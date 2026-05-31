@@ -1,0 +1,104 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parseChartModule > loads a trusted local TS chart module and returns a normalized AST 1`] = `
+{
+  "id": "review-and-fix",
+  "initial": "research",
+  "kind": "chart",
+  "states": {
+    "approval": {
+      "action": {
+        "kind": "user",
+        "options": [
+          "APPROVED",
+          "REJECTED",
+        ],
+        "prompt": "Apply changes?",
+      },
+      "id": "approval",
+      "kind": "state",
+      "transitions": {
+        "APPROVED": "done",
+        "REJECTED": "implement",
+      },
+    },
+    "done": {
+      "id": "done",
+      "kind": "final",
+    },
+    "failed": {
+      "id": "failed",
+      "kind": "final",
+    },
+    "implement": {
+      "action": {
+        "kind": "agent",
+        "name": "coder",
+      },
+      "id": "implement",
+      "kind": "state",
+      "transitions": {
+        "FAILED": "failed",
+        "IMPLEMENTED": "approval",
+      },
+    },
+    "plan": {
+      "action": {
+        "input": [Function],
+        "kind": "agent",
+        "name": "planner",
+        "output": {
+          "kind": "jsonSchema",
+          "schema": {
+            "properties": {
+              "steps": {
+                "items": {
+                  "type": "string",
+                },
+                "type": "array",
+              },
+            },
+            "required": [
+              "steps",
+            ],
+            "type": "object",
+          },
+        },
+      },
+      "id": "plan",
+      "kind": "state",
+      "transitions": {
+        "FAILED": "failed",
+        "PLAN_READY": "implement",
+      },
+    },
+    "research": {
+      "action": {
+        "input": [Function],
+        "kind": "agent",
+        "name": "researcher",
+        "output": {
+          "kind": "jsonSchema",
+          "schema": {
+            "properties": {
+              "summary": {
+                "type": "string",
+              },
+            },
+            "required": [
+              "summary",
+            ],
+            "type": "object",
+          },
+        },
+      },
+      "id": "research",
+      "kind": "state",
+      "transitions": {
+        "FAILED": "failed",
+        "RESEARCH_READY": "plan",
+      },
+    },
+  },
+}
+`;
