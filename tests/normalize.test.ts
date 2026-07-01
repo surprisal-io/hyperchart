@@ -5,10 +5,12 @@ describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
 		const result = normalizeChartConfig(
 			chart({
+				kind: "chart",
 				id: "ok",
 				initial: "start",
 				states: {
 					start: {
+						kind: "state",
 						action: agent("worker", {
 							output: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
 						}),
@@ -30,10 +32,11 @@ describe("normalizeChartConfig", () => {
 	it("reports invalid initial state and transition targets", () => {
 		const result = normalizeChartConfig(
 			chart({
+				kind: "chart",
 				id: "broken",
 				initial: "missing",
 				states: {
-					start: { action: agent("worker"), transitions: { DONE: "missing" } },
+					start: { kind: "state", action: agent("worker"), transitions: { DONE: "missing" } },
 				},
 			}),
 		);

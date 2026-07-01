@@ -1,20 +1,18 @@
 export type {
 	ActionEvent,
+	ActionUID,
 	ActionStateAst,
 	ActionStateCst,
-	ActionStateInput,
 	AgentActionAst,
 	AgentActionCst,
 	AuthoringDiagnostic,
 	ChartAst,
 	ChartCst,
 	ChartEvent,
-	ChartInput,
 	ChartSource,
 	EventType,
 	FinalStateAst,
 	FinalStateCst,
-	FinalStateInput,
 	InputMapper,
 	JsonSchema,
 	JsonSchemaOutputAst,
@@ -25,14 +23,11 @@ export type {
 	ReservedSystemEventType,
 	SchemaRefAst,
 	SchemaRefCst,
-	ScriptActionAst,
-	ScriptActionCst,
 	StateActionAst,
 	StateActionCst,
 	StateAst,
 	StateCst,
 	StateId,
-	StateInput,
 	StateResult,
 	SystemEvent,
 	TransitionMapCst,
@@ -50,10 +45,29 @@ export {
 	final,
 	jsonSchema,
 	schemaRef,
-	script,
 	tsImportSchema,
 	user,
 } from "./core/dsl.js";
 
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
+export type {
+	AgentEffect,
+	AgentMachineEvent,
+	DurableRecordsAddedMachineEvent,
+	DurableRecordsEffect,
+	Effect,
+	EffectId,
+	MachineEvent,
+	MachineOutput,
+	MachineOutputEffect,
+	MachineOutputFinal,
+	MachineState,
+	UserEffect,
+	UserMachineEvent,
+} from "./core/machine.js";
+export type { DurableLogRecord } from "./core/durable_events.js";
+export { isFinalState } from "./core/projection.js";
+export { createMachineOutput, stepMachine } from "./core/machine.js";
+export { concatAsyncIterables, toAsyncIterable } from "./utils/index.js";
+export type { MaybeAsyncIterable } from "./utils/index.js";

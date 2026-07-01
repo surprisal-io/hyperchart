@@ -1,4 +1,9 @@
 export type StateId = string;
+export type ActionUID = Readonly<{
+	chart: string;
+	state: StateId;
+	action: string;
+}>;
 export type EventType = string;
 export type ReservedSystemEventType = "FAILED";
 export type JsonSchema = Record<string, unknown>;
@@ -17,10 +22,7 @@ export type AuthoringDiagnostic = {
 	source?: ChartSource;
 };
 
-export type InputMapper<TInput = unknown> = (args: {
-	input: TInput;
-	results: Record<StateId, StateResult>;
-}) => unknown;
+export type InputMapper = (args: { input: unknown; results: Record<StateId, StateResult> }) => unknown;
 
 export type SchemaRefCst = {
 	kind: "schemaRef";
@@ -48,36 +50,27 @@ export type JsonSchemaOutputAst = Readonly<{
 }>;
 export type OutputSpecAst = JsonSchemaOutputAst | SchemaRefAst | TsImportSchemaRefAst;
 
-export type AgentActionCst<TInput = unknown> = {
+export type AgentActionCst = {
 	kind: "agent";
 	name: string;
-	input?: InputMapper<TInput>;
+	input?: InputMapper;
 	output?: OutputSpecCst;
 };
 
-export type ScriptActionCst<TInput = unknown> = {
-	kind: "script";
-	command: string | InputMapper<TInput>;
-	output?: OutputSpecCst;
-};
-
-export type UserActionCst<TInput = unknown> = {
+export type UserActionCst = {
 	kind: "user";
-	prompt: string | InputMapper<TInput>;
+	prompt: string | InputMapper;
 	options?: readonly string[];
 	output?: OutputSpecCst;
 };
 
-export type StateActionCst<TInput = unknown> =
-	| AgentActionCst<TInput>
-	| ScriptActionCst<TInput>
-	| UserActionCst<TInput>;
+export type StateActionCst = AgentActionCst | UserActionCst;
 
 export type TransitionMapCst = Record<EventType, StateId>;
 
-export type ActionStateCst<TInput = unknown> = {
+export type ActionStateCst = {
 	kind: "state";
-	action: StateActionCst<TInput>;
+	action: StateActionCst;
 	transitions?: TransitionMapCst;
 };
 
@@ -85,39 +78,35 @@ export type FinalStateCst = {
 	kind: "final";
 };
 
-export type StateCst<TInput = unknown> = ActionStateCst<TInput> | FinalStateCst;
+export type StateCst = ActionStateCst | FinalStateCst;
 
-export type ChartCst<TInput = unknown> = {
+export type ChartCst = {
 	kind: "chart";
 	id: string;
 	initial: StateId;
-	states: Record<StateId, StateCst<TInput>>;
+	states: Record<StateId, StateCst>;
 };
 
-export type ActionStateInput<TInput = unknown> = Omit<ActionStateCst<TInput>, "kind"> & {
-	kind?: "state";
-};
-export type FinalStateInput = FinalStateCst | { final: true };
-export type StateInput<TInput = unknown> = StateCst<TInput> | ActionStateInput<TInput> | FinalStateInput;
-export type ChartInput<TInput = unknown> = Omit<ChartCst<TInput>, "kind" | "states"> & {
-	kind?: "chart";
-	states: Record<StateId, StateInput<TInput>>;
-};
+export type AgentActionAst = Readonly<{
+	kind: "agent";
+	uid: ActionUID;
+	name: string;
+	input?: InputMapper;
+	output?: OutputSpecAst;
+}>;
+export type UserActionAst = Readonly<{
+	kind: "user";
+	uid: ActionUID;
+	prompt: string | InputMapper;
+	options: readonly string[];
+	output?: OutputSpecAst;
+}>;
+export type StateActionAst = AgentActionAst | UserActionAst;
 
-export type AgentActionAst<TInput = unknown> = Readonly<AgentActionCst<TInput> & { output?: OutputSpecAst }>;
-export type ScriptActionAst<TInput = unknown> = Readonly<ScriptActionCst<TInput> & { output?: OutputSpecAst }>;
-export type UserActionAst<TInput = unknown> = Readonly<
-	Omit<UserActionCst<TInput>, "options" | "output"> & { options: readonly string[]; output?: OutputSpecAst }
->;
-export type StateActionAst<TInput = unknown> =
-	| AgentActionAst<TInput>
-	| ScriptActionAst<TInput>
-	| UserActionAst<TInput>;
-
-export type ActionStateAst<TInput = unknown> = Readonly<{
+export type ActionStateAst = Readonly<{
 	kind: "state";
 	id: StateId;
-	action: StateActionAst<TInput>;
+	action: StateActionAst;
 	transitions: Readonly<Record<EventType, StateId>>;
 }>;
 
@@ -126,18 +115,17 @@ export type FinalStateAst = Readonly<{
 	id: StateId;
 }>;
 
-export type StateAst<TInput = unknown> = ActionStateAst<TInput> | FinalStateAst;
+export type StateAst = ActionStateAst | FinalStateAst;
 
-export type ChartAst<TInput = unknown> = Readonly<{
+export type ChartAst = Readonly<{
 	kind: "chart";
 	id: string;
 	initial: StateId;
-	states: Readonly<Record<StateId, StateAst<TInput>>>;
+	states: Readonly<Record<StateId, StateAst>>;
 }>;
 
-export type ActionEvent<TPayload = unknown> = {
+export type ActionEvent = {
 	type: string;
-	payload?: TPayload;
 };
 
 export type SystemEvent = {
@@ -147,24 +135,22 @@ export type SystemEvent = {
 
 export type ChartEvent = ActionEvent | SystemEvent;
 
-export type StateResult<TOutput = unknown> = {
+export type StateResult = {
 	status: "ok" | "error" | "cancelled";
-	output?: TOutput;
-	event?: ActionEvent;
-	error?: unknown;
+	event: ChartEvent;
 };
 
-export type ParsedChart<TInput = unknown> =
+export type ParsedChart =
 	| {
 			ok: true;
 			source: ChartSource;
-			cst: ChartCst<TInput>;
-			ast: ChartAst<TInput>;
+			cst: ChartCst;
+			ast: ChartAst;
 			diagnostics: readonly [];
 	  }
 	| {
 			ok: false;
 			source: ChartSource;
-			cst?: ChartCst<TInput>;
+			cst?: ChartCst;
 			diagnostics: readonly AuthoringDiagnostic[];
 	  };

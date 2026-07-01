@@ -1,12 +1,20 @@
 import { agent, chart, final, jsonSchema, user } from "../../src/index.js";
 
-export default chart<{ task: string }>({
+type ReviewInput = { task: string };
+
+function reviewInput(input: unknown): ReviewInput {
+	return input as ReviewInput;
+}
+
+export default chart({
+	kind: "chart",
 	id: "review-and-fix",
 	initial: "research",
 	states: {
 		research: {
+			kind: "state",
 			action: agent("researcher", {
-				input: ({ input }) => ({ task: input.task }),
+				input: ({ input }) => ({ task: reviewInput(input).task }),
 				output: jsonSchema({
 					type: "object",
 					required: ["summary"],
@@ -20,10 +28,11 @@ export default chart<{ task: string }>({
 		},
 
 		plan: {
+			kind: "state",
 			action: agent("planner", {
 				input: ({ input, results }) => ({
-					task: input.task,
-					research: results.research?.output,
+					task: reviewInput(input).task,
+					research: results.research,
 				}),
 				output: jsonSchema({
 					type: "object",
@@ -38,6 +47,7 @@ export default chart<{ task: string }>({
 		},
 
 		implement: {
+			kind: "state",
 			action: agent("coder"),
 			transitions: {
 				IMPLEMENTED: "approval",
@@ -46,6 +56,7 @@ export default chart<{ task: string }>({
 		},
 
 		approval: {
+			kind: "state",
 			action: user({ prompt: "Apply changes?", options: ["APPROVED", "REJECTED"] }),
 			transitions: {
 				APPROVED: "done",

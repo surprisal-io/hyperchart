@@ -9,19 +9,19 @@ export type ParseChartModuleOptions = {
 };
 
 export class ChartParseError extends Error {
-	readonly result: ParsedChart<any>;
+	readonly result: ParsedChart;
 
-	constructor(result: ParsedChart<any>) {
+	constructor(result: ParsedChart) {
 		super(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 		this.name = "ChartParseError";
 		this.result = result;
 	}
 }
 
-export async function parseChartModule<TInput = unknown>(
+export async function parseChartModule(
 	filePath: string,
 	options: ParseChartModuleOptions = {},
-): Promise<ParsedChart<TInput>> {
+): Promise<ParsedChart> {
 	const absolutePath = resolve(filePath);
 	const source: ChartSource = { path: absolutePath, exportName: options.exportName ?? "default" };
 	try {
@@ -31,7 +31,7 @@ export async function parseChartModule<TInput = unknown>(
 		}
 		const module = (await import(url.href)) as Record<string, unknown>;
 		const exportName = options.exportName ?? "default";
-		return parseChartExport<TInput>(module[exportName], source);
+		return parseChartExport(module[exportName], source);
 	} catch (cause) {
 		return {
 			ok: false,
@@ -47,15 +47,15 @@ export async function parseChartModule<TInput = unknown>(
 	}
 }
 
-export function parseChartExport<TInput = unknown>(value: unknown, source: ChartSource = {}): ParsedChart<TInput> {
-	return normalizeChartConfig<TInput>(value, source);
+export function parseChartExport(value: unknown, source: ChartSource = {}): ParsedChart {
+	return normalizeChartConfig(value, source);
 }
 
-export async function parseChartModuleAst<TInput = unknown>(
+export async function parseChartModuleAst(
 	filePath: string,
 	options: ParseChartModuleOptions = {},
-): Promise<Extract<ParsedChart<TInput>, { ok: true }>> {
-	const result = await parseChartModule<TInput>(filePath, options);
+): Promise<Extract<ParsedChart, { ok: true }>> {
+	const result = await parseChartModule(filePath, options);
 	if (result.ok) return result;
 	throw new ChartParseError(result);
 }
