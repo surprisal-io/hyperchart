@@ -1,45 +1,36 @@
 import { deepFreeze } from "./dsl.js";
 import type {
 	ActionStateAst,
-	ActionStateCst,
 	ActionUID,
 	AgentActionAst,
-	AgentActionCst,
 	AuthoringDiagnostic,
 	ChartAst,
 	ChartCst,
 	ChartSource,
 	FinalStateAst,
-	JsonSchemaOutputAst,
-	OutputSpecAst,
-	OutputSpecCst,
 	InputMapper,
+	OutputSpecAst,
 	ParsedChart,
 	StateActionAst,
-	StateActionCst,
 	StateAst,
-	StateCst,
 	UserActionAst,
-	UserActionCst,
 } from "./types.js";
 
 const RESERVED_SYSTEM_EVENTS = new Set(["FAILED"]);
 
-export function normalizeChartConfig(
-	input: unknown,
-	source: ChartSource = {},
-): ParsedChart {
+// Validation is a single pass: unknown input goes straight to a frozen AST plus diagnostics.
+// The *Cst types describe only what authors write (DSL factory inputs); ParsedChart.cst is the
+// untouched input echoed back, never a reconstructed tree.
+export function normalizeChartConfig(input: unknown, source: ChartSource = {}): ParsedChart {
 	const diagnostics: AuthoringDiagnostic[] = [];
-	const cst = toChartCst(input, diagnostics, source);
+	const ast = toChartAst(input, diagnostics, source);
+	const cst = isRecord(input) ? (input as ChartCst) : undefined;
+	if (diagnostics.length > 0 || ast === undefined) {
+		return { ok: false, source, ...(cst === undefined ? {} : { cst }), diagnostics };
+	}
 	if (cst === undefined) {
 		return { ok: false, source, diagnostics };
 	}
-
-	const ast = normalizeChartCst(cst, diagnostics, source);
-	if (diagnostics.length > 0 || ast === undefined) {
-		return { ok: false, source, cst, diagnostics };
-	}
-
 	return { ok: true, source, cst, ast, diagnostics: [] };
 }
 
@@ -47,11 +38,7 @@ export function isReservedSystemEvent(eventType: string): boolean {
 	return RESERVED_SYSTEM_EVENTS.has(eventType);
 }
 
-function toChartCst(
-	input: unknown,
-	diagnostics: AuthoringDiagnostic[],
-	source: ChartSource,
-): ChartCst | undefined {
+function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: ChartSource): ChartAst | undefined {
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_CHART", "Chart export must be an object.", "", source));
 		return undefined;
@@ -65,35 +52,58 @@ function toChartCst(
 	}
 	const initial = input.initial;
 	if (typeof initial !== "string" || initial.length === 0) {
-		diagnostics.push(
-			diagnostic("INVALID_INITIAL", "Chart initial must be a non-empty state id.", "/initial", source),
-		);
+		diagnostics.push(diagnostic("INVALID_INITIAL", "Chart initial must be a non-empty state id.", "/initial", source));
 	}
 	if (!isRecord(input.states)) {
 		diagnostics.push(diagnostic("INVALID_STATES", "Chart states must be an object.", "/states", source));
 		return undefined;
 	}
 
-	const states: Record<string, StateCst> = {};
+	const chartId = typeof id === "string" ? id : "";
+	const states: Record<string, StateAst> = {};
 	for (const [stateId, stateInput] of Object.entries(input.states)) {
-		const state = toStateCst(stateInput, `/states/${escapePointer(stateId)}`, diagnostics, source);
+		const state = toStateAst(stateInput, chartId, stateId, `/states/${escapePointer(stateId)}`, diagnostics, source);
 		if (state !== undefined) states[stateId] = state;
 	}
 
-	return {
+	if (typeof initial === "string" && !(initial in states)) {
+		diagnostics.push(
+			diagnostic("UNKNOWN_INITIAL_STATE", `Initial state '${initial}' does not exist.`, "/initial", source),
+		);
+	}
+	for (const [stateId, state] of Object.entries(states)) {
+		if (state.kind !== "state") continue;
+		for (const [eventType, target] of Object.entries(state.transitions)) {
+			if (!(target in states)) {
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_TRANSITION_TARGET",
+						`Transition '${eventType}' in state '${stateId}' targets unknown state '${target}'.`,
+						`/states/${escapePointer(stateId)}/transitions/${escapePointer(eventType)}`,
+						source,
+					),
+				);
+			}
+		}
+	}
+
+	if (diagnostics.length > 0) return undefined;
+	return deepFreeze({
 		kind: "chart",
-		id: typeof id === "string" ? id : "",
+		id: chartId,
 		initial: typeof initial === "string" ? initial : "",
 		states,
-	};
+	});
 }
 
-function toStateCst(
+function toStateAst(
 	input: unknown,
+	chartId: string,
+	stateId: string,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): StateCst | undefined {
+): StateAst | undefined {
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_STATE", "State must be an object.", path, source));
 		return undefined;
@@ -105,30 +115,33 @@ function toStateCst(
 				diagnostic("INVALID_FINAL_STATE", "Final state must not define an action.", `${path}/action`, source),
 			);
 		}
-		return { kind: "final" };
+		return deepFreeze({ kind: "final", id: stateId } satisfies FinalStateAst);
 	}
 
 	if ("action" in input) {
-		const action = toStateActionCst(input.action, `${path}/action`, diagnostics, source);
+		const action = toStateActionAst(input.action, chartId, stateId, `${path}/action`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${path}/transitions`, diagnostics, source);
 		if (action === undefined) return undefined;
-		return {
+		return deepFreeze({
 			kind: "state",
+			id: stateId,
 			action,
-			...(transitions === undefined ? {} : { transitions }),
-		};
+			transitions: transitions ?? {},
+		} satisfies ActionStateAst);
 	}
 
 	diagnostics.push(diagnostic("MISSING_ACTION", "Non-final state must define exactly one action.", path, source));
 	return undefined;
 }
 
-function toStateActionCst(
+function toStateActionAst(
 	input: unknown,
+	chartId: string,
+	stateId: string,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): StateActionCst | undefined {
+): StateActionAst | undefined {
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_ACTION", "State action must be an object.", path, source));
 		return undefined;
@@ -138,14 +151,15 @@ function toStateActionCst(
 			if (typeof input.name !== "string" || input.name.length === 0) {
 				diagnostics.push(diagnostic("INVALID_AGENT_NAME", "Agent action name must be a string.", `${path}/name`, source));
 			}
-			const output = toOutputSpec(input.output, `${path}/output`, diagnostics, source);
-			const action: AgentActionCst = {
+			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
+			const uid: ActionUID = { chart: chartId, state: stateId, action: "agent" };
+			return deepFreeze({
 				kind: "agent",
+				uid,
 				name: typeof input.name === "string" ? input.name : "",
-			};
-			if (typeof input.input === "function") action.input = input.input as InputMapper;
-			if (output !== undefined) action.output = output;
-			return action;
+				...(typeof input.input === "function" ? { input: input.input as InputMapper } : {}),
+				...(output === undefined ? {} : { output }),
+			} satisfies AgentActionAst);
 		}
 		case "user": {
 			if (typeof input.prompt !== "string" && typeof input.prompt !== "function") {
@@ -170,13 +184,17 @@ function toStateActionCst(
 					);
 				}
 			}
-			const output = toOutputSpec(input.output, `${path}/output`, diagnostics, source);
-			return {
+			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
+			const uid: ActionUID = { chart: chartId, state: stateId, action: "user" };
+			return deepFreeze({
 				kind: "user",
-				prompt: (typeof input.prompt === "string" || typeof input.prompt === "function" ? input.prompt : "") as UserActionCst["prompt"],
+				uid,
+				prompt: (typeof input.prompt === "string" || typeof input.prompt === "function"
+					? input.prompt
+					: "") as UserActionAst["prompt"],
 				options: options.filter((option): option is string => typeof option === "string"),
 				...(output === undefined ? {} : { output }),
-			};
+			} satisfies UserActionAst);
 		}
 		default:
 			diagnostics.push(diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent' or 'user'.", `${path}/kind`, source));
@@ -184,12 +202,12 @@ function toStateActionCst(
 	}
 }
 
-function toOutputSpec(
+function toOutputSpecAst(
 	input: unknown,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): OutputSpecCst | undefined {
+): OutputSpecAst | undefined {
 	if (input === undefined) return undefined;
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_OUTPUT_SPEC", "Output spec must be an object.", path, source));
@@ -246,91 +264,6 @@ function toTransitionMap(
 		transitions[eventType] = target;
 	}
 	return transitions;
-}
-
-function normalizeChartCst(
-	cst: ChartCst,
-	diagnostics: AuthoringDiagnostic[],
-	source: ChartSource,
-): ChartAst | undefined {
-	if (!(cst.initial in cst.states)) {
-		diagnostics.push(
-			diagnostic("UNKNOWN_INITIAL_STATE", `Initial state '${cst.initial}' does not exist.`, "/initial", source),
-		);
-	}
-	const states: Record<string, StateAst> = {};
-	for (const [stateId, state] of Object.entries(cst.states)) {
-		states[stateId] = normalizeStateAst(cst.id, stateId, state);
-	}
-	const stateIds = new Set(Object.keys(cst.states));
-	for (const [stateId, state] of Object.entries(cst.states)) {
-		if (state.kind !== "state") continue;
-		for (const [eventType, target] of Object.entries(state.transitions ?? {})) {
-			if (!stateIds.has(target)) {
-				diagnostics.push(
-					diagnostic(
-						"UNKNOWN_TRANSITION_TARGET",
-						`Transition '${eventType}' in state '${stateId}' targets unknown state '${target}'.`,
-						`/states/${escapePointer(stateId)}/transitions/${escapePointer(eventType)}`,
-						source,
-					),
-				);
-			}
-		}
-	}
-	if (diagnostics.length > 0) return undefined;
-	return deepFreeze({ kind: "chart", id: cst.id, initial: cst.initial, states });
-}
-
-function normalizeStateAst(chartId: string, stateId: string, state: StateCst): StateAst {
-	if (state.kind === "final") {
-		return deepFreeze({ kind: "final", id: stateId } satisfies FinalStateAst);
-	}
-	return deepFreeze({
-		kind: "state",
-		id: stateId,
-		action: normalizeActionAst(chartId, stateId, state.action),
-		transitions: { ...(state.transitions ?? {}) },
-	} satisfies ActionStateAst);
-}
-
-function normalizeActionAst(
-	chartId: string,
-	stateId: string,
-	action: StateActionCst,
-): StateActionAst {
-	const uid: ActionUID = { chart: chartId, state: stateId, action: action.kind };
-	const output = action.output === undefined ? undefined : normalizeOutputSpecAst(action.output);
-
-	switch (action.kind) {
-		case "agent":
-			return deepFreeze({
-				kind: "agent",
-				uid,
-				name: action.name,
-				...(action.input === undefined ? {} : { input: action.input }),
-				...(output === undefined ? {} : { output }),
-			} satisfies AgentActionAst);
-		case "user":
-			return deepFreeze({
-				kind: "user",
-				uid,
-				prompt: action.prompt,
-				options: [...(action.options ?? [])],
-				...(output === undefined ? {} : { output }),
-			} satisfies UserActionAst);
-	}
-}
-
-function normalizeOutputSpecAst(output: OutputSpecCst): OutputSpecAst {
-	switch (output.kind) {
-		case "jsonSchema":
-			return { kind: "jsonSchema", schema: { ...output.schema } } satisfies JsonSchemaOutputAst;
-		case "schemaRef":
-			return { kind: "schemaRef", name: output.name };
-		case "tsImport":
-			return { kind: "tsImport", module: output.module, export: output.export };
-	}
 }
 
 function diagnostic(code: string, message: string, path: string, source: ChartSource): AuthoringDiagnostic {
