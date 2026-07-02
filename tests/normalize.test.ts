@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, compound, final, jsonSchema, normalizeChartConfig, tsImport, user } from "../src/index.js";
+import {
+	agent,
+	chart,
+	compound,
+	final,
+	jsonSchema,
+	normalizeChartConfig,
+	parallel,
+	tsImport,
+	user,
+} from "../src/index.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
@@ -102,7 +112,7 @@ describe("normalizeChartConfig", () => {
 		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_STATE_ID");
 	});
 
-	it("requires onDone exactly when a compound has a final child", () => {
+	it("requires every compound to have a final child and declare onDone", () => {
 		const missing = normalizeChartConfig({
 			id: "missing-on-done",
 			initial: "review",
@@ -133,7 +143,8 @@ describe("normalizeChartConfig", () => {
 			},
 		});
 		expect(useless.ok).toBe(false);
-		expect(useless.diagnostics.map((d) => d.code)).toContain("USELESS_ON_DONE");
+		// A compound with no final child cannot complete: forbidden rather than "onDone is dead".
+		expect(useless.diagnostics.map((d) => d.code)).toContain("MISSING_FINAL");
 	});
 
 	it("resolves targets among siblings of the declaring level only", () => {
@@ -158,6 +169,128 @@ describe("normalizeChartConfig", () => {
 		expect(result.diagnostics.map((d) => d.code)).toEqual(
 			expect.arrayContaining(["UNKNOWN_TRANSITION_TARGET", "UNKNOWN_ON_DONE_TARGET"]),
 		);
+	});
+
+	it("normalizes parallel states with regions", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "par",
+				initial: "audit",
+				states: {
+					audit: parallel({
+						states: {
+							security: compound({
+								initial: "scan",
+								states: {
+									scan: { kind: "state", action: agent("sec"), transitions: { OK: "ok" } },
+									ok: final(),
+								},
+							}),
+							perf: compound({
+								initial: "scan",
+								states: {
+									scan: { kind: "state", action: agent("perf"), transitions: { OK: "ok" } },
+									ok: final(),
+								},
+							}),
+						},
+						onDone: "merge",
+					}),
+					merge: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected valid chart");
+		const audit = result.ast.states.audit;
+		if (audit?.kind !== "parallel") throw new Error("expected parallel state");
+		expect(audit.regions).toEqual(["security", "perf"]);
+		expect(result.ast.states["audit.security.scan"]?.kind).toBe("state");
+	});
+
+	it("rejects onDone on regions and region transitions targeting siblings", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "bad-regions",
+				initial: "audit",
+				states: {
+					audit: parallel({
+						states: {
+							security: compound({
+								initial: "scan",
+								onDone: "perf", // regions must not exit through onDone
+								transitions: { RETRY: "perf" }, // and may only restart themselves
+								states: {
+									scan: { kind: "state", action: agent("sec"), transitions: { OK: "ok" } },
+									ok: final(),
+								},
+							}),
+							perf: compound({
+								initial: "scan",
+								states: {
+									scan: { kind: "state", action: agent("perf"), transitions: { OK: "ok" } },
+									ok: final(),
+								},
+							}),
+						},
+						onDone: "merge",
+					}),
+					merge: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((d) => d.code)).toEqual(
+			expect.arrayContaining(["REGION_ON_DONE", "INVALID_REGION_TARGET"]),
+		);
+	});
+
+	it("requires completable regions and onDone on every parallel", () => {
+		const region = (name: string, withFinal: boolean) =>
+			compound({
+				initial: "scan",
+				states: {
+					scan: {
+						kind: "state" as const,
+						action: agent(name),
+						transitions: withFinal ? { OK: "ok" } : { OK: "scan" },
+					},
+					...(withFinal ? { ok: final() } : {}),
+				},
+			});
+
+		const missing = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "missing",
+				initial: "audit",
+				states: {
+					audit: parallel({ states: { a: region("a", true), b: region("b", true) } }),
+					merge: final(),
+				},
+			}),
+		);
+		expect(missing.ok).toBe(false);
+		expect(missing.diagnostics.map((d) => d.code)).toContain("MISSING_ON_DONE");
+
+		const useless = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "useless",
+				initial: "audit",
+				states: {
+					audit: parallel({ states: { a: region("a", true), b: region("b", false) }, onDone: "merge" }),
+					merge: final(),
+				},
+			}),
+		);
+		expect(useless.ok).toBe(false);
+		// A region that can never reach a final would make the join unreachable: forbidden.
+		expect(useless.diagnostics.map((d) => d.code)).toContain("MISSING_FINAL");
 	});
 
 	it("normalizes after on an action state", () => {

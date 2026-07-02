@@ -12,7 +12,9 @@ import type {
 	GuardRef,
 	OnReject,
 	OutputSpecAst,
+	ParallelStateAst,
 	ParsedChart,
+	RegionStateAst,
 	StateActionAst,
 	StateAst,
 	StatePath,
@@ -98,7 +100,8 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 }
 
 // Builds the node at its absolute path and recurses into compound children — the AST stays a
-// flat path-keyed map, nesting lives in `parent` links.
+// flat path-keyed map, nesting lives in `parent` links. Direct children of a parallel are
+// collected with the "region" role: authored as compounds, they become region nodes.
 function collectState(
 	input: unknown,
 	chartId: string,
@@ -108,6 +111,7 @@ function collectState(
 	states: Record<StatePath, StateAst>,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
+	role: "state" | "region" = "state",
 ): void {
 	if (!STATE_ID_PATTERN.test(localId)) {
 		diagnostics.push(
@@ -128,12 +132,55 @@ function collectState(
 	}
 
 	if (input.kind === "final" || input.final === true) {
+		if (role === "region") {
+			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
+			return;
+		}
 		if ("action" in input) {
 			diagnostics.push(
 				diagnostic("INVALID_FINAL_STATE", "Final state must not define an action.", `${pointer}/action`, source),
 			);
 		}
 		states[path] = deepFreeze({ kind: "final", id: localId, ...parent } satisfies FinalStateAst);
+		return;
+	}
+
+	if (input.kind === "parallel") {
+		if (role === "region") {
+			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
+			return;
+		}
+		if (!isRecord(input.states)) {
+			diagnostics.push(diagnostic("INVALID_STATES", "Parallel states must be an object.", `${pointer}/states`, source));
+			return;
+		}
+		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
+		const onDone = toOnDone(input.onDone, `${pointer}/onDone`, diagnostics, source);
+		if (onDone === undefined) {
+			diagnostics.push(diagnostic("MISSING_ON_DONE", `Parallel '${path}' must declare onDone.`, pointer, source));
+		}
+		const regions = Object.keys(input.states);
+		for (const [childId, childInput] of Object.entries(input.states)) {
+			collectState(
+				childInput,
+				chartId,
+				childId,
+				path,
+				`${pointer}/states/${escapePointer(childId)}`,
+				states,
+				diagnostics,
+				source,
+				"region",
+			);
+		}
+		states[path] = deepFreeze({
+			kind: "parallel",
+			id: localId,
+			...parent,
+			regions,
+			transitions: transitions ?? {},
+			onDone: onDone ?? "",
+		} satisfies ParallelStateAst);
 		return;
 	}
 
@@ -149,16 +196,7 @@ function collectState(
 			return;
 		}
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
-		let onDone: string | undefined;
-		if (input.onDone !== undefined) {
-			if (typeof input.onDone !== "string" || input.onDone.length === 0) {
-				diagnostics.push(
-					diagnostic("INVALID_ON_DONE", "onDone must be a non-empty state id.", `${pointer}/onDone`, source),
-				);
-			} else {
-				onDone = input.onDone;
-			}
-		}
+		const onDone = toOnDone(input.onDone, `${pointer}/onDone`, diagnostics, source);
 		for (const [childId, childInput] of Object.entries(input.states)) {
 			collectState(
 				childInput,
@@ -171,18 +209,52 @@ function collectState(
 				source,
 			);
 		}
+		// Every compound (and region) must be completable: a direct final child is its exit.
+		const hasFinal = Object.keys(input.states).some((childId) => states[`${path}.${childId}`]?.kind === "final");
+		if (!hasFinal) {
+			diagnostics.push(
+				diagnostic("MISSING_FINAL", `State '${path}' must contain a final child (its completion).`, pointer, source),
+			);
+		}
+		if (role === "region") {
+			if (input.onDone !== undefined) {
+				diagnostics.push(
+					diagnostic(
+						"REGION_ON_DONE",
+						`Region '${path}' must not declare onDone: a final child marks the region complete.`,
+						`${pointer}/onDone`,
+						source,
+					),
+				);
+			}
+			states[path] = deepFreeze({
+				kind: "region",
+				id: localId,
+				...parent,
+				initial: typeof initial === "string" ? initial : "",
+				transitions: transitions ?? {},
+			} satisfies RegionStateAst);
+			return;
+		}
+		if (onDone === undefined) {
+			diagnostics.push(diagnostic("MISSING_ON_DONE", `Compound '${path}' must declare onDone.`, pointer, source));
+		}
 		states[path] = deepFreeze({
 			kind: "compound",
 			id: localId,
 			...parent,
 			initial: typeof initial === "string" ? initial : "",
 			transitions: transitions ?? {},
-			...(onDone === undefined ? {} : { onDone }),
+			onDone: onDone ?? "",
 		} satisfies CompoundStateAst);
 		return;
 	}
 
 	if ("action" in input) {
+		if (role === "region") {
+			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
+			return;
+		}
 		const action = toStateActionAst(input.action, chartId, path, `${pointer}/action`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
@@ -215,17 +287,14 @@ function collectState(
 	diagnostics.push(diagnostic("MISSING_ACTION", "Non-final state must define exactly one action.", pointer, source));
 }
 
-// Every target — transition, after, onDone, compound initial — resolves among the siblings of
-// the level where it is declared; there is no path syntax in authoring.
+// Every target — transition, after, onDone, container initial — resolves among the siblings of
+// the level where it is declared; there is no path syntax in authoring. Completeness rules
+// (final child, onDone presence) live in collectState; here only the targets are checked.
 function validateTargets(
 	states: Record<StatePath, StateAst>,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
-	const withFinalChild = new Set<StatePath>();
-	for (const node of Object.values(states)) {
-		if (node.kind === "final" && node.parent !== undefined) withFinalChild.add(node.parent);
-	}
 	for (const [path, node] of Object.entries(states)) {
 		if (node.kind === "final") continue;
 		const pointer = statePointer(path);
@@ -236,6 +305,16 @@ function validateTargets(
 					diagnostic(
 						"UNKNOWN_TRANSITION_TARGET",
 						`Transition '${eventType}' in state '${path}' targets unknown state '${target}'.`,
+						`${pointer}/transitions/${escapePointer(eventType)}`,
+						source,
+					),
+				);
+			} else if (node.kind === "region" && target !== node.id) {
+				// Region siblings run concurrently: a region's own transitions may only restart it.
+				diagnostics.push(
+					diagnostic(
+						"INVALID_REGION_TARGET",
+						`Transition '${eventType}' on region '${path}' may only target the region itself.`,
 						`${pointer}/transitions/${escapePointer(eventType)}`,
 						source,
 					),
@@ -255,7 +334,11 @@ function validateTargets(
 			}
 			continue;
 		}
-		if (!(`${path}.${node.initial}` in states)) {
+		if (
+			(node.kind === "compound" || node.kind === "region") &&
+			node.initial.length > 0 &&
+			!(`${path}.${node.initial}` in states)
+		) {
 			diagnostics.push(
 				diagnostic(
 					"UNKNOWN_INITIAL_STATE",
@@ -265,7 +348,11 @@ function validateTargets(
 				),
 			);
 		}
-		if (node.onDone !== undefined && !(sibling(node.onDone) in states)) {
+		if (
+			(node.kind === "compound" || node.kind === "parallel") &&
+			node.onDone.length > 0 &&
+			!(sibling(node.onDone) in states)
+		) {
 			diagnostics.push(
 				diagnostic(
 					"UNKNOWN_ON_DONE_TARGET",
@@ -275,27 +362,21 @@ function validateTargets(
 				),
 			);
 		}
-		if (withFinalChild.has(path) && node.onDone === undefined) {
-			diagnostics.push(
-				diagnostic(
-					"MISSING_ON_DONE",
-					`Compound '${path}' contains a final child and must declare onDone.`,
-					pointer,
-					source,
-				),
-			);
-		}
-		if (!withFinalChild.has(path) && node.onDone !== undefined) {
-			diagnostics.push(
-				diagnostic(
-					"USELESS_ON_DONE",
-					`Compound '${path}' declares onDone but has no final child.`,
-					`${pointer}/onDone`,
-					source,
-				),
-			);
-		}
 	}
+}
+
+function toOnDone(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): string | undefined {
+	if (input === undefined) return undefined;
+	if (typeof input !== "string" || input.length === 0) {
+		diagnostics.push(diagnostic("INVALID_ON_DONE", "onDone must be a non-empty state id.", path, source));
+		return undefined;
+	}
+	return input;
 }
 
 function statePointer(path: StatePath): string {

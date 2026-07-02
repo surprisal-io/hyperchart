@@ -6,6 +6,7 @@ import type {
 	GuardRef,
 	JsonSchema,
 	JsonSchemaOutputCst,
+	ParallelStateCst,
 	SchemaRefCst,
 	TsImportSchemaRefCst,
 	UserActionCst,
@@ -23,6 +24,10 @@ export function final(): FinalStateCst {
 
 export function compound(options: Omit<CompoundStateCst, "kind">): CompoundStateCst {
 	return { kind: "compound", ...options };
+}
+
+export function parallel(options: Omit<ParallelStateCst, "kind">): ParallelStateCst {
+	return { kind: "parallel", ...options };
 }
 
 export function agent(name: string, options: Omit<AgentActionCst, "kind" | "name"> = {}): AgentActionCst {

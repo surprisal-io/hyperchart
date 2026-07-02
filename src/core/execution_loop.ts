@@ -23,6 +23,9 @@ export async function loop(runtime: Runtime): Promise<MachineState> {
 				runtime.runEffects(output.effects);
 				break;
 			case "final":
+				if (output.effects.length > 0) {
+					runtime.runEffects(output.effects);
+				}
 				return output.state;
 			case "error":
 				throw new Error(output.error);

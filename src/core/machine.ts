@@ -158,6 +158,9 @@ export type MachineOutputError = Readonly<{
 export type MachineOutputFinal = Readonly<{
 	kind: "final";
 	state: MachineState;
+	// Parting effects the runtime must still execute — e.g. cancels for agents abandoned by the
+	// transition that finished the chart.
+	effects: Effect[];
 	result: unknown;
 }>;
 
@@ -172,21 +175,19 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 		return {
 			kind: "final",
 			state,
-			result: state.projection.results[state.projection.activeState],
+			effects: responses.map((entry) => (entry.kind === "append" ? stampAppend(state, entry) : entry)),
+			result: state.projection.results[state.projection.activeLeaves[0] ?? ""],
 		};
 	}
 
-	// What the runtime should be doing right now, derived entirely from the projection: append an
-	// invoke record when the active action-state has nothing pending yet, plus the effects of each
+	// What the runtime should be doing right now, derived entirely from the projection: an invoke
+	// record for every active action-leaf with nothing pending yet, plus the effects of each
 	// pending action — run it (with a deadline timer, if the state has one), validate its
 	// completion, or deliver the rejection.
-	const missing = missingInvoke(state);
-	const desired: (Effect | RecordAppend)[] = state.projection.pendingActions.flatMap((pending) =>
-		pendingEffects(state.ast, pending),
-	);
-	if (missing) {
-		desired.unshift(invokeAppend(missing));
-	}
+	const desired: (Effect | RecordAppend)[] = [
+		...missingInvokes(state).map(invokeAppend),
+		...state.projection.pendingActions.flatMap((pending) => pendingEffects(state.ast, pending)),
+	];
 
 	// Each desired entry is dispatched once per machine lifetime; markers of entries no longer
 	// desired are dropped, so re-entering the same state later dispatches again.
@@ -309,11 +310,11 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			if (typeof pending === "string") {
 				return { kind: "error", state, error: pending };
 			}
-			if (!hasTransition(state.ast, state.projection.activeState, event.event.type)) {
+			if (!hasTransition(state.ast, pending.actionUid.state, event.event.type)) {
 				return {
 					kind: "error",
 					state,
-					error: `No transition found for event type ${event.event.type} in state ${state.projection.activeState}`,
+					error: `No transition found for event type ${event.event.type} in state ${pending.actionUid.state}`,
 				};
 			}
 			// The completion is logged unconditionally; whether it needs validation before the
@@ -382,9 +383,20 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 		case "user":
 			// User actions are not implemented yet; the event is accepted but ignored.
 			break;
-		case "durable_records_added":
-			state.projection = projectBranch(state.projection, state.ast, event.records);
-			break;
+		case "durable_records_added": {
+			// The projection reports what an exit dropped while its session was alive — e.g. one
+			// region's event exited the whole parallel. The runtime must kill it.
+			const abandoned: PendingAction[] = [];
+			state.projection = projectBranch(state.projection, state.ast, event.records, abandoned);
+			const cancels = abandoned.map(
+				(pending): Effect => ({
+					kind: "cancel",
+					id: `cancel:${pendingEffectId(pending)}`,
+					actionUid: pending.actionUid,
+				}),
+			);
+			return createMachineOutput(state, cancels);
+		}
 	}
 
 	return createMachineOutput(state, []);
@@ -409,25 +421,29 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 	if (pending.phase === "validating") {
 		return `Validation already in flight for ${effectId}`;
 	}
-	const curState = machine.ast.states[machine.projection.activeState];
+	const curState = machine.ast.states[actionId.state];
 	if (curState?.kind !== "state") {
-		return `Current state ${machine.projection.activeState} is not actionable`;
+		return `State ${actionId.state} is not actionable`;
 	}
 	return { actionUid: actionId, state: curState };
 }
 
-// The machine decides when actions start: an invoke record is due whenever the active state's
-// action is not pending yet. This covers the initial state and every transition target — the
-// runtime never initiates anything on its own. The id carries no seqId, but between two entries
-// into the same state the action is always pending, so the dispatch marker is dropped in between.
-function missingInvoke(state: MachineState): ActionUID | null {
-	const node = state.ast.states[state.projection.activeState];
-	if (node?.kind !== "state") {
-		return null;
+// The machine decides when actions start: an invoke record is due for every active action-leaf
+// whose action is not pending yet. This covers the initial state, every transition target and
+// all parallel regions — the runtime never initiates anything on its own. The id carries no
+// seqId, but between two entries into the same state the action is always pending, so the
+// dispatch marker is dropped in between.
+function missingInvokes(state: MachineState): ActionUID[] {
+	const missing: ActionUID[] = [];
+	for (const leaf of state.projection.activeLeaves) {
+		const node = state.ast.states[leaf];
+		if (node?.kind !== "state") continue;
+		const actionUid = node.action.uid;
+		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid))) {
+			missing.push(actionUid);
+		}
 	}
-	const actionUid = node.action.uid;
-	const pending = state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid));
-	return pending ? null : actionUid;
+	return missing;
 }
 
 function invokeAppend(actionUid: ActionUID): RecordAppend {

@@ -121,7 +121,18 @@ export type CompoundStateCst = {
 	onDone?: StateId;
 };
 
-export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst;
+// All children (regions) run concurrently; entering the parallel enters every region. A final
+// inside a region marks that region complete (regions must not declare onDone); when every
+// region is complete the parallel exits through its own onDone. An event bubbling past a region
+// to the parallel (or above) exits all regions at once, abandoning their running actions.
+export type ParallelStateCst = {
+	kind: "parallel";
+	states: Record<StateId, StateCst>;
+	transitions?: TransitionMapCst;
+	onDone?: StateId;
+};
+
+export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst | ParallelStateCst;
 
 export type ChartCst = {
 	kind: "chart";
@@ -168,16 +179,40 @@ export type FinalStateAst = Readonly<{
 	parent?: StatePath;
 }>;
 
+// Every compound completes: it must contain a direct final child and exit through onDone. There
+// is no "loop container" without a final — a repeat-until process expresses its exit condition
+// as a final child instead.
 export type CompoundStateAst = Readonly<{
 	kind: "compound";
 	id: StateId;
 	parent?: StatePath;
 	initial: StateId;
 	transitions: Readonly<Record<EventType, StateId>>;
-	onDone?: StateId;
+	onDone: StateId;
 }>;
 
-export type StateAst = ActionStateAst | FinalStateAst | CompoundStateAst;
+// A compound written inside a parallel. Its final child marks the region complete for the join
+// instead of exiting anywhere, hence no onDone; its own transitions may only restart itself.
+export type RegionStateAst = Readonly<{
+	kind: "region";
+	id: StateId;
+	parent?: StatePath;
+	initial: StateId;
+	transitions: Readonly<Record<EventType, StateId>>;
+}>;
+
+export type ParallelStateAst = Readonly<{
+	kind: "parallel";
+	id: StateId;
+	parent?: StatePath;
+	// Local ids of the regions, all entered on entry. Regions are always completable, so the
+	// join always has somewhere to go: onDone is mandatory.
+	regions: readonly StateId[];
+	transitions: Readonly<Record<EventType, StateId>>;
+	onDone: StateId;
+}>;
+
+export type StateAst = ActionStateAst | FinalStateAst | CompoundStateAst | RegionStateAst | ParallelStateAst;
 
 export type ChartAst = Readonly<{
 	kind: "chart";

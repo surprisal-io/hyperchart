@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, compound, final, normalizeChartConfig, tsImport } from "../src/index.js";
+import { agent, chart, compound, final, normalizeChartConfig, parallel, tsImport } from "../src/index.js";
 import { loop } from "../src/core/execution_loop.js";
 import type {
 	ActionUID,
@@ -144,6 +144,35 @@ function compoundAst(): ChartAst {
 	return result.ast;
 }
 
+function parallelAst(): ChartAst {
+	const region = (worker: string) =>
+		compound({
+			initial: "scan",
+			states: {
+				scan: { kind: "state" as const, action: agent(worker), transitions: { OK: "ok" } },
+				ok: final(),
+			},
+		});
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "par-chart",
+			initial: "audit",
+			states: {
+				audit: parallel({
+					states: { security: region("security-bot"), perf: region("perf-bot") },
+					onDone: "merge",
+					transitions: { FAILED: "escalate" },
+				}),
+				merge: final(),
+				escalate: final(),
+			},
+		}),
+	);
+	if (!result.ok) throw new Error("test chart should be valid");
+	return result.ast;
+}
+
 function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 	const state = ast.states[stateId];
 	if (state?.kind !== "state") throw new Error(`state ${stateId} should be actionable`);
@@ -188,7 +217,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches).toEqual([]);
 		expect(runtime.calls).toEqual(["loadAst", "loadLogs", "eventsQueue"]);
 	});
@@ -203,7 +232,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches).toEqual([]);
 	});
 
@@ -272,7 +301,7 @@ describe("execution loop", () => {
 		const state = await loop(runtime);
 
 		expect(sequence).toEqual(["agent", "durable_records"]);
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.pendingActions).toEqual([]);
 	});
 
@@ -319,11 +348,14 @@ describe("execution loop", () => {
 			"agent:second",
 			"complete:second",
 		]);
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.pendingActions).toEqual([]);
 	});
 
-	function runValidatedChart(outcomes: GuardOutcome[], options: { onReject?: "resume" | "restart"; claim?: string } = {}) {
+	function runValidatedChart(
+		outcomes: GuardOutcome[],
+		options: { onReject?: "resume" | "restart"; claim?: string } = {},
+	) {
 		const ast = validatedAst(options.onReject);
 		const uid = actionUid(ast, "work");
 		const events: MachineEvent[] = [];
@@ -363,7 +395,7 @@ describe("execution loop", () => {
 
 		const state = await run;
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(rejections).toEqual([]);
 		expect(validations).toHaveLength(1);
 		expect(validations[0]).toEqual(
@@ -380,7 +412,7 @@ describe("execution loop", () => {
 
 		const state = await run;
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(rejections).toHaveLength(1);
 		expect(rejections[0]).toEqual(
 			expect.objectContaining({ kind: "rejected", onReject: "resume", reason: "tests are failing" }),
@@ -412,7 +444,7 @@ describe("execution loop", () => {
 
 		const state = await run;
 
-		expect(state.projection.activeState).toBe("failed");
+		expect(state.projection.activeLeaves).toEqual(["failed"]);
 		expect(rejections).toEqual([]);
 		expect(validations).toEqual([]);
 	});
@@ -428,7 +460,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "validate")).toEqual([]);
 	});
 
@@ -455,7 +487,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "validate")).toHaveLength(1);
 		// The claiming action itself was not restarted: its claim is being validated, not lost.
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "agent")).toEqual([]);
@@ -481,7 +513,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		const records = runtime.effectBatches
 			.flat()
 			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
@@ -580,7 +612,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("escalated");
+		expect(state.projection.activeLeaves).toEqual(["escalated"]);
 		expect(cancels).toEqual([expect.objectContaining({ kind: "cancel", actionUid: uid })]);
 		const records = runtime.effectBatches
 			.flat()
@@ -612,7 +644,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "cancel")).toEqual([]);
 	});
 
@@ -650,13 +682,15 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		const records = runtime.effectBatches
 			.flat()
 			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
 		// The worker's late DONE left no trace: only the expiry and the escalation run are logged.
 		expect(
-			records.map((record) => (record.type === "state_action" ? `${record.kind}:${record.actionUid.state}` : record.type)),
+			records.map((record) =>
+				record.type === "state_action" ? `${record.kind}:${record.actionUid.state}` : record.type,
+			),
 		).toEqual(["timer_fired:work", "invoke:escalated", "complete:escalated"]);
 	});
 
@@ -671,7 +705,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("escalated");
+		expect(state.projection.activeLeaves).toEqual(["escalated"]);
 		expect(runtime.effectBatches).toEqual([]);
 	});
 
@@ -702,7 +736,7 @@ describe("execution loop", () => {
 
 		// fix's OK lands on the nested final `verified`; the projection immediately exits the
 		// compound through onDone — nothing extra is logged, no state is visited in between.
-		expect(state.projection.activeState).toBe("deploy");
+		expect(state.projection.activeLeaves).toEqual(["deploy"]);
 		expect(sequence).toEqual([
 			"invoke:review.analyze",
 			"agent:review.analyze",
@@ -734,7 +768,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("escalate");
+		expect(state.projection.activeLeaves).toEqual(["escalate"]);
 	});
 
 	it("replays a hierarchical log without re-running agents", async () => {
@@ -749,7 +783,82 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("deploy");
+		expect(state.projection.activeLeaves).toEqual(["deploy"]);
+		expect(runtime.effectBatches).toEqual([]);
+	});
+
+	it("runs all parallel regions concurrently and joins through onDone", async () => {
+		const ast = parallelAst();
+		const events: MachineEvent[] = [];
+		const invoked: string[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						invoked.push(effect.actionUid.state);
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["merge"]);
+		expect(invoked.sort()).toEqual(["audit.perf.scan", "audit.security.scan"]);
+		expect(state.projection.pendingActions).toEqual([]);
+	});
+
+	it("aborts all regions and cancels their agents when an event exits the parallel", async () => {
+		const ast = parallelAst();
+		const events: MachineEvent[] = [];
+		const cancels: Extract<Effect, { kind: "cancel" }>[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "audit.security.scan") {
+						// security fails; perf's agent keeps hanging and must be killed.
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
+					}
+					if (effect.kind === "cancel") {
+						cancels.push(effect);
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["escalate"]);
+		expect(cancels).toEqual([
+			expect.objectContaining({ kind: "cancel", actionUid: actionUid(ast, "audit.perf.scan") }),
+		]);
+	});
+
+	it("replays a parallel log without re-running agents", async () => {
+		const ast = parallelAst();
+		const security = actionUid(ast, "audit.security.scan");
+		const perf = actionUid(ast, "audit.perf.scan");
+		const runtime = new MockRuntime({
+			ast,
+			// Region facts interleave in log order; the join fires when the last one lands.
+			logs: [invoke(security, 1), invoke(perf, 2), complete(perf, "OK", 3), complete(security, "OK", 4)],
+			events: failOnPullEvents(),
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["merge"]);
 		expect(runtime.effectBatches).toEqual([]);
 	});
 
@@ -797,7 +906,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(state.projection.activeState).toBe("done");
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 		// One timer for the running phase; validation is not raced against the clock.
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "timer")).toHaveLength(1);
 	});

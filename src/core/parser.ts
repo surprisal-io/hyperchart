@@ -18,10 +18,7 @@ export class ChartParseError extends Error {
 	}
 }
 
-export async function parseChartModule(
-	filePath: string,
-	options: ParseChartModuleOptions = {},
-): Promise<ParsedChart> {
+export async function parseChartModule(filePath: string, options: ParseChartModuleOptions = {}): Promise<ParsedChart> {
 	const absolutePath = resolve(filePath);
 	const source: ChartSource = { path: absolutePath, exportName: options.exportName ?? "default" };
 	try {
