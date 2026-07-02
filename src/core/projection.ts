@@ -31,19 +31,6 @@ export function projectBranch(
 			case "session_ref":
 				// No state change, just a reference to a session
 				break;
-			case "state_transition":
-				if (record.source === projection.activeState) {
-					switch (record.kind) {
-						case "simple":
-							projection.activeState = record.target;
-							break;
-						case "guarded":
-							throw new Error("Guarded transitions are not supported yet");
-					}
-				} else {
-					throw new Error(`Invalid state transition from ${record.source} while in state ${projection.activeState}`);
-				}
-				break;
 			case "state_action":
 				switch (record.kind) {
 					case "invoke":
@@ -59,6 +46,15 @@ export function projectBranch(
 							if (index !== -1) {
 								projection.pendingActions.splice(index, 1);
 							}
+							// Transitions are not logged: recompute the move from the chart AST.
+							const state = ast.states[projection.activeState];
+							const target = state?.kind === "state" ? state.transitions?.[record.event.type] : undefined;
+							if (!target) {
+								throw new Error(
+									`No transition for event type ${record.event.type} in state ${projection.activeState}`,
+								);
+							}
+							projection.activeState = target;
 						}
 						break;
 				}

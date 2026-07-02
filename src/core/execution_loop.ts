@@ -24,6 +24,8 @@ export async function loop(runtime: Runtime): Promise<MachineState> {
 				break;
 			case "final":
 				return output.state;
+			case "error":
+				throw new Error(output.error);
 		}
 	}
 	throw new Error("Event queue closed before reaching a final state");

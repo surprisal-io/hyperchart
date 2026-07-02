@@ -5,6 +5,9 @@ import { isFinalState, projectBranch, type BranchProjection } from "./projection
 export type MachineState = {
 	ast: ChartAst;
 	projection: BranchProjection;
+	// Pending actions whose effects were already emitted in this machine lifetime. Guards against
+	// dispatching the same action twice; starts empty on restart, so unfinished actions re-run.
+	dispatchedActions: Set<string>;
 };
 
 export type EffectId = string;
@@ -84,13 +87,33 @@ export function createMachineOutput(state: MachineState, effects: Effect[]): Mac
 		};
 	}
 
+	// Completed actions left the projection; drop them so a later re-invoke can dispatch again.
+	const pendingKeys = new Set(state.projection.pendingActions.map(actionUidKey));
+	for (const key of state.dispatchedActions) {
+		if (!pendingKeys.has(key)) {
+			state.dispatchedActions.delete(key);
+		}
+	}
+
+	const actionEffects: Effect[] = [];
+	for (const [index, actionUid] of state.projection.pendingActions.entries()) {
+		const key = actionUidKey(actionUid);
+		if (state.dispatchedActions.has(key)) {
+			continue;
+		}
+		state.dispatchedActions.add(key);
+		actionEffects.push(createEffect(state.ast, actionUid, index));
+	}
+
 	return {
 		kind: "effect",
 		state,
-		effects: effects.concat(
-			state.projection.pendingActions.map((actionUid, index) => createEffect(state.ast, actionUid, index)),
-		),
+		effects: effects.concat(actionEffects),
 	};
+}
+
+function actionUidKey(actionUid: ActionUID): string {
+	return `${actionUid.chart}:${actionUid.state}:${actionUid.action}`;
 }
 
 function createEffect(ast: ChartAst, actionUid: ActionUID, index: number): Effect {
@@ -152,6 +175,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			if (curState?.kind === "state" && curState.transitions) {
 				let nextStateId = curState.transitions[event.event.type];
 				if (nextStateId) {
+					// Only the fact is logged; the transition itself is recomputed by the projection.
 					effects = effects.concat([
 						{
 							kind: "durable_records",
@@ -161,15 +185,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 									type: "state_action",
 									kind: "complete",
 									actionUid: actionId,
-									parentId: state.projection.seqId,
-									seqId: ++state.projection.seqId,
-									timestamp: Date.now(),
-								},
-								{
-									type: "state_transition",
-									kind: "simple",
-									source: state.projection.activeState,
-									target: nextStateId,
+									event: event.event,
 									parentId: state.projection.seqId,
 									seqId: ++state.projection.seqId,
 									timestamp: Date.now(),
@@ -191,11 +207,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					error: `Current state ${state.projection.activeState} is not actionable or has no transitions`,
 				};
 			}
-			return {
-				kind: "effect",
-				state,
-				effects,
-			};
+			break;
 		}
 		case "start":
 		case "user":
@@ -211,5 +223,5 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 }
 
 export function createMachine(ast: ChartAst, projection: BranchProjection): MachineState {
-	return { ast, projection };
+	return { ast, projection, dispatchedActions: new Set() };
 }

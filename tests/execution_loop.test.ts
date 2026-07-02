@@ -74,8 +74,8 @@ function meta(seqId: number) {
 	return { seqId, parentId: null, timestamp: seqId };
 }
 
-function transition(source: StateId, target: StateId, seqId = 1): DurableLogRecord {
-	return { type: "state_transition", kind: "simple", source, target, ...meta(seqId) };
+function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecord {
+	return { type: "state_action", kind: "complete", actionUid: uid, event: { type: eventType }, ...meta(seqId) };
 }
 
 function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
@@ -98,9 +98,10 @@ describe("execution loop", () => {
 	});
 
 	it("projects persisted logs before processing runtime events", async () => {
+		const ast = linearAst();
 		const runtime = new MockRuntime({
-			ast: linearAst(),
-			logs: [transition("start", "done")],
+			ast,
+			logs: [complete(actionUid(ast), "DONE")],
 			events: failOnPullEvents(),
 		});
 
@@ -158,17 +159,9 @@ describe("execution loop", () => {
 								type: "state_action",
 								kind: "complete",
 								actionUid: uid,
+								event: doneEvent,
 								parentId: 1,
 								seqId: 2,
-								timestamp: expect.any(Number),
-							}),
-							expect.objectContaining({
-								type: "state_transition",
-								kind: "simple",
-								source: "start",
-								target: "done",
-								parentId: 2,
-								seqId: 3,
 								timestamp: expect.any(Number),
 							}),
 						]);
@@ -209,15 +202,17 @@ describe("execution loop", () => {
 						break;
 					}
 					case "durable_records": {
-						const transitionRecord = effect.records.find((record) => record.type === "state_transition");
-						if (transitionRecord?.type !== "state_transition" || transitionRecord.kind !== "simple") {
-							throw new Error("expected simple transition record");
+						const completeRecord = effect.records.find(
+							(record) => record.type === "state_action" && record.kind === "complete",
+						);
+						if (completeRecord?.type !== "state_action" || completeRecord.kind !== "complete") {
+							throw new Error("expected complete record");
 						}
 
-						sequence.push(`durable:${transitionRecord.source}->${transitionRecord.target}`);
+						sequence.push(`durable:${completeRecord.actionUid.state}`);
 						const records: DurableLogRecord[] = [...effect.records];
-						if (transitionRecord.target === "second") {
-							records.push(invoke(secondUid, transitionRecord.seqId + 1));
+						if (completeRecord.actionUid.state === "first") {
+							records.push(invoke(secondUid, completeRecord.seqId + 1));
 						}
 						events.push(durableRecordsAdded(records, effect.id));
 						break;
@@ -230,7 +225,7 @@ describe("execution loop", () => {
 
 		const state = await loop(runtime);
 
-		expect(sequence).toEqual(["agent:first", "durable:first->second", "agent:second", "durable:second->done"]);
+		expect(sequence).toEqual(["agent:first", "durable:first", "agent:second", "durable:second"]);
 		expect(state.projection.activeState).toBe("done");
 		expect(state.projection.pendingActions).toEqual([]);
 	});
@@ -239,5 +234,26 @@ describe("execution loop", () => {
 		const runtime = new MockRuntime({ ast: linearAst(), events: [] });
 
 		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+	});
+
+	it("does not dispatch a pending action effect twice", async () => {
+		const ast = linearAst();
+		const uid = actionUid(ast);
+		const sessionRef: DurableLogRecord = { type: "session_ref", index: 0, file: "session.jsonl", ...meta(2) };
+		// A neutral event that re-enters createMachineOutput while the action is still pending.
+		const events: MachineEvent[] = [durableRecordsAdded([sessionRef], "noop")];
+		const runtime = new MockRuntime({ ast, logs: [invoke(uid)], events });
+
+		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+
+		const agentEffects = runtime.effectBatches.flat().filter((effect) => effect.kind === "agent");
+		expect(agentEffects).toHaveLength(1);
+	});
+
+	it("throws when the machine reports an error output", async () => {
+		const events: MachineEvent[] = [{ kind: "agent", effectId: "bogus:effect:id:0", event: { type: "DONE" } }];
+		const runtime = new MockRuntime({ ast: linearAst(), events });
+
+		await expect(loop(runtime)).rejects.toThrow("No pending action found for effectId bogus:effect:id:0");
 	});
 });
