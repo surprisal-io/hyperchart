@@ -8,7 +8,8 @@ import type { DurableLogRecord } from "./durable_events.js";
 // session is alive through the whole cycle. seqId is the record that started the current phase;
 // it makes the effect id of each phase unique.
 export type PendingAction =
-	| { actionUid: ActionUID; seqId: number; phase: "running" }
+	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
+	| { actionUid: ActionUID; seqId: number; timestamp: number; phase: "running" }
 	| { actionUid: ActionUID; seqId: number; phase: "validating"; event: ChartEvent }
 	| { actionUid: ActionUID; seqId: number; phase: "rejected"; event: ChartEvent; reason?: string };
 
@@ -47,7 +48,12 @@ export function projectBranch(
 					case "invoke":
 						if (record.actionUid.state === projection.activeState) {
 							assertActiveActionUid(ast, projection.activeState, record.actionUid, "invoke");
-							projection.pendingActions.push({ actionUid: record.actionUid, seqId: record.seqId, phase: "running" });
+							projection.pendingActions.push({
+								actionUid: record.actionUid,
+								seqId: record.seqId,
+								timestamp: record.timestamp,
+								phase: "running",
+							});
 						}
 						break;
 					case "complete":
@@ -67,6 +73,15 @@ export function projectBranch(
 							}
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.event.type);
+						}
+						break;
+					case "timer_fired":
+						// The activeState guard makes race losers no-ops: a completion logged after the
+						// timer (or vice versa) refers to a state that is no longer active and is skipped.
+						if (record.actionUid.state === projection.activeState) {
+							assertActiveActionUid(ast, projection.activeState, record.actionUid, "timer_fired");
+							removePendingAction(projection, record.actionUid);
+							applyAfterTransition(projection, ast);
 						}
 						break;
 					case "validated": {
@@ -104,6 +119,15 @@ function removePendingAction(projection: BranchProjection, actionUid: ActionUID)
 	if (index !== -1) {
 		projection.pendingActions.splice(index, 1);
 	}
+}
+
+function applyAfterTransition(projection: BranchProjection, ast: ChartAst): void {
+	const state = ast.states[projection.activeState];
+	const target = state?.kind === "state" ? state.after?.target : undefined;
+	if (!target) {
+		throw new Error(`No after transition in state ${projection.activeState}`);
+	}
+	projection.activeState = target;
 }
 
 // Transitions are not logged: recompute the move from the chart AST.

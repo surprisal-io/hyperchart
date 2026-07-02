@@ -55,6 +55,56 @@ describe("normalizeChartConfig", () => {
 		expect(work.onReject).toBe("resume");
 	});
 
+	it("normalizes after on an action state", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "timed",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("coder"),
+						after: { delayMs: 500, target: "escalated" },
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					escalated: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected valid chart");
+		const work = result.ast.states.work;
+		if (work?.kind !== "state") throw new Error("expected action state");
+		expect(work.after).toEqual({ delayMs: 500, target: "escalated" });
+	});
+
+	it("rejects invalid after shapes and unknown after targets", () => {
+		const badDelay = normalizeChartConfig({
+			id: "bad-delay",
+			initial: "work",
+			states: {
+				work: { action: agent("coder"), after: { delayMs: -1, target: "done" }, transitions: { DONE: "done" } },
+				done: final(),
+			},
+		});
+		expect(badDelay.ok).toBe(false);
+		expect(badDelay.diagnostics.map((d) => d.code)).toContain("INVALID_AFTER");
+
+		const unknownTarget = normalizeChartConfig({
+			id: "bad-target",
+			initial: "work",
+			states: {
+				work: { action: agent("coder"), after: { delayMs: 500, target: "missing" }, transitions: { DONE: "done" } },
+				done: final(),
+			},
+		});
+		expect(unknownTarget.ok).toBe(false);
+		expect(unknownTarget.diagnostics.map((d) => d.code)).toContain("UNKNOWN_AFTER_TARGET");
+	});
+
 	it("rejects inline functions as validators", () => {
 		const result = normalizeChartConfig({
 			id: "inline-validate",

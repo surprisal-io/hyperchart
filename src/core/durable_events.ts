@@ -39,6 +39,14 @@ type StateActionValidatedLog = {
 	outcome: GuardOutcome;
 } & SessionParams;
 
-type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog;
+// The action's deadline expired before a completion landed. Like transitions, the target is not
+// logged — the projection recomputes it from the state's `after` in the current chart.
+type StateActionTimerFiredLog = {
+	type: "state_action";
+	kind: "timer_fired";
+	actionUid: ActionUID;
+} & SessionParams;
+
+type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog | StateActionTimerFiredLog;
 
 export type DurableLogRecord = SessionRefLog | StateAction;

@@ -88,10 +88,19 @@ export type OnReject = "resume" | "restart";
 
 export type TransitionMapCst = Record<EventType, StateId>;
 
+// Deadline for an action state: if the action is still running delayMs after its invoke fact,
+// the chart transitions to target and the runtime is told to cancel the action. The timer covers
+// only the running phase — validation of a completion is not raced against the clock.
+export type AfterCst = {
+	delayMs: number;
+	target: StateId;
+};
+
 export type ActionStateCst = {
 	kind: "state";
 	action: StateActionCst;
 	transitions?: TransitionMapCst;
+	after?: AfterCst;
 	validate?: GuardRef;
 	onReject?: OnReject;
 };
@@ -129,6 +138,7 @@ export type ActionStateAst = Readonly<{
 	id: StateId;
 	action: StateActionAst;
 	transitions: Readonly<Record<EventType, StateId>>;
+	after?: Readonly<AfterCst>;
 	validate?: GuardRef;
 	// Present only when validate is set; defaults to "resume".
 	onReject?: OnReject;

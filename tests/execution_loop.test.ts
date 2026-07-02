@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { agent, chart, final, normalizeChartConfig, tsImport } from "../src/index.js";
 import { loop } from "../src/core/execution_loop.js";
-import type { ActionUID, ChartAst, DurableLogRecord, Effect, GuardOutcome, MachineEvent, StateId } from "../src/index.js";
+import type {
+	ActionUID,
+	ChartAst,
+	DurableLogRecord,
+	Effect,
+	GuardOutcome,
+	MachineEvent,
+	StateCst,
+	StateId,
+} from "../src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 
 function linearAst(): ChartAst {
@@ -87,6 +96,28 @@ function validatedAst(onReject?: "resume" | "restart"): ChartAst {
 	return result.ast;
 }
 
+function afterAst(escalated: StateCst = final()): ChartAst {
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "timed-chart",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: agent("coder"),
+					after: { delayMs: 500, target: "escalated" },
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+				escalated,
+			},
+		}),
+	);
+	if (!result.ok) throw new Error("test chart should be valid");
+	return result.ast;
+}
+
 function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 	const state = ast.states[stateId];
 	if (state?.kind !== "state") throw new Error(`state ${stateId} should be actionable`);
@@ -103,6 +134,10 @@ function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecor
 
 function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
 	return { type: "state_action", kind: "invoke", actionUid: uid, ...meta(seqId) };
+}
+
+function timerFired(uid: ActionUID, seqId = 1): DurableLogRecord {
+	return { type: "state_action", kind: "timer_fired", actionUid: uid, ...meta(seqId) };
 }
 
 function validated(uid: ActionUID, eventType: string, outcome: GuardOutcome, seqId = 1): DurableLogRecord {
@@ -451,9 +486,215 @@ describe("execution loop", () => {
 	});
 
 	it("throws when the machine reports an error output", async () => {
-		const events: MachineEvent[] = [{ kind: "agent", effectId: "bogus:effect:id:0", event: { type: "DONE" } }];
-		const runtime = new MockRuntime({ ast: linearAst(), events });
+		const ast = linearAst();
+		const events: MachineEvent[] = [
+			{ kind: "agent", effectId: "running:test-chart:start:agent:1", event: { type: "NOPE" } },
+		];
+		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast))], events });
 
-		await expect(loop(runtime)).rejects.toThrow("No pending action found for effectId bogus:effect:id:0");
+		await expect(loop(runtime)).rejects.toThrow("No transition found for event type NOPE");
+	});
+
+	it("ignores a completion for an action that is not pending", async () => {
+		const ast = linearAst();
+		// A parseable effect id that matches no pending action: a completion that lost a race.
+		const events: MachineEvent[] = [
+			{ kind: "agent", effectId: "running:test-chart:other:agent:7", event: { type: "DONE" } },
+		];
+		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast))], events });
+
+		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+
+		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "durable_records")).toEqual([]);
+	});
+
+	it("dispatches a deadline timer alongside the agent effect", async () => {
+		const ast = afterAst();
+		const uid = actionUid(ast, "work");
+		const runtime = new MockRuntime({ ast, logs: [invoke(uid)], events: [] });
+
+		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+
+		expect(runtime.effectBatches[0]).toEqual([
+			expect.objectContaining({ kind: "agent", actionUid: uid }),
+			expect.objectContaining({
+				kind: "timer",
+				id: "timer:timed-chart:work:agent:1",
+				actionUid: uid,
+				// invoke fact's timestamp (1) + delayMs (500)
+				firesAt: 501,
+			}),
+		]);
+	});
+
+	it("records the expiry, cancels the agent and transitions when the timer fires", async () => {
+		const ast = afterAst();
+		const uid = actionUid(ast, "work");
+		const events: MachineEvent[] = [];
+		const cancels: Extract<Effect, { kind: "cancel" }>[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					// The agent effect is left hanging: the worker never answers.
+					if (effect.kind === "timer") {
+						events.push({ kind: "timer", effectId: effect.id });
+					}
+					if (effect.kind === "cancel") {
+						cancels.push(effect);
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("escalated");
+		expect(cancels).toEqual([expect.objectContaining({ kind: "cancel", actionUid: uid })]);
+		const records = runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
+		expect(records.map((record) => (record.type === "state_action" ? record.kind : record.type))).toEqual([
+			"timer_fired",
+		]);
+	});
+
+	it("ignores a stale timer from an earlier round", async () => {
+		const ast = afterAst();
+		const uid = actionUid(ast, "work");
+		const events: MachineEvent[] = [{ kind: "timer", effectId: "timer:timed-chart:work:agent:99" }];
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("done");
+		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "cancel")).toEqual([]);
+	});
+
+	it("ignores a completion that lost the race to the timer", async () => {
+		const ast = afterAst({ kind: "state", action: agent("escalation-handler"), transitions: { HANDLED: "done" } });
+		const uid = actionUid(ast, "work");
+		const events: MachineEvent[] = [];
+		let workEffectId = "";
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "work") {
+						// The worker hangs; remember its id to complete it too late.
+						workEffectId = effect.id;
+					}
+					if (effect.kind === "agent" && effect.actionUid.state === "escalated") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "HANDLED" } });
+					}
+					if (effect.kind === "timer") {
+						events.push({ kind: "timer", effectId: effect.id });
+					}
+					if (effect.kind === "cancel") {
+						// The killed worker manages to report a completion after losing the race.
+						events.push({ kind: "agent", effectId: workEffectId, event: { type: "DONE" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("done");
+		const records = runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
+		// The worker's late DONE left no trace: only the expiry and the escalation run are logged.
+		expect(
+			records.map((record) => (record.type === "state_action" ? `${record.kind}:${record.actionUid.state}` : record.type)),
+		).toEqual(["timer_fired:work", "invoke:escalated", "complete:escalated"]);
+	});
+
+	it("replays a timer expiry without waiting", async () => {
+		const ast = afterAst();
+		const uid = actionUid(ast, "work");
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid, 1), timerFired(uid, 2)],
+			events: failOnPullEvents(),
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("escalated");
+		expect(runtime.effectBatches).toEqual([]);
+	});
+
+	it("does not race validation against the deadline", async () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "timed-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("coder"),
+						after: { delayMs: 500, target: "escalated" },
+						validate: tsImport("./checks.js", "testsPass"),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					escalated: final(),
+				},
+			}),
+		);
+		if (!result.ok) throw new Error("test chart should be valid");
+		const ast = result.ast;
+		const uid = actionUid(ast, "work");
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "validate") {
+						events.push({ kind: "validated", effectId: effect.id, outcome: true });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("done");
+		// One timer for the running phase; validation is not raced against the clock.
+		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "timer")).toHaveLength(1);
 	});
 });

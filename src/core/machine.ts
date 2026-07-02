@@ -64,7 +64,32 @@ export type RejectedEffect = Readonly<{
 	reason?: string;
 }>;
 
-export type Effect = AgentEffect | UserEffect | DurableRecordsEffect | ValidateEffect | RejectedEffect;
+// A deadline racing a running action: fires at `firesAt` (absolute — the invoke fact's timestamp
+// plus the state's after.delayMs, so a restarted machine waits only the remaining time). The
+// runtime answers with a `timer` event; whether the firing still matters is the machine's call.
+export type TimerEffect = Readonly<{
+	kind: "timer";
+	id: EffectId;
+	actionUid: ActionUID;
+	firesAt: number;
+}>;
+
+// The action lost to its deadline: the runtime must stop the agent. Purely a kill signal — the
+// chart has already moved on via the timer_fired fact.
+export type CancelEffect = Readonly<{
+	kind: "cancel";
+	id: EffectId;
+	actionUid: ActionUID;
+}>;
+
+export type Effect =
+	| AgentEffect
+	| UserEffect
+	| DurableRecordsEffect
+	| ValidateEffect
+	| RejectedEffect
+	| TimerEffect
+	| CancelEffect;
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -104,6 +129,12 @@ export type ValidatedMachineEvent = Readonly<{
 	outcome: GuardOutcome;
 }>;
 
+// The runtime's answer to a timer effect: the deadline passed.
+export type TimerMachineEvent = Readonly<{
+	kind: "timer";
+	effectId: EffectId;
+}>;
+
 export type MachineStartEvent = Readonly<{
 	kind: "start";
 }>;
@@ -113,7 +144,8 @@ export type MachineEvent =
 	| AgentMachineEvent
 	| UserMachineEvent
 	| DurableRecordsAddedMachineEvent
-	| ValidatedMachineEvent;
+	| ValidatedMachineEvent
+	| TimerMachineEvent;
 
 export type MachineOutput = MachineOutputEffect | MachineOutputFinal | MachineOutputError;
 
@@ -135,7 +167,7 @@ export type MachineOutputEffect = Readonly<{
 	effects: Effect[];
 }>;
 
-export function createMachineOutput(state: MachineState, appends: readonly RecordAppend[]): MachineOutput {
+export function createMachineOutput(state: MachineState, responses: readonly (Effect | RecordAppend)[]): MachineOutput {
 	if (isFinalState(state.projection, state.ast)) {
 		return {
 			kind: "final",
@@ -145,11 +177,12 @@ export function createMachineOutput(state: MachineState, appends: readonly Recor
 	}
 
 	// What the runtime should be doing right now, derived entirely from the projection: append an
-	// invoke record when the active action-state has nothing pending yet, plus exactly one effect
-	// per pending action — run it, validate its completion, or deliver the rejection.
+	// invoke record when the active action-state has nothing pending yet, plus the effects of each
+	// pending action — run it (with a deadline timer, if the state has one), validate its
+	// completion, or deliver the rejection.
 	const missing = missingInvoke(state);
-	const desired: (Effect | RecordAppend)[] = state.projection.pendingActions.map((pending) =>
-		pendingEffect(state.ast, pending),
+	const desired: (Effect | RecordAppend)[] = state.projection.pendingActions.flatMap((pending) =>
+		pendingEffects(state.ast, pending),
 	);
 	if (missing) {
 		desired.unshift(invokeAppend(missing));
@@ -170,7 +203,9 @@ export function createMachineOutput(state: MachineState, appends: readonly Recor
 
 	// The only place where records are numbered: appends that made it into the output consume
 	// their seqIds here.
-	const effects = [...appends, ...fresh].map((entry) => (entry.kind === "append" ? stampAppend(state, entry) : entry));
+	const effects = [...responses, ...fresh].map((entry) =>
+		entry.kind === "append" ? stampAppend(state, entry) : entry,
+	);
 
 	return { kind: "effect", state, effects };
 }
@@ -197,6 +232,28 @@ function actionUidKey(actionUid: ActionUID): string {
 // makes the id unique per phase, so each phase dispatches exactly once.
 function pendingEffectId(pending: PendingAction): EffectId {
 	return `${pending.phase}:${actionUidKey(pending.actionUid)}:${pending.seqId}`;
+}
+
+// All effects a pending action currently wants: its phase effect, plus — while running under a
+// deadline — the timer racing it.
+function pendingEffects(ast: ChartAst, pending: PendingAction): Effect[] {
+	const effects = [pendingEffect(ast, pending)];
+	if (pending.phase === "running") {
+		const node = ast.states[pending.actionUid.state];
+		if (node?.kind === "state" && node.after !== undefined) {
+			effects.push({
+				kind: "timer",
+				id: timerEffectId(pending),
+				actionUid: pending.actionUid,
+				firesAt: pending.timestamp + node.after.delayMs,
+			});
+		}
+	}
+	return effects;
+}
+
+function timerEffectId(pending: PendingAction): EffectId {
+	return `timer:${actionUidKey(pending.actionUid)}:${pending.seqId}`;
 }
 
 function pendingEffect(ast: ChartAst, pending: PendingAction): Effect {
@@ -244,6 +301,11 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 	switch (event.kind) {
 		case "agent": {
 			const pending = findPendingAction(state, event.effectId);
+			if (pending === null) {
+				// The action is no longer pending — it lost a race (e.g. its timer fired first).
+				// The late completion is ignored.
+				break;
+			}
 			if (typeof pending === "string") {
 				return { kind: "error", state, error: pending };
 			}
@@ -296,6 +358,25 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 				},
 			]);
 		}
+		case "timer": {
+			const running = state.projection.pendingActions.find(
+				(pending) => pending.phase === "running" && timerEffectId(pending) === event.effectId,
+			);
+			if (!running) {
+				// The action completed (or moved into validation) before its deadline: stale, ignored.
+				break;
+			}
+			// The expiry is a fact; the transition target is the projection's job. The cancel signal
+			// rides along — the runtime must stop the now-abandoned agent.
+			return createMachineOutput(state, [
+				{
+					kind: "append",
+					id: event.effectId,
+					records: [{ type: "state_action", kind: "timer_fired", actionUid: running.actionUid }],
+				},
+				{ kind: "cancel", id: `cancel:${event.effectId}`, actionUid: running.actionUid },
+			]);
+		}
 		case "start":
 			// Nothing to apply: the derivation in createMachineOutput starts whatever is due.
 			break;
@@ -315,14 +396,16 @@ type PendingActionContext = {
 	state: ActionStateAst;
 };
 
-function findPendingAction(machine: MachineState, effectId: EffectId): PendingActionContext | string {
+// null means "nothing pending for this action" — not an error, the completion may simply have
+// lost a race; a string is a protocol violation to report.
+function findPendingAction(machine: MachineState, effectId: EffectId): PendingActionContext | string | null {
 	const actionId = effectIdToActionUid(effectId);
 	if (!actionId) {
 		return `Invalid effectId ${effectId}`;
 	}
 	const pending = machine.projection.pendingActions.find((el) => sameActionUid(el.actionUid, actionId));
 	if (!pending) {
-		return `No pending action found for effectId ${effectId}`;
+		return null;
 	}
 	if (pending.phase === "validating") {
 		return `Validation already in flight for ${effectId}`;

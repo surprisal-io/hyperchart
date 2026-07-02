@@ -86,6 +86,16 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 				);
 			}
 		}
+		if (state.after !== undefined && !(state.after.target in states)) {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_AFTER_TARGET",
+					`after in state '${stateId}' targets unknown state '${state.after.target}'.`,
+					`/states/${escapePointer(stateId)}/after/target`,
+					source,
+				),
+			);
+		}
 	}
 
 	if (diagnostics.length > 0) return undefined;
@@ -122,6 +132,7 @@ function toStateAst(
 	if ("action" in input) {
 		const action = toStateActionAst(input.action, chartId, stateId, `${path}/action`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${path}/transitions`, diagnostics, source);
+		const after = toAfter(input.after, `${path}/after`, diagnostics, source);
 		const validate = toGuardRef(input.validate, `${path}/validate`, diagnostics, source);
 		let onReject: OnReject | undefined;
 		if (input.onReject !== undefined) {
@@ -130,9 +141,7 @@ function toStateAst(
 					diagnostic("INVALID_ON_REJECT", "onReject must be 'resume' or 'restart'.", `${path}/onReject`, source),
 				);
 			} else if (input.validate === undefined) {
-				diagnostics.push(
-					diagnostic("INVALID_ON_REJECT", "onReject requires validate.", `${path}/onReject`, source),
-				);
+				diagnostics.push(diagnostic("INVALID_ON_REJECT", "onReject requires validate.", `${path}/onReject`, source));
 			} else {
 				onReject = input.onReject;
 			}
@@ -143,6 +152,7 @@ function toStateAst(
 			id: stateId,
 			action,
 			transitions: transitions ?? {},
+			...(after === undefined ? {} : { after }),
 			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
 		} satisfies ActionStateAst);
 	}
@@ -166,7 +176,9 @@ function toStateActionAst(
 	switch (input.kind) {
 		case "agent": {
 			if (typeof input.name !== "string" || input.name.length === 0) {
-				diagnostics.push(diagnostic("INVALID_AGENT_NAME", "Agent action name must be a string.", `${path}/name`, source));
+				diagnostics.push(
+					diagnostic("INVALID_AGENT_NAME", "Agent action name must be a string.", `${path}/name`, source),
+				);
 			}
 			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: stateId, action: "agent" };
@@ -209,7 +221,9 @@ function toStateActionAst(
 			} satisfies UserActionAst);
 		}
 		default:
-			diagnostics.push(diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent' or 'user'.", `${path}/kind`, source));
+			diagnostics.push(
+				diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent' or 'user'.", `${path}/kind`, source),
+			);
 			return undefined;
 	}
 }
@@ -228,22 +242,45 @@ function toOutputSpecAst(
 	switch (input.kind) {
 		case "jsonSchema":
 			if (!isRecord(input.schema)) {
-				diagnostics.push(diagnostic("INVALID_JSON_SCHEMA", "JSON Schema output must contain an object schema.", `${path}/schema`, source));
+				diagnostics.push(
+					diagnostic(
+						"INVALID_JSON_SCHEMA",
+						"JSON Schema output must contain an object schema.",
+						`${path}/schema`,
+						source,
+					),
+				);
 				return undefined;
 			}
 			return { kind: "jsonSchema", schema: { ...input.schema } };
 		case "schemaRef":
 			if (typeof input.name !== "string" || input.name.length === 0) {
-				diagnostics.push(diagnostic("INVALID_SCHEMA_REF", "Schema ref name must be a non-empty string.", `${path}/name`, source));
+				diagnostics.push(
+					diagnostic("INVALID_SCHEMA_REF", "Schema ref name must be a non-empty string.", `${path}/name`, source),
+				);
 				return undefined;
 			}
 			return { kind: "schemaRef", name: input.name };
 		case "tsImport":
 			if (typeof input.module !== "string" || input.module.length === 0) {
-				diagnostics.push(diagnostic("INVALID_SCHEMA_IMPORT", "TS import schema module must be a non-empty string.", `${path}/module`, source));
+				diagnostics.push(
+					diagnostic(
+						"INVALID_SCHEMA_IMPORT",
+						"TS import schema module must be a non-empty string.",
+						`${path}/module`,
+						source,
+					),
+				);
 			}
 			if (typeof input.export !== "string" || input.export.length === 0) {
-				diagnostics.push(diagnostic("INVALID_SCHEMA_IMPORT", "TS import schema export must be a non-empty string.", `${path}/export`, source));
+				diagnostics.push(
+					diagnostic(
+						"INVALID_SCHEMA_IMPORT",
+						"TS import schema export must be a non-empty string.",
+						`${path}/export`,
+						source,
+					),
+				);
 			}
 			return {
 				kind: "tsImport",
@@ -251,7 +288,14 @@ function toOutputSpecAst(
 				export: typeof input.export === "string" ? input.export : "",
 			};
 		default:
-			diagnostics.push(diagnostic("INVALID_OUTPUT_SPEC", "Output spec kind must be 'jsonSchema', 'schemaRef', or 'tsImport'.", `${path}/kind`, source));
+			diagnostics.push(
+				diagnostic(
+					"INVALID_OUTPUT_SPEC",
+					"Output spec kind must be 'jsonSchema', 'schemaRef', or 'tsImport'.",
+					`${path}/kind`,
+					source,
+				),
+			);
 			return undefined;
 	}
 }
@@ -270,12 +314,45 @@ function toTransitionMap(
 	const transitions: Record<string, string> = {};
 	for (const [eventType, target] of Object.entries(input)) {
 		if (typeof target !== "string" || target.length === 0) {
-			diagnostics.push(diagnostic("INVALID_TRANSITION_TARGET", "Transition target must be a non-empty state id.", `${path}/${escapePointer(eventType)}`, source));
+			diagnostics.push(
+				diagnostic(
+					"INVALID_TRANSITION_TARGET",
+					"Transition target must be a non-empty state id.",
+					`${path}/${escapePointer(eventType)}`,
+					source,
+				),
+			);
 			continue;
 		}
 		transitions[eventType] = target;
 	}
 	return transitions;
+}
+
+function toAfter(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): { delayMs: number; target: string } | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(diagnostic("INVALID_AFTER", "after must be an object with delayMs and target.", path, source));
+		return undefined;
+	}
+	if (typeof input.delayMs !== "number" || !Number.isFinite(input.delayMs) || input.delayMs <= 0) {
+		diagnostics.push(
+			diagnostic("INVALID_AFTER", "after.delayMs must be a positive number.", `${path}/delayMs`, source),
+		);
+		return undefined;
+	}
+	if (typeof input.target !== "string" || input.target.length === 0) {
+		diagnostics.push(
+			diagnostic("INVALID_AFTER", "after.target must be a non-empty state id.", `${path}/target`, source),
+		);
+		return undefined;
+	}
+	return { delayMs: input.delayMs, target: input.target };
 }
 
 function toGuardRef(
@@ -294,17 +371,23 @@ function toGuardRef(
 	switch (input.kind) {
 		case "tsImport":
 			if (typeof input.module !== "string" || input.module.length === 0) {
-				diagnostics.push(diagnostic("INVALID_GUARD", "Guard tsImport module must be a non-empty string.", `${path}/module`, source));
+				diagnostics.push(
+					diagnostic("INVALID_GUARD", "Guard tsImport module must be a non-empty string.", `${path}/module`, source),
+				);
 				return undefined;
 			}
 			if (typeof input.export !== "string" || input.export.length === 0) {
-				diagnostics.push(diagnostic("INVALID_GUARD", "Guard tsImport export must be a non-empty string.", `${path}/export`, source));
+				diagnostics.push(
+					diagnostic("INVALID_GUARD", "Guard tsImport export must be a non-empty string.", `${path}/export`, source),
+				);
 				return undefined;
 			}
 			return { kind: "tsImport", module: input.module, export: input.export };
 		case "script": {
 			if (typeof input.command !== "string" || input.command.length === 0) {
-				diagnostics.push(diagnostic("INVALID_GUARD", "Guard script command must be a non-empty string.", `${path}/command`, source));
+				diagnostics.push(
+					diagnostic("INVALID_GUARD", "Guard script command must be a non-empty string.", `${path}/command`, source),
+				);
 				return undefined;
 			}
 			const args = Array.isArray(input.args) ? input.args : [];
@@ -315,7 +398,9 @@ function toGuardRef(
 			return { kind: "script", command: input.command, ...(args.length === 0 ? {} : { args }) };
 		}
 		default:
-			diagnostics.push(diagnostic("INVALID_GUARD", "Guard kind must be 'tsImport' or 'script'.", `${path}/kind`, source));
+			diagnostics.push(
+				diagnostic("INVALID_GUARD", "Guard kind must be 'tsImport' or 'script'.", `${path}/kind`, source),
+			);
 			return undefined;
 	}
 }
