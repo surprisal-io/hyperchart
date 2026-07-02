@@ -22,8 +22,6 @@ export type AuthoringDiagnostic = {
 	source?: ChartSource;
 };
 
-export type InputMapper = (args: { input: unknown; results: Record<StateId, StateResult> }) => unknown;
-
 export type SchemaRefCst = {
 	kind: "schemaRef";
 	name: string;
@@ -53,13 +51,12 @@ export type OutputSpecAst = JsonSchemaOutputAst | SchemaRefAst | TsImportSchemaR
 export type AgentActionCst = {
 	kind: "agent";
 	name: string;
-	input?: InputMapper;
 	output?: OutputSpecCst;
 };
 
 export type UserActionCst = {
 	kind: "user";
-	prompt: string | InputMapper;
+	prompt: string;
 	options?: readonly string[];
 	output?: OutputSpecCst;
 };
@@ -91,13 +88,12 @@ export type AgentActionAst = Readonly<{
 	kind: "agent";
 	uid: ActionUID;
 	name: string;
-	input?: InputMapper;
 	output?: OutputSpecAst;
 }>;
 export type UserActionAst = Readonly<{
 	kind: "user";
 	uid: ActionUID;
-	prompt: string | InputMapper;
+	prompt: string;
 	options: readonly string[];
 	output?: OutputSpecAst;
 }>;
@@ -134,11 +130,6 @@ export type SystemEvent = {
 };
 
 export type ChartEvent = ActionEvent | SystemEvent;
-
-export type StateResult = {
-	status: "ok" | "error" | "cancelled";
-	event: ChartEvent;
-};
 
 export type ParsedChart =
 	| {

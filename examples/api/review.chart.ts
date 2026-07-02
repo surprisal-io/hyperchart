@@ -1,11 +1,5 @@
 import { agent, chart, final, jsonSchema, user } from "../../src/index.js";
 
-type ReviewInput = { task: string };
-
-function reviewInput(input: unknown): ReviewInput {
-	return input as ReviewInput;
-}
-
 export default chart({
 	kind: "chart",
 	id: "review-and-fix",
@@ -14,7 +8,6 @@ export default chart({
 		research: {
 			kind: "state",
 			action: agent("researcher", {
-				input: ({ input }) => ({ task: reviewInput(input).task }),
 				output: jsonSchema({
 					type: "object",
 					required: ["summary"],
@@ -30,10 +23,6 @@ export default chart({
 		plan: {
 			kind: "state",
 			action: agent("planner", {
-				input: ({ input, results }) => ({
-					task: reviewInput(input).task,
-					research: results.research,
-				}),
 				output: jsonSchema({
 					type: "object",
 					required: ["steps"],

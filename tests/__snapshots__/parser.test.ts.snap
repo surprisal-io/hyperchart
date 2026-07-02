@@ -54,7 +54,6 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
     },
     "plan": {
       "action": {
-        "input": [Function],
         "kind": "agent",
         "name": "planner",
         "output": {
@@ -89,7 +88,6 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
     },
     "research": {
       "action": {
-        "input": [Function],
         "kind": "agent",
         "name": "researcher",
         "output": {

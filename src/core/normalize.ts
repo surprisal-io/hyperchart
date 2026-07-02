@@ -8,7 +8,6 @@ import type {
 	ChartCst,
 	ChartSource,
 	FinalStateAst,
-	InputMapper,
 	OutputSpecAst,
 	ParsedChart,
 	StateActionAst,
@@ -157,15 +156,12 @@ function toStateActionAst(
 				kind: "agent",
 				uid,
 				name: typeof input.name === "string" ? input.name : "",
-				...(typeof input.input === "function" ? { input: input.input as InputMapper } : {}),
 				...(output === undefined ? {} : { output }),
 			} satisfies AgentActionAst);
 		}
 		case "user": {
-			if (typeof input.prompt !== "string" && typeof input.prompt !== "function") {
-				diagnostics.push(
-					diagnostic("INVALID_USER_PROMPT", "User prompt must be a string or mapper.", `${path}/prompt`, source),
-				);
+			if (typeof input.prompt !== "string") {
+				diagnostics.push(diagnostic("INVALID_USER_PROMPT", "User prompt must be a string.", `${path}/prompt`, source));
 			}
 			const options = Array.isArray(input.options) ? input.options : [];
 			for (const [index, option] of options.entries()) {
@@ -189,9 +185,7 @@ function toStateActionAst(
 			return deepFreeze({
 				kind: "user",
 				uid,
-				prompt: (typeof input.prompt === "string" || typeof input.prompt === "function"
-					? input.prompt
-					: "") as UserActionAst["prompt"],
+				prompt: typeof input.prompt === "string" ? input.prompt : "",
 				options: options.filter((option): option is string => typeof option === "string"),
 				...(output === undefined ? {} : { output }),
 			} satisfies UserActionAst);

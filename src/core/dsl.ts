@@ -54,4 +54,4 @@ export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 	return Object.freeze(value);
 }
 
-export type { OutputSpecCst, StateResult } from "./types.js";
+export type { OutputSpecCst } from "./types.js";
