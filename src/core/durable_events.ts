@@ -1,4 +1,4 @@
-import type { ActionUID, ChartEvent } from "./types.js";
+import type { ActionUID, ChartEvent, GuardOutcome, GuardRef } from "./types.js";
 
 type SessionParams = {
 	seqId: number;
@@ -27,6 +27,18 @@ type StateActionCompleteLog = {
 	event: ChartEvent;
 } & SessionParams;
 
-type StateAction = StateActionInvokeLog | StateActionCompleteLog;
+// Validation verdict for a completion claim. Stored like any other fact: replay reads the
+// outcome instead of re-running the validator. The guard ref is provenance — a later "can this
+// log replay unchanged?" check compares it (docker-cache style) against the current chart.
+type StateActionValidatedLog = {
+	type: "state_action";
+	kind: "validated";
+	actionUid: ActionUID;
+	event: ChartEvent;
+	guard: GuardRef;
+	outcome: GuardOutcome;
+} & SessionParams;
+
+type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog;
 
 export type DurableLogRecord = SessionRefLog | StateAction;

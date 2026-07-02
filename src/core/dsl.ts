@@ -2,9 +2,9 @@ import type {
 	AgentActionCst,
 	ChartCst,
 	FinalStateCst,
+	GuardRef,
 	JsonSchema,
 	JsonSchemaOutputCst,
-	OutputSpecCst,
 	SchemaRefCst,
 	TsImportSchemaRefCst,
 	UserActionCst,
@@ -26,6 +26,14 @@ export function agent(name: string, options: Omit<AgentActionCst, "kind" | "name
 
 export function user(options: Omit<UserActionCst, "kind">): UserActionCst {
 	return { kind: "user", ...options };
+}
+
+export function tsImport(module: string, exportName: string): GuardRef {
+	return { kind: "tsImport", module, export: exportName };
+}
+
+export function script(command: string, args?: readonly string[]): GuardRef {
+	return { kind: "script", command, ...(args === undefined ? {} : { args }) };
 }
 
 export function jsonSchema(schema: JsonSchema): JsonSchemaOutputCst {

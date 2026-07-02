@@ -8,6 +8,8 @@ import type {
 	ChartCst,
 	ChartSource,
 	FinalStateAst,
+	GuardRef,
+	OnReject,
 	OutputSpecAst,
 	ParsedChart,
 	StateActionAst,
@@ -120,12 +122,28 @@ function toStateAst(
 	if ("action" in input) {
 		const action = toStateActionAst(input.action, chartId, stateId, `${path}/action`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${path}/transitions`, diagnostics, source);
+		const validate = toGuardRef(input.validate, `${path}/validate`, diagnostics, source);
+		let onReject: OnReject | undefined;
+		if (input.onReject !== undefined) {
+			if (input.onReject !== "resume" && input.onReject !== "restart") {
+				diagnostics.push(
+					diagnostic("INVALID_ON_REJECT", "onReject must be 'resume' or 'restart'.", `${path}/onReject`, source),
+				);
+			} else if (input.validate === undefined) {
+				diagnostics.push(
+					diagnostic("INVALID_ON_REJECT", "onReject requires validate.", `${path}/onReject`, source),
+				);
+			} else {
+				onReject = input.onReject;
+			}
+		}
 		if (action === undefined) return undefined;
 		return deepFreeze({
 			kind: "state",
 			id: stateId,
 			action,
 			transitions: transitions ?? {},
+			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
 		} satisfies ActionStateAst);
 	}
 
@@ -258,6 +276,48 @@ function toTransitionMap(
 		transitions[eventType] = target;
 	}
 	return transitions;
+}
+
+function toGuardRef(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): GuardRef | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic("INVALID_GUARD", "Guard must be a tsImport or script reference, not an inline value.", path, source),
+		);
+		return undefined;
+	}
+	switch (input.kind) {
+		case "tsImport":
+			if (typeof input.module !== "string" || input.module.length === 0) {
+				diagnostics.push(diagnostic("INVALID_GUARD", "Guard tsImport module must be a non-empty string.", `${path}/module`, source));
+				return undefined;
+			}
+			if (typeof input.export !== "string" || input.export.length === 0) {
+				diagnostics.push(diagnostic("INVALID_GUARD", "Guard tsImport export must be a non-empty string.", `${path}/export`, source));
+				return undefined;
+			}
+			return { kind: "tsImport", module: input.module, export: input.export };
+		case "script": {
+			if (typeof input.command !== "string" || input.command.length === 0) {
+				diagnostics.push(diagnostic("INVALID_GUARD", "Guard script command must be a non-empty string.", `${path}/command`, source));
+				return undefined;
+			}
+			const args = Array.isArray(input.args) ? input.args : [];
+			if (!args.every((arg): arg is string => typeof arg === "string")) {
+				diagnostics.push(diagnostic("INVALID_GUARD", "Guard script args must be strings.", `${path}/args`, source));
+				return undefined;
+			}
+			return { kind: "script", command: input.command, ...(args.length === 0 ? {} : { args }) };
+		}
+		default:
+			diagnostics.push(diagnostic("INVALID_GUARD", "Guard kind must be 'tsImport' or 'script'.", `${path}/kind`, source));
+			return undefined;
+	}
 }
 
 function diagnostic(code: string, message: string, path: string, source: ChartSource): AuthoringDiagnostic {

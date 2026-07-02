@@ -63,12 +63,37 @@ export type UserActionCst = {
 
 export type StateActionCst = AgentActionCst | UserActionCst;
 
+// Serializable reference to validation code. Inline closures are not allowed: the chart stays
+// plain data. A validator is an acceptance check on the action's completion claim — it runs live
+// exactly once, when the claim arrives; accepted facts are never re-validated on replay.
+export type GuardRef =
+	| {
+			kind: "tsImport";
+			module: string;
+			export: string;
+	  }
+	| {
+			kind: "script";
+			command: string;
+			args?: readonly string[];
+	  };
+
+export type GuardOutcome = boolean | { ok: false; reason: string };
+
+// What to do when validation rejects a completion claim: feed the reason back into the still
+// running action ("resume") or discard that attempt and start the action fresh ("restart").
+// Either way the action stays pending and nothing is logged — the choice lives in the chart,
+// the runtime just executes it.
+export type OnReject = "resume" | "restart";
+
 export type TransitionMapCst = Record<EventType, StateId>;
 
 export type ActionStateCst = {
 	kind: "state";
 	action: StateActionCst;
 	transitions?: TransitionMapCst;
+	validate?: GuardRef;
+	onReject?: OnReject;
 };
 
 export type FinalStateCst = {
@@ -104,6 +129,9 @@ export type ActionStateAst = Readonly<{
 	id: StateId;
 	action: StateActionAst;
 	transitions: Readonly<Record<EventType, StateId>>;
+	validate?: GuardRef;
+	// Present only when validate is set; defaults to "resume".
+	onReject?: OnReject;
 }>;
 
 export type FinalStateAst = Readonly<{

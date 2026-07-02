@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, final, jsonSchema, normalizeChartConfig, user } from "../src/index.js";
+import { agent, chart, final, jsonSchema, normalizeChartConfig, tsImport, user } from "../src/index.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
@@ -27,6 +27,79 @@ describe("normalizeChartConfig", () => {
 		expect(result.ast.states.start?.kind).toBe("state");
 		expect(Object.isFrozen(result.ast)).toBe(true);
 		expect(Object.isFrozen(result.ast.states)).toBe(true);
+	});
+
+	it("normalizes validate with a default onReject of resume", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "validated",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("coder"),
+						validate: tsImport("./checks.js", "testsPass"),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected valid chart");
+		const work = result.ast.states.work;
+		if (work?.kind !== "state") throw new Error("expected action state");
+		expect(work.validate).toEqual({ kind: "tsImport", module: "./checks.js", export: "testsPass" });
+		expect(work.onReject).toBe("resume");
+	});
+
+	it("rejects inline functions as validators", () => {
+		const result = normalizeChartConfig({
+			id: "inline-validate",
+			initial: "work",
+			states: {
+				work: {
+					action: agent("coder"),
+					validate: () => true,
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_GUARD");
+	});
+
+	it("rejects onReject without validate and invalid onReject values", () => {
+		const withoutValidate = normalizeChartConfig({
+			id: "no-validate",
+			initial: "work",
+			states: {
+				work: { action: agent("coder"), onReject: "resume", transitions: { DONE: "done" } },
+				done: final(),
+			},
+		});
+		expect(withoutValidate.ok).toBe(false);
+		expect(withoutValidate.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REJECT");
+
+		const badValue = normalizeChartConfig({
+			id: "bad-on-reject",
+			initial: "work",
+			states: {
+				work: {
+					action: agent("coder"),
+					validate: tsImport("./checks.js", "testsPass"),
+					onReject: "explode",
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(badValue.ok).toBe(false);
+		expect(badValue.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REJECT");
 	});
 
 	it("reports invalid initial state and transition targets", () => {
