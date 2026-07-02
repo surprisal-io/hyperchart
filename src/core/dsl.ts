@@ -1,6 +1,7 @@
 import type {
 	AgentActionCst,
 	ChartCst,
+	CompoundStateCst,
 	FinalStateCst,
 	GuardRef,
 	JsonSchema,
@@ -18,6 +19,10 @@ export const createChart = chart;
 
 export function final(): FinalStateCst {
 	return { kind: "final" };
+}
+
+export function compound(options: Omit<CompoundStateCst, "kind">): CompoundStateCst {
+	return { kind: "compound", ...options };
 }
 
 export function agent(name: string, options: Omit<AgentActionCst, "kind" | "name"> = {}): AgentActionCst {

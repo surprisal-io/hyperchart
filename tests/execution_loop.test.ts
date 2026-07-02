@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, final, normalizeChartConfig, tsImport } from "../src/index.js";
+import { agent, chart, compound, final, normalizeChartConfig, tsImport } from "../src/index.js";
 import { loop } from "../src/core/execution_loop.js";
 import type {
 	ActionUID,
@@ -111,6 +111,32 @@ function afterAst(escalated: StateCst = final()): ChartAst {
 				},
 				done: final(),
 				escalated,
+			},
+		}),
+	);
+	if (!result.ok) throw new Error("test chart should be valid");
+	return result.ast;
+}
+
+function compoundAst(): ChartAst {
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "nested-chart",
+			initial: "review",
+			states: {
+				review: compound({
+					initial: "analyze",
+					onDone: "deploy",
+					states: {
+						analyze: { kind: "state", action: agent("analyzer"), transitions: { OK: "fix" } },
+						fix: { kind: "state", action: agent("fixer"), transitions: { OK: "verified" } },
+						verified: final(),
+					},
+					transitions: { FAILED: "escalate" },
+				}),
+				deploy: final(),
+				escalate: final(),
 			},
 		}),
 	);
@@ -646,6 +672,84 @@ describe("execution loop", () => {
 		const state = await loop(runtime);
 
 		expect(state.projection.activeState).toBe("escalated");
+		expect(runtime.effectBatches).toEqual([]);
+	});
+
+	it("drills down to the initial leaf and completes the compound through onDone", async () => {
+		const ast = compoundAst();
+		const events: MachineEvent[] = [];
+		const sequence: string[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						sequence.push(`agent:${effect.actionUid.state}`);
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						for (const record of effect.records) {
+							if (record.type === "state_action") sequence.push(`${record.kind}:${record.actionUid.state}`);
+						}
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		// fix's OK lands on the nested final `verified`; the projection immediately exits the
+		// compound through onDone — nothing extra is logged, no state is visited in between.
+		expect(state.projection.activeState).toBe("deploy");
+		expect(sequence).toEqual([
+			"invoke:review.analyze",
+			"agent:review.analyze",
+			"complete:review.analyze",
+			"invoke:review.fix",
+			"agent:review.fix",
+			"complete:review.fix",
+		]);
+	});
+
+	it("bubbles an unhandled event to the ancestor's handler", async () => {
+		const ast = compoundAst();
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						// analyze has no FAILED transition; the compound catches it.
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("escalate");
+	});
+
+	it("replays a hierarchical log without re-running agents", async () => {
+		const ast = compoundAst();
+		const analyze = actionUid(ast, "review.analyze");
+		const fix = actionUid(ast, "review.fix");
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(analyze, 1), complete(analyze, "OK", 2), invoke(fix, 3), complete(fix, "OK", 4)],
+			events: failOnPullEvents(),
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeState).toBe("deploy");
 		expect(runtime.effectBatches).toEqual([]);
 	});
 

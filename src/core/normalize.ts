@@ -7,6 +7,7 @@ import type {
 	ChartAst,
 	ChartCst,
 	ChartSource,
+	CompoundStateAst,
 	FinalStateAst,
 	GuardRef,
 	OnReject,
@@ -14,10 +15,15 @@ import type {
 	ParsedChart,
 	StateActionAst,
 	StateAst,
+	StatePath,
 	UserActionAst,
 } from "./types.js";
 
 const RESERVED_SYSTEM_EVENTS = new Set(["FAILED"]);
+
+// "." separates path segments, ":" separates effect id segments, "#" is reserved for future
+// parallel instance keys.
+const STATE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 // Validation is a single pass: unknown input goes straight to a frozen AST plus diagnostics.
 // The *Cst types describe only what authors write (DSL factory inputs); ParsedChart.cst is the
@@ -61,10 +67,18 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 	}
 
 	const chartId = typeof id === "string" ? id : "";
-	const states: Record<string, StateAst> = {};
+	const states: Record<StatePath, StateAst> = {};
 	for (const [stateId, stateInput] of Object.entries(input.states)) {
-		const state = toStateAst(stateInput, chartId, stateId, `/states/${escapePointer(stateId)}`, diagnostics, source);
-		if (state !== undefined) states[stateId] = state;
+		collectState(
+			stateInput,
+			chartId,
+			stateId,
+			undefined,
+			`/states/${escapePointer(stateId)}`,
+			states,
+			diagnostics,
+			source,
+		);
 	}
 
 	if (typeof initial === "string" && !(initial in states)) {
@@ -72,31 +86,7 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 			diagnostic("UNKNOWN_INITIAL_STATE", `Initial state '${initial}' does not exist.`, "/initial", source),
 		);
 	}
-	for (const [stateId, state] of Object.entries(states)) {
-		if (state.kind !== "state") continue;
-		for (const [eventType, target] of Object.entries(state.transitions)) {
-			if (!(target in states)) {
-				diagnostics.push(
-					diagnostic(
-						"UNKNOWN_TRANSITION_TARGET",
-						`Transition '${eventType}' in state '${stateId}' targets unknown state '${target}'.`,
-						`/states/${escapePointer(stateId)}/transitions/${escapePointer(eventType)}`,
-						source,
-					),
-				);
-			}
-		}
-		if (state.after !== undefined && !(state.after.target in states)) {
-			diagnostics.push(
-				diagnostic(
-					"UNKNOWN_AFTER_TARGET",
-					`after in state '${stateId}' targets unknown state '${state.after.target}'.`,
-					`/states/${escapePointer(stateId)}/after/target`,
-					source,
-				),
-			);
-		}
-	}
+	validateTargets(states, diagnostics, source);
 
 	if (diagnostics.length > 0) return undefined;
 	return deepFreeze({
@@ -107,64 +97,215 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 	});
 }
 
-function toStateAst(
+// Builds the node at its absolute path and recurses into compound children — the AST stays a
+// flat path-keyed map, nesting lives in `parent` links.
+function collectState(
 	input: unknown,
 	chartId: string,
-	stateId: string,
-	path: string,
+	localId: string,
+	parentPath: StatePath | undefined,
+	pointer: string,
+	states: Record<StatePath, StateAst>,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): StateAst | undefined {
+): void {
+	if (!STATE_ID_PATTERN.test(localId)) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_STATE_ID",
+				`State id '${localId}' must match [A-Za-z0-9_-]+ ('.', ':' and '#' are reserved).`,
+				pointer,
+				source,
+			),
+		);
+		return;
+	}
+	const path = parentPath === undefined ? localId : `${parentPath}.${localId}`;
+	const parent = parentPath === undefined ? {} : { parent: parentPath };
 	if (!isRecord(input)) {
-		diagnostics.push(diagnostic("INVALID_STATE", "State must be an object.", path, source));
-		return undefined;
+		diagnostics.push(diagnostic("INVALID_STATE", "State must be an object.", pointer, source));
+		return;
 	}
 
 	if (input.kind === "final" || input.final === true) {
 		if ("action" in input) {
 			diagnostics.push(
-				diagnostic("INVALID_FINAL_STATE", "Final state must not define an action.", `${path}/action`, source),
+				diagnostic("INVALID_FINAL_STATE", "Final state must not define an action.", `${pointer}/action`, source),
 			);
 		}
-		return deepFreeze({ kind: "final", id: stateId } satisfies FinalStateAst);
+		states[path] = deepFreeze({ kind: "final", id: localId, ...parent } satisfies FinalStateAst);
+		return;
+	}
+
+	if (input.kind === "compound" || "states" in input) {
+		const initial = input.initial;
+		if (typeof initial !== "string" || initial.length === 0) {
+			diagnostics.push(
+				diagnostic("INVALID_INITIAL", "Compound initial must be a non-empty state id.", `${pointer}/initial`, source),
+			);
+		}
+		if (!isRecord(input.states)) {
+			diagnostics.push(diagnostic("INVALID_STATES", "Compound states must be an object.", `${pointer}/states`, source));
+			return;
+		}
+		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
+		let onDone: string | undefined;
+		if (input.onDone !== undefined) {
+			if (typeof input.onDone !== "string" || input.onDone.length === 0) {
+				diagnostics.push(
+					diagnostic("INVALID_ON_DONE", "onDone must be a non-empty state id.", `${pointer}/onDone`, source),
+				);
+			} else {
+				onDone = input.onDone;
+			}
+		}
+		for (const [childId, childInput] of Object.entries(input.states)) {
+			collectState(
+				childInput,
+				chartId,
+				childId,
+				path,
+				`${pointer}/states/${escapePointer(childId)}`,
+				states,
+				diagnostics,
+				source,
+			);
+		}
+		states[path] = deepFreeze({
+			kind: "compound",
+			id: localId,
+			...parent,
+			initial: typeof initial === "string" ? initial : "",
+			transitions: transitions ?? {},
+			...(onDone === undefined ? {} : { onDone }),
+		} satisfies CompoundStateAst);
+		return;
 	}
 
 	if ("action" in input) {
-		const action = toStateActionAst(input.action, chartId, stateId, `${path}/action`, diagnostics, source);
-		const transitions = toTransitionMap(input.transitions, `${path}/transitions`, diagnostics, source);
-		const after = toAfter(input.after, `${path}/after`, diagnostics, source);
-		const validate = toGuardRef(input.validate, `${path}/validate`, diagnostics, source);
+		const action = toStateActionAst(input.action, chartId, path, `${pointer}/action`, diagnostics, source);
+		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
+		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
+		const validate = toGuardRef(input.validate, `${pointer}/validate`, diagnostics, source);
 		let onReject: OnReject | undefined;
 		if (input.onReject !== undefined) {
 			if (input.onReject !== "resume" && input.onReject !== "restart") {
 				diagnostics.push(
-					diagnostic("INVALID_ON_REJECT", "onReject must be 'resume' or 'restart'.", `${path}/onReject`, source),
+					diagnostic("INVALID_ON_REJECT", "onReject must be 'resume' or 'restart'.", `${pointer}/onReject`, source),
 				);
 			} else if (input.validate === undefined) {
-				diagnostics.push(diagnostic("INVALID_ON_REJECT", "onReject requires validate.", `${path}/onReject`, source));
+				diagnostics.push(diagnostic("INVALID_ON_REJECT", "onReject requires validate.", `${pointer}/onReject`, source));
 			} else {
 				onReject = input.onReject;
 			}
 		}
-		if (action === undefined) return undefined;
-		return deepFreeze({
+		if (action === undefined) return;
+		states[path] = deepFreeze({
 			kind: "state",
-			id: stateId,
+			id: localId,
+			...parent,
 			action,
 			transitions: transitions ?? {},
 			...(after === undefined ? {} : { after }),
 			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
 		} satisfies ActionStateAst);
+		return;
 	}
 
-	diagnostics.push(diagnostic("MISSING_ACTION", "Non-final state must define exactly one action.", path, source));
-	return undefined;
+	diagnostics.push(diagnostic("MISSING_ACTION", "Non-final state must define exactly one action.", pointer, source));
+}
+
+// Every target — transition, after, onDone, compound initial — resolves among the siblings of
+// the level where it is declared; there is no path syntax in authoring.
+function validateTargets(
+	states: Record<StatePath, StateAst>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const withFinalChild = new Set<StatePath>();
+	for (const node of Object.values(states)) {
+		if (node.kind === "final" && node.parent !== undefined) withFinalChild.add(node.parent);
+	}
+	for (const [path, node] of Object.entries(states)) {
+		if (node.kind === "final") continue;
+		const pointer = statePointer(path);
+		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
+		for (const [eventType, target] of Object.entries(node.transitions)) {
+			if (!(sibling(target) in states)) {
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_TRANSITION_TARGET",
+						`Transition '${eventType}' in state '${path}' targets unknown state '${target}'.`,
+						`${pointer}/transitions/${escapePointer(eventType)}`,
+						source,
+					),
+				);
+			}
+		}
+		if (node.kind === "state") {
+			if (node.after !== undefined && !(sibling(node.after.target) in states)) {
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_AFTER_TARGET",
+						`after in state '${path}' targets unknown state '${node.after.target}'.`,
+						`${pointer}/after/target`,
+						source,
+					),
+				);
+			}
+			continue;
+		}
+		if (!(`${path}.${node.initial}` in states)) {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_INITIAL_STATE",
+					`Initial state '${node.initial}' does not exist in '${path}'.`,
+					`${pointer}/initial`,
+					source,
+				),
+			);
+		}
+		if (node.onDone !== undefined && !(sibling(node.onDone) in states)) {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_ON_DONE_TARGET",
+					`onDone in state '${path}' targets unknown state '${node.onDone}'.`,
+					`${pointer}/onDone`,
+					source,
+				),
+			);
+		}
+		if (withFinalChild.has(path) && node.onDone === undefined) {
+			diagnostics.push(
+				diagnostic(
+					"MISSING_ON_DONE",
+					`Compound '${path}' contains a final child and must declare onDone.`,
+					pointer,
+					source,
+				),
+			);
+		}
+		if (!withFinalChild.has(path) && node.onDone !== undefined) {
+			diagnostics.push(
+				diagnostic(
+					"USELESS_ON_DONE",
+					`Compound '${path}' declares onDone but has no final child.`,
+					`${pointer}/onDone`,
+					source,
+				),
+			);
+		}
+	}
+}
+
+function statePointer(path: StatePath): string {
+	return `/states/${path.split(".").map(escapePointer).join("/states/")}`;
 }
 
 function toStateActionAst(
 	input: unknown,
 	chartId: string,
-	stateId: string,
+	statePath: StatePath,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
@@ -181,7 +322,7 @@ function toStateActionAst(
 				);
 			}
 			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
-			const uid: ActionUID = { chart: chartId, state: stateId, action: "agent" };
+			const uid: ActionUID = { chart: chartId, state: statePath, action: "agent" };
 			return deepFreeze({
 				kind: "agent",
 				uid,
@@ -211,7 +352,7 @@ function toStateActionAst(
 				}
 			}
 			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
-			const uid: ActionUID = { chart: chartId, state: stateId, action: "user" };
+			const uid: ActionUID = { chart: chartId, state: statePath, action: "user" };
 			return deepFreeze({
 				kind: "user",
 				uid,

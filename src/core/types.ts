@@ -109,7 +109,19 @@ export type FinalStateCst = {
 	kind: "final";
 };
 
-export type StateCst = ActionStateCst | FinalStateCst;
+// A container of nested states. Entering it drills down the initial chain to a leaf. Its
+// transitions catch events its descendants leave unhandled (innermost-first); onDone is where the
+// chart goes when a direct final child is reached — required if it has one. All targets, here and
+// in children, resolve among the siblings of the level where they are declared.
+export type CompoundStateCst = {
+	kind: "compound";
+	initial: StateId;
+	states: Record<StateId, StateCst>;
+	transitions?: TransitionMapCst;
+	onDone?: StateId;
+};
+
+export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst;
 
 export type ChartCst = {
 	kind: "chart";
@@ -133,9 +145,15 @@ export type UserActionAst = Readonly<{
 }>;
 export type StateActionAst = AgentActionAst | UserActionAst;
 
+// Absolute path of a state in the chart: local ids joined with "." (e.g. "review.analyze").
+// Top-level states' paths equal their ids, so flat charts keep their addresses.
+export type StatePath = string;
+
 export type ActionStateAst = Readonly<{
 	kind: "state";
 	id: StateId;
+	// Path of the containing compound; absent at top level.
+	parent?: StatePath;
 	action: StateActionAst;
 	transitions: Readonly<Record<EventType, StateId>>;
 	after?: Readonly<AfterCst>;
@@ -147,15 +165,26 @@ export type ActionStateAst = Readonly<{
 export type FinalStateAst = Readonly<{
 	kind: "final";
 	id: StateId;
+	parent?: StatePath;
 }>;
 
-export type StateAst = ActionStateAst | FinalStateAst;
+export type CompoundStateAst = Readonly<{
+	kind: "compound";
+	id: StateId;
+	parent?: StatePath;
+	initial: StateId;
+	transitions: Readonly<Record<EventType, StateId>>;
+	onDone?: StateId;
+}>;
+
+export type StateAst = ActionStateAst | FinalStateAst | CompoundStateAst;
 
 export type ChartAst = Readonly<{
 	kind: "chart";
 	id: string;
 	initial: StateId;
-	states: Readonly<Record<StateId, StateAst>>;
+	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).
+	states: Readonly<Record<StatePath, StateAst>>;
 }>;
 
 export type ActionEvent = {

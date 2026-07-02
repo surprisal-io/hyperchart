@@ -10,7 +10,7 @@ import type {
 	UserActionAst,
 } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
-import { isFinalState, projectBranch, type BranchProjection, type PendingAction } from "./projection.js";
+import { hasTransition, isFinalState, projectBranch, type BranchProjection, type PendingAction } from "./projection.js";
 
 export type MachineState = {
 	ast: ChartAst;
@@ -309,8 +309,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			if (typeof pending === "string") {
 				return { kind: "error", state, error: pending };
 			}
-			const nextStateId = pending.state.transitions[event.event.type];
-			if (!nextStateId) {
+			if (!hasTransition(state.ast, state.projection.activeState, event.event.type)) {
 				return {
 					kind: "error",
 					state,

@@ -1,4 +1,4 @@
-import type { ActionUID, ChartAst, ChartEvent, StateId } from "./types.js";
+import type { ActionUID, ChartAst, ChartEvent, StateAst, StateId, StatePath } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
 
 // A pending action and the phase it is in, each phase started by a log record: invoke —
@@ -14,10 +14,11 @@ export type PendingAction =
 	| { actionUid: ActionUID; seqId: number; phase: "rejected"; event: ChartEvent; reason?: string };
 
 export type BranchProjection = {
-	activeState: StateId;
+	// Always a leaf: compounds are never active themselves, entry drills down to their initial.
+	activeState: StatePath;
 	seqId: number;
 	pendingActions: PendingAction[];
-	results: Record<StateId, unknown>;
+	results: Record<StatePath, unknown>;
 };
 
 export function isFinalState(projection: BranchProjection, ast: ChartAst): boolean {
@@ -26,7 +27,7 @@ export function isFinalState(projection: BranchProjection, ast: ChartAst): boole
 
 export function createBranchProjection(ast: ChartAst): BranchProjection {
 	return {
-		activeState: ast.initial,
+		activeState: enterState(ast, ast.initial),
 		seqId: 0,
 		pendingActions: [],
 		results: {},
@@ -123,21 +124,68 @@ function removePendingAction(projection: BranchProjection, actionUid: ActionUID)
 
 function applyAfterTransition(projection: BranchProjection, ast: ChartAst): void {
 	const state = ast.states[projection.activeState];
-	const target = state?.kind === "state" ? state.after?.target : undefined;
-	if (!target) {
+	if (state?.kind !== "state" || state.after === undefined) {
 		throw new Error(`No after transition in state ${projection.activeState}`);
 	}
-	projection.activeState = target;
+	projection.activeState = enterState(ast, siblingPath(state, state.after.target));
 }
 
-// Transitions are not logged: recompute the move from the chart AST.
+// Transitions are not logged: recompute the move from the chart AST. The handler's level decides
+// the exit scope; its target is a sibling at that level.
 function applyTransition(projection: BranchProjection, ast: ChartAst, eventType: string): void {
-	const state = ast.states[projection.activeState];
-	const target = state?.kind === "state" ? state.transitions[eventType] : undefined;
-	if (!target) {
+	const handler = findHandler(ast, projection.activeState, eventType);
+	if (!handler) {
 		throw new Error(`No transition for event type ${eventType} in state ${projection.activeState}`);
 	}
-	projection.activeState = target;
+	projection.activeState = enterState(ast, siblingPath(handler.node, handler.target));
+}
+
+// Innermost-first: the active leaf handles the event, or the closest ancestor declaring it.
+function findHandler(
+	ast: ChartAst,
+	fromPath: StatePath,
+	eventType: string,
+): { node: StateAst; target: StateId } | undefined {
+	let path: StatePath | undefined = fromPath;
+	while (path !== undefined) {
+		const node: StateAst | undefined = ast.states[path];
+		if (node === undefined) return undefined;
+		if (node.kind !== "final") {
+			const target = node.transitions[eventType];
+			if (target !== undefined) return { node, target };
+		}
+		path = node.parent;
+	}
+	return undefined;
+}
+
+export function hasTransition(ast: ChartAst, fromPath: StatePath, eventType: string): boolean {
+	return findHandler(ast, fromPath, eventType) !== undefined;
+}
+
+// Entering a state resolves it to the active leaf: compounds drill down their initial chain, and
+// a final child immediately completes its container — the chart exits through the compound's
+// onDone in the same step, with nothing logged (replay recomputes the whole chain).
+function enterState(ast: ChartAst, path: StatePath): StatePath {
+	let current = path;
+	for (;;) {
+		const node = ast.states[current];
+		if (node?.kind !== "compound") break;
+		current = `${current}.${node.initial}`;
+	}
+	const node = ast.states[current];
+	if (node?.kind === "final" && node.parent !== undefined) {
+		const container = ast.states[node.parent];
+		if (container?.kind !== "compound" || container.onDone === undefined) {
+			throw new Error(`Final state ${current} has no onDone exit`);
+		}
+		return enterState(ast, siblingPath(container, container.onDone));
+	}
+	return current;
+}
+
+function siblingPath(node: StateAst, target: StateId): StatePath {
+	return node.parent === undefined ? target : `${node.parent}.${target}`;
 }
 
 function assertActiveActionUid(ast: ChartAst, stateId: StateId, actual: ActionUID, operation: string): void {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, final, jsonSchema, normalizeChartConfig, tsImport, user } from "../src/index.js";
+import { agent, chart, compound, final, jsonSchema, normalizeChartConfig, tsImport, user } from "../src/index.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
@@ -53,6 +53,111 @@ describe("normalizeChartConfig", () => {
 		if (work?.kind !== "state") throw new Error("expected action state");
 		expect(work.validate).toEqual({ kind: "tsImport", module: "./checks.js", export: "testsPass" });
 		expect(work.onReject).toBe("resume");
+	});
+
+	it("normalizes compounds into a flat path-keyed AST", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "nested",
+				initial: "review",
+				states: {
+					review: compound({
+						initial: "analyze",
+						onDone: "done",
+						states: {
+							analyze: { kind: "state", action: agent("analyzer"), transitions: { OK: "verified" } },
+							verified: final(),
+						},
+						transitions: { FAILED: "done" },
+					}),
+					done: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected valid chart");
+		const review = result.ast.states.review;
+		if (review?.kind !== "compound") throw new Error("expected compound state");
+		expect(review.initial).toBe("analyze");
+		expect(review.onDone).toBe("done");
+		const analyze = result.ast.states["review.analyze"];
+		if (analyze?.kind !== "state") throw new Error("expected nested action state");
+		expect(analyze.parent).toBe("review");
+		expect(analyze.action.uid.state).toBe("review.analyze");
+	});
+
+	it("rejects state ids with reserved characters", () => {
+		const result = normalizeChartConfig({
+			id: "bad-ids",
+			initial: "work",
+			states: {
+				"work.step": { action: agent("coder"), transitions: {} },
+				work: { action: agent("coder"), transitions: {} },
+			},
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_STATE_ID");
+	});
+
+	it("requires onDone exactly when a compound has a final child", () => {
+		const missing = normalizeChartConfig({
+			id: "missing-on-done",
+			initial: "review",
+			states: {
+				review: compound({
+					initial: "work",
+					states: {
+						work: { kind: "state" as const, action: agent("coder"), transitions: { OK: "finished" } },
+						finished: final(),
+					},
+				}),
+				done: final(),
+			},
+		});
+		expect(missing.ok).toBe(false);
+		expect(missing.diagnostics.map((d) => d.code)).toContain("MISSING_ON_DONE");
+
+		const useless = normalizeChartConfig({
+			id: "useless-on-done",
+			initial: "review",
+			states: {
+				review: compound({
+					initial: "work",
+					onDone: "done",
+					states: { work: { kind: "state" as const, action: agent("coder"), transitions: { FAILED: "work" } } },
+				}),
+				done: final(),
+			},
+		});
+		expect(useless.ok).toBe(false);
+		expect(useless.diagnostics.map((d) => d.code)).toContain("USELESS_ON_DONE");
+	});
+
+	it("resolves targets among siblings of the declaring level only", () => {
+		const result = normalizeChartConfig({
+			id: "cross-branch",
+			initial: "review",
+			states: {
+				review: compound({
+					initial: "work",
+					onDone: "nowhere",
+					states: {
+						// "done" is a top-level state, not a sibling of work: not addressable from here.
+						work: { kind: "state" as const, action: agent("coder"), transitions: { OK: "done" } },
+						finished: final(),
+					},
+				}),
+				done: final(),
+			},
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((d) => d.code)).toEqual(
+			expect.arrayContaining(["UNKNOWN_TRANSITION_TARGET", "UNKNOWN_ON_DONE_TARGET"]),
+		);
 	});
 
 	it("normalizes after on an action state", () => {
