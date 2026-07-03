@@ -12,6 +12,7 @@ import type {
 	OnReject,
 	SchemaAst,
 	ScriptActionAst,
+	StatePath,
 	TemplateAst,
 	UserActionAst,
 } from "./types.js";
@@ -24,6 +25,7 @@ import {
 	type PendingAction,
 	projectBranch,
 } from "./projection.js";
+import { instancePathFor, lastSegmentKey, matchesDeclaredUid, nearestInstance, nodeAt } from "./paths.js";
 
 export type MachineState = {
 	ast: ChartAst;
@@ -254,7 +256,8 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 	// pending action — run it (with a deadline timer, if the state has one), validate its
 	// completion, or deliver the rejection.
 	const desired: (Effect | RecordAppend)[] = [
-		...missingInvokes(state).map(invokeAppend),
+		...dueSpawns(state),
+		...dueInvokes(state).map(invokeAppend),
 		...state.projection.pendingActions.flatMap((pending) => pendingEffects(state, pending)),
 	];
 
@@ -310,7 +313,7 @@ function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 	const ast = state.ast;
 	const effects = [pendingEffect(state, pending)];
 	if (pending.phase === "running") {
-		const node = ast.states[pending.actionUid.state];
+		const node = nodeAt(ast, pending.actionUid.state);
 		if (node?.kind === "state" && node.after !== undefined) {
 			effects.push({
 				kind: "timer",
@@ -328,8 +331,8 @@ function timerEffectId(pending: PendingAction): EffectId {
 }
 
 function pendingEffect(state: MachineState, pending: PendingAction): Effect {
-	const node = state.ast.states[pending.actionUid.state];
-	if (node?.kind !== "state" || !sameActionUid(pending.actionUid, node.action.uid)) {
+	const node = nodeAt(state.ast, pending.actionUid.state);
+	if (node?.kind !== "state" || !matchesDeclaredUid(pending.actionUid, node.action.uid)) {
 		throw new Error(`Pending action does not match the chart in state ${pending.actionUid.state}`);
 	}
 	const id = pendingEffectId(pending);
@@ -352,9 +355,9 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 								env: Object.fromEntries(
 									Object.entries(action.env).map(([name, value]) => {
 										if (value.kind === "template") {
-											return [name, renderTemplate(state, value, node.id)];
+											return [name, renderTemplate(state, value, pending.actionUid.state)];
 										}
-										const read = renderRead(state, value, node.id);
+										const read = renderRead(state, value, pending.actionUid.state);
 										return [name, read.select === undefined ? read.path : read];
 									}),
 								),
@@ -364,7 +367,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 						: {
 								artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
 									name,
-									...renderArtifact(state, declared, node.id),
+									...renderArtifact(state, declared, pending.actionUid.state),
 								})),
 							}),
 				};
@@ -378,18 +381,18 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 					action,
 					events: allowedEvents(state.ast, pending.actionUid.state),
 					...(action.reply === undefined ? {} : { reply: action.reply }),
-					...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, node.id) }),
+					...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, pending.actionUid.state) }),
 					...(action.artifacts === undefined
 						? {}
 						: {
 								artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
 									name,
-									...renderArtifact(state, declared, node.id),
+									...renderArtifact(state, declared, pending.actionUid.state),
 								})),
 							}),
 					...(action.reads === undefined
 						? {}
-						: { reads: action.reads.map((read) => renderRead(state, read, node.id)) }),
+						: { reads: action.reads.map((read) => renderRead(state, read, pending.actionUid.state)) }),
 				};
 			}
 			return {
@@ -397,7 +400,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 				id,
 				actionUid: pending.actionUid,
 				action: node.action,
-				prompt: renderTemplate(state, node.action.prompt, node.id),
+				prompt: renderTemplate(state, node.action.prompt, pending.actionUid.state),
 			};
 		}
 		case "validating":
@@ -469,7 +472,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			if (!validating) {
 				return { kind: "error", state, error: `No pending validation found for effectId ${event.effectId}` };
 			}
-			const node = state.ast.states[validating.actionUid.state];
+			const node = nodeAt(state.ast, validating.actionUid.state);
 			if (node?.kind !== "state" || node.validate === undefined) {
 				return { kind: "error", state, error: `State ${validating.actionUid.state} has no validator` };
 			}
@@ -555,7 +558,7 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 	if (pending.phase === "validating") {
 		return `Validation already in flight for ${effectId}`;
 	}
-	const curState = machine.ast.states[actionId.state];
+	const curState = nodeAt(machine.ast, actionId.state);
 	if (curState?.kind !== "state") {
 		return `State ${actionId.state} is not actionable`;
 	}
@@ -567,17 +570,79 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 // all parallel regions — the runtime never initiates anything on its own. The id carries no
 // seqId, but between two entries into the same state the action is always pending, so the
 // dispatch marker is dropped in between.
-function missingInvokes(state: MachineState): ActionUID[] {
-	const missing: ActionUID[] = [];
+function dueInvokes(state: MachineState): ActionUID[] {
+	const blocked = blockedInstances(state);
+	const due: ActionUID[] = [];
 	for (const leaf of state.projection.activeLeaves) {
-		const node = state.ast.states[leaf];
-		if (node?.kind !== "state") continue;
-		const actionUid = node.action.uid;
+		const node = nodeAt(state.ast, leaf);
+		if (node?.kind !== "state" || blocked.has(leaf)) continue;
+		// The uid of the invoke carries the INSTANCE path — that is the action's identity in the
+		// log and in effect ids; the chart's declared uid keeps the template path.
+		const actionUid = { ...node.action.uid, state: leaf };
 		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid))) {
-			missing.push(actionUid);
+			due.push(actionUid);
 		}
 	}
-	return missing;
+	return due;
+}
+
+// The leaves a map's concurrency gate holds shut right now. Per limited map: instances already
+// holding pending work keep their slots; idle instances take the free slots in activeLeaves
+// order — the spawn fact's key order, so slots fill deterministically — and the rest wait. A
+// completed instance has nothing pending and no action leaf, so it holds no slot.
+function blockedInstances(state: MachineState): Set<StatePath> {
+	const blocked = new Set<StatePath>();
+	const running = new Map<StatePath, Set<string>>();
+	for (const entry of state.projection.pendingActions) {
+		const instance = nearestInstance(entry.actionUid.state);
+		if (instance === undefined) continue;
+		const keys = running.get(instance.container) ?? new Set<string>();
+		keys.add(instance.key);
+		running.set(instance.container, keys);
+	}
+	for (const leaf of state.projection.activeLeaves) {
+		if (nodeAt(state.ast, leaf)?.kind !== "state") continue;
+		const instance = nearestInstance(leaf);
+		if (instance === undefined) continue;
+		const container = nodeAt(state.ast, instance.container);
+		if (container?.kind !== "map" || container.concurrency === undefined) continue;
+		const keys = running.get(instance.container) ?? new Set<string>();
+		if (keys.has(instance.key)) continue;
+		if (keys.size >= container.concurrency) {
+			blocked.add(leaf);
+			continue;
+		}
+		keys.add(instance.key);
+		running.set(instance.container, keys);
+	}
+	return blocked;
+}
+
+// A bare map leaf is a placeholder awaiting its fan-out: resolve `over` from the same facts
+// templates render from and pin the keys and items as a spawned fact. Replay reads the fact and
+// never re-resolves — the instances are frozen at birth.
+function dueSpawns(state: MachineState): RecordAppend[] {
+	const appends: RecordAppend[] = [];
+	for (const leaf of state.projection.activeLeaves) {
+		const node = nodeAt(state.ast, leaf);
+		if (node?.kind !== "map" || lastSegmentKey(leaf) !== undefined) continue;
+		const over = resolveRef(state, node.over, leaf);
+		const instances = Array.isArray(over) ? Object.fromEntries(over.map((item, index) => [String(index), item])) : over;
+		if (typeof instances !== "object" || instances === null) {
+			throw new Error(`Map ${leaf}: 'over' must resolve to a record or an array, got ${typeof over}`);
+		}
+		for (const key of Object.keys(instances)) {
+			if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+				throw new Error(`Map ${leaf}: instance key '${key}' must match [A-Za-z0-9_-]+`);
+			}
+		}
+		appends.push({
+			kind: "append",
+			id: `spawn:${leaf}`,
+			records: [{ type: "spawned", path: leaf, instances: instances as Record<string, unknown> }],
+		});
+	}
+	return appends;
 }
 
 // Templates are rendered, never logged: the same args/results facts always render to the same
@@ -627,7 +692,7 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 	if (read.kind === "template") {
 		return { path: renderTemplate(state, read, stateId) };
 	}
-	const producer = state.ast.states[read.state];
+	const producer = nodeAt(state.ast, read.state);
 	const artifacts =
 		producer?.kind === "state" && producer.action.kind !== "user" ? producer.action.artifacts : undefined;
 	const names = Object.keys(artifacts ?? {});
@@ -643,11 +708,20 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 }
 
 function refLabel(ref: InputRef): string {
-	return ref.kind === "arg"
-		? `arg '${ref.name}'`
-		: `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+	switch (ref.kind) {
+		case "arg":
+			return `arg '${ref.name}'`;
+		case "result":
+			return `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "key":
+			return "map key";
+		case "item":
+			return `map item${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+	}
 }
 
+// stateId is the referencing action's INSTANCE path: result lookups re-scope into it, key/item
+// resolve against its nearest enclosing map's spawn fact.
 function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknown {
 	if (ref.kind === "arg") {
 		const args = state.projection.args;
@@ -656,16 +730,35 @@ function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknow
 		}
 		return args[ref.name];
 	}
-	if (!(ref.state in state.projection.results)) {
-		throw new Error(`Template in state ${stateId}: no result for state ${ref.state}`);
+	if (ref.kind === "key" || ref.kind === "item") {
+		const instance = nearestInstance(stateId);
+		if (instance === undefined) {
+			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} used outside any map instance`);
+		}
+		const instances = state.projection.spawns[instance.container];
+		if (instances === undefined || !(instance.key in instances)) {
+			throw new Error(`Template in state ${stateId}: no spawned instance '${instance.key}' of ${instance.container}`);
+		}
+		if (ref.kind === "key") {
+			return instance.key;
+		}
+		return selectPath(instances[instance.key], ref.path, ref, stateId);
 	}
-	let current: unknown = state.projection.results[ref.state];
-	if (ref.path === undefined) {
-		return current;
+	const resultKey = instancePathFor(ref.state, stateId);
+	if (!(resultKey in state.projection.results)) {
+		throw new Error(`Template in state ${stateId}: no result for state ${resultKey}`);
 	}
-	for (const segment of ref.path.split(".")) {
+	return selectPath(state.projection.results[resultKey], ref.path, ref, stateId);
+}
+
+function selectPath(value: unknown, path: string | undefined, ref: InputRef, stateId: string): unknown {
+	if (path === undefined) {
+		return value;
+	}
+	let current = value;
+	for (const segment of path.split(".")) {
 		if (typeof current !== "object" || current === null || !(segment in current)) {
-			throw new Error(`Template in state ${stateId}: result of ${ref.state} has no '${ref.path}'`);
+			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} has no '${path}'`);
 		}
 		current = (current as Record<string, unknown>)[segment];
 	}

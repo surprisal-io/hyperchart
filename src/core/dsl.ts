@@ -7,6 +7,7 @@ import type {
 	ArtifactCst,
 	ArtifactOfCst,
 	InputRef,
+	MapStateCst,
 	SchemaCst,
 	ParallelStateCst,
 	ScriptActionCst,
@@ -31,6 +32,10 @@ export function compound<const O extends Omit<CompoundStateCst, "kind">>(options
 
 export function parallel<const O extends Omit<ParallelStateCst, "kind">>(options: O): { kind: "parallel" } & O {
 	return { kind: "parallel", ...options };
+}
+
+export function map<const O extends Omit<MapStateCst, "kind">>(options: O): { kind: "map" } & O {
+	return { kind: "map", ...options };
 }
 
 // Const type parameters throughout the DSL: the literal types of options (zod replies, artifact
@@ -78,6 +83,16 @@ export function json<V>(ref: InputRef<V>): InputRef<string> {
 
 export function arg(name: string): InputRef {
 	return { kind: "arg", name };
+}
+
+// The instance key of the nearest enclosing map.
+export function key(): InputRef<string> {
+	return { kind: "key" };
+}
+
+// The spawn-pinned item of the nearest enclosing map instance, optionally a dot-path into it.
+export function item(path?: string): InputRef {
+	return { kind: "item", ...(path === undefined ? {} : { path }) };
 }
 
 export function result(state: string, path?: string): InputRef {

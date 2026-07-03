@@ -1,4 +1,4 @@
-import type { ActionUID, ChartEvent, GuardOutcome, GuardRef } from "./types.js";
+import type { ActionUID, ChartEvent, GuardOutcome, GuardRef, StatePath } from "./types.js";
 
 type SessionParams = {
 	seqId: number;
@@ -18,6 +18,15 @@ type SessionRefLog = {
 type ArgsLog = {
 	type: "args";
 	args: Readonly<Record<string, unknown>>;
+} & SessionParams;
+
+// A map's fan-out is a fact: which instance keys exist and what item each carries, pinned when
+// the map is entered. The instance's input is frozen at birth — later changes to the `over`
+// source do not reach spawned instances, and replay re-creates exactly the same fan-out.
+type SpawnedLog = {
+	type: "spawned";
+	path: StatePath;
+	instances: Readonly<Record<string, unknown>>;
 } & SessionParams;
 
 type StateActionInvokeLog = {
@@ -57,4 +66,4 @@ type StateActionTimerFiredLog = {
 
 type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog | StateActionTimerFiredLog;
 
-export type DurableLogRecord = SessionRefLog | ArgsLog | StateAction;
+export type DurableLogRecord = SessionRefLog | ArgsLog | SpawnedLog | StateAction;

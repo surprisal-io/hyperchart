@@ -9,6 +9,9 @@ import {
 	final,
 	json,
 	normalizeChartConfig,
+	item,
+	key,
+	map,
 	parallel,
 	result,
 	script,
@@ -189,6 +192,46 @@ function parallelAst(): ChartAst {
 	if (!result.ok) throw new Error("test chart should be valid");
 	return result.ast;
 }
+
+function mapAst(concurrency?: number): ChartAst {
+	const parsed = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "map-chart",
+			initial: "plan",
+			states: {
+				plan: {
+					kind: "state",
+					action: agent("planner", {
+						reply: z.object({ chapters: z.record(z.string(), z.object({ title: z.string() })) }),
+					}),
+					transitions: { OK: "chapters" },
+				},
+				chapters: map({
+					over: result("plan", "chapters"),
+					...(concurrency === undefined ? {} : { concurrency }),
+					initial: "author",
+					onDone: "done",
+					states: {
+						author: {
+							kind: "state",
+							action: agent("author", { task: t`Write ${key()}: ${item("title")}` }),
+							transitions: { OK: "written" },
+						},
+						written: final(),
+					},
+					transitions: { FAILED: "escalate" },
+				}),
+				done: final(),
+				escalate: final(),
+			},
+		}),
+	);
+	if (!parsed.ok) throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+	return parsed.ast;
+}
+
+const PLAN_OUTPUT = { chapters: { intro: { title: "Intro" }, body: { title: "Body" } } };
 
 function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 	const state = ast.states[stateId];
@@ -1310,5 +1353,129 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		// One timer for the running phase; validation is not raced against the clock.
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "timer")).toHaveLength(1);
+	});
+
+	it("spawns an instance per key, pins the items and joins through onDone", async () => {
+		const ast = mapAst();
+		const events: MachineEvent[] = [];
+		const tasks: string[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "plan") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", output: PLAN_OUTPUT } });
+					}
+					if (effect.kind === "agent" && effect.actionUid.state !== "plan") {
+						tasks.push(effect.task ?? "");
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(tasks.sort()).toEqual(["Write body: Body", "Write intro: Intro"]);
+		expect(state.projection.spawns.chapters).toEqual(PLAN_OUTPUT.chapters);
+		const spawned = (await runtime.loadLogs()).find((record) => record.type === "spawned");
+		expect(spawned).toMatchObject({ path: "chapters", instances: PLAN_OUTPUT.chapters });
+	});
+
+	it("gates instance starts by the map's concurrency", async () => {
+		const ast = mapAst(1);
+		const events: MachineEvent[] = [];
+		const batches: string[][] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				const instances = effects
+					.filter((effect): effect is Extract<Effect, { kind: "agent" }> => effect.kind === "agent")
+					.map((effect) => effect.actionUid.state)
+					.filter((state) => state.includes("#"));
+				if (instances.length > 0) batches.push(instances);
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						const output = effect.actionUid.state === "plan" ? { output: PLAN_OUTPUT } : {};
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", ...output } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		// One instance at a time, in spawn-fact key order — the second starts only after the
+		// first completes.
+		expect(batches).toEqual([["chapters#intro.author"], ["chapters#body.author"]]);
+	});
+
+	it("aborts all instances and cancels their agents when an event exits the map", async () => {
+		const ast = mapAst();
+		const events: MachineEvent[] = [];
+		const cancels: string[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "plan") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", output: PLAN_OUTPUT } });
+					}
+					if (effect.kind === "agent" && effect.actionUid.state === "chapters#intro.author") {
+						// intro fails; body's agent keeps hanging and must be killed.
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
+					}
+					if (effect.kind === "cancel") {
+						cancels.push(effect.actionUid.state);
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["escalate"]);
+		expect(cancels).toEqual(["chapters#body.author"]);
+	});
+
+	it("replays a map log without re-running agents", async () => {
+		const ast = mapAst();
+		const planUid = actionUid(ast, "plan");
+		const instanceUid = (key: string) => ({ ...actionUid(ast, "chapters.author"), state: `chapters#${key}.author` });
+		const logs: DurableLogRecord[] = [
+			invoke(planUid, 1),
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: planUid,
+				event: { type: "OK", output: PLAN_OUTPUT },
+				...meta(2),
+			},
+			{ type: "spawned", path: "chapters", instances: PLAN_OUTPUT.chapters, ...meta(3) },
+			invoke(instanceUid("intro"), 4),
+			invoke(instanceUid("body"), 5),
+			complete(instanceUid("intro"), "OK", 6),
+			complete(instanceUid("body"), "OK", 7),
+		];
+		const runtime = new MockRuntime({ ast, logs, events: failOnPullEvents() });
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(state.projection.spawns.chapters).toEqual(PLAN_OUTPUT.chapters);
 	});
 });

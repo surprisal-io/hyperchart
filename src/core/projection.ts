@@ -1,5 +1,15 @@
 import type { ActionUID, ChartAst, ChartEvent, StateAst, StateId, StatePath } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
+import {
+	childPath,
+	lastSegmentKey,
+	matchesDeclaredUid,
+	nodeAt,
+	parentPath,
+	siblingPath,
+	stripLastKey,
+	underScope,
+} from "./paths.js";
 
 // A pending action and the phase it is in, each phase started by a log record: invoke —
 // "running"; a completion on a validated state — "validating"; a negative verdict — "rejected"
@@ -30,13 +40,16 @@ export type BranchProjection = {
 	pendingActions: PendingAction[];
 	// The run's input arguments; undefined until the args fact lands in the log.
 	args?: Readonly<Record<string, unknown>>;
+	// Pinned fan-outs: map instance-path → { key → item }, written by spawned facts. Entries stay
+	// after the map exits — reads over a completed map's instances resolve from here.
+	spawns: Record<StatePath, Readonly<Record<string, unknown>>>;
 	// Latest accepted output per action state; re-entering a state overwrites its result.
 	results: Record<StatePath, unknown>;
 };
 
 export function isFinalState(projection: BranchProjection, ast: ChartAst): boolean {
 	return (
-		projection.activeLeaves.length > 0 && projection.activeLeaves.every((leaf) => ast.states[leaf]?.kind === "final")
+		projection.activeLeaves.length > 0 && projection.activeLeaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final")
 	);
 }
 
@@ -45,6 +58,7 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		activeLeaves: enterState(ast, ast.initial),
 		seqId: 0,
 		pendingActions: [],
+		spawns: {},
 		results: {},
 	};
 	completeParallels(projection, ast);
@@ -68,6 +82,26 @@ export function projectBranch(
 			case "args":
 				projection.args = record.args;
 				break;
+			case "spawned": {
+				// The placeholder guard mirrors invoke: a spawn for a map that is no longer active
+				// lost a race and is skipped.
+				if (!projection.activeLeaves.includes(record.path)) break;
+				const node = nodeAt(ast, record.path);
+				if (node?.kind !== "map") {
+					throw new Error(`Spawned record for non-map state ${record.path}`);
+				}
+				projection.spawns[record.path] = record.instances;
+				const keys = Object.keys(record.instances);
+				projection.activeLeaves = [
+					...projection.activeLeaves.filter((leaf) => leaf !== record.path),
+					// An empty fan-out completes the map immediately, like a compound reaching final.
+					...(keys.length === 0
+						? enterState(ast, siblingPath(record.path, node.onDone))
+						: keys.flatMap((key) => enterState(ast, `${record.path}#${key}`))),
+				];
+				completeParallels(projection, ast);
+				break;
+			}
 			case "state_action":
 				switch (record.kind) {
 					case "invoke":
@@ -84,7 +118,7 @@ export function projectBranch(
 					case "complete":
 						if (projection.activeLeaves.includes(record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "complete");
-							const state = ast.states[record.actionUid.state];
+							const state = nodeAt(ast, record.actionUid.state);
 							if (state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED") {
 								// The completion goes into validation, restarting the cycle if a previous round was
 								// rejected; the rejection count survives the retry.
@@ -130,7 +164,7 @@ export function projectBranch(
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned);
 							break;
 						}
-						const node = ast.states[record.actionUid.state];
+						const node = nodeAt(ast, record.actionUid.state);
 						const retries = node?.kind === "state" ? node.retries : undefined;
 						const rejections = validating.rejections + 1;
 						if (retries !== undefined && rejections > retries) {
@@ -178,11 +212,11 @@ function applyAfterTransition(
 	leaf: StatePath,
 	abandoned: PendingAction[],
 ): void {
-	const state = ast.states[leaf];
+	const state = nodeAt(ast, leaf);
 	if (state?.kind !== "state" || state.after === undefined) {
 		throw new Error(`No after transition in state ${leaf}`);
 	}
-	exitAndEnter(projection, ast, leaf, siblingPath(state, state.after.target), abandoned);
+	exitAndEnter(projection, ast, leaf, siblingPath(leaf, state.after.target), abandoned);
 }
 
 // Transitions are not logged: recompute the move from the chart AST. The handler's level decides
@@ -198,7 +232,7 @@ function applyTransition(
 	if (!handler) {
 		throw new Error(`No transition for event type ${eventType} in state ${fromLeaf}`);
 	}
-	exitAndEnter(projection, ast, handler.path, siblingPath(handler.node, handler.target), abandoned);
+	exitAndEnter(projection, ast, handler.path, siblingPath(handler.path, handler.target), abandoned);
 }
 
 // The exit scope is the handler's own state: every active leaf under it leaves the
@@ -213,7 +247,7 @@ function exitAndEnter(
 	abandoned: PendingAction[],
 ): void {
 	projection.activeLeaves = [
-		...projection.activeLeaves.filter((leaf) => !isOrUnder(leaf, exitPath)),
+		...projection.activeLeaves.filter((leaf) => !underScope(leaf, exitPath)),
 		...enterState(ast, targetPath),
 	];
 	const kept: PendingAction[] = [];
@@ -228,10 +262,6 @@ function exitAndEnter(
 	completeParallels(projection, ast);
 }
 
-function isOrUnder(path: StatePath, scope: StatePath): boolean {
-	return path === scope || path.startsWith(`${scope}.`);
-}
-
 // Innermost-first: the leaf that emitted the event handles it, or the closest ancestor declaring
 // it. Events are not broadcast — a completion belongs to exactly one leaf, so parallel regions
 // never conflict by construction.
@@ -242,15 +272,19 @@ function findHandler(
 ): { path: StatePath; node: StateAst; target: StateId } | undefined {
 	let path: StatePath | undefined = fromPath;
 	while (path !== undefined) {
-		const node: StateAst | undefined = ast.states[path];
+		const node: StateAst | undefined = nodeAt(ast, path);
 		if (node === undefined) {
 			throw new Error(`Broken parent chain: state ${path} not found`);
 		}
 		if (node.kind !== "final") {
 			const target = node.transitions[eventType];
-			if (target !== undefined) return { path, node, target };
+			if (target !== undefined) {
+				// A map's transitions belong to the container, not the instance the event bubbled
+				// out of: the handler scope drops the instance key, so the exit aborts ALL instances.
+				return { path: node.kind === "map" ? stripLastKey(path) : path, node, target };
+			}
 		}
-		path = node.parent;
+		path = parentPath(path);
 	}
 	return undefined;
 }
@@ -267,7 +301,7 @@ export function allowedEvents(ast: ChartAst, fromPath: StatePath): string[] {
 	const seen = new Set<string>();
 	let path: StatePath | undefined = fromPath;
 	while (path !== undefined) {
-		const node: StateAst | undefined = ast.states[path];
+		const node: StateAst | undefined = nodeAt(ast, path);
 		if (node === undefined) {
 			throw new Error(`Broken parent chain: state ${path} not found`);
 		}
@@ -279,7 +313,7 @@ export function allowedEvents(ast: ChartAst, fromPath: StatePath): string[] {
 				}
 			}
 		}
-		path = node.parent;
+		path = parentPath(path);
 	}
 	return events;
 }
@@ -289,36 +323,43 @@ export function allowedEvents(ast: ChartAst, fromPath: StatePath): string[] {
 // container through onDone — nothing is logged, replay recomputes the whole chain. A final in a
 // region stays as-is: it marks the region complete for the join.
 function enterState(ast: ChartAst, path: StatePath): StatePath[] {
-	const node = ast.states[path];
+	const node = nodeAt(ast, path);
 	if (node === undefined) {
 		throw new Error(`Unknown state ${path}`);
 	}
 	if (node.kind === "compound" || node.kind === "region") {
-		return enterState(ast, `${path}.${node.initial}`);
+		return enterState(ast, childPath(path, node.initial));
+	}
+	if (node.kind === "map") {
+		// The bare map path rests as a placeholder until its spawned fact pins the instances; an
+		// instance path ("#key") drills down like a compound.
+		return lastSegmentKey(path) === undefined ? [path] : enterState(ast, childPath(path, node.initial));
 	}
 	if (node.kind === "parallel") {
-		return node.regions.flatMap((region) => enterState(ast, `${path}.${region}`));
+		return node.regions.flatMap((region) => enterState(ast, childPath(path, region)));
 	}
-	if (node.kind === "final" && node.parent !== undefined) {
-		const container = ast.states[node.parent];
+	const parent = parentPath(path);
+	if (node.kind === "final" && parent !== undefined) {
+		const container = nodeAt(ast, parent);
 		if (container === undefined) {
-			throw new Error(`Broken parent chain: state ${node.parent} not found`);
+			throw new Error(`Broken parent chain: state ${parent} not found`);
 		}
 		if (container.kind === "compound") {
-			return enterState(ast, siblingPath(container, container.onDone));
+			return enterState(ast, siblingPath(parent, container.onDone));
 		}
 	}
 	return [path];
 }
 
-// A parallel is complete when every active leaf under it is final; its onDone then replaces
-// them. Innermost parallels first, repeated until stable — completing one may complete an outer.
+// A parallel — or a map fan-out — is complete when every active leaf under it is final; its
+// onDone then replaces them. Innermost first, repeated until stable — completing one may
+// complete an outer.
 function completeParallels(projection: BranchProjection, ast: ChartAst): void {
 	for (;;) {
 		const done = findCompletedParallel(projection, ast);
 		if (done === undefined) return;
 		projection.activeLeaves = [
-			...projection.activeLeaves.filter((leaf) => !isOrUnder(leaf, done.path)),
+			...projection.activeLeaves.filter((leaf) => !underScope(leaf, done.path)),
 			...enterState(ast, done.target),
 		];
 	}
@@ -331,36 +372,37 @@ function findCompletedParallel(
 	const candidates: { path: StatePath; target: StatePath }[] = [];
 	const seen = new Set<StatePath>();
 	for (const leaf of projection.activeLeaves) {
-		let path = ast.states[leaf]?.parent;
+		let path = parentPath(leaf);
 		while (path !== undefined) {
-			const node = ast.states[path];
+			const node = nodeAt(ast, path);
 			if (node === undefined) {
 				throw new Error(`Broken parent chain: state ${path} not found`);
 			}
-			if (node.kind === "parallel" && !seen.has(path)) {
-				seen.add(path);
-				candidates.push({ path, target: siblingPath(node, node.onDone) });
+			if (node.kind === "parallel" || node.kind === "map") {
+				// A map joins over ALL its instances: the scope is the container with the instance
+				// key stripped, so every instance's leaves must be final.
+				const scope = node.kind === "map" ? stripLastKey(path) : path;
+				if (!seen.has(scope)) {
+					seen.add(scope);
+					candidates.push({ path: scope, target: siblingPath(scope, node.onDone) });
+				}
 			}
-			path = node.parent;
+			path = parentPath(path);
 		}
 	}
 	candidates.sort((a, b) => b.path.length - a.path.length);
 	return candidates.find(({ path }) => {
-		const leaves = projection.activeLeaves.filter((leaf) => isOrUnder(leaf, path));
-		return leaves.length > 0 && leaves.every((leaf) => ast.states[leaf]?.kind === "final");
+		const leaves = projection.activeLeaves.filter((leaf) => underScope(leaf, path));
+		return leaves.length > 0 && leaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final");
 	});
 }
 
-function siblingPath(node: StateAst, target: StateId): StatePath {
-	return node.parent === undefined ? target : `${node.parent}.${target}`;
-}
-
 function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: ActionUID, operation: string): void {
-	const state = ast.states[stateId];
+	const state = nodeAt(ast, stateId);
 	if (state?.kind !== "state") {
 		throw new Error(`Cannot ${operation} action for non-action state ${stateId}`);
 	}
-	if (!sameActionUid(actual, state.action.uid)) {
+	if (!matchesDeclaredUid(actual, state.action.uid)) {
 		throw new Error(`Invalid action ${operation} for state ${stateId}`);
 	}
 }

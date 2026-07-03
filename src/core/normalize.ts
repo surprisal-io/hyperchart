@@ -14,6 +14,7 @@ import type {
 	FinalStateAst,
 	GuardRef,
 	InputRef,
+	MapStateAst,
 	OnReject,
 	SchemaAst,
 	ParallelStateAst,
@@ -29,8 +30,8 @@ import type {
 
 const RESERVED_SYSTEM_EVENTS = new Set(["FAILED"]);
 
-// "." separates path segments, ":" separates effect id segments, "#" is reserved for future
-// parallel instance keys.
+// "." separates path segments, ":" separates effect id segments, "#" separates a map instance
+// key from its state id.
 const STATE_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 // Validation is a single pass: unknown input goes straight to a frozen AST plus diagnostics.
@@ -187,6 +188,74 @@ function collectState(
 			transitions: transitions ?? {},
 			onDone: onDone ?? "",
 		} satisfies ParallelStateAst);
+		return;
+	}
+
+	if (input.kind === "map") {
+		if (role === "region") {
+			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
+			return;
+		}
+		const initial = input.initial;
+		if (typeof initial !== "string" || initial.length === 0) {
+			diagnostics.push(
+				diagnostic("INVALID_INITIAL", "Map initial must be a non-empty state id.", `${pointer}/initial`, source),
+			);
+		}
+		if (!isRecord(input.states)) {
+			diagnostics.push(diagnostic("INVALID_STATES", "Map states must be an object.", `${pointer}/states`, source));
+			return;
+		}
+		const over = input.over === undefined ? undefined : toInputRef(input.over, `${pointer}/over`, diagnostics, source);
+		if (input.over === undefined) {
+			diagnostics.push(
+				diagnostic("INVALID_MAP", `Map '${path}' must declare over — what it fans out on.`, `${pointer}/over`, source),
+			);
+		}
+		let concurrency: number | undefined;
+		if (input.concurrency !== undefined) {
+			if (typeof input.concurrency !== "number" || !Number.isInteger(input.concurrency) || input.concurrency < 1) {
+				diagnostics.push(
+					diagnostic("INVALID_MAP", "Map concurrency must be a positive integer.", `${pointer}/concurrency`, source),
+				);
+			} else {
+				concurrency = input.concurrency;
+			}
+		}
+		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
+		const onDone = toOnDone(input.onDone, `${pointer}/onDone`, diagnostics, source);
+		if (onDone === undefined) {
+			diagnostics.push(diagnostic("MISSING_ON_DONE", `Map '${path}' must declare onDone.`, pointer, source));
+		}
+		for (const [childId, childInput] of Object.entries(input.states)) {
+			collectState(
+				childInput,
+				chartId,
+				childId,
+				path,
+				`${pointer}/states/${escapePointer(childId)}`,
+				states,
+				diagnostics,
+				source,
+			);
+		}
+		// An instance completes by reaching a direct final child — same rule as a compound.
+		const hasFinal = Object.keys(input.states).some((childId) => states[`${path}.${childId}`]?.kind === "final");
+		if (!hasFinal) {
+			diagnostics.push(
+				diagnostic("MISSING_FINAL", `State '${path}' must contain a final child (its completion).`, pointer, source),
+			);
+		}
+		states[path] = deepFreeze({
+			kind: "map",
+			id: localId,
+			...parent,
+			over: over ?? { kind: "arg", name: "" },
+			...(concurrency === undefined ? {} : { concurrency }),
+			initial: typeof initial === "string" ? initial : "",
+			transitions: transitions ?? {},
+			onDone: onDone ?? "",
+		} satisfies MapStateAst);
 		return;
 	}
 
@@ -419,6 +488,16 @@ function validateTargets(
 			// Result refs address action states by absolute path — data lookup, not control flow.
 			for (const template of actionTemplates(node.action)) {
 				for (const ref of template.refs) {
+					if ((ref.kind === "key" || ref.kind === "item") && !insideMap(states, path)) {
+						diagnostics.push(
+							diagnostic(
+								"INVALID_MAP_REF",
+								`A template in state '${path}' uses ${ref.kind}() outside any map.`,
+								`${pointer}/action`,
+								source,
+							),
+						);
+					}
 					if (ref.kind === "result" && states[ref.state]?.kind !== "state") {
 						diagnostics.push(
 							diagnostic(
@@ -433,8 +512,18 @@ function validateTargets(
 			}
 			continue;
 		}
+		if (node.kind === "map" && node.over.kind === "result" && states[node.over.state]?.kind !== "state") {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_INPUT_RESULT",
+					`Map '${path}' fans out over the result of unknown action state '${node.over.state}'.`,
+					`${pointer}/over`,
+					source,
+				),
+			);
+		}
 		if (
-			(node.kind === "compound" || node.kind === "region") &&
+			(node.kind === "compound" || node.kind === "region" || node.kind === "map") &&
 			node.initial.length > 0 &&
 			!(`${path}.${node.initial}` in states)
 		) {
@@ -448,7 +537,7 @@ function validateTargets(
 			);
 		}
 		if (
-			(node.kind === "compound" || node.kind === "parallel") &&
+			(node.kind === "compound" || node.kind === "parallel" || node.kind === "map") &&
 			node.onDone.length > 0 &&
 			!(sibling(node.onDone) in states)
 		) {
@@ -462,6 +551,15 @@ function validateTargets(
 			);
 		}
 	}
+}
+
+function insideMap(states: Record<StatePath, StateAst>, path: StatePath): boolean {
+	let cur = states[path]?.parent;
+	while (cur !== undefined) {
+		if (states[cur]?.kind === "map") return true;
+		cur = states[cur]?.parent;
+	}
+	return false;
 }
 
 // All templated parameters of an action, for ref validation.
@@ -679,7 +777,21 @@ function toInputRef(
 			...jsonMark,
 		};
 	}
-	diagnostics.push(diagnostic("INVALID_TEMPLATE", "Template ref kind must be 'arg' or 'result'.", path, source));
+	if (input.kind === "key") {
+		return { kind: "key", ...jsonMark };
+	}
+	if (input.kind === "item") {
+		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
+			diagnostics.push(
+				diagnostic("INVALID_TEMPLATE", "item ref path selector must be a non-empty string.", path, source),
+			);
+			return undefined;
+		}
+		return { kind: "item", ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
+	}
+	diagnostics.push(
+		diagnostic("INVALID_TEMPLATE", "Template ref kind must be 'arg', 'result', 'key' or 'item'.", path, source),
+	);
 	return undefined;
 }
 

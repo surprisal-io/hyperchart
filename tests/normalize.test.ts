@@ -5,6 +5,9 @@ import {
 	chart,
 	compound,
 	final,
+	item,
+	key,
+	map,
 	normalizeChartConfig,
 	parallel,
 	result,
@@ -578,5 +581,94 @@ describe("normalizeChartConfig", () => {
 
 		expect(result.ok).toBe(false);
 		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_SCHEMA");
+	});
+
+	it("normalizes a map into a compound-shaped node with over and concurrency", () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "mapped",
+				initial: "plan",
+				states: {
+					plan: { kind: "state", action: agent("planner"), transitions: { OK: "chapters" } },
+					chapters: map({
+						over: result("plan", "chapters"),
+						concurrency: 2,
+						initial: "author",
+						onDone: "done",
+						states: {
+							author: {
+								kind: "state",
+								action: agent("author", { task: t`Write ${key()}: ${item("title")}` }),
+								transitions: { OK: "written" },
+							},
+							written: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		expect(parsed.ast.states.chapters).toMatchObject({
+			kind: "map",
+			over: { kind: "result", state: "plan", path: "chapters" },
+			concurrency: 2,
+			initial: "author",
+			onDone: "done",
+		});
+		expect(parsed.ast.states["chapters.author"]?.kind).toBe("state");
+	});
+
+	it("requires over, onDone, a final child and a sane concurrency on maps", () => {
+		const parsed = normalizeChartConfig({
+			id: "bad-map",
+			initial: "chapters",
+			states: {
+				chapters: {
+					kind: "map",
+					concurrency: 0,
+					initial: "author",
+					states: {
+						author: { kind: "state" as const, action: agent("author"), transitions: { OK: "author" } },
+					},
+				},
+				done: final(),
+			},
+		});
+		expect(parsed.ok).toBe(false);
+		const codes = parsed.diagnostics.map((d) => d.code);
+		expect(codes).toContain("INVALID_MAP");
+		expect(codes).toContain("MISSING_ON_DONE");
+		expect(codes).toContain("MISSING_FINAL");
+	});
+
+	it("rejects key()/item() refs outside any map and over reading an unknown result", () => {
+		const parsed = normalizeChartConfig({
+			id: "bad-refs",
+			initial: "solo",
+			states: {
+				solo: {
+					kind: "state" as const,
+					action: agent("writer", { task: t`Write ${key()} of ${item("title")}` }),
+					transitions: { OK: "chapters" },
+				},
+				chapters: map({
+					over: result("missing", "chapters"),
+					initial: "author",
+					onDone: "done",
+					states: {
+						author: { kind: "state" as const, action: agent("author"), transitions: { OK: "written" } },
+						written: final(),
+					},
+				}),
+				done: final(),
+			},
+		});
+		expect(parsed.ok).toBe(false);
+		const codes = parsed.diagnostics.map((d) => d.code);
+		expect(codes.filter((code) => code === "INVALID_MAP_REF")).toHaveLength(2);
+		expect(codes).toContain("UNKNOWN_INPUT_RESULT");
 	});
 });

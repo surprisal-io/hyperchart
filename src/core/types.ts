@@ -159,6 +159,15 @@ export type InputRef<V = unknown> = (
 			state: StatePath;
 			path?: string;
 	  }
+	// The instance args of the nearest enclosing map: its key, and its spawn-pinned item
+	// (optionally narrowed by a dot-path). Only meaningful inside a map's body.
+	| {
+			kind: "key";
+	  }
+	| {
+			kind: "item";
+			path?: string;
+	  }
 ) & {
 	// Set by json(): the value is embedded as JSON text. Without it the renderer admits only
 	// primitives — the runtime twin of the static rule enforced by t().
@@ -225,7 +234,23 @@ export type ParallelStateCst = {
 	onDone?: StateId;
 };
 
-export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst | ParallelStateCst;
+// A dynamic fan-out: a compound-shaped container whose instances are spawned per key of the
+// `over` value (a Record resolved from run data). The keys AND items are pinned by a `spawned`
+// fact — the instance's input is frozen at birth (its future actor args). An instance completes
+// by reaching a final child; when all instances complete the map exits through onDone. The map's
+// own transitions catch what instances leave unhandled — exiting ALL instances (abort).
+export type MapStateCst = {
+	kind: "map";
+	over: InputRef;
+	// At most this many instances run at once (invokes are gated, spawn is not); omitted = all.
+	concurrency?: number;
+	initial: StateId;
+	states: Record<StateId, StateCst>;
+	transitions?: TransitionMapCst;
+	onDone?: StateId;
+};
+
+export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst | ParallelStateCst | MapStateCst;
 
 export type ChartCst = {
 	kind: "chart";
@@ -328,7 +353,24 @@ export type ParallelStateAst = Readonly<{
 	onDone: StateId;
 }>;
 
-export type StateAst = ActionStateAst | FinalStateAst | CompoundStateAst | RegionStateAst | ParallelStateAst;
+export type MapStateAst = Readonly<{
+	kind: "map";
+	id: StateId;
+	parent?: StatePath;
+	over: InputRef;
+	concurrency?: number;
+	initial: StateId;
+	transitions: Readonly<Record<EventType, StateId>>;
+	onDone: StateId;
+}>;
+
+export type StateAst =
+	| ActionStateAst
+	| FinalStateAst
+	| CompoundStateAst
+	| RegionStateAst
+	| ParallelStateAst
+	| MapStateAst;
 
 export type ChartAst = Readonly<{
 	kind: "chart";
