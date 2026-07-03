@@ -12,6 +12,7 @@ import type {
 	OutputSpecCst,
 	ParallelStateCst,
 	SchemaRefCst,
+	ScriptActionCst,
 	Templatable,
 	TemplateCst,
 	TsImportSchemaRefCst,
@@ -102,8 +103,14 @@ export function tsImport(module: string, exportName: string): GuardRef {
 	return { kind: "tsImport", module, export: exportName };
 }
 
-export function script(command: string, args?: readonly string[]): GuardRef {
-	return { kind: "script", command, ...(args === undefined ? {} : { args }) };
+// Doubles as a guard (validate: script(...)) and as a command action (action: script(...)) —
+// the position decides. Parameters flow through env templates; command/args stay static.
+export function script(
+	command: string,
+	args?: readonly string[],
+	opts: Omit<ScriptActionCst, "kind" | "command" | "args"> = {},
+): ScriptActionCst {
+	return { kind: "script", command, ...(args === undefined ? {} : { args }), ...opts };
 }
 
 export function jsonSchema(schema: JsonSchema): JsonSchemaOutputCst {

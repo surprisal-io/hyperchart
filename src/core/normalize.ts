@@ -19,6 +19,7 @@ import type {
 	ParallelStateAst,
 	ParsedChart,
 	RegionStateAst,
+	ScriptActionAst,
 	StateActionAst,
 	StateAst,
 	StatePath,
@@ -337,13 +338,16 @@ function validateTargets(
 					),
 				);
 			}
-			// An artifactOf read must resolve to exactly one declared artifact of an agent state.
-			if (node.action.kind === "agent") {
-				for (const read of node.action.reads ?? []) {
-					if (read.kind !== "artifactOf") continue;
+			// An artifactOf reference must resolve to exactly one declared artifact.
+			if (node.action.kind !== "user") {
+				const artifactRefs = [
+					...(node.action.kind === "agent" ? (node.action.reads ?? []) : []),
+					...(node.action.kind === "script" ? Object.values(node.action.env ?? {}) : []),
+				].filter((item): item is ArtifactOfAst => item.kind === "artifactOf");
+				for (const read of artifactRefs) {
 					const producer = states[read.state];
 					const artifacts =
-						producer?.kind === "state" && producer.action.kind === "agent" ? producer.action.artifacts : undefined;
+						producer?.kind === "state" && producer.action.kind !== "user" ? producer.action.artifacts : undefined;
 					if (artifacts === undefined || Object.keys(artifacts).length === 0) {
 						diagnostics.push(
 							diagnostic(
@@ -431,9 +435,14 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 		return [action.prompt];
 	}
 	return [
-		...(action.task ? [action.task] : []),
+		...(action.kind === "agent" && action.task ? [action.task] : []),
+		...(action.kind === "script"
+			? Object.values(action.env ?? {}).filter((value): value is TemplateAst => value.kind === "template")
+			: []),
 		...Object.values(action.artifacts ?? {}).map((declared) => declared.path),
-		...(action.reads ?? []).filter((read): read is TemplateAst => read.kind === "template"),
+		...(action.kind === "agent" ? (action.reads ?? []) : []).filter(
+			(read): read is TemplateAst => read.kind === "template",
+		),
 	];
 }
 
@@ -498,6 +507,63 @@ function toArtifacts(
 	return artifacts;
 }
 
+function toEnv(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): Record<string, TemplateAst | ArtifactOfAst> | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic("INVALID_SCRIPT", "Script env must be a map of name → template or artifactOf.", path, source),
+		);
+		return undefined;
+	}
+	const env: Record<string, TemplateAst | ArtifactOfAst> = {};
+	for (const [name, value] of Object.entries(input)) {
+		const pointer = `${path}/${escapePointer(name)}`;
+		if (isRecord(value) && value.kind === "artifactOf") {
+			const ref = toArtifactOf(value, pointer, diagnostics, source);
+			if (ref !== undefined) env[name] = ref;
+			continue;
+		}
+		const template = toTemplate(value, pointer, diagnostics, source);
+		if (template !== undefined) env[name] = template;
+	}
+	return env;
+}
+
+function toArtifactOf(
+	item: Record<string, unknown>,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): ArtifactOfAst | undefined {
+	if (typeof item.state !== "string" || item.state.length === 0) {
+		diagnostics.push(
+			diagnostic("INVALID_TEMPLATE", "artifactOf state must be a non-empty state path.", pointer, source),
+		);
+		return undefined;
+	}
+	if (item.artifact !== undefined && (typeof item.artifact !== "string" || item.artifact.length === 0)) {
+		diagnostics.push(diagnostic("INVALID_TEMPLATE", "artifactOf artifact must be a non-empty name.", pointer, source));
+		return undefined;
+	}
+	if (item.select !== undefined && (typeof item.select !== "string" || item.select.length === 0)) {
+		diagnostics.push(
+			diagnostic("INVALID_TEMPLATE", "artifactOf select must be a non-empty dot-path.", pointer, source),
+		);
+		return undefined;
+	}
+	return {
+		kind: "artifactOf",
+		state: item.state,
+		...(item.artifact === undefined ? {} : { artifact: item.artifact }),
+		...(item.select === undefined ? {} : { select: item.select }),
+	};
+}
+
 function toReads(
 	input: unknown,
 	path: string,
@@ -519,35 +585,8 @@ function toReads(
 	const reads: (TemplateAst | ArtifactOfAst)[] = [];
 	for (const [index, item] of input.entries()) {
 		if (isRecord(item) && item.kind === "artifactOf") {
-			if (typeof item.state !== "string" || item.state.length === 0) {
-				diagnostics.push(
-					diagnostic(
-						"INVALID_TEMPLATE",
-						"artifactOf state must be a non-empty state path.",
-						`${path}/${index}`,
-						source,
-					),
-				);
-				continue;
-			}
-			if (item.artifact !== undefined && (typeof item.artifact !== "string" || item.artifact.length === 0)) {
-				diagnostics.push(
-					diagnostic("INVALID_TEMPLATE", "artifactOf artifact must be a non-empty name.", `${path}/${index}`, source),
-				);
-				continue;
-			}
-			if (item.select !== undefined && (typeof item.select !== "string" || item.select.length === 0)) {
-				diagnostics.push(
-					diagnostic("INVALID_TEMPLATE", "artifactOf select must be a non-empty dot-path.", `${path}/${index}`, source),
-				);
-				continue;
-			}
-			reads.push({
-				kind: "artifactOf",
-				state: item.state,
-				...(item.artifact === undefined ? {} : { artifact: item.artifact }),
-				...(item.select === undefined ? {} : { select: item.select }),
-			});
+			const ref = toArtifactOf(item, `${path}/${index}`, diagnostics, source);
+			if (ref !== undefined) reads.push(ref);
 			continue;
 		}
 		const template = toTemplate(item, `${path}/${index}`, diagnostics, source);
@@ -694,6 +733,30 @@ function toStateActionAst(
 				...(reply === undefined ? {} : { reply }),
 			} satisfies AgentActionAst);
 		}
+		case "script": {
+			if (typeof input.command !== "string" || input.command.length === 0) {
+				diagnostics.push(
+					diagnostic("INVALID_SCRIPT", "Script command must be a non-empty string.", `${path}/command`, source),
+				);
+			}
+			const args = Array.isArray(input.args) ? input.args : [];
+			if (!args.every((item): item is string => typeof item === "string")) {
+				diagnostics.push(diagnostic("INVALID_SCRIPT", "Script args must be strings.", `${path}/args`, source));
+			}
+			const env = toEnv(input.env, `${path}/env`, diagnostics, source);
+			const artifacts = toArtifacts(input.artifacts, `${path}/artifacts`, diagnostics, source);
+			const reply = toOutputSpecAst(input.reply, `${path}/reply`, diagnostics, source);
+			const uid: ActionUID = { chart: chartId, state: statePath, action: "script" };
+			return deepFreeze({
+				kind: "script",
+				uid,
+				command: typeof input.command === "string" ? input.command : "",
+				args: args.filter((item): item is string => typeof item === "string"),
+				...(env === undefined ? {} : { env }),
+				...(artifacts === undefined ? {} : { artifacts }),
+				...(reply === undefined ? {} : { reply }),
+			} satisfies ScriptActionAst);
+		}
 		case "user": {
 			const prompt = toTemplate(input.prompt, `${path}/prompt`, diagnostics, source);
 			if (prompt === undefined) {
@@ -730,7 +793,7 @@ function toStateActionAst(
 		}
 		default:
 			diagnostics.push(
-				diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent' or 'user'.", `${path}/kind`, source),
+				diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent', 'user' or 'script'.", `${path}/kind`, source),
 			);
 			return undefined;
 	}

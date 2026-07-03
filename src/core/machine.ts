@@ -11,6 +11,7 @@ import type {
 	InputRef,
 	OnReject,
 	OutputSpecAst,
+	ScriptActionAst,
 	TemplateAst,
 	UserActionAst,
 } from "./types.js";
@@ -74,6 +75,25 @@ export type UserEffect = Readonly<{
 	prompt: string;
 }>;
 
+// A command to execute: same completion contract as an agent (events + reply for the parsed
+// stdout), same artifact channels; parameters arrive as rendered env vars.
+export type ScriptEffect = Readonly<{
+	kind: "script";
+	id: EffectId;
+	actionUid: ActionUID;
+	action: ScriptActionAst;
+	command: string;
+	args: readonly string[];
+	// Rendered env. A string is final (templates; artifactOf without select renders to the
+	// producer's file path). A RenderedArtifact appears for artifactOf WITH select: the runtime
+	// resolves it at spawn — read the file, validate against shape, extract the field, serialize
+	// (string verbatim, everything else as JSON) — same rules as an agent's reads.
+	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	artifacts?: readonly RenderedArtifact[];
+	events: readonly string[];
+	reply?: OutputSpecAst;
+}>;
+
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
 	id: EffectId;
@@ -122,6 +142,7 @@ export type CancelEffect = Readonly<{
 export type Effect =
 	| AgentEffect
 	| UserEffect
+	| ScriptEffect
 	| DurableRecordsEffect
 	| ValidateEffect
 	| RejectedEffect
@@ -153,6 +174,14 @@ export type UserMachineEvent = Readonly<{
 	event: ChartEvent;
 }>;
 
+// A script's completion: same shape and handling as an agent's — the runtime maps the process
+// outcome (exit code, parsed stdout) into a chart event.
+export type ScriptMachineEvent = Readonly<{
+	kind: "script";
+	effectId: EffectId;
+	event: ChartEvent;
+}>;
+
 export type DurableRecordsAddedMachineEvent = Readonly<{
 	kind: "durable_records_added";
 	effectId: EffectId;
@@ -180,6 +209,7 @@ export type MachineEvent =
 	| MachineStartEvent
 	| AgentMachineEvent
 	| UserMachineEvent
+	| ScriptMachineEvent
 	| DurableRecordsAddedMachineEvent
 	| ValidatedMachineEvent
 	| TimerMachineEvent;
@@ -303,6 +333,40 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	const id = pendingEffectId(pending);
 	switch (pending.phase) {
 		case "running": {
+			if (node.action.kind === "script") {
+				const action = node.action;
+				return {
+					kind: "script",
+					id,
+					actionUid: pending.actionUid,
+					action,
+					command: action.command,
+					args: action.args,
+					events: allowedEvents(state.ast, pending.actionUid.state),
+					...(action.reply === undefined ? {} : { reply: action.reply }),
+					...(action.env === undefined
+						? {}
+						: {
+								env: Object.fromEntries(
+									Object.entries(action.env).map(([name, value]) => {
+										if (value.kind === "template") {
+											return [name, renderTemplate(state, value, node.id)];
+										}
+										const read = renderRead(state, value, node.id);
+										return [name, read.select === undefined ? read.path : read];
+									}),
+								),
+							}),
+					...(action.artifacts === undefined
+						? {}
+						: {
+								artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
+									name,
+									...renderArtifact(state, declared, node.id),
+								})),
+							}),
+				};
+			}
 			if (node.action.kind === "agent") {
 				const action = node.action;
 				return {
@@ -366,7 +430,8 @@ function sameActionUid(left: ActionUID, right: ActionUID): boolean {
 
 export function stepMachine(state: MachineState, event: MachineEvent): MachineOutput {
 	switch (event.kind) {
-		case "agent": {
+		case "agent":
+		case "script": {
 			const pending = findPendingAction(state, event.effectId);
 			if (pending === null) {
 				// The action is no longer pending — it lost a race (e.g. its timer fired first).
@@ -561,7 +626,7 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 	}
 	const producer = state.ast.states[read.state];
 	const artifacts =
-		producer?.kind === "state" && producer.action.kind === "agent" ? producer.action.artifacts : undefined;
+		producer?.kind === "state" && producer.action.kind !== "user" ? producer.action.artifacts : undefined;
 	const names = Object.keys(artifacts ?? {});
 	const name = read.artifact ?? (names.length === 1 ? names[0] : undefined);
 	const declared = name === undefined ? undefined : artifacts?.[name];

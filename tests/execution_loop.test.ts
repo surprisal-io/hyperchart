@@ -12,6 +12,7 @@ import {
 	normalizeChartConfig,
 	parallel,
 	result,
+	script,
 	t,
 	tsImport,
 } from "../src/index.js";
@@ -692,6 +693,98 @@ describe("execution loop", () => {
 			{ path: "out/ai.json", shape },
 			{ path: "out/ai.json", shape, select: "claims.approved" },
 		]);
+	});
+
+	it("runs a script action as an honest command step", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "cmd-chart",
+				initial: "plan",
+				states: {
+					plan: { kind: "state", action: agent("planner"), transitions: { PLAN_READY: "normalize" } },
+					normalize: {
+						kind: "state",
+						action: script("python3", ["bin/normalize.py"], {
+							env: { ARTIFACTS_DIR: t`${result("plan", "dir")}`, TOPIC: t`${arg("topic")}` },
+							artifacts: { evidence: t`${result("plan", "dir")}/evidence.json` },
+						}),
+						transitions: { NORMALIZED: "consume" },
+					},
+					consume: {
+						kind: "state",
+						// a script consuming another step's artifact: the path arrives as a rendered env var;
+						// with select, the runtime resolves the field's VALUE at spawn
+						action: script("python3", ["bin/consume.py"], {
+							env: {
+								EVIDENCE: artifactOf("normalize"),
+								THRESHOLD: artifactOf("normalize", { select: "threshold" }),
+							},
+						}),
+						transitions: { CONSUMED: "read" },
+					},
+					read: {
+						kind: "state",
+						action: agent("reader", { reads: [artifactOf("normalize")] }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		let scriptEffect: unknown;
+		let consumeEffect: unknown;
+		let readerReads: unknown;
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						readerReads = effect.reads;
+						const reply =
+							effect.actionUid.state === "plan"
+								? { type: "PLAN_READY", output: { dir: "artifacts" } }
+								: { type: "DONE" };
+						events.push({ kind: "agent", effectId: effect.id, event: reply });
+					}
+					if (effect.kind === "script") {
+						if (effect.actionUid.state === "normalize") scriptEffect = effect;
+						else consumeEffect = effect;
+						// the runtime ran the process and mapped its outcome to a chart event
+						const eventType = effect.actionUid.state === "normalize" ? "NORMALIZED" : "CONSUMED";
+						events.push({ kind: "script", effectId: effect.id, event: { type: eventType } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await start(runtime, { topic: "AI" });
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(scriptEffect).toMatchObject({
+			kind: "script",
+			command: "python3",
+			args: ["bin/normalize.py"],
+			env: { ARTIFACTS_DIR: "artifacts", TOPIC: "AI" },
+			artifacts: [{ name: "evidence", path: "artifacts/evidence.json" }],
+			events: ["NORMALIZED"],
+		});
+		// a script consuming that artifact gets the path as env; a selected field arrives as a
+		// late-bound read the runtime resolves at spawn
+		expect(consumeEffect).toMatchObject({
+			env: {
+				EVIDENCE: "artifacts/evidence.json",
+				THRESHOLD: { path: "artifacts/evidence.json", select: "threshold" },
+			},
+		});
+		// and an agent reads the same artifact through its own channel
+		expect(readerReads).toEqual([{ path: "artifacts/evidence.json" }]);
 	});
 
 	it("rejects a non-primitive interpolation at the effect boundary", async () => {

@@ -25,7 +25,7 @@ describe("examples", () => {
 			schema: { type: "object", required: ["artifacts_dir", "buckets", "coverage_thresholds"] },
 		});
 		const normalize = parsed.ast.states.normalize;
-		if (normalize?.kind !== "state" || normalize.action.kind !== "agent") throw new Error("expected agent state");
+		if (normalize?.kind !== "state" || normalize.action.kind !== "script") throw new Error("expected agent state");
 		expect(normalize.action.artifacts?.evidence?.shape).toMatchObject({
 			kind: "jsonSchema",
 			schema: { type: "object", required: ["facts"] },

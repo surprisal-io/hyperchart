@@ -113,7 +113,22 @@ export type UserActionCst = {
 	reply?: OutputSpecCst;
 };
 
-export type StateActionCst = AgentActionCst | UserActionCst;
+// A command step: the runtime executes the command and answers with a completion event, exactly
+// like an agent — same artifact/reads channels, same reply shape for the parsed stdout. The
+// command and args are static; parameters flow through env templates (the taskflow contract).
+// The same shape doubles as a script GuardRef when used in a validate position.
+export type ScriptActionCst = {
+	kind: "script";
+	command: string;
+	args?: readonly string[];
+	// All dynamic values flow through env: templates render from args/results, artifactOf renders
+	// to the producer's artifact PATH — the process reads the file itself, no prompt channel.
+	env?: Record<string, Templatable | ArtifactOfCst>;
+	artifacts?: Record<string, Templatable | ArtifactCst>;
+	reply?: OutputSpecCst;
+};
+
+export type StateActionCst = AgentActionCst | UserActionCst | ScriptActionCst;
 
 // Serializable reference to validation code. Inline closures are not allowed: the chart stays
 // plain data. A validator is an acceptance check on the action's completion claim — it runs live
@@ -265,7 +280,16 @@ export type UserActionAst = Readonly<{
 	options: readonly string[];
 	reply?: OutputSpecAst;
 }>;
-export type StateActionAst = AgentActionAst | UserActionAst;
+export type ScriptActionAst = Readonly<{
+	kind: "script";
+	uid: ActionUID;
+	command: string;
+	args: readonly string[];
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst>>;
+	artifacts?: Readonly<Record<string, ArtifactAst>>;
+	reply?: OutputSpecAst;
+}>;
+export type StateActionAst = AgentActionAst | UserActionAst | ScriptActionAst;
 
 // Absolute path of a state in the chart: local ids joined with "." (e.g. "review.analyze").
 // Top-level states' paths equal their ids, so flat charts keep their addresses.
