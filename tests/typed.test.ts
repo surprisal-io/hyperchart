@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, arg as untypedArg, final, json, refs, result as untypedResult, t, z } from "../src/index.js";
+import { agent, arg as untypedArg, final, json, map, refs, result as untypedResult, t, z } from "../src/index.js";
 
 type Args = { topic: string; goal: string };
 
@@ -91,6 +91,67 @@ describe("typed refs (TS-first)", () => {
 		>();
 		// @ts-expect-error artifact name drifted
 		wrongArtifact.chart(body);
+	});
+
+	it("types key()/item() from the map registry and verifies it against over", () => {
+		const Items = z.object({ buckets: z.record(z.string(), z.object({ purpose: z.string(), n: z.number() })) });
+		type Item = z.infer<typeof Items>["buckets"][string];
+		const body = {
+			kind: "chart",
+			id: "typed-map",
+			initial: "plan",
+			states: {
+				plan: {
+					kind: "state",
+					action: agent("planner", { reply: Items }),
+					transitions: { OK: "research" },
+				},
+				research: map({
+					over: untypedResult("plan", "buckets"),
+					initial: "scout",
+					onDone: "done",
+					states: {
+						scout: { kind: "state", action: agent("scout"), transitions: { OK: "found" } },
+						found: final(),
+					},
+				}),
+				done: final(),
+			},
+		} as const;
+
+		const typed = refs<
+			Record<string, never>,
+			{ plan: z.infer<typeof Items> },
+			Record<never, Record<string, unknown>>,
+			{ research: Item }
+		>();
+		expect(typed.key("research")).toEqual({ kind: "key", map: "research" });
+		expect(typed.item("research", "purpose")).toEqual({ kind: "item", map: "research", path: "purpose" });
+		// @ts-expect-error unknown map
+		typed.key("nope");
+		// @ts-expect-error typo in the item selector
+		typed.item("research", "purposee");
+		// a string field interpolates freely; the whole item needs json()
+		t`${typed.key("research")} ${typed.item("research", "purpose")} ${json(typed.item("research"))}`;
+		// @ts-expect-error a whole item cannot be embedded silently
+		t`${typed.item("research")}`;
+		// @ts-expect-error selectors do not descend into a primitive field
+		typed.item("research", "purpose.deeper");
+
+		// over: untypedResult carries no phantom, so the chart-computed item type is unknown — the
+		// registry must say so; a concrete claim is drift.
+		// @ts-expect-error maps registry is out of sync with the chart (unknown vs Item)
+		typed.chart(body);
+		const honest = refs<
+			Record<string, never>,
+			{ plan: z.infer<typeof Items> },
+			Record<never, Record<string, unknown>>,
+			{ research: unknown }
+		>();
+		expect(honest.chart(body).id).toBe("typed-map");
+		const unregistered = refs<Record<string, never>, { plan: z.infer<typeof Items> }>();
+		// @ts-expect-error the chart declares a map the registry does not mention
+		unregistered.chart(body);
 	});
 
 	it("templates admit only primitive-valued refs; objects need an explicit json()", () => {

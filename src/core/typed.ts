@@ -67,6 +67,27 @@ export type FilesOf<C> = C extends { states: infer S }
 		>
 	: never;
 
+// The value type an InputRef resolves to, recovered from its __value phantom.
+type RefValue<R> = R extends { __value?(value: infer V): void } ? V : unknown;
+
+// The per-instance item type of a map's `over` value: array element or record value.
+type ItemOf<V> = V extends readonly (infer E)[] ? E : V extends Record<string, infer E> ? E : unknown;
+
+// The map registry the chart itself declares: every map state, template path → the item type its
+// instances are spawned with (carried by the phantom of the `over` ref).
+export type MapsOf<C> = C extends { states: infer S }
+	? Simplify2<
+			UnionToIntersection<
+				FlattenStates<S> extends infer E
+					? E extends [infer P extends string, { kind: "map"; over: infer R }]
+						? { [K in P]: ItemOf<RefValue<R>> }
+						: never
+					: never
+			> &
+				NonNullable<unknown> // intersection identity for the no-entries case
+		>
+	: never;
+
 // Both directions must hold: everything the registry declares exists in the chart with the same
 // type, and everything the chart declares is written down in the registry.
 type Mutual<Declared, Actual, Message extends string> = [Declared] extends [Actual]
@@ -75,13 +96,18 @@ type Mutual<Declared, Actual, Message extends string> = [Declared] extends [Actu
 		: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } }
 	: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } };
 
-type VerifyDecl<C, Results, Files> = Mutual<Results, ResultsOf<C>, "results registry is out of sync with the chart"> &
-	Mutual<Files, FilesOf<C>, "files registry is out of sync with the chart">;
+type VerifyDecl<C, Results, Files, Maps> = Mutual<
+	Results,
+	ResultsOf<C>,
+	"results registry is out of sync with the chart"
+> &
+	Mutual<Files, FilesOf<C>, "files registry is out of sync with the chart"> &
+	Mutual<Maps, MapsOf<C>, "maps registry is out of sync with the chart">;
 
-type Refs<Args, Results, Files> = {
+type Refs<Args, Results, Files, Maps> = {
 	// The checking chart constructor: accepts only a literal whose declared replies/artifacts
 	// match the registry the refs were built from — the registry cannot drift from the chart.
-	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Results, Files>) => C;
+	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Results, Files, Maps>) => C;
 	arg: <K extends keyof Args & string>(name: K) => InputRef<Args[K]>;
 	result: {
 		<S extends keyof Results & string>(state: S): InputRef<Results[S]>;
@@ -109,6 +135,13 @@ type Refs<Args, Results, Files> = {
 			opts: { artifact: A },
 		): JoinArtifactOfCst;
 	};
+	// The instance args of the named map (its template path — the registry key): the key is
+	// always a string, the item type comes from the registry and is verified against `over`.
+	key: <M extends keyof Maps & string>(map: M) => InputRef<string>;
+	item: {
+		<M extends keyof Maps & string>(map: M): InputRef<Maps[M]>;
+		<M extends keyof Maps & string, P extends Paths<Maps[M]> & string>(map: M, path: P): InputRef<ValueAt<Maps[M], P>>;
+	};
 };
 
 // Typed refs, TS-first: Args is the shape of the run's arguments, Results maps state paths to
@@ -123,7 +156,8 @@ export function refs<
 	Args extends Record<string, unknown>,
 	Results extends Record<string, unknown>,
 	Files extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
->(): Refs<Args, Results, Files> {
+	Maps extends Record<string, unknown> = Record<never, unknown>,
+>(): Refs<Args, Results, Files, Maps> {
 	return {
 		chart: (def) => def,
 		arg: (name) => ({ kind: "arg", name }),
@@ -131,17 +165,23 @@ export function refs<
 			kind: "result",
 			state,
 			...(path === undefined ? {} : { path }),
-		})) as Refs<Args, Results, Files>["result"],
+		})) as Refs<Args, Results, Files, Maps>["result"],
 		artifactOf: ((state: string, opts: { artifact?: string; select?: string } = {}) => ({
 			kind: "artifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 			...(opts.select === undefined ? {} : { select: opts.select }),
-		})) as Refs<Args, Results, Files>["artifactOf"],
+		})) as Refs<Args, Results, Files, Maps>["artifactOf"],
 		joinArtifactOf: ((state: string, opts: { artifact?: string } = {}) => ({
 			kind: "joinArtifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
-		})) as Refs<Args, Results, Files>["joinArtifactOf"],
+		})) as Refs<Args, Results, Files, Maps>["joinArtifactOf"],
+		key: (map) => ({ kind: "key", map }),
+		item: ((map: string, path?: string) => ({
+			kind: "item",
+			map,
+			...(path === undefined ? {} : { path }),
+		})) as Refs<Args, Results, Files, Maps>["item"],
 	};
 }

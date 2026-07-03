@@ -502,11 +502,13 @@ function validateTargets(
 			// Result refs address action states by absolute path — data lookup, not control flow.
 			for (const template of actionTemplates(node.action)) {
 				for (const ref of template.refs) {
-					if ((ref.kind === "key" || ref.kind === "item") && !insideMap(states, path)) {
+					if ((ref.kind === "key" || ref.kind === "item") && !insideMap(states, path, ref.map)) {
 						diagnostics.push(
 							diagnostic(
 								"INVALID_MAP_REF",
-								`A template in state '${path}' uses ${ref.kind}() outside any map.`,
+								ref.map === undefined
+									? `A template in state '${path}' uses ${ref.kind}() outside any map.`
+									: `A template in state '${path}' uses ${ref.kind}() outside map '${ref.map}'.`,
 								`${pointer}/action`,
 								source,
 							),
@@ -567,10 +569,11 @@ function validateTargets(
 	}
 }
 
-function insideMap(states: Record<StatePath, StateAst>, path: StatePath): boolean {
+// Is `path` inside a map — any map, or (when `map` names one) that specific ancestor.
+function insideMap(states: Record<StatePath, StateAst>, path: StatePath, map?: StatePath): boolean {
 	let cur = states[path]?.parent;
 	while (cur !== undefined) {
-		if (states[cur]?.kind === "map") return true;
+		if (states[cur]?.kind === "map" && (map === undefined || cur === map)) return true;
 		cur = states[cur]?.parent;
 	}
 	return false;
@@ -826,17 +829,24 @@ function toInputRef(
 			...jsonMark,
 		};
 	}
-	if (input.kind === "key") {
-		return { kind: "key", ...jsonMark };
-	}
-	if (input.kind === "item") {
+	if (input.kind === "key" || input.kind === "item") {
+		if (input.map !== undefined && (typeof input.map !== "string" || input.map.length === 0)) {
+			diagnostics.push(
+				diagnostic("INVALID_TEMPLATE", `${input.kind} ref map must be a non-empty state path.`, path, source),
+			);
+			return undefined;
+		}
+		const mapField = input.map === undefined ? {} : { map: input.map };
+		if (input.kind === "key") {
+			return { kind: "key", ...mapField, ...jsonMark };
+		}
 		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
 			diagnostics.push(
 				diagnostic("INVALID_TEMPLATE", "item ref path selector must be a non-empty string.", path, source),
 			);
 			return undefined;
 		}
-		return { kind: "item", ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
+		return { kind: "item", ...mapField, ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
 	}
 	diagnostics.push(
 		diagnostic("INVALID_TEMPLATE", "Template ref kind must be 'arg', 'result', 'key' or 'item'.", path, source),

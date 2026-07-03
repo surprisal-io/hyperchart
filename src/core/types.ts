@@ -168,13 +168,17 @@ export type InputRef<V = unknown> = (
 			state: StatePath;
 			path?: string;
 	  }
-	// The instance args of the nearest enclosing map: its key, and its spawn-pinned item
-	// (optionally narrowed by a dot-path). Only meaningful inside a map's body.
+	// The instance args of an enclosing map: its key, and its spawn-pinned item (optionally
+	// narrowed by a dot-path). `map` names the map by template path — required for nesting and
+	// set by the typed layer; without it the nearest enclosing map is used. Only meaningful
+	// inside that map's body.
 	| {
 			kind: "key";
+			map?: StatePath;
 	  }
 	| {
 			kind: "item";
+			map?: StatePath;
 			path?: string;
 	  }
 ) & {

@@ -87,17 +87,21 @@ export function matchesDeclaredUid(actual: ActionUID, declared: ActionUID): bool
 }
 
 // The nearest enclosing instance, scanning right to left: for "outer#a.chapters#k.author" that is
-// the map container "outer#a.chapters" and the key "k". This is the scope key()/item() resolve in.
-export function nearestInstance(path: StatePath): { container: StatePath; key: string } | undefined {
+// the map container "outer#a.chapters" and the key "k". This is the scope key()/item() resolve
+// in; a ref naming its map passes the map's template path as `container` to pick a specific
+// enclosing instance instead of the innermost one.
+export function nearestInstance(
+	path: StatePath,
+	container?: StatePath,
+): { container: StatePath; key: string } | undefined {
 	const segments = path.split(".");
 	for (let index = segments.length - 1; index >= 0; index--) {
 		const segment = segments[index] ?? "";
 		const hash = segment.indexOf("#");
-		if (hash !== -1) {
-			return {
-				container: [...segments.slice(0, index), segment.slice(0, hash)].join("."),
-				key: segment.slice(hash + 1),
-			};
+		if (hash === -1) continue;
+		const instance = [...segments.slice(0, index), segment.slice(0, hash)].join(".");
+		if (container === undefined || templatePath(instance) === container) {
+			return { container: instance, key: segment.slice(hash + 1) };
 		}
 	}
 	return undefined;

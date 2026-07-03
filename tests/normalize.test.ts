@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { InputRef } from "../src/index.js";
 import {
 	agent,
 	arg,
@@ -670,5 +671,31 @@ describe("normalizeChartConfig", () => {
 		const codes = parsed.diagnostics.map((d) => d.code);
 		expect(codes.filter((code) => code === "INVALID_MAP_REF")).toHaveLength(2);
 		expect(codes).toContain("UNKNOWN_INPUT_RESULT");
+
+		// A ref naming its map explicitly must sit inside THAT map, not just any map.
+		const wrongMap = normalizeChartConfig({
+			id: "wrong-map",
+			initial: "chapters",
+			states: {
+				chapters: map({
+					over: arg("items"),
+					initial: "author",
+					onDone: "done",
+					states: {
+						author: {
+							kind: "state" as const,
+							action: agent("author", {
+								task: t`${{ kind: "item", map: "other", path: "title" } as InputRef<string>}`,
+							}),
+							transitions: { OK: "written" },
+						},
+						written: final(),
+					},
+				}),
+				done: final(),
+			},
+		});
+		expect(wrongMap.ok).toBe(false);
+		expect(wrongMap.diagnostics.map((d) => d.code)).toContain("INVALID_MAP_REF");
 	});
 });

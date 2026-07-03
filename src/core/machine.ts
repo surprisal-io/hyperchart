@@ -757,9 +757,9 @@ function refLabel(ref: InputRef): string {
 		case "result":
 			return `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
 		case "key":
-			return "map key";
+			return `map key${ref.map === undefined ? "" : ` of '${ref.map}'`}`;
 		case "item":
-			return `map item${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+			return `map item${ref.map === undefined ? "" : ` of '${ref.map}'`}${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
 	}
 }
 
@@ -774,7 +774,7 @@ function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknow
 		return args[ref.name];
 	}
 	if (ref.kind === "key" || ref.kind === "item") {
-		const instance = nearestInstance(stateId);
+		const instance = nearestInstance(stateId, ref.map);
 		if (instance === undefined) {
 			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} used outside any map instance`);
 		}
