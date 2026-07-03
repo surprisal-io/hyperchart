@@ -9,9 +9,18 @@ import type { DurableLogRecord } from "./durable_events.js";
 // it makes the effect id of each phase unique.
 export type PendingAction =
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
+	// rejections counts the rejected rounds of this invoke cycle — derived from validated(false)
+	// facts, it decides when the retry budget (state.retries) is exhausted.
 	| { actionUid: ActionUID; seqId: number; timestamp: number; phase: "running" }
-	| { actionUid: ActionUID; seqId: number; phase: "validating"; event: ChartEvent }
-	| { actionUid: ActionUID; seqId: number; phase: "rejected"; event: ChartEvent; reason?: string };
+	| { actionUid: ActionUID; seqId: number; phase: "validating"; event: ChartEvent; rejections: number }
+	| {
+			actionUid: ActionUID;
+			seqId: number;
+			phase: "rejected";
+			event: ChartEvent;
+			rejections: number;
+			reason?: string;
+	  };
 
 export type BranchProjection = {
 	// The active configuration: one leaf normally, one per region while a parallel is active.
@@ -77,13 +86,19 @@ export function projectBranch(
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "complete");
 							const state = ast.states[record.actionUid.state];
 							if (state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED") {
-								// The completion goes into validation, restarting the cycle if a previous round was rejected.
+								// The completion goes into validation, restarting the cycle if a previous round was
+								// rejected; the rejection count survives the retry.
+								const previous = projection.pendingActions.find((pending) =>
+									sameActionUid(pending.actionUid, record.actionUid),
+								);
+								const rejections = previous?.phase === "rejected" ? previous.rejections : 0;
 								removePendingAction(projection, record.actionUid);
 								projection.pendingActions.push({
 									actionUid: record.actionUid,
 									seqId: record.seqId,
 									phase: "validating",
 									event: record.event,
+									rejections,
 								});
 								break;
 							}
@@ -113,15 +128,26 @@ export function projectBranch(
 							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned);
-						} else {
-							projection.pendingActions[projection.pendingActions.indexOf(validating)] = {
-								actionUid: validating.actionUid,
-								seqId: record.seqId,
-								phase: "rejected",
-								event: validating.event,
-								...(typeof record.outcome === "object" ? { reason: record.outcome.reason } : {}),
-							};
+							break;
 						}
+						const node = ast.states[record.actionUid.state];
+						const retries = node?.kind === "state" ? node.retries : undefined;
+						const rejections = validating.rejections + 1;
+						if (retries !== undefined && rejections > retries) {
+							// The budget is exhausted: the rejection is terminal and becomes a FAILED
+							// transition. The entry deliberately stays pending — the exit sweep reports it
+							// abandoned, so the machine cancels the still-running session.
+							applyTransition(projection, ast, record.actionUid.state, "FAILED", abandoned);
+							break;
+						}
+						projection.pendingActions[projection.pendingActions.indexOf(validating)] = {
+							actionUid: validating.actionUid,
+							seqId: record.seqId,
+							phase: "rejected",
+							event: validating.event,
+							rejections,
+							...(typeof record.outcome === "object" ? { reason: record.outcome.reason } : {}),
+						};
 						break;
 					}
 				}

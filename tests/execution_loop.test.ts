@@ -89,7 +89,7 @@ function twoStepAst(): ChartAst {
 	return result.ast;
 }
 
-function validatedAst(onReject?: "resume" | "restart"): ChartAst {
+function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartAst {
 	const result = normalizeChartConfig(
 		chart({
 			kind: "chart",
@@ -101,6 +101,7 @@ function validatedAst(onReject?: "resume" | "restart"): ChartAst {
 					action: agent("coder"),
 					validate: tsImport("./checks.js", "testsPass"),
 					...(onReject === undefined ? {} : { onReject }),
+					...(retries === undefined ? {} : { retries }),
 					transitions: { DONE: "done", FAILED: "failed" },
 				},
 				done: final(),
@@ -370,9 +371,9 @@ describe("execution loop", () => {
 
 	function runValidatedChart(
 		outcomes: GuardOutcome[],
-		options: { onReject?: "resume" | "restart"; claim?: string } = {},
+		options: { onReject?: "resume" | "restart"; claim?: string; retries?: number } = {},
 	) {
-		const ast = validatedAst(options.onReject);
+		const ast = validatedAst(options.onReject, options.retries);
 		const uid = actionUid(ast, "work");
 		const events: MachineEvent[] = [];
 		const validations: Extract<Effect, { kind: "validate" }>[] = [];
@@ -453,6 +454,20 @@ describe("execution loop", () => {
 		expect(rejections).toHaveLength(1);
 		expect(rejections[0]).toEqual(expect.objectContaining({ kind: "rejected", onReject: "restart" }));
 		expect(rejections[0]?.reason).toBeUndefined();
+	});
+
+	it("exhausts the retry budget into FAILED and cancels the agent", async () => {
+		// retries: 1 — one rejected round may be retried; the second rejection is terminal.
+		const { runtime, rejections, run } = runValidatedChart([{ ok: false, reason: "no" }, false], { retries: 1 });
+
+		const state = await run;
+
+		expect(state.projection.activeLeaves).toEqual(["failed"]);
+		// only the first rejection produced feedback; the terminal one went straight to FAILED
+		expect(rejections).toHaveLength(1);
+		expect(rejections[0]).toMatchObject({ attempt: 1 });
+		// the still-running session was abandoned by the FAILED exit and must be killed
+		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "cancel")).toHaveLength(1);
 	});
 
 	it("lets FAILED bypass validation", async () => {

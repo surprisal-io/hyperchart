@@ -118,6 +118,8 @@ export type RejectedEffect = Readonly<{
 	actionUid: ActionUID;
 	event: ChartEvent;
 	onReject: OnReject;
+	// Which rejected round this is (1-based); the budget lives in the state's `retries`.
+	attempt: number;
 	reason?: string;
 }>;
 
@@ -410,6 +412,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 				actionUid: pending.actionUid,
 				event: pending.event,
 				onReject: node.onReject ?? "resume",
+				attempt: pending.rejections,
 				...(pending.reason === undefined ? {} : { reason: pending.reason }),
 			};
 	}

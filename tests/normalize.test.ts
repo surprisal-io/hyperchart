@@ -489,6 +489,35 @@ describe("normalizeChartConfig", () => {
 		expect(badValue.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REJECT");
 	});
 
+	it("validates the retry budget declaration", () => {
+		const withoutValidate = normalizeChartConfig({
+			id: "no-validate",
+			initial: "work",
+			states: {
+				work: { action: agent("coder"), retries: 2, transitions: { DONE: "done", FAILED: "done" } },
+				done: final(),
+			},
+		});
+		expect(withoutValidate.ok).toBe(false);
+		expect(withoutValidate.diagnostics.map((d) => d.code)).toContain("INVALID_RETRIES");
+
+		const noRoute = normalizeChartConfig({
+			id: "no-route",
+			initial: "work",
+			states: {
+				work: {
+					action: agent("coder"),
+					validate: tsImport("./checks.js", "testsPass"),
+					retries: 2,
+					transitions: { DONE: "done" }, // nowhere for the exhausted budget to go
+				},
+				done: final(),
+			},
+		});
+		expect(noRoute.ok).toBe(false);
+		expect(noRoute.diagnostics.map((d) => d.code)).toContain("MISSING_FAILED_ROUTE");
+	});
+
 	it("reports invalid initial state and transition targets", () => {
 		const result = normalizeChartConfig(
 			chart({

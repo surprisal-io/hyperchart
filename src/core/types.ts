@@ -192,6 +192,10 @@ export type ActionStateCst = {
 	after?: AfterCst;
 	validate?: GuardRef;
 	onReject?: OnReject;
+	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection is
+	// terminal — the claim turns into a FAILED transition (a FAILED route must exist, possibly on
+	// an ancestor) and the abandoned session is cancelled. Requires validate; omitted = unbounded.
+	retries?: number;
 };
 
 export type FinalStateCst = {
@@ -282,6 +286,7 @@ export type ActionStateAst = Readonly<{
 	validate?: GuardRef;
 	// Present only when validate is set; defaults to "resume".
 	onReject?: OnReject;
+	retries?: number;
 }>;
 
 export type FinalStateAst = Readonly<{

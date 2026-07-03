@@ -277,6 +277,18 @@ function collectState(
 				onReject = input.onReject;
 			}
 		}
+		let retries: number | undefined;
+		if (input.retries !== undefined) {
+			if (typeof input.retries !== "number" || !Number.isInteger(input.retries) || input.retries < 0) {
+				diagnostics.push(
+					diagnostic("INVALID_RETRIES", "retries must be a non-negative integer.", `${pointer}/retries`, source),
+				);
+			} else if (input.validate === undefined) {
+				diagnostics.push(diagnostic("INVALID_RETRIES", "retries requires validate.", `${pointer}/retries`, source));
+			} else {
+				retries = input.retries;
+			}
+		}
 		if (action === undefined) return;
 		states[path] = deepFreeze({
 			kind: "state",
@@ -286,6 +298,7 @@ function collectState(
 			transitions: transitions ?? {},
 			...(after === undefined ? {} : { after }),
 			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
+			...(retries === undefined ? {} : { retries }),
 		} satisfies ActionStateAst);
 		return;
 	}
@@ -328,6 +341,28 @@ function validateTargets(
 			}
 		}
 		if (node.kind === "state") {
+			// An exhausted retry budget turns into a FAILED transition — it needs a route.
+			if (node.retries !== undefined) {
+				let handled = false;
+				let cur: StateAst | undefined = node;
+				while (cur !== undefined) {
+					if (cur.kind !== "final" && "FAILED" in cur.transitions) {
+						handled = true;
+						break;
+					}
+					cur = cur.parent === undefined ? undefined : states[cur.parent];
+				}
+				if (!handled) {
+					diagnostics.push(
+						diagnostic(
+							"MISSING_FAILED_ROUTE",
+							`State '${path}' declares retries but no FAILED transition is reachable for the exhausted budget.`,
+							`${pointer}/retries`,
+							source,
+						),
+					);
+				}
+			}
 			if (node.after !== undefined && !(sibling(node.after.target) in states)) {
 				diagnostics.push(
 					diagnostic(

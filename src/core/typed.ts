@@ -43,7 +43,8 @@ export type ResultsOf<C> = C extends { states: infer S }
 						? { [K in P]: InferSpec<R> }
 						: never
 					: never
-			> & NonNullable<unknown> // intersection identity for the no-entries case
+			> &
+				NonNullable<unknown> // intersection identity for the no-entries case
 		>
 	: never;
 
@@ -61,7 +62,8 @@ export type FilesOf<C> = C extends { states: infer S }
 						? { [K in P]: ArtifactShapes<A> }
 						: never
 					: never
-			> & NonNullable<unknown> // intersection identity for the no-entries case
+			> &
+				NonNullable<unknown> // intersection identity for the no-entries case
 		>
 	: never;
 
