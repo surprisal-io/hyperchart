@@ -4,7 +4,11 @@ import {
 	chart,
 	arg,
 	compound,
+	artifact,
+	artifactOf,
 	final,
+	json,
+	jsonSchema,
 	normalizeChartConfig,
 	parallel,
 	result,
@@ -563,14 +567,17 @@ describe("execution loop", () => {
 				states: {
 					plan: {
 						kind: "state",
-						action: agent("planner", { task: t`Plan a report on ${arg("topic")}.` }),
+						action: agent("planner", {
+							task: t`Plan a report on ${arg("topic")}.`,
+							reply: jsonSchema({ type: "object", required: ["steps"], properties: {} }),
+						}),
 						transitions: { PLAN_READY: "build" },
 					},
 					build: {
 						kind: "state",
 						action: agent("builder", {
-							task: t`Build a report on ${arg("topic")} following steps ${result("plan", "steps")}.`,
-							output: t`out/${arg("topic")}.html`,
+							task: t`Build a report on ${arg("topic")} following steps ${json(result("plan", "steps"))}.`,
+							artifacts: { report: t`out/${arg("topic")}.html` },
 						}),
 						transitions: { BUILT: "done" },
 					},
@@ -583,6 +590,7 @@ describe("execution loop", () => {
 		const events: MachineEvent[] = [];
 		const tasks: Record<string, unknown> = {};
 		const outputs: Record<string, unknown> = {};
+		const resultShapes: Record<string, unknown> = {};
 		const runtime = new MockRuntime({
 			ast,
 			events,
@@ -590,7 +598,8 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						tasks[effect.actionUid.state] = effect.task;
-						outputs[effect.actionUid.state] = effect.output;
+						outputs[effect.actionUid.state] = effect.artifacts;
+						resultShapes[effect.actionUid.state] = effect.reply;
 						const reply =
 							effect.actionUid.state === "plan"
 								? { type: "PLAN_READY", output: { steps: ["a", "b"] } }
@@ -617,7 +626,112 @@ describe("execution loop", () => {
 		// Templates arrive rendered: strings verbatim, non-strings as JSON — in every templated param.
 		expect(tasks.plan).toBe("Plan a report on AI report.");
 		expect(tasks.build).toBe('Build a report on AI report following steps ["a","b"].');
-		expect(outputs.build).toBe("out/AI report.html");
+		expect(outputs.build).toEqual([{ name: "report", path: "out/AI report.html" }]);
+		// The reply channel is a first-class part of the spawn request: the payload shape the
+		// runtime should instruct and validate against.
+		expect(resultShapes.plan).toEqual({
+			kind: "jsonSchema",
+			schema: { type: "object", required: ["steps"], properties: {} },
+		});
+		expect(resultShapes.build).toBeUndefined();
+	});
+
+	it("fileOf reads inherit the producer's rendered path and content shape", async () => {
+		const shape = jsonSchema({ type: "object", required: ["claims"], properties: {} });
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "files-chart",
+				initial: "writer",
+				states: {
+					writer: {
+						kind: "state",
+						action: agent("writer", { artifacts: { claims: artifact(t`out/${arg("topic")}.json`, shape) } }),
+						transitions: { DONE: "reader" },
+					},
+					reader: {
+						kind: "state",
+						action: agent("reader", {
+							reads: [artifactOf("writer"), artifactOf("writer", { artifact: "claims", select: "claims.approved" })],
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		const outputs: Record<string, unknown> = {};
+		const readsSeen: Record<string, unknown> = {};
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						outputs[effect.actionUid.state] = effect.artifacts;
+						readsSeen[effect.actionUid.state] = effect.reads;
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await start(runtime, { topic: "ai" });
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		// The producer was told where to write and what shape; the consumer reads the SAME thing —
+		// path re-rendered from the same facts, shape inherited from the declaration.
+		expect(outputs.writer).toEqual([{ name: "claims", path: "out/ai.json", shape }]);
+		// a plain read (single artifact resolved by name omission), and a narrowed read of one field
+		expect(readsSeen.reader).toEqual([
+			{ path: "out/ai.json", shape },
+			{ path: "out/ai.json", shape, select: "claims.approved" },
+		]);
+	});
+
+	it("rejects a non-primitive interpolation at the effect boundary", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "boundary-chart",
+				initial: "plan",
+				states: {
+					plan: { kind: "state", action: agent("planner"), transitions: { PLAN_READY: "build" } },
+					build: {
+						kind: "state",
+						// untyped ref: the object slips past TS but must not slip past the renderer
+						action: agent("builder", { task: t`Build from ${result("plan")}` }),
+						transitions: { BUILT: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "PLAN_READY", output: { steps: [] } } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		await expect(loop(runtime)).rejects.toThrow(
+			"result of 'plan' resolved to a non-primitive value; wrap the ref in json()",
+		);
 	});
 
 	it("start over a non-empty log resumes without reseeding args", async () => {
@@ -910,6 +1024,17 @@ describe("execution loop", () => {
 			"agent:review.fix",
 			"complete:review.fix",
 		]);
+	});
+
+	it("tells the agent which completion events the machine will accept", async () => {
+		const ast = compoundAst();
+		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast, "review.analyze"))], events: [] });
+
+		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+
+		const [agentEffect] = runtime.effectBatches.flat().filter((effect) => effect.kind === "agent");
+		// analyze's own OK plus the compound's bubbled FAILED, innermost first.
+		expect(agentEffect?.events).toEqual(["OK", "FAILED"]);
 	});
 
 	it("bubbles an unhandled event to the ancestor's handler", async () => {

@@ -56,7 +56,10 @@ export {
 	createChart,
 	arg,
 	deepFreeze,
+	artifact,
+	artifactOf,
 	final,
+	json,
 	parallel,
 	result,
 	t,
@@ -69,6 +72,11 @@ export {
 } from "./core/dsl.js";
 
 export { loop, start } from "./core/execution_loop.js";
+// zod is part of the authoring surface (schema values in reply/artifact shapes): re-exported so
+// charts depend on one package only.
+export { z } from "zod";
+export { refs } from "./core/typed.js";
+export type { Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
 export type {

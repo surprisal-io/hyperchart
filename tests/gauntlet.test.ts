@@ -5,6 +5,7 @@ import {
 	arg,
 	compound,
 	final,
+	json,
 	normalizeChartConfig,
 	parallel,
 	result,
@@ -109,7 +110,7 @@ function paramChart(): ChartAst {
 				},
 				build: {
 					kind: "state",
-					action: agent("builder", { task: t`Build ${arg("topic")} following ${result("plan", "steps")}.` }),
+					action: agent("builder", { task: t`Build ${arg("topic")} following ${json(result("plan", "steps"))}.` }),
 					transitions: { BUILT: "done" },
 				},
 				done: final(),

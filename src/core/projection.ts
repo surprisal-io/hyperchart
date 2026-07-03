@@ -233,6 +233,31 @@ export function hasTransition(ast: ChartAst, fromPath: StatePath, eventType: str
 	return findHandler(ast, fromPath, eventType) !== undefined;
 }
 
+// Every event type a completion from this leaf can take somewhere: the leaf's own transitions
+// plus everything catchable by its ancestors (bubbling), innermost first. This is what the
+// machine would accept — told to the agent upfront instead of learned by rejection.
+export function allowedEvents(ast: ChartAst, fromPath: StatePath): string[] {
+	const events: string[] = [];
+	const seen = new Set<string>();
+	let path: StatePath | undefined = fromPath;
+	while (path !== undefined) {
+		const node: StateAst | undefined = ast.states[path];
+		if (node === undefined) {
+			throw new Error(`Broken parent chain: state ${path} not found`);
+		}
+		if (node.kind !== "final") {
+			for (const eventType of Object.keys(node.transitions)) {
+				if (!seen.has(eventType)) {
+					seen.add(eventType);
+					events.push(eventType);
+				}
+			}
+		}
+		path = node.parent;
+	}
+	return events;
+}
+
 // Entering a state resolves it to active leaves: compounds and regions drill down their initial
 // chain, parallels enter every region, and a final child immediately completes its compound
 // container through onDone — nothing is logged, replay recomputes the whole chain. A final in a

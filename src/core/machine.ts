@@ -5,14 +5,24 @@ import type {
 	AgentActionAst,
 	ChartAst,
 	GuardOutcome,
+	ArtifactAst,
+	ArtifactOfAst,
 	GuardRef,
 	InputRef,
 	OnReject,
+	OutputSpecAst,
 	TemplateAst,
 	UserActionAst,
 } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
-import { hasTransition, isFinalState, projectBranch, type BranchProjection, type PendingAction } from "./projection.js";
+import {
+	allowedEvents,
+	type BranchProjection,
+	hasTransition,
+	isFinalState,
+	type PendingAction,
+	projectBranch,
+} from "./projection.js";
 
 export type MachineState = {
 	ast: ChartAst;
@@ -26,15 +36,34 @@ export type MachineState = {
 export type EffectId = string;
 
 // A spawn-ready subagent call: the definition name and frontmatter overrides live in `action`;
-// the fields below are the templated parameters rendered into final text by the machine.
+// task/output/reads are the templated parameters rendered into final text by the machine.
+// A file parameter with its path rendered and — when the producer declared one — the shape of
+// its content; the runtime uses the shape both to instruct the agent and to verify the file.
+export type RenderedArtifact = Readonly<{
+	// Present on the producing side: the artifact's declared name.
+	name?: string;
+	path: string;
+	shape?: OutputSpecAst;
+	// Present on artifactOf reads with a selector: the runtime hands the agent only this field of the
+	// file's content (validated against `shape`, which describes the WHOLE file).
+	select?: string;
+}>;
+
 export type AgentEffect = Readonly<{
 	kind: "agent";
 	id: EffectId;
 	actionUid: ActionUID;
 	action: AgentActionAst;
 	task?: string;
-	output?: string;
-	reads?: readonly string[];
+	// The artifact channel: named deliverable files to produce (with shapes), files to read first.
+	artifacts?: readonly RenderedArtifact[];
+	reads?: readonly RenderedArtifact[];
+	// The reply (stdout) channel — the step's RESULT: which completion event types the machine
+	// will accept (own transitions plus bubbling ancestors), and what shape the event's payload
+	// must have — it becomes results[state] once accepted. The runtime tells the agent both
+	// upfront and validates the actual reply at the boundary.
+	events: readonly string[];
+	reply?: OutputSpecAst;
 }>;
 
 export type UserEffect = Readonly<{
@@ -281,11 +310,20 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 					id,
 					actionUid: pending.actionUid,
 					action,
+					events: allowedEvents(state.ast, pending.actionUid.state),
+					...(action.reply === undefined ? {} : { reply: action.reply }),
 					...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, node.id) }),
-					...(action.output === undefined ? {} : { output: renderTemplate(state, action.output, node.id) }),
+					...(action.artifacts === undefined
+						? {}
+						: {
+								artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
+									name,
+									...renderArtifact(state, declared, node.id),
+								})),
+							}),
 					...(action.reads === undefined
 						? {}
-						: { reads: action.reads.map((read) => renderTemplate(state, read, node.id)) }),
+						: { reads: action.reads.map((read) => renderRead(state, read, node.id)) }),
 				};
 			}
 			return {
@@ -475,16 +513,71 @@ function missingInvokes(state: MachineState): ActionUID[] {
 }
 
 // Templates are rendered, never logged: the same args/results facts always render to the same
-// text, so a restarted machine hands the agent an identical call. A ref into a missing
-// arg/result is a chart-ordering bug — fail loud.
+// text, so a restarted machine hands the agent an identical call. This is the effect boundary —
+// the last moment the engine holds the value — so the parameter contract is enforced here: a ref
+// into a missing arg/result and a non-primitive value without a json() mark both fail loud.
 function renderTemplate(state: MachineState, template: TemplateAst, stateId: string): string {
 	const parts: string[] = [template.strings[0] ?? ""];
 	template.refs.forEach((ref, index) => {
-		const value = resolveRef(state, ref, stateId);
-		parts.push(typeof value === "string" ? value : JSON.stringify(value));
+		parts.push(renderValue(resolveRef(state, ref, stateId), ref, stateId));
 		parts.push(template.strings[index + 1] ?? "");
 	});
 	return parts.join("");
+}
+
+function renderValue(value: unknown, ref: InputRef, stateId: string): string {
+	if (ref.json === true) {
+		const text = JSON.stringify(value);
+		if (text === undefined) {
+			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} is not JSON-serializable`);
+		}
+		return text;
+	}
+	if (typeof value === "string") {
+		return value;
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	throw new Error(
+		`Template in state ${stateId}: ${refLabel(ref)} resolved to a non-primitive value; wrap the ref in json() to embed it as JSON`,
+	);
+}
+
+function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: string): RenderedArtifact {
+	return {
+		path: renderTemplate(state, declared.path, stateId),
+		...(declared.shape === undefined ? {} : { shape: declared.shape }),
+	};
+}
+
+// An artifactOf read resolves to the producer's declared artifact — rendered from the same facts, so
+// path and shape can never drift from what the producer was told to write. Normalize guarantees
+// the reference resolves to exactly one artifact; a miss here means the chart changed under a
+// live log — fail loud.
+function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stateId: string): RenderedArtifact {
+	if (read.kind === "template") {
+		return { path: renderTemplate(state, read, stateId) };
+	}
+	const producer = state.ast.states[read.state];
+	const artifacts =
+		producer?.kind === "state" && producer.action.kind === "agent" ? producer.action.artifacts : undefined;
+	const names = Object.keys(artifacts ?? {});
+	const name = read.artifact ?? (names.length === 1 ? names[0] : undefined);
+	const declared = name === undefined ? undefined : artifacts?.[name];
+	if (declared === undefined) {
+		throw new Error(`Read in state ${stateId}: cannot resolve artifact '${read.artifact ?? "*"}' of ${read.state}`);
+	}
+	return {
+		...renderArtifact(state, declared, stateId),
+		...(read.select === undefined ? {} : { select: read.select }),
+	};
+}
+
+function refLabel(ref: InputRef): string {
+	return ref.kind === "arg"
+		? `arg '${ref.name}'`
+		: `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
 }
 
 function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknown {

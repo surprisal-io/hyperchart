@@ -62,7 +62,7 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "planner",
-        "outputSchema": {
+        "reply": {
           "kind": "jsonSchema",
           "schema": {
             "properties": {
@@ -96,7 +96,7 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "researcher",
-        "outputSchema": {
+        "reply": {
           "kind": "jsonSchema",
           "schema": {
             "properties": {

@@ -25,7 +25,7 @@ describe("normalizeChartConfig", () => {
 					start: {
 						kind: "state",
 						action: agent("worker", {
-							outputSchema: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
+							reply: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
 						}),
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
@@ -355,7 +355,7 @@ describe("normalizeChartConfig", () => {
 				build: {
 					action: agent("builder", {
 						task: t`Build ${arg("topic")} following ${result("plan", "steps")}`,
-						output: "claims.json",
+						artifacts: { claims: "claims.json" },
 					}),
 					transitions: { OK: "done" },
 				},
@@ -374,8 +374,10 @@ describe("normalizeChartConfig", () => {
 				{ kind: "result", state: "plan", path: "steps" },
 			],
 		});
-		// A plain string is a template with no refs.
-		expect(build.action.output).toEqual({ kind: "template", strings: ["claims.json"], refs: [] });
+		// A plain string artifact is a no-refs template path with no declared shape.
+		expect(build.action.artifacts).toEqual({
+			claims: { path: { kind: "template", strings: ["claims.json"], refs: [] } },
+		});
 
 		const inline = normalizeChartConfig({
 			id: "bad-template",
@@ -404,6 +406,24 @@ describe("normalizeChartConfig", () => {
 		});
 		expect(unknownResult.ok).toBe(false);
 		expect(unknownResult.diagnostics.map((d) => d.code)).toContain("UNKNOWN_INPUT_RESULT");
+	});
+
+	it("rejects artifactOf reads pointing at states without artifacts", () => {
+		const result = normalizeChartConfig({
+			id: "bad-file-source",
+			initial: "reader",
+			states: {
+				writer: { action: agent("writer"), transitions: { OK: "reader" } }, // no output declared
+				reader: {
+					action: agent("reader", { reads: [{ kind: "artifactOf", state: "writer" }] }),
+					transitions: { OK: "done" },
+				},
+				done: final(),
+			},
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((d) => d.code)).toContain("UNKNOWN_FILE_SOURCE");
 	});
 
 	it("shape-checks agent frontmatter overrides", () => {
@@ -520,7 +540,7 @@ describe("normalizeChartConfig", () => {
 			initial: "start",
 			states: {
 				start: {
-					action: { kind: "agent", name: "worker", outputSchema: { kind: "jsonSchema", schema: "nope" } },
+					action: { kind: "agent", name: "worker", reply: { kind: "jsonSchema", schema: "nope" } },
 					transitions: { DONE: "done" },
 				},
 				done: final(),

@@ -8,7 +8,7 @@ export default chart({
 		research: {
 			kind: "state",
 			action: agent("researcher", {
-				outputSchema: jsonSchema({
+				reply: jsonSchema({
 					type: "object",
 					required: ["summary"],
 					properties: { summary: { type: "string" } },
@@ -23,7 +23,7 @@ export default chart({
 		plan: {
 			kind: "state",
 			action: agent("planner", {
-				outputSchema: jsonSchema({
+				reply: jsonSchema({
 					type: "object",
 					required: ["steps"],
 					properties: { steps: { type: "array", items: { type: "string" } } },

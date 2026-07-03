@@ -4,11 +4,15 @@ import type {
 	CompoundStateCst,
 	FinalStateCst,
 	GuardRef,
+	ArtifactCst,
+	ArtifactOfCst,
 	InputRef,
 	JsonSchema,
 	JsonSchemaOutputCst,
+	OutputSpecCst,
 	ParallelStateCst,
 	SchemaRefCst,
+	Templatable,
 	TemplateCst,
 	TsImportSchemaRefCst,
 	UserActionCst,
@@ -40,10 +44,33 @@ export function user(options: Omit<UserActionCst, "kind">): UserActionCst {
 	return { kind: "user", ...options };
 }
 
-// Tagged template for parameter values: t`Report on ${arg("topic")} using ${result("plan")}`.
-// Evaluates to plain data — the machine renders it right before dispatch.
-export function t(strings: TemplateStringsArray, ...refs: InputRef[]): TemplateCst {
-	return { kind: "template", strings: [...strings], refs };
+// Tagged template for parameter values: t`Report on ${arg("topic")} using ${result("plan", "dir")}`.
+// Evaluates to plain data — the machine renders it right before dispatch. Ref interpolations
+// must resolve to primitives (a ref known to hold an object is embedded explicitly via
+// json(ref)); plain primitive interpolations are build-time constants and fold into the strings.
+export function t(
+	strings: TemplateStringsArray,
+	...values: (InputRef<string | number | boolean> | string | number | boolean)[]
+): TemplateCst {
+	const parts: string[] = [strings[0] ?? ""];
+	const refs: InputRef[] = [];
+	values.forEach((value, index) => {
+		const next = strings[index + 1] ?? "";
+		if (typeof value === "object") {
+			refs.push(value);
+			parts.push(next);
+		} else {
+			parts[parts.length - 1] += String(value) + next;
+		}
+	});
+	return { kind: "template", strings: parts, refs };
+}
+
+// Marks a ref whose value is embedded as JSON text — the only way an object enters a template,
+// both in the types (t() rejects object-typed refs) and at runtime (the renderer throws on a
+// non-primitive value without this mark).
+export function json<V>(ref: InputRef<V>): InputRef<string> {
+	return { ...ref, json: true } as InputRef<string>;
 }
 
 export function arg(name: string): InputRef {
@@ -52,6 +79,23 @@ export function arg(name: string): InputRef {
 
 export function result(state: string, path?: string): InputRef {
 	return { kind: "result", state, ...(path === undefined ? {} : { path }) };
+}
+
+// A deliverable file with an optional content shape — see ArtifactCst.
+export function artifact(path: Templatable, shape?: OutputSpecCst): ArtifactCst {
+	return { kind: "artifact", path, ...(shape === undefined ? {} : { shape }) };
+}
+
+// Read an artifact another state declared: path and content shape come from the producer.
+// `artifact` names which one (omit when the producer declares exactly one); `select` narrows the
+// read to a dot-path field of the file's content.
+export function artifactOf(state: string, opts: { artifact?: string; select?: string } = {}): ArtifactOfCst {
+	return {
+		kind: "artifactOf",
+		state,
+		...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
+		...(opts.select === undefined ? {} : { select: opts.select }),
+	};
 }
 
 export function tsImport(module: string, exportName: string): GuardRef {

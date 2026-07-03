@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { deepFreeze } from "./dsl.js";
 import type {
 	ActionStateAst,
@@ -7,7 +8,9 @@ import type {
 	ChartAst,
 	ChartCst,
 	ChartSource,
+	ArtifactAst,
 	CompoundStateAst,
+	ArtifactOfAst,
 	FinalStateAst,
 	GuardRef,
 	InputRef,
@@ -334,6 +337,46 @@ function validateTargets(
 					),
 				);
 			}
+			// An artifactOf read must resolve to exactly one declared artifact of an agent state.
+			if (node.action.kind === "agent") {
+				for (const read of node.action.reads ?? []) {
+					if (read.kind !== "artifactOf") continue;
+					const producer = states[read.state];
+					const artifacts =
+						producer?.kind === "state" && producer.action.kind === "agent" ? producer.action.artifacts : undefined;
+					if (artifacts === undefined || Object.keys(artifacts).length === 0) {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_FILE_SOURCE",
+								`artifactOf in state '${path}' references '${read.state}', which declares no artifacts.`,
+								`${pointer}/action/reads`,
+								source,
+							),
+						);
+						continue;
+					}
+					if (read.artifact !== undefined && !(read.artifact in artifacts)) {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_ARTIFACT",
+								`artifactOf in state '${path}': '${read.state}' declares no artifact '${read.artifact}'.`,
+								`${pointer}/action/reads`,
+								source,
+							),
+						);
+					}
+					if (read.artifact === undefined && Object.keys(artifacts).length > 1) {
+						diagnostics.push(
+							diagnostic(
+								"AMBIGUOUS_ARTIFACT",
+								`artifactOf in state '${path}': '${read.state}' declares several artifacts — name one.`,
+								`${pointer}/action/reads`,
+								source,
+							),
+						);
+					}
+				}
+			}
 			// Result refs address action states by absolute path — data lookup, not control flow.
 			for (const template of actionTemplates(node.action)) {
 				for (const ref of template.refs) {
@@ -387,7 +430,11 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	if (action.kind === "user") {
 		return [action.prompt];
 	}
-	return [...(action.task ? [action.task] : []), ...(action.output ? [action.output] : []), ...(action.reads ?? [])];
+	return [
+		...(action.task ? [action.task] : []),
+		...Object.values(action.artifacts ?? {}).map((declared) => declared.path),
+		...(action.reads ?? []).filter((read): read is TemplateAst => read.kind === "template"),
+	];
 }
 
 function toTemplate(
@@ -419,23 +466,94 @@ function toTemplate(
 	return { kind: "template", strings, refs };
 }
 
-function toTemplateList(
+function toArtifacts(
 	input: unknown,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): TemplateAst[] | undefined {
+): Record<string, ArtifactAst> | undefined {
 	if (input === undefined) return undefined;
-	if (!Array.isArray(input)) {
-		diagnostics.push(diagnostic("INVALID_TEMPLATE", "Expected an array of strings or t`...` templates.", path, source));
+	if (!isRecord(input)) {
+		diagnostics.push(diagnostic("INVALID_ARTIFACT", "artifacts must be a map of name → artifact.", path, source));
 		return undefined;
 	}
-	const templates: TemplateAst[] = [];
-	for (const [index, item] of input.entries()) {
-		const template = toTemplate(item, `${path}/${index}`, diagnostics, source);
-		if (template !== undefined) templates.push(template);
+	const artifacts: Record<string, ArtifactAst> = {};
+	for (const [name, item] of Object.entries(input)) {
+		const pointer = `${path}/${escapePointer(name)}`;
+		if (isRecord(item) && item.kind === "artifact") {
+			const template = toTemplate(item.path, `${pointer}/path`, diagnostics, source);
+			if (template === undefined) {
+				diagnostics.push(diagnostic("INVALID_ARTIFACT", `Artifact '${name}' requires a path.`, pointer, source));
+				continue;
+			}
+			const shape = toOutputSpecAst(item.shape, `${pointer}/shape`, diagnostics, source);
+			artifacts[name] = { path: template, ...(shape === undefined ? {} : { shape }) };
+			continue;
+		}
+		const template = toTemplate(item, pointer, diagnostics, source);
+		if (template !== undefined) {
+			artifacts[name] = { path: template };
+		}
 	}
-	return templates;
+	return artifacts;
+}
+
+function toReads(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): (TemplateAst | ArtifactOfAst)[] | undefined {
+	if (input === undefined) return undefined;
+	if (!Array.isArray(input)) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_TEMPLATE",
+				"reads must be an array of artifactOf() refs, strings or templates.",
+				path,
+				source,
+			),
+		);
+		return undefined;
+	}
+	const reads: (TemplateAst | ArtifactOfAst)[] = [];
+	for (const [index, item] of input.entries()) {
+		if (isRecord(item) && item.kind === "artifactOf") {
+			if (typeof item.state !== "string" || item.state.length === 0) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_TEMPLATE",
+						"artifactOf state must be a non-empty state path.",
+						`${path}/${index}`,
+						source,
+					),
+				);
+				continue;
+			}
+			if (item.artifact !== undefined && (typeof item.artifact !== "string" || item.artifact.length === 0)) {
+				diagnostics.push(
+					diagnostic("INVALID_TEMPLATE", "artifactOf artifact must be a non-empty name.", `${path}/${index}`, source),
+				);
+				continue;
+			}
+			if (item.select !== undefined && (typeof item.select !== "string" || item.select.length === 0)) {
+				diagnostics.push(
+					diagnostic("INVALID_TEMPLATE", "artifactOf select must be a non-empty dot-path.", `${path}/${index}`, source),
+				);
+				continue;
+			}
+			reads.push({
+				kind: "artifactOf",
+				state: item.state,
+				...(item.artifact === undefined ? {} : { artifact: item.artifact }),
+				...(item.select === undefined ? {} : { select: item.select }),
+			});
+			continue;
+		}
+		const template = toTemplate(item, `${path}/${index}`, diagnostics, source);
+		if (template !== undefined) reads.push(template);
+	}
+	return reads;
 }
 
 function toInputRef(
@@ -455,12 +573,17 @@ function toInputRef(
 		);
 		return undefined;
 	}
+	if (input.json !== undefined && input.json !== true) {
+		diagnostics.push(diagnostic("INVALID_TEMPLATE", "ref json mark must be `true` when present.", path, source));
+		return undefined;
+	}
+	const jsonMark = input.json === true ? { json: true as const } : {};
 	if (input.kind === "arg") {
 		if (typeof input.name !== "string" || input.name.length === 0) {
 			diagnostics.push(diagnostic("INVALID_TEMPLATE", "arg ref name must be a non-empty string.", path, source));
 			return undefined;
 		}
-		return { kind: "arg", name: input.name };
+		return { kind: "arg", name: input.name, ...jsonMark };
 	}
 	if (input.kind === "result") {
 		if (typeof input.state !== "string" || input.state.length === 0) {
@@ -475,7 +598,12 @@ function toInputRef(
 			);
 			return undefined;
 		}
-		return { kind: "result", state: input.state, ...(input.path === undefined ? {} : { path: input.path }) };
+		return {
+			kind: "result",
+			state: input.state,
+			...(input.path === undefined ? {} : { path: input.path }),
+			...jsonMark,
+		};
 	}
 	diagnostics.push(diagnostic("INVALID_TEMPLATE", "Template ref kind must be 'arg' or 'result'.", path, source));
 	return undefined;
@@ -550,20 +678,20 @@ function toStateActionAst(
 				);
 			}
 			const task = toTemplate(input.task, `${path}/task`, diagnostics, source);
-			const output = toTemplate(input.output, `${path}/output`, diagnostics, source);
-			const reads = toTemplateList(input.reads, `${path}/reads`, diagnostics, source);
+			const artifacts = toArtifacts(input.artifacts, `${path}/artifacts`, diagnostics, source);
+			const reads = toReads(input.reads, `${path}/reads`, diagnostics, source);
 			const overrides = toAgentOverrides(input, path, diagnostics, source);
-			const outputSchema = toOutputSpecAst(input.outputSchema, `${path}/outputSchema`, diagnostics, source);
+			const reply = toOutputSpecAst(input.reply, `${path}/reply`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "agent" };
 			return deepFreeze({
 				kind: "agent",
 				uid,
 				name: typeof input.name === "string" ? input.name : "",
 				...(task === undefined ? {} : { task }),
-				...(output === undefined ? {} : { output }),
+				...(artifacts === undefined ? {} : { artifacts }),
 				...(reads === undefined ? {} : { reads }),
 				...overrides,
-				...(outputSchema === undefined ? {} : { outputSchema }),
+				...(reply === undefined ? {} : { reply }),
 			} satisfies AgentActionAst);
 		}
 		case "user": {
@@ -590,14 +718,14 @@ function toStateActionAst(
 					);
 				}
 			}
-			const outputSchema = toOutputSpecAst(input.outputSchema, `${path}/outputSchema`, diagnostics, source);
+			const reply = toOutputSpecAst(input.reply, `${path}/reply`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "user" };
 			return deepFreeze({
 				kind: "user",
 				uid,
 				prompt: prompt ?? { kind: "template", strings: [""], refs: [] },
 				options: options.filter((option): option is string => typeof option === "string"),
-				...(outputSchema === undefined ? {} : { outputSchema }),
+				...(reply === undefined ? {} : { reply }),
 			} satisfies UserActionAst);
 		}
 		default:
@@ -615,6 +743,17 @@ function toOutputSpecAst(
 	source: ChartSource,
 ): OutputSpecAst | undefined {
 	if (input === undefined) return undefined;
+	// zod first-class: a schema value converts to plain JSON schema, keeping the AST serializable.
+	if (input instanceof z.ZodType) {
+		try {
+			return { kind: "jsonSchema", schema: z.toJSONSchema(input) };
+		} catch (error) {
+			diagnostics.push(
+				diagnostic("INVALID_SCHEMA", `zod schema is not representable as JSON Schema: ${String(error)}`, path, source),
+			);
+			return undefined;
+		}
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_OUTPUT_SPEC", "Output spec must be an object.", path, source));
 		return undefined;

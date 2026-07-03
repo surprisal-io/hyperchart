@@ -1,3 +1,5 @@
+import type { ZodType } from "zod";
+
 export type StateId = string;
 export type ActionUID = Readonly<{
 	chart: string;
@@ -22,6 +24,10 @@ export type AuthoringDiagnostic = {
 	source?: ChartSource;
 };
 
+// A named export of the chart's own module. The runtime already imports that module to load the
+// chart, so resolving the schema value (e.g. a zod schema living right next to the chart) is
+// free; only the name enters the AST — the chart stays plain data. For shapes shared across
+// charts use TsImportSchemaRefCst instead.
 export type SchemaRefCst = {
 	kind: "schemaRef";
 	name: string;
@@ -38,7 +44,12 @@ export type JsonSchemaOutputCst = {
 	schema: JsonSchema;
 };
 
-export type OutputSpecCst = JsonSchemaOutputCst | SchemaRefCst | TsImportSchemaRefCst;
+export type OutputSpecCst = JsonSchemaOutputCst | SchemaRefCst | TsImportSchemaRefCst | ZodType;
+
+// zod is a first-class authoring citizen: a schema value may be passed directly wherever a shape
+// is declared (reply, artifact shapes). Normalize converts it to plain JSON schema for the AST —
+// the chart-as-data doctrine holds where it matters (AST, log, hashes), while authoring and the
+// typed layer share one zod source (z.infer).
 
 export type SchemaRefAst = Readonly<SchemaRefCst>;
 export type TsImportSchemaRefAst = Readonly<TsImportSchemaRefCst>;
@@ -47,6 +58,30 @@ export type JsonSchemaOutputAst = Readonly<{
 	schema: Readonly<JsonSchema>;
 }>;
 export type OutputSpecAst = JsonSchemaOutputAst | SchemaRefAst | TsImportSchemaRefAst;
+
+// A deliverable file the agent must produce: where to write and — optionally — what shape the
+// CONTENT has (e.g. a schemaRef to a zod export next to the chart). The runtime tells the agent
+// to write this shape and may verify the written file; consumers reading via fileOf() inherit
+// path and shape from here, so they cannot drift. Artifacts are NOT the step's result — the
+// result is the completion event's payload (see `reply`).
+export type ArtifactCst = {
+	kind: "artifact";
+	path: Templatable;
+	shape?: OutputSpecCst;
+};
+
+// A read of another state's declared artifact, by producer rather than by path. `artifact` names
+// which one (may be omitted when the producer declares exactly one). An optional dot-path
+// selector narrows the read to a field of the file's content — the machine only carries it (it
+// never touches disk); the runtime reads the file, validates it against the declared shape and
+// hands the agent just the selected part.
+export type ArtifactOfCst = {
+	kind: "artifactOf";
+	// Absolute path of the producing action state; it must declare artifacts.
+	state: StatePath;
+	artifact?: string;
+	select?: string;
+};
 
 // The per-invocation surface of a subagent, mirroring pi-subagents' chain step: `name` points at
 // the definition (markdown file: identity, description, system prompt — not overridable);
@@ -57,23 +92,25 @@ export type AgentActionCst = {
 	name: string;
 	// Task text (the user message; the definition's markdown body stays the system prompt).
 	task?: Templatable;
-	// File the agent must write its artifact to — the runtime injects it into the task
-	// ("[Write to: ...]") and may verify the file exists afterwards.
-	output?: Templatable;
-	// Files the agent should read first; typically previous steps' output files.
-	reads?: readonly Templatable[];
+	// Named deliverable files this call must produce — the runtime injects them into the task
+	// ("[Write to: ...]") and may verify each (existence, and shape when declared). A plain
+	// Templatable value is an artifact with just a path.
+	artifacts?: Record<string, Templatable | ArtifactCst>;
+	// Files the agent should read first: previous steps' artifacts via fileOf(), or raw paths.
+	reads?: readonly (Templatable | ArtifactOfCst)[];
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
-	// Expected shape of the completion event's payload.
-	outputSchema?: OutputSpecCst;
+	// The step's RESULT: the shape of the completion event's payload. Small routing data only —
+	// deliverables go through artifacts.
+	reply?: OutputSpecCst;
 };
 
 export type UserActionCst = {
 	kind: "user";
 	prompt: Templatable;
 	options?: readonly string[];
-	outputSchema?: OutputSpecCst;
+	reply?: OutputSpecCst;
 };
 
 export type StateActionCst = AgentActionCst | UserActionCst;
@@ -115,7 +152,12 @@ export type AfterCst = {
 // narrowed by a dot-path selector). Only ever appears interpolated inside a template. Never
 // logged: the same args/results facts always resolve to the same values, so a restarted machine
 // renders identical text.
-export type InputRef =
+//
+// V is a phantom: the TS type of the value the ref resolves to, carried by the typed layer
+// (refs<Args, Results>()) so templates can insist on primitives. Never present at runtime.
+// Declared as an optional method for bivariance: untyped refs (V = unknown) pass everywhere,
+// refs with unrelated value types do not.
+export type InputRef<V = unknown> = (
 	| {
 			kind: "arg";
 			name: string;
@@ -125,7 +167,13 @@ export type InputRef =
 			// Absolute state path: this is a data lookup, not control flow — no sibling scoping.
 			state: StatePath;
 			path?: string;
-	  };
+	  }
+) & {
+	// Set by json(): the value is embedded as JSON text. Without it the renderer admits only
+	// primitives — the runtime twin of the static rule enforced by t().
+	json?: true;
+	__value?(value: V): void;
+};
 
 // A string with interpolated refs, authored as a tagged template:
 //   t`Report on ${arg("topic")} using ${result("plan", "steps")}`
@@ -191,24 +239,31 @@ export type ChartCst = {
 	states: Record<StateId, StateCst>;
 };
 
+export type ArtifactAst = Readonly<{
+	path: TemplateAst;
+	shape?: OutputSpecAst;
+}>;
+
+export type ArtifactOfAst = Readonly<ArtifactOfCst>;
+
 export type AgentActionAst = Readonly<{
 	kind: "agent";
 	uid: ActionUID;
 	name: string;
 	task?: TemplateAst;
-	output?: TemplateAst;
-	reads?: readonly TemplateAst[];
+	artifacts?: Readonly<Record<string, ArtifactAst>>;
+	reads?: readonly (TemplateAst | ArtifactOfAst)[];
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
-	outputSchema?: OutputSpecAst;
+	reply?: OutputSpecAst;
 }>;
 export type UserActionAst = Readonly<{
 	kind: "user";
 	uid: ActionUID;
 	prompt: TemplateAst;
 	options: readonly string[];
-	outputSchema?: OutputSpecAst;
+	reply?: OutputSpecAst;
 }>;
 export type StateActionAst = AgentActionAst | UserActionAst;
 
