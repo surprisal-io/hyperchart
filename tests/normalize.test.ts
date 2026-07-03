@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
 	agent,
+	arg,
 	chart,
 	compound,
 	final,
 	jsonSchema,
 	normalizeChartConfig,
 	parallel,
+	result,
+	t,
 	tsImport,
 	user,
 } from "../src/index.js";
@@ -22,7 +25,7 @@ describe("normalizeChartConfig", () => {
 					start: {
 						kind: "state",
 						action: agent("worker", {
-							output: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
+							outputSchema: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
 						}),
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
@@ -343,6 +346,82 @@ describe("normalizeChartConfig", () => {
 		expect(unknownTarget.diagnostics.map((d) => d.code)).toContain("UNKNOWN_AFTER_TARGET");
 	});
 
+	it("normalizes templates and validates their refs", () => {
+		const valid = normalizeChartConfig({
+			id: "templates",
+			initial: "build",
+			states: {
+				plan: { action: agent("planner"), transitions: { OK: "build" } },
+				build: {
+					action: agent("builder", {
+						task: t`Build ${arg("topic")} following ${result("plan", "steps")}`,
+						output: "claims.json",
+					}),
+					transitions: { OK: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(valid.diagnostics).toEqual([]);
+		if (!valid.ok) throw new Error("expected valid chart");
+		const build = valid.ast.states.build;
+		if (build?.kind !== "state" || build.action.kind !== "agent") throw new Error("expected agent state");
+		expect(build.action.task).toEqual({
+			kind: "template",
+			strings: ["Build ", " following ", ""],
+			refs: [
+				{ kind: "arg", name: "topic" },
+				{ kind: "result", state: "plan", path: "steps" },
+			],
+		});
+		// A plain string is a template with no refs.
+		expect(build.action.output).toEqual({ kind: "template", strings: ["claims.json"], refs: [] });
+
+		const inline = normalizeChartConfig({
+			id: "bad-template",
+			initial: "build",
+			states: {
+				build: {
+					action: agent("builder", { task: { kind: "template", strings: ["a", "b"], refs: [42] } as never }),
+					transitions: { OK: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(inline.ok).toBe(false);
+		expect(inline.diagnostics.map((d) => d.code)).toContain("INVALID_TEMPLATE");
+
+		const unknownResult = normalizeChartConfig({
+			id: "unknown-result",
+			initial: "build",
+			states: {
+				build: {
+					action: agent("builder", { task: t`From ${result("missing")}` }),
+					transitions: { OK: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(unknownResult.ok).toBe(false);
+		expect(unknownResult.diagnostics.map((d) => d.code)).toContain("UNKNOWN_INPUT_RESULT");
+	});
+
+	it("shape-checks agent frontmatter overrides", () => {
+		const bad = normalizeChartConfig({
+			id: "bad-overrides",
+			initial: "build",
+			states: {
+				build: {
+					action: agent("builder", { model: "", tools: "write" } as never),
+					transitions: { OK: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(bad.ok).toBe(false);
+		expect(bad.diagnostics.map((d) => d.code)).toEqual(["INVALID_AGENT_OPTION", "INVALID_AGENT_OPTION"]);
+	});
+
 	it("rejects inline functions as validators", () => {
 		const result = normalizeChartConfig({
 			id: "inline-validate",
@@ -441,7 +520,7 @@ describe("normalizeChartConfig", () => {
 			initial: "start",
 			states: {
 				start: {
-					action: { kind: "agent", name: "worker", output: { kind: "jsonSchema", schema: "nope" } },
+					action: { kind: "agent", name: "worker", outputSchema: { kind: "jsonSchema", schema: "nope" } },
 					transitions: { DONE: "done" },
 				},
 				done: final(),

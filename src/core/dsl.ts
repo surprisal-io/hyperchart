@@ -4,10 +4,12 @@ import type {
 	CompoundStateCst,
 	FinalStateCst,
 	GuardRef,
+	InputRef,
 	JsonSchema,
 	JsonSchemaOutputCst,
 	ParallelStateCst,
 	SchemaRefCst,
+	TemplateCst,
 	TsImportSchemaRefCst,
 	UserActionCst,
 } from "./types.js";
@@ -36,6 +38,20 @@ export function agent(name: string, options: Omit<AgentActionCst, "kind" | "name
 
 export function user(options: Omit<UserActionCst, "kind">): UserActionCst {
 	return { kind: "user", ...options };
+}
+
+// Tagged template for parameter values: t`Report on ${arg("topic")} using ${result("plan")}`.
+// Evaluates to plain data — the machine renders it right before dispatch.
+export function t(strings: TemplateStringsArray, ...refs: InputRef[]): TemplateCst {
+	return { kind: "template", strings: [...strings], refs };
+}
+
+export function arg(name: string): InputRef {
+	return { kind: "arg", name };
+}
+
+export function result(state: string, path?: string): InputRef {
+	return { kind: "result", state, ...(path === undefined ? {} : { path }) };
 }
 
 export function tsImport(module: string, exportName: string): GuardRef {

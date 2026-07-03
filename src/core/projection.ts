@@ -19,6 +19,9 @@ export type BranchProjection = {
 	activeLeaves: StatePath[];
 	seqId: number;
 	pendingActions: PendingAction[];
+	// The run's input arguments; undefined until the args fact lands in the log.
+	args?: Readonly<Record<string, unknown>>;
+	// Latest accepted output per action state; re-entering a state overwrites its result.
 	results: Record<StatePath, unknown>;
 };
 
@@ -53,6 +56,9 @@ export function projectBranch(
 			case "session_ref":
 				// No state change, just a reference to a session
 				break;
+			case "args":
+				projection.args = record.args;
+				break;
 			case "state_action":
 				switch (record.kind) {
 					case "invoke":
@@ -81,6 +87,7 @@ export function projectBranch(
 								});
 								break;
 							}
+							recordResult(projection, record.actionUid.state, record.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned);
 						}
@@ -103,6 +110,7 @@ export function projectBranch(
 							throw new Error(`No pending validation for action in state ${record.actionUid.state}`);
 						}
 						if (record.outcome === true) {
+							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned);
 						} else {
@@ -122,6 +130,13 @@ export function projectBranch(
 		projection.seqId = Math.max(projection.seqId, record.seqId);
 	}
 	return projection;
+}
+
+// A result exists once the completion is accepted (directly, or by a positive verdict).
+function recordResult(projection: BranchProjection, state: StatePath, event: ChartEvent): void {
+	if ("output" in event && event.output !== undefined) {
+		projection.results[state] = event.output;
+	}
 }
 
 function removePendingAction(projection: BranchProjection, actionUid: ActionUID): void {

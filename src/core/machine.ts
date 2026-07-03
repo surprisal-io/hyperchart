@@ -6,7 +6,9 @@ import type {
 	ChartAst,
 	GuardOutcome,
 	GuardRef,
+	InputRef,
 	OnReject,
+	TemplateAst,
 	UserActionAst,
 } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
@@ -23,11 +25,16 @@ export type MachineState = {
 
 export type EffectId = string;
 
+// A spawn-ready subagent call: the definition name and frontmatter overrides live in `action`;
+// the fields below are the templated parameters rendered into final text by the machine.
 export type AgentEffect = Readonly<{
 	kind: "agent";
 	id: EffectId;
 	actionUid: ActionUID;
 	action: AgentActionAst;
+	task?: string;
+	output?: string;
+	reads?: readonly string[];
 }>;
 
 export type UserEffect = Readonly<{
@@ -35,6 +42,7 @@ export type UserEffect = Readonly<{
 	id: EffectId;
 	actionUid: ActionUID;
 	action: UserActionAst;
+	prompt: string;
 }>;
 
 export type DurableRecordsEffect = Readonly<{
@@ -186,7 +194,7 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 	// completion, or deliver the rejection.
 	const desired: (Effect | RecordAppend)[] = [
 		...missingInvokes(state).map(invokeAppend),
-		...state.projection.pendingActions.flatMap((pending) => pendingEffects(state.ast, pending)),
+		...state.projection.pendingActions.flatMap((pending) => pendingEffects(state, pending)),
 	];
 
 	// Each desired entry is dispatched once per machine lifetime; markers of entries no longer
@@ -237,8 +245,9 @@ function pendingEffectId(pending: PendingAction): EffectId {
 
 // All effects a pending action currently wants: its phase effect, plus — while running under a
 // deadline — the timer racing it.
-function pendingEffects(ast: ChartAst, pending: PendingAction): Effect[] {
-	const effects = [pendingEffect(ast, pending)];
+function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
+	const ast = state.ast;
+	const effects = [pendingEffect(state, pending)];
 	if (pending.phase === "running") {
 		const node = ast.states[pending.actionUid.state];
 		if (node?.kind === "state" && node.after !== undefined) {
@@ -257,17 +266,36 @@ function timerEffectId(pending: PendingAction): EffectId {
 	return `timer:${actionUidKey(pending.actionUid)}:${pending.seqId}`;
 }
 
-function pendingEffect(ast: ChartAst, pending: PendingAction): Effect {
-	const node = ast.states[pending.actionUid.state];
+function pendingEffect(state: MachineState, pending: PendingAction): Effect {
+	const node = state.ast.states[pending.actionUid.state];
 	if (node?.kind !== "state" || !sameActionUid(pending.actionUid, node.action.uid)) {
 		throw new Error(`Pending action does not match the chart in state ${pending.actionUid.state}`);
 	}
 	const id = pendingEffectId(pending);
 	switch (pending.phase) {
-		case "running":
-			return node.action.kind === "agent"
-				? { kind: "agent", id, actionUid: pending.actionUid, action: node.action }
-				: { kind: "user", id, actionUid: pending.actionUid, action: node.action };
+		case "running": {
+			if (node.action.kind === "agent") {
+				const action = node.action;
+				return {
+					kind: "agent",
+					id,
+					actionUid: pending.actionUid,
+					action,
+					...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, node.id) }),
+					...(action.output === undefined ? {} : { output: renderTemplate(state, action.output, node.id) }),
+					...(action.reads === undefined
+						? {}
+						: { reads: action.reads.map((read) => renderTemplate(state, read, node.id)) }),
+				};
+			}
+			return {
+				kind: "user",
+				id,
+				actionUid: pending.actionUid,
+				action: node.action,
+				prompt: renderTemplate(state, node.action.prompt, node.id),
+			};
+		}
 		case "validating":
 			if (node.validate === undefined) {
 				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without a validator`);
@@ -444,6 +472,43 @@ function missingInvokes(state: MachineState): ActionUID[] {
 		}
 	}
 	return missing;
+}
+
+// Templates are rendered, never logged: the same args/results facts always render to the same
+// text, so a restarted machine hands the agent an identical call. A ref into a missing
+// arg/result is a chart-ordering bug — fail loud.
+function renderTemplate(state: MachineState, template: TemplateAst, stateId: string): string {
+	const parts: string[] = [template.strings[0] ?? ""];
+	template.refs.forEach((ref, index) => {
+		const value = resolveRef(state, ref, stateId);
+		parts.push(typeof value === "string" ? value : JSON.stringify(value));
+		parts.push(template.strings[index + 1] ?? "");
+	});
+	return parts.join("");
+}
+
+function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknown {
+	if (ref.kind === "arg") {
+		const args = state.projection.args;
+		if (args === undefined || !(ref.name in args)) {
+			throw new Error(`Template in state ${stateId}: no argument '${ref.name}'`);
+		}
+		return args[ref.name];
+	}
+	if (!(ref.state in state.projection.results)) {
+		throw new Error(`Template in state ${stateId}: no result for state ${ref.state}`);
+	}
+	let current: unknown = state.projection.results[ref.state];
+	if (ref.path === undefined) {
+		return current;
+	}
+	for (const segment of ref.path.split(".")) {
+		if (typeof current !== "object" || current === null || !(segment in current)) {
+			throw new Error(`Template in state ${stateId}: result of ${ref.state} has no '${ref.path}'`);
+		}
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
 }
 
 function invokeAppend(actionUid: ActionUID): RecordAppend {

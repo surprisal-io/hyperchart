@@ -13,7 +13,13 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
           "APPROVED",
           "REJECTED",
         ],
-        "prompt": "Apply changes?",
+        "prompt": {
+          "kind": "template",
+          "refs": [],
+          "strings": [
+            "Apply changes?",
+          ],
+        },
         "uid": {
           "action": "user",
           "chart": "review-and-fix",
@@ -56,7 +62,7 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "planner",
-        "output": {
+        "outputSchema": {
           "kind": "jsonSchema",
           "schema": {
             "properties": {
@@ -90,7 +96,7 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "researcher",
-        "output": {
+        "outputSchema": {
           "kind": "jsonSchema",
           "schema": {
             "properties": {

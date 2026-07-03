@@ -16,6 +16,7 @@ export type {
 	EventType,
 	FinalStateAst,
 	FinalStateCst,
+	InputRef,
 	JsonSchema,
 	JsonSchemaOutputAst,
 	JsonSchemaOutputCst,
@@ -35,6 +36,9 @@ export type {
 	StateId,
 	StatePath,
 	SystemEvent,
+	TemplateAst,
+	TemplateCst,
+	Templatable,
 	GuardOutcome,
 	GuardRef,
 	OnReject,
@@ -50,9 +54,12 @@ export {
 	chart,
 	compound,
 	createChart,
+	arg,
 	deepFreeze,
 	final,
 	parallel,
+	result,
+	t,
 	jsonSchema,
 	schemaRef,
 	script,
@@ -61,6 +68,7 @@ export {
 	user,
 } from "./core/dsl.js";
 
+export { loop, start } from "./core/execution_loop.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
 export type {

@@ -10,6 +10,7 @@ import type {
 	CompoundStateAst,
 	FinalStateAst,
 	GuardRef,
+	InputRef,
 	OnReject,
 	OutputSpecAst,
 	ParallelStateAst,
@@ -18,6 +19,7 @@ import type {
 	StateActionAst,
 	StateAst,
 	StatePath,
+	TemplateAst,
 	UserActionAst,
 } from "./types.js";
 
@@ -332,6 +334,21 @@ function validateTargets(
 					),
 				);
 			}
+			// Result refs address action states by absolute path — data lookup, not control flow.
+			for (const template of actionTemplates(node.action)) {
+				for (const ref of template.refs) {
+					if (ref.kind === "result" && states[ref.state]?.kind !== "state") {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_INPUT_RESULT",
+								`A template in state '${path}' reads the result of unknown action state '${ref.state}'.`,
+								`${pointer}/action`,
+								source,
+							),
+						);
+					}
+				}
+			}
 			continue;
 		}
 		if (
@@ -363,6 +380,136 @@ function validateTargets(
 			);
 		}
 	}
+}
+
+// All templated parameters of an action, for ref validation.
+function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
+	if (action.kind === "user") {
+		return [action.prompt];
+	}
+	return [...(action.task ? [action.task] : []), ...(action.output ? [action.output] : []), ...(action.reads ?? [])];
+}
+
+function toTemplate(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): TemplateAst | undefined {
+	if (input === undefined) return undefined;
+	// A plain string is a template with no refs.
+	if (typeof input === "string") {
+		return { kind: "template", strings: [input], refs: [] };
+	}
+	if (!isRecord(input) || input.kind !== "template" || !Array.isArray(input.strings) || !Array.isArray(input.refs)) {
+		diagnostics.push(diagnostic("INVALID_TEMPLATE", "Expected a string or a t`...` template.", path, source));
+		return undefined;
+	}
+	const strings = input.strings;
+	if (!strings.every((part): part is string => typeof part === "string") || strings.length !== input.refs.length + 1) {
+		diagnostics.push(diagnostic("INVALID_TEMPLATE", "Malformed template parts.", path, source));
+		return undefined;
+	}
+	const refs: InputRef[] = [];
+	for (const [index, raw] of input.refs.entries()) {
+		const ref = toInputRef(raw, `${path}/${index}`, diagnostics, source);
+		if (ref === undefined) return undefined;
+		refs.push(ref);
+	}
+	return { kind: "template", strings, refs };
+}
+
+function toTemplateList(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): TemplateAst[] | undefined {
+	if (input === undefined) return undefined;
+	if (!Array.isArray(input)) {
+		diagnostics.push(diagnostic("INVALID_TEMPLATE", "Expected an array of strings or t`...` templates.", path, source));
+		return undefined;
+	}
+	const templates: TemplateAst[] = [];
+	for (const [index, item] of input.entries()) {
+		const template = toTemplate(item, `${path}/${index}`, diagnostics, source);
+		if (template !== undefined) templates.push(template);
+	}
+	return templates;
+}
+
+function toInputRef(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): InputRef | undefined {
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_TEMPLATE",
+				"Template interpolations must be arg()/result() refs, not inline values.",
+				path,
+				source,
+			),
+		);
+		return undefined;
+	}
+	if (input.kind === "arg") {
+		if (typeof input.name !== "string" || input.name.length === 0) {
+			diagnostics.push(diagnostic("INVALID_TEMPLATE", "arg ref name must be a non-empty string.", path, source));
+			return undefined;
+		}
+		return { kind: "arg", name: input.name };
+	}
+	if (input.kind === "result") {
+		if (typeof input.state !== "string" || input.state.length === 0) {
+			diagnostics.push(
+				diagnostic("INVALID_TEMPLATE", "result ref state must be a non-empty state path.", path, source),
+			);
+			return undefined;
+		}
+		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
+			diagnostics.push(
+				diagnostic("INVALID_TEMPLATE", "result ref path selector must be a non-empty string.", path, source),
+			);
+			return undefined;
+		}
+		return { kind: "result", state: input.state, ...(input.path === undefined ? {} : { path: input.path }) };
+	}
+	diagnostics.push(diagnostic("INVALID_TEMPLATE", "Template ref kind must be 'arg' or 'result'.", path, source));
+	return undefined;
+}
+
+// Frontmatter overrides of the subagent definition; opaque to the engine, shape-checked only.
+function toAgentOverrides(
+	input: Record<string, unknown>,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): { model?: string; thinking?: string; tools?: readonly string[] } {
+	const overrides: { model?: string; thinking?: string; tools?: readonly string[] } = {};
+	for (const key of ["model", "thinking"] as const) {
+		const value = input[key];
+		if (value === undefined) continue;
+		if (typeof value !== "string" || value.length === 0) {
+			diagnostics.push(
+				diagnostic("INVALID_AGENT_OPTION", `Agent ${key} must be a non-empty string.`, `${path}/${key}`, source),
+			);
+			continue;
+		}
+		overrides[key] = value;
+	}
+	if (input.tools !== undefined) {
+		if (Array.isArray(input.tools) && input.tools.every((tool): tool is string => typeof tool === "string")) {
+			overrides.tools = input.tools;
+		} else {
+			diagnostics.push(
+				diagnostic("INVALID_AGENT_OPTION", "Agent tools must be an array of strings.", `${path}/tools`, source),
+			);
+		}
+	}
+	return overrides;
 }
 
 function toOnDone(
@@ -402,18 +549,29 @@ function toStateActionAst(
 					diagnostic("INVALID_AGENT_NAME", "Agent action name must be a string.", `${path}/name`, source),
 				);
 			}
-			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
+			const task = toTemplate(input.task, `${path}/task`, diagnostics, source);
+			const output = toTemplate(input.output, `${path}/output`, diagnostics, source);
+			const reads = toTemplateList(input.reads, `${path}/reads`, diagnostics, source);
+			const overrides = toAgentOverrides(input, path, diagnostics, source);
+			const outputSchema = toOutputSpecAst(input.outputSchema, `${path}/outputSchema`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "agent" };
 			return deepFreeze({
 				kind: "agent",
 				uid,
 				name: typeof input.name === "string" ? input.name : "",
+				...(task === undefined ? {} : { task }),
 				...(output === undefined ? {} : { output }),
+				...(reads === undefined ? {} : { reads }),
+				...overrides,
+				...(outputSchema === undefined ? {} : { outputSchema }),
 			} satisfies AgentActionAst);
 		}
 		case "user": {
-			if (typeof input.prompt !== "string") {
-				diagnostics.push(diagnostic("INVALID_USER_PROMPT", "User prompt must be a string.", `${path}/prompt`, source));
+			const prompt = toTemplate(input.prompt, `${path}/prompt`, diagnostics, source);
+			if (prompt === undefined) {
+				diagnostics.push(
+					diagnostic("INVALID_USER_PROMPT", "User prompt must be a string or template.", `${path}/prompt`, source),
+				);
 			}
 			const options = Array.isArray(input.options) ? input.options : [];
 			for (const [index, option] of options.entries()) {
@@ -432,14 +590,14 @@ function toStateActionAst(
 					);
 				}
 			}
-			const output = toOutputSpecAst(input.output, `${path}/output`, diagnostics, source);
+			const outputSchema = toOutputSpecAst(input.outputSchema, `${path}/outputSchema`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "user" };
 			return deepFreeze({
 				kind: "user",
 				uid,
-				prompt: typeof input.prompt === "string" ? input.prompt : "",
+				prompt: prompt ?? { kind: "template", strings: [""], refs: [] },
 				options: options.filter((option): option is string => typeof option === "string"),
-				...(output === undefined ? {} : { output }),
+				...(outputSchema === undefined ? {} : { outputSchema }),
 			} satisfies UserActionAst);
 		}
 		default:

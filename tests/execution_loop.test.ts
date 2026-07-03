@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, compound, final, normalizeChartConfig, parallel, tsImport } from "../src/index.js";
-import { loop } from "../src/core/execution_loop.js";
+import {
+	agent,
+	chart,
+	arg,
+	compound,
+	final,
+	normalizeChartConfig,
+	parallel,
+	result,
+	t,
+	tsImport,
+} from "../src/index.js";
+import { loop, start } from "../src/core/execution_loop.js";
 import type {
 	ActionUID,
 	ChartAst,
@@ -541,6 +552,160 @@ describe("execution loop", () => {
 
 		const agentEffects = runtime.effectBatches.flat().filter((effect) => effect.kind === "agent");
 		expect(agentEffects).toHaveLength(1);
+	});
+
+	it("logs the run arguments as the first fact and resolves inputs from facts", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "params-chart",
+				initial: "plan",
+				states: {
+					plan: {
+						kind: "state",
+						action: agent("planner", { task: t`Plan a report on ${arg("topic")}.` }),
+						transitions: { PLAN_READY: "build" },
+					},
+					build: {
+						kind: "state",
+						action: agent("builder", {
+							task: t`Build a report on ${arg("topic")} following steps ${result("plan", "steps")}.`,
+							output: t`out/${arg("topic")}.html`,
+						}),
+						transitions: { BUILT: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const ast = parsed.ast;
+		const events: MachineEvent[] = [];
+		const tasks: Record<string, unknown> = {};
+		const outputs: Record<string, unknown> = {};
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						tasks[effect.actionUid.state] = effect.task;
+						outputs[effect.actionUid.state] = effect.output;
+						const reply =
+							effect.actionUid.state === "plan"
+								? { type: "PLAN_READY", output: { steps: ["a", "b"] } }
+								: { type: "BUILT" };
+						events.push({ kind: "agent", effectId: effect.id, event: reply });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await start(runtime, { topic: "AI report" });
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		// args landed as the very first fact, seeded before the loop even started.
+		const records = runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
+		expect(records[0]).toEqual(expect.objectContaining({ type: "args", args: { topic: "AI report" } }));
+		expect(records.filter((record) => record.type === "args")).toHaveLength(1);
+		expect(state.projection.results.plan).toEqual({ steps: ["a", "b"] });
+		// Templates arrive rendered: strings verbatim, non-strings as JSON — in every templated param.
+		expect(tasks.plan).toBe("Plan a report on AI report.");
+		expect(tasks.build).toBe('Build a report on AI report following steps ["a","b"].');
+		expect(outputs.build).toBe("out/AI report.html");
+	});
+
+	it("start over a non-empty log resumes without reseeding args", async () => {
+		const ast = linearAst();
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(actionUid(ast))],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await start(runtime, { topic: "ignored" });
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		const records = runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
+		expect(records.filter((record) => record.type === "args")).toEqual([]);
+	});
+
+	it("resolves the same input after a restart, reading args from the log", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "restart-chart",
+				initial: "plan",
+				states: {
+					plan: { kind: "state", action: agent("planner"), transitions: { PLAN_READY: "build" } },
+					build: {
+						kind: "state",
+						action: agent("builder", { task: t`Build ${arg("topic")} from plan ${result("plan")}` }),
+						transitions: { BUILT: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const ast = parsed.ast;
+		const planUid = actionUid(ast, "plan");
+		const buildUid = actionUid(ast, "build");
+		// The process died while build's agent was running; note: no loadArgs on this runtime —
+		// the args come from the log alone.
+		const logs: DurableLogRecord[] = [
+			{ type: "args", args: { topic: "AI report" }, ...meta(1) },
+			invoke(planUid, 2),
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: planUid,
+				event: { type: "PLAN_READY", output: 42 },
+				...meta(3),
+			},
+			invoke(buildUid, 4),
+		];
+		const events: MachineEvent[] = [];
+		let buildTask: unknown;
+		const runtime = new MockRuntime({
+			ast,
+			logs,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						buildTask = effect.task;
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "BUILT" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(buildTask).toBe("Build AI report from plan 42");
 	});
 
 	it("throws when the machine reports an error output", async () => {

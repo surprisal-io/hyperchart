@@ -48,17 +48,32 @@ export type JsonSchemaOutputAst = Readonly<{
 }>;
 export type OutputSpecAst = JsonSchemaOutputAst | SchemaRefAst | TsImportSchemaRefAst;
 
+// The per-invocation surface of a subagent, mirroring pi-subagents' chain step: `name` points at
+// the definition (markdown file: identity, description, system prompt — not overridable);
+// everything else parameterizes this call. The engine treats model/thinking/tools as opaque
+// overrides of the definition's frontmatter.
 export type AgentActionCst = {
 	kind: "agent";
 	name: string;
-	output?: OutputSpecCst;
+	// Task text (the user message; the definition's markdown body stays the system prompt).
+	task?: Templatable;
+	// File the agent must write its artifact to — the runtime injects it into the task
+	// ("[Write to: ...]") and may verify the file exists afterwards.
+	output?: Templatable;
+	// Files the agent should read first; typically previous steps' output files.
+	reads?: readonly Templatable[];
+	model?: string;
+	thinking?: string;
+	tools?: readonly string[];
+	// Expected shape of the completion event's payload.
+	outputSchema?: OutputSpecCst;
 };
 
 export type UserActionCst = {
 	kind: "user";
-	prompt: string;
+	prompt: Templatable;
 	options?: readonly string[];
-	output?: OutputSpecCst;
+	outputSchema?: OutputSpecCst;
 };
 
 export type StateActionCst = AgentActionCst | UserActionCst;
@@ -95,6 +110,41 @@ export type AfterCst = {
 	delayMs: number;
 	target: StateId;
 };
+
+// Serializable reference to a value from the run's args or a previous state's result (optionally
+// narrowed by a dot-path selector). Only ever appears interpolated inside a template. Never
+// logged: the same args/results facts always resolve to the same values, so a restarted machine
+// renders identical text.
+export type InputRef =
+	| {
+			kind: "arg";
+			name: string;
+	  }
+	| {
+			kind: "result";
+			// Absolute state path: this is a data lookup, not control flow — no sibling scoping.
+			state: StatePath;
+			path?: string;
+	  };
+
+// A string with interpolated refs, authored as a tagged template:
+//   t`Report on ${arg("topic")} using ${result("plan", "steps")}`
+// Plain data (strings.length === refs.length + 1), no placeholder grammar to parse; the machine
+// renders it right before dispatch (string values verbatim, everything else as JSON).
+export type TemplateCst = {
+	kind: "template";
+	strings: readonly string[];
+	refs: readonly InputRef[];
+};
+
+// Anywhere a template is accepted, a plain string is too (a template with no refs).
+export type Templatable = string | TemplateCst;
+
+export type TemplateAst = Readonly<{
+	kind: "template";
+	strings: readonly string[];
+	refs: readonly InputRef[];
+}>;
 
 export type ActionStateCst = {
 	kind: "state";
@@ -145,14 +195,20 @@ export type AgentActionAst = Readonly<{
 	kind: "agent";
 	uid: ActionUID;
 	name: string;
-	output?: OutputSpecAst;
+	task?: TemplateAst;
+	output?: TemplateAst;
+	reads?: readonly TemplateAst[];
+	model?: string;
+	thinking?: string;
+	tools?: readonly string[];
+	outputSchema?: OutputSpecAst;
 }>;
 export type UserActionAst = Readonly<{
 	kind: "user";
 	uid: ActionUID;
-	prompt: string;
+	prompt: TemplateAst;
 	options: readonly string[];
-	output?: OutputSpecAst;
+	outputSchema?: OutputSpecAst;
 }>;
 export type StateActionAst = AgentActionAst | UserActionAst;
 
@@ -224,6 +280,9 @@ export type ChartAst = Readonly<{
 
 export type ActionEvent = {
 	type: string;
+	// The action's result payload. Travels inside the complete fact, so it is durable for free;
+	// the projection exposes it as results[statePath] once the completion is accepted.
+	output?: unknown;
 };
 
 export type SystemEvent = {

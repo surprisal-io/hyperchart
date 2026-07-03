@@ -9,7 +9,7 @@ export class MockRuntime implements Runtime {
 	readonly effectBatches: Effect[][] = [];
 
 	private readonly ast: ChartAst;
-	private readonly logs: readonly DurableLogRecord[];
+	private readonly logs: DurableLogRecord[];
 	private readonly events: AsyncIterable<MachineEvent>;
 	private readonly onRunEffects: ((effects: Effect[]) => void) | undefined;
 
@@ -20,7 +20,7 @@ export class MockRuntime implements Runtime {
 		onRunEffects?: (effects: Effect[]) => void;
 	}) {
 		this.ast = options.ast;
-		this.logs = options.logs ?? [];
+		this.logs = [...(options.logs ?? [])];
 		this.events = toAsyncIterable(options.events ?? []);
 		this.onRunEffects = options.onRunEffects;
 	}
@@ -28,6 +28,13 @@ export class MockRuntime implements Runtime {
 	runEffects(effects: Effect[]): void {
 		this.calls.push("runEffects");
 		this.effectBatches.push(effects);
+		// A real runtime persists appended records; the mock does too, so records seeded before
+		// the loop (e.g. start()'s args fact) show up in loadLogs.
+		for (const effect of effects) {
+			if (effect.kind === "durable_records") {
+				this.logs.push(...effect.records);
+			}
+		}
 		this.onRunEffects?.(effects);
 	}
 

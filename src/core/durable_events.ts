@@ -12,6 +12,14 @@ type SessionRefLog = {
 	file: string;
 } & SessionParams;
 
+// The run's input arguments — external data, hence a fact: the first record of a fresh log,
+// seeded by start() when the run is created. Everything downstream (template rendering, replay)
+// reads args from here and only here.
+type ArgsLog = {
+	type: "args";
+	args: Readonly<Record<string, unknown>>;
+} & SessionParams;
+
 type StateActionInvokeLog = {
 	type: "state_action";
 	kind: "invoke";
@@ -49,4 +57,4 @@ type StateActionTimerFiredLog = {
 
 type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog | StateActionTimerFiredLog;
 
-export type DurableLogRecord = SessionRefLog | StateAction;
+export type DurableLogRecord = SessionRefLog | ArgsLog | StateAction;

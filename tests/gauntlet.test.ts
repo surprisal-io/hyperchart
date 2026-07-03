@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { agent, chart, compound, final, normalizeChartConfig, parallel, tsImport } from "../src/index.js";
-import { loop } from "../src/core/execution_loop.js";
+import {
+	agent,
+	chart,
+	arg,
+	compound,
+	final,
+	normalizeChartConfig,
+	parallel,
+	result,
+	t,
+	tsImport,
+} from "../src/index.js";
+import { loop, start } from "../src/core/execution_loop.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 
@@ -14,10 +25,13 @@ function make(config: ChartCst): ChartAst {
 	return result.ast;
 }
 
+type AgentReply = string | { type: string; output?: unknown };
+
 type LiveOptions = {
 	logs?: readonly DurableLogRecord[];
-	// state path → successive event types its agent replies with (rejections retry from the same queue)
-	agents?: Record<string, string[]>;
+	args?: Readonly<Record<string, unknown>>;
+	// state path → successive replies of its agent (rejections retry from the same queue)
+	agents?: Record<string, AgentReply[]>;
 	// successive validator verdicts
 	verdicts?: GuardOutcome[];
 	fireTimers?: boolean;
@@ -39,9 +53,13 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 				switch (effect.kind) {
 					case "agent":
 					case "rejected": {
-						const eventType = agents.get(effect.actionUid.state)?.shift();
-						if (eventType !== undefined) {
-							events.push({ kind: "agent", effectId: effect.id, event: { type: eventType } });
+						const reply = agents.get(effect.actionUid.state)?.shift();
+						if (reply !== undefined) {
+							events.push({
+								kind: "agent",
+								effectId: effect.id,
+								event: typeof reply === "string" ? { type: reply } : reply,
+							});
 						}
 						break;
 					}
@@ -67,7 +85,7 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 			}
 		},
 	});
-	const state = await loop(runtime);
+	const state = await (options.args === undefined ? loop(runtime) : start(runtime, options.args));
 	return { state, runtime, log: [...(options.logs ?? []), ...appended] };
 }
 
@@ -75,6 +93,29 @@ async function replay(ast: ChartAst, log: readonly DurableLogRecord[]) {
 	const runtime = new MockRuntime({ ast, logs: log, events: failOnPullEvents() });
 	const state = await loop(runtime);
 	return { state, runtime };
+}
+
+function paramChart(): ChartAst {
+	return make(
+		chart({
+			kind: "chart",
+			id: "gauntlet-params",
+			initial: "plan",
+			states: {
+				plan: {
+					kind: "state",
+					action: agent("planner", { task: t`Plan ${arg("topic")}.` }),
+					transitions: { PLAN_READY: "build" },
+				},
+				build: {
+					kind: "state",
+					action: agent("builder", { task: t`Build ${arg("topic")} following ${result("plan", "steps")}.` }),
+					transitions: { BUILT: "done" },
+				},
+				done: final(),
+			},
+		}),
+	);
 }
 
 function twoStepChart(): ChartAst {
@@ -225,6 +266,17 @@ const SCENARIOS: Scenario[] = [
 		ast: parallelChart,
 		options: { agents: { "audit.security.scan": ["FAILED"] } },
 		finalLeaves: ["escalate"],
+	},
+	{
+		// The args fact and result payloads replay from the log; the replay runtime has no
+		// loadArgs at all.
+		name: "parameter flow (args + results + input)",
+		ast: paramChart,
+		options: {
+			args: { topic: "AI report" },
+			agents: { plan: [{ type: "PLAN_READY", output: { steps: ["a", "b"] } }], build: ["BUILT"] },
+		},
+		finalLeaves: ["done"],
 	},
 ];
 
