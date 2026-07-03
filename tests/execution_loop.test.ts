@@ -10,6 +10,7 @@ import {
 	json,
 	normalizeChartConfig,
 	item,
+	joinArtifactOf,
 	key,
 	map,
 	parallel,
@@ -1450,6 +1451,86 @@ describe("execution loop", () => {
 
 		expect(state.projection.activeLeaves).toEqual(["escalate"]);
 		expect(cancels).toEqual(["chapters#body.author"]);
+	});
+
+	it("fans instance artifacts back in: files for agent reads, a JSON path array for script env", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "join-chart",
+				initial: "plan",
+				states: {
+					plan: {
+						kind: "state",
+						action: agent("planner"),
+						transitions: { OK: "chapters" },
+					},
+					chapters: map({
+						over: result("plan", "chapters"),
+						initial: "author",
+						onDone: "gather",
+						states: {
+							author: {
+								kind: "state",
+								action: agent("author", {
+									artifacts: { chapter: artifact(t`out/${key()}.json`, z.object({ prose: z.string() })) },
+								}),
+								transitions: { OK: "written" },
+							},
+							written: final(),
+						},
+					}),
+					gather: {
+						kind: "state",
+						action: agent("editor", { reads: [joinArtifactOf("chapters.author")] }),
+						transitions: { OK: "pack" },
+					},
+					pack: {
+						kind: "state",
+						action: script("tar", [], { env: { FILES: joinArtifactOf("chapters.author") } }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		const ast = parsed.ast;
+		const events: MachineEvent[] = [];
+		let reads: readonly { path: string }[] = [];
+		let files = "";
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "plan") {
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							event: { type: "OK", output: { chapters: PLAN_OUTPUT.chapters } },
+						});
+					} else if (effect.kind === "agent") {
+						if (effect.actionUid.state === "gather") reads = effect.reads ?? [];
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "script") {
+						files = typeof effect.env?.FILES === "string" ? effect.env.FILES : "";
+						events.push({ kind: "script", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		// One artifact per spawned instance, in spawn-fact key order, shape carried along.
+		expect(reads.map((read) => read.path)).toEqual(["out/intro.json", "out/body.json"]);
+		expect(files).toBe(JSON.stringify(["out/intro.json", "out/body.json"]));
 	});
 
 	it("replays a map log without re-running agents", async () => {

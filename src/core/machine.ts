@@ -7,6 +7,7 @@ import type {
 	GuardOutcome,
 	ArtifactAst,
 	ArtifactOfAst,
+	JoinArtifactOfAst,
 	GuardRef,
 	InputRef,
 	OnReject,
@@ -25,7 +26,7 @@ import {
 	type PendingAction,
 	projectBranch,
 } from "./projection.js";
-import { instancePathFor, lastSegmentKey, matchesDeclaredUid, nearestInstance, nodeAt } from "./paths.js";
+import { instancePathFor, lastSegmentKey, matchesDeclaredUid, nearestInstance, nodeAt, parentPath } from "./paths.js";
 
 export type MachineState = {
 	ast: ChartAst;
@@ -357,6 +358,10 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 										if (value.kind === "template") {
 											return [name, renderTemplate(state, value, pending.actionUid.state)];
 										}
+										if (value.kind === "joinArtifactOf") {
+											const paths = renderJoin(state, value, pending.actionUid.state).map((read) => read.path);
+											return [name, JSON.stringify(paths)];
+										}
 										const read = renderRead(state, value, pending.actionUid.state);
 										return [name, read.select === undefined ? read.path : read];
 									}),
@@ -392,7 +397,13 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 							}),
 					...(action.reads === undefined
 						? {}
-						: { reads: action.reads.map((read) => renderRead(state, read, pending.actionUid.state)) }),
+						: {
+								reads: action.reads.flatMap((read) =>
+									read.kind === "joinArtifactOf"
+										? renderJoin(state, read, pending.actionUid.state)
+										: [renderRead(state, read, pending.actionUid.state)],
+								),
+							}),
 				};
 			}
 			return {
@@ -705,6 +716,38 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 		...renderArtifact(state, declared, stateId),
 		...(read.select === undefined ? {} : { select: read.select }),
 	};
+}
+
+// A fan-in read over a map: one artifact per spawned instance, in spawn-fact key order. The
+// producer's declared path renders in each instance's scope — key()/item() and result() refs in
+// it resolve exactly as they did for the producer itself.
+function renderJoin(state: MachineState, read: JoinArtifactOfAst, stateId: string): RenderedArtifact[] {
+	const container = enclosingMapPath(state.ast, read.state, stateId);
+	const mapPath = instancePathFor(container, stateId);
+	const instances = state.projection.spawns[mapPath];
+	if (instances === undefined) {
+		throw new Error(`Read in state ${stateId}: map ${mapPath} has no spawned instances`);
+	}
+	const single: ArtifactOfAst = {
+		kind: "artifactOf",
+		state: read.state,
+		...(read.artifact === undefined ? {} : { artifact: read.artifact }),
+	};
+	return Object.keys(instances).map((key) =>
+		renderRead(state, single, `${mapPath}#${key}${read.state.slice(container.length)}`),
+	);
+}
+
+// The innermost map the producer's template path sits in — the container whose instances the
+// fan-in expands over. Normalize guarantees one exists; a miss means the chart changed under a
+// live log.
+function enclosingMapPath(ast: ChartAst, producer: StatePath, stateId: string): StatePath {
+	let path = parentPath(producer);
+	while (path !== undefined) {
+		if (nodeAt(ast, path)?.kind === "map") return path;
+		path = parentPath(path);
+	}
+	throw new Error(`Read in state ${stateId}: joinArtifactOf('${producer}') is not inside a map`);
 }
 
 function refLabel(ref: InputRef): string {

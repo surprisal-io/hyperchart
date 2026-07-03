@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { ArtifactOfCst, ChartCst, InputRef } from "./types.js";
+import type { ArtifactOfCst, ChartCst, JoinArtifactOfCst, InputRef } from "./types.js";
 
 // Dot-paths a result() selector may take into a value of type T. Free-form objects
 // (Record<string, unknown>) admit any tail; arrays and primitives end the path.
@@ -102,6 +102,13 @@ type Refs<Args, Results, Files> = {
 			opts: { select: Paths<Files[S][keyof Files[S]]> & string },
 		): ArtifactOfCst;
 	};
+	joinArtifactOf: {
+		<S extends keyof Files & string>(state: S): JoinArtifactOfCst;
+		<S extends keyof Files & string, A extends keyof Files[S] & string>(
+			state: S,
+			opts: { artifact: A },
+		): JoinArtifactOfCst;
+	};
 };
 
 // Typed refs, TS-first: Args is the shape of the run's arguments, Results maps state paths to
@@ -131,5 +138,10 @@ export function refs<
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 			...(opts.select === undefined ? {} : { select: opts.select }),
 		})) as Refs<Args, Results, Files>["artifactOf"],
+		joinArtifactOf: ((state: string, opts: { artifact?: string } = {}) => ({
+			kind: "joinArtifactOf",
+			state,
+			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
+		})) as Refs<Args, Results, Files>["joinArtifactOf"],
 	};
 }

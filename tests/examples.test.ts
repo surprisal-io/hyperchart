@@ -10,7 +10,9 @@ describe("examples", () => {
 		expect(result.ok).toBe(true);
 		if (!result.ok) throw new Error("expected valid chart");
 		// The bucket regions materialized under the parallel with absolute paths.
-		expect(result.ast.states["research.official.scout"]?.kind).toBe("state");
+		expect(result.ast.states.research?.kind).toBe("map");
+		expect(result.ast.states["research.scout"]?.kind).toBe("state");
+		expect(result.ast.states["chapters.author"]?.kind).toBe("state");
 	});
 
 	it("zod shapes convert to plain JSON Schema in the AST", () => {

@@ -59,6 +59,15 @@ export type ArtifactOfCst = {
 	select?: string;
 };
 
+// A fan-in read: the artifact of EVERY instance of a map, addressed by the producer's template
+// path inside it. In an agent's reads it expands to one file per spawned instance; in a script's
+// env it renders to a JSON array of paths. Instance set and order come from the spawned fact.
+export type JoinArtifactOfCst = {
+	kind: "joinArtifactOf";
+	state: StatePath;
+	artifact?: string;
+};
+
 // The per-invocation surface of a subagent, mirroring pi-subagents' chain step: `name` points at
 // the definition (markdown file: identity, description, system prompt — not overridable);
 // everything else parameterizes this call. The engine treats model/thinking/tools as opaque
@@ -73,7 +82,7 @@ export type AgentActionCst = {
 	// Templatable value is an artifact with just a path.
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	// Files the agent should read first: previous steps' artifacts via fileOf(), or raw paths.
-	reads?: readonly (Templatable | ArtifactOfCst)[];
+	reads?: readonly (Templatable | ArtifactOfCst | JoinArtifactOfCst)[];
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -99,7 +108,7 @@ export type ScriptActionCst = {
 	args?: readonly string[];
 	// All dynamic values flow through env: templates render from args/results, artifactOf renders
 	// to the producer's artifact PATH — the process reads the file itself, no prompt channel.
-	env?: Record<string, Templatable | ArtifactOfCst>;
+	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	reply?: SchemaCst;
 };
@@ -266,13 +275,15 @@ export type ArtifactAst = Readonly<{
 
 export type ArtifactOfAst = Readonly<ArtifactOfCst>;
 
+export type JoinArtifactOfAst = Readonly<JoinArtifactOfCst>;
+
 export type AgentActionAst = Readonly<{
 	kind: "agent";
 	uid: ActionUID;
 	name: string;
 	task?: TemplateAst;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
-	reads?: readonly (TemplateAst | ArtifactOfAst)[];
+	reads?: readonly (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[];
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -290,7 +301,7 @@ export type ScriptActionAst = Readonly<{
 	uid: ActionUID;
 	command: string;
 	args: readonly string[];
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst>>;
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;

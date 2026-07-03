@@ -6,6 +6,7 @@ import type {
 	GuardRef,
 	ArtifactCst,
 	ArtifactOfCst,
+	JoinArtifactOfCst,
 	InputRef,
 	MapStateCst,
 	SchemaCst,
@@ -119,6 +120,12 @@ export function artifactOf(state: string, opts: { artifact?: string; select?: st
 		...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 		...(opts.select === undefined ? {} : { select: opts.select }),
 	};
+}
+
+// A read of the named artifact of EVERY instance of the map enclosing `state` (a template
+// path): agents get one file per instance, scripts a JSON array of paths.
+export function joinArtifactOf(state: string, opts: { artifact?: string } = {}): JoinArtifactOfCst {
+	return { kind: "joinArtifactOf", state, ...(opts.artifact === undefined ? {} : { artifact: opts.artifact }) };
 }
 
 export function tsImport(module: string, exportName: string): GuardRef {

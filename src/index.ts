@@ -56,6 +56,7 @@ export {
 	artifactOf,
 	final,
 	json,
+	joinArtifactOf,
 	item,
 	key,
 	map,

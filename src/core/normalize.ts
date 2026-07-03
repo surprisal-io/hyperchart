@@ -11,6 +11,7 @@ import type {
 	ArtifactAst,
 	CompoundStateAst,
 	ArtifactOfAst,
+	JoinArtifactOfAst,
 	FinalStateAst,
 	GuardRef,
 	InputRef,
@@ -447,8 +448,21 @@ function validateTargets(
 				const artifactRefs = [
 					...(node.action.kind === "agent" ? (node.action.reads ?? []) : []),
 					...(node.action.kind === "script" ? Object.values(node.action.env ?? {}) : []),
-				].filter((item): item is ArtifactOfAst => item.kind === "artifactOf");
+				].filter(
+					(item): item is ArtifactOfAst | JoinArtifactOfAst =>
+						item.kind === "artifactOf" || item.kind === "joinArtifactOf",
+				);
 				for (const read of artifactRefs) {
+					if (read.kind === "joinArtifactOf" && !insideMap(states, read.state)) {
+						diagnostics.push(
+							diagnostic(
+								"INVALID_MAP_REF",
+								`joinArtifactOf in state '${path}' references '${read.state}', which is not inside a map.`,
+								`${pointer}/action/reads`,
+								source,
+							),
+						);
+					}
 					const producer = states[read.state];
 					const artifacts =
 						producer?.kind === "state" && producer.action.kind !== "user" ? producer.action.artifacts : undefined;
@@ -645,7 +659,7 @@ function toEnv(
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): Record<string, TemplateAst | ArtifactOfAst> | undefined {
+): Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst> | undefined {
 	if (input === undefined) return undefined;
 	if (!isRecord(input)) {
 		diagnostics.push(
@@ -653,11 +667,16 @@ function toEnv(
 		);
 		return undefined;
 	}
-	const env: Record<string, TemplateAst | ArtifactOfAst> = {};
+	const env: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst> = {};
 	for (const [name, value] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
 		if (isRecord(value) && value.kind === "artifactOf") {
 			const ref = toArtifactOf(value, pointer, diagnostics, source);
+			if (ref !== undefined) env[name] = ref;
+			continue;
+		}
+		if (isRecord(value) && value.kind === "joinArtifactOf") {
+			const ref = toJoinArtifactOf(value, pointer, diagnostics, source);
 			if (ref !== undefined) env[name] = ref;
 			continue;
 		}
@@ -697,12 +716,37 @@ function toArtifactOf(
 	};
 }
 
+function toJoinArtifactOf(
+	item: Record<string, unknown>,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): JoinArtifactOfAst | undefined {
+	if (typeof item.state !== "string" || item.state.length === 0) {
+		diagnostics.push(
+			diagnostic("INVALID_TEMPLATE", "joinArtifactOf state must be a non-empty state path.", pointer, source),
+		);
+		return undefined;
+	}
+	if (item.artifact !== undefined && (typeof item.artifact !== "string" || item.artifact.length === 0)) {
+		diagnostics.push(
+			diagnostic("INVALID_TEMPLATE", "joinArtifactOf artifact must be a non-empty name.", pointer, source),
+		);
+		return undefined;
+	}
+	return {
+		kind: "joinArtifactOf",
+		state: item.state,
+		...(item.artifact === undefined ? {} : { artifact: item.artifact }),
+	};
+}
+
 function toReads(
 	input: unknown,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): (TemplateAst | ArtifactOfAst)[] | undefined {
+): (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined {
 	if (input === undefined) return undefined;
 	if (!Array.isArray(input)) {
 		diagnostics.push(
@@ -715,10 +759,15 @@ function toReads(
 		);
 		return undefined;
 	}
-	const reads: (TemplateAst | ArtifactOfAst)[] = [];
+	const reads: (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] = [];
 	for (const [index, item] of input.entries()) {
 		if (isRecord(item) && item.kind === "artifactOf") {
 			const ref = toArtifactOf(item, `${path}/${index}`, diagnostics, source);
+			if (ref !== undefined) reads.push(ref);
+			continue;
+		}
+		if (isRecord(item) && item.kind === "joinArtifactOf") {
+			const ref = toJoinArtifactOf(item, `${path}/${index}`, diagnostics, source);
 			if (ref !== undefined) reads.push(ref);
 			continue;
 		}
