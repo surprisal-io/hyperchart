@@ -5,7 +5,10 @@ import {
 	arg,
 	compound,
 	final,
+	item,
 	json,
+	key,
+	map,
 	normalizeChartConfig,
 	parallel,
 	result,
@@ -224,6 +227,45 @@ function parallelChart(): ChartAst {
 	);
 }
 
+function mapChart(concurrency?: number): ChartAst {
+	return make(
+		chart({
+			kind: "chart",
+			id: "gauntlet-map",
+			initial: "plan",
+			states: {
+				plan: {
+					kind: "state",
+					action: agent("planner"),
+					transitions: { PLAN_READY: "chapters" },
+				},
+				chapters: map({
+					over: result("plan", "chapters"),
+					...(concurrency === undefined ? {} : { concurrency }),
+					initial: "author",
+					onDone: "done",
+					states: {
+						author: {
+							kind: "state",
+							action: agent("author", { task: t`Write ${key()}: ${item("title")}` }),
+							transitions: { AUTHORED: "written" },
+						},
+						written: final(),
+					},
+					transitions: { FAILED: "escalate" },
+				}),
+				done: final(),
+				escalate: final(),
+			},
+		}),
+	);
+}
+
+const MAP_PLAN_REPLY: AgentReply = {
+	type: "PLAN_READY",
+	output: { chapters: { intro: { title: "Intro" }, body: { title: "Body" } } },
+};
+
 type Scenario = {
 	name: string;
 	ast: () => ChartAst;
@@ -266,6 +308,27 @@ const SCENARIOS: Scenario[] = [
 		name: "parallel abort",
 		ast: parallelChart,
 		options: { agents: { "audit.security.scan": ["FAILED"] } },
+		finalLeaves: ["escalate"],
+	},
+	{
+		// The spawned fact replays the fan-out: instance paths, key/item rendering and the join
+		// are all recomputed from the log without touching `over` again.
+		name: "map fan-out and join",
+		ast: mapChart,
+		options: {
+			agents: {
+				plan: [MAP_PLAN_REPLY],
+				"chapters#intro.author": ["AUTHORED"],
+				"chapters#body.author": ["AUTHORED"],
+			},
+		},
+		finalLeaves: ["done"],
+	},
+	{
+		// One instance's FAILED bubbles to the map's own transitions and aborts ALL instances.
+		name: "map abort",
+		ast: mapChart,
+		options: { agents: { plan: [MAP_PLAN_REPLY], "chapters#intro.author": ["FAILED"] } },
 		finalLeaves: ["escalate"],
 	},
 	{
@@ -328,6 +391,94 @@ describe("replay gauntlet", () => {
 			.flat()
 			.flatMap((effect) => (effect.kind === "agent" ? [effect.actionUid.state] : []));
 		expect(agentRuns).toEqual(["second"]);
+	});
+
+	it("crash mid-fan-out: spawned instances are pinned, only unfinished ones re-run", async () => {
+		const ast = mapChart(1);
+		const live = await runLive(ast, {
+			agents: {
+				plan: [MAP_PLAN_REPLY],
+				"chapters#intro.author": ["AUTHORED"],
+				"chapters#body.author": ["AUTHORED"],
+			},
+		});
+		expect(live.state.projection.activeLeaves).toEqual(["done"]);
+		// Cut right after intro's completion: with concurrency 1, body was never even started.
+		const cut = live.log.findIndex(
+			(record) =>
+				record.type === "state_action" && record.kind === "complete" && record.actionUid.state.includes("#intro"),
+		);
+		const prefix = live.log.slice(0, cut + 1);
+
+		const resumed = await runLive(ast, { logs: prefix, agents: { "chapters#body.author": ["AUTHORED"] } });
+
+		expect(resumed.state.projection.activeLeaves).toEqual(["done"]);
+		const agentRuns = resumed.runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "agent" ? [effect.actionUid.state] : []));
+		expect(agentRuns).toEqual(["chapters#body.author"]);
+		// The fan-out is a fact: resuming does not re-resolve `over` — no second spawned record.
+		expect(resumed.log.filter((record) => record.type === "spawned")).toHaveLength(1);
+	});
+
+	it("modified chart: a step added inside the map body re-opens every logged instance", async () => {
+		const v1 = mapChart();
+		const live = await runLive(v1, {
+			agents: {
+				plan: [MAP_PLAN_REPLY],
+				"chapters#intro.author": ["AUTHORED"],
+				"chapters#body.author": ["AUTHORED"],
+			},
+		});
+		expect(live.state.projection.activeLeaves).toEqual(["done"]);
+
+		// v2 routes AUTHORED into a brand-new per-instance review step.
+		const v2 = make(
+			chart({
+				kind: "chart",
+				id: "gauntlet-map",
+				initial: "plan",
+				states: {
+					plan: {
+						kind: "state",
+						action: agent("planner"),
+						transitions: { PLAN_READY: "chapters" },
+					},
+					chapters: map({
+						over: result("plan", "chapters"),
+						initial: "author",
+						onDone: "done",
+						states: {
+							author: {
+								kind: "state",
+								action: agent("author", { task: t`Write ${key()}: ${item("title")}` }),
+								transitions: { AUTHORED: "review" },
+							},
+							review: {
+								kind: "state",
+								action: agent("map-reviewer"),
+								transitions: { OK: "written" },
+							},
+							written: final(),
+						},
+						transitions: { FAILED: "escalate" },
+					}),
+					done: final(),
+					escalate: final(),
+				},
+			}),
+		);
+		const resumed = await runLive(v2, {
+			logs: live.log,
+			agents: { "chapters#intro.review": ["OK"], "chapters#body.review": ["OK"] },
+		});
+
+		expect(resumed.state.projection.activeLeaves).toEqual(["done"]);
+		const agentRuns = resumed.runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "agent" ? [effect.actionUid.state] : []));
+		// The spawn fact and both AUTHORED completions were reused as-is; only the new step ran.
+		expect(agentRuns.sort()).toEqual(["chapters#body.review", "chapters#intro.review"]);
 	});
 
 	it("modified chart: the logged prefix is reused, the new route continues live", async () => {
