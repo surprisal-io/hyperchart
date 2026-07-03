@@ -15,7 +15,7 @@ import type {
 	GuardRef,
 	InputRef,
 	OnReject,
-	OutputSpecAst,
+	SchemaAst,
 	ParallelStateAst,
 	ParsedChart,
 	RegionStateAst,
@@ -495,7 +495,7 @@ function toArtifacts(
 				diagnostics.push(diagnostic("INVALID_ARTIFACT", `Artifact '${name}' requires a path.`, pointer, source));
 				continue;
 			}
-			const shape = toOutputSpecAst(item.shape, `${pointer}/shape`, diagnostics, source);
+			const shape = toSchemaAst(item.shape, `${pointer}/shape`, diagnostics, source);
 			artifacts[name] = { path: template, ...(shape === undefined ? {} : { shape }) };
 			continue;
 		}
@@ -720,7 +720,7 @@ function toStateActionAst(
 			const artifacts = toArtifacts(input.artifacts, `${path}/artifacts`, diagnostics, source);
 			const reads = toReads(input.reads, `${path}/reads`, diagnostics, source);
 			const overrides = toAgentOverrides(input, path, diagnostics, source);
-			const reply = toOutputSpecAst(input.reply, `${path}/reply`, diagnostics, source);
+			const reply = toSchemaAst(input.reply, `${path}/reply`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "agent" };
 			return deepFreeze({
 				kind: "agent",
@@ -745,7 +745,7 @@ function toStateActionAst(
 			}
 			const env = toEnv(input.env, `${path}/env`, diagnostics, source);
 			const artifacts = toArtifacts(input.artifacts, `${path}/artifacts`, diagnostics, source);
-			const reply = toOutputSpecAst(input.reply, `${path}/reply`, diagnostics, source);
+			const reply = toSchemaAst(input.reply, `${path}/reply`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "script" };
 			return deepFreeze({
 				kind: "script",
@@ -781,7 +781,7 @@ function toStateActionAst(
 					);
 				}
 			}
-			const reply = toOutputSpecAst(input.reply, `${path}/reply`, diagnostics, source);
+			const reply = toSchemaAst(input.reply, `${path}/reply`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "user" };
 			return deepFreeze({
 				kind: "user",
@@ -799,14 +799,14 @@ function toStateActionAst(
 	}
 }
 
-function toOutputSpecAst(
+// Shapes are authored as zod values only; the AST stores their plain JSON Schema conversion.
+function toSchemaAst(
 	input: unknown,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): OutputSpecAst | undefined {
+): SchemaAst | undefined {
 	if (input === undefined) return undefined;
-	// zod first-class: a schema value converts to plain JSON schema, keeping the AST serializable.
 	if (input instanceof z.ZodType) {
 		try {
 			return { kind: "jsonSchema", schema: z.toJSONSchema(input) };
@@ -817,69 +817,8 @@ function toOutputSpecAst(
 			return undefined;
 		}
 	}
-	if (!isRecord(input)) {
-		diagnostics.push(diagnostic("INVALID_OUTPUT_SPEC", "Output spec must be an object.", path, source));
-		return undefined;
-	}
-	switch (input.kind) {
-		case "jsonSchema":
-			if (!isRecord(input.schema)) {
-				diagnostics.push(
-					diagnostic(
-						"INVALID_JSON_SCHEMA",
-						"JSON Schema output must contain an object schema.",
-						`${path}/schema`,
-						source,
-					),
-				);
-				return undefined;
-			}
-			return { kind: "jsonSchema", schema: { ...input.schema } };
-		case "schemaRef":
-			if (typeof input.name !== "string" || input.name.length === 0) {
-				diagnostics.push(
-					diagnostic("INVALID_SCHEMA_REF", "Schema ref name must be a non-empty string.", `${path}/name`, source),
-				);
-				return undefined;
-			}
-			return { kind: "schemaRef", name: input.name };
-		case "tsImport":
-			if (typeof input.module !== "string" || input.module.length === 0) {
-				diagnostics.push(
-					diagnostic(
-						"INVALID_SCHEMA_IMPORT",
-						"TS import schema module must be a non-empty string.",
-						`${path}/module`,
-						source,
-					),
-				);
-			}
-			if (typeof input.export !== "string" || input.export.length === 0) {
-				diagnostics.push(
-					diagnostic(
-						"INVALID_SCHEMA_IMPORT",
-						"TS import schema export must be a non-empty string.",
-						`${path}/export`,
-						source,
-					),
-				);
-			}
-			return {
-				kind: "tsImport",
-				module: typeof input.module === "string" ? input.module : "",
-				export: typeof input.export === "string" ? input.export : "",
-			};
-		default:
-			diagnostics.push(
-				diagnostic(
-					"INVALID_OUTPUT_SPEC",
-					"Output spec kind must be 'jsonSchema', 'schemaRef', or 'tsImport'.",
-					`${path}/kind`,
-					source,
-				),
-			);
-			return undefined;
-	}
+	diagnostics.push(diagnostic("INVALID_SCHEMA", "A shape must be a zod schema value.", path, source));
+	return undefined;
 }
 
 function toTransitionMap(

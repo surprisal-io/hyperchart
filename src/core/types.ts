@@ -24,50 +24,26 @@ export type AuthoringDiagnostic = {
 	source?: ChartSource;
 };
 
-// A named export of the chart's own module. The runtime already imports that module to load the
-// chart, so resolving the schema value (e.g. a zod schema living right next to the chart) is
-// free; only the name enters the AST — the chart stays plain data. For shapes shared across
-// charts use TsImportSchemaRefCst instead.
-export type SchemaRefCst = {
-	kind: "schemaRef";
-	name: string;
-};
+// Shapes are authored as zod values, and only as zod values — one source for the TS type
+// (z.infer), the agent-facing description and the runtime validation. Normalize converts the
+// value to plain JSON Schema for the AST, so the chart-as-data doctrine holds where it matters
+// (AST, log, hashes) while a zod instance never enters serialized data.
+export type SchemaCst = ZodType;
 
-export type TsImportSchemaRefCst = {
-	kind: "tsImport";
-	module: string;
-	export: string;
-};
-
-export type JsonSchemaOutputCst = {
-	kind: "jsonSchema";
-	schema: JsonSchema;
-};
-
-export type OutputSpecCst = JsonSchemaOutputCst | SchemaRefCst | TsImportSchemaRefCst | ZodType;
-
-// zod is a first-class authoring citizen: a schema value may be passed directly wherever a shape
-// is declared (reply, artifact shapes). Normalize converts it to plain JSON schema for the AST —
-// the chart-as-data doctrine holds where it matters (AST, log, hashes), while authoring and the
-// typed layer share one zod source (z.infer).
-
-export type SchemaRefAst = Readonly<SchemaRefCst>;
-export type TsImportSchemaRefAst = Readonly<TsImportSchemaRefCst>;
-export type JsonSchemaOutputAst = Readonly<{
+export type SchemaAst = Readonly<{
 	kind: "jsonSchema";
 	schema: Readonly<JsonSchema>;
 }>;
-export type OutputSpecAst = JsonSchemaOutputAst | SchemaRefAst | TsImportSchemaRefAst;
 
 // A deliverable file the agent must produce: where to write and — optionally — what shape the
-// CONTENT has (e.g. a schemaRef to a zod export next to the chart). The runtime tells the agent
+// CONTENT has (a zod value declared next to the chart). The runtime tells the agent
 // to write this shape and may verify the written file; consumers reading via fileOf() inherit
 // path and shape from here, so they cannot drift. Artifacts are NOT the step's result — the
 // result is the completion event's payload (see `reply`).
 export type ArtifactCst = {
 	kind: "artifact";
 	path: Templatable;
-	shape?: OutputSpecCst;
+	shape?: SchemaCst;
 };
 
 // A read of another state's declared artifact, by producer rather than by path. `artifact` names
@@ -103,14 +79,14 @@ export type AgentActionCst = {
 	tools?: readonly string[];
 	// The step's RESULT: the shape of the completion event's payload. Small routing data only —
 	// deliverables go through artifacts.
-	reply?: OutputSpecCst;
+	reply?: SchemaCst;
 };
 
 export type UserActionCst = {
 	kind: "user";
 	prompt: Templatable;
 	options?: readonly string[];
-	reply?: OutputSpecCst;
+	reply?: SchemaCst;
 };
 
 // A command step: the runtime executes the command and answers with a completion event, exactly
@@ -125,7 +101,7 @@ export type ScriptActionCst = {
 	// to the producer's artifact PATH — the process reads the file itself, no prompt channel.
 	env?: Record<string, Templatable | ArtifactOfCst>;
 	artifacts?: Record<string, Templatable | ArtifactCst>;
-	reply?: OutputSpecCst;
+	reply?: SchemaCst;
 };
 
 export type StateActionCst = AgentActionCst | UserActionCst | ScriptActionCst;
@@ -256,7 +232,7 @@ export type ChartCst = {
 
 export type ArtifactAst = Readonly<{
 	path: TemplateAst;
-	shape?: OutputSpecAst;
+	shape?: SchemaAst;
 }>;
 
 export type ArtifactOfAst = Readonly<ArtifactOfCst>;
@@ -271,14 +247,14 @@ export type AgentActionAst = Readonly<{
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
-	reply?: OutputSpecAst;
+	reply?: SchemaAst;
 }>;
 export type UserActionAst = Readonly<{
 	kind: "user";
 	uid: ActionUID;
 	prompt: TemplateAst;
 	options: readonly string[];
-	reply?: OutputSpecAst;
+	reply?: SchemaAst;
 }>;
 export type ScriptActionAst = Readonly<{
 	kind: "script";
@@ -287,7 +263,7 @@ export type ScriptActionAst = Readonly<{
 	args: readonly string[];
 	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst>>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
-	reply?: OutputSpecAst;
+	reply?: SchemaAst;
 }>;
 export type StateActionAst = AgentActionAst | UserActionAst | ScriptActionAst;
 

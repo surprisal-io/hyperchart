@@ -1,4 +1,4 @@
-import { agent, chart, final, jsonSchema, user } from "../../src/index.js";
+import { agent, chart, final, user, z } from "../../src/index.js";
 
 export default chart({
 	kind: "chart",
@@ -8,11 +8,7 @@ export default chart({
 		research: {
 			kind: "state",
 			action: agent("researcher", {
-				reply: jsonSchema({
-					type: "object",
-					required: ["summary"],
-					properties: { summary: { type: "string" } },
-				}),
+				reply: z.object({ summary: z.string() }),
 			}),
 			transitions: {
 				RESEARCH_READY: "plan",
@@ -23,11 +19,7 @@ export default chart({
 		plan: {
 			kind: "state",
 			action: agent("planner", {
-				reply: jsonSchema({
-					type: "object",
-					required: ["steps"],
-					properties: { steps: { type: "array", items: { type: "string" } } },
-				}),
+				reply: z.object({ steps: z.array(z.string()) }),
 			}),
 			transitions: {
 				PLAN_READY: "implement",

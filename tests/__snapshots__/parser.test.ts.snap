@@ -65,6 +65,8 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
         "reply": {
           "kind": "jsonSchema",
           "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
             "properties": {
               "steps": {
                 "items": {
@@ -99,6 +101,8 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
         "reply": {
           "kind": "jsonSchema",
           "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "additionalProperties": false,
             "properties": {
               "summary": {
                 "type": "string",

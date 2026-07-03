@@ -8,13 +8,13 @@ import {
 	artifactOf,
 	final,
 	json,
-	jsonSchema,
 	normalizeChartConfig,
 	parallel,
 	result,
 	script,
 	t,
 	tsImport,
+	z,
 } from "../src/index.js";
 import { loop, start } from "../src/core/execution_loop.js";
 import type {
@@ -570,7 +570,7 @@ describe("execution loop", () => {
 						kind: "state",
 						action: agent("planner", {
 							task: t`Plan a report on ${arg("topic")}.`,
-							reply: jsonSchema({ type: "object", required: ["steps"], properties: {} }),
+							reply: z.object({ steps: z.array(z.string()) }),
 						}),
 						transitions: { PLAN_READY: "build" },
 					},
@@ -630,15 +630,15 @@ describe("execution loop", () => {
 		expect(outputs.build).toEqual([{ name: "report", path: "out/AI report.html" }]);
 		// The reply channel is a first-class part of the spawn request: the payload shape the
 		// runtime should instruct and validate against.
-		expect(resultShapes.plan).toEqual({
+		expect(resultShapes.plan).toMatchObject({
 			kind: "jsonSchema",
-			schema: { type: "object", required: ["steps"], properties: {} },
+			schema: { type: "object", required: ["steps"] },
 		});
 		expect(resultShapes.build).toBeUndefined();
 	});
 
 	it("fileOf reads inherit the producer's rendered path and content shape", async () => {
-		const shape = jsonSchema({ type: "object", required: ["claims"], properties: {} });
+		const shape = z.object({ claims: z.array(z.string()) });
 		const parsed = normalizeChartConfig(
 			chart({
 				kind: "chart",
@@ -687,11 +687,14 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		// The producer was told where to write and what shape; the consumer reads the SAME thing —
 		// path re-rendered from the same facts, shape inherited from the declaration.
-		expect(outputs.writer).toEqual([{ name: "claims", path: "out/ai.json", shape }]);
+		const convertedShape = { kind: "jsonSchema", schema: expect.objectContaining({ type: "object" }) };
+		expect(outputs.writer).toEqual([
+			expect.objectContaining({ name: "claims", path: "out/ai.json", shape: convertedShape }),
+		]);
 		// a plain read (single artifact resolved by name omission), and a narrowed read of one field
 		expect(readsSeen.reader).toEqual([
-			{ path: "out/ai.json", shape },
-			{ path: "out/ai.json", shape, select: "claims.approved" },
+			expect.objectContaining({ path: "out/ai.json", shape: convertedShape }),
+			expect.objectContaining({ path: "out/ai.json", shape: convertedShape, select: "claims.approved" }),
 		]);
 	});
 

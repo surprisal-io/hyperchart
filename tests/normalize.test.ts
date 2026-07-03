@@ -5,13 +5,13 @@ import {
 	chart,
 	compound,
 	final,
-	jsonSchema,
 	normalizeChartConfig,
 	parallel,
 	result,
 	t,
 	tsImport,
 	user,
+	z,
 } from "../src/index.js";
 
 describe("normalizeChartConfig", () => {
@@ -25,7 +25,7 @@ describe("normalizeChartConfig", () => {
 					start: {
 						kind: "state",
 						action: agent("worker", {
-							reply: jsonSchema({ type: "object", properties: { value: { type: "string" } } }),
+							reply: z.object({ value: z.string() }),
 						}),
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
@@ -534,13 +534,13 @@ describe("normalizeChartConfig", () => {
 		expect(result.diagnostics.map((d) => d.code)).toContain("RESERVED_EVENT_EMIT");
 	});
 
-	it("reports invalid output schema shape", () => {
+	it("rejects non-zod shape declarations", () => {
 		const result = normalizeChartConfig({
 			id: "broken",
 			initial: "start",
 			states: {
 				start: {
-					action: { kind: "agent", name: "worker", reply: { kind: "jsonSchema", schema: "nope" } },
+					action: { kind: "agent", name: "worker", reply: { kind: "jsonSchema", schema: { type: "object" } } },
 					transitions: { DONE: "done" },
 				},
 				done: final(),
@@ -548,6 +548,6 @@ describe("normalizeChartConfig", () => {
 		});
 
 		expect(result.ok).toBe(false);
-		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_JSON_SCHEMA");
+		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_SCHEMA");
 	});
 });

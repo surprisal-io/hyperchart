@@ -10,7 +10,7 @@ import type {
 	GuardRef,
 	InputRef,
 	OnReject,
-	OutputSpecAst,
+	SchemaAst,
 	ScriptActionAst,
 	TemplateAst,
 	UserActionAst,
@@ -44,7 +44,7 @@ export type RenderedArtifact = Readonly<{
 	// Present on the producing side: the artifact's declared name.
 	name?: string;
 	path: string;
-	shape?: OutputSpecAst;
+	shape?: SchemaAst;
 	// Present on artifactOf reads with a selector: the runtime hands the agent only this field of the
 	// file's content (validated against `shape`, which describes the WHOLE file).
 	select?: string;
@@ -64,7 +64,7 @@ export type AgentEffect = Readonly<{
 	// must have — it becomes results[state] once accepted. The runtime tells the agent both
 	// upfront and validates the actual reply at the boundary.
 	events: readonly string[];
-	reply?: OutputSpecAst;
+	reply?: SchemaAst;
 }>;
 
 export type UserEffect = Readonly<{
@@ -91,7 +91,7 @@ export type ScriptEffect = Readonly<{
 	env?: Readonly<Record<string, string | RenderedArtifact>>;
 	artifacts?: readonly RenderedArtifact[];
 	events: readonly string[];
-	reply?: OutputSpecAst;
+	reply?: SchemaAst;
 }>;
 
 export type DurableRecordsEffect = Readonly<{

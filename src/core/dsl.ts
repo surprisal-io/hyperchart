@@ -7,15 +7,11 @@ import type {
 	ArtifactCst,
 	ArtifactOfCst,
 	InputRef,
-	JsonSchema,
-	JsonSchemaOutputCst,
-	OutputSpecCst,
+	SchemaCst,
 	ParallelStateCst,
-	SchemaRefCst,
 	ScriptActionCst,
 	Templatable,
 	TemplateCst,
-	TsImportSchemaRefCst,
 	UserActionCst,
 } from "./types.js";
 
@@ -29,19 +25,25 @@ export function final(): FinalStateCst {
 	return { kind: "final" };
 }
 
-export function compound(options: Omit<CompoundStateCst, "kind">): CompoundStateCst {
+export function compound<const O extends Omit<CompoundStateCst, "kind">>(options: O): { kind: "compound" } & O {
 	return { kind: "compound", ...options };
 }
 
-export function parallel(options: Omit<ParallelStateCst, "kind">): ParallelStateCst {
+export function parallel<const O extends Omit<ParallelStateCst, "kind">>(options: O): { kind: "parallel" } & O {
 	return { kind: "parallel", ...options };
 }
 
-export function agent(name: string, options: Omit<AgentActionCst, "kind" | "name"> = {}): AgentActionCst {
+// Const type parameters throughout the DSL: the literal types of options (zod replies, artifact
+// shapes, nested states) survive into the chart literal, so the typed layer can extract the
+// registry from the definition itself.
+export function agent<const O extends Omit<AgentActionCst, "kind" | "name">>(
+	name: string,
+	options: O = {} as O,
+): { kind: "agent"; name: string } & O {
 	return { kind: "agent", name, ...options };
 }
 
-export function user(options: Omit<UserActionCst, "kind">): UserActionCst {
+export function user<const O extends Omit<UserActionCst, "kind">>(options: O): { kind: "user" } & O {
 	return { kind: "user", ...options };
 }
 
@@ -83,7 +85,12 @@ export function result(state: string, path?: string): InputRef {
 }
 
 // A deliverable file with an optional content shape — see ArtifactCst.
-export function artifact(path: Templatable, shape?: OutputSpecCst): ArtifactCst {
+export function artifact<const P extends Templatable>(path: P): { kind: "artifact"; path: P };
+export function artifact<const P extends Templatable, const S extends SchemaCst>(
+	path: P,
+	shape: S,
+): { kind: "artifact"; path: P; shape: S };
+export function artifact(path: Templatable, shape?: SchemaCst): ArtifactCst {
 	return { kind: "artifact", path, ...(shape === undefined ? {} : { shape }) };
 }
 
@@ -105,24 +112,12 @@ export function tsImport(module: string, exportName: string): GuardRef {
 
 // Doubles as a guard (validate: script(...)) and as a command action (action: script(...)) —
 // the position decides. Parameters flow through env templates; command/args stay static.
-export function script(
+export function script<const O extends Omit<ScriptActionCst, "kind" | "command" | "args">>(
 	command: string,
 	args?: readonly string[],
-	opts: Omit<ScriptActionCst, "kind" | "command" | "args"> = {},
-): ScriptActionCst {
+	opts: O = {} as O,
+): { kind: "script"; command: string; args?: readonly string[] } & O {
 	return { kind: "script", command, ...(args === undefined ? {} : { args }), ...opts };
-}
-
-export function jsonSchema(schema: JsonSchema): JsonSchemaOutputCst {
-	return { kind: "jsonSchema", schema };
-}
-
-export function schemaRef(name: string): SchemaRefCst {
-	return { kind: "schemaRef", name };
-}
-
-export function tsImportSchema(module: string, exportName: string): TsImportSchemaRefCst {
-	return { kind: "tsImport", module, export: exportName };
 }
 
 export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
@@ -139,4 +134,4 @@ export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 	return Object.freeze(value);
 }
 
-export type { OutputSpecCst } from "./types.js";
+export type { SchemaCst } from "./types.js";

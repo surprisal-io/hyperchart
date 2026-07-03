@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arg as untypedArg, json, refs, result as untypedResult, t } from "../src/index.js";
+import { agent, arg as untypedArg, final, json, refs, result as untypedResult, t, z } from "../src/index.js";
 
 type Args = { topic: string; goal: string };
 
@@ -55,6 +55,42 @@ describe("typed refs (TS-first)", () => {
 		expect(arg("topic")).toEqual({ kind: "arg", name: "topic" });
 		// @ts-expect-error unknown argument
 		arg("topicc");
+	});
+
+	it("the refs-provided chart() pins the registry to the definition", () => {
+		const Reply = z.object({ dir: z.string() });
+		const body = {
+			kind: "chart",
+			id: "drift",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: agent("w", { reply: Reply, artifacts: { out: "out.json" } }),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		} as const;
+
+		const ok = refs<Record<string, never>, { work: z.infer<typeof Reply> }, { work: { out: unknown } }>();
+		expect(ok.chart(body).id).toBe("drift");
+
+		const renamed = refs<Record<string, never>, { renamed: z.infer<typeof Reply> }, { work: { out: unknown } }>();
+		// @ts-expect-error the registry names a state the chart does not declare
+		renamed.chart(body);
+
+		const missing = refs<Record<string, never>, Record<string, never>, { work: { out: unknown } }>();
+		// @ts-expect-error the chart declares a reply the registry does not mention
+		missing.chart(body);
+
+		const wrongArtifact = refs<
+			Record<string, never>,
+			{ work: z.infer<typeof Reply> },
+			{ work: { renamed: unknown } }
+		>();
+		// @ts-expect-error artifact name drifted
+		wrongArtifact.chart(body);
 	});
 
 	it("templates admit only primitive-valued refs; objects need an explicit json()", () => {
