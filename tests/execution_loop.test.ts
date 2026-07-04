@@ -1,25 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
 	agent,
-	chart,
-	arg,
-	compound,
 	artifact,
-	artifactOf,
+	compound,
 	final,
 	json,
-	normalizeChartConfig,
-	item,
-	joinArtifactOf,
-	key,
 	map,
+	normalizeChartConfig,
 	parallel,
-	result,
 	script,
 	t,
 	tsImport,
 	z,
 } from "../src/index.js";
+import { arg, artifactOf, chart, item, joinArtifactOf, key, result } from "../src/core/dsl.js";
 import { loop, start } from "../src/core/execution_loop.js";
 import type {
 	ActionUID,
@@ -308,7 +302,7 @@ describe("execution loop", () => {
 		expect(runtime.effectBatches[0]).toEqual([
 			expect.objectContaining({
 				kind: "agent",
-				id: "running:test-chart:start:agent:1",
+				id: "test-chart:start:agent:1:1",
 				actionUid: uid,
 			}),
 		]);
@@ -476,7 +470,12 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(rejections).toHaveLength(1);
 		expect(rejections[0]).toEqual(
-			expect.objectContaining({ kind: "rejected", onReject: "resume", reason: "tests are failing" }),
+			expect.objectContaining({
+				kind: "rejected",
+				onReject: "resume",
+				reason: "tests are failing",
+				invocation: expect.objectContaining({ kind: "agent", id: "validated-chart:work:agent:1:1" }),
+			}),
 		);
 		// The whole validation history is durable: claim, verdict, retry, verdict.
 		const records = runtime.effectBatches
@@ -694,6 +693,11 @@ describe("execution loop", () => {
 			schema: { type: "object", required: ["steps"] },
 		});
 		expect(resultShapes.build).toBeUndefined();
+		expect(
+			records.find(
+				(record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "plan",
+			),
+		).not.toHaveProperty("invocation");
 	});
 
 	it("fileOf reads inherit the producer's rendered path and content shape", async () => {
@@ -837,6 +841,15 @@ describe("execution loop", () => {
 			artifacts: [{ name: "evidence", path: "artifacts/evidence.json" }],
 			events: ["NORMALIZED"],
 		});
+		const records = runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
+		expect(
+			records.find(
+				(record) =>
+					record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "normalize",
+			),
+		).not.toHaveProperty("invocation");
 		// a script consuming that artifact gets the path as env; a selected field arrives as a
 		// late-bound read the runtime resolves at spawn
 		expect(consumeEffect).toMatchObject({
@@ -979,9 +992,7 @@ describe("execution loop", () => {
 
 	it("throws when the machine reports an error output", async () => {
 		const ast = linearAst();
-		const events: MachineEvent[] = [
-			{ kind: "agent", effectId: "running:test-chart:start:agent:1", event: { type: "NOPE" } },
-		];
+		const events: MachineEvent[] = [{ kind: "agent", effectId: "test-chart:start:agent:1:1", event: { type: "NOPE" } }];
 		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast))], events });
 
 		await expect(loop(runtime)).rejects.toThrow("No transition found for event type NOPE");
@@ -990,9 +1001,7 @@ describe("execution loop", () => {
 	it("ignores a completion for an action that is not pending", async () => {
 		const ast = linearAst();
 		// A parseable effect id that matches no pending action: a completion that lost a race.
-		const events: MachineEvent[] = [
-			{ kind: "agent", effectId: "running:test-chart:other:agent:7", event: { type: "DONE" } },
-		];
+		const events: MachineEvent[] = [{ kind: "agent", effectId: "test-chart:other:agent:1:7", event: { type: "DONE" } }];
 		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast))], events });
 
 		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
@@ -1011,7 +1020,7 @@ describe("execution loop", () => {
 			expect.objectContaining({ kind: "agent", actionUid: uid }),
 			expect.objectContaining({
 				kind: "timer",
-				id: "timer:timed-chart:work:agent:1",
+				id: "timed-chart:work:agent:1:1",
 				actionUid: uid,
 				// invoke fact's timestamp (1) + delayMs (500)
 				firesAt: 501,
@@ -1059,7 +1068,7 @@ describe("execution loop", () => {
 	it("ignores a stale timer from an earlier round", async () => {
 		const ast = afterAst();
 		const uid = actionUid(ast, "work");
-		const events: MachineEvent[] = [{ kind: "timer", effectId: "timer:timed-chart:work:agent:99" }];
+		const events: MachineEvent[] = [{ kind: "timer", effectId: "timed-chart:work:agent:1:99" }];
 		const runtime = new MockRuntime({
 			ast,
 			logs: [invoke(uid)],

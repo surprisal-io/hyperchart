@@ -45,28 +45,7 @@ export type {
 	UserActionCst,
 } from "./core/types.js";
 
-export {
-	agent,
-	chart,
-	compound,
-	createChart,
-	arg,
-	deepFreeze,
-	artifact,
-	artifactOf,
-	final,
-	json,
-	joinArtifactOf,
-	item,
-	key,
-	map,
-	parallel,
-	result,
-	t,
-	script,
-	tsImport,
-	user,
-} from "./core/dsl.js";
+export { agent, compound, artifact, final, json, map, parallel, t, script, tsImport, user } from "./core/dsl.js";
 
 export { loop, start } from "./core/execution_loop.js";
 // zod is part of the authoring surface (schema values in reply/artifact shapes): re-exported so
@@ -105,5 +84,5 @@ export type { DurableLogRecord, StateActionInvokeLog } from "./core/durable_even
 export { createBranchProjection, isFinalState, projectBranch } from "./core/projection.js";
 export type { BranchProjection, PendingAction } from "./core/projection.js";
 export { createMachineOutput, stepMachine } from "./core/machine.js";
-export { concatAsyncIterables, toAsyncIterable } from "./utils/index.js";
-export type { MaybeAsyncIterable } from "./utils/index.js";
+export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";
+export type { AsyncQueue, MaybeAsyncIterable } from "./utils/index.js";

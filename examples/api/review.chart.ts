@@ -1,4 +1,11 @@
-import { agent, chart, final, user, z } from "../../src/index.js";
+import { agent, final, refs, user, z } from "../../src/index.js";
+
+const Research = z.object({ summary: z.string() });
+const Plan = z.object({ steps: z.array(z.string()) });
+type Research = z.infer<typeof Research>;
+type Plan = z.infer<typeof Plan>;
+
+const { chart } = refs<Record<string, never>, { research: Research; plan: Plan }>();
 
 export default chart({
 	kind: "chart",

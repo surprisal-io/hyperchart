@@ -1,20 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-	agent,
-	chart,
-	arg,
-	compound,
-	final,
-	item,
-	json,
-	key,
-	map,
-	normalizeChartConfig,
-	parallel,
-	result,
-	t,
-	tsImport,
-} from "../src/index.js";
+import { agent, compound, final, json, map, normalizeChartConfig, parallel, t, tsImport } from "../src/index.js";
+import { arg, chart, item, key, result } from "../src/core/dsl.js";
 import { loop, start } from "../src/core/execution_loop.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";

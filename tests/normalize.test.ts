@@ -1,22 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../src/index.js";
-import {
-	agent,
-	arg,
-	chart,
-	compound,
-	final,
-	item,
-	key,
-	map,
-	normalizeChartConfig,
-	parallel,
-	result,
-	t,
-	tsImport,
-	user,
-	z,
-} from "../src/index.js";
+import { agent, compound, final, map, normalizeChartConfig, parallel, t, tsImport, user, z } from "../src/index.js";
+import { arg, chart, item, key, result } from "../src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {

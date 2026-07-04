@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agent, arg as untypedArg, final, json, map, refs, result as untypedResult, t, z } from "../src/index.js";
+import { agent, final, json, map, refs, t, z } from "../src/index.js";
+import { arg as untypedArg, result as untypedResult } from "../src/core/dsl.js";
 
 type Args = { topic: string; goal: string };
 
