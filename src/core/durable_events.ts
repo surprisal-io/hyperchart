@@ -29,7 +29,7 @@ type SpawnedLog = {
 	instances: Readonly<Record<string, unknown>>;
 } & SessionParams;
 
-type StateActionInvokeLog = {
+export type StateActionInvokeLog = {
 	type: "state_action";
 	kind: "invoke";
 	actionUid: ActionUID;

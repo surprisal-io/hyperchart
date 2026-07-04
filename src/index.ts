@@ -77,6 +77,7 @@ export type { Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
 export type {
+	ActionEffect,
 	AgentEffect,
 	AgentMachineEvent,
 	CancelEffect,
@@ -100,8 +101,9 @@ export type {
 	UserEffect,
 	UserMachineEvent,
 } from "./core/machine.js";
-export type { DurableLogRecord } from "./core/durable_events.js";
-export { isFinalState } from "./core/projection.js";
+export type { DurableLogRecord, StateActionInvokeLog } from "./core/durable_events.js";
+export { createBranchProjection, isFinalState, projectBranch } from "./core/projection.js";
+export type { BranchProjection, PendingAction } from "./core/projection.js";
 export { createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, toAsyncIterable } from "./utils/index.js";
 export type { MaybeAsyncIterable } from "./utils/index.js";

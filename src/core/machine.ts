@@ -18,6 +18,7 @@ import type {
 	UserActionAst,
 } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
+import { actionUidKey } from "./action_uid.js";
 import {
 	allowedEvents,
 	type BranchProjection,
@@ -39,8 +40,6 @@ export type MachineState = {
 
 export type EffectId = string;
 
-// A spawn-ready subagent call: the definition name and frontmatter overrides live in `action`;
-// task/output/reads are the templated parameters rendered into final text by the machine.
 // A file parameter with its path rendered and — when the producer declared one — the shape of
 // its content; the runtime uses the shape both to instruct the agent and to verify the file.
 export type RenderedArtifact = Readonly<{
@@ -53,6 +52,8 @@ export type RenderedArtifact = Readonly<{
 	select?: string;
 }>;
 
+// A spawn-ready subagent call: the definition name and frontmatter overrides live in `action`;
+// task/output/reads are the templated parameters rendered into final text by the machine.
 export type AgentEffect = Readonly<{
 	kind: "agent";
 	id: EffectId;
@@ -97,6 +98,8 @@ export type ScriptEffect = Readonly<{
 	reply?: SchemaAst;
 }>;
 
+export type ActionEffect = AgentEffect | UserEffect | ScriptEffect;
+
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
 	id: EffectId;
@@ -124,6 +127,9 @@ export type RejectedEffect = Readonly<{
 	// Which rejected round this is (1-based); the budget lives in the state's `retries`.
 	attempt: number;
 	reason?: string;
+	// Fully rendered invocation reconstructed from chart + replayed facts using the original
+	// invoke seqId. Used when a rejected action must continue/restart after process memory is gone.
+	invocation: ActionEffect;
 }>;
 
 // A deadline racing a running action: fires at `firesAt` (absolute — the invoke fact's timestamp
@@ -297,15 +303,15 @@ function stampAppend(state: MachineState, append: RecordAppend): DurableRecordsE
 	};
 }
 
-function actionUidKey(actionUid: ActionUID): string {
-	return `${actionUid.chart}:${actionUid.state}:${actionUid.action}`;
-}
-
 // Every pending action's effect answers the log record that started its phase: invoke → run the
 // action, complete → validate it, validated(false) → deliver the rejection. The record's seqId
 // makes the id unique per phase, so each phase dispatches exactly once.
 function pendingEffectId(pending: PendingAction): EffectId {
-	return `${pending.phase}:${actionUidKey(pending.actionUid)}:${pending.seqId}`;
+	return actionEffectId(pending.actionUid, pending.attemptId, pending.seqId);
+}
+
+function actionEffectId(actionUid: ActionUID, attemptId: number, seqId: number): EffectId {
+	return `${actionUidKey(actionUid)}:${attemptId}:${seqId}`;
 }
 
 // All effects a pending action currently wants: its phase effect, plus — while running under a
@@ -328,7 +334,7 @@ function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 }
 
 function timerEffectId(pending: PendingAction): EffectId {
-	return `timer:${actionUidKey(pending.actionUid)}:${pending.seqId}`;
+	return actionEffectId(pending.actionUid, pending.attemptId, pending.seqId);
 }
 
 function pendingEffect(state: MachineState, pending: PendingAction): Effect {
@@ -338,82 +344,8 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	}
 	const id = pendingEffectId(pending);
 	switch (pending.phase) {
-		case "running": {
-			if (node.action.kind === "script") {
-				const action = node.action;
-				return {
-					kind: "script",
-					id,
-					actionUid: pending.actionUid,
-					action,
-					command: action.command,
-					args: action.args,
-					events: allowedEvents(state.ast, pending.actionUid.state),
-					...(action.reply === undefined ? {} : { reply: action.reply }),
-					...(action.env === undefined
-						? {}
-						: {
-								env: Object.fromEntries(
-									Object.entries(action.env).map(([name, value]) => {
-										if (value.kind === "template") {
-											return [name, renderTemplate(state, value, pending.actionUid.state)];
-										}
-										if (value.kind === "joinArtifactOf") {
-											const paths = renderJoin(state, value, pending.actionUid.state).map((read) => read.path);
-											return [name, JSON.stringify(paths)];
-										}
-										const read = renderRead(state, value, pending.actionUid.state);
-										return [name, read.select === undefined ? read.path : read];
-									}),
-								),
-							}),
-					...(action.artifacts === undefined
-						? {}
-						: {
-								artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
-									name,
-									...renderArtifact(state, declared, pending.actionUid.state),
-								})),
-							}),
-				};
-			}
-			if (node.action.kind === "agent") {
-				const action = node.action;
-				return {
-					kind: "agent",
-					id,
-					actionUid: pending.actionUid,
-					action,
-					events: allowedEvents(state.ast, pending.actionUid.state),
-					...(action.reply === undefined ? {} : { reply: action.reply }),
-					...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, pending.actionUid.state) }),
-					...(action.artifacts === undefined
-						? {}
-						: {
-								artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
-									name,
-									...renderArtifact(state, declared, pending.actionUid.state),
-								})),
-							}),
-					...(action.reads === undefined
-						? {}
-						: {
-								reads: action.reads.flatMap((read) =>
-									read.kind === "joinArtifactOf"
-										? renderJoin(state, read, pending.actionUid.state)
-										: [renderRead(state, read, pending.actionUid.state)],
-								),
-							}),
-				};
-			}
-			return {
-				kind: "user",
-				id,
-				actionUid: pending.actionUid,
-				action: node.action,
-				prompt: renderTemplate(state, node.action.prompt, pending.actionUid.state),
-			};
-		}
+		case "running":
+			return actionInvocationForAction(state, pending.actionUid, node.action, id);
 		case "validating":
 			if (node.validate === undefined) {
 				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without a validator`);
@@ -428,17 +360,133 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 				onReject: node.onReject ?? "resume",
 				attempt: pending.rejections,
 				...(pending.reason === undefined ? {} : { reason: pending.reason }),
+				invocation: actionInvocationForAction(
+					state,
+					pending.actionUid,
+					node.action,
+					actionEffectId(pending.actionUid, pending.attemptId, pending.invokeSeqId),
+				),
 			};
 	}
 }
 
-function effectIdToActionUid(id: EffectId): ActionUID | null {
-	const [, chart, state, action] = id.split(":");
-	if (!chart || !state || !action) {
+function actionInvocationForAction(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: ActionStateAst["action"],
+	id: EffectId,
+): ActionEffect {
+	switch (action.kind) {
+		case "agent":
+			return agentInvocationForAction(state, actionUid, action, id);
+		case "script":
+			return scriptInvocationForAction(state, actionUid, action, id);
+		case "user":
+			return userInvocationForAction(state, actionUid, action, id);
+	}
+}
+
+function agentInvocationForAction(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: AgentActionAst,
+	id: EffectId,
+): AgentEffect {
+	return {
+		kind: "agent",
+		id,
+		actionUid,
+		action,
+		events: allowedEvents(state.ast, actionUid.state),
+		...(action.reply === undefined ? {} : { reply: action.reply }),
+		...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, actionUid.state) }),
+		...(action.artifacts === undefined
+			? {}
+			: {
+					artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
+						name,
+						...renderArtifact(state, declared, actionUid.state),
+					})),
+				}),
+		...(action.reads === undefined
+			? {}
+			: {
+					reads: action.reads.flatMap((read) =>
+						read.kind === "joinArtifactOf"
+							? renderJoin(state, read, actionUid.state)
+							: [renderRead(state, read, actionUid.state)],
+					),
+				}),
+	};
+}
+
+function scriptInvocationForAction(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: ScriptActionAst,
+	id: EffectId,
+): ScriptEffect {
+	return {
+		kind: "script",
+		id,
+		actionUid,
+		action,
+		command: action.command,
+		args: action.args,
+		events: allowedEvents(state.ast, actionUid.state),
+		...(action.reply === undefined ? {} : { reply: action.reply }),
+		...(action.env === undefined
+			? {}
+			: {
+					env: Object.fromEntries(
+						Object.entries(action.env).map(([name, value]) => {
+							if (value.kind === "template") {
+								return [name, renderTemplate(state, value, actionUid.state)];
+							}
+							if (value.kind === "joinArtifactOf") {
+								const paths = renderJoin(state, value, actionUid.state).map((read) => read.path);
+								return [name, JSON.stringify(paths)];
+							}
+							const read = renderRead(state, value, actionUid.state);
+							return [name, read.select === undefined ? read.path : read];
+						}),
+					),
+				}),
+		...(action.artifacts === undefined
+			? {}
+			: {
+					artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
+						name,
+						...renderArtifact(state, declared, actionUid.state),
+					})),
+				}),
+	};
+}
+
+function userInvocationForAction(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: UserActionAst,
+	id: EffectId,
+): UserEffect {
+	return {
+		kind: "user",
+		id,
+		actionUid,
+		action,
+		prompt: renderTemplate(state, action.prompt, actionUid.state),
+	};
+}
+
+function effectIdParts(id: EffectId): { actionUid: ActionUID; attemptId: number; seqId: number } | null {
+	const [chart, state, action, attempt, seq] = id.split(":");
+	const attemptId = Number(attempt);
+	const seqId = Number(seq);
+	if (!chart || !state || !action || !Number.isInteger(attemptId) || !Number.isInteger(seqId)) {
 		return null;
 	}
 
-	return { chart, state, action };
+	return { actionUid: { chart, state, action }, attemptId, seqId };
 }
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {
@@ -522,7 +570,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					id: event.effectId,
 					records: [{ type: "state_action", kind: "timer_fired", actionUid: running.actionUid }],
 				},
-				{ kind: "cancel", id: `cancel:${event.effectId}`, actionUid: running.actionUid },
+				{ kind: "cancel", id: event.effectId, actionUid: running.actionUid },
 			]);
 		}
 		case "start":
@@ -539,7 +587,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			const cancels = abandoned.map(
 				(pending): Effect => ({
 					kind: "cancel",
-					id: `cancel:${pendingEffectId(pending)}`,
+					id: pendingEffectId(pending),
 					actionUid: pending.actionUid,
 				}),
 			);
@@ -558,22 +606,24 @@ type PendingActionContext = {
 // null means "nothing pending for this action" — not an error, the completion may simply have
 // lost a race; a string is a protocol violation to report.
 function findPendingAction(machine: MachineState, effectId: EffectId): PendingActionContext | string | null {
-	const actionId = effectIdToActionUid(effectId);
-	if (!actionId) {
+	const parsed = effectIdParts(effectId);
+	if (!parsed) {
 		return `Invalid effectId ${effectId}`;
 	}
-	const pending = machine.projection.pendingActions.find((el) => sameActionUid(el.actionUid, actionId));
-	if (!pending) {
+	const pending = machine.projection.pendingActions.find(
+		(el) => sameActionUid(el.actionUid, parsed.actionUid) && el.attemptId === parsed.attemptId,
+	);
+	if (!pending || pendingEffectId(pending) !== effectId) {
 		return null;
 	}
 	if (pending.phase === "validating") {
 		return `Validation already in flight for ${effectId}`;
 	}
-	const curState = nodeAt(machine.ast, actionId.state);
+	const curState = nodeAt(machine.ast, parsed.actionUid.state);
 	if (curState?.kind !== "state") {
-		return `State ${actionId.state} is not actionable`;
+		return `State ${parsed.actionUid.state} is not actionable`;
 	}
-	return { actionUid: actionId, state: curState };
+	return { actionUid: parsed.actionUid, state: curState };
 }
 
 // The machine decides when actions start: an invoke record is due for every active action-leaf

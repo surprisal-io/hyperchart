@@ -1,5 +1,6 @@
 import type { ActionUID, ChartAst, ChartEvent, StateAst, StateId, StatePath } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
+import { actionUidKey } from "./action_uid.js";
 import {
 	childPath,
 	lastSegmentKey,
@@ -21,11 +22,21 @@ export type PendingAction =
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
 	// rejections counts the rejected rounds of this invoke cycle — derived from validated(false)
 	// facts, it decides when the retry budget (state.retries) is exhausted.
-	| { actionUid: ActionUID; seqId: number; timestamp: number; phase: "running" }
-	| { actionUid: ActionUID; seqId: number; phase: "validating"; event: ChartEvent; rejections: number }
+	| { actionUid: ActionUID; attemptId: number; seqId: number; invokeSeqId: number; timestamp: number; phase: "running" }
 	| {
 			actionUid: ActionUID;
+			attemptId: number;
 			seqId: number;
+			invokeSeqId: number;
+			phase: "validating";
+			event: ChartEvent;
+			rejections: number;
+	  }
+	| {
+			actionUid: ActionUID;
+			attemptId: number;
+			seqId: number;
+			invokeSeqId: number;
 			phase: "rejected";
 			event: ChartEvent;
 			rejections: number;
@@ -45,6 +56,9 @@ export type BranchProjection = {
 	spawns: Record<StatePath, Readonly<Record<string, unknown>>>;
 	// Latest accepted output per action state; re-entering a state overwrites its result.
 	results: Record<StatePath, unknown>;
+	// Per concrete actionUid, how many invoke records have started an action attempt. Replayed from
+	// durable facts so attempt ids stay stable without being stored in each log record.
+	actionAttempts: Record<string, number>;
 };
 
 export function isFinalState(projection: BranchProjection, ast: ChartAst): boolean {
@@ -60,6 +74,7 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		pendingActions: [],
 		spawns: {},
 		results: {},
+		actionAttempts: {},
 	};
 	completeParallels(projection, ast);
 	return projection;
@@ -107,9 +122,14 @@ export function projectBranch(
 					case "invoke":
 						if (projection.activeLeaves.includes(record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "invoke");
+							const key = actionUidKey(record.actionUid);
+							const attemptId = (projection.actionAttempts[key] ?? 0) + 1;
+							projection.actionAttempts[key] = attemptId;
 							projection.pendingActions.push({
 								actionUid: record.actionUid,
+								attemptId,
 								seqId: record.seqId,
+								invokeSeqId: record.seqId,
 								timestamp: record.timestamp,
 								phase: "running",
 							});
@@ -129,7 +149,9 @@ export function projectBranch(
 								removePendingAction(projection, record.actionUid);
 								projection.pendingActions.push({
 									actionUid: record.actionUid,
+									attemptId: previous?.attemptId ?? projection.actionAttempts[actionUidKey(record.actionUid)] ?? 1,
 									seqId: record.seqId,
+									invokeSeqId: previous?.invokeSeqId ?? record.seqId,
 									phase: "validating",
 									event: record.event,
 									rejections,
@@ -176,7 +198,9 @@ export function projectBranch(
 						}
 						projection.pendingActions[projection.pendingActions.indexOf(validating)] = {
 							actionUid: validating.actionUid,
+							attemptId: validating.attemptId,
 							seqId: record.seqId,
+							invokeSeqId: validating.invokeSeqId,
 							phase: "rejected",
 							event: validating.event,
 							rejections,
