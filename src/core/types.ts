@@ -233,6 +233,9 @@ export type TemplateAst = Readonly<{
 	refs: readonly InputRef[];
 }>;
 
+export type OnReenterCst = "restart" | { kind: "resume"; message: Templatable };
+export type OnReenterAst = "restart" | { kind: "resume"; message: TemplateAst };
+
 export type ActionStateCst = {
 	kind: "state";
 	action: StateActionCst;
@@ -241,6 +244,7 @@ export type ActionStateCst = {
 	after?: AfterCst;
 	validate?: GuardRef;
 	onReject?: OnReject;
+	onReenter?: OnReenterCst;
 	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection is
 	// terminal — the claim turns into a FAILED transition (a FAILED route must exist, possibly on
 	// an ancestor) and the abandoned session is cancelled. Requires validate; omitted = unbounded.
@@ -285,6 +289,7 @@ export type MapStateCst = {
 	over: InputRef;
 	// At most this many instances run at once (invokes are gated, spawn is not); omitted = all.
 	concurrency?: number;
+	onReenter?: OnReenterCst;
 	initial: StateId;
 	states: Record<StateId, StateCst>;
 	transitions?: TransitionMapCst;
@@ -355,6 +360,7 @@ export type ActionStateAst = Readonly<{
 	validate?: GuardRef;
 	// Present only when validate is set; defaults to "resume".
 	onReject?: OnReject;
+	onReenter?: OnReenterAst;
 	retries?: number;
 }>;
 
@@ -404,6 +410,7 @@ export type MapStateAst = Readonly<{
 	input?: Readonly<Record<string, SchemaAst>>;
 	over: InputRef;
 	concurrency?: number;
+	onReenter?: OnReenterAst;
 	initial: StateId;
 	transitions: Readonly<Record<EventType, TransitionAst>>;
 	onDone: StateId;

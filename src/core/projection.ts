@@ -61,6 +61,9 @@ export type BranchProjection = {
 	// Per concrete actionUid, how many invoke records have entered that action state. Replayed from
 	// durable facts so visit ids stay stable without being stored in each log record.
 	stateVisits: Record<string, number>;
+	// Latest persisted agent session file per concrete actionUid. Optional runtime metadata used
+	// for onReenter resume; it never drives chart control flow.
+	sessions: Record<string, string>;
 };
 
 export function isFinalState(projection: BranchProjection, ast: ChartAst): boolean {
@@ -78,6 +81,7 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		inputs: {},
 		results: {},
 		stateVisits: {},
+		sessions: {},
 	};
 	applyInputsForEntry(projection, ast, ast.initial);
 	completeParallels(projection, ast);
@@ -96,7 +100,10 @@ export function projectBranch(
 	for (const record of log) {
 		switch (record.type) {
 			case "session_ref":
-				// No state change, just a reference to a session
+				// No control-state change, just a reference to a persisted runtime session.
+				if (record.actionUid !== undefined) {
+					projection.sessions[actionUidKey(record.actionUid)] = record.file;
+				}
 				break;
 			case "args":
 				projection.args = record.args;

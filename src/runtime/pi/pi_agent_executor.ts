@@ -54,6 +54,7 @@ type RunOptions = {
 	resumePrompt?: string;
 	rejectReason?: string;
 	resumeInvocationId?: string;
+	resumeSessionFile?: string;
 };
 
 export type SessionPlan = {
@@ -80,7 +81,17 @@ export class PiAgentExecutor implements AgentExecutor {
 	start(effect: AgentEffect, emit: EmitCompletion): void {
 		const key = actionUidKey(effect.actionUid);
 		const generation = this.nextGeneration(key);
-		void this.run(effect, emit, { forceNewSession: false }, generation).catch((error: unknown) => {
+		void this.run(
+			effect,
+			emit,
+			{
+				forceNewSession: false,
+				...(effect.resume === undefined
+					? {}
+					: { resumePrompt: effect.resume.message, resumeSessionFile: effect.resume.session }),
+			},
+			generation,
+		).catch((error: unknown) => {
 			this.markProgressFailed(effect.actionUid, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
@@ -188,9 +199,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		});
 		const definition = loadAgentDefinition(effect.action.name, this.definitionDirs);
 		const dir = actionSessionDir(this.options.sessionsDir, effect);
-		const latest = runOptions.forceNewSession
-			? undefined
-			: latestJsonlForInvocation(dir, runOptions.resumeInvocationId ?? effect.id);
+		const latest = latestSessionForRunOptions(this.options.sessionsDir, dir, effect, runOptions);
 		const sink: CompletionSink = { captured: undefined };
 		const session = await this.createSession(effect, definition, dir, latest, sink);
 		if (this.isCancelled(key, generation)) {
@@ -498,6 +507,25 @@ function resolveModel(modelRegistry: ModelRegistry, modelRef: string) {
 	return model;
 }
 
+function latestSessionForRunOptions(
+	sessionsDir: string,
+	dir: string,
+	effect: AgentEffect,
+	runOptions: RunOptions,
+): string | undefined {
+	if (runOptions.forceNewSession) return undefined;
+	if (runOptions.resumeSessionFile !== undefined && existsSync(runOptions.resumeSessionFile)) {
+		return runOptions.resumeSessionFile;
+	}
+	if (runOptions.resumeInvocationId !== undefined) {
+		return latestJsonlForInvocation(dir, runOptions.resumeInvocationId);
+	}
+	if (runOptions.resumePrompt !== undefined) {
+		return latestJsonlForPreviousActionSession(sessionsDir, effect);
+	}
+	return latestJsonlForInvocation(dir, effect.id);
+}
+
 function latestJsonlForInvocation(dir: string, invocationId: string): string | undefined {
 	if (!existsSync(dir)) return undefined;
 	return readdirSync(dir)
@@ -505,6 +533,21 @@ function latestJsonlForInvocation(dir: string, invocationId: string): string | u
 		.map((file) => join(dir, file))
 		.filter((file) => sessionMentionsInvocationId(file, invocationId))
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
+}
+
+function latestJsonlForPreviousActionSession(sessionsDir: string, effect: AgentEffect): string | undefined {
+	const root = join(sessionsDir, actionUidDirName(effect.actionUid));
+	if (!existsSync(root)) return undefined;
+	const currentKey = sanitizeSegment(sessionKey(effect.id));
+	const candidates: string[] = [];
+	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		if (!entry.isDirectory() || entry.name === currentKey) continue;
+		const dir = join(root, entry.name);
+		for (const file of readdirSync(dir)) {
+			if (file.endsWith(".jsonl")) candidates.push(join(dir, file));
+		}
+	}
+	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
 }
 
 function actionSessionDir(sessionsDir: string, effect: AgentEffect): string {

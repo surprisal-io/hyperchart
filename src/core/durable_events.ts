@@ -10,6 +10,7 @@ type SessionRefLog = {
 	type: "session_ref";
 	index: number;
 	file: string;
+	actionUid?: ActionUID;
 } & SessionParams;
 
 // The run's input arguments — external data, hence a fact: the first record of a fresh log,

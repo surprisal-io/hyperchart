@@ -10,6 +10,7 @@ import type {
 	JoinArtifactOfCst,
 	InputRef,
 	MapStateCst,
+	OnReenterCst,
 	SchemaCst,
 	ParallelStateCst,
 	ScriptActionCst,
@@ -97,6 +98,10 @@ export function input(name: string, path?: string): InputRef {
 
 export function visit(state?: string): InputRef<number> {
 	return { kind: "visit", ...(state === undefined ? {} : { state }) };
+}
+
+export function resume(message: Templatable): OnReenterCst {
+	return { kind: "resume", message };
 }
 
 // The instance key of the nearest enclosing map.

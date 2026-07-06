@@ -8,12 +8,13 @@ import {
 	map,
 	normalizeChartConfig,
 	parallel,
+	resume,
 	script,
 	t,
 	tsImport,
 	z,
 } from "../src/index.js";
-import { arg, artifactOf, chart, item, joinArtifactOf, key, result, visit } from "../src/core/dsl.js";
+import { arg, artifactOf, chart, event, input, item, joinArtifactOf, key, result, visit } from "../src/core/dsl.js";
 import { loop, start } from "../src/core/execution_loop.js";
 import type {
 	ActionUID,
@@ -824,6 +825,174 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(writerPaths).toEqual(["out/1.json", "out/2.json"]);
 		expect(readerPath).toBe("out/2.json");
+	});
+
+	it("adds a resume request with the current visit effect id on re-entry", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "reenter-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("none") },
+						onReenter: resume(t`Apply feedback: ${input("feedback")}`),
+						action: agent("worker"),
+						transitions: { DONE: "gate" },
+					},
+					gate: {
+						kind: "state",
+						action: agent("gate", { reply: z.object({ feedback: z.string() }) }),
+						transitions: { AGAIN: { target: "work", input: { feedback: event("feedback") } }, PASS: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		const workEffects: Extract<Effect, { kind: "agent" }>[] = [];
+		let gateRuns = 0;
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "work") {
+						workEffects.push(effect);
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
+						gateRuns += 1;
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							event: gateRuns === 1 ? { type: "AGAIN", output: { feedback: "tighten" } } : { type: "PASS" },
+						});
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(workEffects).toHaveLength(2);
+		expect(workEffects[0]?.resume).toBeUndefined();
+		expect(workEffects[1]?.id).toMatch(/:2:\d+$/);
+		expect(workEffects[1]?.resume).toEqual({ message: "Apply feedback: tighten" });
+	});
+
+	it("map onReenter resumes matching keys and starts new keys fresh", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "map-reenter-chart",
+				initial: "items",
+				states: {
+					items: {
+						kind: "map",
+						input: { items: z.record(z.string(), z.number()).default({ a: 1 }) },
+						over: input("items"),
+						onReenter: resume(t`Redo ${key()}: ${item()}`),
+						initial: "work",
+						states: {
+							work: { kind: "state", action: agent("worker"), transitions: { OK: "done" } },
+							done: final(),
+						},
+						onDone: "gate",
+					},
+					gate: {
+						kind: "state",
+						action: agent("gate", { reply: z.object({ items: z.record(z.string(), z.number()) }) }),
+						transitions: { AGAIN: { target: "items", input: { items: event("items") } }, PASS: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		const workerEffects: Extract<Effect, { kind: "agent" }>[] = [];
+		let gateRuns = 0;
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state.endsWith(".work")) {
+						workerEffects.push(effect);
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
+						gateRuns += 1;
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							event: gateRuns === 1 ? { type: "AGAIN", output: { items: { a: 2, b: 3 } } } : { type: "PASS" },
+						});
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(workerEffects.map((effect) => [effect.actionUid.state, effect.resume?.message])).toEqual([
+			["items#a.work", undefined],
+			["items#a.work", "Redo a: 2"],
+			["items#b.work", undefined],
+		]);
+	});
+
+	it("resume requests can carry a replayed session reference", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "reenter-session-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						onReenter: resume("Continue from prior context."),
+						action: agent("worker"),
+						transitions: { DONE: "gate" },
+					},
+					gate: { kind: "state", action: agent("gate"), transitions: { AGAIN: "work" } },
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const uid = actionUid(parsed.ast, "work");
+		const gateUid = actionUid(parsed.ast, "gate");
+		const logs: DurableLogRecord[] = [
+			invoke(uid, 1),
+			complete(uid, "DONE", 2),
+			{ type: "session_ref", index: 0, file: "sessions/work.jsonl", actionUid: uid, ...meta(3) },
+			invoke(gateUid, 4),
+			complete(gateUid, "AGAIN", 5),
+			invoke(uid, 6),
+		];
+		const runtime = new MockRuntime({ ast: parsed.ast, logs, events: [] });
+
+		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+
+		const workEffect = runtime.effectBatches
+			.flat()
+			.find((effect) => effect.kind === "agent" && effect.actionUid.state === "work");
+		expect(workEffect).toMatchObject({
+			kind: "agent",
+			id: "reenter-session-chart:work:agent:2:6",
+			resume: { message: "Continue from prior context.", session: "sessions/work.jsonl" },
+		});
 	});
 
 	it("validation retries keep the same visit() value", async () => {

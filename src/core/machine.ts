@@ -11,6 +11,7 @@ import type {
 	GuardRef,
 	InputRef,
 	OnReject,
+	OnReenterAst,
 	SchemaAst,
 	ScriptActionAst,
 	StatePath,
@@ -48,6 +49,11 @@ export type MachineState = {
 
 export type EffectId = string;
 
+export type ResumeRequest = Readonly<{
+	message: string;
+	session?: string;
+}>;
+
 // A file parameter with its path rendered and — when the producer declared one — the shape of
 // its content; the runtime uses the shape both to instruct the agent and to verify the file.
 export type RenderedArtifact = Readonly<{
@@ -77,6 +83,7 @@ export type AgentEffect = Readonly<{
 	// upfront and validates the actual reply at the boundary.
 	events: readonly string[];
 	reply?: SchemaAst;
+	resume?: ResumeRequest;
 }>;
 
 export type UserEffect = Readonly<{
@@ -400,6 +407,7 @@ function agentInvocationForAction(
 	action: AgentActionAst,
 	id: EffectId,
 ): AgentEffect {
+	const resume = resumeRequestForAction(state, actionUid, id);
 	return {
 		kind: "agent",
 		id,
@@ -407,6 +415,7 @@ function agentInvocationForAction(
 		action,
 		events: allowedEvents(state.ast, actionUid.state),
 		...(action.reply === undefined ? {} : { reply: action.reply }),
+		...(resume === undefined ? {} : { resume }),
 		...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, actionUid.state) }),
 		...(action.artifacts === undefined
 			? {}
@@ -484,6 +493,38 @@ function userInvocationForAction(
 		action,
 		prompt: renderTemplate(state, action.prompt, actionUid.state),
 	};
+}
+
+function resumeRequestForAction(state: MachineState, actionUid: ActionUID, id: EffectId): ResumeRequest | undefined {
+	const parts = effectIdParts(id);
+	if (parts === null || parts.visitId <= 1) return undefined;
+	const match = onReenterForAction(state.ast, actionUid.state);
+	if (match === undefined || match.policy === "restart") return undefined;
+	return {
+		message: renderTemplate(state, match.policy.message, match.scope),
+		...(state.projection.sessions[actionUidKey(actionUid)] === undefined
+			? {}
+			: { session: state.projection.sessions[actionUidKey(actionUid)] }),
+	};
+}
+
+function onReenterForAction(
+	ast: ChartAst,
+	statePath: StatePath,
+): { policy: OnReenterAst; scope: StatePath } | undefined {
+	const own = nodeAt(ast, statePath);
+	if (own?.kind === "state" && own.onReenter !== undefined) {
+		return { policy: own.onReenter, scope: statePath };
+	}
+	let cur = parentPath(statePath);
+	while (cur !== undefined) {
+		const node = nodeAt(ast, cur);
+		if (node?.kind === "map" && node.onReenter !== undefined) {
+			return { policy: node.onReenter, scope: cur };
+		}
+		cur = parentPath(cur);
+	}
+	return undefined;
 }
 
 function effectIdParts(id: EffectId): { actionUid: ActionUID; visitId: number; seqId: number } | null {

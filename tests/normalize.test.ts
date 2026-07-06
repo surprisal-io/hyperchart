@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../src/index.js";
 import { agent, compound, final, map, normalizeChartConfig, parallel, t, tsImport, user, z } from "../src/index.js";
-import { arg, chart, event, input, item, key, result, visit } from "../src/core/dsl.js";
+import { arg, chart, event, input, item, key, result, resume, visit } from "../src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
@@ -617,6 +617,49 @@ describe("normalizeChartConfig", () => {
 		});
 		expect(badValue.ok).toBe(false);
 		expect(badValue.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REJECT");
+	});
+
+	it("normalizes onReenter resume for agents and rejects meaningless resume targets", () => {
+		const valid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "on-reenter",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("none") },
+						onReenter: resume(t`Fix: ${input("feedback")}`),
+						action: agent("coder"),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(valid.ok).toBe(true);
+		if (!valid.ok) throw new Error("expected valid chart");
+		const work = valid.ast.states.work;
+		expect(work?.kind === "state" ? work.onReenter : undefined).toMatchObject({ kind: "resume" });
+
+		const invalid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "bad-on-reenter",
+				initial: "ask",
+				states: {
+					ask: {
+						kind: "state",
+						onReenter: resume("Ask again"),
+						action: user({ prompt: "Continue?" }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(invalid.ok).toBe(false);
+		expect(invalid.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REENTER");
 	});
 
 	it("validates the retry budget declaration", () => {

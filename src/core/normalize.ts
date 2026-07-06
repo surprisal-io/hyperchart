@@ -18,6 +18,7 @@ import type {
 	InputRef,
 	MapStateAst,
 	OnReject,
+	OnReenterAst,
 	SchemaAst,
 	ParallelStateAst,
 	ParsedChart,
@@ -228,6 +229,7 @@ function collectState(
 			}
 		}
 		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source);
+		const onReenter = toOnReenter(input.onReenter, `${pointer}/onReenter`, diagnostics, source, true);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const onDone = toOnDone(input.onDone, `${pointer}/onDone`, diagnostics, source);
 		if (onDone === undefined) {
@@ -259,6 +261,7 @@ function collectState(
 			...(inputs === undefined ? {} : { input: inputs }),
 			over: over ?? { kind: "arg", name: "" },
 			...(concurrency === undefined ? {} : { concurrency }),
+			...(onReenter === undefined ? {} : { onReenter }),
 			initial: typeof initial === "string" ? initial : "",
 			transitions: transitions ?? {},
 			onDone: onDone ?? "",
@@ -354,6 +357,13 @@ function collectState(
 				onReject = input.onReject;
 			}
 		}
+		const onReenter = toOnReenter(
+			input.onReenter,
+			`${pointer}/onReenter`,
+			diagnostics,
+			source,
+			action?.kind === "agent",
+		);
 		let retries: number | undefined;
 		if (input.retries !== undefined) {
 			if (typeof input.retries !== "number" || !Number.isInteger(input.retries) || input.retries < 0) {
@@ -376,6 +386,7 @@ function collectState(
 			transitions: transitions ?? {},
 			...(after === undefined ? {} : { after }),
 			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
+			...(onReenter === undefined ? {} : { onReenter }),
 			...(retries === undefined ? {} : { retries }),
 		} satisfies ActionStateAst);
 		return;
@@ -510,43 +521,10 @@ function validateTargets(
 			}
 			// Result refs address action states by absolute path — data lookup, not control flow.
 			for (const template of actionTemplates(node.action)) {
-				for (const ref of template.refs) {
-					if ((ref.kind === "key" || ref.kind === "item") && !insideMap(states, path, ref.map)) {
-						diagnostics.push(
-							diagnostic(
-								"INVALID_MAP_REF",
-								ref.map === undefined
-									? `A template in state '${path}' uses ${ref.kind}() outside any map.`
-									: `A template in state '${path}' uses ${ref.kind}() outside map '${ref.map}'.`,
-								`${pointer}/action`,
-								source,
-							),
-						);
-					}
-					if (ref.kind === "result" && states[ref.state]?.kind !== "state") {
-						diagnostics.push(
-							diagnostic(
-								"UNKNOWN_INPUT_RESULT",
-								`A template in state '${path}' reads the result of unknown action state '${ref.state}'.`,
-								`${pointer}/action`,
-								source,
-							),
-						);
-					}
-					if (ref.kind === "input" && !hasInputDeclaration(states, path, ref.name)) {
-						diagnostics.push(
-							diagnostic(
-								"UNKNOWN_INPUT",
-								`A template in state '${path}' reads undeclared input '${ref.name}'.`,
-								`${pointer}/action`,
-								source,
-							),
-						);
-					}
-					if (ref.kind === "visit") {
-						validateVisitRef(states, path, ref.state, `${pointer}/action`, diagnostics, source);
-					}
-				}
+				validateTemplateRefs(states, path, template, `${pointer}/action`, diagnostics, source);
+			}
+			if (typeof node.onReenter === "object") {
+				validateTemplateRefs(states, path, node.onReenter.message, `${pointer}/onReenter/message`, diagnostics, source);
 			}
 			continue;
 		}
@@ -573,6 +551,19 @@ function validateTargets(
 			}
 			if (node.over.kind === "visit") {
 				validateVisitRef(states, path, node.over.state, `${pointer}/over`, diagnostics, source);
+			}
+			if (typeof node.onReenter === "object") {
+				validateTemplateRefs(
+					states,
+					path,
+					node.onReenter.message,
+					`${pointer}/onReenter/message`,
+					diagnostics,
+					source,
+					{
+						includeSelfMap: true,
+					},
+				);
 			}
 		}
 		if (
@@ -714,6 +705,57 @@ function inputEntryTargets(
 	return [];
 }
 
+function validateTemplateRefs(
+	states: Record<StatePath, StateAst>,
+	path: StatePath,
+	template: TemplateAst,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	options: { includeSelfMap?: boolean } = {},
+): void {
+	for (const ref of template.refs) {
+		if (
+			(ref.kind === "key" || ref.kind === "item") &&
+			!insideMap(states, path, ref.map, options.includeSelfMap === true)
+		) {
+			diagnostics.push(
+				diagnostic(
+					"INVALID_MAP_REF",
+					ref.map === undefined
+						? `A template in state '${path}' uses ${ref.kind}() outside any map.`
+						: `A template in state '${path}' uses ${ref.kind}() outside map '${ref.map}'.`,
+					pointer,
+					source,
+				),
+			);
+		}
+		if (ref.kind === "result" && states[ref.state]?.kind !== "state") {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_INPUT_RESULT",
+					`A template in state '${path}' reads the result of unknown action state '${ref.state}'.`,
+					pointer,
+					source,
+				),
+			);
+		}
+		if (ref.kind === "input" && !hasInputDeclaration(states, path, ref.name)) {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_INPUT",
+					`A template in state '${path}' reads undeclared input '${ref.name}'.`,
+					pointer,
+					source,
+				),
+			);
+		}
+		if (ref.kind === "visit") {
+			validateVisitRef(states, path, ref.state, pointer, diagnostics, source);
+		}
+	}
+}
+
 function validateVisitRef(
 	states: Record<StatePath, StateAst>,
 	scope: StatePath,
@@ -754,8 +796,13 @@ function schemaHasDefault(schema: SchemaAst): boolean {
 }
 
 // Is `path` inside a map — any map, or (when `map` names one) that specific ancestor.
-function insideMap(states: Record<StatePath, StateAst>, path: StatePath, map?: StatePath): boolean {
-	let cur = states[path]?.parent;
+function insideMap(
+	states: Record<StatePath, StateAst>,
+	path: StatePath,
+	map?: StatePath,
+	includeSelf = false,
+): boolean {
+	let cur = includeSelf ? path : states[path]?.parent;
 	while (cur !== undefined) {
 		if (states[cur]?.kind === "map" && (map === undefined || cur === map)) return true;
 		cur = states[cur]?.parent;
@@ -1111,6 +1158,33 @@ function toOnDone(
 		return undefined;
 	}
 	return input;
+}
+
+function toOnReenter(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	allowResume: boolean,
+): OnReenterAst | undefined {
+	if (input === undefined) return undefined;
+	if (input === "restart") return "restart";
+	if (!isRecord(input) || input.kind !== "resume") {
+		diagnostics.push(
+			diagnostic("INVALID_ON_REENTER", "onReenter must be 'restart' or { kind: 'resume', message }.", path, source),
+		);
+		return undefined;
+	}
+	if (!allowResume) {
+		diagnostics.push(diagnostic("INVALID_ON_REENTER", "onReenter resume requires an agent action.", path, source));
+		return undefined;
+	}
+	const message = toTemplate(input.message, `${path}/message`, diagnostics, source);
+	if (message === undefined) {
+		diagnostics.push(diagnostic("INVALID_ON_REENTER", "onReenter resume requires a message.", path, source));
+		return undefined;
+	}
+	return { kind: "resume", message };
 }
 
 function statePointer(path: StatePath): string {
