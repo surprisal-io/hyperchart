@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agent, compound, final, json, map, normalizeChartConfig, parallel, t, tsImport } from "../src/index.js";
-import { arg, chart, item, key, result } from "../src/core/dsl.js";
+import { agent, compound, final, json, map, normalizeChartConfig, parallel, t, tsImport, z } from "../src/index.js";
+import { arg, chart, event, input, item, key, result } from "../src/core/dsl.js";
 import { loop, start } from "../src/core/execution_loop.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
@@ -541,6 +541,139 @@ describe("replay gauntlet", () => {
 		const kinds = resumed.runtime.effectBatches.flat().map((effect) => effect.kind);
 		expect(kinds.filter((kind) => kind === "agent")).toEqual([]);
 		expect(kinds.filter((kind) => kind === "validate")).toEqual(["validate"]);
+	});
+
+	it("transition input is replay-derived and rebinds under a changed chart", async () => {
+		const makeInputChart = (bindingPath: "feedback" | "alternate") =>
+			make(
+				chart({
+					kind: "chart",
+					id: "gauntlet-inputs",
+					initial: "gate",
+					states: {
+						gate: {
+							kind: "state",
+							action: agent("gate"),
+							transitions: { BLOCK: { target: "fix", input: { feedback: event(bindingPath) } } },
+						},
+						fix: {
+							kind: "state",
+							input: { feedback: z.string() },
+							action: agent("fixer", { task: t`Fix: ${input("feedback")}` }),
+							transitions: { FIXED: "done" },
+						},
+						done: final(),
+					},
+				}),
+			);
+
+		const v1 = makeInputChart("feedback");
+		const live = await runLive(v1, {
+			agents: { gate: [{ type: "BLOCK", output: { feedback: "old", alternate: "new" } }], fix: ["FIXED"] },
+		});
+		expect(live.state.projection.inputs.fix).toEqual({ feedback: "old" });
+
+		const v2 = makeInputChart("alternate");
+		const replayed = await replay(v2, live.log);
+		expect(replayed.state.projection.inputs.fix).toEqual({ feedback: "new" });
+	});
+
+	it("defaulted initial input renders without a binding", async () => {
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "gauntlet-input-default",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("none") },
+						action: agent("worker", { task: t`Feedback: ${input("feedback")}` }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const live = await runLive(ast, { agents: { work: ["DONE"] } });
+		const firstAgent = live.runtime.effectBatches.flat().find((effect) => effect.kind === "agent");
+		expect(firstAgent?.kind === "agent" ? firstAgent.task : undefined).toBe("Feedback: none");
+		expect(live.state.projection.inputs.work).toEqual({ feedback: "none" });
+	});
+
+	it("exhausted retry FAILED transition does not bind new inputs", async () => {
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "gauntlet-input-retry-failed",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("keep") },
+						action: agent("worker", { task: t`${input("feedback")}` }),
+						validate: tsImport("./checks.js", "testsPass"),
+						retries: 0,
+						transitions: { DONE: "done", FAILED: "failed" },
+					},
+					done: final(),
+					failed: final(),
+				},
+			}),
+		);
+		const live = await runLive(ast, { agents: { work: ["DONE"] }, verdicts: [{ ok: false, reason: "no" }] });
+		expect(live.state.projection.activeLeaves).toEqual(["failed"]);
+		expect(live.state.projection.inputs).toEqual({ work: { feedback: "keep" } });
+	});
+
+	it("transition input can drive a re-entered map fan-out", async () => {
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "gauntlet-input-map",
+				initial: "choose",
+				states: {
+					choose: {
+						kind: "state",
+						action: agent("chooser"),
+						transitions: { GO: { target: "items", input: { items: event("items") } } },
+					},
+					items: map({
+						input: { items: z.record(z.string(), z.object({ title: z.string() })) },
+						over: input("items"),
+						initial: "work",
+						onDone: "gate",
+						states: {
+							work: {
+								kind: "state",
+								action: agent("worker", { task: t`Work ${key()}: ${item("title")}` }),
+								transitions: { OK: "done" },
+							},
+							done: final(),
+						},
+					}),
+					gate: {
+						kind: "state",
+						action: agent("gate"),
+						transitions: { AGAIN: { target: "items", input: { items: event("items") } }, DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const live = await runLive(ast, {
+			agents: {
+				choose: [{ type: "GO", output: { items: { alpha: { title: "Alpha" } } } }],
+				"items#alpha.work": ["OK"],
+				gate: [{ type: "AGAIN", output: { items: { beta: { title: "Beta" } } } }, "DONE"],
+				"items#beta.work": ["OK"],
+			},
+		});
+
+		expect(live.state.projection.activeLeaves).toEqual(["done"]);
+		expect(live.state.projection.inputs.items).toEqual({ items: { beta: { title: "Beta" } } });
+		const spawned = live.log.filter((record) => record.type === "spawned");
+		expect(spawned.map((record) => Object.keys(record.instances))).toEqual([["alpha"], ["beta"]]);
 	});
 
 	it("modified chart: a fact the chart cannot apply fails loud", async () => {

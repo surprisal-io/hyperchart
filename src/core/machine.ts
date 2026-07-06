@@ -27,7 +27,15 @@ import {
 	type PendingAction,
 	projectBranch,
 } from "./projection.js";
-import { instancePathFor, lastSegmentKey, matchesDeclaredUid, nearestInstance, nodeAt, parentPath } from "./paths.js";
+import {
+	instancePathFor,
+	lastSegmentKey,
+	matchesDeclaredUid,
+	nearestInstance,
+	nodeAt,
+	parentPath,
+	stripLastKey,
+} from "./paths.js";
 
 export type MachineState = {
 	ast: ChartAst;
@@ -124,8 +132,8 @@ export type RejectedEffect = Readonly<{
 	actionUid: ActionUID;
 	event: ChartEvent;
 	onReject: OnReject;
-	// Which rejected round this is (1-based); the budget lives in the state's `retries`.
-	attempt: number;
+	// Which rejected validation round this is (1-based); the budget lives in the state's `retries`.
+	validationAttempts: number;
 	reason?: string;
 	// Fully rendered invocation reconstructed from chart + replayed facts using the original
 	// invoke seqId. Used when a rejected action must continue/restart after process memory is gone.
@@ -307,11 +315,11 @@ function stampAppend(state: MachineState, append: RecordAppend): DurableRecordsE
 // action, complete → validate it, validated(false) → deliver the rejection. The record's seqId
 // makes the id unique per phase, so each phase dispatches exactly once.
 function pendingEffectId(pending: PendingAction): EffectId {
-	return actionEffectId(pending.actionUid, pending.attemptId, pending.seqId);
+	return actionEffectId(pending.actionUid, pending.visitId, pending.seqId);
 }
 
-function actionEffectId(actionUid: ActionUID, attemptId: number, seqId: number): EffectId {
-	return `${actionUidKey(actionUid)}:${attemptId}:${seqId}`;
+function actionEffectId(actionUid: ActionUID, visitId: number, seqId: number): EffectId {
+	return `${actionUidKey(actionUid)}:${visitId}:${seqId}`;
 }
 
 // All effects a pending action currently wants: its phase effect, plus — while running under a
@@ -334,7 +342,7 @@ function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 }
 
 function timerEffectId(pending: PendingAction): EffectId {
-	return actionEffectId(pending.actionUid, pending.attemptId, pending.seqId);
+	return actionEffectId(pending.actionUid, pending.visitId, pending.seqId);
 }
 
 function pendingEffect(state: MachineState, pending: PendingAction): Effect {
@@ -358,13 +366,13 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 				actionUid: pending.actionUid,
 				event: pending.event,
 				onReject: node.onReject ?? "resume",
-				attempt: pending.rejections,
+				validationAttempts: pending.validationAttempts,
 				...(pending.reason === undefined ? {} : { reason: pending.reason }),
 				invocation: actionInvocationForAction(
 					state,
 					pending.actionUid,
 					node.action,
-					actionEffectId(pending.actionUid, pending.attemptId, pending.invokeSeqId),
+					actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
 				),
 			};
 	}
@@ -478,15 +486,15 @@ function userInvocationForAction(
 	};
 }
 
-function effectIdParts(id: EffectId): { actionUid: ActionUID; attemptId: number; seqId: number } | null {
-	const [chart, state, action, attempt, seq] = id.split(":");
-	const attemptId = Number(attempt);
+function effectIdParts(id: EffectId): { actionUid: ActionUID; visitId: number; seqId: number } | null {
+	const [chart, state, action, visit, seq] = id.split(":");
+	const visitId = Number(visit);
 	const seqId = Number(seq);
-	if (!chart || !state || !action || !Number.isInteger(attemptId) || !Number.isInteger(seqId)) {
+	if (!chart || !state || !action || !Number.isInteger(visitId) || !Number.isInteger(seqId)) {
 		return null;
 	}
 
-	return { actionUid: { chart, state, action }, attemptId, seqId };
+	return { actionUid: { chart, state, action }, visitId, seqId };
 }
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {
@@ -611,7 +619,7 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 		return `Invalid effectId ${effectId}`;
 	}
 	const pending = machine.projection.pendingActions.find(
-		(el) => sameActionUid(el.actionUid, parsed.actionUid) && el.attemptId === parsed.attemptId,
+		(el) => sameActionUid(el.actionUid, parsed.actionUid) && el.visitId === parsed.visitId,
 	);
 	if (!pending || pendingEffectId(pending) !== effectId) {
 		return null;
@@ -753,7 +761,8 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 	if (read.kind === "template") {
 		return { path: renderTemplate(state, read, stateId) };
 	}
-	const producer = nodeAt(state.ast, read.state);
+	const producerState = instancePathFor(read.state, stateId);
+	const producer = nodeAt(state.ast, producerState);
 	const artifacts =
 		producer?.kind === "state" && producer.action.kind !== "user" ? producer.action.artifacts : undefined;
 	const names = Object.keys(artifacts ?? {});
@@ -763,7 +772,7 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 		throw new Error(`Read in state ${stateId}: cannot resolve artifact '${read.artifact ?? "*"}' of ${read.state}`);
 	}
 	return {
-		...renderArtifact(state, declared, stateId),
+		...renderArtifact(state, declared, producerState),
 		...(read.select === undefined ? {} : { select: read.select }),
 	};
 }
@@ -810,6 +819,10 @@ function refLabel(ref: InputRef): string {
 			return `map key${ref.map === undefined ? "" : ` of '${ref.map}'`}`;
 		case "item":
 			return `map item${ref.map === undefined ? "" : ` of '${ref.map}'`}${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "input":
+			return `input '${ref.name}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "visit":
+			return `visit${ref.state === undefined ? "" : ` of '${ref.state}'`}`;
 	}
 }
 
@@ -822,6 +835,16 @@ function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknow
 			throw new Error(`Template in state ${stateId}: no argument '${ref.name}'`);
 		}
 		return args[ref.name];
+	}
+	if (ref.kind === "visit") {
+		return resolveVisitRef(state, ref, stateId);
+	}
+	if (ref.kind === "input") {
+		const slot = inputSlotFor(state, ref.name, stateId);
+		if (slot === undefined || !(ref.name in slot.values)) {
+			throw new Error(`Template in state ${stateId}: no input '${ref.name}'`);
+		}
+		return selectPath(slot.values[ref.name], ref.path, ref, stateId);
 	}
 	if (ref.kind === "key" || ref.kind === "item") {
 		const instance = nearestInstance(stateId, ref.map);
@@ -842,6 +865,37 @@ function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknow
 		throw new Error(`Template in state ${stateId}: no result for state ${resultKey}`);
 	}
 	return selectPath(state.projection.results[resultKey], ref.path, ref, stateId);
+}
+
+function resolveVisitRef(state: MachineState, ref: Extract<InputRef, { kind: "visit" }>, stateId: string): number {
+	const target = ref.state === undefined ? stateId : instancePathFor(ref.state, stateId);
+	const node = nodeAt(state.ast, target);
+	if (node?.kind !== "state") {
+		throw new Error(`Template in state ${stateId}: ${refLabel(ref)} does not reference an action state`);
+	}
+	const key = actionUidKey({ ...node.action.uid, state: target });
+	const visit = state.projection.stateVisits[key];
+	if (visit === undefined) {
+		throw new Error(`Template in state ${stateId}: no visit for state ${target}`);
+	}
+	return visit;
+}
+
+function inputSlotFor(
+	state: MachineState,
+	name: string,
+	stateId: string,
+): { path: StatePath; values: Record<string, unknown> } | undefined {
+	let cur: StatePath | undefined = stateId;
+	while (cur !== undefined) {
+		const node = nodeAt(state.ast, cur);
+		if ((node?.kind === "state" || node?.kind === "map") && node.input !== undefined && name in node.input) {
+			const key = node.kind === "map" ? stripLastKey(cur) : cur;
+			return { path: key, values: state.projection.inputs[key] ?? {} };
+		}
+		cur = parentPath(cur);
+	}
+	return undefined;
 }
 
 function selectPath(value: unknown, path: string | undefined, ref: InputRef, stateId: string): unknown {

@@ -230,7 +230,9 @@ function graphRow(
 		...(timeline?.invokedAt !== undefined && timeline.completedAt !== undefined
 			? { durationMs: Math.max(0, timeline.completedAt - timeline.invokedAt) }
 			: {}),
-		...(pending?.phase === "validating" || pending?.phase === "rejected" ? { rejections: pending.rejections } : {}),
+		...(pending?.phase === "validating" || pending?.phase === "rejected"
+			? { rejections: pending.validationAttempts }
+			: {}),
 		...(pending?.phase === "rejected" && pending.reason !== undefined ? { reason: pending.reason } : {}),
 		...(instanceOf === undefined ? {} : { instanceOf }),
 	};
@@ -291,7 +293,9 @@ function pendingView(pending: PendingAction, now: number): PendingView {
 		path: pending.actionUid.state,
 		phase: pending.phase,
 		...(pending.phase === "running" ? { sinceMs: Math.max(0, now - pending.timestamp) } : {}),
-		...(pending.phase === "validating" || pending.phase === "rejected" ? { rejections: pending.rejections } : {}),
+		...(pending.phase === "validating" || pending.phase === "rejected"
+			? { rejections: pending.validationAttempts }
+			: {}),
 		...(pending.phase === "rejected" && pending.reason !== undefined ? { reason: pending.reason } : {}),
 	};
 }

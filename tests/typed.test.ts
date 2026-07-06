@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { agent, final, json, map, refs, t, z } from "../src/index.js";
-import { arg as untypedArg, result as untypedResult } from "../src/core/dsl.js";
+import { arg as untypedArg, event as untypedEvent, result as untypedResult } from "../src/core/dsl.js";
 
 type Args = { topic: string; goal: string };
+type EmptyFiles = Record<never, Record<string, unknown>>;
+type EmptyMaps = Record<never, unknown>;
 
 type Plan = {
 	steps: string[];
@@ -153,6 +155,78 @@ describe("typed refs (TS-first)", () => {
 		const unregistered = refs<Record<string, never>, { plan: z.infer<typeof Items> }>();
 		// @ts-expect-error the chart declares a map the registry does not mention
 		unregistered.chart(body);
+	});
+
+	it("visit() is a numeric typed ref", () => {
+		const typed = refs<Record<string, never>, Record<string, never>>();
+		expect(typed.visit()).toEqual({ kind: "visit" });
+		expect(typed.visit("work")).toEqual({ kind: "visit", state: "work" });
+		t`visit ${typed.visit()} ${json(typed.visit("work"))}`;
+	});
+
+	it("types input() refs by input name and verifies input declarations against the chart", () => {
+		const Feedback = z.object({ reason: z.string(), instructions: z.array(z.string()) });
+		type Feedback = z.infer<typeof Feedback>;
+		const typed = refs<
+			Record<string, never>,
+			Record<string, never>,
+			EmptyFiles,
+			EmptyMaps,
+			{ fix: { feedback: Feedback; count: number } }
+		>();
+
+		expect(typed.input("feedback")).toEqual({ kind: "input", name: "feedback" });
+		expect(typed.input("feedback", "reason")).toEqual({ kind: "input", name: "feedback", path: "reason" });
+		expect(typed.event("feedback.reason")).toEqual({ kind: "event", path: "feedback.reason" });
+		// @ts-expect-error unknown input name
+		typed.input("feedbak");
+		// @ts-expect-error typo in input selector
+		typed.input("feedback", "reasn");
+		// @ts-expect-error selectors do not descend into primitive inputs
+		typed.input("count", "value");
+		t`${typed.input("feedback", "reason")} ${json(typed.input("feedback"))}`;
+		// @ts-expect-error a whole object input cannot be embedded silently
+		t`${typed.input("feedback")}`;
+
+		const body = {
+			kind: "chart",
+			id: "typed-inputs",
+			initial: "gate",
+			states: {
+				gate: {
+					kind: "state",
+					action: agent("gate"),
+					transitions: { BLOCK: { target: "fix", input: { feedback: untypedEvent() } } },
+				},
+				fix: {
+					kind: "state",
+					input: { feedback: Feedback },
+					action: agent("fixer"),
+					transitions: { OK: "done" },
+				},
+				done: final(),
+			},
+		} as const;
+		const ok = refs<
+			Record<string, never>,
+			Record<string, never>,
+			EmptyFiles,
+			EmptyMaps,
+			{ fix: { feedback: Feedback } }
+		>();
+		expect(ok.chart(body).id).toBe("typed-inputs");
+		const unregistered = refs<Record<string, never>, Record<string, never>>();
+		// @ts-expect-error the chart declares input the registry does not mention
+		unregistered.chart(body);
+		const wrong = refs<
+			Record<string, never>,
+			Record<string, never>,
+			EmptyFiles,
+			EmptyMaps,
+			{ fix: { renamed: Feedback } }
+		>();
+		// @ts-expect-error input name drifted
+		wrong.chart(body);
 	});
 
 	it("templates admit only primitive-valued refs; objects need an explicit json()", () => {

@@ -2,6 +2,7 @@ import type {
 	AgentActionCst,
 	ChartCst,
 	CompoundStateCst,
+	EventBindingCst,
 	FinalStateCst,
 	GuardRef,
 	ArtifactCst,
@@ -84,6 +85,18 @@ export function json<V>(ref: InputRef<V>): InputRef<string> {
 
 export function arg(name: string): InputRef {
 	return { kind: "arg", name };
+}
+
+export function event(path?: string): EventBindingCst {
+	return { kind: "event", ...(path === undefined ? {} : { path }) };
+}
+
+export function input(name: string, path?: string): InputRef {
+	return { kind: "input", name, ...(path === undefined ? {} : { path }) };
+}
+
+export function visit(state?: string): InputRef<number> {
+	return { kind: "visit", ...(state === undefined ? {} : { state }) };
 }
 
 // The instance key of the nearest enclosing map.

@@ -123,17 +123,17 @@ describe("ScriptRunner via ChartRuntime", () => {
 		expect(state.projection.activeLeaves).toEqual(["failed"]);
 	});
 
-	it("re-runs a rejected script with attempt environment", async () => {
+	it("re-runs a rejected script with validation attempt environment", async () => {
 		const dir = await makeTempDir();
 		const action = script(
 			node,
 			[
 				"-e",
-				`const attempt = Number(process.env.HYPERCHART_ATTEMPT || 0);
-const ok = attempt > 0;
-console.log(JSON.stringify({type:"DONE", output:{ok, attempt, reason: process.env.HYPERCHART_REJECT_REASON || null}}));`,
+				`const validationAttempt = Number(process.env.HYPERCHART_VALIDATION_ATTEMPT || 0);
+const ok = validationAttempt > 0;
+console.log(JSON.stringify({type:"DONE", output:{ok, validationAttempt, reason: process.env.HYPERCHART_REJECT_REASON || null}}));`,
 			],
-			{ reply: z.object({ ok: z.boolean(), attempt: z.number(), reason: z.string().nullable() }) },
+			{ reply: z.object({ ok: z.boolean(), validationAttempt: z.number(), reason: z.string().nullable() }) },
 		);
 		const guard = script(node, [
 			"-e",
@@ -168,7 +168,7 @@ process.stdin.on("end", () => {
 		const state = await runScriptChart(ast, dir);
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.results.run).toEqual({ ok: true, attempt: 1, reason: "not ok" });
+		expect(state.projection.results.run).toEqual({ ok: true, validationAttempt: 1, reason: "not ok" });
 	});
 
 	it("retries a rejected script when a fresh runtime resumes the durable log", async () => {
@@ -177,11 +177,11 @@ process.stdin.on("end", () => {
 			node,
 			[
 				"-e",
-				`const attempt = Number(process.env.HYPERCHART_ATTEMPT || 0);
-const ok = attempt > 0;
-console.log(JSON.stringify({type:"DONE", output:{ok, attempt, reason: process.env.HYPERCHART_REJECT_REASON || null}}));`,
+				`const validationAttempt = Number(process.env.HYPERCHART_VALIDATION_ATTEMPT || 0);
+const ok = validationAttempt > 0;
+console.log(JSON.stringify({type:"DONE", output:{ok, validationAttempt, reason: process.env.HYPERCHART_REJECT_REASON || null}}));`,
 			],
-			{ reply: z.object({ ok: z.boolean(), attempt: z.number(), reason: z.string().nullable() }) },
+			{ reply: z.object({ ok: z.boolean(), validationAttempt: z.number(), reason: z.string().nullable() }) },
 		);
 		const guard = script(node, [
 			"-e",
@@ -221,7 +221,7 @@ process.stdin.on("end", () => {
 				type: "state_action",
 				kind: "complete",
 				actionUid,
-				event: { type: "DONE", output: { ok: false, attempt: 0, reason: null } },
+				event: { type: "DONE", output: { ok: false, validationAttempt: 0, reason: null } },
 				parentId: 1,
 				seqId: 2,
 				timestamp: 2,
@@ -230,7 +230,7 @@ process.stdin.on("end", () => {
 				type: "state_action",
 				kind: "validated",
 				actionUid,
-				event: { type: "DONE", output: { ok: false, attempt: 0, reason: null } },
+				event: { type: "DONE", output: { ok: false, validationAttempt: 0, reason: null } },
 				guard,
 				outcome: { ok: false, reason: "not ok" },
 				parentId: 2,
@@ -251,7 +251,7 @@ process.stdin.on("end", () => {
 		const state = await withTimeout(start(runtime));
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.results.run).toEqual({ ok: true, attempt: 1, reason: "not ok" });
+		expect(state.projection.results.run).toEqual({ ok: true, validationAttempt: 1, reason: "not ok" });
 	});
 });
 

@@ -10,9 +10,9 @@ export class ScriptRunner {
 
 	constructor(private readonly opts: { workDir: string }) {}
 
-	async run(effect: ScriptEffect, attempt?: { n: number; reason?: string }): Promise<ChartEvent> {
+	async run(effect: ScriptEffect, validationAttempt?: { n: number; reason?: string }): Promise<ChartEvent> {
 		const key = actionUidKey(effect.actionUid);
-		const env = await this.resolveEnv(effect, attempt);
+		const env = await this.resolveEnv(effect, validationAttempt);
 		const child = spawn(effect.command, [...effect.args], {
 			cwd: this.opts.workDir,
 			env,
@@ -66,16 +66,16 @@ export class ScriptRunner {
 		}
 	}
 
-	private async resolveEnv(effect: ScriptEffect, attempt: { n: number; reason?: string } | undefined) {
+	private async resolveEnv(effect: ScriptEffect, validationAttempt: { n: number; reason?: string } | undefined) {
 		const env: Record<string, string> = { ...process.env } as Record<string, string>;
 		for (const [name, value] of Object.entries(effect.env ?? {})) {
 			env[name] =
 				typeof value === "string" ? value : serializeEnvValue(await resolveArtifactValue(value, this.opts.workDir));
 		}
-		if (attempt !== undefined) {
-			env.HYPERCHART_ATTEMPT = String(attempt.n);
-			if (attempt.reason !== undefined) {
-				env.HYPERCHART_REJECT_REASON = attempt.reason;
+		if (validationAttempt !== undefined) {
+			env.HYPERCHART_VALIDATION_ATTEMPT = String(validationAttempt.n);
+			if (validationAttempt.reason !== undefined) {
+				env.HYPERCHART_REJECT_REASON = validationAttempt.reason;
 			}
 		}
 		return env;

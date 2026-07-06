@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../src/index.js";
 import { agent, compound, final, map, normalizeChartConfig, parallel, t, tsImport, user, z } from "../src/index.js";
-import { arg, chart, item, key, result } from "../src/core/dsl.js";
+import { arg, chart, event, input, item, key, result, visit } from "../src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
@@ -395,6 +395,147 @@ describe("normalizeChartConfig", () => {
 		});
 		expect(unknownResult.ok).toBe(false);
 		expect(unknownResult.diagnostics.map((d) => d.code)).toContain("UNKNOWN_INPUT_RESULT");
+	});
+
+	it("normalizes transition input bindings and rejects missing or unknown input", () => {
+		const valid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "inputs",
+				initial: "gate",
+				states: {
+					gate: {
+						kind: "state",
+						action: agent("gate"),
+						transitions: { BLOCK: { target: "fix", input: { feedback: event("feedback") } } },
+					},
+					fix: {
+						kind: "state",
+						input: { feedback: z.string() },
+						action: agent("fixer", { task: t`Fix ${input("feedback")}` }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(valid.ok).toBe(true);
+		if (!valid.ok) throw new Error("expected valid chart");
+		const gate = valid.ast.states.gate;
+		expect(gate?.kind === "state" ? gate.transitions.BLOCK : undefined).toEqual({
+			target: "fix",
+			input: { feedback: { kind: "event", path: "feedback" } },
+		});
+
+		const missing = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "missing-input",
+				initial: "gate",
+				states: {
+					gate: { kind: "state", action: agent("gate"), transitions: { BLOCK: "fix" } },
+					fix: { kind: "state", input: { feedback: z.string() }, action: agent("fixer"), transitions: { OK: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		expect(missing.ok).toBe(false);
+		expect(missing.diagnostics.map((d) => d.code)).toContain("MISSING_INPUT");
+
+		const unknown = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "unknown-input",
+				initial: "gate",
+				states: {
+					gate: {
+						kind: "state",
+						action: agent("gate"),
+						transitions: { BLOCK: { target: "fix", input: { extra: event() } } },
+					},
+					fix: { kind: "state", action: agent("fixer"), transitions: { OK: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		expect(unknown.ok).toBe(false);
+		expect(unknown.diagnostics.map((d) => d.code)).toContain("UNKNOWN_INPUT");
+	});
+
+	it("allows defaulted input without a binding and rejects FAILED input bindings", () => {
+		const defaulted = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "default-input",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("none") },
+						action: agent("worker", { task: t`${input("feedback")}` }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(defaulted.ok).toBe(true);
+
+		const failedBinding = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "failed-binding",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("none") },
+						action: agent("worker"),
+						transitions: { FAILED: { target: "done", input: { feedback: event() } } },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(failedBinding.ok).toBe(false);
+		expect(failedBinding.diagnostics.map((d) => d.code)).toContain("INVALID_BINDING");
+	});
+
+	it("normalizes visit refs and rejects non-action visit refs", () => {
+		const valid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "visits",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { task: t`Visit ${visit()}` }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(valid.ok).toBe(true);
+
+		const invalid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "bad-visits",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { task: t`Visit ${visit("done")}` }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(invalid.ok).toBe(false);
+		expect(invalid.diagnostics.map((d) => d.code)).toContain("INVALID_VISIT_REF");
 	});
 
 	it("rejects artifactOf reads pointing at states without artifacts", () => {

@@ -13,7 +13,7 @@ import {
 	tsImport,
 	z,
 } from "../src/index.js";
-import { arg, artifactOf, chart, item, joinArtifactOf, key, result } from "../src/core/dsl.js";
+import { arg, artifactOf, chart, item, joinArtifactOf, key, result, visit } from "../src/core/dsl.js";
 import { loop, start } from "../src/core/execution_loop.js";
 import type {
 	ActionUID,
@@ -433,7 +433,7 @@ describe("execution loop", () => {
 					}
 					if (effect.kind === "rejected") {
 						rejections.push(effect);
-						// The action is still pending under the same effect id: retry the claim.
+						// The action is still in the same visit, but the rejected phase has its own seqId.
 						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
 					}
 					if (effect.kind === "durable_records") {
@@ -472,8 +472,10 @@ describe("execution loop", () => {
 		expect(rejections[0]).toEqual(
 			expect.objectContaining({
 				kind: "rejected",
+				id: "validated-chart:work:agent:1:3",
 				onReject: "resume",
 				reason: "tests are failing",
+				validationAttempts: 1,
 				invocation: expect.objectContaining({ kind: "agent", id: "validated-chart:work:agent:1:1" }),
 			}),
 		);
@@ -508,7 +510,7 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["failed"]);
 		// only the first rejection produced feedback; the terminal one went straight to FAILED
 		expect(rejections).toHaveLength(1);
-		expect(rejections[0]).toMatchObject({ attempt: 1 });
+		expect(rejections[0]).toMatchObject({ validationAttempts: 1 });
 		// the still-running session was abandoned by the FAILED exit and must be killed
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "cancel")).toHaveLength(1);
 	});
@@ -759,6 +761,124 @@ describe("execution loop", () => {
 			expect.objectContaining({ path: "out/ai.json", shape: convertedShape }),
 			expect.objectContaining({ path: "out/ai.json", shape: convertedShape, select: "claims.approved" }),
 		]);
+	});
+
+	it("visit() changes artifact paths only when the state is entered again", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "visit-chart",
+				initial: "writer",
+				states: {
+					writer: {
+						kind: "state",
+						action: agent("writer", { artifacts: { out: artifact(t`out/${visit()}.json`) } }),
+						transitions: { DONE: "gate" },
+					},
+					gate: {
+						kind: "state",
+						action: agent("gate"),
+						transitions: { AGAIN: "writer", PASS: "reader" },
+					},
+					reader: {
+						kind: "state",
+						action: agent("reader", { reads: [artifactOf("writer")] }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		const writerPaths: string[] = [];
+		let readerPath: string | undefined;
+		const gateEvents = ["AGAIN", "PASS"];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "writer") {
+						writerPaths.push(effect.artifacts?.[0]?.path ?? "");
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
+						const eventType = gateEvents.shift();
+						if (eventType === undefined) throw new Error("unexpected gate run");
+						events.push({ kind: "agent", effectId: effect.id, event: { type: eventType } });
+					}
+					if (effect.kind === "agent" && effect.actionUid.state === "reader") {
+						readerPath = effect.reads?.[0]?.path;
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(writerPaths).toEqual(["out/1.json", "out/2.json"]);
+		expect(readerPath).toBe("out/2.json");
+	});
+
+	it("validation retries keep the same visit() value", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "visit-validation-chart",
+				initial: "writer",
+				states: {
+					writer: {
+						kind: "state",
+						action: agent("writer", { artifacts: { out: artifact(t`out/${visit()}.json`) } }),
+						validate: tsImport("./checks.js", "testsPass"),
+						onReject: "restart",
+						retries: 1,
+						transitions: { DONE: "done", FAILED: "failed" },
+					},
+					done: final(),
+					failed: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error("test chart should be valid");
+		const events: MachineEvent[] = [];
+		const writerPaths: string[] = [];
+		const verdicts: GuardOutcome[] = [{ ok: false, reason: "try again" }, true];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "writer") {
+						writerPaths.push(effect.artifacts?.[0]?.path ?? "");
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "rejected") {
+						writerPaths.push(effect.invocation.kind === "agent" ? (effect.invocation.artifacts?.[0]?.path ?? "") : "");
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					}
+					if (effect.kind === "validate") {
+						const outcome = verdicts.shift();
+						if (outcome === undefined) throw new Error("unexpected validate effect");
+						events.push({ kind: "validated", effectId: effect.id, outcome });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(writerPaths).toEqual(["out/1.json", "out/1.json"]);
 	});
 
 	it("runs a script action as an honest command step", async () => {

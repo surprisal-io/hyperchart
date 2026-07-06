@@ -1,4 +1,4 @@
-import type { ActionUID, ChartAst, ChartEvent, StateAst, StateId, StatePath } from "./types.js";
+import type { ActionUID, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
 import { actionUidKey } from "./action_uid.js";
 import {
@@ -20,26 +20,26 @@ import {
 // it makes the effect id of each phase unique.
 export type PendingAction =
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
-	// rejections counts the rejected rounds of this invoke cycle — derived from validated(false)
+	// validationAttempts counts the rejected rounds of this invoke cycle — derived from validated(false)
 	// facts, it decides when the retry budget (state.retries) is exhausted.
-	| { actionUid: ActionUID; attemptId: number; seqId: number; invokeSeqId: number; timestamp: number; phase: "running" }
+	| { actionUid: ActionUID; visitId: number; seqId: number; invokeSeqId: number; timestamp: number; phase: "running" }
 	| {
 			actionUid: ActionUID;
-			attemptId: number;
+			visitId: number;
 			seqId: number;
 			invokeSeqId: number;
 			phase: "validating";
 			event: ChartEvent;
-			rejections: number;
+			validationAttempts: number;
 	  }
 	| {
 			actionUid: ActionUID;
-			attemptId: number;
+			visitId: number;
 			seqId: number;
 			invokeSeqId: number;
 			phase: "rejected";
 			event: ChartEvent;
-			rejections: number;
+			validationAttempts: number;
 			reason?: string;
 	  };
 
@@ -54,11 +54,13 @@ export type BranchProjection = {
 	// Pinned fan-outs: map instance-path → { key → item }, written by spawned facts. Entries stay
 	// after the map exits — reads over a completed map's instances resolve from here.
 	spawns: Record<StatePath, Readonly<Record<string, unknown>>>;
+	// Latest input object per input-declaring state; re-entering a state overwrites its inputs.
+	inputs: Record<StatePath, Record<string, unknown>>;
 	// Latest accepted output per action state; re-entering a state overwrites its result.
 	results: Record<StatePath, unknown>;
-	// Per concrete actionUid, how many invoke records have started an action attempt. Replayed from
-	// durable facts so attempt ids stay stable without being stored in each log record.
-	actionAttempts: Record<string, number>;
+	// Per concrete actionUid, how many invoke records have entered that action state. Replayed from
+	// durable facts so visit ids stay stable without being stored in each log record.
+	stateVisits: Record<string, number>;
 };
 
 export function isFinalState(projection: BranchProjection, ast: ChartAst): boolean {
@@ -73,9 +75,11 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		seqId: 0,
 		pendingActions: [],
 		spawns: {},
+		inputs: {},
 		results: {},
-		actionAttempts: {},
+		stateVisits: {},
 	};
+	applyInputsForEntry(projection, ast, ast.initial);
 	completeParallels(projection, ast);
 	return projection;
 }
@@ -107,13 +111,19 @@ export function projectBranch(
 				}
 				projection.spawns[record.path] = record.instances;
 				const keys = Object.keys(record.instances);
+				const entered = keys.length === 0 ? siblingPath(record.path, node.onDone) : undefined;
 				projection.activeLeaves = [
 					...projection.activeLeaves.filter((leaf) => leaf !== record.path),
 					// An empty fan-out completes the map immediately, like a compound reaching final.
-					...(keys.length === 0
-						? enterState(ast, siblingPath(record.path, node.onDone))
-						: keys.flatMap((key) => enterState(ast, `${record.path}#${key}`))),
+					...(entered === undefined
+						? keys.flatMap((key) => enterState(ast, `${record.path}#${key}`))
+						: enterState(ast, entered)),
 				];
+				if (entered === undefined) {
+					for (const key of keys) applyInputsForEntry(projection, ast, `${record.path}#${key}`);
+				} else {
+					applyInputsForEntry(projection, ast, entered);
+				}
 				completeParallels(projection, ast);
 				break;
 			}
@@ -123,11 +133,11 @@ export function projectBranch(
 						if (projection.activeLeaves.includes(record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "invoke");
 							const key = actionUidKey(record.actionUid);
-							const attemptId = (projection.actionAttempts[key] ?? 0) + 1;
-							projection.actionAttempts[key] = attemptId;
+							const visitId = (projection.stateVisits[key] ?? 0) + 1;
+							projection.stateVisits[key] = visitId;
 							projection.pendingActions.push({
 								actionUid: record.actionUid,
-								attemptId,
+								visitId,
 								seqId: record.seqId,
 								invokeSeqId: record.seqId,
 								timestamp: record.timestamp,
@@ -141,26 +151,26 @@ export function projectBranch(
 							const state = nodeAt(ast, record.actionUid.state);
 							if (state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED") {
 								// The completion goes into validation, restarting the cycle if a previous round was
-								// rejected; the rejection count survives the retry.
+								// rejected; the validation-attempt count survives the retry.
 								const previous = projection.pendingActions.find((pending) =>
 									sameActionUid(pending.actionUid, record.actionUid),
 								);
-								const rejections = previous?.phase === "rejected" ? previous.rejections : 0;
+								const validationAttempts = previous?.phase === "rejected" ? previous.validationAttempts : 0;
 								removePendingAction(projection, record.actionUid);
 								projection.pendingActions.push({
 									actionUid: record.actionUid,
-									attemptId: previous?.attemptId ?? projection.actionAttempts[actionUidKey(record.actionUid)] ?? 1,
+									visitId: previous?.visitId ?? projection.stateVisits[actionUidKey(record.actionUid)] ?? 1,
 									seqId: record.seqId,
 									invokeSeqId: previous?.invokeSeqId ?? record.seqId,
 									phase: "validating",
 									event: record.event,
-									rejections,
+									validationAttempts,
 								});
 								break;
 							}
 							recordResult(projection, record.actionUid.state, record.event);
 							removePendingAction(projection, record.actionUid);
-							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned);
+							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
 						}
 						break;
 					case "timer_fired":
@@ -183,13 +193,13 @@ export function projectBranch(
 						if (record.outcome === true) {
 							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
-							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned);
+							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
 							break;
 						}
 						const node = nodeAt(ast, record.actionUid.state);
 						const retries = node?.kind === "state" ? node.retries : undefined;
-						const rejections = validating.rejections + 1;
-						if (retries !== undefined && rejections > retries) {
+						const validationAttempts = validating.validationAttempts + 1;
+						if (retries !== undefined && validationAttempts > retries) {
 							// The budget is exhausted: the rejection is terminal and becomes a FAILED
 							// transition. The entry deliberately stays pending — the exit sweep reports it
 							// abandoned, so the machine cancels the still-running session.
@@ -198,12 +208,12 @@ export function projectBranch(
 						}
 						projection.pendingActions[projection.pendingActions.indexOf(validating)] = {
 							actionUid: validating.actionUid,
-							attemptId: validating.attemptId,
+							visitId: validating.visitId,
 							seqId: record.seqId,
 							invokeSeqId: validating.invokeSeqId,
 							phase: "rejected",
 							event: validating.event,
-							rejections,
+							validationAttempts,
 							...(typeof record.outcome === "object" ? { reason: record.outcome.reason } : {}),
 						};
 						break;
@@ -240,7 +250,9 @@ function applyAfterTransition(
 	if (state?.kind !== "state" || state.after === undefined) {
 		throw new Error(`No after transition in state ${leaf}`);
 	}
-	exitAndEnter(projection, ast, leaf, siblingPath(leaf, state.after.target), abandoned);
+	const target = siblingPath(leaf, state.after.target);
+	applyInputsForEntry(projection, ast, target);
+	exitAndEnter(projection, ast, leaf, target, abandoned);
 }
 
 // Transitions are not logged: recompute the move from the chart AST. The handler's level decides
@@ -251,12 +263,17 @@ function applyTransition(
 	fromLeaf: StatePath,
 	eventType: string,
 	abandoned: PendingAction[],
+	event?: ChartEvent,
 ): void {
 	const handler = findHandler(ast, fromLeaf, eventType);
 	if (!handler) {
 		throw new Error(`No transition for event type ${eventType} in state ${fromLeaf}`);
 	}
-	exitAndEnter(projection, ast, handler.path, siblingPath(handler.path, handler.target), abandoned);
+	const target = siblingPath(handler.path, handler.transition.target);
+	if (event !== undefined) {
+		applyInputsForEntry(projection, ast, target, handler.transition, event);
+	}
+	exitAndEnter(projection, ast, handler.path, target, abandoned);
 }
 
 // The exit scope is the handler's own state: every active leaf under it leaves the
@@ -293,7 +310,7 @@ function findHandler(
 	ast: ChartAst,
 	fromPath: StatePath,
 	eventType: string,
-): { path: StatePath; node: StateAst; target: StateId } | undefined {
+): { path: StatePath; node: StateAst; transition: TransitionAst } | undefined {
 	let path: StatePath | undefined = fromPath;
 	while (path !== undefined) {
 		const node: StateAst | undefined = nodeAt(ast, path);
@@ -301,11 +318,11 @@ function findHandler(
 			throw new Error(`Broken parent chain: state ${path} not found`);
 		}
 		if (node.kind !== "final") {
-			const target = node.transitions[eventType];
-			if (target !== undefined) {
+			const transition = node.transitions[eventType];
+			if (transition !== undefined) {
 				// A map's transitions belong to the container, not the instance the event bubbled
 				// out of: the handler scope drops the instance key, so the exit aborts ALL instances.
-				return { path: node.kind === "map" ? stripLastKey(path) : path, node, target };
+				return { path: node.kind === "map" ? stripLastKey(path) : path, node, transition };
 			}
 		}
 		path = parentPath(path);
@@ -386,6 +403,7 @@ function completeParallels(projection: BranchProjection, ast: ChartAst): void {
 			...projection.activeLeaves.filter((leaf) => !underScope(leaf, done.path)),
 			...enterState(ast, done.target),
 		];
+		applyInputsForEntry(projection, ast, done.target);
 	}
 }
 
@@ -419,6 +437,93 @@ function findCompletedParallel(
 		const leaves = projection.activeLeaves.filter((leaf) => underScope(leaf, path));
 		return leaves.length > 0 && leaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final");
 	});
+}
+
+function applyInputsForEntry(
+	projection: BranchProjection,
+	ast: ChartAst,
+	entryPath: StatePath,
+	transition?: TransitionAst,
+	event?: ChartEvent,
+): void {
+	for (const target of inputEntryTargets(ast, entryPath)) {
+		const values: Record<string, unknown> = {};
+		for (const [name, schema] of Object.entries(target.input)) {
+			const binding = transition?.input?.[name];
+			if (binding !== undefined) {
+				if (event === undefined) {
+					throw new Error(`Input '${name}' for state ${target.path}: event binding has no event payload`);
+				}
+				values[name] = selectEventValue(event, binding.path, name, target.path);
+				continue;
+			}
+			if (schemaHasDefault(schema)) {
+				values[name] = cloneJson((schema.schema as Record<string, unknown>).default);
+			}
+		}
+		projection.inputs[target.path] = values;
+	}
+}
+
+function inputEntryTargets(
+	ast: ChartAst,
+	path: StatePath,
+): Array<{ path: StatePath; input: Readonly<Record<string, SchemaAst>> }> {
+	const node = nodeAt(ast, path);
+	if (node === undefined) return [];
+	if (node.kind === "state") {
+		return node.input === undefined ? [] : [{ path, input: node.input }];
+	}
+	if (node.kind === "map") {
+		if (lastSegmentKey(path) === undefined) {
+			return node.input === undefined ? [] : [{ path, input: node.input }];
+		}
+		return inputEntryTargets(ast, childPath(path, node.initial));
+	}
+	if (node.kind === "compound" || node.kind === "region") {
+		return inputEntryTargets(ast, childPath(path, node.initial));
+	}
+	if (node.kind === "parallel") {
+		return node.regions.flatMap((region) => inputEntryTargets(ast, childPath(path, region)));
+	}
+	const parent = parentPath(path);
+	if (node.kind === "final" && parent !== undefined) {
+		const container = nodeAt(ast, parent);
+		if (container?.kind === "compound") {
+			return inputEntryTargets(ast, siblingPath(parent, container.onDone));
+		}
+	}
+	return [];
+}
+
+function selectEventValue(
+	event: ChartEvent,
+	path: string | undefined,
+	inputName: string,
+	statePath: StatePath,
+): unknown {
+	if (!("output" in event)) {
+		if (path === undefined) return undefined;
+		throw new Error(`Input '${inputName}' for state ${statePath}: event ${event.type} has no output`);
+	}
+	if (path === undefined) return event.output;
+	let current = event.output;
+	for (const segment of path.split(".")) {
+		if (typeof current !== "object" || current === null || !(segment in current)) {
+			throw new Error(`Input '${inputName}' for state ${statePath}: event output has no '${path}'`);
+		}
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
+}
+
+function schemaHasDefault(schema: SchemaAst): boolean {
+	return typeof schema.schema === "object" && schema.schema !== null && "default" in schema.schema;
+}
+
+function cloneJson(value: unknown): unknown {
+	if (value === undefined) return undefined;
+	return JSON.parse(JSON.stringify(value)) as unknown;
 }
 
 function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: ActionUID, operation: string): void {

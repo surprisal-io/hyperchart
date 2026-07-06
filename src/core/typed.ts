@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { ArtifactOfCst, ChartCst, JoinArtifactOfCst, InputRef } from "./types.js";
+import type { ArtifactOfCst, ChartCst, EventBindingCst, JoinArtifactOfCst, InputRef } from "./types.js";
 
 // Dot-paths a result() selector may take into a value of type T. Free-form objects
 // (Record<string, unknown>) admit any tail; arrays and primitives end the path.
@@ -88,6 +88,25 @@ export type MapsOf<C> = C extends { states: infer S }
 		>
 	: never;
 
+type InputShapes<I> = Simplify2<{
+	[N in keyof I]: InferSpec<I[N]>;
+}>;
+
+// The input registry the chart itself declares: every input-declaring state/map,
+// state path → input name → value type.
+export type InputsOf<C> = C extends { states: infer S }
+	? Simplify2<
+			UnionToIntersection<
+				FlattenStates<S> extends infer E
+					? E extends [infer P extends string, { input: infer I }]
+						? { [K in P]: InputShapes<I> }
+						: never
+					: never
+			> &
+				NonNullable<unknown> // intersection identity for the no-entries case
+		>
+	: never;
+
 // Both directions must hold: everything the registry declares exists in the chart with the same
 // type, and everything the chart declares is written down in the registry.
 type Mutual<Declared, Actual, Message extends string> = [Declared] extends [Actual]
@@ -96,19 +115,38 @@ type Mutual<Declared, Actual, Message extends string> = [Declared] extends [Actu
 		: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } }
 	: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } };
 
-type VerifyDecl<C, Results, Files, Maps> = Mutual<
+type VerifyDecl<C, Results, Files, Maps, Inputs> = Mutual<
 	Results,
 	ResultsOf<C>,
 	"results registry is out of sync with the chart"
 > &
 	Mutual<Files, FilesOf<C>, "files registry is out of sync with the chart"> &
-	Mutual<Maps, MapsOf<C>, "maps registry is out of sync with the chart">;
+	Mutual<Maps, MapsOf<C>, "maps registry is out of sync with the chart"> &
+	Mutual<Inputs, InputsOf<C>, "inputs registry is out of sync with the chart">;
 
-type Refs<Args, Results, Files, Maps> = {
+type InputNames<Inputs> = {
+	[S in keyof Inputs]: keyof Inputs[S];
+}[keyof Inputs] &
+	string;
+
+type InputValue<Inputs, K extends string> = {
+	[S in keyof Inputs]: K extends keyof Inputs[S] ? Inputs[S][K] : never;
+}[keyof Inputs];
+
+type Refs<Args, Results, Files, Maps, Inputs> = {
 	// The checking chart constructor: accepts only a literal whose declared replies/artifacts
 	// match the registry the refs were built from — the registry cannot drift from the chart.
-	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Results, Files, Maps>) => C;
+	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Results, Files, Maps, Inputs>) => C;
 	arg: <K extends keyof Args & string>(name: K) => InputRef<Args[K]>;
+	event: (path?: string) => EventBindingCst;
+	visit: (state?: string) => InputRef<number>;
+	input: {
+		<K extends InputNames<Inputs>>(name: K): InputRef<InputValue<Inputs, K>>;
+		<K extends InputNames<Inputs>, P extends Paths<InputValue<Inputs, K>> & string>(
+			name: K,
+			path: P,
+		): InputRef<ValueAt<InputValue<Inputs, K>, P>>;
+	};
 	result: {
 		<S extends keyof Results & string>(state: S): InputRef<Results[S]>;
 		<S extends keyof Results & string, P extends Paths<Results[S]> & string>(
@@ -157,31 +195,39 @@ export function refs<
 	Results extends Record<string, unknown>,
 	Files extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
 	Maps extends Record<string, unknown> = Record<never, unknown>,
->(): Refs<Args, Results, Files, Maps> {
+	Inputs extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
+>(): Refs<Args, Results, Files, Maps, Inputs> {
 	return {
 		chart: (def) => def,
 		arg: (name) => ({ kind: "arg", name }),
+		event: (path?: string) => ({ kind: "event", ...(path === undefined ? {} : { path }) }),
+		visit: (state?: string) => ({ kind: "visit", ...(state === undefined ? {} : { state }) }),
+		input: ((name: string, path?: string) => ({
+			kind: "input",
+			name,
+			...(path === undefined ? {} : { path }),
+		})) as Refs<Args, Results, Files, Maps, Inputs>["input"],
 		result: ((state: string, path?: string) => ({
 			kind: "result",
 			state,
 			...(path === undefined ? {} : { path }),
-		})) as Refs<Args, Results, Files, Maps>["result"],
+		})) as Refs<Args, Results, Files, Maps, Inputs>["result"],
 		artifactOf: ((state: string, opts: { artifact?: string; select?: string } = {}) => ({
 			kind: "artifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 			...(opts.select === undefined ? {} : { select: opts.select }),
-		})) as Refs<Args, Results, Files, Maps>["artifactOf"],
+		})) as Refs<Args, Results, Files, Maps, Inputs>["artifactOf"],
 		joinArtifactOf: ((state: string, opts: { artifact?: string } = {}) => ({
 			kind: "joinArtifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
-		})) as Refs<Args, Results, Files, Maps>["joinArtifactOf"],
+		})) as Refs<Args, Results, Files, Maps, Inputs>["joinArtifactOf"],
 		key: (map) => ({ kind: "key", map }),
 		item: ((map: string, path?: string) => ({
 			kind: "item",
 			map,
 			...(path === undefined ? {} : { path }),
-		})) as Refs<Args, Results, Files, Maps>["item"],
+		})) as Refs<Args, Results, Files, Maps, Inputs>["item"],
 	};
 }

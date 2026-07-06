@@ -23,9 +23,11 @@ export function buildNudgePrompt(effect: AgentEffect): string {
 }
 
 export function buildRejectPrompt(effect: RejectedEffect): string {
-	return `Your result was rejected by the validator (attempt ${effect.attempt}). Reason: ${
+	const completion =
+		effect.invocation.kind === "agent" ? `\n\n${formatCompletion({ ...effect.invocation, id: effect.id })}` : "";
+	return `Your result was rejected by the validator (validation attempt ${effect.validationAttempts}). Reason: ${
 		effect.reason ?? "No reason provided."
-	}. Fix the issues and call \`finish\` again.`;
+	}. Fix the issues and call \`finish\` again.${completion}`;
 }
 
 export function buildArtifactFeedbackPrompt(errors: string[]): string {

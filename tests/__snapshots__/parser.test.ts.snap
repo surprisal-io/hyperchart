@@ -29,8 +29,12 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "approval",
       "kind": "state",
       "transitions": {
-        "APPROVED": "done",
-        "REJECTED": "implement",
+        "APPROVED": {
+          "target": "done",
+        },
+        "REJECTED": {
+          "target": "implement",
+        },
       },
     },
     "done": {
@@ -54,8 +58,12 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "implement",
       "kind": "state",
       "transitions": {
-        "FAILED": "failed",
-        "IMPLEMENTED": "approval",
+        "FAILED": {
+          "target": "failed",
+        },
+        "IMPLEMENTED": {
+          "target": "approval",
+        },
       },
     },
     "plan": {
@@ -90,8 +98,12 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "plan",
       "kind": "state",
       "transitions": {
-        "FAILED": "failed",
-        "PLAN_READY": "implement",
+        "FAILED": {
+          "target": "failed",
+        },
+        "PLAN_READY": {
+          "target": "implement",
+        },
       },
     },
     "research": {
@@ -123,8 +135,12 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "research",
       "kind": "state",
       "transitions": {
-        "FAILED": "failed",
-        "RESEARCH_READY": "plan",
+        "FAILED": {
+          "target": "failed",
+        },
+        "RESEARCH_READY": {
+          "target": "plan",
+        },
       },
     },
   },

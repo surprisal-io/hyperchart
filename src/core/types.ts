@@ -133,12 +133,29 @@ export type GuardRef =
 export type GuardOutcome = boolean | { ok: false; reason: string };
 
 // What to do when validation rejects a completion claim: feed the reason back into the still
-// running action ("resume") or discard that attempt and start the action fresh ("restart").
+// running action ("resume") or discard that validation attempt and start the action fresh ("restart").
 // Either way the action stays pending and nothing is logged — the choice lives in the chart,
 // the runtime just executes it.
 export type OnReject = "resume" | "restart";
 
-export type TransitionMapCst = Record<EventType, StateId>;
+export type EventBindingCst = {
+	kind: "event";
+	path?: string;
+};
+
+export type TransitionCst = {
+	target: StateId;
+	input?: Record<string, EventBindingCst>;
+};
+
+export type TransitionMapCst = Record<EventType, StateId | TransitionCst>;
+
+export type EventBindingAst = Readonly<EventBindingCst>;
+
+export type TransitionAst = Readonly<{
+	target: StateId;
+	input?: Readonly<Record<string, EventBindingAst>>;
+}>;
 
 // Deadline for an action state: if the action is still running delayMs after its invoke fact,
 // the chart transitions to target and the runtime is told to cancel the action. The timer covers
@@ -181,6 +198,15 @@ export type InputRef<V = unknown> = (
 			map?: StatePath;
 			path?: string;
 	  }
+	| {
+			kind: "input";
+			name: string;
+			path?: string;
+	  }
+	| {
+			kind: "visit";
+			state?: StatePath;
+	  }
 ) & {
 	// Set by json(): the value is embedded as JSON text. Without it the renderer admits only
 	// primitives — the runtime twin of the static rule enforced by t().
@@ -210,6 +236,7 @@ export type TemplateAst = Readonly<{
 export type ActionStateCst = {
 	kind: "state";
 	action: StateActionCst;
+	input?: Record<string, SchemaCst>;
 	transitions?: TransitionMapCst;
 	after?: AfterCst;
 	validate?: GuardRef;
@@ -254,6 +281,7 @@ export type ParallelStateCst = {
 // own transitions catch what instances leave unhandled — exiting ALL instances (abort).
 export type MapStateCst = {
 	kind: "map";
+	input?: Record<string, SchemaCst>;
 	over: InputRef;
 	// At most this many instances run at once (invokes are gated, spawn is not); omitted = all.
 	concurrency?: number;
@@ -321,7 +349,8 @@ export type ActionStateAst = Readonly<{
 	// Path of the containing compound; absent at top level.
 	parent?: StatePath;
 	action: StateActionAst;
-	transitions: Readonly<Record<EventType, StateId>>;
+	input?: Readonly<Record<string, SchemaAst>>;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
 	after?: Readonly<AfterCst>;
 	validate?: GuardRef;
 	// Present only when validate is set; defaults to "resume".
@@ -343,7 +372,7 @@ export type CompoundStateAst = Readonly<{
 	id: StateId;
 	parent?: StatePath;
 	initial: StateId;
-	transitions: Readonly<Record<EventType, StateId>>;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
 	onDone: StateId;
 }>;
 
@@ -354,7 +383,7 @@ export type RegionStateAst = Readonly<{
 	id: StateId;
 	parent?: StatePath;
 	initial: StateId;
-	transitions: Readonly<Record<EventType, StateId>>;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
 }>;
 
 export type ParallelStateAst = Readonly<{
@@ -364,7 +393,7 @@ export type ParallelStateAst = Readonly<{
 	// Local ids of the regions, all entered on entry. Regions are always completable, so the
 	// join always has somewhere to go: onDone is mandatory.
 	regions: readonly StateId[];
-	transitions: Readonly<Record<EventType, StateId>>;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
 	onDone: StateId;
 }>;
 
@@ -372,10 +401,11 @@ export type MapStateAst = Readonly<{
 	kind: "map";
 	id: StateId;
 	parent?: StatePath;
+	input?: Readonly<Record<string, SchemaAst>>;
 	over: InputRef;
 	concurrency?: number;
 	initial: StateId;
-	transitions: Readonly<Record<EventType, StateId>>;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
 	onDone: StateId;
 }>;
 

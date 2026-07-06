@@ -11,7 +11,18 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { parseChartModule, type ChartAst } from "../src/index.js";
+import {
+	parseChartModule,
+	type ArtifactAst,
+	type ArtifactOfAst,
+	type ChartAst,
+	type InputRef,
+	type JoinArtifactOfAst,
+	type JsonSchema,
+	type StateActionAst,
+	type StateAst,
+	type TemplateAst,
+} from "../src/index.js";
 import { JsonlLogStore } from "../src/runtime/generic/log_store.js";
 import { createRunDir, loadRunMeta, saveRunMeta, type RunMeta } from "../src/runtime/generic/run_dir.js";
 import { isFailureStatePath, type RunTerminalState } from "../src/runtime/generic/run_outcome.js";
@@ -210,6 +221,7 @@ export default function register(pi: ExtensionAPI) {
 		getArgumentCompletions: (prefix) => completeHyperchartArgs(prefix),
 	});
 	pi.registerTool(hyperchartRunTool);
+	pi.registerTool(hyperchartInspectTool);
 	pi.on("session_start", async (event, ctx) => {
 		if (event.reason === "reload" || event.reason === "startup" || event.reason === "resume") {
 			await restoreRunWidgets(ctx);
@@ -255,6 +267,234 @@ const hyperchartRunTool = defineTool({
 		};
 	},
 });
+
+type HyperchartArtifactInfo = { name: string; path?: string; shape?: JsonSchema };
+
+type HyperchartInspectState = {
+	id: string;
+	kind: "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
+	agent?: string;
+	// Authoring text with refs shown as {placeholders} - not a rendered prompt.
+	task?: string;
+	command?: string;
+	envKeys?: string[];
+	// State paths this action pulls from: result() refs in templates plus artifactOf/joinArtifactOf reads.
+	reads?: string[];
+	artifacts?: HyperchartArtifactInfo[];
+	reply?: JsonSchema;
+	model?: string;
+	thinking?: string;
+	tools?: readonly string[];
+	over?: string;
+	concurrency?: number;
+	regions?: string[];
+	retries?: number;
+	transitions?: Array<{ event: string; target: string }>;
+};
+
+type HyperchartInspectResult = {
+	chartId: string;
+	chartPath: string;
+	exportName?: string;
+	states: HyperchartInspectState[];
+};
+
+const hyperchartInspectTool = defineTool({
+	name: "hyperchart_inspect",
+	label: "Inspect Hyperchart",
+	description: "Parse a Hyperchart chart module and return its static state graph without starting a run.",
+	parameters: Type.Object({
+		chartPath: Type.String({ description: "Hyperchart name in .pi/hypercharts, or a chart module path" }),
+		exportName: Type.Optional(Type.String({ description: "Named export to inspect" })),
+	}),
+	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		const result = await inspectHyperchartDefinition(
+			{
+				chartPath: params.chartPath,
+				...(params.exportName === undefined ? {} : { exportName: params.exportName }),
+			},
+			ctx,
+		);
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Inspected hyperchart ${result.chartId}: ${result.states.length} states (${result.chartPath}). No run was started.`,
+				},
+			],
+			details: result,
+		};
+	},
+});
+
+async function inspectHyperchartDefinition(
+	opts: { chartPath: string; exportName?: string },
+	ctx: HyperchartContext,
+): Promise<HyperchartInspectResult> {
+	const chartPath = resolveHyperchartPath(opts.chartPath, ctx.cwd);
+	const parsed = await parseChartModule(
+		chartPath,
+		opts.exportName === undefined ? {} : { exportName: opts.exportName },
+	);
+	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	return {
+		chartId: parsed.ast.id,
+		chartPath,
+		...(opts.exportName === undefined ? {} : { exportName: opts.exportName }),
+		states: statesFromAst(parsed.ast),
+	};
+}
+
+function statesFromAst(ast: ChartAst): HyperchartInspectState[] {
+	return Object.entries(ast.states).map(([path, state]) => {
+		if (state.kind === "final") return { id: path, kind: "final" };
+		const transitions = transitionEntries(state);
+		return {
+			...stateFromAst(path, state),
+			...(transitions.length === 0 ? {} : { transitions }),
+		};
+	});
+}
+
+function stateFromAst(path: string, state: Exclude<StateAst, { kind: "final" }>): HyperchartInspectState {
+	if (state.kind === "state") return actionStateFromAst(path, state);
+	if (state.kind === "map") {
+		return {
+			id: path,
+			kind: "map",
+			over: inputRefPreview(state.over),
+			...(state.concurrency === undefined ? {} : { concurrency: state.concurrency }),
+		};
+	}
+	if (state.kind === "parallel") {
+		return { id: path, kind: "parallel", regions: state.regions.map((region) => `${path}.${region}`) };
+	}
+	return { id: path, kind: state.kind };
+}
+
+function actionStateFromAst(path: string, state: Extract<StateAst, { kind: "state" }>): HyperchartInspectState {
+	const action = state.action;
+	const reads = actionReads(action);
+	const artifacts = actionArtifacts(action);
+	const base = {
+		id: path,
+		...(reads.length === 0 ? {} : { reads }),
+		...(artifacts.length === 0 ? {} : { artifacts }),
+		...(action.reply === undefined ? {} : { reply: action.reply.schema }),
+		...(state.retries === undefined ? {} : { retries: state.retries }),
+	};
+	if (action.kind === "agent") {
+		const task = templatePreview(action.task);
+		return {
+			...base,
+			kind: "agent",
+			agent: action.name,
+			...(task === undefined ? {} : { task }),
+			...(action.model === undefined ? {} : { model: action.model }),
+			...(action.thinking === undefined ? {} : { thinking: action.thinking }),
+			...(action.tools === undefined ? {} : { tools: action.tools }),
+		};
+	}
+	if (action.kind === "script") {
+		return {
+			...base,
+			kind: "script",
+			command: [action.command, ...action.args].join(" "),
+			...(action.env === undefined ? {} : { envKeys: Object.keys(action.env) }),
+		};
+	}
+	const task = templatePreview(action.prompt);
+	return { ...base, kind: "user", ...(task === undefined ? {} : { task }) };
+}
+
+function artifactInfo(name: string, artifact: ArtifactAst): HyperchartArtifactInfo {
+	const path = templatePreview(artifact.path);
+	return {
+		name,
+		...(path === undefined ? {} : { path }),
+		...(artifact.shape === undefined ? {} : { shape: artifact.shape.schema }),
+	};
+}
+
+function actionArtifacts(action: StateActionAst): HyperchartArtifactInfo[] {
+	if (action.kind === "user") return [];
+	return Object.entries(action.artifacts ?? {}).map(([name, artifact]) => artifactInfo(name, artifact));
+}
+
+function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): Array<{ event: string; target: string }> {
+	const entries = Object.entries(state.transitions).map(([event, transition]) => ({
+		event,
+		target: siblingStatePath(state.parent, transition.target),
+	}));
+	if (state.kind === "compound" || state.kind === "parallel" || state.kind === "map") {
+		entries.push({ event: "onDone", target: siblingStatePath(state.parent, state.onDone) });
+	}
+	if (state.kind === "state" && state.after !== undefined) {
+		entries.push({
+			event: `after:${state.after.delayMs}ms`,
+			target: siblingStatePath(state.parent, state.after.target),
+		});
+	}
+	return entries;
+}
+
+function siblingStatePath(parent: string | undefined, localId: string): string {
+	return parent === undefined ? localId : `${parent}.${localId}`;
+}
+
+function actionReads(action: StateActionAst): string[] {
+	const reads: string[] = [];
+	if (action.kind === "agent") {
+		for (const read of action.reads ?? []) appendReadRefs(reads, read);
+		appendTemplateRefs(reads, action.task);
+	} else if (action.kind === "script") {
+		for (const value of Object.values(action.env ?? {})) appendReadRefs(reads, value);
+	} else {
+		appendTemplateRefs(reads, action.prompt);
+	}
+	return [...new Set(reads)];
+}
+
+function appendReadRefs(reads: string[], value: TemplateAst | ArtifactOfAst | JoinArtifactOfAst): void {
+	if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") {
+		reads.push(value.state);
+		return;
+	}
+	appendTemplateRefs(reads, value);
+}
+
+function appendTemplateRefs(reads: string[], value: TemplateAst | undefined): void {
+	if (value === undefined) return;
+	for (const ref of value.refs) {
+		if (ref.kind === "result") reads.push(ref.state);
+	}
+}
+
+function templatePreview(value: TemplateAst | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	const rendered = value.strings.reduce((acc, chunk, index) => {
+		const ref = value.refs[index];
+		return ref === undefined ? `${acc}${chunk}` : `${acc}${chunk}{${inputRefPreview(ref)}}`;
+	}, "");
+	return rendered.trim() || undefined;
+}
+
+function inputRefPreview(ref: InputRef): string {
+	switch (ref.kind) {
+		case "arg":
+			return `arg:${ref.name}`;
+		case "result":
+			return ref.path ? `${ref.state}.${ref.path}` : ref.state;
+		case "key":
+			return ref.map ? `${ref.map}.key` : "key";
+		case "item":
+			return [ref.map, "item", ref.path].filter(Boolean).join(".");
+		case "input":
+			return ref.path ? `input:${ref.name}.${ref.path}` : `input:${ref.name}`;
+		case "visit":
+			return ref.state ? `visit:${ref.state}` : "visit";
+	}
+}
 
 async function dispatch(args: string, ctx: ExtensionCommandContext): Promise<void> {
 	const tokens = tokenize(args);

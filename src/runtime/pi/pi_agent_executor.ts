@@ -53,6 +53,7 @@ type RunOptions = {
 	forceNewSession: boolean;
 	resumePrompt?: string;
 	rejectReason?: string;
+	resumeInvocationId?: string;
 };
 
 export type SessionPlan = {
@@ -87,48 +88,56 @@ export class PiAgentExecutor implements AgentExecutor {
 
 	reject(effect: RejectedEffect, emit: EmitCompletion): void {
 		const key = actionUidKey(effect.actionUid);
-		const live = this.live.get(key);
-		if (live !== undefined) {
-			if (effect.onReject === "restart") {
-				this.markCancelled(key, live.generation);
-				live.unsubscribeProgress?.();
-				void live.session.abort().finally(() => live.session.dispose());
-				this.live.delete(key);
-				const generation = this.nextGeneration(key);
-				void this.run(
-					live.effect,
-					emit,
-					{ forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) },
-					generation,
-				).catch((error: unknown) => {
-					this.markProgressFailed(live.effect.actionUid, errorMessage(error));
-					this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
-				});
-				return;
-			}
-			live.sink.captured = undefined;
-			void this.promptAndAccept(key, live.generation, emit, live, buildRejectPrompt(effect)).catch((error: unknown) => {
-				this.markProgressFailed(live.effect.actionUid, errorMessage(error));
-				this.safeEmit(key, live.generation, emit, { type: "FAILED", error: errorMessage(error) });
-			});
-			return;
-		}
-
-		if (effect.invocation.kind !== "agent") {
+		const retryEffect = rejectedAgentInvocation(effect);
+		if (retryEffect === undefined) {
 			emit({
 				type: "FAILED",
 				error: `Cannot recover rejected action ${key}: replay-derived agent invocation is missing`,
 			});
 			return;
 		}
-		const savedEffect = effect.invocation;
+
+		const live = this.live.get(key);
+		if (live !== undefined) {
+			this.markCancelled(key, live.generation);
+			live.unsubscribeProgress?.();
+			this.live.delete(key);
+			if (effect.onReject === "restart") {
+				void live.session.abort().finally(() => live.session.dispose());
+				const generation = this.nextGeneration(key);
+				void this.run(
+					retryEffect,
+					emit,
+					{ forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) },
+					generation,
+				).catch((error: unknown) => {
+					this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+					this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
+				});
+				return;
+			}
+
+			live.session.dispose();
+			const generation = this.nextGeneration(key);
+			void this.run(
+				retryEffect,
+				emit,
+				{ forceNewSession: false, resumePrompt: buildRejectPrompt(effect), resumeInvocationId: live.effect.id },
+				generation,
+			).catch((error: unknown) => {
+				this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+				this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
+			});
+			return;
+		}
+
 		const generation = this.nextGeneration(key);
 		const runOptions: RunOptions =
 			effect.onReject === "restart"
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
-				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
-		void this.run(savedEffect, emit, runOptions, generation).catch((error: unknown) => {
-			this.markProgressFailed(savedEffect.actionUid, errorMessage(error));
+				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect), resumeInvocationId: effect.invocation.id };
+		void this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
+			this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
@@ -179,7 +188,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		});
 		const definition = loadAgentDefinition(effect.action.name, this.definitionDirs);
 		const dir = actionSessionDir(this.options.sessionsDir, effect);
-		const latest = runOptions.forceNewSession ? undefined : latestJsonlForInvocation(dir, effect.id);
+		const latest = runOptions.forceNewSession
+			? undefined
+			: latestJsonlForInvocation(dir, runOptions.resumeInvocationId ?? effect.id);
 		const sink: CompletionSink = { captured: undefined };
 		const session = await this.createSession(effect, definition, dir, latest, sink);
 		if (this.isCancelled(key, generation)) {
@@ -204,9 +215,10 @@ export class PiAgentExecutor implements AgentExecutor {
 
 		const reads = await resolveReads(effect, this.options.workDir);
 		const taskPrompt = [
+			runOptions.resumePrompt,
 			runOptions.rejectReason === undefined
 				? undefined
-				: `Previous attempt was rejected. Reason: ${runOptions.rejectReason}. Start fresh and fix it.`,
+				: `Previous validation attempt was rejected. Reason: ${runOptions.rejectReason}. Start fresh and fix it.`,
 			buildTaskPrompt(effect, reads),
 		]
 			.filter((part): part is string => part !== undefined)
@@ -400,6 +412,10 @@ export class PiAgentExecutor implements AgentExecutor {
 			emit(event);
 		}
 	}
+}
+
+function rejectedAgentInvocation(effect: RejectedEffect): AgentEffect | undefined {
+	return effect.invocation.kind === "agent" ? { ...effect.invocation, id: effect.id } : undefined;
 }
 
 export function buildSessionPlan(

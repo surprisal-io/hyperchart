@@ -6,6 +6,8 @@ export type {
 	AfterCst,
 	AgentActionAst,
 	AgentActionCst,
+	ArtifactAst,
+	ArtifactOfAst,
 	AuthoringDiagnostic,
 	ChartAst,
 	ChartCst,
@@ -13,10 +15,13 @@ export type {
 	ChartSource,
 	CompoundStateAst,
 	CompoundStateCst,
+	EventBindingAst,
+	EventBindingCst,
 	EventType,
 	FinalStateAst,
 	FinalStateCst,
 	InputRef,
+	JoinArtifactOfAst,
 	JsonSchema,
 	SchemaAst,
 	SchemaCst,
@@ -40,19 +45,36 @@ export type {
 	GuardOutcome,
 	GuardRef,
 	OnReject,
+	TransitionAst,
+	TransitionCst,
 	TransitionMapCst,
 	UserActionAst,
 	UserActionCst,
 } from "./core/types.js";
 
-export { agent, compound, artifact, final, json, map, parallel, t, script, tsImport, user } from "./core/dsl.js";
+export {
+	agent,
+	compound,
+	artifact,
+	event,
+	final,
+	input,
+	json,
+	visit,
+	map,
+	parallel,
+	t,
+	script,
+	tsImport,
+	user,
+} from "./core/dsl.js";
 
 export { loop, start } from "./core/execution_loop.js";
 // zod is part of the authoring surface (schema values in reply/artifact shapes): re-exported so
 // charts depend on one package only.
 export { z } from "zod";
 export { refs } from "./core/typed.js";
-export type { Paths, ValueAt } from "./core/typed.js";
+export type { InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
 export type {

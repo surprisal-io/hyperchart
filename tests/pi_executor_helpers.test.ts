@@ -206,6 +206,26 @@ describe("pi executor helpers", () => {
 		expect(sessionMentionsInvocationId(join(dir, "missing.jsonl"), "chart:work:worker:1:1")).toBe(false);
 	});
 
+	it("does not recover stale finish calls for a newer rejected phase", () => {
+		const messages = [
+			{ role: "user", content: "task with invocation chart:work:worker:1:1" },
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "toolCall",
+						name: "finish",
+						id: "call-1",
+						arguments: { invocationId: "chart:work:worker:1:1", event: "DONE", output: { value: 1 } },
+					},
+				],
+			},
+			{ role: "toolResult", toolName: "finish", toolCallId: "call-1", isError: false },
+		];
+
+		expect(findCapturedFinish(messages, effect({ id: "chart:work:worker:1:3" }))).toBeUndefined();
+	});
+
 	it("builds task prompts with selected reads, deliverables and completion contract", () => {
 		const prompt = buildTaskPrompt(
 			effect({

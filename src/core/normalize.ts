@@ -10,6 +10,7 @@ import type {
 	ChartSource,
 	ArtifactAst,
 	CompoundStateAst,
+	EventBindingAst,
 	ArtifactOfAst,
 	JoinArtifactOfAst,
 	FinalStateAst,
@@ -24,8 +25,10 @@ import type {
 	ScriptActionAst,
 	StateActionAst,
 	StateAst,
+	StateId,
 	StatePath,
 	TemplateAst,
+	TransitionAst,
 	UserActionAst,
 } from "./types.js";
 
@@ -97,6 +100,7 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 		);
 	}
 	validateTargets(states, diagnostics, source);
+	validateInputs(states, typeof initial === "string" ? initial : "", diagnostics, source);
 
 	if (diagnostics.length > 0) return undefined;
 	return deepFreeze({
@@ -223,6 +227,7 @@ function collectState(
 				concurrency = input.concurrency;
 			}
 		}
+		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const onDone = toOnDone(input.onDone, `${pointer}/onDone`, diagnostics, source);
 		if (onDone === undefined) {
@@ -251,6 +256,7 @@ function collectState(
 			kind: "map",
 			id: localId,
 			...parent,
+			...(inputs === undefined ? {} : { input: inputs }),
 			over: over ?? { kind: "arg", name: "" },
 			...(concurrency === undefined ? {} : { concurrency }),
 			initial: typeof initial === "string" ? initial : "",
@@ -332,6 +338,7 @@ function collectState(
 			return;
 		}
 		const action = toStateActionAst(input.action, chartId, path, `${pointer}/action`, diagnostics, source);
+		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
 		const validate = toGuardRef(input.validate, `${pointer}/validate`, diagnostics, source);
@@ -365,6 +372,7 @@ function collectState(
 			id: localId,
 			...parent,
 			action,
+			...(inputs === undefined ? {} : { input: inputs }),
 			transitions: transitions ?? {},
 			...(after === undefined ? {} : { after }),
 			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
@@ -388,7 +396,8 @@ function validateTargets(
 		if (node.kind === "final") continue;
 		const pointer = statePointer(path);
 		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
-		for (const [eventType, target] of Object.entries(node.transitions)) {
+		for (const [eventType, transition] of Object.entries(node.transitions)) {
+			const target = transition.target;
 			if (!(sibling(target) in states)) {
 				diagnostics.push(
 					diagnostic(
@@ -524,19 +533,47 @@ function validateTargets(
 							),
 						);
 					}
+					if (ref.kind === "input" && !hasInputDeclaration(states, path, ref.name)) {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_INPUT",
+								`A template in state '${path}' reads undeclared input '${ref.name}'.`,
+								`${pointer}/action`,
+								source,
+							),
+						);
+					}
+					if (ref.kind === "visit") {
+						validateVisitRef(states, path, ref.state, `${pointer}/action`, diagnostics, source);
+					}
 				}
 			}
 			continue;
 		}
-		if (node.kind === "map" && node.over.kind === "result" && states[node.over.state]?.kind !== "state") {
-			diagnostics.push(
-				diagnostic(
-					"UNKNOWN_INPUT_RESULT",
-					`Map '${path}' fans out over the result of unknown action state '${node.over.state}'.`,
-					`${pointer}/over`,
-					source,
-				),
-			);
+		if (node.kind === "map") {
+			if (node.over.kind === "result" && states[node.over.state]?.kind !== "state") {
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_INPUT_RESULT",
+						`Map '${path}' fans out over the result of unknown action state '${node.over.state}'.`,
+						`${pointer}/over`,
+						source,
+					),
+				);
+			}
+			if (node.over.kind === "input" && !hasInputDeclaration(states, path, node.over.name)) {
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_INPUT",
+						`Map '${path}' fans out over undeclared input '${node.over.name}'.`,
+						`${pointer}/over`,
+						source,
+					),
+				);
+			}
+			if (node.over.kind === "visit") {
+				validateVisitRef(states, path, node.over.state, `${pointer}/over`, diagnostics, source);
+			}
 		}
 		if (
 			(node.kind === "compound" || node.kind === "region" || node.kind === "map") &&
@@ -567,6 +604,153 @@ function validateTargets(
 			);
 		}
 	}
+}
+
+function validateInputs(
+	states: Record<StatePath, StateAst>,
+	initial: StateId,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const edges: Array<{ target: StatePath; bindings?: Readonly<Record<string, EventBindingAst>>; pointer: string }> = [];
+	if (initial.length > 0 && initial in states) {
+		edges.push({ target: initial, pointer: "/initial" });
+	}
+	for (const [path, node] of Object.entries(states)) {
+		if (node.kind === "final") continue;
+		const pointer = statePointer(path);
+		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
+		for (const [eventType, transition] of Object.entries(node.transitions)) {
+			const target = sibling(transition.target);
+			if (!(target in states)) continue;
+			const inputTargets = inputEntryTargets(states, target);
+			const declared = new Set(inputTargets.flatMap((entry) => Object.keys(entry.input)));
+			for (const bindingName of Object.keys(transition.input ?? {})) {
+				if (!declared.has(bindingName)) {
+					diagnostics.push(
+						diagnostic(
+							"UNKNOWN_INPUT",
+							`Transition '${eventType}' in state '${path}' binds undeclared input '${bindingName}' on target '${transition.target}'.`,
+							`${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(bindingName)}`,
+							source,
+						),
+					);
+				}
+			}
+			edges.push({
+				target,
+				pointer: `${pointer}/transitions/${escapePointer(eventType)}`,
+				...(transition.input === undefined ? {} : { bindings: transition.input }),
+			});
+		}
+		if (node.kind === "state" && node.after !== undefined) {
+			const target = sibling(node.after.target);
+			if (target in states) edges.push({ target, pointer: `${pointer}/after` });
+		}
+		if (node.kind === "map" && node.initial.length > 0) {
+			const target = `${path}.${node.initial}`;
+			if (target in states) edges.push({ target, pointer: `${pointer}/states/${escapePointer(node.initial)}` });
+		}
+		if ((node.kind === "compound" || node.kind === "parallel" || node.kind === "map") && node.onDone.length > 0) {
+			const target = sibling(node.onDone);
+			if (target in states) edges.push({ target, pointer: `${pointer}/onDone` });
+		}
+	}
+	const edgesByInputTarget = new Map<StatePath, typeof edges>();
+	for (const edge of edges) {
+		for (const target of inputEntryTargets(states, edge.target)) {
+			const list = edgesByInputTarget.get(target.path) ?? [];
+			list.push(edge);
+			edgesByInputTarget.set(target.path, list);
+		}
+	}
+	for (const [path, node] of Object.entries(states)) {
+		if ((node.kind !== "state" && node.kind !== "map") || node.input === undefined) continue;
+		const incoming = edgesByInputTarget.get(path) ?? [];
+		for (const [name, schema] of Object.entries(node.input)) {
+			if (schemaHasDefault(schema)) continue;
+			for (const edge of incoming) {
+				if (edge.bindings?.[name] === undefined) {
+					diagnostics.push(
+						diagnostic(
+							"MISSING_INPUT",
+							`Input '${name}' for state '${path}' is required but the incoming edge at ${edge.pointer} does not bind it.`,
+							statePointer(path),
+							source,
+						),
+					);
+					break;
+				}
+			}
+		}
+	}
+}
+
+function inputEntryTargets(
+	states: Record<StatePath, StateAst>,
+	path: StatePath,
+): Array<{ path: StatePath; input: Readonly<Record<string, SchemaAst>> }> {
+	const node = states[path];
+	if (node === undefined) return [];
+	if (node.kind === "state") {
+		return node.input === undefined ? [] : [{ path, input: node.input }];
+	}
+	if (node.kind === "map") {
+		return node.input === undefined ? [] : [{ path, input: node.input }];
+	}
+	if (node.kind === "compound" || node.kind === "region") {
+		return inputEntryTargets(states, `${path}.${node.initial}`);
+	}
+	if (node.kind === "parallel") {
+		return node.regions.flatMap((region) => inputEntryTargets(states, `${path}.${region}`));
+	}
+	if (node.kind === "final" && node.parent !== undefined) {
+		const container = states[node.parent];
+		if (container?.kind === "compound") {
+			const target = container.parent === undefined ? container.onDone : `${container.parent}.${container.onDone}`;
+			return inputEntryTargets(states, target);
+		}
+	}
+	return [];
+}
+
+function validateVisitRef(
+	states: Record<StatePath, StateAst>,
+	scope: StatePath,
+	stateRef: StatePath | undefined,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const target = stateRef ?? scope;
+	if (states[target]?.kind !== "state") {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_VISIT_REF",
+				stateRef === undefined
+					? `visit() in state '${scope}' must resolve to an action state.`
+					: `visit('${stateRef}') in state '${scope}' references a non-action state.`,
+				pointer,
+				source,
+			),
+		);
+	}
+}
+
+function hasInputDeclaration(states: Record<StatePath, StateAst>, path: StatePath, name: string): boolean {
+	let cur: StatePath | undefined = path;
+	while (cur !== undefined) {
+		const node: StateAst | undefined = states[cur];
+		if ((node?.kind === "state" || node?.kind === "map") && node.input !== undefined && name in node.input) {
+			return true;
+		}
+		cur = node?.parent;
+	}
+	return false;
+}
+
+function schemaHasDefault(schema: SchemaAst): boolean {
+	return isRecord(schema.schema) && "default" in schema.schema;
 }
 
 // Is `path` inside a map — any map, or (when `map` names one) that specific ancestor.
@@ -790,7 +974,7 @@ function toInputRef(
 		diagnostics.push(
 			diagnostic(
 				"INVALID_TEMPLATE",
-				"Template interpolations must be arg()/result() refs, not inline values.",
+				"Template interpolations must be arg()/result()/input() refs, not inline values.",
 				path,
 				source,
 			),
@@ -829,6 +1013,31 @@ function toInputRef(
 			...jsonMark,
 		};
 	}
+	if (input.kind === "visit") {
+		if (input.state !== undefined && (typeof input.state !== "string" || input.state.length === 0)) {
+			diagnostics.push(diagnostic("INVALID_TEMPLATE", "visit ref state must be a non-empty state path.", path, source));
+			return undefined;
+		}
+		return { kind: "visit", ...(input.state === undefined ? {} : { state: input.state }), ...jsonMark };
+	}
+	if (input.kind === "input") {
+		if (typeof input.name !== "string" || input.name.length === 0) {
+			diagnostics.push(diagnostic("INVALID_TEMPLATE", "input ref name must be a non-empty string.", path, source));
+			return undefined;
+		}
+		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
+			diagnostics.push(
+				diagnostic("INVALID_TEMPLATE", "input ref path selector must be a non-empty string.", path, source),
+			);
+			return undefined;
+		}
+		return {
+			kind: "input",
+			name: input.name,
+			...(input.path === undefined ? {} : { path: input.path }),
+			...jsonMark,
+		};
+	}
 	if (input.kind === "key" || input.kind === "item") {
 		if (input.map !== undefined && (typeof input.map !== "string" || input.map.length === 0)) {
 			diagnostics.push(
@@ -849,7 +1058,12 @@ function toInputRef(
 		return { kind: "item", ...mapField, ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
 	}
 	diagnostics.push(
-		diagnostic("INVALID_TEMPLATE", "Template ref kind must be 'arg', 'result', 'key' or 'item'.", path, source),
+		diagnostic(
+			"INVALID_TEMPLATE",
+			"Template ref kind must be 'arg', 'result', 'input', 'visit', 'key' or 'item'.",
+			path,
+			source,
+		),
 	);
 	return undefined;
 }
@@ -1027,33 +1241,125 @@ function toSchemaAst(
 	return undefined;
 }
 
+function toInputDeclarations(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): Record<string, SchemaAst> | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(diagnostic("INVALID_INPUT", "input must be a map of name → zod schema.", path, source));
+		return undefined;
+	}
+	const inputs: Record<string, SchemaAst> = {};
+	for (const [name, schema] of Object.entries(input)) {
+		if (name.length === 0) {
+			diagnostics.push(
+				diagnostic("INVALID_INPUT", "input names must be non-empty.", `${path}/${escapePointer(name)}`, source),
+			);
+			continue;
+		}
+		const ast = toSchemaAst(schema, `${path}/${escapePointer(name)}`, diagnostics, source);
+		if (ast !== undefined) inputs[name] = ast;
+	}
+	return inputs;
+}
+
 function toTransitionMap(
 	input: unknown,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): Record<string, string> | undefined {
+): Record<string, TransitionAst> | undefined {
 	if (input === undefined) return undefined;
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_TRANSITIONS", "Transitions must be an object map.", path, source));
 		return undefined;
 	}
-	const transitions: Record<string, string> = {};
-	for (const [eventType, target] of Object.entries(input)) {
-		if (typeof target !== "string" || target.length === 0) {
+	const transitions: Record<string, TransitionAst> = {};
+	for (const [eventType, raw] of Object.entries(input)) {
+		const pointer = `${path}/${escapePointer(eventType)}`;
+		if (typeof raw === "string") {
+			if (raw.length === 0) {
+				diagnostics.push(
+					diagnostic("INVALID_TRANSITION_TARGET", "Transition target must be a non-empty state id.", pointer, source),
+				);
+				continue;
+			}
+			transitions[eventType] = { target: raw };
+			continue;
+		}
+		if (!isRecord(raw)) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_TRANSITION_TARGET",
-					"Transition target must be a non-empty state id.",
-					`${path}/${escapePointer(eventType)}`,
+					"Transition must be a non-empty state id or an object with target.",
+					pointer,
 					source,
 				),
 			);
 			continue;
 		}
-		transitions[eventType] = target;
+		if (typeof raw.target !== "string" || raw.target.length === 0) {
+			diagnostics.push(
+				diagnostic(
+					"INVALID_TRANSITION_TARGET",
+					"Transition target must be a non-empty state id.",
+					`${pointer}/target`,
+					source,
+				),
+			);
+			continue;
+		}
+		const bindings = toEventBindings(raw.input, `${pointer}/input`, diagnostics, source);
+		if (eventType === "FAILED" && bindings !== undefined && Object.keys(bindings).length > 0) {
+			diagnostics.push(
+				diagnostic(
+					"INVALID_BINDING",
+					"FAILED transitions cannot bind input in this phase.",
+					`${pointer}/input`,
+					source,
+				),
+			);
+		}
+		transitions[eventType] = {
+			target: raw.target,
+			...(bindings === undefined ? {} : { input: bindings }),
+		};
 	}
 	return transitions;
+}
+
+function toEventBindings(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): Record<string, EventBindingAst> | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic("INVALID_BINDING", "Transition input must be a map of name → event() binding.", path, source),
+		);
+		return undefined;
+	}
+	const bindings: Record<string, EventBindingAst> = {};
+	for (const [name, raw] of Object.entries(input)) {
+		const pointer = `${path}/${escapePointer(name)}`;
+		if (!isRecord(raw) || raw.kind !== "event") {
+			diagnostics.push(
+				diagnostic("INVALID_BINDING", "Transition input values must be event() bindings.", pointer, source),
+			);
+			continue;
+		}
+		if (raw.path !== undefined && (typeof raw.path !== "string" || raw.path.length === 0)) {
+			diagnostics.push(diagnostic("INVALID_BINDING", "event() path must be a non-empty string.", pointer, source));
+			continue;
+		}
+		bindings[name] = { kind: "event", ...(raw.path === undefined ? {} : { path: raw.path }) };
+	}
+	return bindings;
 }
 
 function toAfter(

@@ -131,7 +131,10 @@ export class ChartRuntime implements Runtime {
 				return;
 			}
 			void this.scripts
-				.run(scriptEffect, { n: effect.attempt, ...(effect.reason === undefined ? {} : { reason: effect.reason }) })
+				.run(scriptEffect, {
+					n: effect.validationAttempts,
+					...(effect.reason === undefined ? {} : { reason: effect.reason }),
+				})
 				.then((event) => this.queue.send({ kind: "script", effectId: effect.id, event }))
 				.catch((error: unknown) =>
 					this.queue.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) }),
