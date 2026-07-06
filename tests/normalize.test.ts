@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../src/index.js";
-import { agent, compound, final, map, normalizeChartConfig, parallel, t, tsImport, user, z } from "../src/index.js";
-import { arg, chart, event, input, item, key, result, resume, visit } from "../src/core/dsl.js";
+import {
+	agent,
+	artifact,
+	compound,
+	final,
+	map,
+	normalizeChartConfig,
+	parallel,
+	t,
+	tsImport,
+	user,
+	z,
+} from "../src/index.js";
+import { arg, artifactOf, chart, event, input, item, key, result, resume, visit } from "../src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {
@@ -338,7 +350,7 @@ describe("normalizeChartConfig", () => {
 	it("normalizes templates and validates their refs", () => {
 		const valid = normalizeChartConfig({
 			id: "templates",
-			initial: "build",
+			initial: "plan",
 			states: {
 				plan: { action: agent("planner"), transitions: { OK: "build" } },
 				build: {
@@ -395,6 +407,163 @@ describe("normalizeChartConfig", () => {
 		});
 		expect(unknownResult.ok).toBe(false);
 		expect(unknownResult.diagnostics.map((d) => d.code)).toContain("UNKNOWN_INPUT_RESULT");
+	});
+
+	it("rejects non-dominated result and artifactOf refs", () => {
+		const resultRef = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "non-dominated-result",
+				initial: "start",
+				states: {
+					start: { kind: "state", action: agent("starter"), transitions: { SKIP: "read", DO: "produce" } },
+					produce: { kind: "state", action: agent("producer"), transitions: { DONE: "read" } },
+					read: {
+						kind: "state",
+						action: agent("reader", { task: t`Use ${result("produce")}` }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(resultRef.ok).toBe(false);
+		expect(resultRef.diagnostics.map((d) => d.code)).toContain("NON_DOMINATED_REF");
+
+		const artifactRef = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "non-dominated-artifact",
+				initial: "start",
+				states: {
+					start: { kind: "state", action: agent("starter"), transitions: { SKIP: "read", DO: "produce" } },
+					produce: {
+						kind: "state",
+						action: agent("producer", { artifacts: { out: artifact("out.json") } }),
+						transitions: { DONE: "read" },
+					},
+					read: {
+						kind: "state",
+						action: agent("reader", { reads: [artifactOf("produce")] }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(artifactRef.ok).toBe(false);
+		expect(artifactRef.diagnostics.map((d) => d.code)).toContain("NON_DOMINATED_REF");
+	});
+
+	it("allows dominated pull refs across back-edges and after parallel joins", () => {
+		const backEdge = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "dominated-back-edge",
+				initial: "produce",
+				states: {
+					produce: {
+						kind: "state",
+						action: agent("producer", { artifacts: { out: artifact("out.json") } }),
+						transitions: { DONE: "gate" },
+					},
+					gate: { kind: "state", action: agent("gate"), transitions: { AGAIN: "produce", PASS: "read" } },
+					read: {
+						kind: "state",
+						action: agent("reader", { task: t`Use ${result("produce")}`, reads: [artifactOf("produce")] }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(backEdge.diagnostics).toEqual([]);
+
+		const joined = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "parallel-join-pull",
+				initial: "audit",
+				states: {
+					audit: parallel({
+						states: {
+							a: compound({
+								initial: "scan",
+								states: {
+									scan: {
+										kind: "state",
+										action: agent("a", { artifacts: { out: artifact("a.json") } }),
+										transitions: { OK: "done" },
+									},
+									done: final(),
+								},
+							}),
+							b: compound({
+								initial: "scan",
+								states: {
+									scan: {
+										kind: "state",
+										action: agent("b", { artifacts: { out: artifact("b.json") } }),
+										transitions: { OK: "done" },
+									},
+									done: final(),
+								},
+							}),
+						},
+						onDone: "fix",
+					}),
+					fix: {
+						kind: "state",
+						action: agent("fix", { reads: [artifactOf("audit.a.scan"), artifactOf("audit.b.scan")] }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(joined.diagnostics).toEqual([]);
+	});
+
+	it("rejects cross-region pull refs inside a parallel", () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "parallel-cross-region",
+				initial: "audit",
+				states: {
+					audit: parallel({
+						states: {
+							a: compound({
+								initial: "scan",
+								states: {
+									scan: {
+										kind: "state",
+										action: agent("a", { artifacts: { out: artifact("a.json") } }),
+										transitions: { OK: "done" },
+									},
+									done: final(),
+								},
+							}),
+							b: compound({
+								initial: "read",
+								states: {
+									read: {
+										kind: "state",
+										action: agent("b", { reads: [artifactOf("audit.a.scan")] }),
+										transitions: { OK: "done" },
+									},
+									done: final(),
+								},
+							}),
+						},
+						onDone: "done",
+					}),
+					done: final(),
+				},
+			}),
+		);
+		expect(parsed.ok).toBe(false);
+		expect(parsed.diagnostics.map((d) => d.code)).toContain("NON_DOMINATED_REF");
 	});
 
 	it("normalizes transition input bindings and rejects missing or unknown input", () => {

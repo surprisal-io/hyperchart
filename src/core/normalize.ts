@@ -102,6 +102,7 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 	}
 	validateTargets(states, diagnostics, source);
 	validateInputs(states, typeof initial === "string" ? initial : "", diagnostics, source);
+	validateDominatedRefs(states, typeof initial === "string" ? initial : "", diagnostics, source);
 
 	if (diagnostics.length > 0) return undefined;
 	return deepFreeze({
@@ -703,6 +704,256 @@ function inputEntryTargets(
 		}
 	}
 	return [];
+}
+
+const DOMINATOR_START = "<start>";
+type DominatorNode = StatePath | typeof DOMINATOR_START;
+
+function validateDominatedRefs(
+	states: Record<StatePath, StateAst>,
+	initial: StateId,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const graph = buildDominanceGraph(states, initial);
+	const dominators = computeDominators(graph);
+	const check = (producer: StatePath, consumer: StatePath, pointer: string, label: string) => {
+		if (states[producer]?.kind !== "state") return;
+		if (dominatesForDataRef(states, dominators, producer, consumer)) return;
+		diagnostics.push(
+			diagnostic(
+				"NON_DOMINATED_REF",
+				`${label} in state '${consumer}' reads '${producer}', but '${producer}' does not dominate '${consumer}'. Pass feedback through input() for back-edges or restructure the chart.`,
+				pointer,
+				source,
+			),
+		);
+	};
+
+	for (const [path, node] of Object.entries(states)) {
+		const pointer = statePointer(path);
+		if (node.kind === "state") {
+			for (const template of actionTemplates(node.action)) {
+				for (const ref of template.refs) {
+					if (ref.kind === "result") check(ref.state, path, `${pointer}/action`, "result()");
+				}
+			}
+			if (typeof node.onReenter === "object") {
+				for (const ref of node.onReenter.message.refs) {
+					if (ref.kind === "result") check(ref.state, path, `${pointer}/onReenter/message`, "result()");
+				}
+			}
+			for (const read of artifactReads(node.action, pointer)) {
+				check(read.state, path, read.pointer, "artifactOf()");
+			}
+			continue;
+		}
+		if (node.kind === "map") {
+			if (node.over.kind === "result") check(node.over.state, path, `${pointer}/over`, "result()");
+			if (typeof node.onReenter === "object") {
+				for (const ref of node.onReenter.message.refs) {
+					if (ref.kind === "result") check(ref.state, path, `${pointer}/onReenter/message`, "result()");
+				}
+			}
+		}
+	}
+}
+
+function artifactReads(action: StateActionAst, basePointer: string): Array<{ state: StatePath; pointer: string }> {
+	if (action.kind === "agent") {
+		return (action.reads ?? []).flatMap((read, index) =>
+			read.kind === "artifactOf" ? [{ state: read.state, pointer: `${basePointer}/action/reads/${index}` }] : [],
+		);
+	}
+	if (action.kind === "script") {
+		return Object.entries(action.env ?? {}).flatMap(([name, value]) =>
+			value.kind === "artifactOf"
+				? [{ state: value.state, pointer: `${basePointer}/action/env/${escapePointer(name)}` }]
+				: [],
+		);
+	}
+	return [];
+}
+
+function buildDominanceGraph(
+	states: Record<StatePath, StateAst>,
+	initial: StateId,
+): Map<DominatorNode, Set<DominatorNode>> {
+	const graph = new Map<DominatorNode, Set<DominatorNode>>([[DOMINATOR_START, new Set()]]);
+	for (const path of Object.keys(states)) graph.set(path, new Set());
+	const addEdge = (from: DominatorNode, to: StatePath) => {
+		if (to in states) graph.get(from)?.add(to);
+	};
+	if (initial in states) addEdge(DOMINATOR_START, initial);
+
+	for (const [path, node] of Object.entries(states)) {
+		if (node.kind !== "final") {
+			for (const transition of Object.values(node.transitions)) {
+				addEdge(path, siblingTarget(node, transition.target));
+			}
+		}
+		if (node.kind === "state" && node.after !== undefined) {
+			addEdge(path, siblingTarget(node, node.after.target));
+		}
+		if (node.kind === "compound" || node.kind === "region") {
+			addEdge(path, `${path}.${node.initial}`);
+		}
+		if (node.kind === "map") {
+			addEdge(path, `${path}.${node.initial}`);
+			// Empty fan-out completes immediately, so map-body states do not dominate onDone targets.
+			addEdge(path, siblingTarget(node, node.onDone));
+		}
+		if (node.kind === "parallel") {
+			for (const region of node.regions) addEdge(path, `${path}.${region}`);
+			// Parallel onDone is an AND-join in the runtime; this edge keeps the join target reachable
+			// for ordinary dominators, while parallelJoinDominates handles region products precisely.
+			addEdge(path, siblingTarget(node, node.onDone));
+		}
+		if (node.kind === "final" && node.parent !== undefined) {
+			const parent = states[node.parent];
+			if (parent?.kind === "compound" || parent?.kind === "map") {
+				addEdge(path, siblingTarget(parent, parent.onDone));
+			}
+		}
+	}
+	return graph;
+}
+
+function computeDominators(graph: Map<DominatorNode, Set<DominatorNode>>): Map<DominatorNode, Set<DominatorNode>> {
+	const reachable = reachableNodes(graph);
+	const predecessors = new Map<DominatorNode, Set<DominatorNode>>();
+	for (const node of reachable) predecessors.set(node, new Set());
+	for (const [from, targets] of graph) {
+		if (!reachable.has(from)) continue;
+		for (const to of targets) {
+			if (reachable.has(to)) predecessors.get(to)?.add(from);
+		}
+	}
+	const all = [...reachable];
+	const dominators = new Map<DominatorNode, Set<DominatorNode>>();
+	for (const node of all) {
+		dominators.set(node, node === DOMINATOR_START ? new Set([DOMINATOR_START]) : new Set(all));
+	}
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const node of all) {
+			if (node === DOMINATOR_START) continue;
+			const preds = [...(predecessors.get(node) ?? [])];
+			const next = new Set<DominatorNode>([node]);
+			const intersection = intersectSets(preds.map((pred) => dominators.get(pred) ?? new Set<DominatorNode>()));
+			for (const item of intersection) next.add(item);
+			if (!sameSet(dominators.get(node) ?? new Set(), next)) {
+				dominators.set(node, next);
+				changed = true;
+			}
+		}
+	}
+	return dominators;
+}
+
+function reachableNodes(graph: Map<DominatorNode, Set<DominatorNode>>): Set<DominatorNode> {
+	const reachable = new Set<DominatorNode>();
+	const queue: DominatorNode[] = [DOMINATOR_START];
+	for (let index = 0; index < queue.length; index++) {
+		const node = queue[index];
+		if (node === undefined || reachable.has(node)) continue;
+		reachable.add(node);
+		for (const next of graph.get(node) ?? []) queue.push(next);
+	}
+	return reachable;
+}
+
+function dominatesForDataRef(
+	states: Record<StatePath, StateAst>,
+	dominators: Map<DominatorNode, Set<DominatorNode>>,
+	producer: StatePath,
+	consumer: StatePath,
+): boolean {
+	if (strictlyDominates(dominators, producer, consumer)) return true;
+	return parallelJoinDominates(states, dominators, producer, consumer);
+}
+
+function parallelJoinDominates(
+	states: Record<StatePath, StateAst>,
+	dominators: Map<DominatorNode, Set<DominatorNode>>,
+	producer: StatePath,
+	consumer: StatePath,
+): boolean {
+	const scope = enclosingParallelRegion(states, producer);
+	if (scope === undefined || underStateScope(consumer, scope.parallelPath)) return false;
+	const parallel = states[scope.parallelPath];
+	if (parallel?.kind !== "parallel") return false;
+	const joinTarget = siblingTarget(parallel, parallel.onDone);
+	if (!isDominatedBy(dominators, scope.parallelPath, consumer)) return false;
+	if (consumer !== joinTarget && !strictlyDominates(dominators, joinTarget, consumer)) return false;
+	return finalDescendants(states, scope.regionPath).some((finalPath) =>
+		strictlyDominates(dominators, producer, finalPath),
+	);
+}
+
+function enclosingParallelRegion(
+	states: Record<StatePath, StateAst>,
+	path: StatePath,
+): { parallelPath: StatePath; regionPath: StatePath } | undefined {
+	let cur = parentStatePath(path);
+	while (cur !== undefined) {
+		const node = states[cur];
+		if (node?.kind === "region" && node.parent !== undefined && states[node.parent]?.kind === "parallel") {
+			return { parallelPath: node.parent, regionPath: cur };
+		}
+		cur = parentStatePath(cur);
+	}
+	return undefined;
+}
+
+function finalDescendants(states: Record<StatePath, StateAst>, scope: StatePath): StatePath[] {
+	return Object.entries(states).flatMap(([path, node]) =>
+		node.kind === "final" && underStateScope(path, scope) ? [path] : [],
+	);
+}
+
+function siblingTarget(node: StateAst, target: StateId): StatePath {
+	return node.parent === undefined ? target : `${node.parent}.${target}`;
+}
+
+function parentStatePath(path: StatePath): StatePath | undefined {
+	const dot = path.lastIndexOf(".");
+	return dot === -1 ? undefined : path.slice(0, dot);
+}
+
+function underStateScope(path: StatePath, scope: StatePath): boolean {
+	return path === scope || path.startsWith(`${scope}.`);
+}
+
+function strictlyDominates(
+	dominators: Map<DominatorNode, Set<DominatorNode>>,
+	dominator: StatePath,
+	node: StatePath,
+): boolean {
+	return dominator !== node && isDominatedBy(dominators, dominator, node);
+}
+
+function isDominatedBy(
+	dominators: Map<DominatorNode, Set<DominatorNode>>,
+	dominator: StatePath,
+	node: StatePath,
+): boolean {
+	return dominators.get(node)?.has(dominator) === true;
+}
+
+function intersectSets<T>(sets: Set<T>[]): Set<T> {
+	if (sets.length === 0) return new Set();
+	const [first, ...rest] = sets;
+	const result = new Set(first);
+	for (const item of first ?? []) {
+		if (!rest.every((set) => set.has(item))) result.delete(item);
+	}
+	return result;
+}
+
+function sameSet<T>(left: Set<T>, right: Set<T>): boolean {
+	return left.size === right.size && [...left].every((item) => right.has(item));
 }
 
 function validateTemplateRefs(
