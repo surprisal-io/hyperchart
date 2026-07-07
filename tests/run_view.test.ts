@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeChartConfig } from "../src/index.js";
 import { agent, arg, chart, final, map, tsImport } from "../src/core/dsl.js";
-import type { ActionUID, ChartAst, ChartCst, DurableLogRecord } from "../src/index.js";
+import type { ActionUID, ChartAst, ChartCst, DurableLogRecord, StateActionAst } from "../src/index.js";
 import { buildRunView } from "../src/tui/run_view.js";
 
 function make(config: ChartCst): ChartAst {
@@ -53,7 +53,11 @@ function fanoutChart(): ChartAst {
 }
 
 function invoke(seqId: number, actionUid: ActionUID, timestamp = seqId * 100): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", actionUid, parentId: seqId - 1, seqId, timestamp };
+	return { type: "state_action", kind: "invoke", actionUid, definition: definitionForUid(actionUid), parentId: seqId - 1, seqId, timestamp };
+}
+
+function definitionForUid(uid: ActionUID): StateActionAst {
+	return { kind: "agent", uid, name: "test-worker" };
 }
 
 describe("buildRunView", () => {

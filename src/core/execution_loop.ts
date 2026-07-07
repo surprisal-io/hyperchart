@@ -49,3 +49,4 @@ export async function loop(runtime: Runtime): Promise<MachineState> {
 	}
 	throw new Error("Event queue closed before reaching a final state");
 }
+

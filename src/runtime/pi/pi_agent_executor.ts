@@ -304,7 +304,7 @@ export class PiAgentExecutor implements AgentExecutor {
 					this.safeEmit(key, generation, emit, { type: "FAILED", error: "agent did not produce a valid completion" });
 					return;
 				}
-				await live.session.prompt(buildNudgePrompt(live.effect));
+				await live.session.prompt(buildNudgePrompt(live.effect, lastAssistantText(live.session.messages)));
 				continue;
 			}
 			if (live.sink.captured.type !== "FAILED") {
@@ -593,7 +593,23 @@ function usageTokens(message: unknown): number {
 	return input + output + cacheRead + cacheWrite;
 }
 
+function lastAssistantText(messages: readonly unknown[]): string | undefined {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const message = messages[index];
+		if (!isRecord(message) || message.role !== "assistant") continue;
+		const text = messageText(message);
+		if (text !== undefined) return text;
+	}
+	return undefined;
+}
+
 function messagePreview(message: unknown): string | undefined {
+	const text = messageText(message);
+	if (text === undefined) return undefined;
+	return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
+
+function messageText(message: unknown): string | undefined {
 	if (!isRecord(message)) return undefined;
 	const content = message.content;
 	let text: string | undefined;
@@ -607,6 +623,5 @@ function messagePreview(message: unknown): string | undefined {
 	}
 	if (text === undefined) return undefined;
 	const compact = text.replace(/\s+/g, " ").trim();
-	if (compact.length === 0) return undefined;
-	return compact.length > 240 ? `${compact.slice(0, 237)}...` : compact;
+	return compact.length === 0 ? undefined : compact;
 }

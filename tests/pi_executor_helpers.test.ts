@@ -7,7 +7,7 @@ import type { AgentEffect } from "../src/core/machine.js";
 import type { AgentActionAst, JsonSchema, SchemaAst } from "../src/core/types.js";
 import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../src/runtime/pi/finish_tool.js";
-import { buildTaskPrompt } from "../src/runtime/pi/prompts.js";
+import { buildNudgePrompt, buildTaskPrompt } from "../src/runtime/pi/prompts.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,
@@ -224,6 +224,15 @@ describe("pi executor helpers", () => {
 		];
 
 		expect(findCapturedFinish(messages, effect({ id: "chart:work:worker:1:3" }))).toBeUndefined();
+	});
+
+	it("builds a corrective nudge when the model writes textual tool-call syntax", () => {
+		const prompt = buildNudgePrompt(effect(), "read<arg_key>path</arg_key><arg_value>context.json</arg_value>");
+
+		expect(prompt).toContain("actual tool-calling interface");
+		expect(prompt).toContain("Plain text like `read<arg_key>...`");
+		expect(prompt).toContain("## Completion");
+		expect(prompt).toContain(`invocationId: exactly ${JSON.stringify(effect().id)}`);
 	});
 
 	it("builds task prompts with selected reads, deliverables and completion contract", () => {

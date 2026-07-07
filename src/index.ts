@@ -55,6 +55,7 @@ export type {
 } from "./core/types.js";
 
 export {
+	chart,
 	agent,
 	compound,
 	artifact,
@@ -80,6 +81,17 @@ export { refs } from "./core/typed.js";
 export type { InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
+export { inspectChartAst, inspectChartModuleSync, parseChartModuleSync } from "./core/inspect.js";
+export type {
+	HyperchartInspectArtifact,
+	HyperchartInspectInput,
+	HyperchartInspectOnReenter,
+	HyperchartInspectRef,
+	HyperchartInspectResult,
+	HyperchartInspectState,
+	HyperchartInspectTransition,
+	InspectChartModuleOptions,
+} from "./core/inspect.js";
 export type {
 	ActionEffect,
 	AgentEffect,
@@ -107,8 +119,10 @@ export type {
 	UserMachineEvent,
 } from "./core/machine.js";
 export type { DurableLogRecord, StateActionInvokeLog } from "./core/durable_events.js";
+export { explainReplay } from "./core/replay_check.js";
+export type { ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord, ReplayStaleRecord } from "./core/replay_check.js";
 export { createBranchProjection, isFinalState, projectBranch } from "./core/projection.js";
-export type { BranchProjection, PendingAction } from "./core/projection.js";
+export type { BranchProjection, PendingAction, ProjectionSkippedRecord } from "./core/projection.js";
 export { createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";
 export type { AsyncQueue, MaybeAsyncIterable } from "./utils/index.js";

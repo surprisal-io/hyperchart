@@ -1,6 +1,18 @@
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, isAbsolute, resolve } from "node:path";
+import {
+	closeSync,
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	defineTool,
@@ -12,20 +24,24 @@ import {
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
+	createBranchProjection,
+	explainReplay,
+	inspectChartModuleSync,
 	parseChartModule,
-	type ArtifactAst,
-	type ArtifactOfAst,
+	projectBranch,
+	type BranchProjection,
 	type ChartAst,
+	type DurableLogRecord,
 	type InputRef,
-	type JoinArtifactOfAst,
-	type JsonSchema,
-	type StateActionAst,
-	type StateAst,
+	type StatePath,
 	type TemplateAst,
 } from "../src/index.js";
+import { actionUidDirName, actionUidKey } from "../src/core/action_uid.js";
+import { instancePathFor, nearestInstance, nodeAt, stripLastKey } from "../src/core/paths.js";
 import { JsonlLogStore } from "../src/runtime/generic/log_store.js";
 import { createRunDir, loadRunMeta, saveRunMeta, type RunMeta } from "../src/runtime/generic/run_dir.js";
 import { isFailureStatePath, type RunTerminalState } from "../src/runtime/generic/run_outcome.js";
+import { assertChartPreflight } from "../src/runtime/pi/chart_typecheck.js";
 import {
 	getHyperchartRunsRoot,
 	listProjectHypercharts,
@@ -41,6 +57,7 @@ import {
 	type HyperchartRunStatus,
 } from "../src/runtime/pi/run_status.js";
 import type { HyperchartRunnerConfig } from "../src/runtime/pi/hyperchart_runner.js";
+import { readSessionProgress, sessionProgressPath } from "../src/runtime/pi/session_progress.js";
 import {
 	RunHistoryOverlay,
 	RunOverlay,
@@ -70,7 +87,13 @@ type RunHistoryEntry = {
 };
 type ActiveRun = RunSnapshot & { done: Promise<HyperchartRunStatus> };
 type HyperchartContext = Pick<ExtensionContext, "cwd" | "mode" | "model" | "ui">;
-type RunStartOptions = { chartPath?: string; args?: Record<string, unknown>; runDir?: string; exportName?: string };
+type RunStartOptions = {
+	chartPath?: string;
+	args?: Record<string, unknown>;
+	runDir?: string;
+	exportName?: string;
+	ignoreReplayWarnings?: boolean;
+};
 type RunStartResult = { runId: string; runDir: string; chartId: string; done: Promise<HyperchartRunStatus> };
 
 class RunManager {
@@ -108,9 +131,10 @@ const RUN_OPTION_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "--args", label: "--args", description: "JSON args" },
 	{ value: "--run-dir", label: "--run-dir", description: "resume/destination run dir" },
 	{ value: "--export", label: "--export", description: "named chart export" },
+	{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" },
 ];
 const HYPERCHART_USAGE =
-	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] | resume <runId> | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
+	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--ignore-replay-warnings] | resume <runId> [--ignore-replay-warnings] | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
 
 function completeHyperchartArgs(argumentPrefix: string): AutocompleteItem[] | null {
 	const parsed = parseCompletionPrefix(argumentPrefix);
@@ -118,8 +142,8 @@ function completeHyperchartArgs(argumentPrefix: string): AutocompleteItem[] | nu
 	const command = parsed.previous[0];
 	const previous = parsed.previous.slice(1);
 	if (command === "run") return prependCompletionPrefix(completeRunArgs(previous, parsed.current), parsed.previous);
+	if (command === "resume") return prependCompletionPrefix(completeResumeArgs(previous, parsed.current), parsed.previous);
 	if (
-		command === "resume" ||
 		command === "restart" ||
 		command === "stop" ||
 		command === "view" ||
@@ -137,6 +161,18 @@ function completeTopLevelArgs(current: string): AutocompleteItem[] | null {
 	const runs = filterCompletions(runIdCompletions(process.cwd()), current) ?? [];
 	const items = [...commands, ...runs];
 	return items.length === 0 ? null : items;
+}
+
+function completeResumeArgs(previous: string[], current: string): AutocompleteItem[] | null {
+	if (current.startsWith("--")) {
+		return filterCompletions(
+			[{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" }],
+			current,
+		);
+	}
+	const hasRunId = previous.some((token) => !token.startsWith("--"));
+	if (hasRunId) return current.length === 0 ? completeResumeArgs([], "--") : null;
+	return filterCompletions(runIdCompletions(process.cwd()), current);
 }
 
 function completeRunArgs(previous: string[], current: string): AutocompleteItem[] | null {
@@ -222,6 +258,7 @@ export default function register(pi: ExtensionAPI) {
 	});
 	pi.registerTool(hyperchartRunTool);
 	pi.registerTool(hyperchartInspectTool);
+	pi.registerTool(hyperchartRewindTool);
 	pi.on("session_start", async (event, ctx) => {
 		if (event.reason === "reload" || event.reason === "startup" || event.reason === "resume") {
 			await restoreRunWidgets(ctx);
@@ -243,6 +280,7 @@ const hyperchartRunTool = defineTool({
 		),
 		exportName: Type.Optional(Type.String({ description: "Named export to load from the chart module" })),
 		wait: Type.Optional(Type.Boolean({ description: "Wait for the run to finish before returning" })),
+		ignoreReplayWarnings: Type.Optional(Type.Boolean({ description: "Explicitly continue despite stale/skipped replay warnings. Default: false" })),
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const result = await startHyperchartRun(
@@ -251,6 +289,7 @@ const hyperchartRunTool = defineTool({
 				...(params.args === undefined ? {} : { args: params.args as Record<string, unknown> }),
 				...(params.runDir === undefined ? {} : { runDir: params.runDir }),
 				...(params.exportName === undefined ? {} : { exportName: params.exportName }),
+				...(params.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 			},
 			ctx,
 		);
@@ -268,37 +307,6 @@ const hyperchartRunTool = defineTool({
 	},
 });
 
-type HyperchartArtifactInfo = { name: string; path?: string; shape?: JsonSchema };
-
-type HyperchartInspectState = {
-	id: string;
-	kind: "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
-	agent?: string;
-	// Authoring text with refs shown as {placeholders} - not a rendered prompt.
-	task?: string;
-	command?: string;
-	envKeys?: string[];
-	// State paths this action pulls from: result() refs in templates plus artifactOf/joinArtifactOf reads.
-	reads?: string[];
-	artifacts?: HyperchartArtifactInfo[];
-	reply?: JsonSchema;
-	model?: string;
-	thinking?: string;
-	tools?: readonly string[];
-	over?: string;
-	concurrency?: number;
-	regions?: string[];
-	retries?: number;
-	transitions?: Array<{ event: string; target: string }>;
-};
-
-type HyperchartInspectResult = {
-	chartId: string;
-	chartPath: string;
-	exportName?: string;
-	states: HyperchartInspectState[];
-};
-
 const hyperchartInspectTool = defineTool({
 	name: "hyperchart_inspect",
 	label: "Inspect Hyperchart",
@@ -308,12 +316,10 @@ const hyperchartInspectTool = defineTool({
 		exportName: Type.Optional(Type.String({ description: "Named export to inspect" })),
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-		const result = await inspectHyperchartDefinition(
-			{
-				chartPath: params.chartPath,
-				...(params.exportName === undefined ? {} : { exportName: params.exportName }),
-			},
-			ctx,
+		const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
+		const result = inspectChartModuleSync(
+			chartPath,
+			params.exportName === undefined ? {} : { exportName: params.exportName },
 		);
 		return {
 			content: [
@@ -327,173 +333,389 @@ const hyperchartInspectTool = defineTool({
 	},
 });
 
-async function inspectHyperchartDefinition(
-	opts: { chartPath: string; exportName?: string },
-	ctx: HyperchartContext,
-): Promise<HyperchartInspectResult> {
-	const chartPath = resolveHyperchartPath(opts.chartPath, ctx.cwd);
-	const parsed = await parseChartModule(
-		chartPath,
-		opts.exportName === undefined ? {} : { exportName: opts.exportName },
-	);
+const hyperchartRewindTool = defineTool({
+	name: "hyperchart_rewind",
+	label: "Rewind Hyperchart Run",
+	description: "Back up and truncate a stopped Hyperchart run log so replay can continue from a specific state or seqId.",
+	parameters: Type.Object({
+		runDir: Type.String({ description: "Existing run directory or run id to rewind" }),
+		state: Type.Optional(Type.String({ description: "State path to rewind to, e.g. chapter-production or chapter-production#key.write-copy" })),
+		seqId: Type.Optional(Type.Number({ description: "Durable log seqId to rewind to" })),
+		to: Type.Optional(Type.Literal("compatible", { description: "Cut to the first prefix compatible with the current chart" })),
+		mode: Type.Optional(Type.Union([Type.Literal("before"), Type.Literal("after")], { description: "Cut before or after the matching record. Default: before" })),
+		cleanupSessions: Type.Optional(Type.Boolean({ description: "Remove downstream session progress and move downstream session dirs into the backup. Default: true" })),
+		cleanupArtifacts: Type.Optional(Type.Boolean({ description: "Best-effort backup+remove artifact files declared by downstream actions. Default: false" })),
+		start: Type.Optional(Type.Boolean({ description: "Start/resume the rewound run immediately after truncating. Default: false" })),
+		ignoreReplayWarnings: Type.Optional(Type.Boolean({ description: "When start=true, explicitly continue despite stale/skipped replay warnings. Default: false" })),
+	}),
+	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
+		const result = await rewindHyperchartRun(
+			{
+				runDir,
+				...(params.state === undefined ? {} : { state: params.state }),
+				...(params.seqId === undefined ? {} : { seqId: params.seqId }),
+				...(params.to === undefined ? {} : { to: params.to }),
+				mode: params.mode === "after" ? "after" : "before",
+				cleanupSessions: params.cleanupSessions !== false,
+				cleanupArtifacts: params.cleanupArtifacts === true,
+			},
+			ctx,
+		);
+		if (params.start === true) {
+			const started = await startHyperchartRun(
+				{ runDir, ...(params.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}) },
+				ctx,
+			);
+			return {
+				content: [{ type: "text", text: `Rewound ${result.runId} to ${result.targetLabel} and started replay (${started.runDir})` }],
+				details: { ...result, started: { runId: started.runId, runDir: started.runDir, chartId: started.chartId } },
+			};
+		}
+		return {
+			content: [{ type: "text", text: `Rewound ${result.runId} to ${result.targetLabel}. Resume with hyperchart_run runDir=${result.runDir}` }],
+			details: result,
+		};
+	},
+});
+
+type RewindMode = "before" | "after";
+type RewindOptions = {
+	runDir: string;
+	state?: string;
+	seqId?: number;
+	to?: "compatible";
+	mode: RewindMode;
+	cleanupSessions: boolean;
+	cleanupArtifacts: boolean;
+};
+type RewindResult = {
+	runId: string;
+	runDir: string;
+	chartId: string;
+	targetLabel: string;
+	backupDir: string;
+	keptRecords: number;
+	removedRecords: number;
+	removedByState: Array<{ state: string; records: number }>;
+	cutSeqId?: number;
+	cleanup: { sessionsRemoved: number; artifactFilesRemoved: number; artifactWarnings: string[] };
+};
+
+async function rewindHyperchartRun(opts: RewindOptions, ctx: HyperchartContext): Promise<RewindResult> {
+	const targetCount = [opts.state, opts.seqId, opts.to].filter((target) => target !== undefined).length;
+	if (targetCount !== 1) {
+		throw new Error("hyperchart_rewind requires exactly one of state, seqId, or to=compatible");
+	}
+	const status = readRunStatus(opts.runDir);
+	if (isRunLive(status)) throw new Error(`Run '${basename(opts.runDir)}' is live; stop it before rewinding`);
+	const meta = loadRunMeta(opts.runDir);
+	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
+		throw new Error(`Run '${basename(opts.runDir)}' belongs to ${meta.workDir}; open that directory first`);
+	}
+	const parsed = await parseChartModule(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-	return {
+	const logPath = resolve(opts.runDir, "log.jsonl");
+	const records = readDurableLogSync(logPath);
+	const match = findRewindMatch(records, opts, parsed.ast);
+	const cutMode = opts.to === "compatible" ? "before" : opts.mode;
+	const cutIndex = cutMode === "before" ? match.index : match.index + 1;
+	const kept = records.slice(0, cutIndex);
+	const removed = records.slice(cutIndex);
+	if (removed.length === 0) throw new Error("Rewind would remove zero records; choose an earlier target or mode=before");
+
+	const backupDir = resolve(opts.runDir, "rewind-backups", `${new Date().toISOString().replace(/[:.]/g, "-")}-${safeBackupLabel(match.label)}`);
+	mkdirSync(backupDir, { recursive: true });
+	backupIfExists(logPath, backupDir, "log.jsonl");
+	backupIfExists(resolve(opts.runDir, "status.json"), backupDir, "status.json");
+	backupIfExists(sessionProgressPath(resolve(opts.runDir, "sessions")), backupDir, "sessions-progress.json");
+
+	const artifactCleanup = opts.cleanupArtifacts
+		? cleanupDownstreamArtifacts({ ast: parsed.ast, records, cutIndex, workDir: meta.workDir, backupDir })
+		: { removed: 0, warnings: [] as string[] };
+	const sessionsRemoved = opts.cleanupSessions ? cleanupDownstreamSessions(opts.runDir, removed, backupDir) : 0;
+
+	writeDurableLogSync(logPath, kept);
+	patchRunStatus(opts.runDir, {
+		runId: basename(opts.runDir),
 		chartId: parsed.ast.id,
-		chartPath,
-		...(opts.exportName === undefined ? {} : { exportName: opts.exportName }),
-		states: statesFromAst(parsed.ast),
-	};
-}
-
-function statesFromAst(ast: ChartAst): HyperchartInspectState[] {
-	return Object.entries(ast.states).map(([path, state]) => {
-		if (state.kind === "final") return { id: path, kind: "final" };
-		const transitions = transitionEntries(state);
-		return {
-			...stateFromAst(path, state),
-			...(transitions.length === 0 ? {} : { transitions }),
-		};
+		state: "stopped",
+		pid: undefined,
+		heartbeatAt: undefined,
+		exitCode: 0,
+		error: undefined,
 	});
-}
 
-function stateFromAst(path: string, state: Exclude<StateAst, { kind: "final" }>): HyperchartInspectState {
-	if (state.kind === "state") return actionStateFromAst(path, state);
-	if (state.kind === "map") {
-		return {
-			id: path,
-			kind: "map",
-			over: inputRefPreview(state.over),
-			...(state.concurrency === undefined ? {} : { concurrency: state.concurrency }),
-		};
-	}
-	if (state.kind === "parallel") {
-		return { id: path, kind: "parallel", regions: state.regions.map((region) => `${path}.${region}`) };
-	}
-	return { id: path, kind: state.kind };
-}
-
-function actionStateFromAst(path: string, state: Extract<StateAst, { kind: "state" }>): HyperchartInspectState {
-	const action = state.action;
-	const reads = actionReads(action);
-	const artifacts = actionArtifacts(action);
-	const base = {
-		id: path,
-		...(reads.length === 0 ? {} : { reads }),
-		...(artifacts.length === 0 ? {} : { artifacts }),
-		...(action.reply === undefined ? {} : { reply: action.reply.schema }),
-		...(state.retries === undefined ? {} : { retries: state.retries }),
-	};
-	if (action.kind === "agent") {
-		const task = templatePreview(action.task);
-		return {
-			...base,
-			kind: "agent",
-			agent: action.name,
-			...(task === undefined ? {} : { task }),
-			...(action.model === undefined ? {} : { model: action.model }),
-			...(action.thinking === undefined ? {} : { thinking: action.thinking }),
-			...(action.tools === undefined ? {} : { tools: action.tools }),
-		};
-	}
-	if (action.kind === "script") {
-		return {
-			...base,
-			kind: "script",
-			command: [action.command, ...action.args].join(" "),
-			...(action.env === undefined ? {} : { envKeys: Object.keys(action.env) }),
-		};
-	}
-	const task = templatePreview(action.prompt);
-	return { ...base, kind: "user", ...(task === undefined ? {} : { task }) };
-}
-
-function artifactInfo(name: string, artifact: ArtifactAst): HyperchartArtifactInfo {
-	const path = templatePreview(artifact.path);
 	return {
-		name,
-		...(path === undefined ? {} : { path }),
-		...(artifact.shape === undefined ? {} : { shape: artifact.shape.schema }),
+		runId: basename(opts.runDir),
+		runDir: opts.runDir,
+		chartId: parsed.ast.id,
+		targetLabel: match.label,
+		backupDir,
+		keptRecords: kept.length,
+		removedRecords: removed.length,
+		removedByState: summarizeRemovedRecordsByState(removed),
+		...(match.recordSeqId === undefined ? {} : { cutSeqId: match.recordSeqId }),
+		cleanup: {
+			sessionsRemoved,
+			artifactFilesRemoved: artifactCleanup.removed,
+			artifactWarnings: artifactCleanup.warnings,
+		},
 	};
 }
 
-function actionArtifacts(action: StateActionAst): HyperchartArtifactInfo[] {
-	if (action.kind === "user") return [];
-	return Object.entries(action.artifacts ?? {}).map(([name, artifact]) => artifactInfo(name, artifact));
-}
-
-function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): Array<{ event: string; target: string }> {
-	const entries = Object.entries(state.transitions).map(([event, transition]) => ({
-		event,
-		target: siblingStatePath(state.parent, transition.target),
-	}));
-	if (state.kind === "compound" || state.kind === "parallel" || state.kind === "map") {
-		entries.push({ event: "onDone", target: siblingStatePath(state.parent, state.onDone) });
+function findRewindMatch(
+	records: readonly DurableLogRecord[],
+	opts: RewindOptions,
+	ast: ChartAst,
+): { index: number; label: string; recordSeqId?: number } {
+	if (opts.to === "compatible") {
+		const explanation = explainReplay(ast, records);
+		const broken = explanation.broken;
+		if (broken === undefined) {
+			const warnings = explanation.skipped.length + explanation.stale.length;
+			throw new Error(
+				warnings === 0
+					? "Durable log is already compatible with the current chart; no rewind needed"
+					: `Durable log has no structural incompatibility (${warnings} warning record(s)); choose state or seqId if you still want to rewind`,
+			);
+		}
+		const targetSeqId = broken.record.type === "state_action" ? (broken.invokeSeqId ?? broken.seqId) : broken.seqId;
+		const index = records.findIndex((record) => record.seqId === targetSeqId);
+		if (index === -1) throw new Error(`Cannot find compatible cut record seqId ${targetSeqId}`);
+		return {
+			index,
+			label: `compatible before seqId ${targetSeqId}`,
+			recordSeqId: targetSeqId,
+		};
 	}
-	if (state.kind === "state" && state.after !== undefined) {
-		entries.push({
-			event: `after:${state.after.delayMs}ms`,
-			target: siblingStatePath(state.parent, state.after.target),
-		});
+	if (opts.seqId !== undefined) {
+		const index = records.findIndex((record) => record.seqId === opts.seqId);
+		if (index === -1) throw new Error(`No durable log record with seqId ${opts.seqId}`);
+		return { index, label: `${opts.mode} seqId ${opts.seqId}`, recordSeqId: opts.seqId };
 	}
-	return entries;
+	const state = opts.state ?? "";
+	const index = records.findIndex((record) => recordMatchesState(record, state));
+	if (index === -1) throw new Error(`No durable log record matched state '${state}'`);
+	const recordSeqId = records[index]?.seqId;
+	return { index, label: `${opts.mode} state ${state}`, ...(recordSeqId === undefined ? {} : { recordSeqId }) };
 }
 
-function siblingStatePath(parent: string | undefined, localId: string): string {
-	return parent === undefined ? localId : `${parent}.${localId}`;
-}
-
-function actionReads(action: StateActionAst): string[] {
-	const reads: string[] = [];
-	if (action.kind === "agent") {
-		for (const read of action.reads ?? []) appendReadRefs(reads, read);
-		appendTemplateRefs(reads, action.task);
-	} else if (action.kind === "script") {
-		for (const value of Object.values(action.env ?? {})) appendReadRefs(reads, value);
-	} else {
-		appendTemplateRefs(reads, action.prompt);
+function summarizeRemovedRecordsByState(records: readonly DurableLogRecord[]): Array<{ state: string; records: number }> {
+	const counts = new Map<string, number>();
+	for (const record of records) {
+		const state = record.type === "spawned" ? record.path : record.type === "state_action" ? record.actionUid.state : "<run>";
+		counts.set(state, (counts.get(state) ?? 0) + 1);
 	}
-	return [...new Set(reads)];
+	return [...counts.entries()]
+		.map(([state, count]) => ({ state, records: count }))
+		.sort((left, right) => right.records - left.records || left.state.localeCompare(right.state));
 }
 
-function appendReadRefs(reads: string[], value: TemplateAst | ArtifactOfAst | JoinArtifactOfAst): void {
-	if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") {
-		reads.push(value.state);
-		return;
+function recordMatchesState(record: DurableLogRecord, state: string): boolean {
+	if (record.type === "spawned") return record.path === state || templatePathLocal(record.path) === state || isUnderState(record.path, state);
+	if (record.type !== "state_action") return false;
+	return record.actionUid.state === state || templatePathLocal(record.actionUid.state) === state || isUnderState(record.actionUid.state, state);
+}
+
+function isUnderState(path: string, state: string): boolean {
+	return path === state || path.startsWith(`${state}.`) || path.startsWith(`${state}#`) || templatePathLocal(path).startsWith(`${state}.`);
+}
+
+function readDurableLogSync(logPath: string): DurableLogRecord[] {
+	if (!existsSync(logPath)) return [];
+	return readFileSync(logPath, "utf8")
+		.split(/\r?\n/)
+		.filter((line) => line.trim().length > 0)
+		.map((line) => JSON.parse(line) as DurableLogRecord);
+}
+
+function writeDurableLogSync(logPath: string, records: readonly DurableLogRecord[]): void {
+	writeFileSync(logPath, records.length === 0 ? "" : `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
+}
+
+function backupIfExists(path: string, backupDir: string, name: string): void {
+	if (!existsSync(path)) return;
+	copyFileSync(path, resolve(backupDir, name));
+}
+
+function cleanupDownstreamSessions(runDir: string, removed: readonly DurableLogRecord[], backupDir: string): number {
+	const sessionsDir = resolve(runDir, "sessions");
+	mkdirSync(sessionsDir, { recursive: true });
+	const progress = readSessionProgress(sessionsDir);
+	const keys = new Set(
+		removed.flatMap((record) => (record.type === "state_action" ? [actionUidKey(record.actionUid)] : [])),
+	);
+	let removedEntries = 0;
+	for (const key of keys) {
+		if (progress.sessions[key] !== undefined) {
+			delete progress.sessions[key];
+			removedEntries++;
+		}
 	}
-	appendTemplateRefs(reads, value);
-}
-
-function appendTemplateRefs(reads: string[], value: TemplateAst | undefined): void {
-	if (value === undefined) return;
-	for (const ref of value.refs) {
-		if (ref.kind === "result") reads.push(ref.state);
+	progress.updatedAt = Date.now();
+	writeFileSync(sessionProgressPath(sessionsDir), `${JSON.stringify(progress, null, 2)}\n`, "utf8");
+	const backupSessionsDir = resolve(backupDir, "sessions");
+	for (const record of removed) {
+		if (record.type !== "state_action") continue;
+		const actionDir = resolve(sessionsDir, actionUidDirName(record.actionUid));
+		if (!existsSync(actionDir)) continue;
+		mkdirSync(backupSessionsDir, { recursive: true });
+		movePath(actionDir, resolve(backupSessionsDir, basename(actionDir)));
 	}
+	return removedEntries;
 }
 
-function templatePreview(value: TemplateAst | undefined): string | undefined {
-	if (value === undefined) return undefined;
-	const rendered = value.strings.reduce((acc, chunk, index) => {
-		const ref = value.refs[index];
-		return ref === undefined ? `${acc}${chunk}` : `${acc}${chunk}{${inputRefPreview(ref)}}`;
-	}, "");
-	return rendered.trim() || undefined;
-}
-
-function inputRefPreview(ref: InputRef): string {
-	switch (ref.kind) {
-		case "arg":
-			return `arg:${ref.name}`;
-		case "result":
-			return ref.path ? `${ref.state}.${ref.path}` : ref.state;
-		case "key":
-			return ref.map ? `${ref.map}.key` : "key";
-		case "item":
-			return [ref.map, "item", ref.path].filter(Boolean).join(".");
-		case "input":
-			return ref.path ? `input:${ref.name}.${ref.path}` : `input:${ref.name}`;
-		case "visit":
-			return ref.state ? `visit:${ref.state}` : "visit";
+function cleanupDownstreamArtifacts(opts: {
+	ast: ChartAst;
+	records: readonly DurableLogRecord[];
+	cutIndex: number;
+	workDir: string;
+	backupDir: string;
+}): { removed: number; warnings: string[] } {
+	const collected = collectDownstreamArtifactPaths(opts.ast, opts.records, opts.cutIndex, opts.workDir);
+	const warnings = [...collected.warnings];
+	let removed = 0;
+	let index = 0;
+	const backupArtifactsDir = resolve(opts.backupDir, "artifacts");
+	for (const path of collected.paths) {
+		if (!existsSync(path)) continue;
+		const stat = statSync(path);
+		if (!stat.isFile()) {
+			warnings.push(`Skipped non-file artifact ${path}`);
+			continue;
+		}
+		mkdirSync(backupArtifactsDir, { recursive: true });
+		const backupPath = resolve(backupArtifactsDir, `${String(index++).padStart(4, "0")}-${basename(path)}`);
+		copyFileSync(path, backupPath);
+		rmSync(path, { force: true });
+		removed++;
 	}
+	return { removed, warnings };
+}
+
+function collectDownstreamArtifactPaths(
+	ast: ChartAst,
+	records: readonly DurableLogRecord[],
+	cutIndex: number,
+	workDir: string,
+): { paths: string[]; warnings: string[] } {
+	const paths = new Set<string>();
+	const warnings: string[] = [];
+	for (let index = cutIndex; index < records.length; index++) {
+		const record = records[index];
+		if (record?.type !== "state_action" || record.kind !== "invoke") continue;
+		try {
+			const projection = projectBranch(createBranchProjection(ast), ast, records.slice(0, index + 1));
+			const node = nodeAt(ast, record.actionUid.state);
+			if (node?.kind !== "state") continue;
+			const action = node.action;
+			if (action.kind === "user" || action.artifacts === undefined) continue;
+			for (const artifact of Object.values(action.artifacts)) {
+				const rendered = renderTemplateForProjection(projection, ast, artifact.path, record.actionUid.state);
+				paths.add(resolveArtifactPath(workDir, rendered));
+			}
+		} catch (error) {
+			warnings.push(error instanceof Error ? error.message : String(error));
+		}
+	}
+	return { paths: [...paths], warnings };
+}
+
+function renderTemplateForProjection(
+	projection: BranchProjection,
+	ast: ChartAst,
+	template: TemplateAst,
+	stateId: StatePath,
+): string {
+	let out = "";
+	for (let index = 0; index < template.strings.length; index++) {
+		out += template.strings[index] ?? "";
+		const ref = template.refs[index];
+		if (ref === undefined) continue;
+		const value = resolveRefForProjection(projection, ast, ref, stateId);
+		out += typeof value === "string" ? value : JSON.stringify(value);
+	}
+	return out;
+}
+
+function resolveRefForProjection(projection: BranchProjection, ast: ChartAst, ref: InputRef, stateId: StatePath): unknown {
+	if (ref.kind === "arg") return projection.args?.[ref.name];
+	if (ref.kind === "visit") {
+		const target = ref.state === undefined ? stateId : instancePathFor(ref.state, stateId);
+		const node = nodeAt(ast, target);
+		if (node?.kind !== "state") throw new Error(`Cannot resolve visit(${ref.state ?? ""}) for ${stateId}`);
+		return projection.stateVisits[actionUidKey({ ...node.action.uid, state: target })];
+	}
+	if (ref.kind === "input") {
+		const slot = inputSlotForProjection(projection, ast, ref.name, stateId);
+		return selectPathForProjection(slot?.values[ref.name], ref.path);
+	}
+	if (ref.kind === "key" || ref.kind === "item") {
+		const instance = nearestInstance(stateId, ref.map);
+		if (instance === undefined) throw new Error(`Cannot resolve map ref for ${stateId}`);
+		const instances = projection.spawns[instance.container];
+		if (instances === undefined || !(instance.key in instances)) throw new Error(`No spawned instance ${instance.key} in ${instance.container}`);
+		return ref.kind === "key" ? instance.key : selectPathForProjection(instances[instance.key], ref.path);
+	}
+	const resultKey = instancePathFor(ref.state, stateId);
+	return selectPathForProjection(projection.results[resultKey], ref.path);
+}
+
+function inputSlotForProjection(
+	projection: BranchProjection,
+	ast: ChartAst,
+	name: string,
+	stateId: StatePath,
+): { values: Record<string, unknown> } | undefined {
+	let current: StatePath | undefined = stateId;
+	while (current !== undefined) {
+		const node = nodeAt(ast, current);
+		if ((node?.kind === "state" || node?.kind === "map") && node.input !== undefined && name in node.input) {
+			return { values: projection.inputs[node.kind === "map" ? stripLastKey(current) : current] ?? {} };
+		}
+		const dot = current.lastIndexOf(".");
+		current = dot === -1 ? undefined : current.slice(0, dot);
+	}
+	return undefined;
+}
+
+function selectPathForProjection(value: unknown, path: string | undefined): unknown {
+	if (path === undefined) return value;
+	let current = value;
+	for (const segment of path.split(".")) {
+		if (typeof current !== "object" || current === null || !(segment in current)) return undefined;
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
+}
+
+function resolveArtifactPath(workDir: string, path: string): string {
+	return isAbsolute(path) ? path : resolve(workDir, path);
+}
+
+function movePath(from: string, to: string): void {
+	let target = to;
+	let suffix = 1;
+	while (existsSync(target)) {
+		target = `${to}.${suffix++}`;
+	}
+	mkdirSync(dirname(target), { recursive: true });
+	renameSync(from, target);
+}
+
+function templatePathLocal(path: StatePath): StatePath {
+	return path
+		.split(".")
+		.map((segment) => {
+			const hash = segment.indexOf("#");
+			return hash === -1 ? segment : segment.slice(0, hash);
+		})
+		.join(".");
+}
+
+function safeBackupLabel(value: string): string {
+	return value.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
 }
 
 async function dispatch(args: string, ctx: ExtensionCommandContext): Promise<void> {
@@ -575,9 +797,12 @@ async function runsCommand(tokens: string[], ctx: ExtensionCommandContext): Prom
 }
 
 async function resumeCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
-	const runId = tokens[0];
-	if (runId === undefined) throw new Error("resume requires a runId");
-	await resumeRun(runId, ctx);
+	const options = parseResumeOptions(tokens);
+	await resumeRun(
+		options.runId,
+		ctx,
+		options.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {},
+	);
 }
 
 async function restartCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
@@ -592,8 +817,12 @@ async function deleteCommand(tokens: string[], ctx: ExtensionCommandContext): Pr
 	await deleteRun(runId, ctx);
 }
 
-async function resumeRun(runId: string, ctx: HyperchartContext): Promise<RunStartResult> {
-	return startHyperchartRun({ runDir: runId }, ctx);
+async function resumeRun(
+	runId: string,
+	ctx: HyperchartContext,
+	opts: { ignoreReplayWarnings?: boolean } = {},
+): Promise<RunStartResult> {
+	return startHyperchartRun({ runDir: runId, ...(opts.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}) }, ctx);
 }
 
 async function restartRun(runId: string, ctx: HyperchartContext): Promise<RunStartResult> {
@@ -655,6 +884,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		throw new Error("hyperchart_run requires chartPath unless runDir points at an existing run");
 	}
 
+	await assertChartPreflight(chartPath);
 	const parsed = await parseChartModule(chartPath, exportName === undefined ? {} : { exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	warnOnUserActions(parsed.ast, ctx);
@@ -705,6 +935,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		agentDir: getAgentDir(),
 		...(exportName === undefined ? {} : { exportName }),
 		...(opts.args === undefined ? {} : { args: opts.args }),
+		...(opts.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 		...(ctx.model === undefined ? {} : { defaultModel: `${ctx.model.provider}/${ctx.model.id}` }),
 	};
 	const pid = spawnRunner(config);
@@ -1129,11 +1360,13 @@ function parseRunOptions(tokens: string[]): {
 	args?: Record<string, unknown>;
 	runDir?: string;
 	exportName?: string;
+	ignoreReplayWarnings?: boolean;
 } {
 	let chartPath: string | undefined;
 	let args: Record<string, unknown> | undefined;
 	let runDir: string | undefined;
 	let exportName: string | undefined;
+	let ignoreReplayWarnings = false;
 	for (let index = 0; index < tokens.length; index++) {
 		const token = tokens[index];
 		if (token === "--args") {
@@ -1150,6 +1383,8 @@ function parseRunOptions(tokens: string[]): {
 		} else if (token === "--export") {
 			exportName = tokens[++index];
 			if (exportName === undefined) throw new Error("--export requires a name");
+		} else if (token === "--ignore-replay-warnings") {
+			ignoreReplayWarnings = true;
 		} else if (chartPath === undefined) {
 			chartPath = token;
 		} else {
@@ -1161,7 +1396,24 @@ function parseRunOptions(tokens: string[]): {
 		...(args === undefined ? {} : { args }),
 		...(runDir === undefined ? {} : { runDir }),
 		...(exportName === undefined ? {} : { exportName }),
+		...(ignoreReplayWarnings ? { ignoreReplayWarnings: true } : {}),
 	};
+}
+
+function parseResumeOptions(tokens: string[]): { runId: string; ignoreReplayWarnings?: boolean } {
+	let runId: string | undefined;
+	let ignoreReplayWarnings = false;
+	for (const token of tokens) {
+		if (token === "--ignore-replay-warnings") {
+			ignoreReplayWarnings = true;
+		} else if (runId === undefined) {
+			runId = token;
+		} else {
+			throw new Error(`Unexpected argument '${token}'`);
+		}
+	}
+	if (runId === undefined) throw new Error("resume requires a runId");
+	return { runId, ...(ignoreReplayWarnings ? { ignoreReplayWarnings: true } : {}) };
 }
 
 function tokenize(input: string): string[] {

@@ -279,7 +279,7 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 	// completion, or deliver the rejection.
 	const desired: (Effect | RecordAppend)[] = [
 		...dueSpawns(state),
-		...dueInvokes(state).map(invokeAppend),
+		...dueInvokes(state).map((actionUid) => invokeAppend(state, actionUid)),
 		...state.projection.pendingActions.flatMap((pending) => pendingEffects(state, pending)),
 	];
 
@@ -953,11 +953,20 @@ function selectPath(value: unknown, path: string | undefined, ref: InputRef, sta
 	return current;
 }
 
-function invokeAppend(actionUid: ActionUID): RecordAppend {
+function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
+	const node = nodeAt(state.ast, actionUid.state);
+	if (node?.kind !== "state") throw new Error(`Cannot invoke non-action state ${actionUid.state}`);
 	return {
 		kind: "append",
 		id: `invoke:${actionUidKey(actionUid)}`,
-		records: [{ type: "state_action", kind: "invoke", actionUid }],
+		records: [
+			{
+				type: "state_action",
+				kind: "invoke",
+				actionUid,
+				definition: node.action,
+			},
+		],
 	};
 }
 

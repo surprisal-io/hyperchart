@@ -22,10 +22,12 @@ function argsRecord(seqId = 1, args: Readonly<Record<string, unknown>> = { topic
 }
 
 function invokeRecord(seqId = 2): DurableLogRecord {
+	const actionUid = { chart: "chart", state: "work", action: "agent" };
 	return {
 		type: "state_action",
 		kind: "invoke",
-		actionUid: { chart: "chart", state: "work", action: "worker" },
+		actionUid,
+		definition: { kind: "agent", uid: actionUid, name: "worker" },
 		parentId: seqId - 1,
 		seqId,
 		timestamp: seqId * 100,

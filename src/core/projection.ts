@@ -18,6 +18,13 @@ import {
 // completion needing no validation) removes the entry and applies the transition. The action's
 // session is alive through the whole cycle. seqId is the record that started the current phase;
 // it makes the effect id of each phase unique.
+export type ProjectionSkippedRecord = Readonly<{
+	record: DurableLogRecord;
+	state: StatePath;
+	reason: "inactive";
+	activeLeaves: readonly StatePath[];
+}>;
+
 export type PendingAction =
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
 	// validationAttempts counts the rejected rounds of this invoke cycle — derived from validated(false)
@@ -96,6 +103,10 @@ export function projectBranch(
 	// removes it — see exitAndEnter). The machine turns these into cancel signals; replay at
 	// startup passes nothing and lets history's abandoned work stay abandoned.
 	abandoned: PendingAction[] = [],
+	// Collects durable facts that are legal no-ops because their state is no longer active. This is
+	// the race-loser mechanism, but replay diagnostics also use it to expose chart edits that make
+	// old work disappear silently.
+	skipped: ProjectionSkippedRecord[] = [],
 ): BranchProjection {
 	for (const record of log) {
 		switch (record.type) {
@@ -111,7 +122,10 @@ export function projectBranch(
 			case "spawned": {
 				// The placeholder guard mirrors invoke: a spawn for a map that is no longer active
 				// lost a race and is skipped.
-				if (!projection.activeLeaves.includes(record.path)) break;
+				if (!projection.activeLeaves.includes(record.path)) {
+					recordSkipped(skipped, projection, record, record.path);
+					break;
+				}
 				const node = nodeAt(ast, record.path);
 				if (node?.kind !== "map") {
 					throw new Error(`Spawned record for non-map state ${record.path}`);
@@ -137,6 +151,9 @@ export function projectBranch(
 			case "state_action":
 				switch (record.kind) {
 					case "invoke":
+						if (!isRecord(record.definition)) {
+							throw new Error(`Invoke record for state ${record.actionUid.state} is missing action definition provenance`);
+						}
 						if (projection.activeLeaves.includes(record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "invoke");
 							const key = actionUidKey(record.actionUid);
@@ -150,6 +167,8 @@ export function projectBranch(
 								timestamp: record.timestamp,
 								phase: "running",
 							});
+						} else {
+							recordSkipped(skipped, projection, record, record.actionUid.state);
 						}
 						break;
 					case "complete":
@@ -178,6 +197,8 @@ export function projectBranch(
 							recordResult(projection, record.actionUid.state, record.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
+						} else {
+							recordSkipped(skipped, projection, record, record.actionUid.state);
 						}
 						break;
 					case "timer_fired":
@@ -187,6 +208,8 @@ export function projectBranch(
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "timer_fired");
 							removePendingAction(projection, record.actionUid);
 							applyAfterTransition(projection, ast, record.actionUid.state, abandoned);
+						} else {
+							recordSkipped(skipped, projection, record, record.actionUid.state);
 						}
 						break;
 					case "validated": {
@@ -238,6 +261,15 @@ function recordResult(projection: BranchProjection, state: StatePath, event: Cha
 	if ("output" in event && event.output !== undefined) {
 		projection.results[state] = event.output;
 	}
+}
+
+function recordSkipped(
+	skipped: ProjectionSkippedRecord[],
+	projection: BranchProjection,
+	record: DurableLogRecord,
+	state: StatePath,
+): void {
+	skipped.push({ record, state, reason: "inactive", activeLeaves: [...projection.activeLeaves] });
 }
 
 function removePendingAction(projection: BranchProjection, actionUid: ActionUID): void {
@@ -531,6 +563,10 @@ function schemaHasDefault(schema: SchemaAst): boolean {
 function cloneJson(value: unknown): unknown {
 	if (value === undefined) return undefined;
 	return JSON.parse(JSON.stringify(value)) as unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: ActionUID, operation: string): void {

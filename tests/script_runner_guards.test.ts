@@ -216,7 +216,15 @@ process.stdin.on("end", () => {
 		if (runState?.kind !== "state") throw new Error("expected run state");
 		const actionUid = runState.action.uid;
 		const rejectedLog: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", actionUid, parentId: null, seqId: 1, timestamp: 1 },
+			{
+				type: "state_action",
+				kind: "invoke",
+				actionUid,
+				definition: runState.action,
+				parentId: null,
+				seqId: 1,
+				timestamp: 1,
+			},
 			{
 				type: "state_action",
 				kind: "complete",

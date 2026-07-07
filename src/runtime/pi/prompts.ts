@@ -18,8 +18,26 @@ export function buildTaskPrompt(effect: AgentEffect, resolvedReads: ResolvedRead
 	return sections.join("\n\n");
 }
 
-export function buildNudgePrompt(effect: AgentEffect): string {
-	return `You finished responding without calling \`finish\`. Call it now with event one of ${JSON.stringify(finishableEvents(effect))}.`;
+export function buildNudgePrompt(effect: AgentEffect, lastAssistantText?: string): string {
+	const lines = [
+		"You finished responding without making an accepted tool call.",
+		"Do not write tool-call syntax, XML tags, JSON snippets, markdown, or prose.",
+		"Use the actual tool-calling interface now.",
+		`If the step is complete, call the \`finish\` tool now with event one of ${JSON.stringify(finishableEvents(effect))}.`,
+		"",
+		formatCompletion(effect),
+	];
+	if (lastAssistantText !== undefined && looksLikeTextualToolCall(lastAssistantText)) {
+		lines.push(
+			"Your previous response looked like a tool call written as plain text. Plain text like `read<arg_key>...`, `<tool_call>...`, or JSON is ignored by the runtime and does not execute tools.",
+			"If you still need a file/tool, call the real tool through the tool interface. Otherwise call `finish` now.",
+		);
+	}
+	return lines.join("\n");
+}
+
+function looksLikeTextualToolCall(text: string): boolean {
+	return /<\/?(?:tool_call|arg_key|arg_value)>/.test(text) || /\b(?:read|write|bash|browser|finish)<arg_key>/.test(text);
 }
 
 export function buildRejectPrompt(effect: RejectedEffect): string {

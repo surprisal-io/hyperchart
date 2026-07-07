@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -10,6 +10,16 @@ import { saveRunMeta } from "../src/runtime/generic/run_dir.js";
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
 	getArgumentCompletions: (prefix: string) => AutocompleteItem[] | null;
+};
+type HyperchartTool = {
+	name: string;
+	execute: (
+		toolCallId: string,
+		params: Record<string, unknown>,
+		signal: AbortSignal,
+		onUpdate: (update: unknown) => void,
+		ctx: ExtensionCommandContext,
+	) => Promise<{ details?: unknown }>;
 };
 type Notification = { message: string; type: "info" | "warning" | "error" | undefined };
 
@@ -100,6 +110,54 @@ describe("hyperchart extension", () => {
 			type: "error",
 		});
 	});
+
+	it("rewinds an incompatible modified-chart run to the compatible prefix", async () => {
+		const chartPath = writeIncompatibleReplayChart();
+		const runDir = createRun("rewind-compatible", projectDir, chartPath);
+		mkdirSync(runDir, { recursive: true });
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			[
+				{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 },
+				{
+					type: "state_action",
+					kind: "invoke",
+					actionUid: { chart: "demo", state: "first", action: "agent" },
+					definition: { kind: "agent", uid: { chart: "demo", state: "first", action: "agent" }, name: "old-worker" },
+					parentId: 1,
+					seqId: 2,
+					timestamp: 2,
+				},
+				{
+					type: "state_action",
+					kind: "complete",
+					actionUid: { chart: "demo", state: "first", action: "agent" },
+					event: { type: "FIRST_DONE" },
+					parentId: 2,
+					seqId: 3,
+					timestamp: 3,
+				},
+			]
+				.map((record) => JSON.stringify(record))
+				.join("\n") + "\n",
+			"utf8",
+		);
+		const tool = registeredTool("hyperchart_rewind");
+		const { ctx } = commandContext(projectDir);
+
+		const result = await tool.execute(
+			"tool-call",
+			{ runDir, to: "compatible", cleanupSessions: true, cleanupArtifacts: false },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
+
+		const lines = readFileSync(join(runDir, "log.jsonl"), "utf8").trim().split("\n");
+		expect(lines.map((line) => JSON.parse(line) as { seqId: number }).map((record) => record.seqId)).toEqual([1]);
+		expect(result.details).toMatchObject({ removedRecords: 2, cutSeqId: 2 });
+		expect(existsSync(join(runDir, "rewind-backups"))).toBe(true);
+	});
 });
 
 function registeredCommand(): HyperchartCommand {
@@ -114,6 +172,19 @@ function registeredCommand(): HyperchartCommand {
 	register(pi);
 	if (command === undefined) throw new Error("hyperchart command was not registered");
 	return command;
+}
+
+function registeredTool(name: string): HyperchartTool {
+	const tools: HyperchartTool[] = [];
+	const pi = {
+		registerCommand: () => {},
+		registerTool: (tool: HyperchartTool) => tools.push(tool),
+		on: () => {},
+	} as unknown as ExtensionAPI;
+	register(pi);
+	const tool = tools.find((entry) => entry.name === name);
+	if (tool === undefined) throw new Error(`hyperchart tool ${name} was not registered`);
+	return tool;
 }
 
 function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[] } {
@@ -146,6 +217,25 @@ function createRun(runId: string, workDir: string, chartPath: string): string {
 		createdAt: new Date().toISOString(),
 	});
 	return runDir;
+}
+
+function writeIncompatibleReplayChart(): string {
+	const chartPath = join(tempDir, "incompatible-replay.mjs");
+	writeFileSync(
+		chartPath,
+		`export default {
+	kind: "chart",
+	id: "demo",
+	initial: "first",
+	states: {
+		first: { kind: "state", action: { kind: "agent", name: "first-worker" }, transitions: { OTHER: "done" } },
+		done: { kind: "final" }
+	}
+};
+`,
+		"utf8",
+	);
+	return chartPath;
 }
 
 function writeChart(name: string, sideEffectPath?: string): string {

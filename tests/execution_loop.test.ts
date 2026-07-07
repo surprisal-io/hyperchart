@@ -23,6 +23,7 @@ import type {
 	Effect,
 	GuardOutcome,
 	MachineEvent,
+	StateActionAst,
 	StateCst,
 	StateId,
 } from "../src/index.js";
@@ -244,7 +245,13 @@ function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecor
 }
 
 function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", actionUid: uid, ...meta(seqId) };
+	return { type: "state_action", kind: "invoke", actionUid: uid, definition: definitionForUid(uid), ...meta(seqId) };
+}
+
+function definitionForUid(uid: ActionUID): StateActionAst {
+	if (uid.action === "script") return { kind: "script", uid, command: "test", args: [] };
+	if (uid.action === "user") return { kind: "user", uid, prompt: { kind: "template", strings: [""], refs: [] }, options: [] };
+	return { kind: "agent", uid, name: "test-worker" };
 }
 
 function timerFired(uid: ActionUID, seqId = 1): DurableLogRecord {

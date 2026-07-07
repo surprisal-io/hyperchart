@@ -15,6 +15,7 @@ export type HyperchartRunStatus = {
 	heartbeatAt?: number;
 	exitCode?: number;
 	error?: string;
+	replayWarnings?: string[];
 };
 
 export function runStatusPath(runDir: string): string {
@@ -51,6 +52,7 @@ export function patchRunStatus(runDir: string, patch: RunStatusPatch): Hyperchar
 	const heartbeatAt = valueFor("heartbeatAt", patch, previous);
 	const exitCode = valueFor("exitCode", patch, previous);
 	const error = valueFor("error", patch, previous);
+	const replayWarnings = valueFor("replayWarnings", patch, previous);
 	const next: HyperchartRunStatus = {
 		version: 1,
 		runId: valueFor("runId", patch, previous) ?? "unknown",
@@ -63,6 +65,7 @@ export function patchRunStatus(runDir: string, patch: RunStatusPatch): Hyperchar
 		...(heartbeatAt === undefined ? {} : { heartbeatAt }),
 		...(exitCode === undefined ? {} : { exitCode }),
 		...(error === undefined ? {} : { error }),
+		...(replayWarnings === undefined ? {} : { replayWarnings }),
 	};
 	writeRunStatus(runDir, next);
 	return next;
@@ -116,6 +119,9 @@ function normalizeStatus(value: unknown, fallbackRunDir: string): HyperchartRunS
 		...(typeof value.heartbeatAt === "number" ? { heartbeatAt: value.heartbeatAt } : {}),
 		...(typeof value.exitCode === "number" ? { exitCode: value.exitCode } : {}),
 		...(typeof value.error === "string" ? { error: value.error } : {}),
+		...(Array.isArray(value.replayWarnings) && value.replayWarnings.every((entry) => typeof entry === "string")
+			? { replayWarnings: value.replayWarnings }
+			: {}),
 	};
 }
 

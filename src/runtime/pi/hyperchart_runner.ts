@@ -1,10 +1,11 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { parseChartModule, start } from "../../index.js";
+import { explainReplay, parseChartModule, start, type ReplayExplanation } from "../../index.js";
 import { ChartRuntime } from "../generic/chart_runtime.js";
 import { JsonlLogStore } from "../generic/log_store.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine } from "../generic/run_outcome.js";
+import { assertChartPreflight } from "./chart_typecheck.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
 
@@ -17,6 +18,7 @@ export type HyperchartRunnerConfig = {
 	workDir: string;
 	args?: Record<string, unknown>;
 	defaultModel?: string;
+	ignoreReplayWarnings?: boolean;
 	agentDir: string;
 };
 
@@ -44,11 +46,23 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 	heartbeat.unref();
 
 	try {
+		await assertChartPreflight(config.chartPath);
 		const parsed = await parseChartModule(
 			config.chartPath,
 			config.exportName === undefined ? {} : { exportName: config.exportName },
 		);
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		const logStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message));
+		const existingLog = await logStore.readAll();
+		const replayExplanation = existingLog.length === 0 ? undefined : explainReplay(parsed.ast, existingLog);
+		if (replayExplanation?.broken !== undefined) {
+			throw new Error(formatReplayCompatibilityError(config.runDir, replayExplanation));
+		}
+		const replayWarnings = replayExplanation === undefined ? [] : formatReplayWarnings(replayExplanation);
+		if (replayWarnings.length > 0 && config.ignoreReplayWarnings !== true) {
+			throw new Error(formatReplayWarningsError(config.runDir, replayWarnings));
+		}
+		for (const warning of replayWarnings) console.warn(warning);
 		patchRunStatus(config.runDir, {
 			runId: config.runId,
 			chartId: parsed.ast.id,
@@ -57,6 +71,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			heartbeatAt: Date.now(),
 			error: undefined,
 			exitCode: undefined,
+			...(replayWarnings.length === 0 ? { replayWarnings: undefined } : { replayWarnings }),
 		});
 		const modelRegistry = createModelRegistry(config.agentDir);
 		const executor = new PiAgentExecutor({
@@ -66,7 +81,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			sessionsDir: join(config.runDir, "sessions"),
 			...(config.defaultModel === undefined ? {} : { defaultModel: config.defaultModel }),
 		});
-		const logStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message));
 		runtime = new ChartRuntime({
 			ast: parsed.ast,
 			logStore,
@@ -131,7 +145,45 @@ function readConfig(path: string): HyperchartRunnerConfig {
 		...(typeof value.exportName === "string" ? { exportName: value.exportName } : {}),
 		...(isRecord(value.args) ? { args: value.args } : {}),
 		...(typeof value.defaultModel === "string" ? { defaultModel: value.defaultModel } : {}),
+		...(value.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 	};
+}
+
+function formatReplayWarningsError(runDir: string, warnings: readonly string[]): string {
+	return [
+		"Replay over the current chart produced warning-level compatibility issues.",
+		...warnings,
+		`Resolve them by rewinding, or explicitly confirm continuing with: hyperchart_run runDir=${runDir} ignoreReplayWarnings=true`,
+	].join("\n");
+}
+
+function formatReplayCompatibilityError(runDir: string, explanation: ReplayExplanation): string {
+	const broken = explanation.broken;
+	if (broken === undefined) return "Replay compatibility check failed";
+	const target = broken.invokeSeqId ?? broken.seqId;
+	return [
+		`Replay over the current chart is incompatible at seqId ${broken.seqId}${broken.state === undefined ? "" : ` (${broken.state})`}.`,
+		`Original error: ${broken.error}`,
+		`Rewind to the compatible prefix explicitly before resuming: hyperchart_rewind runDir=${runDir} seqId=${target} mode=before`,
+		`Or use: hyperchart_rewind runDir=${runDir} to=compatible`,
+	].join("\n");
+}
+
+function formatReplayWarnings(explanation: ReplayExplanation): string[] {
+	const warnings: string[] = [];
+	if (explanation.skipped.length > 0) {
+		const states = [...new Set(explanation.skipped.map((entry) => entry.state))].slice(0, 8).join(", ");
+		warnings.push(
+			`Replay warning: ${explanation.skipped.length} durable record(s) were skipped because their states were inactive under the current chart${states.length === 0 ? "" : ` (${states})`}.`,
+		);
+	}
+	if (explanation.stale.length > 0) {
+		const states = [...new Set(explanation.stale.map((entry) => entry.state))].slice(0, 8).join(", ");
+		warnings.push(
+			`Replay warning: ${explanation.stale.length} durable record(s) have stale provenance under the current chart${states.length === 0 ? "" : ` (${states})`}.`,
+		);
+	}
+	return warnings;
 }
 
 function createModelRegistry(agentDir: string): ModelRegistry {
