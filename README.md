@@ -46,11 +46,31 @@ Project scripts:
 
 | Command | What it does |
 | --- | --- |
-| `npm run build` | Type-checks and emits declarations/build output with `tsc`. |
+| `npm run typecheck` | Type-checks source, tests, examples, extensions, and Storybook without emitting files. |
+| `npm run build` | Cleans `dist`, emits the production JavaScript/declarations, and builds the React stylesheet. |
 | `npm run test` | Runs the Vitest suite. |
-| `npm run check` | Runs build + tests. |
+| `npm run check` | Runs type-check + production build + tests. |
 
 The package is ESM (`"type": "module"`) and compiles to `dist/`.
+
+### React inspector
+
+The React entry point ships the inspector components and a compiled stylesheet. Import both:
+
+```tsx
+import { HyperchartInspectorDialog } from "pi-hyperchart/react";
+import "pi-hyperchart/react/styles.css";
+```
+
+The stylesheet contains the Tailwind utilities used by the components and the default dark/light CSS variables. Use `HyperchartUiThemeProvider` around standalone React surfaces so portaled dialogs keep the selected theme:
+
+```tsx
+<HyperchartUiThemeProvider theme={{ resolved: "light", themeName: "base" }}>
+	<HyperchartRunStrip {...props} />
+</HyperchartUiThemeProvider>
+```
+
+The inspector also accepts the same `theme` value directly. A document-level `data-theme="light"` or `data-theme="dark"` remains supported when the host owns the portal root. Override the `--bg-*`, `--text-*`, `--border-*`, and `--hc-*` variables to integrate with a host theme.
 
 ## Quick start: author a chart
 

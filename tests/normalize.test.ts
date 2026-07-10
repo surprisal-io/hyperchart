@@ -102,6 +102,49 @@ describe("normalizeChartConfig", () => {
 		expect(analyze.action.uid.state).toBe("review.analyze");
 	});
 
+	it("rejects onDone cycles in the enter-resolution chain", () => {
+		const result = normalizeChartConfig({
+			id: "enter-cycle",
+			initial: "a",
+			states: {
+				a: compound({ initial: "af", onDone: "b", states: { af: final() } }),
+				b: compound({ initial: "bf", onDone: "a", states: { bf: final() } }),
+			},
+		});
+
+		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("expected diagnostics");
+		expect(result.diagnostics.map((d) => d.code)).toContain("ON_DONE_CYCLE");
+	});
+
+	it("accepts onDone chains that settle on an action leaf", () => {
+		const result = normalizeChartConfig({
+			id: "enter-chain",
+			initial: "a",
+			states: {
+				a: compound({
+					initial: "work",
+					onDone: "b",
+					states: {
+						work: { kind: "state" as const, action: agent("worker"), transitions: { OK: "af" } },
+						af: final(),
+					},
+				}),
+				b: compound({
+					initial: "work",
+					onDone: "done",
+					states: {
+						work: { kind: "state" as const, action: agent("worker"), transitions: { OK: "bf" } },
+						bf: final(),
+					},
+				}),
+				done: final(),
+			},
+		});
+
+		expect(result.ok).toBe(true);
+	});
+
 	it("rejects state ids with reserved characters", () => {
 		const result = normalizeChartConfig({
 			id: "bad-ids",

@@ -6,6 +6,8 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import register from "../extensions/hyperchart.js";
 import { saveRunMeta } from "../src/runtime/generic/run_dir.js";
+import { patchRunStatus } from "../src/runtime/pi/run_status.js";
+import { updateSessionProgress } from "../src/runtime/pi/session_progress.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
@@ -65,6 +67,27 @@ describe("hyperchart extension", () => {
 		expect(values).toContain(runId);
 	});
 
+	it("enriches inspected agents with defaults from subagent definitions", async () => {
+		mkdirSync(join(agentDir, "agents"), { recursive: true });
+		writeFileSync(
+			join(agentDir, "agents", "worker.md"),
+			"---\nmodel: anthropic/claude-sonnet\nthinking: high\ntools:\n  - read\n  - grep\n---\nWorker prompt\n",
+			"utf8",
+		);
+		const chartPath = writeChart("inspect-defaults");
+		const tool = registeredTool("hyperchart_inspect");
+		const { ctx } = commandContext(projectDir);
+
+		const result = await tool.execute("tool-call", { chartPath }, new AbortController().signal, () => undefined, ctx);
+		const details = result.details as { states: Array<Record<string, unknown>> };
+
+		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+			model: "anthropic/claude-sonnet",
+			thinking: "high",
+			tools: ["read", "grep"],
+		});
+	});
+
 	it("keeps view as the shortcut for opening the latest run", async () => {
 		const runId = "current-run";
 		const runDir = createRun(runId, projectDir, writeChart("current"));
@@ -73,6 +96,40 @@ describe("hyperchart extension", () => {
 		await registeredCommand().handler("view", ctx);
 
 		expect(notifications).toContainEqual({ message: `Run ${runId}: ${runDir}`, type: "info" });
+	});
+
+	it("returns a runtime-enriched inspector model for concrete run dirs", async () => {
+		const runId = "runtime-inspect-run";
+		const runDir = createRun(runId, projectDir, writeChart("runtime-inspect"));
+		const uid = { chart: "demo", state: "work", action: "agent" };
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			[
+				{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 1, timestamp: 1 },
+				{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, timestamp: 2 },
+				{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "FAILED", error: { code: 2, stderr: "nope" } }, parentId: 2, seqId: 3, timestamp: 3 },
+			]
+				.map((record) => JSON.stringify(record))
+				.join("\n") + "\n",
+			"utf8",
+		);
+		patchRunStatus(runDir, { runId, chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] });
+		updateSessionProgress(join(runDir, "sessions"), uid, { actionName: "worker", status: "failed", error: "session failed", lastActivityAt: 4 });
+		const tool = registeredTool("hyperchart_run_inspect");
+		const { ctx } = commandContext(projectDir);
+
+		const result = await tool.execute("tool-call", { runDir: runId }, new AbortController().signal, () => undefined, ctx);
+		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; states: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }> };
+
+		expect(details.mode).toBe("run");
+		expect(details.args).toEqual({ topic: "wire runtime" });
+		expect(details.issues?.map((issue) => issue.kind)).toEqual(["run_failed", "replay_warning"]);
+		expect(details.states.find((state) => state.id === "work")?.issues).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: "action_failed", message: "Script exited with code 2: nope" }),
+				expect.objectContaining({ kind: "session_failed", message: "session failed" }),
+			]),
+		);
 	});
 
 	it("does not import path-like or foreign run specs through the top-level fallback", async () => {

@@ -3,7 +3,7 @@
 		"target": "ES2022",
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
-		"lib": ["ES2022"],
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
 		"types": ["node", "vitest/globals"],
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
@@ -14,7 +14,18 @@
 		"rootDir": ".",
 		"outDir": "dist",
 		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true
+		"forceConsistentCasingInFileNames": true,
+		"jsx": "react-jsx"
 	},
-	"include": ["src/**/*.ts", "examples/**/*.ts", "tests/**/*.ts", "extensions/**/*.ts", ".pi/hypercharts/**/*.ts"]
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.tsx",
+		"examples/**/*.ts",
+		"tests/**/*.ts",
+		"tests/**/*.tsx",
+		"extensions/**/*.ts",
+		".pi/hypercharts/**/*.ts",
+		".storybook/**/*.ts",
+		".storybook/**/*.tsx"
+	]
 }

@@ -1,7 +1,11 @@
 node_modules/
 dist/
+storybook-static/
 .DS_Store
+tla/.cache/
 
 .pi/hypercharts/runs/
 .pi/hypercharts/artifacts/
 .pi-subagents/
+tla/MCTrace*
+tla/trace/sample-run.jsonl

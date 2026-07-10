@@ -82,8 +82,13 @@ export type { InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
 export { inspectChartAst, inspectChartModuleSync, parseChartModuleSync } from "./core/inspect.js";
+export { hyperchartSource, hyperchartStateSources } from "./core/source.js";
 export type {
+	HyperchartInspectAgentDefaults,
 	HyperchartInspectArtifact,
+	HyperchartInspectBranch,
+	HyperchartInspectEnv,
+	HyperchartInspectGuard,
 	HyperchartInspectInput,
 	HyperchartInspectOnReenter,
 	HyperchartInspectRef,

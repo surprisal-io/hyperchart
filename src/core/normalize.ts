@@ -101,8 +101,14 @@ function toChartAst(input: unknown, diagnostics: AuthoringDiagnostic[], source: 
 		);
 	}
 	validateTargets(states, diagnostics, source);
-	validateInputs(states, typeof initial === "string" ? initial : "", diagnostics, source);
-	validateDominatedRefs(states, typeof initial === "string" ? initial : "", diagnostics, source);
+	const beforeCycles = diagnostics.length;
+	validateEnterCycles(states, diagnostics, source);
+	// Input and domination analysis walk the same enter-resolution chain (inputEntryTargets) and
+	// would recurse without bound on a cyclic one — a found cycle makes them unrunnable.
+	if (diagnostics.length === beforeCycles) {
+		validateInputs(states, typeof initial === "string" ? initial : "", diagnostics, source);
+		validateDominatedRefs(states, typeof initial === "string" ? initial : "", diagnostics, source);
+	}
 
 	if (diagnostics.length > 0) return undefined;
 	return deepFreeze({
@@ -596,6 +602,54 @@ function validateTargets(
 			);
 		}
 	}
+}
+
+// Entering a state must settle on leaves. The projection resolves an entry recursively
+// (enterState): compounds and regions drill into their initial, parallels enter every region,
+// and a final child immediately completes its compound through onDone — so initial/onDone hops
+// form a resolution chain, and a cycle in it (A.onDone -> B, B drills to a final, B.onDone -> A)
+// makes the projection recurse without bound. Maps break the chain (their placeholder rests
+// until spawn), finals in regions/maps rest for the join.
+function validateEnterCycles(
+	states: Record<StatePath, StateAst>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const successors = (path: StatePath): StatePath[] => {
+		const node = states[path];
+		if (node === undefined) return [];
+		if (node.kind === "compound" || node.kind === "region") return [`${path}.${node.initial}`];
+		if (node.kind === "parallel") return node.regions.map((region) => `${path}.${region}`);
+		if (node.kind === "final" && node.parent !== undefined) {
+			const container = states[node.parent];
+			if (container?.kind === "compound") {
+				return [container.parent === undefined ? container.onDone : `${container.parent}.${container.onDone}`];
+			}
+		}
+		return [];
+	};
+	const settled = new Set<StatePath>();
+	const entering = new Set<StatePath>();
+	const visit = (path: StatePath, trail: StatePath[]): void => {
+		if (settled.has(path)) return;
+		if (entering.has(path)) {
+			const cycle = [...trail.slice(trail.indexOf(path)), path];
+			diagnostics.push(
+				diagnostic(
+					"ON_DONE_CYCLE",
+					`Entering '${path}' never settles: the initial/onDone chain loops (${cycle.join(" -> ")}).`,
+					statePointer(path),
+					source,
+				),
+			);
+			return;
+		}
+		entering.add(path);
+		for (const next of successors(path)) visit(next, [...trail, path]);
+		entering.delete(path);
+		settled.add(path);
+	};
+	for (const path of Object.keys(states)) visit(path, []);
 }
 
 function validateInputs(
