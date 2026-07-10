@@ -133,9 +133,9 @@ const longPrompt = [
 	"List every touched file with one short reason per file.",
 	"Explain how the empty states should behave in the inspector panel.",
 	"Call out when a section should not render at all.",
-	"Describe the More/Less behavior for text blocks.",
-	"Keep the collapsed block clean: no scrollbar when content is clipped.",
-	"After expanding, allow scroll only if the expanded content is still too tall.",
+	"Describe when Open full appears for truncated text blocks.",
+	"Keep the preview clean by rendering only the bounded excerpt.",
+	"Mount the complete text only after Open full is selected.",
 	"Finish with the exact verification commands that passed.",
 ].join("\n");
 
@@ -428,7 +428,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "agent",
 		title: "Rich agent",
-		description: "Agent card, short full prompt that fits without More/Less, runtime facts, transitions, and visits.",
+		description: "Agent card, short prompt that fits without Open full, runtime facts, transitions, and visits.",
 		chart: panelChart("inspector-rich-agent", "rich-agent", {
 			"rich-agent": {
 				kind: "state",
@@ -514,8 +514,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "agent",
 		title: "Long prompt",
-		description:
-			"Prompt is taller than the collapsed block, shows More, and fits after expanding without needing full-screen mode.",
+		description: "Prompt exceeds its preview, shows Open full, and does not mount the complete text initially.",
 		chart: panelChart("inspector-long-prompt", "long-prompt", {
 			"long-prompt": { kind: "state", action: agent("writer", { task: longPrompt }), transitions: { DONE: "done" } },
 			done: final(),

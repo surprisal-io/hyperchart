@@ -12,7 +12,7 @@ import {
 	stressRun,
 	transitionEdgeRun,
 } from "../fixtures/hyperchart-board-fixtures.js";
-import { BoardPage, BoardSection, GraphTile, RunStripBoardInner } from "./components/index.js";
+import { BoardPage, BoardSection, ContentPreviewBoard, GraphTile, RunStripBoardInner } from "./components/index.js";
 import { singleStateRun } from "./components/singleStateRun.js";
 
 const meta = {
@@ -28,6 +28,10 @@ type Story = StoryObj;
 
 export const RunStripStates: Story = {
 	render: () => <RunStripBoardInner />,
+};
+
+export const ContentPreviewStates: Story = {
+	render: () => <ContentPreviewBoard />,
 };
 
 export const CardAtlas: Story = {
