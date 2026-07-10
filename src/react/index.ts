@@ -25,7 +25,12 @@ export {
 	runningHyperchartStates,
 	summarizeHyperchartProgress,
 } from "./hyperchart-display.js";
-export { hyperchartRunFromInfo, hyperchartRunFromInspectResult, hyperchartRunFromRuntime, hyperchartRunFromToolDetails } from "../host/adapters.js";
+export {
+	hyperchartRunFromInfo,
+	hyperchartRunFromInspectResult,
+	hyperchartRunFromRuntime,
+	hyperchartRunFromToolDetails,
+} from "../host/adapters.js";
 export type {
 	HyperchartRunFromInspectOptions,
 	HyperchartRunFromRuntimeOptions,

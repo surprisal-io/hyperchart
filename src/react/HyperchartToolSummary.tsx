@@ -24,14 +24,20 @@ function stringArg(value: unknown): string | undefined {
 
 function chartNameFromArgs(args?: Record<string, unknown>): string | undefined {
 	const chartPath = stringArg(args?.chartPath);
-	return stringArg(args?.chartName) ?? chartPath
-		?.split(/[\\/]/)
-		.pop()
-		?.replace(/\.chart\.[jt]s$/, "")
-		.replace(/\.[jt]s$/, "");
+	return (
+		stringArg(args?.chartName) ??
+		chartPath
+			?.split(/[\\/]/)
+			.pop()
+			?.replace(/\.chart\.[jt]s$/, "")
+			.replace(/\.[jt]s$/, "")
+	);
 }
 
-function persistedRun(args: Record<string, unknown> | undefined, runs: HyperchartRunInfo[]): HyperchartRunInfo | undefined {
+function persistedRun(
+	args: Record<string, unknown> | undefined,
+	runs: HyperchartRunInfo[],
+): HyperchartRunInfo | undefined {
 	const runId = stringArg(args?.runId) ?? stringArg(args?.runDir);
 	if (runId) {
 		const byId = runs.find((run) => run.runId === runId || runId.endsWith(`/${run.runId}`));
@@ -39,8 +45,10 @@ function persistedRun(args: Record<string, unknown> | undefined, runs: Hyperchar
 	}
 	const chartName = chartNameFromArgs(args);
 	if (chartName) {
-		return runs.find((run) => run.chartName === chartName && run.status === "running")
-			?? runs.find((run) => run.chartName === chartName);
+		return (
+			runs.find((run) => run.chartName === chartName && run.status === "running") ??
+			runs.find((run) => run.chartName === chartName)
+		);
 	}
 	return runs.find((run) => run.status === "running") ?? runs[0];
 }
@@ -60,9 +68,13 @@ export function HyperchartToolSummary({
 	runs = [],
 	onOpenRun,
 }: HyperchartToolSummaryProps) {
-	const inspected = useMemo(() => hyperchartRunFromToolDetails(details, {
-		status: status === "error" ? "failed" : status === "running" ? "running" : "completed",
-	}), [details, status]);
+	const inspected = useMemo(
+		() =>
+			hyperchartRunFromToolDetails(details, {
+				status: status === "error" ? "failed" : status === "running" ? "running" : "completed",
+			}),
+		[details, status],
+	);
 	const persisted = useMemo(() => persistedRun(args, runs), [args, runs]);
 	const run = inspected ?? persisted;
 	const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -76,7 +88,9 @@ export function HyperchartToolSummary({
 		? isDefinition
 			? `${run.stateCount} states`
 			: [`${progress.done}/${progress.total} states`, usage].filter(Boolean).join(" · ")
-		: status === "running" ? "waiting…" : "not found";
+		: status === "running"
+			? "waiting…"
+			: "not found";
 	const open = () => {
 		if (!run) return;
 		if (!isDefinition && onOpenRun) onOpenRun(run.runId);
@@ -93,31 +107,36 @@ export function HyperchartToolSummary({
 				data-testid={toolName === "hyperchart_inspect" ? "inspected-hyperchart-graph-snippet" : undefined}
 			>
 				<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-[var(--hc-blue-text)]">
-					{run?.status === "running"
-						? <ArrowPathIcon className="h-4 w-4 animate-spin" />
-						: <QueueListIcon className="h-4 w-4" />}
+					{run?.status === "running" ? (
+						<ArrowPathIcon className="h-4 w-4 animate-spin" />
+					) : (
+						<QueueListIcon className="h-4 w-4" />
+					)}
 				</span>
 				<span className="min-w-0 flex-1">
 					<span className="flex min-w-0 items-baseline gap-2">
-						<span className="truncate text-sm font-semibold text-[var(--text-primary)]" title={chartName}>{chartName}</span>
+						<span className="truncate text-sm font-semibold text-[var(--text-primary)]" title={chartName}>
+							{chartName}
+						</span>
 						<span className="shrink-0 text-[11px] text-[var(--text-muted)]">{actionLabel(toolName)}</span>
 					</span>
 					<span className="mt-0.5 block truncate text-[11px] text-[var(--text-muted)]">{meta}</span>
 					{running.length > 0 && (
 						<span className="mt-0.5 block truncate text-[11px] text-[var(--hc-blue-text)]">
-							{running.slice(0, 2).map((state) => state.id).join(", ")}
+							{running
+								.slice(0, 2)
+								.map((state) => state.id)
+								.join(", ")}
 						</span>
 					)}
 				</span>
-				{canOpen && <ArrowTopRightOnSquareIcon className="h-4 w-4 shrink-0 text-[var(--text-muted)] group-hover:text-[var(--hc-blue-text)]" />}
+				{canOpen && (
+					<ArrowTopRightOnSquareIcon className="h-4 w-4 shrink-0 text-[var(--text-muted)] group-hover:text-[var(--hc-blue-text)]" />
+				)}
 			</button>
 			{inspectorOpen && run && (
 				<Suspense fallback={null}>
-					<HyperchartInspectorDialog
-						runs={[run]}
-						selectedRunId={run.runId}
-						onClose={() => setInspectorOpen(false)}
-					/>
+					<HyperchartInspectorDialog runs={[run]} selectedRunId={run.runId} onClose={() => setInspectorOpen(false)} />
 				</Suspense>
 			)}
 		</div>
