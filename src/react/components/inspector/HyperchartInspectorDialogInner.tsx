@@ -71,39 +71,7 @@ export function HyperchartInspectorDialogInner({
 		[currentScopeId, run, showDone, showPending, showSkipped, showMapWorkers],
 	);
 
-	const graphSignature = useMemo(
-		() =>
-			JSON.stringify({
-				runId: run?.runId,
-				showDone,
-				showPending,
-				showSkipped,
-				showMapWorkers,
-				scopeStack,
-				states:
-					run?.states.map((state) => ({
-						id: state.id,
-						type: state.type,
-						agent: state.agent,
-						final: state.final,
-						status: state.status,
-						startedAt: state.startedAt,
-						subProgress: state.subProgress,
-						retry: state.retry,
-						attempts: state.attempts,
-						validationAttempts: state.validationAttempts,
-						visits: state.visits,
-						mapConfig: state.mapConfig,
-						mapKey: state.mapKey,
-						mapItemLabel: state.mapItemLabel,
-						parallelConfig: state.parallelConfig,
-						reads: state.reads,
-						transitions: state.transitions,
-					})) ?? [],
-			}),
-		[run, scopeStack, showDone, showPending, showSkipped, showMapWorkers],
-	);
-	const graph = useGraphLayout(run, visibleIds, graphSignature);
+	const graph = useGraphLayout(run, visibleIds);
 	const selectedState =
 		selectedStateId && visibleIds.has(selectedStateId)
 			? (run?.states.find((state) => state.id === selectedStateId) ?? null)
@@ -129,7 +97,7 @@ export function HyperchartInspectorDialogInner({
 			<div
 				data-hyperchart-root
 				data-theme={resolved}
-				className={`fixed inset-0 z-[70] flex ${isMobile ? "items-stretch justify-stretch p-0" : "items-center justify-center p-2 md:p-5"}`}
+				className={`fixed inset-0 z-[70] flex ${isMobile ? "items-stretch justify-stretch p-0" : "items-center justify-center p-5"}`}
 				data-testid="hyperchart-inspector-dialog"
 			>
 				<button
@@ -147,7 +115,9 @@ export function HyperchartInspectorDialogInner({
 					aria-labelledby={titleId}
 					className={`relative flex w-full flex-col overflow-hidden border border-[var(--border-secondary)] bg-[var(--bg-secondary)] shadow-2xl ${isMobile ? "h-[100svh] max-h-[100svh] overscroll-contain rounded-none border-0" : "h-[94vh] max-w-[1500px] rounded-2xl"}`}
 				>
-					<header className="flex flex-wrap items-center gap-2 border-b border-[var(--border-primary)] px-3 py-2 md:px-4">
+					<header
+						className={`flex flex-wrap items-center gap-2 border-b border-[var(--border-primary)] py-2 ${isMobile ? "px-3" : "px-4"}`}
+					>
 						<FolderIcon className="h-5 w-5 text-[var(--hc-blue-text)]" aria-hidden="true" />
 						<div className="min-w-0 flex-1">
 							<div className="flex min-w-0 items-center gap-2">
@@ -188,7 +158,7 @@ export function HyperchartInspectorDialogInner({
 							ref={closeButtonRef}
 							type="button"
 							onClick={onClose}
-							className="rounded p-2 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] md:p-1"
+							className={`rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${isMobile ? "p-2" : "p-1"}`}
 							aria-label="Close hyperchart inspector"
 						>
 							<XMarkIcon className="h-5 w-5" aria-hidden="true" />
@@ -212,10 +182,10 @@ export function HyperchartInspectorDialogInner({
 					)}
 
 					<div
-						className={`grid min-h-0 flex-1 grid-cols-1 ${isMobile ? "grid-rows-[minmax(220px,45svh)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_390px]"}`}
+						className={`grid min-h-0 flex-1 ${isMobile ? "grid-cols-1 grid-rows-[minmax(220px,45svh)_minmax(0,1fr)]" : "grid-cols-[minmax(0,1fr)_390px]"}`}
 					>
 						<main
-							className={`flex min-h-0 flex-col border-b border-[var(--border-primary)] ${isMobile ? "" : "lg:border-b-0 lg:border-r"}`}
+							className={`flex min-h-0 flex-col border-[var(--border-primary)] ${isMobile ? "border-b" : "border-r"}`}
 						>
 							<div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-primary)] px-3 py-2 text-xs">
 								<div className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-1.5 py-1 text-[11px]">
@@ -315,7 +285,7 @@ export function HyperchartInspectorDialogInner({
 							</div>
 							<div className="min-h-0 flex-1 bg-[var(--bg-primary)]">
 								<ReactFlow
-									key={`${run.runId}:${currentScopeId ?? "root"}`}
+									key={run.runId}
 									nodes={graph.nodes}
 									edges={graph.edges}
 									nodeTypes={nodeTypes}

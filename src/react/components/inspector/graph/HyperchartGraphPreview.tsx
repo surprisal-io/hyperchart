@@ -12,20 +12,7 @@ const edgeTypes = { transition: HyperchartTransitionEdge };
 export function HyperchartGraphPreview({ run, className = "h-72" }: { run: HyperchartRunInfo; className?: string }) {
 	const { resolved } = useHyperchartTheme();
 	const visibleIds = useMemo(() => new Set(run.states.map((state) => state.id)), [run]);
-	const graphSignature = useMemo(
-		() =>
-			JSON.stringify({
-				runId: run.runId,
-				states: run.states.map((state) => ({
-					id: state.id,
-					type: state.type,
-					status: state.status,
-					transitions: state.transitions,
-				})),
-			}),
-		[run],
-	);
-	const graph = useGraphLayout(run, visibleIds, graphSignature);
+	const graph = useGraphLayout(run, visibleIds);
 	return (
 		<div
 			data-hyperchart-root

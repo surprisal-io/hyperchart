@@ -91,16 +91,31 @@ function nodesFromPositions(
 	return input.visibleStates.map((state) => {
 		const displayType = effectiveDisplayType(state, input.stateById);
 		const childPreview = childPreviewForState(state, allStates, input.stateById);
+		const size = graphNodeSize({ type: displayType ?? state.type });
 		return {
 			id: state.id,
 			type: "hyperchartState",
 			position: positions.get(state.id) ?? { x: 36, y: 36 },
+			width: size.width,
+			height: size.height,
 			data: {
 				state,
 				...(displayType === undefined ? {} : { displayType }),
 				...(childPreview === undefined ? {} : { childPreview }),
 			},
 		};
+	});
+}
+
+export function graphLayoutSignature(run: HyperchartRunInfo, visibleIds: Set<string>): string {
+	const input = graphInput(run, visibleIds);
+	return JSON.stringify({
+		runId: run.runId,
+		nodes: input.visibleStates.map((state) => ({
+			id: state.id,
+			type: effectiveDisplayType(state, input.stateById) ?? state.type ?? "agent",
+		})),
+		edges: input.useStateTransitions ? input.transitionEdges : [],
 	});
 }
 
@@ -248,15 +263,22 @@ function routesFromGraph(graph: GraphLayout): ElkEdgeRoute {
 	return routes;
 }
 
-export function useGraphLayout(
-	run: HyperchartRunInfo | null | undefined,
-	visibleIds: Set<string>,
-	signature: string,
-): GraphLayout {
+function positionsForUpdatedGraph(previous: GraphLayout, fallback: GraphLayout): Map<string, NodePosition> {
+	const positions = positionsFromGraph(fallback);
+	for (const node of previous.nodes) {
+		if (positions.has(node.id)) positions.set(node.id, node.position);
+	}
+	return positions;
+}
+
+export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibleIds: Set<string>): GraphLayout {
 	const fallback = useMemo(() => (run ? buildGraph(run, visibleIds) : { nodes: [], edges: [] }), [run, visibleIds]);
+	const signature = useMemo(() => (run ? graphLayoutSignature(run, visibleIds) : ""), [run, visibleIds]);
 	const [graph, setGraph] = useState<GraphLayout>(fallback);
 	const graphRef = useRef(graph);
 	const fallbackRef = useRef(fallback);
+	const layoutInputRef = useRef({ run, visibleIds });
+	layoutInputRef.current = { run, visibleIds };
 
 	useEffect(() => {
 		graphRef.current = graph;
@@ -276,19 +298,24 @@ export function useGraphLayout(
 			setGraph(fallback);
 			return;
 		}
-		setGraph(buildGraph(run, visibleIds, positionsFromGraph(previous), routesFromGraph(previous)));
+		setGraph(buildGraph(run, visibleIds, positionsForUpdatedGraph(previous, fallback), routesFromGraph(previous)));
 	}, [fallback, run, visibleIds]);
 
 	useEffect(() => {
-		void signature;
 		let cancelled = false;
-		if (!run)
+		const requested = layoutInputRef.current;
+		if (!requested.run)
 			return () => {
 				cancelled = true;
 			};
-		buildElkGraph(run, visibleIds)
-			.then((nextGraph) => {
-				if (!cancelled) setGraph(nextGraph);
+		buildElkGraph(requested.run, requested.visibleIds)
+			.then((layoutGraph) => {
+				if (cancelled) return;
+				const latest = layoutInputRef.current;
+				if (!latest.run || graphLayoutSignature(latest.run, latest.visibleIds) !== signature) return;
+				setGraph(
+					buildGraph(latest.run, latest.visibleIds, positionsFromGraph(layoutGraph), routesFromGraph(layoutGraph)),
+				);
 			})
 			.catch(() => {
 				if (!cancelled && graphRef.current.nodes.length === 0) setGraph(fallbackRef.current);
@@ -296,7 +323,7 @@ export function useGraphLayout(
 		return () => {
 			cancelled = true;
 		};
-	}, [run, signature, visibleIds]);
+	}, [signature]);
 	return graph;
 }
 
@@ -310,6 +337,8 @@ export function nodeMiniMapColor(node: Node): string {
 			return "var(--accent-green)";
 		case "failed":
 			return "var(--accent-red)";
+		case "stale":
+			return "var(--accent-yellow)";
 		case "skipped":
 			return EDGE_NEUTRAL_COLOR;
 		default:
