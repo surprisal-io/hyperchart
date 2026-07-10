@@ -4,6 +4,7 @@ import {
 	CircleStackIcon,
 	EllipsisHorizontalIcon,
 	FolderIcon,
+	PlayIcon,
 	ArrowTopRightOnSquareIcon,
 } from "@heroicons/react/24/outline";
 import { StatusPill } from "./components/ui/StatusPill.js";
@@ -60,13 +61,15 @@ export function HyperchartRunStrip({
 	);
 	const visibleRuns = sortedRuns.slice(0, RUN_STRIP_VISIBLE_RUNS);
 	const moreRuns = sortedRuns.slice(RUN_STRIP_VISIBLE_RUNS);
-	const moreCount = moreRuns.length + hypercharts.length;
+	const moreCount = moreRuns.length;
+	const hasChartActions = hypercharts.length > 0;
+	const canOpenMore = moreCount > 0 || hasChartActions;
 	const run = useMemo(() => {
 		if (selectedRunId) return runs.find((candidate) => candidate.runId === selectedRunId) ?? sortedRuns[0];
 		return runs.find((candidate) => candidate.status === "running") ?? sortedRuns[0];
 	}, [runs, selectedRunId, sortedRuns]);
 
-	if (!run && hypercharts.length === 0) return null;
+	if (!run) return null;
 
 	const progress = summarizeHyperchartProgress(run);
 	const running = runningHyperchartStates(run);
@@ -185,20 +188,27 @@ export function HyperchartRunStrip({
 							))}
 						</div>
 
-						{moreCount > 0 && (
+						{canOpenMore && (
 							<button
 								type="button"
 								onClick={() => setMoreOpen((value) => !value)}
 								className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] ${moreOpen ? "border-blue-500/60 bg-blue-500/10 text-[var(--hc-blue-text)]" : "border-[var(--border-secondary)] text-[var(--text-secondary)] hover:border-blue-500/40 hover:text-[var(--hc-blue-text)]"}`}
 								aria-expanded={moreOpen}
-								title="Show older runs and chart actions"
+								title={moreCount > 0 ? "Show older runs and chart actions" : "Run a hyperchart"}
 							>
-								<EllipsisHorizontalIcon className="h-3 w-3" aria-hidden="true" /> More{" "}
-								{moreCount > 0 ? `(${moreCount})` : ""}
+								{moreCount > 0 ? (
+									<>
+										<EllipsisHorizontalIcon className="h-3 w-3" aria-hidden="true" /> More ({moreCount})
+									</>
+								) : (
+									<>
+										<PlayIcon className="h-3 w-3" aria-hidden="true" /> Run…
+									</>
+								)}
 							</button>
 						)}
 
-						{moreOpen && moreCount > 0 && (
+						{moreOpen && canOpenMore && (
 							<MoreHyperchartsDialog
 								hypercharts={hypercharts}
 								runs={moreRuns}

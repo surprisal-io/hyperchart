@@ -1,7 +1,8 @@
 import { readdirSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
+const CONFIG_DIR_NAME = ".pi";
 export const HYPERCHARTS_DIR_NAME = "hypercharts";
 export const RUNS_DIR_NAME = "runs";
 
@@ -9,11 +10,15 @@ export function getProjectHyperchartsDir(cwd: string): string {
 	return join(findNearestProjectRoot(cwd) ?? cwd, CONFIG_DIR_NAME, HYPERCHARTS_DIR_NAME);
 }
 
-export function getHyperchartRunsRoot(agentDir: string = getAgentDir()): string {
+function defaultAgentDir(): string {
+	return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), CONFIG_DIR_NAME, "agent");
+}
+
+export function getHyperchartRunsRoot(agentDir: string = defaultAgentDir()): string {
 	return join(agentDir, HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME);
 }
 
-export function resolveHyperchartRunDir(spec: string, cwd: string, agentDir: string = getAgentDir()): string {
+export function resolveHyperchartRunDir(spec: string, cwd: string, agentDir: string = defaultAgentDir()): string {
 	if (isPathLike(spec)) return resolve(cwd, spec);
 	return join(getHyperchartRunsRoot(agentDir), spec);
 }

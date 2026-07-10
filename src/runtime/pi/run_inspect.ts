@@ -1,12 +1,12 @@
 import { basename, resolve } from "node:path";
-import { inspectChartAst, type HyperchartInspectAgentDefaults } from "../core/inspect.js";
-import { parseChartModule } from "../core/parser.js";
-import { JsonlLogStore } from "../runtime/generic/log_store.js";
-import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
-import { readRunStatus } from "../runtime/pi/run_status.js";
-import { readSessionProgress } from "../runtime/pi/session_progress.js";
-import { hyperchartRunFromRuntime } from "./adapters.js";
-import type { HyperchartRunInfo } from "./types.js";
+import { inspectChartAst, type HyperchartInspectAgentDefaults } from "../../core/inspect.js";
+import { parseChartModule } from "../../core/parser.js";
+import { hyperchartRunFromRuntime } from "../../host/adapters.js";
+import type { HyperchartRunInfo } from "../../host/models.js";
+import { JsonlLogStore } from "../generic/log_store.js";
+import { loadRunMeta, type RunMeta } from "../generic/run_dir.js";
+import { readRunStatus } from "./run_status.js";
+import { readSessionProgress } from "./session_progress.js";
 
 export type HyperchartRunFromRunDirOptions = {
 	meta?: RunMeta;

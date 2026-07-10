@@ -17,7 +17,7 @@ import type {
 	HyperchartRunInfo,
 	HyperchartRunStatus,
 	HyperchartStateStatus,
-} from "./types.js";
+} from "./models.js";
 
 export type HyperchartRunFromInspectOptions = {
 	runId?: string;
@@ -28,6 +28,28 @@ export type HyperchartRunFromInspectOptions = {
 	args?: Record<string, unknown>;
 	description?: string;
 };
+
+export function hyperchartRunFromInfo(
+	info: import("./models.js").HyperchartInfo,
+	options: Pick<HyperchartRunFromInspectOptions, "cwd"> = {},
+): HyperchartRunInfo | undefined {
+	if (!info.states) return undefined;
+	const updatedAt = info.updatedAt ?? Date.now();
+	return {
+		runId: `chart:${info.name}`,
+		chartName: info.name,
+		mode: "static",
+		...(info.definitionSource === undefined ? {} : { definitionSource: info.definitionSource }),
+		description: info.description,
+		status: "paused",
+		cwd: options.cwd ?? "",
+		createdAt: updatedAt,
+		updatedAt,
+		args: info.args ?? {},
+		states: info.states,
+		stateCount: info.stateCount,
+	};
+}
 
 export function hyperchartRunFromInspectResult(
 	result: HyperchartInspectResult,

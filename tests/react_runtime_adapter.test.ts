@@ -5,7 +5,7 @@ import { normalizeChartConfig } from "../src/core/normalize.js";
 import { templatePath } from "../src/core/paths.js";
 import type { ChartAst, ChartCst, StatePath } from "../src/core/types.js";
 import type { DurableLogRecord } from "../src/core/durable_events.js";
-import { hyperchartRunFromInspectResult, hyperchartRunFromRuntime, hyperchartRunFromToolDetails } from "../src/react/adapters.js";
+import { hyperchartRunFromInspectResult, hyperchartRunFromRuntime, hyperchartRunFromToolDetails } from "../src/host/adapters.js";
 import { inspectChartAst } from "../src/core/inspect.js";
 
 function ast(cst: ChartCst): ChartAst {

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createJiti } from "jiti";
 import { normalizeChartConfig } from "./normalize.js";
+import { selectChartModuleExport } from "./parser.js";
 import { inspectChartAst, type HyperchartInspectResult, type InspectChartModuleOptions } from "./inspect_ast.js";
 import type { ParsedChart } from "./types.js";
 
@@ -12,12 +13,13 @@ export function parseChartModuleSync(filePath: string, options: InspectChartModu
 	const absolutePath = resolve(filePath);
 	const jiti = createJiti(pathToFileURL(absolutePath).href, {
 		interopDefault: true,
+		moduleCache: false,
 		alias: { "pi-hyperchart": selfEntryPath() },
 	});
 	try {
 		const module = jiti(absolutePath) as Record<string, unknown>;
 		const exportName = options.exportName ?? "default";
-		return normalizeChartConfig(module[exportName], { path: absolutePath, exportName });
+		return normalizeChartConfig(selectChartModuleExport(module, exportName), { path: absolutePath, exportName });
 	} catch (cause) {
 		return {
 			ok: false,

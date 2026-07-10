@@ -11,6 +11,8 @@
 		"src/tui",
 		"src/utils",
 		"src/index.ts",
+		"src/command.ts",
+		"src/host",
 		"src/react/*.ts",
 		"src/react/*.tsx",
 		"src/react/*.css",
@@ -24,6 +26,18 @@
 		".": {
 			"types": "./dist/src/index.d.ts",
 			"import": "./dist/src/index.js"
+		},
+		"./command": {
+			"types": "./dist/src/command.d.ts",
+			"import": "./dist/src/command.js"
+		},
+		"./host": {
+			"types": "./dist/src/host/index.d.ts",
+			"import": "./dist/src/host/index.js"
+		},
+		"./pi-host": {
+			"types": "./dist/src/runtime/pi/host_adapter.d.ts",
+			"import": "./dist/src/runtime/pi/host_adapter.js"
 		},
 		"./react": {
 			"types": "./dist/src/react/index.d.ts",

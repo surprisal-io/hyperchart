@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import register from "../extensions/hyperchart.js";
+import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../src/command.js";
 import { saveRunMeta } from "../src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../src/runtime/pi/run_status.js";
 import { updateSessionProgress } from "../src/runtime/pi/session_progress.js";
@@ -55,6 +56,41 @@ afterEach(() => {
 });
 
 describe("hyperchart extension", () => {
+	it("accepts commands from another pi extension over the shared event bus", async () => {
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		let commandRequest: ((request: HyperchartCommandRequest) => void) | undefined;
+		const pi = {
+			registerCommand: () => {},
+			registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			events: {
+				on: (event: string, handler: (request: HyperchartCommandRequest) => void) => {
+					if (event === HYPERCHART_COMMAND_EVENT) commandRequest = handler;
+				},
+				emit: () => {},
+			},
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const { ctx, notifications } = commandContext(projectDir);
+		await sessionStart?.({ reason: "startup" }, ctx);
+
+		const handled = await requestHyperchartCommand({
+			emit(event, payload) {
+				if (event === HYPERCHART_COMMAND_EVENT) commandRequest?.(payload as HyperchartCommandRequest);
+			},
+		}, "status");
+
+		expect(handled).toBe(true);
+		expect(notifications).toContainEqual({ message: "No hyperchart runs", type: "info" });
+		await expect(requestHyperchartCommand({
+			emit(event, payload) {
+				if (event === HYPERCHART_COMMAND_EVENT) commandRequest?.(payload as HyperchartCommandRequest);
+			},
+		}, "resume")).rejects.toThrow("resume requires a runId");
+	});
+
 	it("offers documented top-level commands and run ids with an empty prefix", () => {
 		const runId = "demo-run";
 		createRun(runId, projectDir, writeChart("demo"));
@@ -225,6 +261,7 @@ function registeredCommand(): HyperchartCommand {
 		},
 		registerTool: () => {},
 		on: () => {},
+		events: { on: () => {}, emit: () => {} },
 	} as unknown as ExtensionAPI;
 	register(pi);
 	if (command === undefined) throw new Error("hyperchart command was not registered");
@@ -237,6 +274,7 @@ function registeredTool(name: string): HyperchartTool {
 		registerCommand: () => {},
 		registerTool: (tool: HyperchartTool) => tools.push(tool),
 		on: () => {},
+		events: { on: () => {}, emit: () => {} },
 	} as unknown as ExtensionAPI;
 	register(pi);
 	const tool = tools.find((entry) => entry.name === name);

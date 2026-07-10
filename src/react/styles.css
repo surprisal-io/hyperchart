@@ -1,5 +1,7 @@
 @import "@xyflow/react/dist/style.css";
-@import "tailwindcss";
+@layer theme, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
 @source "./*.{ts,tsx}";
 @source "./components/**/*.{ts,tsx}";
 @source "./support/**/*.{ts,tsx}";

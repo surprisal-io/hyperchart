@@ -28,7 +28,7 @@ export async function parseChartModule(filePath: string, options: ParseChartModu
 		}
 		const module = (await import(url.href)) as Record<string, unknown>;
 		const exportName = options.exportName ?? "default";
-		return parseChartExport(module[exportName], source);
+		return parseChartExport(selectChartModuleExport(module, exportName), source);
 	} catch (cause) {
 		return {
 			ok: false,
@@ -42,6 +42,18 @@ export async function parseChartModule(filePath: string, options: ParseChartModu
 			],
 		};
 	}
+}
+
+export function selectChartModuleExport(module: Record<string, unknown>, exportName: string): unknown {
+	let value = module[exportName];
+	if (exportName !== "default") return value;
+	while (isDefaultOnlyModule(value)) value = value.default;
+	return value;
+}
+
+function isDefaultOnlyModule(value: unknown): value is { default: unknown } {
+	return typeof value === "object" && value !== null && !Array.isArray(value) &&
+		Object.keys(value).length === 1 && Object.hasOwn(value, "default");
 }
 
 export function parseChartExport(value: unknown, source: ChartSource = {}): ParsedChart {

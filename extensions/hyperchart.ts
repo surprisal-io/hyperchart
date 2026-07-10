@@ -17,7 +17,6 @@ import { fileURLToPath } from "node:url";
 import {
 	defineTool,
 	type ExtensionAPI,
-	type ExtensionCommandContext,
 	type ExtensionContext,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
@@ -67,7 +66,8 @@ import {
 	type RunHistoryItem,
 } from "../src/tui/components.js";
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
-import { hyperchartRunFromRunDir } from "../src/react/run_inspect.js";
+import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
+import { HYPERCHART_COMMAND_EVENT, type HyperchartCommandRequest } from "../src/command.js";
 
 type RunSnapshot = {
 	runId: string;
@@ -253,6 +253,7 @@ function filterCompletions(items: readonly AutocompleteItem[], current: string):
 }
 
 export default function register(pi: ExtensionAPI) {
+	let currentCtx: HyperchartContext | undefined;
 	pi.registerCommand("hyperchart", {
 		description: "Run and inspect hyperchart workflows",
 		handler: async (args, ctx) => dispatch(args, ctx),
@@ -262,7 +263,15 @@ export default function register(pi: ExtensionAPI) {
 	pi.registerTool(hyperchartInspectTool);
 	pi.registerTool(hyperchartRunInspectTool);
 	pi.registerTool(hyperchartRewindTool);
+	pi.events.on(HYPERCHART_COMMAND_EVENT, (payload) => {
+		const request = payload as HyperchartCommandRequest;
+		request.claim(async () => {
+			if (currentCtx === undefined) throw new Error("Hyperchart session context is not ready");
+			await dispatch(request.args, currentCtx, false);
+		});
+	});
 	pi.on("session_start", async (event, ctx) => {
+		currentCtx = ctx;
 		if (event.reason === "reload" || event.reason === "startup" || event.reason === "resume") {
 			await restoreRunWidgets(ctx);
 		}
@@ -777,7 +786,7 @@ function safeBackupLabel(value: string): string {
 	return value.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80);
 }
 
-async function dispatch(args: string, ctx: ExtensionCommandContext): Promise<void> {
+async function dispatch(args: string, ctx: HyperchartContext, notifyErrors = true): Promise<void> {
 	const tokens = tokenize(args);
 	const command = tokens.shift();
 	try {
@@ -824,15 +833,16 @@ async function dispatch(args: string, ctx: ExtensionCommandContext): Promise<voi
 				ctx.ui.notify(`Unknown hyperchart command '${command}'. ${HYPERCHART_USAGE}`, "info");
 		}
 	} catch (error) {
+		if (!notifyErrors) throw error;
 		ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 	}
 }
 
-async function runCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function runCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	await startHyperchartRun(parseRunOptions(tokens), ctx);
 }
 
-async function runsCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function runsCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	const options = parseRunsOptions(tokens);
 	const entries = await loadRunHistory({ cwd: ctx.cwd, limit: options.limit });
 	if (entries.length === 0) {
@@ -855,7 +865,7 @@ async function runsCommand(tokens: string[], ctx: ExtensionCommandContext): Prom
 	await executeRunHistoryAction(action, ctx);
 }
 
-async function resumeCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function resumeCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	const options = parseResumeOptions(tokens);
 	await resumeRun(
 		options.runId,
@@ -864,13 +874,13 @@ async function resumeCommand(tokens: string[], ctx: ExtensionCommandContext): Pr
 	);
 }
 
-async function restartCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function restartCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	const runId = tokens[0];
 	if (runId === undefined) throw new Error("restart requires a runId");
 	await restartRun(runId, ctx);
 }
 
-async function deleteCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function deleteCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	const runId = tokens[0];
 	if (runId === undefined) throw new Error("delete requires a runId");
 	await deleteRun(runId, ctx);
@@ -903,7 +913,7 @@ async function restartRun(runId: string, ctx: HyperchartContext): Promise<RunSta
 	return result;
 }
 
-async function executeRunHistoryAction(action: RunHistoryAction, ctx: ExtensionCommandContext): Promise<void> {
+async function executeRunHistoryAction(action: RunHistoryAction, ctx: HyperchartContext): Promise<void> {
 	if (action.kind === "close") return;
 	if (action.kind === "view") return viewCommand([action.runId], ctx);
 	if (action.kind === "resume") {
@@ -1071,7 +1081,7 @@ function watchRun(runDir: string): Promise<HyperchartRunStatus> {
 	});
 }
 
-async function statusCommand(ctx: ExtensionCommandContext): Promise<void> {
+async function statusCommand(ctx: HyperchartContext): Promise<void> {
 	const snapshots = await recentRunSnapshots(8);
 	const activeIds = new Set(runs.active.keys());
 	if (runs.active.size === 0 && snapshots.length === 0) {
@@ -1087,7 +1097,7 @@ async function statusCommand(ctx: ExtensionCommandContext): Promise<void> {
 	);
 }
 
-async function stopCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function stopCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	await stopRun(tokens[0], ctx);
 }
 
@@ -1108,7 +1118,7 @@ async function stopRun(runId: string | undefined, ctx: HyperchartContext): Promi
 	ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
 }
 
-async function deleteRun(runId: string, ctx: ExtensionCommandContext): Promise<void> {
+async function deleteRun(runId: string, ctx: HyperchartContext): Promise<void> {
 	const runDir = resolveHyperchartRunDir(runId, ctx.cwd);
 	const meta = loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
@@ -1129,7 +1139,7 @@ async function deleteRun(runId: string, ctx: ExtensionCommandContext): Promise<v
 	ctx.ui.notify(`Deleted hyperchart run ${runId}`, "info");
 }
 
-async function viewCommand(tokens: string[], ctx: ExtensionCommandContext): Promise<void> {
+async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	const activeRun = runs.get(tokens[0]);
 	const run = activeRun ?? (await resolveRunForView(tokens[0], ctx.cwd));
 	if (run === undefined) {

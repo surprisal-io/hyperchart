@@ -29,7 +29,7 @@ import {
 	hyperchartRunFromRuntime,
 	type HyperchartRunFromRuntimeOptions,
 	type HyperchartRuntimeSessionProgressFile,
-} from "../adapters.js";
+} from "../../host/adapters.js";
 import type { HyperchartRunInfo, HyperchartRunStatus } from "../types.js";
 import {
 	BoardPage,

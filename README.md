@@ -62,7 +62,7 @@ import { HyperchartInspectorDialog } from "pi-hyperchart/react";
 import "pi-hyperchart/react/styles.css";
 ```
 
-The stylesheet contains the Tailwind utilities used by the components and the default dark/light CSS variables. Use `HyperchartUiThemeProvider` around standalone React surfaces so portaled dialogs keep the selected theme:
+The stylesheet contains the Tailwind theme/utilities used by the components and the default dark/light CSS variables. It omits Tailwind Preflight, so importing it does not reset host element styles. Use `HyperchartUiThemeProvider` around standalone React surfaces so portaled dialogs keep the selected theme:
 
 ```tsx
 <HyperchartUiThemeProvider theme={{ resolved: "light", themeName: "base" }}>
@@ -71,6 +71,36 @@ The stylesheet contains the Tailwind utilities used by the components and the de
 ```
 
 The inspector also accepts the same `theme` value directly. A document-level `data-theme="light"` or `data-theme="dark"` remains supported when the host owns the portal root. Override the `--bg-*`, `--text-*`, `--border-*`, and `--hc-*` variables to integrate with a host theme.
+
+### Host integration
+
+`pi-hyperchart/host` exposes harness-neutral snapshot models, runtime projections, and the `HyperchartHostAdapter` contract without loading React or filesystem-specific discovery:
+
+```ts
+import type { HyperchartHostAdapter } from "pi-hyperchart/host";
+```
+
+Harness integrations implement that contract. The bundled Pi implementation owns `.pi/hypercharts`, `PI_CODING_AGENT_DIR`, Pi run status, and Pi session progress:
+
+```ts
+import { piHyperchartHost } from "pi-hyperchart/pi-host";
+
+const snapshot = await piHyperchartHost.readSessionSnapshot(cwd, { runLimit: 50 });
+```
+
+An OpenCode integration can provide a different `HyperchartHostAdapter` with its own paths and session metadata. Hosts should transport `snapshot.hypercharts` and `snapshot.runs` unchanged instead of parsing `log.jsonl` or defining parallel run/state types.
+
+`pi-hyperchart/react` consumes those models directly through `HyperchartRunStrip`, `HyperchartInspectorDialog`, `HyperchartLaunchDialog`, and `HyperchartToolSummary`. `hyperchartRunFromInfo` converts a discovered definition into static inspector mode. `HyperchartLaunchDialog` accepts an optional JSON object and rejects free-form or scalar input before submission.
+
+`pi-hyperchart/command` lets another extension invoke the native `/hyperchart` command handler over Pi's shared event bus without a private transport protocol:
+
+```ts
+import { requestHyperchartCommand } from "pi-hyperchart/command";
+
+const handled = await requestHyperchartCommand(pi.events, "resume run-123");
+```
+
+`requestHyperchartCommand()` returns `false` when the Hyperchart Pi extension has not claimed the request. Claimed command work remains asynchronous and errors propagate to the caller.
 
 ## Quick start: author a chart
 
@@ -322,7 +352,10 @@ Important files:
 
 | Path | Role |
 | --- | --- |
-| `src/index.ts` | Public API exports. |
+| `src/index.ts` | Authoring API exports. |
+| `src/command.ts` | Cross-extension `hyperchart:command` request contract. |
+| `src/host/` | Harness-neutral host contract, canonical models, and runtime projection. |
+| `src/react/` | Host-ready React components and stylesheet. |
 | `src/core/types.ts` | Chart, state, action, template, event, and artifact types. |
 | `src/core/dsl.ts` | Authoring helpers (`agent`, `script`, `map`, `parallel`, `artifact`, `t`, etc.). |
 | `src/core/typed.ts` | Compile-time `refs<...>()` registry and typed selectors. |
@@ -331,7 +364,7 @@ Important files:
 | `src/core/machine.ts` | Pure state machine and effect production. |
 | `src/core/execution_loop.ts` | `start()` / `loop()` runner over a generic runtime. |
 | `src/runtime/generic/` | Runtime glue, log store, artifacts, guards, script runner. |
-| `src/runtime/pi/` | Current Pi adapter: agent executor, runner process, paths, prompts, status. |
+| `src/runtime/pi/` | Pi adapter: host discovery, agent executor, runner process, paths, prompts, status. |
 | `src/tui/` | Run widget, run overlay, and run-history UI used by the Pi adapter. |
 | `extensions/hyperchart.ts` | Current Pi command/tool registration. |
 | `examples/` | Example charts. |
