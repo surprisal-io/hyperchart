@@ -1,6 +1,9 @@
 import { basename, resolve } from "node:path";
-import { inspectChartAst, type HyperchartInspectAgentDefaults } from "../../core/inspect.js";
-import { parseChartModule } from "../../core/parser.js";
+import {
+	inspectChartAst,
+	parseChartModuleSync,
+	type HyperchartInspectAgentDefaults,
+} from "../../core/inspect.js";
 import { hyperchartRunFromRuntime } from "../../host/adapters.js";
 import type { HyperchartRunInfo } from "../../host/models.js";
 import { JsonlLogStore } from "../generic/log_store.js";
@@ -20,7 +23,7 @@ export async function hyperchartRunFromRunDir(
 ): Promise<HyperchartRunInfo> {
 	const absoluteRunDir = resolve(runDir);
 	const meta = options.meta ?? loadRunMeta(absoluteRunDir);
-	const parsed = await parseChartModule(
+	const parsed = parseChartModuleSync(
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
 	);

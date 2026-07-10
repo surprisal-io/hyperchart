@@ -1,6 +1,9 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPiHyperchartHost } from "../src/runtime/pi/host_adapter.js";
 
@@ -84,6 +87,53 @@ describe("Pi Hyperchart host adapter", () => {
 			if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
 			else process.env.PI_CODING_AGENT_DIR = previous;
 		}
+	});
+
+	it("loads CommonJS output stored with an mjs extension by Pi skills", async () => {
+		const projectDir = await tempDir("hyperchart-project-");
+		const agentDir = await tempDir("hyperchart-agent-");
+		const chartPath = join(projectDir, "generated.chart.mjs");
+		await writeFile(
+			chartPath,
+			'"use strict"; Object.defineProperty(exports, "__esModule", { value: true }); exports.default = { kind: "chart", id: "generated", initial: "done", states: { done: { kind: "final" } } };\n',
+			"utf8",
+		);
+		const runDir = join(agentDir, "hypercharts", "runs", "generated-run");
+		await mkdir(runDir, { recursive: true });
+		await writeFile(join(runDir, "meta.json"), JSON.stringify({
+			chartPath,
+			workDir: projectDir,
+			chartId: "generated",
+			createdAt: "2026-07-10T00:00:00.000Z",
+		}), "utf8");
+		await writeFile(join(runDir, "status.json"), JSON.stringify({
+			version: 1,
+			runId: "generated-run",
+			runDir,
+			chartId: "generated",
+			state: "complete",
+			startedAt: 1,
+			updatedAt: 2,
+		}), "utf8");
+		await writeFile(join(runDir, "log.jsonl"), "", "utf8");
+
+		const require = createRequire(import.meta.url);
+		const registerUrl = pathToFileURL(join(dirname(require.resolve("jiti/package.json")), "lib", "jiti-register.mjs")).href;
+		const hostUrl = new URL("../dist/src/runtime/pi/host_adapter.js", import.meta.url).href;
+		const script = `
+let hostModule = await import(${JSON.stringify(hostUrl)});
+while (hostModule && typeof hostModule === "object" && Object.keys(hostModule).length === 1 && "default" in hostModule) hostModule = hostModule.default;
+const snapshot = await hostModule.createPiHyperchartHost({ agentDir: ${JSON.stringify(agentDir)} }).readSessionSnapshot(${JSON.stringify(projectDir)});
+console.log(JSON.stringify(snapshot.runs));`;
+		const child = spawnSync(process.execPath, ["--import", registerUrl, "--input-type=module", "-e", script], {
+			cwd: projectDir,
+			encoding: "utf8",
+		});
+
+		expect(child.status, child.stderr).toBe(0);
+		expect(JSON.parse(child.stdout)).toEqual([
+			expect.objectContaining({ runId: "generated-run", chartName: "generated", status: "completed", stateCount: 1 }),
+		]);
 	});
 
 	it("loads matching runs through the runtime-backed adapter and isolates malformed runs", async () => {
