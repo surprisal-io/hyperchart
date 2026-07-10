@@ -78,7 +78,6 @@ export function AgentInfoCard({
 									text={id}
 									state={state}
 									allStates={allStates}
-									showOpenFull={false}
 									{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 									{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 									{...(onHighlightRef === undefined ? {} : { onHighlightRef })}

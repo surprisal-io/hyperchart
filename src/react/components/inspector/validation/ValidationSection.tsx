@@ -28,7 +28,7 @@ export function ValidationSection({ state }: { state: HyperchartStateInfo }) {
 					<div className="inline-flex rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--hc-green-text)]">
 						script guard
 					</div>
-					<ExpandablePre collapsedMaxHeight="max-h-24" language="bash">
+					<ExpandablePre collapsedLines={5} language="bash">
 						{[state.guard.command, ...(state.guard.args ?? [])].join(" ")}
 					</ExpandablePre>
 				</div>

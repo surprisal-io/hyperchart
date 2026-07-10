@@ -62,7 +62,6 @@ export function ContractCard({
 											text={artifact.path}
 											state={state}
 											allStates={allStates}
-											showOpenFull={false}
 											{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 											{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 											{...(onHighlightRef === undefined ? {} : { onHighlightRef })}

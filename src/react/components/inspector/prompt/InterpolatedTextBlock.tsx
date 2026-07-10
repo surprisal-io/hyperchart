@@ -1,16 +1,13 @@
 import React from "react";
-import type { InterpolatedTextProps } from "../types.js";
 import { interpolationAction } from "../helpers/interpolation.js";
+import type { InterpolatedTextProps } from "../types.js";
+import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { InterpolationToken } from "./InterpolationToken.js";
 
-export function InterpolatedTextBlock({
-	text,
-	state,
-	allStates,
-	onHighlightInput,
-	onHighlightReply,
-	onHighlightRef,
-}: InterpolatedTextProps) {
+function interpolatedParts(
+	text: string,
+	{ state, allStates, onHighlightInput, onHighlightReply, onHighlightRef }: Omit<InterpolatedTextProps, "text">,
+): React.ReactNode[] {
 	const parts: React.ReactNode[] = [];
 	const pattern = /\{([^{}]+)\}/g;
 	let lastIndex = 0;
@@ -28,9 +25,36 @@ export function InterpolatedTextBlock({
 		match = pattern.exec(text);
 	}
 	if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+	return parts;
+}
+
+export function InterpolatedTextBlock({
+	text,
+	state,
+	allStates,
+	onHighlightInput,
+	onHighlightReply,
+	onHighlightRef,
+	collapsedLines = 12,
+}: InterpolatedTextProps & { collapsedLines?: number }) {
+	const interpolationProps = {
+		state,
+		allStates,
+		...(onHighlightInput === undefined ? {} : { onHighlightInput }),
+		...(onHighlightReply === undefined ? {} : { onHighlightReply }),
+		...(onHighlightRef === undefined ? {} : { onHighlightRef }),
+	};
 	return (
-		<div className="min-w-0 max-w-full overflow-x-auto rounded-lg border border-[var(--border-primary)] bg-[var(--bg-code)] p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere]">
-			{parts}
-		</div>
+		<ExpandablePre
+			collapsedLines={collapsedLines}
+			maxPreviewCharacters={Math.max(240, collapsedLines * 100)}
+			renderContent={(visibleText) => (
+				<div className="min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere]">
+					{interpolatedParts(visibleText, interpolationProps)}
+				</div>
+			)}
+		>
+			{text}
+		</ExpandablePre>
 	);
 }

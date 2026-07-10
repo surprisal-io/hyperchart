@@ -1,16 +1,8 @@
 import { ExpandablePre } from "./ExpandablePre.js";
 
-export function JsonBlock({
-	value,
-	maxHeight = "max-h-48",
-	showOpenFull = true,
-}: {
-	value: unknown;
-	maxHeight?: string;
-	showOpenFull?: boolean;
-}) {
+export function JsonBlock({ value, previewLines = 12 }: { value: unknown; previewLines?: number }) {
 	return (
-		<ExpandablePre collapsedMaxHeight={maxHeight} showToggle={false} showOpenFull={showOpenFull} language="json">
+		<ExpandablePre collapsedLines={previewLines} language="json">
 			{JSON.stringify(value, null, 2)}
 		</ExpandablePre>
 	);

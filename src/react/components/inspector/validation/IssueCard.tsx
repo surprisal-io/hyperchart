@@ -49,7 +49,7 @@ export function IssueCard({ issue }: { issue: HyperchartIssueInfo }) {
 						payload
 					</summary>
 					<div className="mt-1">
-						<JsonBlock value={issue.payload} maxHeight="max-h-44" />
+						<JsonBlock value={issue.payload} previewLines={10} />
 					</div>
 				</details>
 			)}

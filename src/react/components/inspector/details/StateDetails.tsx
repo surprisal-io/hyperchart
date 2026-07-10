@@ -272,7 +272,7 @@ export function StateDetails({
 									text={state.onReenter.messagePreview}
 									state={state}
 									allStates={allStates}
-									collapsedMaxHeight="max-h-28"
+									collapsedLines={6}
 									{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 									{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 									{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
@@ -338,7 +338,7 @@ export function StateDetails({
 					{state.commandPreview && (
 						<div>
 							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">command</div>
-							<ExpandablePre collapsedMaxHeight="max-h-32" language="bash">
+							<ExpandablePre collapsedLines={7} language="bash">
 								{state.commandPreview}
 							</ExpandablePre>
 						</div>

@@ -86,7 +86,7 @@ export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo;
 			)}
 			{run.finalOutput && (
 				<Section title="Final output" icon={CommandLineIcon} defaultOpen={false}>
-					<ExpandablePre collapsedMaxHeight="max-h-60">{run.finalOutput}</ExpandablePre>
+					<ExpandablePre collapsedLines={14}>{run.finalOutput}</ExpandablePre>
 				</Section>
 			)}
 			{definitionSource && <DefinitionSection source={definitionSource} />}

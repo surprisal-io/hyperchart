@@ -29,7 +29,7 @@ export function TransitionInputRow({
 			</div>
 			{targetInput?.schema && (
 				<div className="mt-2">
-					<TypeBlock schema={targetInput.schema} name={`${name} input`} showOpenFull={false} />
+					<TypeBlock schema={targetInput.schema} name={`${name} input`} />
 				</div>
 			)}
 		</div>

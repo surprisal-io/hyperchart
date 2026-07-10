@@ -7,25 +7,14 @@ export function HighlightedBlock({
 	children,
 	language,
 	full = false,
-	clampLines,
 }: {
 	children: React.ReactNode;
 	language?: string | undefined;
 	full?: boolean;
-	clampLines?: number | undefined;
 }) {
 	const { resolved, themeName } = useHyperchartTheme();
 	const syntaxStyle = useMemo(() => getSyntaxTheme(resolved, themeName), [resolved, themeName]);
 	const text = typeof children === "string" ? children : String(children ?? "");
-	const clampStyle =
-		clampLines === undefined
-			? undefined
-			: ({
-					display: "-webkit-box",
-					WebkitBoxOrient: "vertical",
-					WebkitLineClamp: clampLines,
-					overflow: "hidden",
-				} as React.CSSProperties);
 	if (language) {
 		return (
 			<SyntaxHighlighter
@@ -48,14 +37,5 @@ export function HighlightedBlock({
 		);
 	}
 	const preClassName = `${full ? "p-3 text-[12px] leading-relaxed" : "p-2 text-[11px]"} w-max min-w-full text-[var(--text-secondary)]`;
-	if (clampLines !== undefined) {
-		return (
-			<pre className={preClassName}>
-				<span style={clampStyle} className="block whitespace-pre [overflow-wrap:normal]">
-					{children}
-				</span>
-			</pre>
-		);
-	}
 	return <pre className={`${preClassName} whitespace-pre [overflow-wrap:normal]`}>{children}</pre>;
 }

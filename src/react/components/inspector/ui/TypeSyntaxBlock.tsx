@@ -1,15 +1,12 @@
-import { useMemo, useState } from "react";
-import { ArrowTopRightOnSquareIcon } from "@heroicons/react/24/outline";
+import { useMemo } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { getSyntaxTheme } from "../../../support/syntax-theme.js";
 import { useHyperchartTheme } from "../../../support/theme-context.js";
 import type { TypeTreeLine } from "../types.js";
-import { FullPreDialog } from "./FullPreDialog.js";
 
-export function TypeSyntaxBlock({ lines, showOpenFull = true }: { lines: TypeTreeLine[]; showOpenFull?: boolean }) {
+export function TypeSyntaxBlock({ lines }: { lines: TypeTreeLine[] }) {
 	const { resolved, themeName } = useHyperchartTheme();
 	const syntaxStyle = useMemo(() => getSyntaxTheme(resolved, themeName), [resolved, themeName]);
-	const [fullOpen, setFullOpen] = useState(false);
 	const text = lines.map((line) => line.text).join("\n");
 	return (
 		<div className="relative w-full min-w-0 max-w-full space-y-1">
@@ -49,20 +46,6 @@ export function TypeSyntaxBlock({ lines, showOpenFull = true }: { lines: TypeTre
 					{text}
 				</SyntaxHighlighter>
 			</div>
-			{showOpenFull && (
-				<button
-					type="button"
-					onClick={() => setFullOpen(true)}
-					className="inline-flex items-center gap-1 text-[10px] font-medium text-[var(--hc-blue-text)] hover:underline"
-				>
-					<ArrowTopRightOnSquareIcon className="h-3 w-3" aria-hidden="true" /> Open full
-				</button>
-			)}
-			{fullOpen && (
-				<FullPreDialog language="typescript" onClose={() => setFullOpen(false)}>
-					{text}
-				</FullPreDialog>
-			)}
 		</div>
 	);
 }
