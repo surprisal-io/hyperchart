@@ -1,10 +1,160 @@
 @import "@xyflow/react/dist/style.css";
-@layer theme, components, utilities;
+@layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @source "./*.{ts,tsx}";
 @source "./components/**/*.{ts,tsx}";
 @source "./support/**/*.{ts,tsx}";
+
+/* Tailwind Preflight is intentionally scoped to Hyperchart surfaces. The package must not reset
+   its host dashboard, but the components still rely on Preflight's normalized box model, button,
+   typography, list, and media defaults. */
+@layer base {
+	[data-hyperchart-root] {
+		line-height: 1.5;
+		-webkit-text-size-adjust: 100%;
+		text-size-adjust: 100%;
+		tab-size: 4;
+		font-family: var(
+			--default-font-family,
+			ui-sans-serif,
+			system-ui,
+			sans-serif,
+			"Apple Color Emoji",
+			"Segoe UI Emoji",
+			"Segoe UI Symbol",
+			"Noto Color Emoji"
+		);
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	[data-hyperchart-root],
+	[data-hyperchart-root] *,
+	[data-hyperchart-root]::before,
+	[data-hyperchart-root]::after,
+	[data-hyperchart-root] *::before,
+	[data-hyperchart-root] *::after,
+	[data-hyperchart-root] *::file-selector-button {
+		box-sizing: border-box;
+		margin: 0;
+		padding: 0;
+		border: 0 solid;
+	}
+
+	[data-hyperchart-root] h1,
+	[data-hyperchart-root] h2,
+	[data-hyperchart-root] h3,
+	[data-hyperchart-root] h4,
+	[data-hyperchart-root] h5,
+	[data-hyperchart-root] h6 {
+		font-size: inherit;
+		font-weight: inherit;
+	}
+
+	[data-hyperchart-root] a {
+		color: inherit;
+		text-decoration: inherit;
+	}
+
+	[data-hyperchart-root] b,
+	[data-hyperchart-root] strong {
+		font-weight: bolder;
+	}
+
+	[data-hyperchart-root] code,
+	[data-hyperchart-root] kbd,
+	[data-hyperchart-root] samp,
+	[data-hyperchart-root] pre {
+		font-family: var(
+			--default-mono-font-family,
+			ui-monospace,
+			SFMono-Regular,
+			Menlo,
+			Monaco,
+			Consolas,
+			"Liberation Mono",
+			"Courier New",
+			monospace
+		);
+		font-feature-settings: var(--default-mono-font-feature-settings, normal);
+		font-variation-settings: var(--default-mono-font-variation-settings, normal);
+		font-size: 1em;
+	}
+
+	[data-hyperchart-root] table {
+		text-indent: 0;
+		border-color: inherit;
+		border-collapse: collapse;
+	}
+
+	[data-hyperchart-root] summary {
+		display: list-item;
+	}
+
+	[data-hyperchart-root] ol,
+	[data-hyperchart-root] ul,
+	[data-hyperchart-root] menu {
+		list-style: none;
+	}
+
+	[data-hyperchart-root] img,
+	[data-hyperchart-root] svg,
+	[data-hyperchart-root] video,
+	[data-hyperchart-root] canvas,
+	[data-hyperchart-root] audio,
+	[data-hyperchart-root] iframe,
+	[data-hyperchart-root] embed,
+	[data-hyperchart-root] object {
+		display: block;
+		vertical-align: middle;
+	}
+
+	[data-hyperchart-root] img,
+	[data-hyperchart-root] video {
+		max-width: 100%;
+		height: auto;
+	}
+
+	[data-hyperchart-root] button,
+	[data-hyperchart-root] input,
+	[data-hyperchart-root] select,
+	[data-hyperchart-root] optgroup,
+	[data-hyperchart-root] textarea,
+	[data-hyperchart-root] *::file-selector-button {
+		font: inherit;
+		font-feature-settings: inherit;
+		font-variation-settings: inherit;
+		letter-spacing: inherit;
+		color: inherit;
+		border-radius: 0;
+		background-color: transparent;
+		opacity: 1;
+	}
+
+	[data-hyperchart-root] button,
+	[data-hyperchart-root] select {
+		text-transform: none;
+	}
+
+	[data-hyperchart-root] button,
+	[data-hyperchart-root] input:where([type="button"], [type="reset"], [type="submit"]),
+	[data-hyperchart-root] *::file-selector-button {
+		appearance: button;
+	}
+
+	[data-hyperchart-root] textarea {
+		resize: vertical;
+	}
+
+	[data-hyperchart-root] ::placeholder {
+		opacity: 1;
+		color: color-mix(in oklab, currentcolor 50%, transparent);
+	}
+
+	[data-hyperchart-root] [hidden]:where(:not([hidden="until-found"])) {
+		display: none;
+	}
+}
 
 /* Dashboard base theme tokens copied from pi-agent-dashboard/packages/client/src/index.css. */
 [data-hyperchart-root],
