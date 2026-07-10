@@ -9,6 +9,8 @@ export function mapItemDotClass(status?: string): string {
 			return "bg-[var(--accent-green)]";
 		case "failed":
 			return "bg-[var(--accent-red)]";
+		case "stale":
+			return "bg-[var(--accent-yellow)]";
 		case "skipped":
 			return "bg-[var(--text-muted)]";
 		default:
@@ -44,11 +46,17 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 		const done = state.subProgress?.done ?? items.filter((item) => item.status === "done").length;
 		const running = state.subProgress?.running ?? items.filter((item) => item.status === "running").length;
 		const failed = state.subProgress?.failed ?? items.filter((item) => item.status === "failed").length;
+		const stale = state.subProgress?.stale ?? items.filter((item) => item.status === "stale").length;
 		const pending =
 			total !== undefined
-				? Math.max(0, total - done - running - failed)
-				: items.filter((item) => item.status !== "done" && item.status !== "running" && item.status !== "failed")
-						.length;
+				? Math.max(0, total - done - running - failed - stale)
+				: items.filter(
+						(item) =>
+							item.status !== "done" &&
+							item.status !== "running" &&
+							item.status !== "failed" &&
+							item.status !== "stale",
+					).length;
 		return {
 			kind: "map",
 			label: "items",
@@ -59,6 +67,7 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 			done,
 			running,
 			failed,
+			stale,
 			pending,
 			entries,
 		};
@@ -84,7 +93,8 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 		const done = state.subProgress?.done ?? (state.status === "done" && total !== undefined ? total : 0);
 		const running = state.subProgress?.running ?? 0;
 		const failed = state.subProgress?.failed ?? 0;
-		const pending = total !== undefined ? Math.max(0, total - done - running - failed) : 0;
+		const stale = state.subProgress?.stale ?? 0;
+		const pending = total !== undefined ? Math.max(0, total - done - running - failed - stale) : 0;
 		return {
 			kind: "parallel",
 			label: "branches",
@@ -94,6 +104,7 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 			done,
 			running,
 			failed,
+			stale,
 			pending,
 			entries,
 		};

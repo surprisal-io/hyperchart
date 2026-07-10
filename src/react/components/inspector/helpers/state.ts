@@ -154,7 +154,15 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 		case "map": {
 			const progress = state.subProgress;
 			if (progress)
-				return `${progress.done} done · ${progress.running} running · ${progress.failed} failed / ${progress.total}`;
+				return [
+					`${progress.done} done`,
+					`${progress.running} running`,
+					`${progress.failed} failed`,
+					progress.stale ? `${progress.stale} stale` : undefined,
+					`/ ${progress.total}`,
+				]
+					.filter(Boolean)
+					.join(" · ");
 			const count = state.mapConfig?.items?.length;
 			return count === undefined ? "map" : `${count} items`;
 		}
@@ -174,7 +182,10 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 }
 
 export function compactRuntimeFacts(state: HyperchartStateInfo): string[] {
-	return [formatCompactUsage(state.usage)].filter((fact): fact is string => Boolean(fact));
+	return [
+		state.visits !== undefined && state.visits > 1 ? `visits ×${state.visits}` : undefined,
+		formatCompactUsage(state.usage),
+	].filter((fact): fact is string => Boolean(fact));
 }
 
 export function compactTriageFacts(_state: HyperchartStateInfo, validationLabel: string | undefined): string[] {
@@ -208,15 +219,15 @@ export function stateHasContracts(state: HyperchartStateInfo): boolean {
 	return (state.artifacts?.length ?? 0) > 0 || Boolean(state.replySchema);
 }
 
-export function stateHasStatusDetails(state: HyperchartStateInfo): boolean {
+export function stateHasRuntimeDetails(state: HyperchartStateInfo): boolean {
 	return (
 		state.startedAt !== undefined ||
 		state.endedAt !== undefined ||
 		Boolean(state.mapItemLabel) ||
 		state.visits !== undefined ||
-		Boolean(state.subProgress) ||
-		Boolean(state.type === "map" && state.mapConfig) ||
-		Boolean(state.type === "parallel" && state.parallelConfig) ||
+		state.visitHistory !== undefined ||
+		state.subProgress !== undefined ||
+		state.mapConfig?.items !== undefined ||
 		Boolean(state.usage)
 	);
 }

@@ -11,10 +11,12 @@ export function hyperchartStatusClasses(status: string): string {
 		case "failed":
 			return "border-red-500/40 text-[var(--hc-red-text)] bg-red-500/10";
 		case "blocked":
+		case "stale":
 			return "border-amber-500/40 text-[var(--hc-amber-text)] bg-amber-500/10";
 		case "paused":
 			return "border-purple-500/40 text-[var(--hc-purple-text)] bg-purple-500/10";
 		case "skipped":
+		case "cancelled":
 			return "border-[var(--border-secondary)] text-[var(--text-muted)] bg-[var(--bg-tertiary)]";
 		default:
 			return "border-[var(--border-secondary)] text-[var(--text-secondary)] bg-[var(--bg-tertiary)]";
@@ -31,10 +33,12 @@ export function hyperchartStatusDotClass(status: string): string {
 		case "failed":
 			return "bg-[var(--accent-red)]";
 		case "blocked":
+		case "stale":
 			return "bg-[var(--accent-yellow)]";
 		case "paused":
 			return "bg-[var(--accent-purple)]";
 		case "skipped":
+		case "cancelled":
 			return "bg-[var(--text-muted)]";
 		default:
 			return "bg-[var(--text-tertiary)]";
@@ -51,6 +55,8 @@ export function hyperchartStatusIcon(status: string) {
 		case "failed":
 		case "blocked":
 			return ExclamationTriangleIcon;
+		case "stale":
+			return ClockIcon;
 		default:
 			return ClockIcon;
 	}

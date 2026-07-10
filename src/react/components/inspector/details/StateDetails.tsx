@@ -3,19 +3,11 @@ import {
 	ArrowPathIcon,
 	ArrowTopRightOnSquareIcon,
 	CodeBracketSquareIcon,
-	InformationCircleIcon,
 	ShareIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo } from "../../../types.js";
-import { formatHyperchartDateTime, formatHyperchartUsage } from "../../../hyperchart-display.js";
-import {
-	agentStatesForSelection,
-	stateConcurrencyLabel,
-	stateDisplayName,
-	stateHasStatusDetails,
-	stateKindMeta,
-} from "../helpers/state.js";
+import { agentStatesForSelection, stateConcurrencyLabel, stateDisplayName, stateKindMeta } from "../helpers/state.js";
 import {
 	inputTypeElementId,
 	refEntries,
@@ -25,7 +17,6 @@ import {
 	schemaLabel,
 } from "../helpers/schema.js";
 import { StatusPill } from "../../ui/StatusPill.js";
-import { FanoutStatusCard } from "../graph/FanoutStatusCard.js";
 import { MapOverRefBlock } from "../prompt/MapOverRefBlock.js";
 import { PromptSection } from "../prompt/PromptSection.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
@@ -38,7 +29,7 @@ import { AgentInfoCard } from "./AgentInfoCard.js";
 import { ContractsSection } from "./ContractsSection.js";
 import { DefinitionSection } from "./DefinitionSection.js";
 import { EnvTypeDisplay } from "./EnvTypeDisplay.js";
-import { MapResolvedInputSection } from "./MapResolvedInputSection.js";
+import { RuntimeSection } from "./RuntimeSection.js";
 import { RefChips } from "./RefChips.js";
 import { TransitionsSection } from "./TransitionsSection.js";
 
@@ -289,49 +280,7 @@ export function StateDetails({
 
 			<IssuesSection issues={state.issues} />
 
-			{stateHasStatusDetails(state) && (
-				<Section title="Status" icon={InformationCircleIcon}>
-					{(state.startedAt !== undefined ||
-						state.endedAt !== undefined ||
-						state.mapItemLabel ||
-						state.visits !== undefined) && (
-						<dl className="grid grid-cols-2 gap-2 text-[11px]">
-							{state.startedAt !== undefined && (
-								<div>
-									<dt className="text-[var(--text-muted)]">started</dt>
-									<dd>{formatHyperchartDateTime(state.startedAt)}</dd>
-								</div>
-							)}
-							{state.endedAt !== undefined && (
-								<div>
-									<dt className="text-[var(--text-muted)]">ended</dt>
-									<dd>{formatHyperchartDateTime(state.endedAt)}</dd>
-								</div>
-							)}
-							{state.mapItemLabel && (
-								<div>
-									<dt className="text-[var(--text-muted)]">map item</dt>
-									<dd>{state.mapItemLabel}</dd>
-								</div>
-							)}
-							{state.visits !== undefined && (
-								<div>
-									<dt className="text-[var(--text-muted)]">visits</dt>
-									<dd>{state.visits}</dd>
-								</div>
-							)}
-						</dl>
-					)}
-					<FanoutStatusCard state={state} />
-					{state.usage && (
-						<div className="text-[11px] text-[var(--text-tertiary)]">
-							usage: {formatHyperchartUsage(state.usage) ?? JSON.stringify(state.usage)}
-						</div>
-					)}
-				</Section>
-			)}
-
-			{isMapState && <MapResolvedInputSection state={state} />}
+			<RuntimeSection state={state} />
 
 			{isScriptState && (
 				<Section title="Arguments" icon={CodeBracketSquareIcon} defaultOpen={false}>

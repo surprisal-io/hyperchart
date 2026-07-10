@@ -34,11 +34,13 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 				? "border-blue-500/30 shadow-blue-950/15"
 				: state.status === "done"
 					? "border-green-500/25 shadow-green-950/10"
-					: displayState.type === "map"
-						? "border-cyan-400/70 shadow-cyan-950/20 ring-1 ring-cyan-500/15"
-						: displayState.type === "parallel"
-							? "border-sky-400/45 shadow-sky-950/15"
-							: "border-transparent";
+					: state.status === "stale"
+						? "border-amber-500/35 shadow-amber-950/10 ring-1 ring-amber-500/10"
+						: displayState.type === "map"
+							? "border-cyan-400/70 shadow-cyan-950/20 ring-1 ring-cyan-500/15"
+							: displayState.type === "parallel"
+								? "border-sky-400/45 shadow-sky-950/15"
+								: "border-transparent";
 	const size = graphNodeSize(displayState);
 	const handleClass = "!h-px !w-px !border-0 !bg-transparent !opacity-0";
 	const handleStyle = { background: "transparent", border: 0, opacity: 0, width: 1, height: 1 };

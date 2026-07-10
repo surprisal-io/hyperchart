@@ -134,6 +134,11 @@ export const statusMatrixRun = run("status-matrix-running", "running", [
 	state("review-coverage", "done", "agent", {
 		agent: "worker",
 		taskPreview: "Review source coverage",
+		transitions: [{ event: "NEXT", target: "superseded-draft" }],
+	}),
+	state("superseded-draft", "stale", "agent", {
+		agent: "worker",
+		taskPreview: "Completed during the previous traversal",
 		transitions: [{ event: "NEXT", target: "repair-citations" }],
 	}),
 	state("repair-citations", "failed", "agent", {
@@ -250,7 +255,34 @@ export const richCardsRun = run("rich-cards-running", "running", [
 	}),
 	state("cache-policy", "running", "agent", {
 		agent: "cached-worker",
-		visits: 3,
+		visits: 2,
+		visitHistory: [
+			{
+				visit: 1,
+				invokeSeqId: 14,
+				startedAt: now - 190_000,
+				endedAt: now - 130_000,
+				status: "done",
+				completedEvent: "BLOCK",
+				inputs: { feedback: { instructions: ["Tighten the evidence chain", "Remove unsupported copy"] } },
+				invocation: {
+					kind: "agent",
+					task: "Review the complete report against the evidence map and return a structured gate decision. This intentionally long resolved task demonstrates truncation and full-text inspection for a previous visit.",
+				},
+			},
+			{
+				visit: 2,
+				invokeSeqId: 18,
+				startedAt: now - 40_000,
+				status: "running",
+				inputs: { feedback: { instructions: ["Apply the gate feedback and re-check citations"] } },
+				invocation: {
+					kind: "agent",
+					task: "Resume the report review with the latest feedback and verify every changed claim.",
+					resumeMessage: "Continue the previous session with the updated gate feedback.",
+				},
+			},
+		],
 		validationAttempts: 1,
 		retry: { max: 2 },
 		transitions: [{ event: "BLOCK", target: "validation-rejected" }],
@@ -275,7 +307,24 @@ export const mapVariantsRun = run("map-variants-running", "running", [
 			over: "chapters",
 			as: "chapter",
 			items: [
-				{ key: "one", label: "One", status: "done" },
+				{
+					key: "one",
+					label: "A deliberately long chapter title that must stay compact in the item header",
+					status: "done",
+					summary: [
+						"A long summary used to verify bounded map previews.",
+						"Keep the runtime panel compact.",
+						"Preserve resolved input details.",
+						"Avoid mounting the complete value initially.",
+						"Show an explicit truncation marker.",
+						"Keep the complete text available through Open full.",
+					].join("\n"),
+					value: {
+						title: "A deliberately long chapter title that must stay compact in the item header",
+						instructions:
+							"Use the full evidence pack, preserve caveats, include citations, and provide enough additional text to exercise collapsed JSON rendering in the runtime inspector.",
+					},
+				},
 				{ key: "two", label: "Two", status: "running" },
 				{ key: "three", label: "Three", status: "running" },
 				{ key: "four", label: "Four", status: "pending" },

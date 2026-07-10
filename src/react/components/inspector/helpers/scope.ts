@@ -28,7 +28,7 @@ export function visibleStateIdsForScope(
 		if (isImplicitFailedFinal(state)) continue;
 		if (!state.final) {
 			if (!showDone && state.status === "done") continue;
-			if (!showPending && state.status === "pending") continue;
+			if (!showPending && (state.status === "pending" || state.status === "stale")) continue;
 			if (!showSkipped && state.status === "skipped") continue;
 		}
 		const directScope = immediateMapScopeId(state.id);

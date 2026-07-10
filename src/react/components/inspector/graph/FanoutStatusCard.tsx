@@ -19,6 +19,7 @@ export function FanoutStatusCard({ state, compact = false }: { state: Hyperchart
 		summary.running > 0 ? `${summary.running} running` : undefined,
 		summary.pending > 0 ? `${summary.pending} pending` : undefined,
 		summary.failed > 0 ? `${summary.failed} failed` : undefined,
+		summary.stale > 0 ? `${summary.stale} stale` : undefined,
 	]
 		.filter(Boolean)
 		.join(" · ");

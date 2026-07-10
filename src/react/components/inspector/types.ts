@@ -45,6 +45,7 @@ export type FanoutStatusSummary = {
 	done: number;
 	running: number;
 	failed: number;
+	stale: number;
 	pending: number;
 	entries: FanoutStatusEntry[];
 };
