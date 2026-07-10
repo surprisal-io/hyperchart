@@ -10,6 +10,25 @@ describe("chart preflight", () => {
 		expect(result.ok).toBe(true);
 	});
 
+	it("resolves bundled Node types for charts outside the project tree", async () => {
+		const originalCwd = process.cwd();
+		const dir = mkdtempSync(join(tmpdir(), "hyperchart-external-typecheck-"));
+		const chartPath = join(dir, "external.chart.ts");
+		writeFileSync(
+			chartPath,
+			"const pid: number = process.pid;\nconst timer: NodeJS.Timeout | undefined = undefined;\nexport default { pid, timer };\n",
+			"utf8",
+		);
+
+		process.chdir(dir);
+		try {
+			const result = await typecheckChartModule(chartPath);
+			expect(result.ok).toBe(true);
+		} finally {
+			process.chdir(originalCwd);
+		}
+	});
+
 	it("reports TypeScript diagnostics before runtime loads a chart", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "hyperchart-typecheck-"));
 		const chartPath = join(dir, "bad.chart.ts");

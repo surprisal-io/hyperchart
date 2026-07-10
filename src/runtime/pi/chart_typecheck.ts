@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { extname } from "node:path";
+import { dirname, extname } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -55,6 +55,7 @@ export function lintChartModuleSource(chartPath: string): ChartSourceLintDiagnos
 export async function typecheckChartModule(chartPath: string): Promise<ChartTypecheckResult> {
 	if (!TYPESCRIPT_EXTENSIONS.has(extname(chartPath))) return { ok: true, skipped: true };
 	const tscPath = resolveTypeScriptCompiler();
+	const nodeTypeRoot = resolveNodeTypeRoot();
 	const args = [
 		"--noEmit",
 		"--pretty",
@@ -69,6 +70,8 @@ export async function typecheckChartModule(chartPath: string): Promise<ChartType
 		"NodeNext",
 		"--moduleResolution",
 		"NodeNext",
+		"--typeRoots",
+		nodeTypeRoot,
 		"--types",
 		"node",
 		chartPath,
@@ -139,6 +142,16 @@ function resolveTypeScriptCompiler(): string {
 	} catch (error) {
 		throw new Error(
 			`Hyperchart TypeScript typecheck requires the 'typescript' package, but it could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+function resolveNodeTypeRoot(): string {
+	try {
+		return dirname(dirname(require.resolve("@types/node/package.json")));
+	} catch (error) {
+		throw new Error(
+			`Hyperchart TypeScript typecheck requires the '@types/node' package, but it could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 }
