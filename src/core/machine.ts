@@ -385,6 +385,23 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	}
 }
 
+export function renderPendingActionInvocation(
+	ast: ChartAst,
+	projection: BranchProjection,
+	pending: Extract<PendingAction, { phase: "running" }>,
+): ActionEffect {
+	const node = nodeAt(ast, pending.actionUid.state);
+	if (node?.kind !== "state" || !matchesDeclaredUid(pending.actionUid, node.action.uid)) {
+		throw new Error(`Pending action does not match the chart in state ${pending.actionUid.state}`);
+	}
+	return actionInvocationForAction(
+		{ ast, projection, dispatched: new Set() },
+		pending.actionUid,
+		node.action,
+		actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
+	);
+}
+
 function actionInvocationForAction(
 	state: MachineState,
 	actionUid: ActionUID,

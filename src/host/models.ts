@@ -11,7 +11,7 @@ export interface HyperchartInfo {
 }
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
-export type HyperchartStateStatus = "pending" | "running" | "done" | "failed" | "skipped";
+export type HyperchartStateStatus = "pending" | "running" | "done" | "failed" | "skipped" | "stale";
 export type HyperchartStateType = "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
 
 export interface HyperchartUsageInfo {
@@ -126,6 +126,43 @@ export interface HyperchartValidationInfo {
 	latestRejectedReason?: string;
 }
 
+export interface HyperchartRenderedArtifactInfo {
+	name?: string;
+	path: string;
+	select?: string;
+}
+
+export type HyperchartVisitInvocationInfo =
+	| {
+			kind: "agent";
+			task?: string;
+			resumeMessage?: string;
+			reads?: HyperchartRenderedArtifactInfo[];
+			artifacts?: HyperchartRenderedArtifactInfo[];
+	  }
+	| {
+			kind: "script";
+			command: string;
+			args: string[];
+			env?: Record<string, unknown>;
+			artifacts?: HyperchartRenderedArtifactInfo[];
+	  }
+	| { kind: "user"; prompt: string };
+
+export interface HyperchartVisitInfo {
+	visit: number;
+	invokeSeqId: number;
+	startedAt: number;
+	endedAt?: number;
+	status: "running" | "done" | "failed" | "cancelled";
+	completedEvent?: string;
+	endedReason?: "timed_out" | "scope_exit";
+	validationAttempts?: number;
+	inputs?: Record<string, unknown>;
+	mapItem?: { key: string; value?: unknown };
+	invocation: HyperchartVisitInvocationInfo;
+}
+
 export interface HyperchartStateInfo {
 	id: string;
 	type?: HyperchartStateType;
@@ -159,12 +196,13 @@ export interface HyperchartStateInfo {
 	mapKey?: string;
 	mapItemLabel?: string;
 	parallelConfig?: { branches?: HyperchartBranchInfo[]; count?: number };
-	subProgress?: { done: number; total: number; running: number; failed: number };
+	subProgress?: { done: number; total: number; running: number; failed: number; stale?: number };
 	retry?: HyperchartRetryInfo;
 	attempts?: number;
 	validationAttempts?: number;
 	validation?: HyperchartValidationInfo;
 	visits?: number;
+	visitHistory?: HyperchartVisitInfo[];
 	issues?: HyperchartIssueInfo[];
 }
 
@@ -187,4 +225,3 @@ export interface HyperchartRunInfo {
 	totalUsage?: HyperchartUsageInfo;
 	issues?: HyperchartIssueInfo[];
 }
-
