@@ -342,6 +342,89 @@ describe("React runtime adapter", () => {
 		});
 	});
 
+	it("keeps current map generation done while invalidating only downstream prior work", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "map-generation-status",
+				initial: "items",
+				states: {
+					items: map({
+						over: arg("items"),
+						initial: "design",
+						onDone: "gate",
+						states: {
+							design: { kind: "state", action: agent("design"), transitions: { READY: "write" } },
+							write: { kind: "state", action: agent("write"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					gate: { kind: "state", action: agent("gate"), transitions: { RETRY: "items", PASS: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		const definition = (path: string) =>
+			(chartAst.states[templatePath(path)] as Extract<ChartAst["states"][string], { kind: "state" }>).action;
+		const invoke = (path: string, seqId: number): DurableLogRecord => ({
+			type: "state_action",
+			kind: "invoke",
+			actionUid: actionUid(chartAst, path),
+			definition: definition(path),
+			...baseRecord(seqId),
+		});
+		const complete = (path: string, eventType: string, seqId: number): DurableLogRecord => ({
+			type: "state_action",
+			kind: "complete",
+			actionUid: actionUid(chartAst, path),
+			event: { type: eventType },
+			...baseRecord(seqId),
+		});
+		const instances = { a: "Alpha", b: "Beta" };
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: { items: instances }, ...baseRecord(1) },
+			{ type: "spawned", path: "items", instances, ...baseRecord(2) },
+			invoke("items#a.design", 3),
+			complete("items#a.design", "READY", 4),
+			invoke("items#a.write", 5),
+			complete("items#a.write", "DONE", 6),
+			invoke("items#b.design", 7),
+			complete("items#b.design", "READY", 8),
+			invoke("items#b.write", 9),
+			complete("items#b.write", "DONE", 10),
+			invoke("gate", 11),
+			complete("gate", "RETRY", 12),
+			{ type: "spawned", path: "items", instances, ...baseRecord(13) },
+			invoke("items#a.design", 14),
+			complete("items#a.design", "READY", 15),
+			invoke("items#a.write", 16),
+			complete("items#a.write", "DONE", 17),
+			invoke("items#b.design", 18),
+			complete("items#b.design", "READY", 19),
+			invoke("items#b.write", 20),
+			complete("items#b.write", "DONE", 21),
+			invoke("gate", 22),
+		];
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		for (const path of [
+			"items#a.design",
+			"items#a.write",
+			"items#a.done",
+			"items#b.design",
+			"items#b.write",
+			"items#b.done",
+		]) {
+			expect(run.states.find((state) => state.id === path)?.status, path).toBe("done");
+		}
+		const mapState = run.states.find((state) => state.id === "items");
+		expect(mapState?.status).toBe("done");
+		expect(mapState?.mapConfig?.items).toMatchObject([
+			{ key: "a", status: "done", visits: [1, 2] },
+			{ key: "b", status: "done", visits: [1, 2] },
+		]);
+		expect(run.states.find((state) => state.id === "gate")?.status).toBe("running");
+	});
+
 	it("marks completed states stale across parallel re-entry control flow", () => {
 		const chartAst = ast(
 			chart({
@@ -860,11 +943,16 @@ describe("React runtime adapter", () => {
 			},
 		];
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.filter((state) => state.id.startsWith("items."))).toEqual([]);
 		const mapState = run.states.find((state) => state.id === "items");
 		expect(mapState?.mapConfig?.items).toMatchObject([
-			{ key: "a", label: "Alpha", summary: "first", status: "done", value: { title: "Alpha", summary: "first" } },
-			{ key: "b", label: "Beta", status: "running", value: { title: "Beta" } },
-			{ key: "c", label: "Gamma", status: "failed", value: { title: "Gamma" } },
+			{ key: "a", label: "Alpha", summary: "first", status: "done", value: { title: "Alpha", summary: "first" }, visits: [1] },
+			{ key: "b", label: "Beta", status: "running", value: { title: "Beta" }, visits: [1] },
+			{ key: "c", label: "Gamma", status: "failed", value: { title: "Gamma" }, visits: [1] },
+		]);
+		expect(mapState?.visits).toBe(1);
+		expect(mapState?.mapConfig?.visitHistory).toEqual([
+			{ visit: 1, spawnSeqId: 2, startedAt: 2000, instances },
 		]);
 		expect(mapState?.subProgress).toEqual({ done: 1, running: 1, failed: 1, total: 3 });
 		const itemBWorker = run.states.find((state) => state.id === "items#b.work");
@@ -877,6 +965,62 @@ describe("React runtime adapter", () => {
 		);
 		expect(itemCWorker?.issues?.[0]).toMatchObject({ kind: "action_failed", message: "bad item" });
 		expect(mapState?.mapConfig?.items?.find((item) => item.key === "c")?.issueCount).toBe(1);
+	});
+
+	it("derives UI-only map visit history from repeated spawned facts", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "map-visits",
+				initial: "items",
+				states: {
+					items: map({
+						over: arg("items"),
+						initial: "work",
+						onDone: "gate",
+						states: {
+							work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					gate: { kind: "state", action: agent("gate"), transitions: { REDO: "items", PASS: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		const firstInstances = { a: { title: "Alpha" }, b: { title: "Beta v1" } };
+		const secondInstances = { b: { title: "Beta v2" }, c: { title: "Gamma" } };
+		const itemUid = actionUid(chartAst, "items#a.work");
+		const secondItemUid = actionUid(chartAst, "items#b.work");
+		const gateUid = actionUid(chartAst, "gate");
+		const itemDefinition = (chartAst.states["items.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action;
+		const gateDefinition = (chartAst.states.gate as Extract<ChartAst["states"][string], { kind: "state" }>).action;
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: { items: firstInstances }, ...baseRecord(1) },
+			{ type: "spawned", path: "items", instances: firstInstances, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", actionUid: itemUid, definition: itemDefinition, ...baseRecord(3) },
+			{ type: "state_action", kind: "complete", actionUid: itemUid, event: { type: "DONE" }, ...baseRecord(4) },
+			{ type: "state_action", kind: "invoke", actionUid: secondItemUid, definition: itemDefinition, ...baseRecord(5) },
+			{ type: "state_action", kind: "complete", actionUid: secondItemUid, event: { type: "DONE" }, ...baseRecord(6) },
+			{ type: "state_action", kind: "invoke", actionUid: gateUid, definition: gateDefinition, ...baseRecord(7) },
+			{ type: "state_action", kind: "complete", actionUid: gateUid, event: { type: "REDO" }, ...baseRecord(8) },
+			{ type: "spawned", path: "items", instances: secondInstances, ...baseRecord(9) },
+		];
+
+		const mapState = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records).states.find(
+			(state) => state.id === "items",
+		);
+		expect(mapState?.visits).toBe(2);
+		expect(mapState?.mapConfig?.visitHistory).toEqual([
+			{ visit: 1, spawnSeqId: 2, startedAt: 2000, instances: firstInstances },
+			{ visit: 2, spawnSeqId: 9, startedAt: 9000, instances: secondInstances },
+		]);
+		expect(mapState?.mapConfig?.items).toMatchObject([
+			{ key: "a", label: "Alpha", status: "stale", visits: [1] },
+			{ key: "b", label: "Beta v2", visits: [1, 2] },
+			{ key: "c", label: "Gamma", visits: [2] },
+		]);
+		expect(mapState?.subProgress).toEqual({ done: 0, running: 2, failed: 0, total: 2 });
 	});
 
 	it("materializes nested map workers from concrete spawn paths", () => {

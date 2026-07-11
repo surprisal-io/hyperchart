@@ -5,6 +5,7 @@ import { stateHasRuntimeDetails } from "../helpers/state.js";
 import { FanoutStatusCard } from "../graph/FanoutStatusCard.js";
 import { Section } from "../ui/Section.js";
 import { MapResolvedInputList } from "./MapResolvedInputList.js";
+import { MapVisitHistory } from "./MapVisitHistory.js";
 import { VisitHistory } from "./VisitHistory.js";
 
 export function RuntimeSection({ state }: { state: HyperchartStateInfo }) {
@@ -51,7 +52,13 @@ export function RuntimeSection({ state }: { state: HyperchartStateInfo }) {
 				</div>
 			)}
 			{state.visitHistory !== undefined && <VisitHistory visits={state.visitHistory} />}
-			{state.type === "map" && <MapResolvedInputList state={state} />}
+			{state.type === "map" && state.mapConfig?.visitHistory !== undefined && (
+				<MapVisitHistory
+					visits={state.mapConfig.visitHistory}
+					{...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })}
+				/>
+			)}
+			{state.type === "map" && state.mapConfig?.visitHistory === undefined && <MapResolvedInputList state={state} />}
 		</Section>
 	);
 }

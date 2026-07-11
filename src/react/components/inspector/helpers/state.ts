@@ -211,8 +211,13 @@ export function agentStatesForSelection(
 	allStates: HyperchartStateInfo[],
 ): HyperchartStateInfo[] {
 	if (state.agent) return [state];
-	const prefix = `${state.id}.`;
-	return allStates.filter((candidate) => candidate.agent && candidate.id.startsWith(prefix));
+	const childPrefix = `${state.id}.`;
+	const mapInstancePrefix = `${state.id}#`;
+	return allStates.filter(
+		(candidate) =>
+			candidate.agent &&
+			(candidate.id.startsWith(childPrefix) || (state.type === "map" && candidate.id.startsWith(mapInstancePrefix))),
+	);
 }
 
 export function stateHasContracts(state: HyperchartStateInfo): boolean {

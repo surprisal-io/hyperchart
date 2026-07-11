@@ -70,7 +70,15 @@ export interface HyperchartMapItemInfo {
 	status?: HyperchartStateStatus;
 	state?: string;
 	value?: unknown;
+	visits?: number[];
 	issueCount?: number;
+}
+
+export interface HyperchartMapVisitInfo {
+	visit: number;
+	spawnSeqId: number;
+	startedAt: number;
+	instances: Record<string, unknown>;
 }
 
 export interface HyperchartSchemaInfo {
@@ -193,7 +201,13 @@ export interface HyperchartStateInfo {
 	onReject?: "resume" | "restart";
 	tools?: string[];
 	concurrency?: number;
-	mapConfig?: { over?: string; overSchema?: HyperchartSchemaInfo; as?: string; items?: HyperchartMapItemInfo[] };
+	mapConfig?: {
+		over?: string;
+		overSchema?: HyperchartSchemaInfo;
+		as?: string;
+		items?: HyperchartMapItemInfo[];
+		visitHistory?: HyperchartMapVisitInfo[];
+	};
 	mapKey?: string;
 	mapItemLabel?: string;
 	parallelConfig?: { branches?: HyperchartBranchInfo[]; count?: number };

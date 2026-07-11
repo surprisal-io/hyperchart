@@ -9,10 +9,19 @@ import {
 	type ProjectionSkippedRecord,
 } from "../core/projection.js";
 import type { ActionUID, ChartAst, ChartEvent, StatePath } from "../core/types.js";
-import { instancePathFor, nearestInstance, nodeAt, templatePath, underScope } from "../core/paths.js";
+import {
+	instancePathFor,
+	nearestInstance,
+	nodeAt,
+	parentPath,
+	siblingPath,
+	templatePath,
+	underScope,
+} from "../core/paths.js";
 import type {
 	HyperchartInputInfo,
 	HyperchartIssueInfo,
+	HyperchartMapVisitInfo,
 	HyperchartStateInfo,
 	HyperchartRefInfo,
 	HyperchartRunInfo,
@@ -153,10 +162,10 @@ export function hyperchartRunFromRuntime(
 	});
 	const runtime = runtimeFacts(ast, records, projection, skipped, options.sessionProgress);
 	const staticStates = staticRun.states.map((state) => overlayRuntimeState(state, ast, projection, runtime));
-	const states = markStaleRuntimeStates([
-		...staticStates,
-		...materializedMapStates(staticRun.states, ast, projection, runtime),
-	]);
+	const runtimeStates = [...staticStates, ...materializedMapStates(staticRun.states, ast, projection, runtime)].filter(
+		(state) => !isUnmaterializedMapTemplateState(ast, state.id),
+	);
+	const states = markStaleRuntimeStates(runtimeStates, ast, projection);
 	const issues = runIssues(options.status);
 	return {
 		...staticRun,
@@ -266,15 +275,21 @@ type RuntimeFacts = {
 	byState: Map<StatePath, StateRuntimeFacts>;
 	pendingByState: Map<StatePath, PendingAction>;
 	issuesByState: Map<StatePath, HyperchartIssueInfo[]>;
+	mapVisitHistoryByState: Map<StatePath, HyperchartMapVisitInfo[]>;
 };
 
-function markStaleRuntimeStates(states: HyperchartStateInfo[]): HyperchartStateInfo[] {
+function markStaleRuntimeStates(
+	states: HyperchartStateInfo[],
+	ast: ChartAst,
+	projection: ReturnType<typeof createBranchProjection>,
+): HyperchartStateInfo[] {
 	const byId = new Map(states.map((state) => [state.id, state]));
-	const controlEdges = runtimeControlEdges(states);
+	const controlEdges = runtimeControlEdges(states, ast);
+	const dominators = runtimeDominators(states, controlEdges, ast.initial);
 	const staleIds = new Set<string>();
 	for (const source of states) {
-		const currentVisit = source.visitHistory?.at(-1);
-		if ((source.visitHistory?.length ?? 0) < 2 || currentVisit === undefined) continue;
+		const sourceSeqId = latestReentrySeqId(source);
+		if (sourceSeqId === undefined) continue;
 		const queue = [...(controlEdges.get(source.id) ?? [])];
 		const visited = new Set<string>([source.id]);
 		while (queue.length > 0) {
@@ -283,16 +298,37 @@ function markStaleRuntimeStates(states: HyperchartStateInfo[]): HyperchartStateI
 			visited.add(stateId);
 			const candidate = byId.get(stateId);
 			if (candidate === undefined) continue;
-			const candidateVisit = candidate.visitHistory?.at(-1);
-			if (
-				candidate.status === "done" &&
-				candidateVisit !== undefined &&
-				candidateVisit.invokeSeqId < currentVisit.invokeSeqId
-			) {
+			// A feedback cycle may reach an earlier dominator again. Stop at that loop header instead
+			// of walking into a new conceptual iteration and invalidating predecessors or sibling fan-out work.
+			if (dominators.get(source.id)?.has(candidate.id)) continue;
+			const candidateSeqId = latestStateVisitSeqId(candidate);
+			if (candidate.status === "done" && candidateSeqId !== undefined && candidateSeqId < sourceSeqId) {
 				staleIds.add(candidate.id);
 			}
 			for (const target of controlEdges.get(candidate.id) ?? []) queue.push(target);
 		}
+	}
+	for (const mapState of states) {
+		const currentVisit = mapState.mapConfig?.visitHistory?.at(-1);
+		if (currentVisit === undefined) continue;
+		for (const key of Object.keys(currentVisit.instances)) {
+			const instanceScope = `${mapState.id}#${key}`;
+			for (const candidate of states) {
+				const candidateSeqId = latestStateVisitSeqId(candidate);
+				if (
+					underScope(candidate.id, instanceScope) &&
+					candidateSeqId !== undefined &&
+					candidateSeqId > currentVisit.spawnSeqId
+				) {
+					staleIds.delete(candidate.id);
+				}
+			}
+		}
+	}
+	for (const predecessor of states) {
+		if (!staleIds.has(predecessor.id) || predecessor.completedEvent === undefined) continue;
+		const target = predecessor.transitions?.find((transition) => transition.event === predecessor.completedEvent)?.target;
+		if (target !== undefined && byId.get(target)?.type === "final") staleIds.add(target);
 	}
 	let addedContainer = true;
 	while (addedContainer) {
@@ -318,29 +354,40 @@ function markStaleRuntimeStates(states: HyperchartStateInfo[]): HyperchartStateI
 				return item;
 			return { ...item, status: "stale" as const };
 		});
-		const staleFanoutCount =
-			state.type === "map"
-				? (mapItemsWithStale?.filter((item) => item.status === "stale").length ?? 0)
-				: state.type === "parallel"
-					? (state.parallelConfig?.branches?.filter((branch) => {
-							if (branch.id === undefined) return false;
-							const branchStates = states.filter(
-								(candidate) => candidate.id === branch.id || candidate.id.startsWith(`${branch.id}.`),
-							);
-							const hasCurrentWork = branchStates.some(
-								(candidate) => candidate.status === "running" || candidate.status === "failed",
-							);
-							return !hasCurrentWork && branchStates.some((candidate) => staleIds.has(candidate.id));
-						}).length ?? 0)
-					: 0;
-		const subProgress =
-			state.subProgress === undefined || staleFanoutCount === 0
-				? state.subProgress
-				: {
-						...state.subProgress,
-						done: Math.max(0, state.subProgress.done - staleFanoutCount),
-						stale: staleFanoutCount,
-					};
+		let subProgress = state.subProgress;
+		if (state.type === "map" && mapItemsWithStale !== undefined) {
+			const progressItems = currentMapItems(state.id, mapItemsWithStale, projection);
+			const done = progressItems.filter((item) => item.status === "done").length;
+			const running = progressItems.filter((item) => item.status === "running").length;
+			const failed = progressItems.filter((item) => item.status === "failed").length;
+			const stale = progressItems.filter((item) => item.status === "stale").length;
+			subProgress = {
+				done,
+				running,
+				failed,
+				total: progressItems.length,
+				...(stale === 0 ? {} : { stale }),
+			};
+		} else if (state.type === "parallel" && state.subProgress !== undefined) {
+			const stale =
+				state.parallelConfig?.branches?.filter((branch) => {
+					if (branch.id === undefined) return false;
+					const branchStates = states.filter(
+						(candidate) => candidate.id === branch.id || candidate.id.startsWith(`${branch.id}.`),
+					);
+					const hasCurrentWork = branchStates.some(
+						(candidate) => candidate.status === "running" || candidate.status === "failed",
+					);
+					return !hasCurrentWork && branchStates.some((candidate) => staleIds.has(candidate.id));
+				}).length ?? 0;
+			if (stale > 0) {
+				subProgress = {
+					...state.subProgress,
+					done: Math.max(0, state.subProgress.done - stale),
+					stale,
+				};
+			}
+		}
 		return {
 			...state,
 			...(isStale ? { status: "stale" as const } : {}),
@@ -355,37 +402,124 @@ function markStaleRuntimeStates(states: HyperchartStateInfo[]): HyperchartStateI
 	});
 }
 
-function runtimeControlEdges(states: readonly HyperchartStateInfo[]): Map<string, Set<string>> {
+function latestStateVisitSeqId(state: HyperchartStateInfo): number | undefined {
+	return state.visitHistory?.at(-1)?.invokeSeqId ?? state.mapConfig?.visitHistory?.at(-1)?.spawnSeqId;
+}
+
+function latestReentrySeqId(state: HyperchartStateInfo): number | undefined {
+	if ((state.visitHistory?.length ?? 0) >= 2) return state.visitHistory?.at(-1)?.invokeSeqId;
+	if ((state.mapConfig?.visitHistory?.length ?? 0) >= 2) return state.mapConfig?.visitHistory?.at(-1)?.spawnSeqId;
+	return undefined;
+}
+
+function runtimeControlEdges(
+	states: readonly HyperchartStateInfo[],
+	ast: ChartAst,
+): Map<string, Set<string>> {
+	const runtimeStates = states.filter((state) => !isUnmaterializedMapTemplateState(ast, state.id));
+	const byId = new Set(runtimeStates.map((state) => state.id));
 	const edges = new Map<string, Set<string>>();
 	const add = (source: string, target: string) => {
-		if (source === target) return;
+		if (source === target || !byId.has(target)) return;
 		const targets = edges.get(source) ?? new Set<string>();
 		targets.add(target);
 		edges.set(source, targets);
 	};
-	const containers = states.filter(
-		(state) =>
-			state.type === "compound" || state.type === "region" || state.type === "parallel" || state.type === "map",
-	);
-	for (const state of states) {
+	for (const state of runtimeStates) {
 		for (const transition of state.transitions ?? []) add(state.id, transition.target);
-		if (state.type === "final") {
-			for (const container of containers) {
-				if (!isRuntimeDescendant(state.id, container.id)) continue;
-				for (const transition of container.transitions ?? []) add(state.id, transition.target);
+		const node = nodeAt(ast, state.id);
+		if (node?.kind === "compound" || node?.kind === "region") {
+			add(state.id, `${state.id}.${node.initial}`);
+		} else if (node?.kind === "map") {
+			for (const candidate of states) {
+				if (
+					parentPath(candidate.id)?.startsWith(`${state.id}#`) &&
+					templatePath(candidate.id) === `${templatePath(state.id)}.${node.initial}`
+				) {
+					add(state.id, candidate.id);
+				}
 			}
+		} else if (node?.kind === "parallel") {
+			for (const region of node.regions) add(state.id, `${state.id}.${region}`);
 		}
-	}
-	for (const container of containers) {
-		for (const candidate of states) {
-			if (isRuntimeDescendant(candidate.id, container.id)) add(container.id, candidate.id);
+		if (state.type === "final") {
+			const containerPath = parentPath(state.id);
+			const container = containerPath === undefined ? undefined : nodeAt(ast, containerPath);
+			if (containerPath !== undefined && (container?.kind === "compound" || container?.kind === "map")) {
+				add(state.id, siblingPath(containerPath, container.onDone));
+			} else if (containerPath !== undefined && container?.kind === "region") {
+				const parallelPath = parentPath(containerPath);
+				const parallel = parallelPath === undefined ? undefined : nodeAt(ast, parallelPath);
+				if (parallelPath !== undefined && parallel?.kind === "parallel") {
+					add(state.id, siblingPath(parallelPath, parallel.onDone));
+				}
+			}
 		}
 	}
 	return edges;
 }
 
-function isRuntimeDescendant(stateId: string, scopeId: string): boolean {
-	return stateId.startsWith(`${scopeId}.`) || stateId.startsWith(`${scopeId}#`);
+function isUnmaterializedMapTemplateState(ast: ChartAst, statePath: StatePath): boolean {
+	if (statePath.includes("#")) return false;
+	let scope = parentPath(statePath);
+	while (scope !== undefined) {
+		if (nodeAt(ast, scope)?.kind === "map") return true;
+		scope = parentPath(scope);
+	}
+	return false;
+}
+
+function runtimeDominators(
+	states: readonly HyperchartStateInfo[],
+	edges: ReadonlyMap<string, ReadonlySet<string>>,
+	initial: StatePath,
+): Map<string, Set<string>> {
+	const start = "<runtime-start>";
+	const nodes = states.map((state) => state.id);
+	const nodeSet = new Set(nodes);
+	const reachable = new Set<string>();
+	const queue = nodeSet.has(initial) ? [initial] : [];
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (current === undefined || reachable.has(current)) continue;
+		reachable.add(current);
+		for (const target of edges.get(current) ?? []) queue.push(target);
+	}
+	const entryTargets = new Set<string>([
+		...(nodeSet.has(initial) ? [initial] : []),
+		...nodes.filter((node) => !reachable.has(node)),
+	]);
+	const predecessors = new Map<string, Set<string>>(nodes.map((node) => [node, new Set()]));
+	for (const [source, targets] of edges) {
+		for (const target of targets) predecessors.get(target)?.add(source);
+	}
+	for (const target of entryTargets) predecessors.get(target)?.add(start);
+	const universe = new Set([start, ...nodes]);
+	const dominators = new Map<string, Set<string>>([[start, new Set([start])]]);
+	for (const node of nodes) dominators.set(node, new Set(universe));
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const node of nodes) {
+			const preds = [...(predecessors.get(node) ?? [])];
+			let next = new Set<string>([node]);
+			if (preds.length > 0) {
+				const intersection = new Set(dominators.get(preds[0] ?? start) ?? []);
+				for (const pred of preds.slice(1)) {
+					for (const candidate of intersection) {
+						if (!dominators.get(pred)?.has(candidate)) intersection.delete(candidate);
+					}
+				}
+				next = new Set([node, ...intersection]);
+			}
+			const previous = dominators.get(node) ?? new Set();
+			if (next.size !== previous.size || [...next].some((value) => !previous.has(value))) {
+				dominators.set(node, next);
+				changed = true;
+			}
+		}
+	}
+	return dominators;
 }
 
 function runtimeRunStatus(value: string | undefined, states: readonly HyperchartStateInfo[] = []): HyperchartRunStatus {
@@ -493,8 +627,28 @@ function runtimeFacts(
 		facts.visits = visitHistory.length;
 		byState.set(stateId, facts);
 	}
+	const mapVisitHistoryByState = runtimeMapVisitHistories(records, skippedRecords);
 	appendSessionIssues(issuesByState, sessionProgress);
-	return { byState, pendingByState, issuesByState };
+	return { byState, pendingByState, issuesByState, mapVisitHistoryByState };
+}
+
+function runtimeMapVisitHistories(
+	records: readonly DurableLogRecord[],
+	skippedRecords: ReadonlySet<DurableLogRecord>,
+): Map<StatePath, HyperchartMapVisitInfo[]> {
+	const histories = new Map<StatePath, HyperchartMapVisitInfo[]>();
+	for (const record of records) {
+		if (record.type !== "spawned" || skippedRecords.has(record)) continue;
+		const history = histories.get(record.path) ?? [];
+		history.push({
+			visit: history.length + 1,
+			spawnSeqId: record.seqId,
+			startedAt: record.timestamp,
+			instances: { ...record.instances },
+		});
+		histories.set(record.path, history);
+	}
+	return histories;
 }
 
 function runtimeVisitHistories(
@@ -919,14 +1073,19 @@ function runtimeStateStatus(
 	const pending = runtime.pendingByState.get(state.id);
 	if (pending !== undefined) return "running";
 	if (facts?.completedEvent?.type === "FAILED") return "failed";
-	if (state.type === "final") return projection.activeLeaves.includes(state.id) ? "done" : "pending";
+	if (state.type === "final") {
+		return projection.activeLeaves.includes(state.id) || finalReached(state.id, ast, runtime) ? "done" : "pending";
+	}
 	if (projection.activeLeaves.some((leaf) => leaf === state.id || underScope(leaf, state.id))) return "running";
 	if (facts?.completedAt !== undefined) return "done";
 	if (state.type === "map") {
-		const items = mapItems(state, ast, projection, runtime);
-		if (items.length > 0 && items.every((item) => item.status === "done")) return "done";
-		if (items.some((item) => item.status === "failed")) return "failed";
-		if (items.some((item) => item.status === "running")) return "running";
+		const spawned = projection.spawns[state.id];
+		if (spawned !== undefined) {
+			const items = currentMapItems(state.id, mapItems(state, ast, projection, runtime), projection);
+			if (items.every((item) => item.status === "done")) return "done";
+			if (items.some((item) => item.status === "failed")) return "failed";
+			if (items.some((item) => item.status === "running")) return "running";
+		}
 	}
 	if (state.type === "parallel") {
 		const progress = fanoutProgressForScope(
@@ -957,15 +1116,33 @@ function overlayMapRuntime(
 	runtime: RuntimeFacts,
 ): HyperchartStateInfo {
 	const items = mapItems(state, ast, projection, runtime);
-	if (items.length === 0 && projection.spawns[state.id] === undefined) return state;
-	const done = items.filter((item) => item.status === "done").length;
-	const running = items.filter((item) => item.status === "running").length;
-	const failed = items.filter((item) => item.status === "failed").length;
+	const visitHistory = runtime.mapVisitHistoryByState.get(state.id);
+	if (items.length === 0 && projection.spawns[state.id] === undefined && visitHistory === undefined) return state;
+	const progressItems = currentMapItems(state.id, items, projection);
+	const done = progressItems.filter((item) => item.status === "done").length;
+	const running = progressItems.filter((item) => item.status === "running").length;
+	const failed = progressItems.filter((item) => item.status === "failed").length;
+	const stale = progressItems.filter((item) => item.status === "stale").length;
 	return {
 		...state,
-		mapConfig: { ...state.mapConfig, items },
-		subProgress: { done, running, failed, total: items.length },
+		...(visitHistory === undefined ? {} : { visits: visitHistory.length }),
+		mapConfig: {
+			...state.mapConfig,
+			items,
+			...(visitHistory === undefined ? {} : { visitHistory }),
+		},
+		subProgress: { done, running, failed, total: progressItems.length, ...(stale === 0 ? {} : { stale }) },
 	};
+}
+
+function currentMapItems(
+	stateId: StatePath,
+	items: NonNullable<NonNullable<HyperchartStateInfo["mapConfig"]>["items"]>,
+	projection: ReturnType<typeof createBranchProjection>,
+): NonNullable<NonNullable<HyperchartStateInfo["mapConfig"]>["items"]> {
+	const currentInstances = projection.spawns[stateId];
+	if (currentInstances === undefined) return items;
+	return items.filter((item) => Object.hasOwn(currentInstances, item.key));
 }
 
 function mapItems(
@@ -974,19 +1151,27 @@ function mapItems(
 	projection: ReturnType<typeof createBranchProjection>,
 	runtime: RuntimeFacts,
 ): NonNullable<NonNullable<HyperchartStateInfo["mapConfig"]>["items"]> {
-	const instances = projection.spawns[state.id];
-	if (instances === undefined) return [];
+	const visitHistory = runtime.mapVisitHistoryByState.get(state.id) ?? [];
+	const currentInstances = projection.spawns[state.id];
+	const instances = Object.create(null) as Record<string, unknown>;
+	for (const visit of visitHistory) Object.assign(instances, visit.instances);
+	if (currentInstances !== undefined) Object.assign(instances, currentInstances);
 	return Object.entries(instances).map(([key, value]) => {
 		const instancePath = `${state.id}#${key}`;
 		const summary = mapItemSummary(value);
+		const visits = visitHistory
+			.filter((visit) => Object.hasOwn(visit.instances, key))
+			.map((visit) => visit.visit);
 		const issueCount = scopeIssueCount(instancePath, runtime);
+		const isHistorical = currentInstances !== undefined && !Object.hasOwn(currentInstances, key);
 		return {
 			key,
 			label: mapItemLabel(key, value),
 			...(summary === undefined ? {} : { summary }),
-			status: mapItemStatus(instancePath, projection, runtime, ast),
+			status: isHistorical ? "stale" : mapItemStatus(instancePath, projection, runtime, ast),
 			state: instancePath,
 			value,
+			...(visits.length === 0 ? {} : { visits }),
 			...(issueCount === 0 ? {} : { issueCount }),
 		};
 	});
@@ -1005,6 +1190,18 @@ function mapItemSummary(value: unknown): string | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
 	const record = value as Record<string, unknown>;
 	return typeof record.summary === "string" ? record.summary : undefined;
+}
+
+function finalReached(finalPath: StatePath, ast: ChartAst, runtime: RuntimeFacts): boolean {
+	for (const [statePath, facts] of runtime.byState) {
+		const eventType = facts.completedEvent?.type;
+		if (eventType === undefined || runtime.pendingByState.has(statePath)) continue;
+		const state = nodeAt(ast, statePath);
+		if (state?.kind !== "state") continue;
+		const transition = state.transitions[eventType];
+		if (transition !== undefined && siblingPath(statePath, transition.target) === finalPath) return true;
+	}
+	return false;
 }
 
 function mapItemStatus(

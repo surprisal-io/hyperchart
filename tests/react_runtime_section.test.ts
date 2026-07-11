@@ -3,7 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { HyperchartStateInfo } from "../src/host/models.js";
 import { MapResolvedInputList } from "../src/react/components/inspector/details/MapResolvedInputList.js";
+import { MapVisitHistory } from "../src/react/components/inspector/details/MapVisitHistory.js";
 import { RuntimeSection } from "../src/react/components/inspector/details/RuntimeSection.js";
+import { agentStatesForSelection } from "../src/react/components/inspector/helpers/state.js";
 import { createTextPreview } from "../src/react/components/inspector/helpers/textPreview.js";
 import { TemplateTextBlock } from "../src/react/components/inspector/prompt/TemplateTextBlock.js";
 
@@ -34,6 +36,18 @@ describe("Runtime inspector section", () => {
 		expect(markup).not.toContain("Resolved runtime task");
 	});
 
+	it("includes materialized map agents in the selected map scope", () => {
+		const map: HyperchartStateInfo = { id: "workers", type: "map", status: "done" };
+		const worker: HyperchartStateInfo = {
+			id: "workers#alpha.work",
+			type: "agent",
+			status: "done",
+			agent: "writer",
+			model: "provider/model",
+		};
+		expect(agentStatesForSelection(map, [map, worker])).toEqual([worker]);
+	});
+
 	it("renders fitting map values without a full-content control", () => {
 		const state: HyperchartStateInfo = {
 			id: "items",
@@ -52,6 +66,36 @@ describe("Runtime inspector section", () => {
 		const markup = renderToStaticMarkup(createElement(MapResolvedInputList, { state }));
 		expect(markup).not.toContain("Open full");
 		expect(markup).toContain("wall of text");
+	});
+
+	it("renders map visit generations and item membership", () => {
+		const historyMarkup = renderToStaticMarkup(
+			createElement(MapVisitHistory, {
+				onReenter: { mode: "resume", messagePreview: "Continue map work with updated feedback." },
+				visits: [
+					{ visit: 1, spawnSeqId: 2, startedAt: 1000, instances: { a: { title: "Alpha" } } },
+					{ visit: 2, spawnSeqId: 9, startedAt: 2000, instances: { a: { title: "Alpha v2" } } },
+				],
+			}),
+		);
+		expect(historyMarkup).toContain("Map visit history");
+		expect(historyMarkup).toContain("Visit 1");
+		expect(historyMarkup).toContain("Visit 2");
+		expect(historyMarkup).toContain("on re-enter: resume");
+		expect(historyMarkup).toContain("resume re-entry");
+		expect(historyMarkup).toContain("Continue map work with updated feedback.");
+		expect(historyMarkup).toContain("spawn seq 9");
+		const itemMarkup = renderToStaticMarkup(
+			createElement(MapResolvedInputList, {
+				state: {
+					id: "items",
+					type: "map",
+					status: "done",
+					mapConfig: { items: [{ key: "a", label: "Alpha", visits: [1, 2] }] },
+				},
+			}),
+		);
+		expect(itemMarkup).toContain("map visits: 1, 2");
 	});
 
 	it("does not put clipped map content in the initial DOM", () => {

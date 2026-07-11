@@ -54,6 +54,11 @@ export function MapResolvedInputList({ state }: { state: HyperchartStateInfo }) 
 									{item.state}
 								</code>
 							)}
+							{item.visits !== undefined && (
+								<div className="mt-1 text-[10px] text-[var(--text-muted)]">
+									map visit{item.visits.length === 1 ? "" : "s"}: {item.visits.join(", ")}
+								</div>
+							)}
 							{item.summary !== undefined && (
 								<div className="mt-2">
 									<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">summary</div>
