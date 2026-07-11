@@ -73,7 +73,7 @@ export function HyperchartRunStrip({
 
 	const progress = summarizeHyperchartProgress(run);
 	const running = runningHyperchartStates(run);
-	const usage = formatHyperchartUsage(run?.totalUsage);
+	const usage = formatHyperchartUsage(run.totalUsage);
 	const selectRun = (runId: string) => {
 		onSelectRun?.(runId);
 		onOpenInspector?.(runId);
