@@ -18,16 +18,27 @@ Use the `hyperchart_*` tools directly. `/hyperchart` is a human-facing Pi comman
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Back up and truncate a stopped run | `hyperchart_rewind` |
 
+## Bundled reference
+
+Read the smallest local page that covers the task:
+
+- [DSL and typed refs](../../docs/api/dsl.md) — authoring signatures, options, constraints, and examples.
+- [Pi tools](../../docs/api/pi.md) — exact schemas for all four `hyperchart_*` tools and lifecycle statuses.
+- [Runtime API](../../docs/api/runtime.md) — runtime, stores, scripts, guards, artifacts, and execution errors.
+- [Recovery and safety](../../docs/safety.md) — replay warnings, crash ambiguity, rewind, cleanup, and external effects.
+- [File and run contracts](../../docs/reference.md) — run layout, durable records, and limitations.
+- [Documentation index](../../docs/README.md) — routes to every bundled guide and API page.
+
+These files ship inside the Pi package. Prefer them over network documentation so the reference matches the installed version.
+
 ## Author or modify a chart
 
-1. Read the existing `.chart.ts` file and nearby chart examples.
+1. Read the existing `.chart.ts` file, the bundled [DSL reference](../../docs/api/dsl.md), and nearby chart examples.
 2. Keep control flow explicit in the chart. Agents and scripts return events and data; they do not choose hidden next states.
 3. Prefer `refs()` plus Zod-backed replies, inputs, and artifacts. Use transition inputs for visit-local handoff and artifacts for file deliverables.
 4. Call `hyperchart_inspect` after every structural change.
 5. Resolve all diagnostics and unavailable agent definitions before starting a real run.
 6. Do not start the chart unless the user asked to execute it.
-
-Canonical DSL and API reference: https://github.com/surprisal-io/hyperchart/tree/main/docs/api
 
 ## Start a run
 
@@ -39,6 +50,8 @@ Canonical DSL and API reference: https://github.com/surprisal-io/hyperchart/tree
 
 ## Resume a run
 
+Read [Recovery and safety](../../docs/safety.md), then:
+
 1. Call `hyperchart_run_inspect` with the existing run id or directory.
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
@@ -46,6 +59,8 @@ Canonical DSL and API reference: https://github.com/surprisal-io/hyperchart/tree
 5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
 ## Rewind a run
+
+Read [Recovery and safety](../../docs/safety.md), then:
 
 1. Inspect the run and confirm it is stopped.
 2. Choose exactly one target: `state`, `seqId`, or `to: "compatible"`.

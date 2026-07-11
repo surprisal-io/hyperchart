@@ -53,6 +53,9 @@
 		"src/tui",
 		"extensions",
 		"skills",
+		"docs",
+		"examples",
+		"assets/readme/architecture.svg",
 		"README.md",
 		"LICENSE"
 	],
@@ -100,6 +103,6 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && node ../../scripts/build-react-styles.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"prepack": "npm run build"
+		"prepack": "node ../../scripts/sync-pi-docs.mjs --check && npm run build"
 	}
 }

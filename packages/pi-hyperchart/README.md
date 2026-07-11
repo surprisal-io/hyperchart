@@ -45,6 +45,10 @@ Run `/hyperchart` with no arguments to list recent runs for the current project.
 | `@surprisal-io/pi-hyperchart/react/styles.css` | required React stylesheet |
 | `@surprisal-io/pi-hyperchart/package.json` | package metadata and Pi manifest |
 
+## Bundled documentation
+
+The published package includes `docs/`, runnable `examples/`, and the architecture diagram. The bundled skill links to these local, version-matched files so an agent does not need network access for authoring, tool schemas, or recovery guidance.
+
 ## Documentation
 
 - [Pi extension](https://github.com/surprisal-io/hyperchart/blob/main/docs/pi.md)

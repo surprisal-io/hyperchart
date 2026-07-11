@@ -16,6 +16,11 @@ const root = resolve(import.meta.dirname, "..");
 const temp = mkdtempSync(join(tmpdir(), "hyperchart-pack-"));
 
 try {
+	execFileSync(process.execPath, ["scripts/sync-pi-docs.mjs", "--check"], {
+		cwd: root,
+		stdio: "inherit",
+	});
+
 	const packageSpecs = [
 		{
 			dir: "packages/hyperchart",
@@ -30,6 +35,11 @@ try {
 				"dist/react/styles.css",
 				"extensions/hyperchart.ts",
 				"skills/hyperchart/SKILL.md",
+				"docs/api/dsl.md",
+				"docs/api/pi.md",
+				"docs/safety.md",
+				"examples/quickstart.chart.ts",
+				"assets/readme/architecture.svg",
 				"LICENSE",
 				"README.md",
 			],
@@ -97,6 +107,7 @@ function validateMarkdownLinks() {
 		"packages/hyperchart/README.md",
 		"packages/pi-hyperchart/README.md",
 		"packages/pi-hyperchart/skills",
+		"packages/pi-hyperchart/docs",
 	]) {
 		const path = resolve(root, base);
 		if (statSync(path).isDirectory()) walkMarkdown(path, markdown);
@@ -229,7 +240,14 @@ export type SmokeTypes =
 
 	const consumerRequire = createRequire(resolve(consumer, "package.json"));
 	const piRoot = dirname(consumerRequire.resolve("@surprisal-io/pi-hyperchart/package.json"));
-	for (const resource of ["extensions/hyperchart.ts", "skills/hyperchart/SKILL.md"]) {
+	for (const resource of [
+		"extensions/hyperchart.ts",
+		"skills/hyperchart/SKILL.md",
+		"docs/api/dsl.md",
+		"docs/api/pi.md",
+		"docs/safety.md",
+		"examples/quickstart.chart.ts",
+	]) {
 		if (!existsSync(resolve(piRoot, resource))) throw new Error(`clean Pi install missing ${resource}`);
 	}
 	console.log("Clean tarball runtime and type imports passed.");
