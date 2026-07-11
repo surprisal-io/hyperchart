@@ -1,6 +1,6 @@
 # DSL reference
 
-Import authoring values from `@surprisal-io/hyperchart`:
+Import authoring values from `@surprisal/hyperchart`:
 
 ```ts
 import {
@@ -22,7 +22,7 @@ import {
   user,
   visit,
   z,
-} from "@surprisal-io/hyperchart";
+} from "@surprisal/hyperchart";
 ```
 
 Use `refs()` for arguments, results, artifacts, map items, and transition inputs. Its selectors are type-checked; the untyped root entry point intentionally does not export `arg()`, `result()`, `artifactOf()`, `joinArtifactOf()`, `key()`, or `item()`.
@@ -30,7 +30,7 @@ Use `refs()` for arguments, results, artifacts, map items, and transition inputs
 ## Minimal chart
 
 ```ts
-import { artifact, chart, final, script } from "@surprisal-io/hyperchart";
+import { artifact, chart, final, script } from "@surprisal/hyperchart";
 
 export default chart({
   kind: "chart",
@@ -703,7 +703,7 @@ onReenter: resume(t`Re-entered on visit ${visit()}; continue with the updated co
 `z` is re-exported from the package:
 
 ```ts
-import { z } from "@surprisal-io/hyperchart";
+import { z } from "@surprisal/hyperchart";
 ```
 
 Zod values are accepted in:

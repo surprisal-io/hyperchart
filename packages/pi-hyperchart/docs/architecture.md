@@ -6,7 +6,7 @@ Hyperchart separates chart semantics from effect execution. The core package dec
 
 ## Two packages
 
-### `@surprisal-io/hyperchart`
+### `@surprisal/hyperchart`
 
 The core package owns:
 
@@ -20,7 +20,7 @@ The core package owns:
 
 It has no dependency on Pi or React.
 
-### `@surprisal-io/pi-hyperchart`
+### `@surprisal/pi-hyperchart`
 
 The Pi package owns:
 

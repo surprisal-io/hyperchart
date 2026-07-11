@@ -1,6 +1,6 @@
 # Core API
 
-This page covers the non-authoring exports of `@surprisal-io/hyperchart`. See [DSL reference](dsl.md) for chart constructors and CST fields. `@surprisal-io/hyperchart/package.json` exports the package metadata object for tooling that needs the installed version, engines, or export map.
+This page covers the non-authoring exports of `@surprisal/hyperchart`. See [DSL reference](dsl.md) for chart constructors and CST fields. `@surprisal/hyperchart/package.json` exports the package metadata object for tooling that needs the installed version, engines, or export map.
 
 ```ts
 import {
@@ -12,7 +12,7 @@ import {
   createMachineOutput,
   stepMachine,
   explainReplay,
-} from "@surprisal-io/hyperchart";
+} from "@surprisal/hyperchart";
 ```
 
 ## Parsing and normalization
@@ -458,7 +458,7 @@ type ChartEvent = ActionEvent | SystemEvent;
 
 ```ts
 function start(
-  runtime: import("@surprisal-io/hyperchart/runtime").Runtime,
+  runtime: import("@surprisal/hyperchart/runtime").Runtime,
   args?: Readonly<Record<string, unknown>>,
 ): Promise<MachineState>;
 ```
@@ -469,7 +469,7 @@ If the runtime log is empty and `args` is provided, writes the run arguments as 
 
 ```ts
 function loop(
-  runtime: import("@surprisal-io/hyperchart/runtime").Runtime,
+  runtime: import("@surprisal/hyperchart/runtime").Runtime,
 ): Promise<MachineState>;
 ```
 

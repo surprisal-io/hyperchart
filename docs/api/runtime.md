@@ -1,6 +1,6 @@
 # Runtime API
 
-Import the generic runtime from `@surprisal-io/hyperchart/runtime`:
+Import the generic runtime from `@surprisal/hyperchart/runtime`:
 
 ```ts
 import {
@@ -24,7 +24,7 @@ import {
   type RenderedArtifact,
   type Runtime,
   type SchemaCheck,
-} from "@surprisal-io/hyperchart/runtime";
+} from "@surprisal/hyperchart/runtime";
 ```
 
 ## `Runtime`
@@ -77,8 +77,8 @@ type ChartRuntimeOptions = {
 It does not implement user actions. A `user` effect calls `onWarn` and remains unresolved.
 
 ```ts
-import { loop } from "@surprisal-io/hyperchart";
-import { ChartRuntime, JsonlLogStore } from "@surprisal-io/hyperchart/runtime";
+import { loop } from "@surprisal/hyperchart";
+import { ChartRuntime, JsonlLogStore } from "@surprisal/hyperchart/runtime";
 
 const runtime = new ChartRuntime({
   ast,

@@ -1,4 +1,4 @@
-# `@surprisal-io/pi-hyperchart`
+# `@surprisal/pi-hyperchart`
 
 Pi extension, run manager, agent executor, terminal UI, React inspector, and bundled Hyperchart skill.
 
@@ -7,7 +7,7 @@ Pi extension, run manager, agent executor, terminal UI, React inspector, and bun
 Run from your shell:
 
 ```sh
-pi install npm:@surprisal-io/pi-hyperchart
+pi install npm:@surprisal/pi-hyperchart
 ```
 
 Start Pi after the install, or restart an existing Pi process. The package declares:
@@ -15,7 +15,7 @@ Start Pi after the install, or restart an existing Pi process. The package decla
 - `extensions/hyperchart.ts`;
 - `skills/hyperchart/`.
 
-It requires Node.js 22.19 or newer and the exact matching version of `@surprisal-io/hyperchart`.
+It requires Node.js 22.19 or newer and the exact matching version of `@surprisal/hyperchart`.
 
 ## Start a chart
 
@@ -38,12 +38,12 @@ Run `/hyperchart` with no arguments to list recent runs for the current project.
 
 | Import | Purpose |
 |---|---|
-| `@surprisal-io/pi-hyperchart` | same in-process command API as `/command` |
-| `@surprisal-io/pi-hyperchart/command` | in-process `/hyperchart` request event |
-| `@surprisal-io/pi-hyperchart/pi-host` | Pi chart/run host adapter |
-| `@surprisal-io/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
-| `@surprisal-io/pi-hyperchart/react/styles.css` | required React stylesheet |
-| `@surprisal-io/pi-hyperchart/package.json` | package metadata and Pi manifest |
+| `@surprisal/pi-hyperchart` | same in-process command API as `/command` |
+| `@surprisal/pi-hyperchart/command` | in-process `/hyperchart` request event |
+| `@surprisal/pi-hyperchart/pi-host` | Pi chart/run host adapter |
+| `@surprisal/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
+| `@surprisal/pi-hyperchart/react/styles.css` | required React stylesheet |
+| `@surprisal/pi-hyperchart/package.json` | package metadata and Pi manifest |
 
 ## Bundled documentation
 

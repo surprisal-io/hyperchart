@@ -1,11 +1,11 @@
-# `@surprisal-io/hyperchart`
+# `@surprisal/hyperchart`
 
 Host-neutral Hyperchart authoring, machine, replay, runtime, and inspector models.
 
 ## Install
 
 ```sh
-npm install @surprisal-io/hyperchart
+npm install @surprisal/hyperchart
 ```
 
 Requires Node.js 22.19 or newer.
@@ -13,7 +13,7 @@ Requires Node.js 22.19 or newer.
 ## Create a chart
 
 ```ts
-import { chart, final, script } from "@surprisal-io/hyperchart";
+import { chart, final, script } from "@surprisal/hyperchart";
 
 export default chart({
   kind: "chart",
@@ -36,10 +36,10 @@ A script with one successful transition may select it implicitly on exit code `0
 
 | Import | Purpose |
 |---|---|
-| `@surprisal-io/hyperchart` | DSL, types, parsing, inspection, machine, projection, replay |
-| `@surprisal-io/hyperchart/runtime` | generic runtime, log stores, scripts, guards, artifacts |
-| `@surprisal-io/hyperchart/host` | canonical chart/run models and adapters |
-| `@surprisal-io/hyperchart/package.json` | package metadata |
+| `@surprisal/hyperchart` | DSL, types, parsing, inspection, machine, projection, replay |
+| `@surprisal/hyperchart/runtime` | generic runtime, log stores, scripts, guards, artifacts |
+| `@surprisal/hyperchart/host` | canonical chart/run models and adapters |
+| `@surprisal/hyperchart/package.json` | package metadata |
 
 This package has no Pi or React dependency.
 

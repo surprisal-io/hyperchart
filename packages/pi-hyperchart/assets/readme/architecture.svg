@@ -18,7 +18,7 @@
   <circle cx="1345" cy="80" r="6" fill="#d63d32"/><text x="1362" y="85" class="mono">two npm packages</text>
 
   <rect x="54" y="166" width="1040" height="528" rx="25" class="core" filter="url(#shadow)"/>
-  <text x="84" y="204" class="tiny">Host-neutral core</text><text x="84" y="236" class="title">@surprisal-io/hyperchart</text>
+  <text x="84" y="204" class="tiny">Host-neutral core</text><text x="84" y="236" class="title">@surprisal/hyperchart</text>
 
   <text x="88" y="286" class="tiny">01 · AUTHOR</text>
   <rect x="88" y="305" width="248" height="92" rx="16" class="box"/>
@@ -47,7 +47,7 @@
   <text x="500" y="670" class="small" style="fill:#b72f27">accepted completions return as durable facts; transitions are recomputed from the AST</text>
 
   <rect x="1134" y="166" width="412" height="528" rx="25" class="pi" filter="url(#shadow)"/>
-  <text x="1164" y="204" class="tiny" style="fill:#b72f27">Pi integration</text><text x="1164" y="236" class="title">@surprisal-io/pi-hyperchart</text>
+  <text x="1164" y="204" class="tiny" style="fill:#b72f27">Pi integration</text><text x="1164" y="236" class="title">@surprisal/pi-hyperchart</text>
   <path d="M1050 540 H1168" class="redline"/>
   <text x="1074" y="523" class="tiny" style="fill:#b72f27">EFFECTS</text>
   <rect x="1168" y="274" width="330" height="78" rx="15" class="box"/>

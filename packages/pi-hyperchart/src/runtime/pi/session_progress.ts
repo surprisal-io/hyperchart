@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { actionUidKey } from "@surprisal-io/hyperchart/internal/core/action_uid";
-import type { ActionUID } from "@surprisal-io/hyperchart/internal/core/types";
+import { actionUidKey } from "@surprisal/hyperchart/internal/core/action_uid";
+import type { ActionUID } from "@surprisal/hyperchart/internal/core/types";
 
 export { actionUidKey };
 

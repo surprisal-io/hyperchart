@@ -1,15 +1,15 @@
 # Pi extension
 
-`@surprisal-io/pi-hyperchart` adds chart discovery, run management, four agent tools, a terminal run view, a React inspector, and a bundled `hyperchart` skill to Pi.
+`@surprisal/pi-hyperchart` adds chart discovery, run management, four agent tools, a terminal run view, a React inspector, and a bundled `hyperchart` skill to Pi.
 
-It does not define chart semantics. Those come from the exact matching version of `@surprisal-io/hyperchart`.
+It does not define chart semantics. Those come from the exact matching version of `@surprisal/hyperchart`.
 
 ## Install
 
 Install the Pi package from your shell:
 
 ```sh
-pi install npm:@surprisal-io/pi-hyperchart
+pi install npm:@surprisal/pi-hyperchart
 ```
 
 Start Pi after the install, or restart an existing Pi process. Pi loads:
@@ -243,7 +243,7 @@ Auto-discovered extensions and skills can be refreshed with `/reload`. An extens
 
 ## Troubleshooting
 
-### `Cannot find module @surprisal-io/hyperchart`
+### `Cannot find module @surprisal/hyperchart`
 
 Install the Pi package normally instead of copying only `extensions/hyperchart.ts`. Pi package installs use production dependencies; copied source files do not bring their dependency tree.
 

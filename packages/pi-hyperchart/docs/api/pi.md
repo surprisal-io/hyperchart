@@ -1,17 +1,17 @@
 # Pi API
 
-`@surprisal-io/pi-hyperchart` publishes an in-process command bridge, a Pi host adapter, four agent tools, and the extension itself.
+`@surprisal/pi-hyperchart` publishes an in-process command bridge, a Pi host adapter, four agent tools, and the extension itself.
 
 ## Entry points
 
 | Import | Contents |
 |---|---|
-| `@surprisal-io/pi-hyperchart` | Same API as `/command`. |
-| `@surprisal-io/pi-hyperchart/command` | In-process request bridge to the loaded extension. |
-| `@surprisal-io/pi-hyperchart/pi-host` | Chart/run discovery adapter for Pi directories. |
-| `@surprisal-io/pi-hyperchart/react` | React API documented separately. |
-| `@surprisal-io/pi-hyperchart/react/styles.css` | Complete scoped inspector stylesheet. |
-| `@surprisal-io/pi-hyperchart/package.json` | Package metadata and Pi manifest. |
+| `@surprisal/pi-hyperchart` | Same API as `/command`. |
+| `@surprisal/pi-hyperchart/command` | In-process request bridge to the loaded extension. |
+| `@surprisal/pi-hyperchart/pi-host` | Chart/run discovery adapter for Pi directories. |
+| `@surprisal/pi-hyperchart/react` | React API documented separately. |
+| `@surprisal/pi-hyperchart/react/styles.css` | Complete scoped inspector stylesheet. |
+| `@surprisal/pi-hyperchart/package.json` | Package metadata and Pi manifest. |
 
 The package also registers `extensions/hyperchart.ts` and `skills/hyperchart/` through its Pi manifest. Those files are discovered by Pi; they are not JavaScript import entry points.
 
@@ -23,7 +23,7 @@ import {
   requestHyperchartCommand,
   type HyperchartCommandEventBus,
   type HyperchartCommandRequest,
-} from "@surprisal-io/pi-hyperchart/command";
+} from "@surprisal/pi-hyperchart/command";
 ```
 
 ### `HYPERCHART_COMMAND_EVENT`
@@ -85,7 +85,7 @@ import {
   createPiHyperchartHost,
   piHyperchartHost,
   type PiHyperchartHostOptions,
-} from "@surprisal-io/pi-hyperchart/pi-host";
+} from "@surprisal/pi-hyperchart/pi-host";
 ```
 
 ### `PiHyperchartHostOptions`

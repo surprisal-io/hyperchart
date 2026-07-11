@@ -88,9 +88,9 @@ The README inspector image must be captured from a deterministic Storybook fixtu
 
 ## Package boundaries
 
-`@surprisal-io/hyperchart` must remain independent of Pi and React.
+`@surprisal/hyperchart` must remain independent of Pi and React.
 
-`@surprisal-io/pi-hyperchart` may depend on the core package and Pi/React peers. Browser code must not import Node-only modules.
+`@surprisal/pi-hyperchart` may depend on the core package and Pi/React peers. Browser code must not import Node-only modules.
 
 Check boundaries with:
 
@@ -173,8 +173,8 @@ Run:
 
 ```sh
 npm run validate:packages
-npm publish --dry-run --workspace @surprisal-io/hyperchart
-npm publish --dry-run --workspace @surprisal-io/pi-hyperchart
+npm publish --dry-run --workspace @surprisal/hyperchart
+npm publish --dry-run --workspace @surprisal/pi-hyperchart
 npm audit --omit=dev
 ```
 
@@ -212,7 +212,7 @@ make release-prepare VERSION=0.2.0-rc.1 NPM_TAG=next
 make release-publish VERSION=0.2.0-rc.1 NPM_TAG=next CONFIRM=publish-0.2.0-rc.1
 ```
 
-`release-publish` repeats all gates and dry-runs, verifies npm authentication, publishes `@surprisal-io/hyperchart` first, waits until that exact version is visible, then publishes `@surprisal-io/pi-hyperchart`. It deliberately does not create or push a git tag.
+`release-publish` repeats all gates and dry-runs, verifies npm authentication, publishes `@surprisal/hyperchart` first, waits until that exact version is visible, then publishes `@surprisal/pi-hyperchart`. It deliberately does not create or push a git tag.
 
 After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and all four tools. Create the release/tag only after registry verification.
 

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import type { HyperchartInspectAgentDefaults } from "@surprisal-io/hyperchart/internal/core/inspect_ast";
+import type { HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect_ast";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 

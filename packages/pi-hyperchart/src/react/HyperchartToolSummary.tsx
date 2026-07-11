@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { ArrowPathIcon, ArrowTopRightOnSquareIcon, QueueListIcon } from "@heroicons/react/24/outline";
-import { hyperchartRunFromToolDetails } from "@surprisal-io/hyperchart/host";
-import type { HyperchartRunInfo } from "@surprisal-io/hyperchart/host";
+import { hyperchartRunFromToolDetails } from "@surprisal/hyperchart/host";
+import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 import { formatHyperchartUsage, runningHyperchartStates, summarizeHyperchartProgress } from "./hyperchart-display.js";
 
 const HyperchartInspectorDialog = lazy(async () => {

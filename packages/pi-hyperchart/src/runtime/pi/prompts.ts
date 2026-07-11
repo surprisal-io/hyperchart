@@ -1,4 +1,4 @@
-import type { AgentEffect, RenderedArtifact, RejectedEffect } from "@surprisal-io/hyperchart/internal/core/machine";
+import type { AgentEffect, RenderedArtifact, RejectedEffect } from "@surprisal/hyperchart/internal/core/machine";
 import { finishableEvents } from "./finish_tool.js";
 
 export type ResolvedRead = {

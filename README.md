@@ -11,8 +11,8 @@ Hyperchart runs long-lived work as an explicit statechart. The chart defines wha
 
 | Package | Use it for |
 |---|---|
-| [`@surprisal-io/hyperchart`](packages/hyperchart) | Chart authoring, the pure machine, replay, the generic runtime, and host-neutral models. |
-| [`@surprisal-io/pi-hyperchart`](packages/pi-hyperchart) | The Pi extension, `/hyperchart`, agent tools, terminal UI, and React inspector. |
+| [`@surprisal/hyperchart`](packages/hyperchart) | Chart authoring, the pure machine, replay, the generic runtime, and host-neutral models. |
+| [`@surprisal/pi-hyperchart`](packages/pi-hyperchart) | The Pi extension, `/hyperchart`, agent tools, terminal UI, and React inspector. |
 
 Both packages require Node.js 22.19 or newer. The Pi package depends on the same version of the core package.
 
@@ -21,13 +21,13 @@ Both packages require Node.js 22.19 or newer. The Pi package depends on the same
 Install the Pi package from your shell:
 
 ```sh
-pi install npm:@surprisal-io/pi-hyperchart
+pi install npm:@surprisal/pi-hyperchart
 ```
 
 Create `.pi/hypercharts/hello.chart.ts`:
 
 ```ts
-import { artifact, chart, final, script } from "@surprisal-io/hyperchart";
+import { artifact, chart, final, script } from "@surprisal/hyperchart";
 
 export default chart({
   kind: "chart",

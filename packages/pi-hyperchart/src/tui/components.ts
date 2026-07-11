@@ -16,9 +16,9 @@ import {
 	type SelectItem,
 	type TUI,
 } from "@earendil-works/pi-tui";
-import type { ChartAst } from "@surprisal-io/hyperchart/internal/core/types";
-import { JsonlLogStore } from "@surprisal-io/hyperchart/runtime";
-import { isFailureStatePath } from "@surprisal-io/hyperchart/runtime";
+import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
+import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
+import { isFailureStatePath } from "@surprisal/hyperchart/runtime";
 import {
 	readSessionProgress,
 	sessionProgressPath,

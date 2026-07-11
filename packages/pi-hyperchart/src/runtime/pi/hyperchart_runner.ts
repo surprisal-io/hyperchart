@@ -1,10 +1,10 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { explainReplay, parseChartModule, start, type ReplayExplanation } from "@surprisal-io/hyperchart";
-import { ChartRuntime } from "@surprisal-io/hyperchart/runtime";
-import { JsonlLogStore } from "@surprisal-io/hyperchart/runtime";
-import { finalMachineFailureMessage, terminalStateForFinalMachine } from "@surprisal-io/hyperchart/runtime";
+import { explainReplay, parseChartModule, start, type ReplayExplanation } from "@surprisal/hyperchart";
+import { ChartRuntime } from "@surprisal/hyperchart/runtime";
+import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
+import { finalMachineFailureMessage, terminalStateForFinalMachine } from "@surprisal/hyperchart/runtime";
 import { assertChartPreflight } from "./chart_typecheck.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";

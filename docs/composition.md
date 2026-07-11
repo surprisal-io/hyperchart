@@ -17,7 +17,7 @@ Use composition when a run needs hierarchy, concurrent regions, dynamic fan-out,
 A compound state contains one active child at a time.
 
 ```ts
-import { agent, compound, final } from "@surprisal-io/hyperchart";
+import { agent, compound, final } from "@surprisal/hyperchart";
 
 pipeline: compound({
   initial: "draft",
@@ -53,7 +53,7 @@ Use a final child for local completion. Do not model a compound state as an endl
 A parallel state enters every child region.
 
 ```ts
-import { agent, compound, final, parallel, script } from "@surprisal-io/hyperchart";
+import { agent, compound, final, parallel, script } from "@surprisal/hyperchart";
 
 checks: parallel({
   states: {
@@ -95,7 +95,7 @@ Use parallel states for a fixed branch set. Use a map when keys come from data.
 A map resolves `over` to an array or record, persists a spawn fact, and materializes one instance per key.
 
 ```ts
-import { agent, final, map, refs, t, z } from "@surprisal-io/hyperchart";
+import { agent, final, map, refs, t, z } from "@surprisal/hyperchart";
 
 const Plan = z.object({
   chapters: z.array(z.object({ title: z.string(), brief: z.string() })),

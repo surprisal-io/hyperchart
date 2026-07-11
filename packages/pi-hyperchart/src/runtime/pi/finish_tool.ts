@@ -1,8 +1,8 @@
 import { defineTool, type AgentToolResult, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type TSchema } from "typebox";
-import type { ChartEvent } from "@surprisal-io/hyperchart/internal/core/types";
-import type { AgentEffect } from "@surprisal-io/hyperchart/internal/core/machine";
-import { checkSchema } from "@surprisal-io/hyperchart/runtime";
+import type { ChartEvent } from "@surprisal/hyperchart/internal/core/types";
+import type { AgentEffect } from "@surprisal/hyperchart/internal/core/machine";
+import { checkSchema } from "@surprisal/hyperchart/runtime";
 
 export type CompletionSink = { captured: ChartEvent | undefined };
 

@@ -1,5 +1,5 @@
 {
-	"name": "@surprisal-io/pi-hyperchart",
+	"name": "@surprisal/pi-hyperchart",
 	"version": "0.1.0",
 	"description": "Pi extension and React inspector for Hyperchart workflows",
 	"license": "MIT",
@@ -67,7 +67,7 @@
 	},
 	"dependencies": {
 		"@heroicons/react": "^2.2.0",
-		"@surprisal-io/hyperchart": "0.1.0",
+		"@surprisal/hyperchart": "0.1.0",
 		"jiti": "^2.7.0",
 		"typescript": "5.9.3"
 	},

@@ -1,6 +1,6 @@
 # Host API
 
-`@surprisal-io/hyperchart/host` is the harness-neutral boundary for chart discovery, run snapshots, runtime overlays, and UI models.
+`@surprisal/hyperchart/host` is the harness-neutral boundary for chart discovery, run snapshots, runtime overlays, and UI models.
 
 ```ts
 import {
@@ -10,7 +10,7 @@ import {
   hyperchartRunFromToolDetails,
   type HyperchartHostAdapter,
   type HyperchartRunInfo,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 ```
 
 ## Host adapter

@@ -18,18 +18,18 @@ import {
 	tsImport,
 	user,
 	visit,
-} from "@surprisal-io/hyperchart/internal/core/dsl";
-import { inspectChartAst } from "@surprisal-io/hyperchart/internal/core/inspect_ast";
-import { normalizeChartConfig } from "@surprisal-io/hyperchart/internal/core/normalize";
-import { templatePath } from "@surprisal-io/hyperchart/internal/core/paths";
-import { hyperchartSource as coreHyperchartSource } from "@surprisal-io/hyperchart/internal/core/source";
-import type { ActionUID, ChartAst, ChartCst, ChartEvent, StateAst, StatePath } from "@surprisal-io/hyperchart/internal/core/types";
-import type { DurableLogRecord } from "@surprisal-io/hyperchart/internal/core/durable_events";
+} from "@surprisal/hyperchart/internal/core/dsl";
+import { inspectChartAst } from "@surprisal/hyperchart/internal/core/inspect_ast";
+import { normalizeChartConfig } from "@surprisal/hyperchart/internal/core/normalize";
+import { templatePath } from "@surprisal/hyperchart/internal/core/paths";
+import { hyperchartSource as coreHyperchartSource } from "@surprisal/hyperchart/internal/core/source";
+import type { ActionUID, ChartAst, ChartCst, ChartEvent, StateAst, StatePath } from "@surprisal/hyperchart/internal/core/types";
+import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
 import {
 	hyperchartRunFromRuntime,
 	type HyperchartRunFromRuntimeOptions,
 	type HyperchartRuntimeSessionProgressFile,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 import type { HyperchartRunInfo, HyperchartRunStatus } from "../types.js";
 import {
 	BoardPage,

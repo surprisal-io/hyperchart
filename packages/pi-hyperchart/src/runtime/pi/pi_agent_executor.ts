@@ -8,12 +8,12 @@ import {
 	SessionManager,
 	type ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
-import { actionUidDirName, actionUidKey, sanitizeSegment } from "@surprisal-io/hyperchart/internal/core/action_uid";
-import type { ActionUID, ChartEvent } from "@surprisal-io/hyperchart/internal/core/types";
-import type { AgentEffect, RejectedEffect } from "@surprisal-io/hyperchart/internal/core/machine";
-import { errorMessage } from "@surprisal-io/hyperchart/internal/utils/errors";
-import type { AgentExecutor, EmitCompletion } from "@surprisal-io/hyperchart/runtime";
-import { checkArtifactFile, resolveArtifactValue } from "@surprisal-io/hyperchart/runtime";
+import { actionUidDirName, actionUidKey, sanitizeSegment } from "@surprisal/hyperchart/internal/core/action_uid";
+import type { ActionUID, ChartEvent } from "@surprisal/hyperchart/internal/core/types";
+import type { AgentEffect, RejectedEffect } from "@surprisal/hyperchart/internal/core/machine";
+import { errorMessage } from "@surprisal/hyperchart/internal/utils/errors";
+import type { AgentExecutor, EmitCompletion } from "@surprisal/hyperchart/runtime";
+import { checkArtifactFile, resolveArtifactValue } from "@surprisal/hyperchart/runtime";
 import {
 	loadAgentDefinition,
 	resolvePiSubagentDefinitionDirs,

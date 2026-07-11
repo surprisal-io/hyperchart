@@ -213,7 +213,7 @@ Replay recomputes transitions from the current chart. Preserve the chart source,
 
 Recommended release practice:
 
-- pin `@surprisal-io/hyperchart` and `@surprisal-io/pi-hyperchart` to exact matching versions;
+- pin `@surprisal/hyperchart` and `@surprisal/pi-hyperchart` to exact matching versions;
 - keep chart changes in version control;
 - record the source revision in surrounding project metadata;
 - do not edit `log.jsonl` manually;

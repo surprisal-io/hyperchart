@@ -30,13 +30,13 @@ export {
 	hyperchartRunFromInspectResult,
 	hyperchartRunFromRuntime,
 	hyperchartRunFromToolDetails,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 export type {
 	HyperchartRunFromInspectOptions,
 	HyperchartRunFromRuntimeOptions,
 	HyperchartRuntimeSessionProgressFile,
 	HyperchartRuntimeSessionProgressInfo,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 export { HyperchartPortalProvider } from "./support/HyperchartPortalProvider.js";
 export { HyperchartUiThemeProvider } from "./support/HyperchartUiThemeProvider.js";
 export type * from "./types.js";

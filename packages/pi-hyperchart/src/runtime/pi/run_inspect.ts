@@ -3,11 +3,11 @@ import {
 	inspectChartAst,
 	parseChartModuleSync,
 	type HyperchartInspectAgentDefaults,
-} from "@surprisal-io/hyperchart/internal/core/inspect";
-import { hyperchartRunFromRuntime } from "@surprisal-io/hyperchart/host";
-import type { HyperchartRunInfo } from "@surprisal-io/hyperchart/host";
-import { JsonlLogStore } from "@surprisal-io/hyperchart/runtime";
-import { loadRunMeta, type RunMeta } from "@surprisal-io/hyperchart/runtime";
+} from "@surprisal/hyperchart/internal/core/inspect";
+import { hyperchartRunFromRuntime } from "@surprisal/hyperchart/host";
+import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
+import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
+import { loadRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
 import { readRunStatus } from "./run_status.js";
 import { readSessionProgress } from "./session_progress.js";
 

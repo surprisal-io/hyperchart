@@ -16,7 +16,7 @@
 	},
 	"scripts": {
 		"clean": "node scripts/clean-dist.mjs",
-		"build": "npm run clean && npm run build -w @surprisal-io/hyperchart && npm run build -w @surprisal-io/pi-hyperchart",
+		"build": "npm run clean && npm run build -w @surprisal/hyperchart && npm run build -w @surprisal/pi-hyperchart",
 		"typecheck": "npm run build && tsc -p tsconfig.json --noEmit",
 		"test": "vitest run",
 		"check": "npm run typecheck && npm run test && npm run validate:packages",

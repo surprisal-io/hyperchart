@@ -1,15 +1,15 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
-import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal-io/hyperchart/internal/core/inspect";
+import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect";
 import type {
 	HyperchartHostAdapter,
 	HyperchartSessionSnapshot,
 	HyperchartSnapshotOptions,
-} from "@surprisal-io/hyperchart/host";
-import { hyperchartRunFromInspectResult } from "@surprisal-io/hyperchart/host";
-import type { HyperchartInfo, HyperchartRunInfo } from "@surprisal-io/hyperchart/host";
-import { loadRunMeta } from "@surprisal-io/hyperchart/runtime";
+} from "@surprisal/hyperchart/host";
+import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
+import type { HyperchartInfo, HyperchartRunInfo } from "@surprisal/hyperchart/host";
+import { loadRunMeta } from "@surprisal/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { hyperchartRunFromRunDir } from "./run_inspect.js";

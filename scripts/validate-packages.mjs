@@ -160,23 +160,23 @@ function validateCleanConsumer(tarballs) {
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { createJiti } from "jiti";
-import * as core from "@surprisal-io/hyperchart";
-import * as host from "@surprisal-io/hyperchart/host";
-import * as runtime from "@surprisal-io/hyperchart/runtime";
-import * as command from "@surprisal-io/pi-hyperchart/command";
-import * as piHost from "@surprisal-io/pi-hyperchart/pi-host";
-import * as react from "@surprisal-io/pi-hyperchart/react";
+import * as core from "@surprisal/hyperchart";
+import * as host from "@surprisal/hyperchart/host";
+import * as runtime from "@surprisal/hyperchart/runtime";
+import * as command from "@surprisal/pi-hyperchart/command";
+import * as piHost from "@surprisal/pi-hyperchart/pi-host";
+import * as react from "@surprisal/pi-hyperchart/react";
 if (typeof core.refs !== "function" || typeof core.start !== "function") throw new Error("core exports missing");
 if (typeof host.hyperchartRunFromRuntime !== "function") throw new Error("host exports missing");
 if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !== "function") throw new Error("runtime exports missing");
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");
 if (typeof piHost.createPiHyperchartHost !== "function") throw new Error("Pi host exports missing");
 if (typeof react.HyperchartInspectorDialog !== "function") throw new Error("React exports missing");
-writeFileSync("external.chart.ts", \`import { chart, final } from "@surprisal-io/hyperchart";\nexport default chart({ kind: "chart", id: "external-smoke", initial: "done", states: { done: final() } });\n\`);
+writeFileSync("external.chart.ts", \`import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "external-smoke", initial: "done", states: { done: final() } });\n\`);
 const inspected = core.inspectChartModuleSync(resolve("external.chart.ts"));
 if (inspected.chartId !== "external-smoke") throw new Error("packed sync chart inspection failed");
 const require = createRequire(import.meta.url);
-const piRoot = dirname(require.resolve("@surprisal-io/pi-hyperchart/package.json"));
+const piRoot = dirname(require.resolve("@surprisal/pi-hyperchart/package.json"));
 const extension = await createJiti(import.meta.url, { interopDefault: true }).import(join(piRoot, "extensions/hyperchart.ts"));
 if (typeof extension !== "function" && typeof extension.default !== "function") throw new Error("packed Pi extension failed to load");
 `,
@@ -185,7 +185,7 @@ if (typeof extension !== "function" && typeof extension.default !== "function") 
 
 	writeFileSync(
 		resolve(consumer, "smoke.ts"),
-		`import { final, refs } from "@surprisal-io/hyperchart";
+		`import { final, refs } from "@surprisal/hyperchart";
 import type {
   ArtifactCst,
   ArtifactOfCst,
@@ -196,10 +196,10 @@ import type {
   MapStateCst,
   ParseChartModuleOptions,
   RenderedArtifact,
-} from "@surprisal-io/hyperchart";
-import type { GuardContext, Runtime, SchemaCheck } from "@surprisal-io/hyperchart/runtime";
-import type { HyperchartHostAdapter } from "@surprisal-io/hyperchart/host";
-import type { HyperchartInspectorDialogProps } from "@surprisal-io/pi-hyperchart/react";
+} from "@surprisal/hyperchart";
+import type { GuardContext, Runtime, SchemaCheck } from "@surprisal/hyperchart/runtime";
+import type { HyperchartHostAdapter } from "@surprisal/hyperchart/host";
+import type { HyperchartInspectorDialogProps } from "@surprisal/pi-hyperchart/react";
 const { chart } = refs<Record<string, never>, Record<never, never>>();
 export const definition = chart({ kind: "chart", id: "smoke", initial: "done", states: { done: final() } });
 export type SmokeTypes =
@@ -239,7 +239,7 @@ export type SmokeTypes =
 	});
 
 	const consumerRequire = createRequire(resolve(consumer, "package.json"));
-	const piRoot = dirname(consumerRequire.resolve("@surprisal-io/pi-hyperchart/package.json"));
+	const piRoot = dirname(consumerRequire.resolve("@surprisal/pi-hyperchart/package.json"));
 	for (const resource of [
 		"extensions/hyperchart.ts",
 		"skills/hyperchart/SKILL.md",

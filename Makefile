@@ -3,8 +3,8 @@ SHELL := /bin/bash
 VERSION ?=
 NPM_TAG ?= latest
 NPM_ACCESS ?= public
-CORE_PACKAGE := @surprisal-io/hyperchart
-PI_PACKAGE := @surprisal-io/pi-hyperchart
+CORE_PACKAGE := @surprisal/hyperchart
+PI_PACKAGE := @surprisal/pi-hyperchart
 
 .PHONY: help release-prepare release-dry-run release-publish release release-gate _require-version _release-clean _confirm-publish _assert-unpublished
 

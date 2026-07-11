@@ -6,12 +6,12 @@ This is the canonical reference for the two published packages. Task guides expl
 
 | Entry point | Reference |
 |---|---|
-| `@surprisal-io/hyperchart` authoring DSL | [DSL reference](dsl.md) |
-| `@surprisal-io/hyperchart` parser, inspector, machine, projection, replay, and utilities | [Core API](core.md) |
-| `@surprisal-io/hyperchart/runtime` | [Runtime API](runtime.md) |
-| `@surprisal-io/hyperchart/host` | [Host API](host.md) |
-| `@surprisal-io/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
-| `@surprisal-io/pi-hyperchart/react` and `/react/styles.css` | [React API](react.md) |
+| `@surprisal/hyperchart` authoring DSL | [DSL reference](dsl.md) |
+| `@surprisal/hyperchart` parser, inspector, machine, projection, replay, and utilities | [Core API](core.md) |
+| `@surprisal/hyperchart/runtime` | [Runtime API](runtime.md) |
+| `@surprisal/hyperchart/host` | [Host API](host.md) |
+| `@surprisal/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
+| `@surprisal/pi-hyperchart/react` and `/react/styles.css` | [React API](react.md) |
 | Both packages' `/package.json` subpaths | Package metadata (`name`, version, exports, engines, and manifest fields) |
 
 ## Stability boundary
@@ -19,19 +19,19 @@ This is the canonical reference for the two published packages. Task guides expl
 The supported package entry points are:
 
 ```text
-@surprisal-io/hyperchart
-@surprisal-io/hyperchart/host
-@surprisal-io/hyperchart/runtime
-@surprisal-io/hyperchart/package.json
-@surprisal-io/pi-hyperchart
-@surprisal-io/pi-hyperchart/command
-@surprisal-io/pi-hyperchart/pi-host
-@surprisal-io/pi-hyperchart/react
-@surprisal-io/pi-hyperchart/react/styles.css
-@surprisal-io/pi-hyperchart/package.json
+@surprisal/hyperchart
+@surprisal/hyperchart/host
+@surprisal/hyperchart/runtime
+@surprisal/hyperchart/package.json
+@surprisal/pi-hyperchart
+@surprisal/pi-hyperchart/command
+@surprisal/pi-hyperchart/pi-host
+@surprisal/pi-hyperchart/react
+@surprisal/pi-hyperchart/react/styles.css
+@surprisal/pi-hyperchart/package.json
 ```
 
-`@surprisal-io/hyperchart/internal/core/*` and `@surprisal-io/hyperchart/internal/utils/*` are available for first-party package wiring. They are not compatibility promises for application code and are intentionally excluded from this reference.
+`@surprisal/hyperchart/internal/core/*` and `@surprisal/hyperchart/internal/utils/*` are available for first-party package wiring. They are not compatibility promises for application code and are intentionally excluded from this reference.
 
 ## Conventions
 

@@ -7,7 +7,7 @@ Use this page for the authoring contract. For nested, parallel, and map behavior
 ## Chart anatomy
 
 ```ts
-import { agent, final, refs, t, z } from "@surprisal-io/hyperchart";
+import { agent, final, refs, t, z } from "@surprisal/hyperchart";
 
 const Review = z.object({ verdict: z.enum(["pass", "fix"]), notes: z.string() });
 type Review = z.infer<typeof Review>;
@@ -237,7 +237,7 @@ Hyperchart converts Zod schemas to JSON Schema for normalized source and inspect
 The package re-exports `z` so charts can use the same Zod dependency:
 
 ```ts
-import { z } from "@surprisal-io/hyperchart";
+import { z } from "@surprisal/hyperchart";
 ```
 
 ## Artifacts

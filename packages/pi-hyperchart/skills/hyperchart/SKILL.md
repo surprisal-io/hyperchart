@@ -2,7 +2,7 @@
 name: hyperchart
 description: Author, inspect, run, resume, debug, and safely recover durable TypeScript Hyperchart workflows in Pi. Use for .chart.ts files, hyperchart_* tools, typed refs, artifacts, replay warnings, and runtime troubleshooting.
 license: MIT
-compatibility: Requires Node.js >=22.19 and the @surprisal-io/pi-hyperchart Pi package.
+compatibility: Requires Node.js >=22.19 and the @surprisal/pi-hyperchart Pi package.
 ---
 
 # Hyperchart agent procedure
@@ -51,7 +51,7 @@ This catches different failures at the right boundary:
 - Durable files make inspection, recovery, replay analysis, and manual verification easier than large prompt/result payloads.
 
 ```ts
-import { agent, artifact, final, refs, t, z } from "@surprisal-io/hyperchart";
+import { agent, artifact, final, refs, t, z } from "@surprisal/hyperchart";
 
 const Report = z.object({
   title: z.string(),

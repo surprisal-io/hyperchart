@@ -1,4 +1,4 @@
-import { agent, final, refs, user, z } from "@surprisal-io/hyperchart";
+import { agent, final, refs, user, z } from "@surprisal/hyperchart";
 
 const Research = z.object({ summary: z.string() });
 const Plan = z.object({ steps: z.array(z.string()) });

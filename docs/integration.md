@@ -6,8 +6,8 @@ Use the core package to produce canonical chart/run models. Use the Pi package w
 
 | Package | Browser-safe parts | Node/runtime parts |
 |---|---|---|
-| `@surprisal-io/hyperchart` | normalized types, inspection models, host models/adapters | module loading, machine, replay, generic runtime |
-| `@surprisal-io/pi-hyperchart` | React entry point and CSS | Pi extension, runner, TUI, Pi host adapter |
+| `@surprisal/hyperchart` | normalized types, inspection models, host models/adapters | module loading, machine, replay, generic runtime |
+| `@surprisal/pi-hyperchart` | React entry point and CSS | Pi extension, runner, TUI, Pi host adapter |
 
 Do not import Node-only root or internal modules into browser bundles. The normalized AST inspector is browser-safe; chart module loading is not.
 
@@ -21,7 +21,7 @@ import type {
   HyperchartRunInfo,
   HyperchartSessionSnapshot,
   HyperchartHostAdapter,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 ```
 
 `HyperchartInfo` describes a discovered chart. `HyperchartRunInfo` combines static chart information with optional runtime overlays. UI components consume these models instead of reading `log.jsonl` directly.
@@ -40,7 +40,7 @@ A host adapter has one method:
 import type {
   HyperchartHostAdapter,
   HyperchartSessionSnapshot,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 
 export class MyHyperchartHost implements HyperchartHostAdapter {
   async readSessionSnapshot(
@@ -71,7 +71,7 @@ The Pi package exports a ready adapter:
 import {
   createPiHyperchartHost,
   piHyperchartHost,
-} from "@surprisal-io/pi-hyperchart/pi-host";
+} from "@surprisal/pi-hyperchart/pi-host";
 
 const snapshot = await piHyperchartHost.readSessionSnapshot(process.cwd(), {
   runLimit: 20,
@@ -90,7 +90,7 @@ import {
   hyperchartRunFromInspectResult,
   hyperchartRunFromRuntime,
   hyperchartRunFromToolDetails,
-} from "@surprisal-io/hyperchart/host";
+} from "@surprisal/hyperchart/host";
 ```
 
 Use the adapter matching the data you actually have. Do not fabricate runtime fields for a static inspect result.
@@ -100,7 +100,7 @@ Use the adapter matching the data you actually have. Do not fabricate runtime fi
 Install the Pi package and its UI peers in the host application:
 
 ```sh
-npm install @surprisal-io/pi-hyperchart \
+npm install @surprisal/pi-hyperchart \
   react react-dom @xyflow/react elkjs react-syntax-highlighter
 ```
 
@@ -111,8 +111,8 @@ import {
   HyperchartInspectorDialog,
   HyperchartRunStrip,
   HyperchartUiThemeProvider,
-} from "@surprisal-io/pi-hyperchart/react";
-import "@surprisal-io/pi-hyperchart/react/styles.css";
+} from "@surprisal/pi-hyperchart/react";
+import "@surprisal/pi-hyperchart/react/styles.css";
 ```
 
 Do not import component files or React Flow CSS separately. `styles.css` contains the complete public stylesheet contract, including scoped React Flow styles.
@@ -124,8 +124,8 @@ import { useState } from "react";
 import {
   HyperchartInspectorDialog,
   HyperchartRunStrip,
-} from "@surprisal-io/pi-hyperchart/react";
-import type { HyperchartRunInfo } from "@surprisal-io/hyperchart/host";
+} from "@surprisal/pi-hyperchart/react";
+import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 
 export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);

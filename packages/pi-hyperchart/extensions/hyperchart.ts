@@ -34,12 +34,12 @@ import {
 	type InputRef,
 	type StatePath,
 	type TemplateAst,
-} from "@surprisal-io/hyperchart";
-import { actionUidDirName, actionUidKey } from "@surprisal-io/hyperchart/internal/core/action_uid";
-import { instancePathFor, nearestInstance, nodeAt, stripLastKey } from "@surprisal-io/hyperchart/internal/core/paths";
-import { JsonlLogStore } from "@surprisal-io/hyperchart/runtime";
-import { createRunDir, loadRunMeta, saveRunMeta, type RunMeta } from "@surprisal-io/hyperchart/runtime";
-import { isFailureStatePath, type RunTerminalState } from "@surprisal-io/hyperchart/runtime";
+} from "@surprisal/hyperchart";
+import { actionUidDirName, actionUidKey } from "@surprisal/hyperchart/internal/core/action_uid";
+import { instancePathFor, nearestInstance, nodeAt, stripLastKey } from "@surprisal/hyperchart/internal/core/paths";
+import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
+import { createRunDir, loadRunMeta, saveRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
+import { isFailureStatePath, type RunTerminalState } from "@surprisal/hyperchart/runtime";
 import { assertChartPreflight } from "../src/runtime/pi/chart_typecheck.js";
 import {
 	getHyperchartRunsRoot,

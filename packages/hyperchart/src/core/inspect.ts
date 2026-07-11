@@ -14,7 +14,7 @@ export function parseChartModuleSync(filePath: string, options: InspectChartModu
 	const jiti = createJiti(pathToFileURL(absolutePath).href, {
 		interopDefault: true,
 		moduleCache: false,
-		alias: { "@surprisal-io/hyperchart": selfEntryPath() },
+		alias: { "@surprisal/hyperchart": selfEntryPath() },
 	});
 	try {
 		const module = jiti(absolutePath) as Record<string, unknown>;

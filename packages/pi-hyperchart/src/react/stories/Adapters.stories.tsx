@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useMemo } from "react";
-import type { HyperchartInspectResult } from "@surprisal-io/hyperchart/internal/core/inspect";
-import { hyperchartRunFromInspectResult } from "@surprisal-io/hyperchart/host";
+import type { HyperchartInspectResult } from "@surprisal/hyperchart/internal/core/inspect";
+import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
 import { HyperchartGraphPreview } from "../HyperchartInspectorDialog.js";
 
 const inspectResult: HyperchartInspectResult = {

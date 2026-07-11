@@ -137,7 +137,7 @@ A run may have a valid log and a stale process status. Conversely, a process can
 
 ## Generic runtime components
 
-`@surprisal-io/hyperchart/runtime` exports the supported runtime building blocks:
+`@surprisal/hyperchart/runtime` exports the supported runtime building blocks:
 
 - the `Runtime` effect-interpreter interface;
 - `ChartRuntime`;

@@ -15,7 +15,7 @@ The first chart uses only `node` and the filesystem. No model provider or custom
 From your shell, before starting Pi:
 
 ```sh
-pi install npm:@surprisal-io/pi-hyperchart
+pi install npm:@surprisal/pi-hyperchart
 ```
 
 Start Pi after the install, or restart an existing Pi process. The package contributes one extension and one `hyperchart` skill.
@@ -33,7 +33,7 @@ pi
 Create `.pi/hypercharts/hello.chart.ts`:
 
 ```ts
-import { artifact, chart, final, script } from "@surprisal-io/hyperchart";
+import { artifact, chart, final, script } from "@surprisal/hyperchart";
 
 export default chart({
   kind: "chart",
@@ -133,7 +133,7 @@ The files to know first are:
 Agent actions refer to Pi agent definitions by name:
 
 ```ts
-import { agent } from "@surprisal-io/hyperchart";
+import { agent } from "@surprisal/hyperchart";
 
 agent("reviewer", {
   task: "Review the implementation and return a verdict.",
@@ -150,7 +150,7 @@ Agent execution also requires a configured Pi model/provider. Follow [Pi Provide
 
 Restart Pi after installation. `/reload` reloads auto-discovered resources, but an explicitly loaded extension may remain bound until process exit.
 
-### The chart cannot import `@surprisal-io/hyperchart`
+### The chart cannot import `@surprisal/hyperchart`
 
 Install dependencies in the project or install the Pi package through `pi install`. A distributed Pi package is installed with production dependencies; a copied extension without its package dependencies is not equivalent.
 

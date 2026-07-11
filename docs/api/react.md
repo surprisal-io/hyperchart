@@ -6,11 +6,11 @@ import {
   HyperchartPortalProvider,
   HyperchartUiThemeProvider,
   type HyperchartRunInfo,
-} from "@surprisal-io/pi-hyperchart/react";
-import "@surprisal-io/pi-hyperchart/react/styles.css";
+} from "@surprisal/pi-hyperchart/react";
+import "@surprisal/pi-hyperchart/react/styles.css";
 ```
 
-React is part of `@surprisal-io/pi-hyperchart`; there is no third package.
+React is part of `@surprisal/pi-hyperchart`; there is no third package.
 
 ## Requirements
 
@@ -303,7 +303,7 @@ hyperchartRunFromRuntime
 hyperchartRunFromToolDetails
 ```
 
-It also re-exports every type from `@surprisal-io/hyperchart/host`, including `HyperchartInfo`, `HyperchartRunInfo`, and `HyperchartStateInfo`. See [Host API](host.md).
+It also re-exports every type from `@surprisal/hyperchart/host`, including `HyperchartInfo`, `HyperchartRunInfo`, and `HyperchartStateInfo`. See [Host API](host.md).
 
 ## Complete React export inventory
 

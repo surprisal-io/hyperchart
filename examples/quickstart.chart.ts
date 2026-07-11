@@ -1,4 +1,4 @@
-import { artifact, chart, final, script } from "@surprisal-io/hyperchart";
+import { artifact, chart, final, script } from "@surprisal/hyperchart";
 
 export default chart({
 	kind: "chart",

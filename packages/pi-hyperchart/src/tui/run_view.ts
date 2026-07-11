@@ -1,7 +1,7 @@
-import type { ChartAst, StateAst } from "@surprisal-io/hyperchart/internal/core/types";
-import type { DurableLogRecord } from "@surprisal-io/hyperchart/internal/core/durable_events";
-import { createBranchProjection, isFinalState, type PendingAction, projectBranch } from "@surprisal-io/hyperchart/internal/core/projection";
-import { underScope } from "@surprisal-io/hyperchart/internal/core/paths";
+import type { ChartAst, StateAst } from "@surprisal/hyperchart/internal/core/types";
+import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
+import { createBranchProjection, isFinalState, type PendingAction, projectBranch } from "@surprisal/hyperchart/internal/core/projection";
+import { underScope } from "@surprisal/hyperchart/internal/core/paths";
 
 export type PendingView = {
 	path: string;
