@@ -16,15 +16,39 @@ Hyperchart runs long-lived work as an explicit statechart. The chart defines wha
 
 Both packages require Node.js 22.19 or newer. The Pi package depends on the same version of the core package.
 
-## Run a chart in Pi
+## Install
 
-Install the Pi package from your shell:
+### From npm
+
+Install the core package in a TypeScript or Node.js project:
+
+```sh
+npm install @surprisal/hyperchart
+```
+
+Install the complete Pi integration, including the extension, tools, inspector, and bundled skill:
 
 ```sh
 pi install npm:@surprisal/pi-hyperchart
 ```
 
-Create `.pi/hypercharts/hello.chart.ts`:
+For durable production runs, pin both packages to the same exact version.
+
+### From a local checkout
+
+```sh
+git clone https://github.com/surprisal-io/hyperchart.git
+cd hyperchart
+npm install
+npm run build
+pi install "$PWD/packages/pi-hyperchart"
+```
+
+Pi loads the local package in place, so later source changes remain available after rebuilding. Use `npm run check` before relying on a local checkout for real runs.
+
+## Run a chart in Pi
+
+After installing the Pi package, create `.pi/hypercharts/hello.chart.ts`:
 
 ```ts
 import { artifact, chart, final, script } from "@surprisal/hyperchart";
