@@ -21,6 +21,7 @@ export type HyperchartInspectAgentDefaults = {
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
+	agentDefinitionUnavailable?: boolean;
 };
 
 export type InspectChartModuleOptions = {
@@ -96,6 +97,7 @@ export type HyperchartInspectState = {
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
+	agentDefinitionUnavailable?: boolean;
 	over?: string;
 	overSchema?: JsonSchema;
 	concurrency?: number;
@@ -214,6 +216,7 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 			...(model === undefined ? {} : { model }),
 			...(thinking === undefined ? {} : { thinking }),
 			...(tools === undefined ? {} : { tools }),
+			...(defaults?.agentDefinitionUnavailable === true ? { agentDefinitionUnavailable: true } : {}),
 		};
 	}
 	if (action.kind === "script") {

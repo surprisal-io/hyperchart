@@ -44,10 +44,23 @@ export function AgentInfoCard({
 					</span>
 				)}
 			</div>
+			{state.agentDefinitionUnavailable === true ? (
+				<div
+					role="alert"
+					className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-[var(--hc-amber-text)]"
+				>
+					Agent definition could not be loaded. Model, thinking, tools, and system prompt are unavailable; this
+					 state cannot run.
+				</div>
+			) : null}
 			<div className="mt-2">
 				<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">tools</div>
 				<div className="flex flex-wrap gap-1">
-					{state.tools === undefined ? (
+					{state.agentDefinitionUnavailable === true ? (
+						<span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-amber-text)]">
+							unavailable
+						</span>
+					) : state.tools === undefined ? (
 						<span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-green-text)]">
 							all tools allowed
 						</span>

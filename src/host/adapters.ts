@@ -191,6 +191,7 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 		...(state.model === undefined ? {} : { model: state.model }),
 		...(state.thinking === undefined ? {} : { thinking: state.thinking }),
 		...(state.tools === undefined ? {} : { tools: [...state.tools] }),
+		...(state.agentDefinitionUnavailable === true ? { agentDefinitionUnavailable: true } : {}),
 		...(state.task === undefined ? {} : { taskPreview: previewText(state.task), taskPrompt: state.task }),
 		...(state.command === undefined ? {} : { commandPreview: state.command }),
 		...(state.env === undefined

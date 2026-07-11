@@ -56,7 +56,7 @@ import {
 	type HyperchartRunStatus,
 } from "../src/runtime/pi/run_status.js";
 import type { HyperchartRunnerConfig } from "../src/runtime/pi/hyperchart_runner.js";
-import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../src/runtime/pi/agent_definitions.js";
+import { createAgentDefaultsResolver } from "../src/runtime/pi/agent_definitions.js";
 import { readSessionProgress, sessionProgressPath } from "../src/runtime/pi/session_progress.js";
 import {
 	RunHistoryOverlay,
@@ -321,31 +321,10 @@ const hyperchartRunTool = defineTool({
 	},
 });
 
-function agentDefaultsResolver(cwd: string): (agentName: string) => { model?: string; thinking?: string; tools?: readonly string[] } | undefined {
-	const dirs = resolvePiSubagentDefinitionDirs(cwd, getAgentDir());
-	const cache = new Map<string, { model?: string; thinking?: string; tools?: readonly string[] } | undefined>();
-	return (agentName: string) => {
-		if (cache.has(agentName)) return cache.get(agentName);
-		try {
-			const definition = loadAgentDefinition(agentName, dirs);
-			const defaults = {
-				...(definition.model === undefined ? {} : { model: definition.model }),
-				...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
-				...(definition.tools === undefined ? {} : { tools: definition.tools }),
-			};
-			cache.set(agentName, defaults);
-			return defaults;
-		} catch {
-			cache.set(agentName, undefined);
-			return undefined;
-		}
-	};
-}
-
 async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContext) {
 	const meta = loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
 	if (meta === undefined) throw new Error(`Run '${basename(runDir)}' belongs to another working directory or is missing metadata`);
-	return hyperchartRunFromRunDir(runDir, { meta, agentDefaults: agentDefaultsResolver(ctx.cwd) });
+	return hyperchartRunFromRunDir(runDir, { meta, agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir()) });
 }
 
 const hyperchartInspectTool = defineTool({
@@ -358,7 +337,7 @@ const hyperchartInspectTool = defineTool({
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
-		const agentDefaults = agentDefaultsResolver(ctx.cwd);
+		const agentDefaults = createAgentDefaultsResolver(ctx.cwd, getAgentDir());
 		const result = inspectChartModuleSync(
 			chartPath,
 			{

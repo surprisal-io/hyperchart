@@ -173,6 +173,7 @@ export interface HyperchartStateInfo {
 	endedAt?: number;
 	model?: string;
 	thinking?: string;
+	agentDefinitionUnavailable?: boolean;
 	usage?: HyperchartUsageInfo;
 	reads?: string[];
 	completedEvent?: string;

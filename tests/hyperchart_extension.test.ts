@@ -124,6 +124,20 @@ describe("hyperchart extension", () => {
 		});
 	});
 
+	it("marks unavailable agent definitions in static inspect results", async () => {
+		const chartPath = writeChart("inspect-missing-agent");
+		const tool = registeredTool("hyperchart_inspect");
+		const { ctx } = commandContext(projectDir);
+
+		const result = await tool.execute("tool-call", { chartPath }, new AbortController().signal, () => undefined, ctx);
+		const details = result.details as { states: Array<Record<string, unknown>> };
+
+		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+			agent: "worker",
+			agentDefinitionUnavailable: true,
+		});
+	});
+
 	it("keeps view as the shortcut for opening the latest run", async () => {
 		const runId = "current-run";
 		const runDir = createRun(runId, projectDir, writeChart("current"));

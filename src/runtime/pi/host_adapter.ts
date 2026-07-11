@@ -11,6 +11,7 @@ import { hyperchartRunFromInspectResult } from "../../host/adapters.js";
 import type { HyperchartInfo, HyperchartRunInfo } from "../../host/models.js";
 import { loadRunMeta } from "../generic/run_dir.js";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, listProjectHypercharts } from "./paths.js";
+import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { hyperchartRunFromRunDir } from "./run_inspect.js";
 
 export interface PiHyperchartHostOptions {
@@ -41,9 +42,10 @@ async function readSessionSnapshot(
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
 ): Promise<HyperchartSessionSnapshot> {
+	const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir);
 	const [hypercharts, runs] = await Promise.all([
-		readHypercharts(cwd, agentDir, agentDefaults),
-		readRuns(cwd, agentDir, options.runLimit ?? 50, agentDefaults, failedRunMetaFingerprints),
+		readHypercharts(cwd, agentDir, resolvedAgentDefaults),
+		readRuns(cwd, agentDir, options.runLimit ?? 50, resolvedAgentDefaults, failedRunMetaFingerprints),
 	]);
 	return { hypercharts, runs };
 }

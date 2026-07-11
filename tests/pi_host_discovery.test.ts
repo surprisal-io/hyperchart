@@ -51,7 +51,34 @@ describe("Pi Hyperchart host adapter", () => {
 			stateCount: 2,
 		});
 		expect(snapshot.hypercharts[0]?.states?.map((state) => state.id)).toEqual(["work", "done"]);
+		expect(snapshot.hypercharts[0]?.states?.find((state) => state.id === "work")).toMatchObject({
+			agent: "worker",
+			agentDefinitionUnavailable: true,
+		});
 		expect(snapshot.hypercharts[0]).not.toHaveProperty("phases");
+	});
+
+	it("resolves agent model, thinking, and tools from Pi agent definitions by default", async () => {
+		const projectDir = await tempDir("hyperchart-project-");
+		const agentDir = await tempDir("hyperchart-agent-");
+		await writeChart(projectDir);
+		await mkdir(join(agentDir, "agents"), { recursive: true });
+		await writeFile(
+			join(agentDir, "agents", "worker.md"),
+			"---\nname: worker\nmodel: provider/model\nthinking: high\ntools: read, write\n---\nWorker instructions.\n",
+			"utf8",
+		);
+
+		const snapshot = await createPiHyperchartHost({ agentDir }).readSessionSnapshot(projectDir);
+
+		const worker = snapshot.hypercharts[0]?.states?.find((state) => state.id === "work");
+		expect(worker).toMatchObject({
+			agent: "worker",
+			model: "provider/model",
+			thinking: "high",
+			tools: ["read", "write"],
+		});
+		expect(worker).not.toHaveProperty("agentDefinitionUnavailable");
 	});
 
 	it("reflects changes in imported chart definitions", async () => {

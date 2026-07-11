@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import type { HyperchartInspectAgentDefaults } from "../../core/inspect_ast.js";
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
@@ -50,6 +51,31 @@ export function resolvePiSubagentDefinitionDirs(cwd: string, agentDir: string = 
 		join(agentDir, "agents"),
 		...packageAgentDirs(cwd, agentDir),
 	]);
+}
+
+export function createAgentDefaultsResolver(
+	cwd: string,
+	agentDir: string = getAgentDir(),
+): (agentName: string) => HyperchartInspectAgentDefaults {
+	const dirs = resolvePiSubagentDefinitionDirs(cwd, agentDir);
+	const cache = new Map<string, HyperchartInspectAgentDefaults>();
+	return (agentName) => {
+		const cached = cache.get(agentName);
+		if (cached !== undefined) return cached;
+		let defaults: HyperchartInspectAgentDefaults;
+		try {
+			const definition = loadAgentDefinition(agentName, dirs);
+			defaults = {
+				...(definition.model === undefined ? {} : { model: definition.model }),
+				...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
+				...(definition.tools === undefined ? {} : { tools: definition.tools }),
+			};
+		} catch {
+			defaults = { agentDefinitionUnavailable: true };
+		}
+		cache.set(agentName, defaults);
+		return defaults;
+	};
 }
 
 function parseAgentFile(path: string, requestedName: string): AgentDefinition | undefined {
