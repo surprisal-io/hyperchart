@@ -1,5 +1,5 @@
 import React from "react";
-import { interpolationAction } from "../helpers/interpolation.js";
+import { interpolationAction, isPromptInterpolationToken } from "../helpers/interpolation.js";
 import type { InterpolatedTextProps } from "../types.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { InterpolationToken } from "./InterpolationToken.js";
@@ -15,12 +15,16 @@ function interpolatedParts(
 	while (match !== null) {
 		if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
 		const token = match[1] ?? "";
-		const action = interpolationAction(token, state, allStates, {
-			...(onHighlightInput === undefined ? {} : { onHighlightInput }),
-			...(onHighlightReply === undefined ? {} : { onHighlightReply }),
-			...(onHighlightRef === undefined ? {} : { onHighlightRef }),
-		});
-		parts.push(<InterpolationToken key={`${token}:${match.index}`} token={token} action={action} />);
+		if (isPromptInterpolationToken(token)) {
+			const action = interpolationAction(token, state, allStates, {
+				...(onHighlightInput === undefined ? {} : { onHighlightInput }),
+				...(onHighlightReply === undefined ? {} : { onHighlightReply }),
+				...(onHighlightRef === undefined ? {} : { onHighlightRef }),
+			});
+			parts.push(<InterpolationToken key={`${token}:${match.index}`} token={token} action={action} />);
+		} else {
+			parts.push(match[0]);
+		}
 		lastIndex = match.index + match[0].length;
 		match = pattern.exec(text);
 	}

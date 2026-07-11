@@ -19,16 +19,25 @@ function parseDslCallArgs(token: string, name: string): string[] | undefined {
 	return args;
 }
 
+function unwrapDslCall(token: string, name: string): string | undefined {
+	const trimmed = token.trim();
+	const prefix = `${name}(`;
+	if (!trimmed.startsWith(prefix) || !trimmed.endsWith(")")) return undefined;
+	const inner = trimmed.slice(prefix.length, -1).trim();
+	return inner.length === 0 ? undefined : inner;
+}
+
 function parsePromptInterpolationRef(token: string): PromptInterpolationRef {
-	const inputArgs = parseDslCallArgs(token, "input");
+	const sourceToken = unwrapDslCall(token, "json") ?? token;
+	const inputArgs = parseDslCallArgs(sourceToken, "input");
 	if (inputArgs?.[0])
 		return { kind: "input", name: inputArgs[0], ...(inputArgs[1] === undefined ? {} : { path: inputArgs[1] }) };
-	const resultArgs = parseDslCallArgs(token, "result");
+	const resultArgs = parseDslCallArgs(sourceToken, "result");
 	if (resultArgs?.[0])
 		return { kind: "result", state: resultArgs[0], ...(resultArgs[1] === undefined ? {} : { path: resultArgs[1] }) };
-	const visitArgs = parseDslCallArgs(token, "visit");
+	const visitArgs = parseDslCallArgs(sourceToken, "visit");
 	if (visitArgs) return { kind: "visit", ...(visitArgs[0] === undefined ? {} : { state: visitArgs[0] }) };
-	const keyArgs = parseDslCallArgs(token, "key");
+	const keyArgs = parseDslCallArgs(sourceToken, "key");
 	if (keyArgs) return { kind: "key", ...(keyArgs[0] === undefined ? {} : { state: keyArgs[0] }) };
 	return { kind: "unknown" };
 }
@@ -50,6 +59,10 @@ function inputRefTypeInfo(
 	const input = state.inputs?.find((candidate) => candidate.name === ref.name);
 	if (!input?.schema) return { name: ref.name };
 	return { name: ref.name, schema: schemaAtPath(input.schema, ref.path) ?? input.schema };
+}
+
+export function isPromptInterpolationToken(token: string): boolean {
+	return parsePromptInterpolationRef(token).kind !== "unknown";
 }
 
 export function interpolationAction(
@@ -84,9 +97,9 @@ export function interpolationAction(
 		return {
 			title: schema ? schemaTypeText(schema) : "unknown",
 			tone: "result",
-			...(resultTarget.path !== undefined && actions.onHighlightReply !== undefined
-				? { onClick: () => actions.onHighlightReply?.(resultTarget.state.id, resultTarget.path ?? "") }
-				: {}),
+			...(actions.onHighlightReply === undefined
+				? {}
+				: { onClick: () => actions.onHighlightReply?.(resultTarget.state.id, resultTarget.path ?? "") }),
 		};
 	}
 	if (ref.kind === "key") return { title: "string", tone: "plain" };
@@ -110,5 +123,8 @@ export function interpolationTokenClass(tone: PromptInterpolationTone, clickable
 }
 
 export function hasInterpolation(text: string): boolean {
-	return /\{[^{}]+\}/.test(text);
+	for (const match of text.matchAll(/\{([^{}]+)\}/g)) {
+		if (isPromptInterpolationToken(match[1] ?? "")) return true;
+	}
+	return false;
 }
