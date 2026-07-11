@@ -180,20 +180,41 @@ npm audit --omit=dev
 
 Review the printed tarball contents. Source files included for Pi/Jiti loading are intentional; tests, Storybook, repository configuration, and unrelated assets are not.
 
-## Release order
+## Prepare and publish a release
 
-The packages publish independently but the Pi package pins the matching core version.
+The packages publish independently, and the Pi package pins the exact matching core version. Prepare the version from a clean tracked working tree:
 
-1. confirm a clean working tree and final version numbers;
-2. run `npm run check`;
-3. run `npm run build-storybook`;
-4. run both publish dry-runs;
-5. publish `@surprisal-io/hyperchart`;
-6. verify the core package from a clean npm install;
-7. publish `@surprisal-io/pi-hyperchart`;
-8. install the Pi package in a clean Pi environment;
-9. verify one extension, one `hyperchart` skill, `/hyperchart`, and all four tools;
-10. create the release/tag only after registry verification.
+```sh
+make release-prepare VERSION=0.2.0
+```
+
+This command:
+
+1. rejects a version that already exists for either package;
+2. updates the workspace, core, and Pi versions;
+3. updates the exact Pi → core dependency and `package-lock.json` entries;
+4. updates version labels in the root and package READMEs;
+5. synchronizes the documentation bundled in the Pi package;
+6. runs `npm run check`, the Storybook build, the production dependency audit, and both publish dry-runs.
+
+Review and commit the resulting version change. Publish only from that clean commit:
+
+```sh
+make release-publish \
+  VERSION=0.2.0 \
+  CONFIRM=publish-0.2.0
+```
+
+For a pre-release, provide a non-`latest` npm tag to both commands:
+
+```sh
+make release-prepare VERSION=0.2.0-rc.1 NPM_TAG=next
+make release-publish VERSION=0.2.0-rc.1 NPM_TAG=next CONFIRM=publish-0.2.0-rc.1
+```
+
+`release-publish` repeats all gates and dry-runs, verifies npm authentication, publishes `@surprisal-io/hyperchart` first, waits until that exact version is visible, then publishes `@surprisal-io/pi-hyperchart`. It deliberately does not create or push a git tag.
+
+After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and all four tools. Create the release/tag only after registry verification.
 
 Do not publish from a workspace whose package manifests or lockfile still refer to a temporary local dependency.
 
