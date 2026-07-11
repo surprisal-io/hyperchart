@@ -29,7 +29,12 @@ export async function resolveArtifactValue(artifact: RenderedArtifact, workDir: 
 }
 
 export function serializeEnvValue(value: unknown): string {
-	return typeof value === "string" ? value : JSON.stringify(value);
+	if (typeof value === "string") return value;
+	const serialized = JSON.stringify(value);
+	if (serialized === undefined) {
+		throw new Error("Environment value is not JSON-serializable");
+	}
+	return serialized;
 }
 
 export async function checkArtifactFile(artifact: RenderedArtifact, workDir: string): Promise<SchemaCheck> {

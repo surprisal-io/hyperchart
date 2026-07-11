@@ -89,6 +89,11 @@ describe("artifacts", () => {
 		expect(serializeEnvValue({ x: 1 })).toBe('{"x":1}');
 	});
 
+	it("rejects environment values that JSON cannot serialize", () => {
+		expect(() => serializeEnvValue(undefined)).toThrow("Environment value is not JSON-serializable");
+		expect(() => serializeEnvValue(() => undefined)).toThrow("Environment value is not JSON-serializable");
+	});
+
 	it("checks deliverable file existence and shape", async () => {
 		const dir = await makeTempDir();
 		const artifact: RenderedArtifact = { path: "out.json", shape: schema(z.object({ ok: z.boolean() })) };
