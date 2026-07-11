@@ -40,3 +40,18 @@ the semantic rules in normalize.ts) is not done until all three agree:
 Key spec decisions (fairness doctrine, micro-steps, what is deliberately not
 modeled) are documented in the header of tla/Hyperchart.tla — read it before
 editing either side.
+
+## Documentation is part of the change
+
+Public API or behavior, package/export/dependency, Pi command/tool/lifecycle,
+host adapter, React/UI/theme, and example changes are incomplete without their
+corresponding documentation. Update the relevant canonical page under `docs/`,
+the affected npm package README, bundled skill routing/reference pages when an
+agent workflow changes, and Storybook/README visual assets when users can see
+the change. Do not duplicate the full manual into package READMEs or the skill;
+keep those focused and link to canonical docs.
+
+The change-to-document map and release checklist live in
+[`docs/development.md`](docs/development.md). Tests must accompany behavioral
+changes; UI changes require an appropriate Storybook story and refreshed visual
+when the landing-page representation is affected.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateLaunchArgsText } from "../src/react/components/launch/HyperchartLaunchDialogInner.js";
+import { validateLaunchArgsText } from "../packages/pi-hyperchart/src/react/components/launch/HyperchartLaunchDialogInner.js";
 
 describe("validateLaunchArgsText", () => {
 	it("accepts empty arguments and JSON objects", () => {

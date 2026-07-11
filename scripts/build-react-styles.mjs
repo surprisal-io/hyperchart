@@ -3,10 +3,9 @@ import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { build } from "vite";
 
-const root = resolve(import.meta.dirname, "..");
-const outputDir = resolve(root, "dist/src/react");
+const root = resolve(import.meta.dirname, "../packages/pi-hyperchart");
+const outputDir = resolve(root, "dist/react");
 const outputFile = resolve(outputDir, "styles.css");
-
 await build({
 	root,
 	logLevel: "warn",
@@ -17,12 +16,8 @@ await build({
 		cssMinify: true,
 		rollupOptions: {
 			input: resolve(root, "src/react/styles.css"),
-			output: {
-				assetFileNames: "styles.css",
-				entryFileNames: "styles.js",
-			},
+			output: { assetFileNames: "styles.css", entryFileNames: "styles.js" },
 		},
 	},
 });
-
 await access(outputFile);

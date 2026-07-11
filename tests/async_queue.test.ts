@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAsyncQueue } from "../src/index.js";
+import { createAsyncQueue } from "../packages/hyperchart/src/index.js";
 
 async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 	const values: T[] = [];

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isRunLive, patchRunStatus, readRunStatus } from "../src/runtime/pi/run_status.js";
+import { isRunLive, patchRunStatus, readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
 
 const tempDirs: string[] = [];
 

@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { lintChartModuleSource, preflightChartModule, typecheckChartModule } from "../src/runtime/pi/chart_typecheck.js";
+import { lintChartModuleSource, preflightChartModule, typecheckChartModule } from "../packages/pi-hyperchart/src/runtime/pi/chart_typecheck.js";
 
 describe("chart preflight", () => {
 	it("passes valid TypeScript chart modules", async () => {
@@ -34,7 +34,7 @@ describe("chart preflight", () => {
 		const chartPath = join(dir, "bad.chart.ts");
 		writeFileSync(
 			chartPath,
-			`import { refs } from "${process.cwd().replaceAll("\\", "/")}/src/index.js";\n\nconst { chart, result } = refs();\n\nexport default chart({\n\tkind: "chart",\n\tid: "bad",\n\tinitial: "start",\n\tstates: {\n\t\tstart: {\n\t\t\tkind: "state",\n\t\t\taction: { kind: "script", command: "echo", args: [result("missing", "value")] },\n\t\t\ttransitions: {},\n\t\t},\n\t},\n});\n`,
+			`import { refs } from "${process.cwd().replaceAll("\\", "/")}/packages/hyperchart/src/index.js";\n\nconst { chart, result } = refs();\n\nexport default chart({\n\tkind: "chart",\n\tid: "bad",\n\tinitial: "start",\n\tstates: {\n\t\tstart: {\n\t\t\tkind: "state",\n\t\t\taction: { kind: "script", command: "echo", args: [result("missing", "value")] },\n\t\t\ttransitions: {},\n\t\t},\n\t},\n});\n`,
 			"utf8",
 		);
 
@@ -69,7 +69,7 @@ describe("chart preflight", () => {
 		const chartPath = join(dir, "preflight.chart.ts");
 		writeFileSync(
 			chartPath,
-			`import { z } from "${process.cwd().replaceAll("\\", "/")}/src/index.js";\nconst Shape = z.object({ value: z.string() }).passthrough();\n`,
+			`import { z } from "${process.cwd().replaceAll("\\", "/")}/packages/hyperchart/src/index.js";\nconst Shape = z.object({ value: z.string() }).passthrough();\n`,
 			"utf8",
 		);
 

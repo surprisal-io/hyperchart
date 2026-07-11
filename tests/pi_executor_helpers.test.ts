@@ -2,17 +2,17 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { z } from "../src/index.js";
-import type { AgentEffect } from "../src/core/machine.js";
-import type { AgentActionAst, JsonSchema, SchemaAst } from "../src/core/types.js";
-import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../src/runtime/pi/agent_definitions.js";
-import { createFinishTool, type CompletionSink } from "../src/runtime/pi/finish_tool.js";
-import { buildNudgePrompt, buildTaskPrompt } from "../src/runtime/pi/prompts.js";
+import { z } from "../packages/hyperchart/src/index.js";
+import type { AgentEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentActionAst, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
+import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
+import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
+import { buildNudgePrompt, buildTaskPrompt } from "../packages/pi-hyperchart/src/runtime/pi/prompts.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,
 	sessionMentionsInvocationId,
-} from "../src/runtime/pi/pi_agent_executor.js";
+} from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
 
 const tempDirs: string[] = [];
 

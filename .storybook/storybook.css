@@ -1,5 +1,5 @@
-@import "../src/react/styles.css";
-@source "../src/react/stories/**/*.{ts,tsx}";
+@import "../packages/pi-hyperchart/src/react/styles.css";
+@source "../packages/pi-hyperchart/src/react/stories/**/*.{ts,tsx}";
 
 html,
 body,

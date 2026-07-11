@@ -8,7 +8,7 @@ import {
 	getProjectHyperchartsDir,
 	resolveHyperchartPath,
 	resolveHyperchartRunDir,
-} from "../src/runtime/pi/paths.js";
+} from "../packages/pi-hyperchart/src/runtime/pi/paths.js";
 
 const tempDirs: string[] = [];
 

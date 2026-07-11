@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { agent, compound, final, json, map, normalizeChartConfig, parallel, t, tsImport, z } from "../src/index.js";
-import { arg, chart, event, input, item, key, result } from "../src/core/dsl.js";
-import { loop, start } from "../src/core/execution_loop.js";
-import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../src/index.js";
+import { agent, compound, final, json, map, normalizeChartConfig, parallel, t, tsImport, z } from "../packages/hyperchart/src/index.js";
+import { arg, chart, event, input, item, key, result } from "../packages/hyperchart/src/core/dsl.js";
+import { loop, start } from "../packages/hyperchart/src/core/execution_loop.js";
+import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../packages/hyperchart/src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 
 // The acceptance suite for the engine's core promise: a crashed run restarts from its log

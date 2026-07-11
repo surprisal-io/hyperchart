@@ -2,12 +2,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { normalizeChartConfig, start, z } from "../src/index.js";
-import { chart, final, script, tsImport } from "../src/core/dsl.js";
-import type { ChartAst, ChartCst, DurableLogRecord } from "../src/index.js";
-import { ChartRuntime } from "../src/runtime/generic/chart_runtime.js";
-import { JsonlLogStore, MemoryLogStore } from "../src/runtime/generic/log_store.js";
-import { runGuard } from "../src/runtime/generic/guards.js";
+import { normalizeChartConfig, start, z } from "../packages/hyperchart/src/index.js";
+import { chart, final, script, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
+import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
+import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { runGuard } from "../packages/hyperchart/src/runtime/generic/guards.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];

@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPiHyperchartHost } from "../src/runtime/pi/host_adapter.js";
+import { createPiHyperchartHost } from "../packages/pi-hyperchart/src/runtime/pi/host_adapter.js";
 
 const tempDirs: string[] = [];
 
@@ -146,7 +146,7 @@ describe("Pi Hyperchart host adapter", () => {
 
 		const require = createRequire(import.meta.url);
 		const registerUrl = pathToFileURL(join(dirname(require.resolve("jiti/package.json")), "lib", "jiti-register.mjs")).href;
-		const hostUrl = new URL("../dist/src/runtime/pi/host_adapter.js", import.meta.url).href;
+		const hostUrl = new URL("../packages/pi-hyperchart/dist/runtime/pi/host_adapter.js", import.meta.url).href;
 		const script = `
 let hostModule = await import(${JSON.stringify(hostUrl)});
 while (hostModule && typeof hostModule === "object" && Object.keys(hostModule).length === 1 && "default" in hostModule) hostModule = hostModule.default;

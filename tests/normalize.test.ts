@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { InputRef } from "../src/index.js";
+import type { InputRef } from "../packages/hyperchart/src/index.js";
 import {
 	agent,
 	artifact,
@@ -12,8 +12,8 @@ import {
 	tsImport,
 	user,
 	z,
-} from "../src/index.js";
-import { arg, artifactOf, chart, event, input, item, key, result, resume, visit } from "../src/core/dsl.js";
+} from "../packages/hyperchart/src/index.js";
+import { arg, artifactOf, chart, event, input, item, key, result, resume, visit } from "../packages/hyperchart/src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes a valid chart into a frozen AST", () => {

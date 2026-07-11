@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { agent, chart, final, script } from "../src/core/dsl.js";
-import { normalizeChartConfig } from "../src/core/normalize.js";
-import { hyperchartSource } from "../src/core/source.js";
+import { agent, chart, final, script } from "../packages/hyperchart/src/core/dsl.js";
+import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
+import { hyperchartSource } from "../packages/hyperchart/src/core/source.js";
 
 function sourceForScript() {
 	const parsed = normalizeChartConfig(

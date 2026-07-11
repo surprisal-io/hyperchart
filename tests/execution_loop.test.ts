@@ -13,9 +13,9 @@ import {
 	t,
 	tsImport,
 	z,
-} from "../src/index.js";
-import { arg, artifactOf, chart, event, input, item, joinArtifactOf, key, result, visit } from "../src/core/dsl.js";
-import { loop, start } from "../src/core/execution_loop.js";
+} from "../packages/hyperchart/src/index.js";
+import { arg, artifactOf, chart, event, input, item, joinArtifactOf, key, result, visit } from "../packages/hyperchart/src/core/dsl.js";
+import { loop, start } from "../packages/hyperchart/src/core/execution_loop.js";
 import type {
 	ActionUID,
 	ChartAst,
@@ -26,7 +26,7 @@ import type {
 	StateActionAst,
 	StateCst,
 	StateId,
-} from "../src/index.js";
+} from "../packages/hyperchart/src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 
 function linearAst(): ChartAst {

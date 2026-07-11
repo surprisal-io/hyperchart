@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { HyperchartRunInfo } from "../src/react/types.js";
+import type { HyperchartRunInfo } from "../packages/pi-hyperchart/src/react/types.js";
 import {
 	buildGraph,
 	GRAPH_COMPACT_NODE_HEIGHT,
 	GRAPH_COMPACT_NODE_WIDTH,
 	graphLayoutSignature,
-} from "../src/react/components/inspector/graph/graphModel.js";
+} from "../packages/pi-hyperchart/src/react/components/inspector/graph/graphModel.js";
 
 function run(status: "pending" | "running" | "done", target = "done"): HyperchartRunInfo {
 	return {

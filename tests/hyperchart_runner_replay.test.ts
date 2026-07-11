@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { main, type HyperchartRunnerConfig } from "../src/runtime/pi/hyperchart_runner.js";
-import { readRunStatus } from "../src/runtime/pi/run_status.js";
+import { main, type HyperchartRunnerConfig } from "../packages/pi-hyperchart/src/runtime/pi/hyperchart_runner.js";
+import { readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
 
 let previousCwd = process.cwd();
 let previousExitCode: string | number | null | undefined;

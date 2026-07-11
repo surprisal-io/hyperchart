@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { HyperchartStateInfo } from "../src/host/models.js";
+import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
 import {
 	hasInterpolation,
 	interpolationAction,
 	isPromptInterpolationToken,
-} from "../src/react/components/inspector/helpers/interpolation.js";
+} from "../packages/pi-hyperchart/src/react/components/inspector/helpers/interpolation.js";
 
 const sourceState: HyperchartStateInfo = {
 	id: "work",

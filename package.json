@@ -1,66 +1,35 @@
 {
-	"name": "pi-hyperchart",
-	"version": "0.0.0",
+	"name": "pi-hyperchart-workspace",
+	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"files": [
-		"dist",
-		"extensions",
-		"src/core",
-		"src/runtime",
-		"src/tui",
-		"src/utils",
-		"src/index.ts",
-		"src/command.ts",
-		"src/host",
-		"src/react/*.ts",
-		"src/react/*.tsx",
-		"src/react/*.css",
-		"src/react/components",
-		"src/react/support",
-		"README.md"
+	"workspaces": [
+		"packages/hyperchart",
+		"packages/pi-hyperchart"
 	],
-	"main": "./dist/src/index.js",
-	"types": "./dist/src/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/src/index.d.ts",
-			"import": "./dist/src/index.js"
-		},
-		"./command": {
-			"types": "./dist/src/command.d.ts",
-			"import": "./dist/src/command.js"
-		},
-		"./host": {
-			"types": "./dist/src/host/index.d.ts",
-			"import": "./dist/src/host/index.js"
-		},
-		"./pi-host": {
-			"types": "./dist/src/runtime/pi/host_adapter.d.ts",
-			"import": "./dist/src/runtime/pi/host_adapter.js"
-		},
-		"./react": {
-			"types": "./dist/src/react/index.d.ts",
-			"import": "./dist/src/react/index.js"
-		},
-		"./react/styles.css": "./dist/src/react/styles.css"
+	"pi": {
+		"extensions": ["./packages/pi-hyperchart/extensions"],
+		"skills": ["./packages/pi-hyperchart/skills"]
 	},
-	"sideEffects": [
-		"**/*.css"
-	],
+	"engines": {
+		"node": ">=22.19"
+	},
 	"scripts": {
-		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json && node scripts/build-react-styles.mjs",
+		"clean": "node scripts/clean-dist.mjs",
+		"build": "npm run clean && npm run build -w @surprisal-io/hyperchart && npm run build -w @surprisal-io/pi-hyperchart",
+		"typecheck": "npm run build && tsc -p tsconfig.json --noEmit",
 		"test": "vitest run",
-		"check": "npm run typecheck && npm run build && npm run test",
+		"check": "npm run typecheck && npm run test && npm run validate:packages",
 		"storybook": "storybook dev -p 6006",
-		"build-storybook": "storybook build"
+		"build-storybook": "storybook build",
+		"validate:packages": "node scripts/validate-packages.mjs"
 	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "^0.80.3",
 		"@earendil-works/pi-tui": "^0.80.3",
 		"@storybook/react-vite": "^10.1.7",
 		"@tailwindcss/vite": "^4.3.2",
+		"@types/node": "22.19.19",
 		"@types/react": "^19.0.0",
 		"@types/react-dom": "^19.0.0",
 		"@types/react-syntax-highlighter": "^15.5.13",
@@ -72,58 +41,8 @@
 		"storybook": "^10.1.7",
 		"tailwindcss": "^4.3.2",
 		"typebox": "^1.3.3",
+		"typescript": "5.9.3",
 		"vite": "^6.0.0",
 		"vitest": "4.0.14"
-	},
-	"dependencies": {
-		"@heroicons/react": "^2.2.0",
-		"@types/node": "22.19.19",
-		"jiti": "^2.7.0",
-		"typescript": "5.9.3",
-		"zod": "^4.4.3"
-	},
-	"pi": {
-		"extensions": [
-			"./extensions"
-		]
-	},
-	"engines": {
-		"node": ">=22.19"
-	},
-	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*",
-		"@earendil-works/pi-tui": "*",
-		"@xyflow/react": "^12.11.1",
-		"elkjs": "^0.11.1",
-		"react": "^19.0.0",
-		"react-dom": "^19.0.0",
-		"react-syntax-highlighter": "^16.1.1",
-		"typebox": "*"
-	},
-	"peerDependenciesMeta": {
-		"@earendil-works/pi-coding-agent": {
-			"optional": true
-		},
-		"@earendil-works/pi-tui": {
-			"optional": true
-		},
-		"@xyflow/react": {
-			"optional": true
-		},
-		"elkjs": {
-			"optional": true
-		},
-		"react": {
-			"optional": true
-		},
-		"react-dom": {
-			"optional": true
-		},
-		"react-syntax-highlighter": {
-			"optional": true
-		},
-		"typebox": {
-			"optional": true
-		}
 	}
 }

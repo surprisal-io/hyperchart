@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import deckDirector from "../examples/deck-director.chart.js";
-import { normalizeChartConfig, z } from "../src/index.js";
+import { normalizeChartConfig, z } from "../packages/hyperchart/src/index.js";
 
 describe("examples", () => {
 	it("deck-director chart normalizes cleanly", () => {

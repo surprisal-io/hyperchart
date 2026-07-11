@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { HyperchartRunStrip } from "../src/react/HyperchartRunStrip.js";
-import type { HyperchartInfo, HyperchartRunInfo } from "../src/react/types.js";
+import { HyperchartRunStrip } from "../packages/pi-hyperchart/src/react/HyperchartRunStrip.js";
+import type { HyperchartInfo, HyperchartRunInfo } from "../packages/pi-hyperchart/src/react/types.js";
 
 const chart: HyperchartInfo = {
 	name: "release",

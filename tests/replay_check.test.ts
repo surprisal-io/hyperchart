@@ -15,8 +15,8 @@ import {
 	type DurableLogRecord,
 	type StateActionAst,
 	type StatePath,
-} from "../src/index.js";
-import { arg } from "../src/core/dsl.js";
+} from "../packages/hyperchart/src/index.js";
+import { arg } from "../packages/hyperchart/src/core/dsl.js";
 
 function ast(input: unknown): ChartAst {
 	const parsed = normalizeChartConfig(input);

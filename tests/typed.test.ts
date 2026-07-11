@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agent, final, json, map, refs, t, z } from "../src/index.js";
-import { arg as untypedArg, event as untypedEvent, result as untypedResult } from "../src/core/dsl.js";
+import { agent, final, json, map, refs, t, z } from "../packages/hyperchart/src/index.js";
+import { arg as untypedArg, event as untypedEvent, result as untypedResult } from "../packages/hyperchart/src/core/dsl.js";
 
 type Args = { topic: string; goal: string };
 type EmptyFiles = Record<never, Record<string, unknown>>;

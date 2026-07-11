@@ -1,31 +1,17 @@
 {
+	"extends": "./tsconfig.base.json",
 	"compilerOptions": {
-		"target": "ES2022",
-		"module": "NodeNext",
-		"moduleResolution": "NodeNext",
-		"lib": ["ES2022", "DOM", "DOM.Iterable"],
-		"types": ["node", "vitest/globals"],
-		"strict": true,
-		"noUncheckedIndexedAccess": true,
-		"exactOptionalPropertyTypes": true,
-		"declaration": true,
-		"declarationMap": true,
-		"sourceMap": true,
-		"rootDir": ".",
-		"outDir": "dist",
-		"skipLibCheck": true,
-		"forceConsistentCasingInFileNames": true,
-		"jsx": "react-jsx"
+		"noEmit": true
 	},
 	"include": [
-		"src/**/*.ts",
-		"src/**/*.tsx",
+		"packages/**/*.ts",
+		"packages/**/*.tsx",
 		"examples/**/*.ts",
 		"tests/**/*.ts",
 		"tests/**/*.tsx",
-		"extensions/**/*.ts",
 		".pi/hypercharts/**/*.ts",
 		".storybook/**/*.ts",
 		".storybook/**/*.tsx"
-	]
+	],
+	"exclude": ["packages/*/dist/**"]
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { normalizeChartConfig } from "../src/index.js";
-import { agent, arg, chart, final, map, tsImport } from "../src/core/dsl.js";
-import type { ActionUID, ChartAst, ChartCst, DurableLogRecord, StateActionAst } from "../src/index.js";
-import { buildRunView } from "../src/tui/run_view.js";
+import { normalizeChartConfig } from "../packages/hyperchart/src/index.js";
+import { agent, arg, chart, final, map, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import type { ActionUID, ChartAst, ChartCst, DurableLogRecord, StateActionAst } from "../packages/hyperchart/src/index.js";
+import { buildRunView } from "../packages/pi-hyperchart/src/tui/run_view.js";
 
 function make(config: ChartCst): ChartAst {
 	const result = normalizeChartConfig(config);

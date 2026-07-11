@@ -1,0 +1,6 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": { "rootDir": "src", "outDir": "dist" },
+	"include": ["src/**/*.ts", "src/**/*.tsx"],
+	"exclude": ["src/react/fixtures/**", "src/react/stories/**"]
+}

@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { HyperchartStateInfo } from "../src/host/models.js";
-import { AgentInfoCard } from "../src/react/components/inspector/details/AgentInfoCard.js";
+import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
+import { AgentInfoCard } from "../packages/pi-hyperchart/src/react/components/inspector/details/AgentInfoCard.js";
 
 describe("Agent inspector details", () => {
 	it("warns when the referenced agent definition cannot be loaded", () => {

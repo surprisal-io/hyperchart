@@ -5,7 +5,7 @@ import {
 	type HyperchartInfo,
 	type HyperchartRunInfo,
 	type HyperchartSessionSnapshot,
-} from "../src/host/index.js";
+} from "../packages/hyperchart/src/host/index.js";
 
 describe("host public surface", () => {
 	it("creates an inspector run from a canonical chart definition without React", () => {

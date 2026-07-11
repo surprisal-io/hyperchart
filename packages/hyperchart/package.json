@@ -1,0 +1,69 @@
+{
+	"name": "@surprisal-io/hyperchart",
+	"version": "0.1.0",
+	"description": "Durable, typed statechart workflows for agents and scripts",
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=22.19"
+	},
+	"keywords": [
+		"statecharts",
+		"workflow",
+		"agents",
+		"durable-execution",
+		"typescript"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/surprisal-io/hyperchart.git",
+		"directory": "packages/hyperchart"
+	},
+	"homepage": "https://github.com/surprisal-io/hyperchart#readme",
+	"bugs": {
+		"url": "https://github.com/surprisal-io/hyperchart/issues"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./host": {
+			"types": "./dist/host/index.d.ts",
+			"import": "./dist/host/index.js"
+		},
+		"./runtime": {
+			"types": "./dist/runtime/index.d.ts",
+			"import": "./dist/runtime/index.js"
+		},
+		"./internal/core/*": {
+			"types": "./dist/core/*.d.ts",
+			"import": "./dist/core/*.js"
+		},
+		"./internal/utils/*": {
+			"types": "./dist/utils/*.d.ts",
+			"import": "./dist/utils/*.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"jiti": "^2.7.0",
+		"typebox": "^1.3.3",
+		"zod": "^4.4.3"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"prepack": "npm run build"
+	}
+}

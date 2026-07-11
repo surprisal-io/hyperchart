@@ -1,6 +1,6 @@
-import type { Runtime } from "../src/runtime/runtime.js";
-import { toAsyncIterable } from "../src/index.js";
-import type { ChartAst, DurableLogRecord, Effect, MachineEvent } from "../src/index.js";
+import type { Runtime } from "../packages/hyperchart/src/runtime/runtime.js";
+import { toAsyncIterable } from "../packages/hyperchart/src/index.js";
+import type { ChartAst, DurableLogRecord, Effect, MachineEvent } from "../packages/hyperchart/src/index.js";
 
 type MaybeAsyncIterable<T> = Iterable<T> | AsyncIterable<T>;
 

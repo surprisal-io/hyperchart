@@ -1,13 +1,13 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { HyperchartStateInfo } from "../src/host/models.js";
-import { MapResolvedInputList } from "../src/react/components/inspector/details/MapResolvedInputList.js";
-import { MapVisitHistory } from "../src/react/components/inspector/details/MapVisitHistory.js";
-import { RuntimeSection } from "../src/react/components/inspector/details/RuntimeSection.js";
-import { agentStatesForSelection } from "../src/react/components/inspector/helpers/state.js";
-import { createTextPreview } from "../src/react/components/inspector/helpers/textPreview.js";
-import { TemplateTextBlock } from "../src/react/components/inspector/prompt/TemplateTextBlock.js";
+import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
+import { MapResolvedInputList } from "../packages/pi-hyperchart/src/react/components/inspector/details/MapResolvedInputList.js";
+import { MapVisitHistory } from "../packages/pi-hyperchart/src/react/components/inspector/details/MapVisitHistory.js";
+import { RuntimeSection } from "../packages/pi-hyperchart/src/react/components/inspector/details/RuntimeSection.js";
+import { agentStatesForSelection } from "../packages/pi-hyperchart/src/react/components/inspector/helpers/state.js";
+import { createTextPreview } from "../packages/pi-hyperchart/src/react/components/inspector/helpers/textPreview.js";
+import { TemplateTextBlock } from "../packages/pi-hyperchart/src/react/components/inspector/prompt/TemplateTextBlock.js";
 
 const runtimeState: HyperchartStateInfo = {
 	id: "work",

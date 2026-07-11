@@ -2,8 +2,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { DurableLogRecord } from "../src/index.js";
-import { JsonlLogStore, MemoryLogStore } from "../src/runtime/generic/log_store.js";
+import type { DurableLogRecord } from "../packages/hyperchart/src/index.js";
+import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 
 const tempDirs: string[] = [];
 

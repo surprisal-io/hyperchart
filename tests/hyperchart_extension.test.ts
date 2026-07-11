@@ -4,11 +4,11 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import register from "../extensions/hyperchart.js";
-import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../src/command.js";
-import { saveRunMeta } from "../src/runtime/generic/run_dir.js";
-import { patchRunStatus } from "../src/runtime/pi/run_status.js";
-import { updateSessionProgress } from "../src/runtime/pi/session_progress.js";
+import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
+import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
+import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import { patchRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
+import { updateSessionProgress } from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;

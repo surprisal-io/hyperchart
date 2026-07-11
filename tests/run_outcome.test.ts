@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeChartConfig } from "../src/index.js";
-import { agent, chart, final } from "../src/core/dsl.js";
-import type { DurableLogRecord } from "../src/core/durable_events.js";
-import type { ActionUID, ChartAst, StateActionAst } from "../src/core/types.js";
-import { createMachine, type MachineState } from "../src/core/machine.js";
-import { createBranchProjection, projectBranch } from "../src/core/projection.js";
-import { terminalStateForFinalMachine } from "../src/runtime/generic/run_outcome.js";
+import { normalizeChartConfig } from "../packages/hyperchart/src/index.js";
+import { agent, chart, final } from "../packages/hyperchart/src/core/dsl.js";
+import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
+import type { ActionUID, ChartAst, StateActionAst } from "../packages/hyperchart/src/core/types.js";
+import { createMachine, type MachineState } from "../packages/hyperchart/src/core/machine.js";
+import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
+import { terminalStateForFinalMachine } from "../packages/hyperchart/src/runtime/generic/run_outcome.js";
 
 function ast(config: Parameters<typeof normalizeChartConfig>[0]): ChartAst {
 	const result = normalizeChartConfig(config);

@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { agent, arg, chart, compound, event, final, input, map, parallel, t, tsImport } from "../src/core/dsl.js";
+import { agent, arg, chart, compound, event, final, input, map, parallel, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
-import { actionUidKey } from "../src/core/action_uid.js";
-import { normalizeChartConfig } from "../src/core/normalize.js";
-import { templatePath } from "../src/core/paths.js";
-import type { ChartAst, ChartCst, StatePath } from "../src/core/types.js";
-import type { DurableLogRecord } from "../src/core/durable_events.js";
+import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
+import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
+import { templatePath } from "../packages/hyperchart/src/core/paths.js";
+import type { ChartAst, ChartCst, StatePath } from "../packages/hyperchart/src/core/types.js";
+import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import {
 	hyperchartRunFromInspectResult,
 	hyperchartRunFromRuntime,
 	hyperchartRunFromToolDetails,
-} from "../src/host/adapters.js";
-import { inspectChartAst } from "../src/core/inspect.js";
+} from "../packages/hyperchart/src/host/adapters.js";
+import { inspectChartAst } from "../packages/hyperchart/src/core/inspect.js";
 
 function ast(cst: ChartCst): ChartAst {
 	const parsed = normalizeChartConfig(cst, { path: "test.chart.ts" });

@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseChartModule } from "../src/index.js";
-import { selectChartModuleExport } from "../src/core/parser.js";
+import { parseChartModule } from "../packages/hyperchart/src/index.js";
+import { selectChartModuleExport } from "../packages/hyperchart/src/core/parser.js";
 
 const examplePath = fileURLToPath(new URL("../examples/api/review.chart.ts", import.meta.url));
 

@@ -1,6 +1,6 @@
-import type { ActionUID, ChartEvent } from "../src/index.js";
-import type { AgentEffect, RejectedEffect } from "../src/core/machine.js";
-import type { AgentExecutor, EmitCompletion } from "../src/runtime/generic/agent_executor.js";
+import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/index.js";
+import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentExecutor, EmitCompletion } from "../packages/hyperchart/src/runtime/generic/agent_executor.js";
 
 type Reply = ChartEvent | undefined;
 

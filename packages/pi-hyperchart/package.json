@@ -1,0 +1,105 @@
+{
+	"name": "@surprisal-io/pi-hyperchart",
+	"version": "0.1.0",
+	"description": "Pi extension and React inspector for Hyperchart workflows",
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=22.19"
+	},
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"statecharts",
+		"workflow",
+		"agents",
+		"react"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/surprisal-io/hyperchart.git",
+		"directory": "packages/pi-hyperchart"
+	},
+	"homepage": "https://github.com/surprisal-io/hyperchart#readme",
+	"bugs": {
+		"url": "https://github.com/surprisal-io/hyperchart/issues"
+	},
+	"main": "./dist/command.js",
+	"types": "./dist/command.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/command.d.ts",
+			"import": "./dist/command.js"
+		},
+		"./command": {
+			"types": "./dist/command.d.ts",
+			"import": "./dist/command.js"
+		},
+		"./pi-host": {
+			"types": "./dist/runtime/pi/host_adapter.d.ts",
+			"import": "./dist/runtime/pi/host_adapter.js"
+		},
+		"./react": {
+			"types": "./dist/react/index.d.ts",
+			"import": "./dist/react/index.js"
+		},
+		"./react/styles.css": "./dist/react/styles.css",
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"src/command.ts",
+		"src/runtime/pi",
+		"src/tui",
+		"extensions",
+		"skills",
+		"README.md",
+		"LICENSE"
+	],
+	"sideEffects": [
+		"**/*.css"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"@heroicons/react": "^2.2.0",
+		"@surprisal-io/hyperchart": "0.1.0",
+		"jiti": "^2.7.0",
+		"typescript": "5.9.3"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"@xyflow/react": "^12.11.1",
+		"elkjs": "^0.11.1",
+		"react": "^19.0.0",
+		"react-dom": "^19.0.0",
+		"react-syntax-highlighter": "^16.1.1",
+		"typebox": "*"
+	},
+	"peerDependenciesMeta": {
+		"@earendil-works/pi-coding-agent": { "optional": true },
+		"@earendil-works/pi-tui": { "optional": true },
+		"@xyflow/react": { "optional": true },
+		"elkjs": { "optional": true },
+		"react": { "optional": true },
+		"react-dom": { "optional": true },
+		"react-syntax-highlighter": { "optional": true },
+		"typebox": { "optional": true }
+	},
+	"pi": {
+		"extensions": [
+			"./extensions/hyperchart.ts"
+		],
+		"skills": [
+			"./skills/hyperchart"
+		],
+		"image": "https://raw.githubusercontent.com/surprisal-io/hyperchart/main/assets/readme/inspector.png"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json && node ../../scripts/build-react-styles.mjs",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"prepack": "npm run build"
+	}
+}

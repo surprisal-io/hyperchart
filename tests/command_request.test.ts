@@ -3,7 +3,7 @@ import {
 	HYPERCHART_COMMAND_EVENT,
 	requestHyperchartCommand,
 	type HyperchartCommandRequest,
-} from "../src/command.js";
+} from "../packages/pi-hyperchart/src/command.js";
 
 function eventBusWith(...listeners: Array<(request: HyperchartCommandRequest) => void>) {
 	return {

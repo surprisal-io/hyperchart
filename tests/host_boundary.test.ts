@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const hostDir = fileURLToPath(new URL("../src/host", import.meta.url));
+const hostDir = fileURLToPath(new URL("../packages/hyperchart/src/host", import.meta.url));
 
 describe("neutral host boundary", () => {
 	it("does not depend on Pi paths, storage, or runtime readers", () => {
