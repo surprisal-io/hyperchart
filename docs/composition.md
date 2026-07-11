@@ -1,226 +1,274 @@
-# Composition, artifacts, validation, and re-entry
+# Compose states
 
-This guide covers nested control flow and reliability features. All examples import from `@surprisal-io/hyperchart`.
+Use composition when a run needs hierarchy, concurrent regions, dynamic fan-out, validation, or controlled re-entry. Composition changes control flow; data still moves through explicit refs, transition inputs, and artifacts.
+
+## Choose a state kind
+
+| State kind | Enter behavior | Complete behavior | Use when |
+|---|---|---|---|
+| action | dispatch one agent, script, or user action | an event selects a transition | one unit of work produces one completion claim |
+| compound | enter one `initial` child | a direct final child completes, then `onDone` exits | work is sequential or nested |
+| parallel | enter every child region | every region reaches a final child, then `onDone` exits | a fixed set of branches runs concurrently |
+| map | pin keys/items from `over`, then enter one instance per key | every instance reaches a final child, then `onDone` exits | the branch count comes from run data |
+| final | no action | completes its containing state | a local branch is finished |
 
 ## Compound states
 
-A compound state is a nested sequential machine:
+A compound state contains one active child at a time.
 
 ```ts
-compound({
+import { agent, compound, final } from "@surprisal-io/hyperchart";
+
+pipeline: compound({
   initial: "draft",
   states: {
     draft: {
       kind: "state",
-      action: agent("writer", { task: "Draft the chapter." }),
-      transitions: { DONE: "complete", FAILED: "failed" },
+      action: agent("writer", { task: "Draft the answer." }),
+      transitions: { DRAFTED: "review" },
     },
-    complete: final(),
-    failed: final(),
+    review: {
+      kind: "state",
+      action: agent("reviewer", { task: "Review the draft." }),
+      transitions: { PASS: "finished", FIX: "draft" },
+    },
+    finished: final(),
   },
-  onDone: "nextTopLevelState",
+  onDone: "publish",
 })
 ```
 
-Entering a compound recursively enters its `initial` child. A direct final child completes the compound and routes through `onDone`. Events not handled by a child bubble to transitions declared on the compound. Targets declared inside the compound resolve among that compound's children; `onDone` resolves among the compound's siblings.
+Rules:
+
+- entering `pipeline` follows `initial` until it reaches an action or final state;
+- transition targets declared inside `pipeline` resolve among its children;
+- an unhandled event bubbles to `pipeline.transitions` and then outward;
+- a direct final child requires `onDone` on the compound state;
+- leaving the compound state cancels running descendants.
+
+Use a final child for local completion. Do not model a compound state as an endless container with no completion path.
 
 ## Parallel states
 
-A parallel state starts every child region together:
+A parallel state enters every child region.
 
 ```ts
-parallel({
+import { agent, compound, final, parallel, script } from "@surprisal-io/hyperchart";
+
+checks: parallel({
   states: {
-    research: compound({
-      initial: "collect",
+    tests: compound({
+      initial: "run",
       states: {
-        collect: {
+        run: {
           kind: "state",
-          action: agent("researcher", { task: "Collect evidence." }),
-          transitions: { DONE: "ready", FAILED: "failed" },
+          action: script("npm", ["test"]),
+          transitions: { TESTS_PASS: "done" },
         },
-        ready: final(),
-        failed: final(),
+        done: final(),
       },
     }),
-    design: compound({
-      initial: "plan",
+    docs: compound({
+      initial: "review",
       states: {
-        plan: {
+        review: {
           kind: "state",
-          action: agent("designer", { task: "Plan the visual system." }),
-          transitions: { DONE: "ready", FAILED: "failed" },
+          action: agent("docs-reviewer", { task: "Review documentation changes." }),
+          transitions: { DOCS_PASS: "done" },
         },
-        ready: final(),
-        failed: final(),
+        done: final(),
       },
     }),
   },
-  onDone: "assemble",
+  onDone: "release",
 })
 ```
 
-Each child becomes a parallel region. A final state completes only its region. The parallel state completes when every region is final, then takes `onDone`. A transition handled at the parallel or an ancestor exits all regions and cancels still-running work.
+Each direct child is a region. Regions do not declare `onDone`; their final child marks only that region complete. The parallel state exits after all regions are complete.
 
-Parallel work is not a promise of thread-level simultaneous start. The runtime receives independent effects and may schedule them according to host capacity.
+If an event bubbles to a transition on the parallel state or an ancestor, the whole parallel scope exits. Hyperchart cancels running actions in every abandoned region.
 
-## Dynamic map states
+Use parallel states for a fixed branch set. Use a map when keys come from data.
 
-A map materializes one nested instance per entry in its resolved `over` value:
+## Map states
+
+A map resolves `over` to an array or record, persists a spawn fact, and materializes one instance per key.
 
 ```ts
-const { chart, arg, key, item } = refs<
-  { chapters: Record<string, { title: string }> },
-  Record<never, never>,
+import { agent, final, map, refs, t, z } from "@surprisal-io/hyperchart";
+
+const Plan = z.object({
+  chapters: z.array(z.object({ title: z.string(), brief: z.string() })),
+});
+type Plan = z.infer<typeof Plan>;
+
+const { chart, result, key, item } = refs<
+  Record<string, never>,
+  { plan: Plan },
   Record<never, Record<string, unknown>>,
-  { chapters: { title: string } }
+  { chapters: Plan["chapters"][number] }
 >();
 
-const definition = map({
-  over: arg("chapters"),
-  concurrency: 3,
-  initial: "write",
+const definition = chart({
+  kind: "chart",
+  id: "chapters",
+  initial: "plan",
   states: {
-    write: {
+    plan: {
       kind: "state",
-      action: agent("writer", {
-        task: t`Write ${key("chapters")}: ${item("chapters", "title")}`,
-      }),
-      transitions: { DONE: "complete", FAILED: "failed" },
+      action: agent("planner", { reply: Plan }),
+      transitions: { PLANNED: "chapters" },
     },
-    complete: final(),
-    failed: final(),
+    chapters: map({
+      over: result("plan", "chapters"),
+      concurrency: 3,
+      initial: "write",
+      states: {
+        write: {
+          kind: "state",
+          action: agent("writer", {
+            task: t`Write ${item("chapters", "title")} for key ${key("chapters")}`,
+          }),
+          transitions: { WRITTEN: "done" },
+        },
+        done: final(),
+      },
+      onDone: "done",
+    }),
+    done: final(),
   },
-  onDone: "join",
 });
 ```
 
-`over` resolves to an array or record. Arrays receive stringified numeric keys; records keep their keys. Hyperchart writes a `spawned` fact containing both keys and values, so an instance's item is pinned even if the original source later changes. `concurrency` limits active invokes, not the persisted spawn set.
+Map behavior:
 
-Runtime paths include instance keys, for example `chapters#intro.write`; source/template paths use `chapters.write`. Choose stable, deterministic keys. Changing keys creates different durable identities.
+1. resolve `over` on entry;
+2. derive stable string keys (`"0"`, `"1"`, … for arrays; property names for records);
+3. append one spawn fact containing keys and items;
+4. create runtime paths such as `chapters#0.write`;
+5. invoke at most `concurrency` instances at once;
+6. join after every instance reaches a final child.
 
-Map instances complete independently. The map completes only after every current instance reaches final. The inspector preserves prior visit generations and marks work from older traversals as stale rather than pending.
+`concurrency` gates action invocation, not spawn persistence. Omitting it allows all instances to run.
 
-## Artifacts
+The spawn fact pins each key/item pair. Replay does not silently substitute a new array from changed upstream code.
 
-Artifacts are declared on the producer:
+## Fan-in artifacts
 
-```ts
-const Report = z.object({ title: z.string(), sections: z.array(z.string()) });
-
-action: agent("writer", {
-  artifacts: {
-    report: artifact("out/report.json", Report),
-  },
-})
-```
-
-A plain path is also accepted when no content schema is available:
+Inside a map, declare one artifact per instance:
 
 ```ts
-artifacts: { screenshot: "out/screenshot.png" }
+artifacts: {
+  chapter: artifact(t`artifacts/chapters/${key("chapters")}.md`),
+}
 ```
 
-Consumers refer to producer identity, not duplicated paths:
-
-```ts
-reads: [artifactOf("write", { artifact: "report" })]
-```
-
-Use `select` to pass one validated field:
-
-```ts
-reads: [artifactOf("write", { artifact: "report", select: "sections" })]
-```
-
-Use `joinArtifactOf` to collect one artifact from every materialized map instance:
+After the map, collect those paths in spawn order:
 
 ```ts
 reads: [joinArtifactOf("chapters.write", { artifact: "chapter" })]
 ```
 
-For an agent, a joined read expands to one file per instance. For a script environment value, it renders a JSON array of paths. Relative artifact paths resolve under the run work directory. The generic runtime rejects paths that escape the allowed workspace, missing files, and schema-invalid structured artifacts.
+For an agent, `joinArtifactOf()` becomes a list of files to read. For a script environment variable, it becomes a JSON array of paths.
 
-Artifacts are deliverables; replies are routing data. Prefer a file for large prose, reports, images, or structured datasets and a reply payload for small status/selection values.
+Use artifacts for large deliverables. Keep reply payloads small and suitable for routing.
 
-## Validation guards
+## Validation
 
-A validation guard evaluates a claimed completion before Hyperchart accepts it.
-
-### Script guard
+A validator checks a completion claim before it becomes an accepted result fact.
 
 ```ts
-validate: script("node", ["scripts/check-report.mjs"]),
-onReject: "resume",
-retries: 2,
+review: {
+  kind: "state",
+  action: agent("reviewer", { reply: Review }),
+  validate: script("node", ["bin/check-review.mjs"]),
+  onReject: "resume",
+  retries: 2,
+  transitions: {
+    PASS: "done",
+    FAILED: "failed",
+  },
+}
 ```
 
-A guard script returns an accepted/rejected outcome according to the generic runtime guard contract. Keep it deterministic and side-effect-free.
-
-### Imported TypeScript guard
+Validators are serializable references:
 
 ```ts
-validate: tsImport("./guards/report.ts", "validateReport"),
+validate: script("python3", ["bin/check.py"])
 ```
 
-The imported function returns `true`, `false`, or `{ ok: false, reason: string }`. Chart definitions remain data-first: inline closures are rejected because they cannot be serialized, inspected, or fingerprinted reliably.
-
-### Rejection policy and budget
-
-`onReject` applies only when `validate` is present:
-
-- `"resume"` sends rejection feedback to the still-running agent session;
-- `"restart"` abandons that attempt and starts fresh.
-
-When omitted, validation rejection defaults to resume. `retries: N` permits `N` rejected retries; the next rejection becomes `FAILED`. Omit `retries` for no configured rejection limit. Always provide an explicit failure route.
-
-Validation attempts and feedback are operational history. Accepted completed work is never silently revalidated during replay.
-
-## Deadlines and cancellation
-
-Use `after` on an action state:
+or:
 
 ```ts
-after: { delayMs: 120_000, target: "timedOut" }
+validate: tsImport("./guards/review.ts", "validateReview")
 ```
 
-The timer races the running action. If it wins, Hyperchart records control progress, emits cancellation for the action, and transitions to the target. The timer does not race post-completion validation. Cancellation is cooperative at external boundaries; a child process or remote API may take time to stop, so design side effects to tolerate late completion.
+A guard returns `true` or `{ ok: false, reason }`.
 
-## Transition input
+### Rejection policy
 
-State and map nodes may declare input schemas:
+| Setting | Behavior |
+|---|---|
+| `onReject: "resume"` | send the rejection reason back to the existing action/session |
+| `onReject: "restart"` | abandon the rejected action and invoke a fresh one |
+| omitted | defaults to `resume` when validation is present |
+
+`retries` is the number of rejected rounds that may be retried. The next rejection becomes `FAILED`, and Hyperchart cancels the abandoned action. Omitting `retries` permits unbounded rejection rounds; use that only when another policy bounds the run.
+
+Accepted facts are not revalidated during replay. Changing validator code can therefore make an old accepted claim incompatible; `explainReplay()` reports the mismatch instead of silently reinterpreting it.
+
+## Deadlines
+
+Add a deadline to an action state:
 
 ```ts
-input: { feedback: z.string() }
+after: {
+  delayMs: 120_000,
+  target: "timed-out",
+}
 ```
 
-A transition binds event payload fields with `event(path?)`. Descendants read them with `input(name, path?)`. Inputs are resolved per visit and displayed with that visit in the runtime inspector. This makes feedback cycles explicit and durable instead of hiding them in mutable prompt text.
+The timer begins when the action invoke fact is accepted. If the action is still running when the deadline fires, the chart transitions to the target and asks the runtime to cancel the action.
 
-## State re-entry
+The timer covers action execution, not validation after a completion claim has arrived.
 
-Every entry creates a new visit. With no `onReenter` policy, an action is invoked normally for the new visit. The explicit forms are:
+Cancellation is best effort at the external boundary. A process or agent may already have caused effects that Hyperchart cannot undo.
+
+## Re-entry
+
+By default, entering an action state again starts a new invocation.
 
 ```ts
 onReenter: "restart"
-// or
-onReenter: resume(t`Continue using this feedback: ${input("feedback")}`)
 ```
 
-Resume re-entry is accepted for agent actions and map containers; non-agent action states cannot resume a conversation. Re-entry policy is experimental in 0.1.0. In particular, session reuse for partially repeated map items and parallel branches is still being specified. Do not assume a prior map key automatically means a prior conversational session will be reused; inspect visit and session history when designing feedback loops.
+An agent state may request session reuse:
 
-Validation `onReject` and control-flow `onReenter` are different:
+```ts
+onReenter: resume(t`Address this new input: ${input("notes")}`)
+```
 
-- `onReject` reacts to a validator rejecting the current completion claim;
-- `onReenter` applies after control flow leaves a state/scope and later enters it again.
+Session reuse is intentionally narrow. Map and parallel session identity becomes ambiguous when only part of a fan-out is revisited. Do not rely on partial fan-out reuse unless the chart and host define that identity explicitly.
 
-## Reliability checklist
+A repeated state path is not the same visit. Runtime history records visits independently so the inspector can show resolved inputs, invocations, artifacts, validation attempts, and stale completions from older traversals.
 
-- Use stable state IDs and map keys.
-- Give compound/map/parallel containers valid final/join routes.
-- Catch `FAILED` deliberately at the right scope.
-- Make validators deterministic and side effects idempotent.
-- Bound fan-out with `concurrency` when the host has limited capacity.
-- Keep large outputs in artifacts and validate their shape.
-- Treat explicit re-entry and rewind as advanced features; verify them with runtime inspection.
+## Failure and scope exit
 
-See [`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) for an end-to-end composition example.
+`FAILED` is a system event. Handle it locally when the chart has a meaningful recovery path:
+
+```ts
+transitions: {
+  COMPLETE: "done",
+  FAILED: "fallback",
+}
+```
+
+Otherwise let it bubble to an ancestor or terminate the run.
+
+Leaving a compound, parallel, or map scope asks the runtime to cancel active descendant actions. Replay derives that cancellation from the durable event that caused scope exit; the current log contract has no standalone cancellation record.
+
+## Next steps
+
+- [Pi run operations](pi.md)
+- [Recovery and safety](safety.md)
+- [Runtime and durability](runtime-and-durability.md)

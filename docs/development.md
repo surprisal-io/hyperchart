@@ -1,132 +1,202 @@
-# Development, documentation, testing, and release
+# Development and release
+
+This repository is an npm workspace with two publishable packages and shared tests, examples, Storybook, documentation, and formal models.
+
+## Requirements
+
+- Node.js 22.19 or newer
+- npm
+- Java, for TLA+ model checking
+- Pi, for extension and TUI testing
+
+Install dependencies:
+
+```sh
+npm install
+```
 
 ## Repository layout
 
 ```text
-packages/hyperchart/             host-neutral engine/runtime/host models
-packages/pi-hyperchart/          Pi adapter, extension, TUI, React, skill
-examples/                        executable chart modules
-tests/                           cross-workspace Vitest suite
-docs/                            canonical documentation
-assets/readme/                   checked-in landing-page visuals
-.storybook/                      Storybook configuration
-tla/                             formal semantics and trace validation
-scripts/                         build and package validation
+packages/
+├── hyperchart/
+│   ├── src/core/
+│   ├── src/runtime/
+│   └── src/host/
+└── pi-hyperchart/
+    ├── extensions/
+    ├── skills/
+    └── src/
+        ├── runtime/pi/
+        ├── tui/
+        └── react/
+
+docs/                 canonical user documentation
+examples/             checked-in chart examples
+tests/                cross-package tests
+assets/readme/         README and documentation visuals
+tla/                   independent semantics and trace model
+scripts/               build and package validation
 ```
 
-The workspace root is private. Only the two packages under `packages/` are publishable.
+## Build and test
 
-## Install and validate
+Build both packages:
 
 ```sh
-npm install
-npm run typecheck
 npm run build
-npm run test
-npm run build-storybook
-npm run validate:packages
 ```
 
-`npm run check` builds core before Pi, typechecks source/tests/examples/Storybook, runs all Vitest tests, and validates packages/docs. `validate:packages` inspects both tarballs and their links/import boundaries. Run the explicit Storybook build for UI changes.
+Run TypeScript checks:
 
-Do not test package consumers only through workspace symlinks. A release candidate must also install the generated tarballs in a clean temporary project.
+```sh
+npm run typecheck
+```
 
-## Package boundaries
+Run tests:
 
-`@surprisal-io/hyperchart` may not import Pi or React. It owns:
+```sh
+npm test
+```
 
-- authoring types/DSL;
-- normalization, parsing, source, and static inspection;
-- machine, projection, replay, and execution loop;
-- generic runtime utilities;
-- host-neutral inspector models/adapters.
+Run the standard gate:
 
-`@surprisal-io/pi-hyperchart` depends on the exact matching core version and owns:
+```sh
+npm run check
+```
 
-- command event API;
-- Pi discovery/runner/agent executor/status/session progress;
-- Pi extension and bundled skill;
-- TUI components;
-- React inspector and compiled stylesheet.
+`check` builds, typechecks, runs Vitest, validates package contents and links, packs both workspaces, installs the tarballs in a clean project, tests runtime and type imports, loads the packed Pi extension through Jiti, and verifies the bundled skill.
 
-Across this boundary, import package entry points. Relative imports that escape one package into the other are forbidden.
+## Storybook
 
-## Tests
-
-The suite includes:
-
-- parser/normalizer/typed authoring tests;
-- execution loop, timers, validation, map/parallel/compound behavior;
-- durable log/replay and crash gauntlet tests;
-- generic runtime, script, artifact, and run-outcome tests;
-- Pi path, runner, agent executor, status, host-discovery, and extension tests;
-- host-model/runtime-adapter tests;
-- React SSR/layout/style/preview tests;
-- external chart typecheck examples.
-
-Add the smallest focused test for a change, then run the full suite before release. A change to execution semantics also requires the TLA+/trace workflow in `AGENTS.md`.
-
-## Storybook and visual QA
-
-Run:
+Start Storybook:
 
 ```sh
 npm run storybook
 ```
 
-Stories live beside Pi React source and include inspector panels, run states, edge types, launch UI, and bounded-content examples. Visible component changes require an appropriate story. Refresh `assets/readme/inspector.png` when the README representation is no longer accurate. Screenshots must use deterministic fixtures and contain no secrets or real user paths.
+Build the static site:
 
-## Documentation ownership map
+```sh
+npm run build-storybook
+```
 
-Documentation is part of implementation, not post-release cleanup.
+React changes need a story that shows the affected state. Test both light and dark schemes, narrow layouts, long content, modal stacking, and keyboard behavior where relevant.
+
+The README inspector image must be captured from a deterministic Storybook fixture, not assembled as a mockup.
+
+## Package boundaries
+
+`@surprisal-io/hyperchart` must remain independent of Pi and React.
+
+`@surprisal-io/pi-hyperchart` may depend on the core package and Pi/React peers. Browser code must not import Node-only modules.
+
+Check boundaries with:
+
+```sh
+npm run validate:packages
+```
+
+The validator rejects cross-package relative imports and verifies packed export maps. Do not bypass it with development-only aliases that disappear from the tarball.
+
+## Change execution semantics
+
+A change to `machine.ts`, `projection.ts`, `execution_loop.ts`, durable records, or semantic normalization is not complete when TypeScript tests pass.
+
+Keep three articulations in sync:
+
+1. implementation and durable log/replay contract;
+2. `tla/Hyperchart.tla` and model-check configurations;
+3. a real trace exported from the TypeScript engine and checked by `tla/HyperchartTrace.tla`.
+
+Run all models:
+
+```sh
+for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do
+  tla/check.sh "$M"
+done
+```
+
+Record and validate the sample trace:
+
+```sh
+node tla/trace/record-sample.mjs
+tla/trace/validate.sh sample_chart.ts sample-run.jsonl
+```
+
+Read the header of `tla/Hyperchart.tla` before editing either implementation or model. A divergence is a finding to investigate, not permission to change the model until it passes.
+
+## Documentation ownership
+
+Documentation is part of the change.
 
 | Change | Required documentation |
 |---|---|
-| Authoring export or chart field | `core-authoring.md`, `reference.md`, core package README, relevant example; skill routing if agents author it. |
-| Compound/parallel/map/artifact/validation/re-entry behavior | `composition.md`, `reference.md`, behavior tests. |
-| Runtime/log/replay semantics | `runtime-and-durability.md`, `architecture.md`, `reference.md`, replay tests, and TLA+/trace per `AGENTS.md`. |
-| Package/export/dependency/Node support | docs index/reference/development, affected package README, package validation. |
-| Pi command/tool/lifecycle/run file | `pi.md`, Pi package README, skill reference/workflow. |
-| Host adapter model | `integration.md`, `reference.md`, host tests. |
-| React/UI/theme | `integration.md`, Pi README, Storybook, and README visual when visible. |
-| Example | `examples.md`, source comments/tests, skill reference when recommended. |
-| Recovery safety | `pi.md`, `runtime-and-durability.md`, skill safety reference. |
+| DSL, schemas, refs, actions | `docs/core-authoring.md`, `docs/reference.md`, core package README |
+| compound/parallel/map/validation/re-entry | `docs/composition.md`, semantic/replay notes where applicable |
+| runtime, log, projection, replay | `docs/runtime-and-durability.md`, `docs/safety.md`, `docs/architecture.md` |
+| Pi command, tool, lifecycle, discovery | `docs/pi.md`, bundled skill and references |
+| rewind, delete, override behavior | `docs/safety.md`, tool reference, skill safety rules |
+| host models or adapters | `docs/integration.md`, `docs/reference.md` |
+| React components, CSS, themes, portals | `docs/integration.md`, Storybook, package README |
+| examples | `docs/examples.md`, runnable source/test |
+| package exports/dependencies | root README, affected package README, `docs/reference.md` |
+| visible product identity | README assets and their surrounding alt text/copy |
 
-Package READMEs are concise npm landing pages. `docs/` is canonical. The skill routes agents to focused references and canonical pages; do not duplicate the manual into all three.
+Do not duplicate the full manual into package READMEs or the skill. Those files must remain usable on their own for installation/routing, then link to canonical pages.
 
-## Writing docs
+Every command and code sample must match a checked-in implementation, test, or example. State prerequisites before the procedure, especially agent definitions, model credentials, external scripts, and unsupported user actions.
 
-- Use public scoped package imports.
-- Keep examples compilable and data-first.
-- State defaults, required fields, safety constraints, and unsupported behavior.
-- Link related concepts instead of copying paragraphs.
-- Add alt text to every image.
-- Use repository-relative links inside canonical docs and stable GitHub links from packed package README/skill references.
-- Update the docs index when adding a canonical page.
+## Add or change a public export
 
-`npm run validate:packages` checks local Markdown links included in root docs, package READMEs, and the bundled skill.
+1. update the source barrel;
+2. update the package `exports` map if a new subpath is needed;
+3. build declarations;
+4. add a clean-consumer runtime and type import to `scripts/validate-packages.mjs`;
+5. document the entry point in `docs/reference.md` and the package README;
+6. run `npm run validate:packages`.
 
-## Preparing a release
+Avoid expanding `./internal/*` as an application API. Add a deliberate public subpath when third-party consumers need a supported contract.
 
-1. Confirm the shared version and release notes.
-2. Verify the working tree contains only reviewed changes.
-3. Run `npm ci` in a clean checkout.
-4. Run `npm run check` and `npm run build-storybook`.
-5. Inspect actual tarballs:
+## Validate tarballs
 
-   ```sh
-   npm pack --workspace @surprisal-io/hyperchart --json
-   npm pack --workspace @surprisal-io/pi-hyperchart --json
-   ```
+Run:
 
-6. Verify each tarball contains README, LICENSE, declarations, JavaScript, and only intended source/resources. The Pi tarball must contain `extensions/hyperchart.ts` and `skills/hyperchart/SKILL.md` plus references.
-7. In a clean temporary project, install both tarballs and import every public export path. Typecheck a minimal chart. Load the Pi extension through Pi/Jiti and verify the skill is discovered.
-8. Run `npm publish --dry-run --workspace ...` for both.
-9. Publish `@surprisal-io/hyperchart` first, then `@surprisal-io/pi-hyperchart`, both with public access.
-10. Verify registry metadata, clean installation, Pi discovery, and the package-gallery image.
+```sh
+npm run validate:packages
+npm publish --dry-run --workspace @surprisal-io/hyperchart
+npm publish --dry-run --workspace @surprisal-io/pi-hyperchart
+npm audit --omit=dev
+```
 
-Package scripts run a production build before publication. Nothing in this repository publishes automatically.
+Review the printed tarball contents. Source files included for Pi/Jiti loading are intentional; tests, Storybook, repository configuration, and unrelated assets are not.
 
-## Security and dependency review
+## Release order
 
-Pi extensions and skills execute with user permissions. Review dependencies, `npm audit` output, and packed source before release. Do not fix an audit warning by a blind major upgrade; determine reachability and regression risk. Never include run directories, sessions, credentials, generated Storybook output, or local agent definitions in a tarball.
+The packages publish independently but the Pi package pins the matching core version.
+
+1. confirm a clean working tree and final version numbers;
+2. run `npm run check`;
+3. run `npm run build-storybook`;
+4. run both publish dry-runs;
+5. publish `@surprisal-io/hyperchart`;
+6. verify the core package from a clean npm install;
+7. publish `@surprisal-io/pi-hyperchart`;
+8. install the Pi package in a clean Pi environment;
+9. verify one extension, one `hyperchart` skill, `/hyperchart`, and all four tools;
+10. create the release/tag only after registry verification.
+
+Do not publish from a workspace whose package manifests or lockfile still refer to a temporary local dependency.
+
+## Pre-release checklist
+
+- [ ] Node and npm versions match the supported range.
+- [ ] `npm run check` passes.
+- [ ] `npm run build-storybook` passes.
+- [ ] TLA+ models and trace validation pass for semantic changes.
+- [ ] package and Markdown link validation passes.
+- [ ] both tarballs install in a clean consumer.
+- [ ] Pi discovers the packed extension and skill.
+- [ ] production dependency audit is clean or findings are documented.
+- [ ] package versions and core dependency are exact and matching.
+- [ ] user docs, package READMEs, skill references, examples, and visuals reflect the release.

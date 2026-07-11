@@ -3,94 +3,90 @@
 <p align="center"><strong>Durable, typed statechart workflows for agents and scripts.</strong></p>
 <p align="center"><a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-6366f1"></a> <img alt="experimental version 0.1.0" src="https://img.shields.io/badge/status-experimental-f59e0b"> <img alt="Node 22.19 or newer" src="https://img.shields.io/badge/node-%3E%3D22.19-22c55e"></p>
 
-![Abstract visualization of connected durable workflow states](assets/readme/hyperchart-hero.svg)
+Hyperchart runs long-lived work as an explicit statechart. The chart defines what may run, which event advances it, what data crosses each transition, and how a run can be reconstructed after a crash.
 
-Hyperchart turns long-running agent work into explicit statecharts with typed handoffs, append-only facts, crash resume, validation, fan-out and inspection. The pure engine is host-neutral; the first complete integration is a Pi extension with commands, tools, terminal views and a React inspector.
-
-> **Experimental 0.1.0:** useful and tested, but APIs and chart-migration tooling may change. Do not use replay overrides or rewind without reviewing their safety documentation.
+![Calligraphic paths surrounding the Hyperchart mark](assets/readme/hyperchart-hero.svg)
 
 ## Choose a package
 
-| Package | Choose it when… |
+| Package | Use it for |
 |---|---|
-| [`@surprisal-io/hyperchart`](packages/hyperchart) | You author charts or embed the engine/runtime contract in any Node host. |
-| [`@surprisal-io/pi-hyperchart`](packages/pi-hyperchart) | You want the Pi extension, four agent tools, TUI, React inspector and bundled skill. |
+| [`@surprisal-io/hyperchart`](packages/hyperchart) | Chart authoring, the pure machine, replay, the generic runtime, and host-neutral models. |
+| [`@surprisal-io/pi-hyperchart`](packages/pi-hyperchart) | The Pi extension, `/hyperchart`, agent tools, terminal UI, and React inspector. |
 
-## Core in 60 seconds
+Both packages require Node.js 22.19 or newer. The Pi package depends on the same version of the core package.
+
+## Run a chart in Pi
+
+Install the Pi package from your shell:
 
 ```sh
-npm install @surprisal-io/hyperchart
+pi install npm:@surprisal-io/pi-hyperchart
 ```
 
+Create `.pi/hypercharts/hello.chart.ts`:
+
 ```ts
-import { agent, final, refs, t, z } from "@surprisal-io/hyperchart";
-
-const Reply = z.object({ answer: z.string() });
-type Reply = z.infer<typeof Reply>;
-
-const { chart, arg } = refs<
-  { question: string },
-  { work: Reply }
->();
+import { artifact, chart, final, script } from "@surprisal-io/hyperchart";
 
 export default chart({
   kind: "chart",
-  id: "answer",
-  initial: "work",
+  id: "hello",
+  initial: "write",
   states: {
-    work: {
+    write: {
       kind: "state",
-      action: agent("researcher", {
-        task: t`Answer ${arg("question")}`,
-        reply: Reply,
+      action: script("node", [
+        "-e",
+        `require("node:fs").writeFileSync("hello.txt", "Hello from Hyperchart\\n")`,
+      ], {
+        artifacts: { greeting: artifact("hello.txt") },
       }),
-      transitions: { DONE: "done", FAILED: "failed" },
+      transitions: { DONE: "done" },
     },
     done: final(),
-    failed: final(),
   },
 });
 ```
 
-Continue with [first chart and authoring](docs/core-authoring.md).
-
-## Pi in 60 seconds
-
-```sh
-pi install npm:@surprisal-io/pi-hyperchart
-mkdir -p .pi/hypercharts
-# save the chart above as .pi/hypercharts/answer.chart.ts
-```
+A successful script with one non-`FAILED` transition emits that event implicitly. Ask Pi to inspect the chart with `hyperchart_inspect`, then start it:
 
 ```text
-/hyperchart run answer --args '{"question":"Why do durable logs matter?"}'
+Use hyperchart_inspect on .pi/hypercharts/hello.chart.ts
+/hyperchart run .pi/hypercharts/hello.chart.ts
 ```
 
-Or let an agent call `hyperchart_inspect`, `hyperchart_run`, `hyperchart_run_inspect`, and—only for reviewed recovery—`hyperchart_rewind`. See the [Pi operations guide](docs/pi.md).
+The run writes `hello.txt` and records its history under `.pi/hypercharts/runs/`.
 
-## Why Hyperchart
+Read [Run your first chart](docs/quickstart.md) for installation checks, expected output, agent setup, and troubleshooting.
 
-- **Resume rather than repeat:** project append-only facts after crashes.
-- **Typed contracts:** Zod replies, typed refs/templates and validated artifacts.
-- **Structure at scale:** nested states, parallel regions and bounded dynamic maps.
-- **Operational control:** retries, rejection feedback, deadlines and explicit failure paths.
-- **Inspectable runs:** definitions, active states, visits, usage and validation in one UI.
-- **Host boundaries:** a pure machine/runtime contract, with Pi kept in its own package.
+## What is durable
+
+A run appends semantic facts to `log.jsonl`: arguments, action invocations, accepted events, map spawns, validation outcomes, and deadline firings. Current state is projected from those facts and the chart definition. It is not restored from a mutable checkpoint.
+
+This makes crash recovery inspectable, but it does not undo external effects. A process may crash after a script or agent caused an external change and before the completion fact was appended. Read [Recovery and safety](docs/safety.md) before overriding replay warnings or rewinding a run.
 
 ## Inspector
 
-![Hyperchart inspector showing a real workflow graph, selected state and runtime details](assets/readme/inspector.png)
+The Pi package includes a terminal view and a React inspector built from canonical host models. Static chart information and runtime overlays remain separate.
+
+![Hyperchart inspector showing a running map state and its resolved details](assets/readme/inspector.png)
 
 ## Architecture
 
-![Hyperchart architecture: typed charts and pure core write durable JSONL facts while the Pi package supplies tools, agents, TUI and React inspector](assets/readme/architecture.svg)
+![Hyperchart package and runtime architecture](assets/readme/architecture.svg)
 
-Execution semantics are independently articulated in TLA+ and checked against a trace recorded from the engine. Read [architecture and semantics](docs/architecture.md) and [durability/replay](docs/runtime-and-durability.md).
+The pure machine requests facts and effects; it does not call Pi directly. The Pi package supplies the runner, agent executor, commands, tools, terminal UI, and React UI. See [Architecture](docs/architecture.md) for the execution loop and formal-model boundary.
 
-## Learn and contribute
+## Documentation
 
-- [Documentation index](docs/README.md) · [Examples](examples/) · [Public exports](docs/reference.md)
-- [Host/React integration](docs/integration.md) · [Development and release](docs/development.md)
-- [Contributing contract](AGENTS.md) · [MIT license](LICENSE)
+- [Run your first chart](docs/quickstart.md)
+- [Author charts](docs/core-authoring.md)
+- [Compose nested, parallel, and map states](docs/composition.md)
+- [Use the Pi extension](docs/pi.md)
+- [Operate and recover runs](docs/safety.md)
+- [Embed the runtime or React inspector](docs/integration.md)
+- [API and file reference](docs/reference.md)
+- [Develop and release](docs/development.md)
 
-Build locally with `npm install && npm run check`. Package validation inspects both tarballs and their links/import boundaries; nothing publishes automatically.
+Hyperchart is experimental. Pin exact package versions for durable runs and keep the chart source that produced each log.

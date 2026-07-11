@@ -1,8 +1,65 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="300" viewBox="0 0 1120 300" role="img" aria-labelledby="title desc">
-<title id="title">Hyperchart package architecture</title><desc id="desc">Charts flow through the host-neutral core runtime into durable logs; the Pi package connects Pi tools, terminal UI and React inspector.</desc>
-<defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#10162d"/><stop offset="1" stop-color="#172554"/></linearGradient><filter id="s"><feDropShadow dx="0" dy="5" stdDeviation="7" flood-opacity=".3"/></filter></defs>
-<rect width="1120" height="300" rx="24" fill="url(#bg)"/><g font-family="system-ui,sans-serif" fill="#eef2ff">
-<text x="55" y="48" font-size="18" font-weight="700">@surprisal-io/hyperchart</text><rect x="45" y="65" width="650" height="185" rx="18" fill="#1e293b" stroke="#6366f1" filter="url(#s)"/>
-<g font-size="16" text-anchor="middle"><rect x="75" y="112" width="160" height="78" rx="12" fill="#312e81"/><text x="155" y="145">Typed chart</text><text x="155" y="168">DSL + schemas</text><text x="285" y="156" font-size="28">→</text><rect x="335" y="112" width="160" height="78" rx="12" fill="#3730a3"/><text x="415" y="145">Pure machine</text><text x="415" y="168">effects + events</text><text x="545" y="156" font-size="28">→</text><rect x="595" y="112" width="70" height="78" rx="12" fill="#4338ca"/><text x="630" y="145">JSONL</text><text x="630" y="168">facts</text></g>
-<text x="745" y="48" font-size="18" font-weight="700">@surprisal-io/pi-hyperchart</text><rect x="725" y="65" width="350" height="185" rx="18" fill="#1e293b" stroke="#22d3ee" filter="url(#s)"/>
-<g font-size="15"><rect x="755" y="95" width="135" height="52" rx="10" fill="#155e75"/><text x="822" y="127" text-anchor="middle">Pi extension/tools</text><rect x="910" y="95" width="135" height="52" rx="10" fill="#155e75"/><text x="977" y="127" text-anchor="middle">Agent sessions</text><rect x="755" y="170" width="135" height="52" rx="10" fill="#164e63"/><text x="822" y="202" text-anchor="middle">Terminal UI</text><rect x="910" y="170" width="135" height="52" rx="10" fill="#164e63"/><text x="977" y="202" text-anchor="middle">React inspector</text></g><path d="M695 157h30" stroke="#67e8f9" stroke-width="4" marker-end="url(#a)"/><defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0l8 4-8 4z" fill="#67e8f9"/></marker></defs></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" role="img" aria-labelledby="title desc">
+  <title id="title">Hyperchart architecture</title>
+  <desc id="desc">Host-neutral Hyperchart core normalizes typed chart modules into an immutable AST, projects durable JSONL facts through a pure machine, and asks a generic runtime to execute effects. The Pi package supplies tools, runner, agent sessions, terminal UI and React inspector.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#1b1917" flood-opacity=".08"/></filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#272522"/></marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#d63d32"/></marker>
+    <style>
+      .label{font:600 16px Inter,ui-sans-serif,system-ui,sans-serif;fill:#272522}.small{font:500 13px Inter,ui-sans-serif,system-ui,sans-serif;fill:#716d67}.tiny{font:700 11px Inter,ui-sans-serif,system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;fill:#817c75}.title{font:700 25px Inter,ui-sans-serif,system-ui,sans-serif;fill:#171614}.mono{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#4e4a45}.box{fill:#fff;stroke:#d9d4cc;stroke-width:1.5}.core{fill:#f6f3ee;stroke:#c8c1b7;stroke-width:1.5}.pi{fill:#fff8f5;stroke:#e7b3ac;stroke-width:1.5}.line{fill:none;stroke:#272522;stroke-width:2;marker-end:url(#arrow)}.redline{fill:none;stroke:#d63d32;stroke-width:2;marker-end:url(#arrowRed)}
+    </style>
+  </defs>
+  <rect width="1600" height="760" rx="32" fill="#fbfaf7"/>
+  <path d="M68 67 C90 42 123 42 144 67 C165 92 157 126 132 143 C103 162 68 145 58 118 C48 91 63 67 88 59" fill="none" stroke="#171614" stroke-width="8" stroke-linecap="round"/>
+  <path d="M89 110 C99 86 112 63 126 63 C143 63 137 91 128 107 C122 119 128 130 141 124" fill="none" stroke="#171614" stroke-width="5" stroke-linecap="round"/>
+  <text x="176" y="82" class="title">Hyperchart architecture</text>
+  <text x="176" y="109" class="small">Typed authoring → durable facts → pure decisions → host effects</text>
+  <rect x="1317" y="56" width="215" height="48" rx="24" fill="#fff" stroke="#d9d4cc"/>
+  <circle cx="1345" cy="80" r="6" fill="#d63d32"/><text x="1362" y="85" class="mono">two npm packages</text>
+
+  <rect x="54" y="166" width="1040" height="528" rx="25" class="core" filter="url(#shadow)"/>
+  <text x="84" y="204" class="tiny">Host-neutral core</text><text x="84" y="236" class="title">@surprisal-io/hyperchart</text>
+
+  <text x="88" y="286" class="tiny">01 · AUTHOR</text>
+  <rect x="88" y="305" width="248" height="92" rx="16" class="box"/>
+  <text x="112" y="337" class="label">TypeScript chart module</text><text x="112" y="364" class="small">DSL · refs · Zod schemas</text><text x="112" y="384" class="mono">authoring CST</text>
+  <path d="M336 351 H394" class="line"/>
+  <rect x="396" y="305" width="218" height="92" rx="16" class="box"/>
+  <text x="420" y="337" class="label">Normalize + validate</text><text x="420" y="364" class="small">paths · contracts · inputs</text><text x="420" y="384" class="mono">diagnostics</text>
+  <path d="M614 351 H672" class="line"/>
+  <rect x="674" y="305" width="266" height="92" rx="16" fill="#272522"/>
+  <text x="698" y="337" class="label" fill="#fff" style="fill:#fff">Frozen serializable AST</text><text x="698" y="364" class="small" style="fill:#d8d3cc">topology · source · JSON Schema</text><text x="698" y="384" class="mono" style="fill:#f1c0ba">single semantic definition</text>
+
+  <text x="88" y="449" class="tiny">02 · DECIDE AND RECORD</text>
+  <rect x="88" y="469" width="214" height="142" rx="16" class="box"/>
+  <text x="112" y="500" class="label">Durable JSONL facts</text><text x="112" y="526" class="small">append-only semantic history</text>
+  <path d="M112 552 H276" stroke="#e5e0d9"/><text x="112" y="576" class="mono">log.jsonl</text><text x="112" y="598" class="small">replay + stale detection</text>
+  <path d="M302 520 H366" class="line"/>
+  <rect x="368" y="469" width="190" height="142" rx="16" class="box"/>
+  <text x="392" y="500" class="label">Projection</text><text x="392" y="526" class="small">visits · results · fan-out</text><text x="392" y="550" class="small">pending actions · branch</text><text x="392" y="584" class="mono">facts → state</text>
+  <path d="M558 520 H620" class="line"/>
+  <rect x="622" y="469" width="190" height="142" rx="16" class="box"/>
+  <text x="646" y="500" class="label">Pure machine</text><text x="646" y="526" class="small">transitions · completion</text><text x="646" y="550" class="small">guards · micro-steps</text><text x="646" y="584" class="mono">state → requests</text>
+  <path d="M812 520 H874" class="line"/>
+  <rect x="876" y="469" width="174" height="142" rx="16" fill="#fff8f5" stroke="#e3a59d" stroke-width="1.5"/>
+  <text x="900" y="500" class="label">Runtime requests</text><text x="900" y="526" class="small">append facts</text><text x="900" y="550" class="small">execute effects</text><text x="900" y="584" class="mono" style="fill:#b72f27">explicit boundary</text>
+  <path d="M958 611 V646 H194 V612" fill="none" stroke="#d63d32" stroke-width="2" marker-end="url(#arrowRed)"/>
+  <text x="500" y="670" class="small" style="fill:#b72f27">accepted completions return as durable facts; transitions are recomputed from the AST</text>
+
+  <rect x="1134" y="166" width="412" height="528" rx="25" class="pi" filter="url(#shadow)"/>
+  <text x="1164" y="204" class="tiny" style="fill:#b72f27">Pi integration</text><text x="1164" y="236" class="title">@surprisal-io/pi-hyperchart</text>
+  <path d="M1050 540 H1168" class="redline"/>
+  <text x="1074" y="523" class="tiny" style="fill:#b72f27">EFFECTS</text>
+  <rect x="1168" y="274" width="330" height="78" rx="15" class="box"/>
+  <text x="1192" y="305" class="label">Generic runtime + Pi adapter</text><text x="1192" y="331" class="small">runner · heartbeat · effect dispatch</text>
+  <path d="M1333 352 V382" class="line"/>
+  <rect x="1168" y="384" width="154" height="86" rx="15" class="box"/>
+  <text x="1190" y="416" class="label">Pi surfaces</text><text x="1190" y="442" class="small">/hyperchart · tools</text>
+  <rect x="1344" y="384" width="154" height="86" rx="15" class="box"/>
+  <text x="1366" y="416" class="label">Execution</text><text x="1366" y="442" class="small">agent sessions · scripts</text>
+  <rect x="1168" y="492" width="154" height="86" rx="15" class="box"/>
+  <text x="1190" y="524" class="label">Operations</text><text x="1190" y="550" class="small">status · progress · TUI</text>
+  <rect x="1344" y="492" width="154" height="86" rx="15" class="box"/>
+  <text x="1366" y="524" class="label">React inspector</text><text x="1366" y="550" class="small">canonical host models</text>
+  <path d="M1245 600 H1422" stroke="#d9d4cc"/><text x="1168" y="632" class="small">Depends on the exact matching core version.</text><text x="1168" y="656" class="small">Pi and React never define execution semantics.</text>
+</svg>

@@ -1,244 +1,286 @@
-# Core authoring guide
+# Author charts
 
-This guide covers the public chart-authoring surface of `@surprisal-io/hyperchart`. Hyperchart charts are TypeScript modules whose exported value is plain, normalizable data. Runtime code is supplied by a host such as Pi.
+A Hyperchart module exports one chart definition. The definition is normalized into a frozen, serializable AST before a run starts.
 
-## Install and create a chart
+Use this page for the authoring contract. For nested, parallel, and map behavior, continue with [Compose states](composition.md).
 
-Hyperchart requires Node.js 22.19 or newer and uses ESM.
-
-```sh
-npm install @surprisal-io/hyperchart
-```
-
-Create `review.chart.ts`:
+## Chart anatomy
 
 ```ts
 import { agent, final, refs, t, z } from "@surprisal-io/hyperchart";
 
-const Research = z.object({ summary: z.string() });
-const Plan = z.object({ steps: z.array(z.string()) });
+const Review = z.object({ verdict: z.enum(["pass", "fix"]), notes: z.string() });
+type Review = z.infer<typeof Review>;
 
-type Research = z.infer<typeof Research>;
-type Plan = z.infer<typeof Plan>;
-
-const { chart, arg, result } = refs<
-  { topic: string },
-  { research: Research; plan: Plan }
+const { chart, arg } = refs<
+  { task: string },
+  { review: Review }
 >();
 
 export default chart({
   kind: "chart",
   id: "review",
-  initial: "research",
+  initial: "review",
   states: {
-    research: {
+    review: {
       kind: "state",
-      action: agent("researcher", {
-        task: t`Research ${arg("topic")}`,
-        reply: Research,
+      action: agent("reviewer", {
+        task: t`Review this task: ${arg("task")}`,
+        reply: Review,
       }),
-      transitions: { DONE: "plan", FAILED: "failed" },
-    },
-    plan: {
-      kind: "state",
-      action: agent("planner", {
-        task: t`Plan from ${result("research", "summary")}`,
-        reply: Plan,
-      }),
-      transitions: { DONE: "done", FAILED: "failed" },
+      transitions: {
+        PASS: "done",
+        FIX: "done",
+      },
     },
     done: final(),
-    failed: final(),
   },
 });
 ```
 
-A chart may be the default export or a named export. Pass the export name to the parser, Pi command, or Pi tool when it is not `default`.
+Every chart has:
 
-## Chart contract
+- `kind: "chart"`;
+- a stable `id`;
+- an `initial` state name;
+- a `states` record;
+- optional run-argument schema metadata.
 
-A chart has four required fields:
+State names are local inside the authoring tree. Normalization assigns absolute paths such as `review` or `pipeline.verify`.
 
-| Field | Meaning |
-|---|---|
-| `kind: "chart"` | Identifies the authoring value. |
-| `id` | Stable chart identity included in action provenance. |
-| `initial` | Top-level state entered first. |
-| `states` | Top-level state record. |
+## Use typed refs
 
-State IDs and nested paths are durable identity. Renaming a chart or state can invalidate old facts. Read [chart evolution and replay](runtime-and-durability.md#chart-evolution-and-replay-warnings) before changing a chart used by an existing run.
+`refs()` creates a chart constructor and selectors checked against your registries:
 
-## State kinds
+```ts
+const { chart, arg, input, result, artifactOf, joinArtifactOf, key, item, event, visit } = refs<
+  Args,
+  Results,
+  Files,
+  Maps,
+  Inputs
+>();
+```
 
-| Kind | Constructor | Purpose |
+The registries mean:
+
+| Registry | Keys | Values |
 |---|---|---|
-| action | object with `kind: "state"` | Runs one agent, script, or user action. |
-| compound | `compound(options)` | Nested sequential state machine. |
-| parallel | `parallel(options)` | Enters all regions and joins after every region reaches final. |
-| map | `map(options)` | Materializes one nested instance per resolved item/key. |
-| final | `final()` | Completes the enclosing chart, compound, region, or map instance. |
+| `Args` | run argument names | argument types |
+| `Results` | action state paths | accepted reply types |
+| `Files` | artifact-producing state paths | artifact name → file content type |
+| `Maps` | map template paths | one map item type |
+| `Inputs` | target state paths | named transition-input types |
 
-The composition rules and full examples are in [Composition, artifacts, and reliability](composition.md).
+The `chart()` returned by `refs()` checks that declared replies, artifacts, maps, and inputs match those registries in both directions. Use the root `chart()` helper only when you deliberately do not need typed registries.
 
-## Actions
-
-### Agent
+### Select values
 
 ```ts
-agent("writer", {
-  task: "Write the report.",
-  reads: ["notes.md"],
-  artifacts: { report: artifact("out/report.json", ReportSchema) },
-  reply: z.object({ title: z.string() }),
-  model: "provider/model",
-  thinking: "high",
-  tools: ["read", "write"],
-})
+arg("task")                         // run argument
+result("review")                   // full accepted result
+result("review", "notes")          // dot-path selection
+input("notes")                     // transition input in the current visit
+artifactOf("render")               // path to one declared artifact
+artifactOf("render", { artifact: "html" })
+joinArtifactOf("chapters.author")  // one artifact path per map instance
+key("chapters")                    // current map key
+item("chapters", "title")          // current map item selection
+event("payload.id")                // current event payload selection
+visit("review")                    // visit number
 ```
 
-`name` resolves a host agent definition. `task` is the per-invocation user message; it does not replace the agent definition's system prompt. `reads` supplies raw paths or declared producer artifacts. `artifacts` declares files the invocation must produce. `reply` describes the small completion-event payload. `model`, `thinking`, and `tools` are opaque host overrides.
+Refs are data. They are resolved immediately before an action is dispatched; they are not arbitrary JavaScript callbacks.
 
-A missing Pi agent definition is a runtime error. The inspector marks it unavailable rather than pretending every tool is allowed.
+## Render templates
 
-### Script
+Use `t` when text contains refs:
 
 ```ts
-script("node", ["scripts/summarize.mjs"], {
-  env: {
-    TOPIC: t`${arg("topic")}`,
-    SOURCE: artifactOf("research", { artifact: "notes" }),
+t`Review ${arg("task")} using ${artifactOf("prepare")}`
+```
+
+Use `json()` when a value must be serialized as JSON rather than interpolated as a string:
+
+```ts
+t`Items: ${json(result("plan", "items"))}`
+```
+
+Hyperchart recognizes only DSL interpolation tokens. Text that happens to contain `${...}` is not evaluated as JavaScript.
+
+## Action states
+
+An action state dispatches one action and waits for an event.
+
+```ts
+{
+  kind: "state",
+  action: agent("reviewer", { task: "Review the change." }),
+  transitions: { PASS: "done", FIX: "repair" },
+}
+```
+
+The action may be an agent, script, or user request.
+
+### Agent actions
+
+```ts
+agent("reviewer", {
+  task: t`Review ${arg("task")}`,
+  reads: [artifactOf("prepare")],
+  artifacts: {
+    report: artifact("artifacts/review.json", Review),
   },
-  artifacts: { summary: artifact("out/summary.json", SummarySchema) },
-  reply: z.object({ count: z.number() }),
+  reply: Review,
+  model: "anthropic/claude-sonnet-4",
+  thinking: "high",
+  tools: ["read", "grep"],
 })
 ```
 
-The command and argument vector are static. Dynamic values flow through `env`. The generic runtime runs the process in the run work directory, parses structured stdout when a reply schema is declared, and emits `FAILED` for a non-zero exit.
+The first argument is a Pi agent-definition name. Hyperchart resolves the concrete definition before execution. If it cannot load that definition, the state cannot run. Model, thinking level, tools, and system prompt are not inferred from an absent definition.
 
-### User
+`model`, `thinking`, and `tools` in the chart override the resolved agent defaults for that invocation.
+
+### Script actions
+
+```ts
+script("python3", ["bin/build.py"], {
+  env: {
+    INPUT_JSON: t`${json(result("plan"))}`,
+    OUTPUT_PATH: "artifacts/output.json",
+  },
+  artifacts: {
+    output: artifact("artifacts/output.json", Output),
+  },
+  reply: Output,
+})
+```
+
+Commands and arguments are static. Dynamic values enter through `env`; this avoids shell interpolation and keeps invocations inspectable.
+
+A script completes as follows:
+
+1. non-zero exit → `FAILED`;
+2. otherwise, parse the last non-empty stdout line as `{ "type": "EVENT", "output": ... }`;
+3. if there is exactly one allowed non-`FAILED` event, exit `0` may select it implicitly;
+4. validate the event type, reply schema, and declared artifacts.
+
+### User actions
 
 ```ts
 user({
   prompt: "Approve the release?",
-  options: ["approve", "reject"],
   reply: z.object({ approved: z.boolean() }),
 })
 ```
 
-User actions are part of the host-neutral contract. The Pi adapter currently warns because it does not implement them.
+User actions are part of the host-neutral DSL. The current Pi executor does not yet implement them. A chart containing one can be inspected but will fail if execution reaches it in Pi.
 
-## Schemas and completion events
+## Events and transitions
 
-Hyperchart re-exports `z` from Zod so chart modules need one direct package import. A `reply` schema performs three jobs:
-
-1. gives TypeScript a result type through `z.infer`;
-2. gives agents a structured completion contract;
-3. gives the runtime a JSON Schema representation for validation.
-
-An action completes with an event such as `DONE`, plus an optional payload. `FAILED` is reserved for system failure. Declare every event the action may emit under `transitions` or on an ancestor that intentionally catches it.
-
-## Typed refs
-
-`refs<Args, Results, Files, Maps, Inputs>()` creates typed selectors and a checking `chart` constructor.
-
-| Helper | Reads |
-|---|---|
-| `arg("name")` | Run argument. |
-| `result("state", "path.to.field")` | Accepted completion payload from a producer state. |
-| `artifactOf("state", options)` | Declared artifact from one producer. |
-| `joinArtifactOf("map.child", options)` | The corresponding artifact from every map instance. |
-| `key("map.path")` | Current map instance key. |
-| `item("map.path", "field")` | Current map instance item or selected field. |
-| `input("name", "field")` | Explicit transition input in the nearest declaring scope. |
-| `visit("state")` | Visit number of a state. |
-| `event("field")` | Binds a completion-event field into a transition input. |
-
-The generic parameters are registries, not runtime configuration:
+A transition can be a target string:
 
 ```ts
-const refsApi = refs<
-  { topic: string },
-  { research: Research },
-  { research: { notes: NotesFile } },
-  { chapters: Chapter },
-  { "chapters.write": { feedback: string } }
->();
+transitions: { PASS: "done" }
 ```
 
-The `chart` constructor verifies that declared reply, artifact, map, and input registries match the chart literal. Paths are checked at compile time where the value type is known. Runtime normalization still verifies that referenced states and scopes exist.
-
-Untyped helpers (`arg`, `result`, `artifactOf`, `joinArtifactOf`, `key`, `item`) are available for low-level use, but `refs()` is the recommended authoring entry point.
-
-## Templates and JSON
-
-Use `t` for values resolved immediately before dispatch:
+or an object with target input:
 
 ```ts
-const task = t`Summarize ${result("research", "summary")} for ${arg("audience")}`;
-```
-
-Strings, numbers, and booleans interpolate directly. Object and array refs must be explicit:
-
-```ts
-const task = t`Use this plan: ${json(result("plan"))}`;
-```
-
-This avoids accidental `"[object Object]"` output. Templates are stored as strings plus typed ref nodes; Hyperchart does not parse a placeholder language out of arbitrary braces.
-
-## Transitions and explicit input
-
-A short transition contains only a target:
-
-```ts
-transitions: { DONE: "next", FAILED: "failed" }
-```
-
-Use the object form to bind event data into declared input:
-
-```ts
-review: {
-  kind: "state",
-  input: { feedback: z.string() },
-  action: agent("reviewer", { task: t`Review: ${input("feedback")}` }),
-  transitions: { DONE: "done", FAILED: "failed" },
-}
-
-// On the producer:
 transitions: {
-  NEEDS_REVIEW: {
-    target: "review",
-    input: { feedback: event("reason") },
+  FIX: {
+    target: "repair",
+    input: {
+      notes: event("output.notes"),
+      attempt: visit("review"),
+    },
   },
 }
 ```
 
-Targets are local IDs resolved among siblings at the declaration level. Nested topology is flattened to absolute state paths during normalization. Events bubble from the active state through enclosing compound/map/parallel scopes until handled.
+Declare target input schemas on the destination state:
 
-## Parsing, normalization, and inspection
+```ts
+repair: {
+  kind: "state",
+  input: {
+    notes: z.string(),
+    attempt: z.number(),
+  },
+  action: agent("fixer", {
+    task: t`Attempt ${input("attempt")}: ${input("notes")}`,
+  }),
+  transitions: { FIXED: "review" },
+}
+```
 
-The main package exports:
+Input is bound to a visit, not permanently to a state path. Re-entering the same state creates a new visit and a new input binding.
 
-- `normalizeChartConfig(value, source?)` — validate CST and produce a frozen AST or diagnostics;
-- `parseChartExport(value, source?)` — normalize one already-loaded value;
-- `parseChartModule(path, options?)` / `parseChartModuleAst(...)` — asynchronously load a module;
-- `parseChartModuleSync(path, options?)` — load TypeScript through Jiti;
-- `inspectChartAst(ast, options?)` / `inspectChartModuleSync(...)` — produce static source, contract, and graph information without running work;
-- `hyperchartSource(ast)` / `hyperchartStateSources(ast)` — generate validated DSL source views.
+Reserved system events include `FAILED`, validation outcomes, timer events, and scope cancellation. Do not invent application events that collide with reserved names.
 
-Treat diagnostics as errors to fix, not as reasons to cast through `any`. Static inspection never contains runtime status, logs, usage, sessions, or visits; those belong to a run overlay.
+## Replies and schemas
 
-## Authoring checklist
+`reply` validates accepted event output:
 
-- Use stable chart/state IDs and stable map keys.
-- Give every failure path an explicit `FAILED` route.
-- Keep completion payloads small; put deliverables in artifacts.
-- Use typed refs instead of ambient mutable files where possible.
-- Make scripts and external side effects idempotent.
-- Inspect and typecheck charts before running them.
-- Read [durability](runtime-and-durability.md) before evolving a chart with existing runs.
+```ts
+const Decision = z.object({
+  verdict: z.enum(["pass", "fix"]),
+  notes: z.string(),
+});
 
-## Examples
+agent("reviewer", { task: "Review.", reply: Decision })
+```
 
-- [`examples/api/review.chart.ts`](../examples/api/review.chart.ts) — small typed chain.
-- [`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) — maps, artifacts, scripts, validation, and deadlines.
-- [Examples guide](examples.md) — how to run and adapt the included charts.
+Hyperchart converts Zod schemas to JSON Schema for normalized source and inspection. Runtime validation still occurs before the result is accepted into the durable log.
+
+The package re-exports `z` so charts can use the same Zod dependency:
+
+```ts
+import { z } from "@surprisal-io/hyperchart";
+```
+
+## Artifacts
+
+Declare files that an action must produce:
+
+```ts
+artifacts: {
+  report: artifact("artifacts/report.json", Report),
+}
+```
+
+The path may be a template. A shape is optional; when present, Hyperchart validates file content before accepting completion.
+
+Read artifacts through declared refs:
+
+```ts
+reads: [artifactOf("build", { artifact: "report" })]
+```
+
+Artifacts are files owned by the run or working directory. The durable log records the accepted declaration and invocation; it does not embed arbitrary file contents.
+
+## Module loading and trust
+
+Chart files are executable TypeScript modules loaded through Jiti. Importing, parsing, or inspecting a module may execute top-level JavaScript with the current user's permissions.
+
+Keep chart modules declarative:
+
+- no top-level network calls;
+- no top-level writes;
+- no timers or background processes;
+- no environment-dependent mutation.
+
+Review untrusted chart source before inspection. The word “static” in static inspection means “without runtime overlays,” not “safe evaluation without code execution.”
+
+## Normalize before execution
+
+`normalizeChartConfig()` validates structure and produces the AST used by the machine. It rejects unknown paths, invalid transition bindings, malformed composition, mismatched refs, and unsupported declarations.
+
+The Pi runner normalizes automatically. Hosts embedding the core package should treat normalization errors as startup errors, not runtime branches.
+
+## Next steps
+
+- [Compose states](composition.md)
+- [Runtime and durable facts](runtime-and-durability.md)
+- [API reference](reference.md)

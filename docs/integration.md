@@ -1,40 +1,71 @@
-# Host adapter and React integration
+# Host and React integration
 
-Hyperchart separates canonical inspection models from host discovery and presentation. The core package contains the host-neutral model; the Pi package provides one implementation and React UI.
+Use the core package to produce canonical chart/run models. Use the Pi package when the host is Pi or when you want the bundled React UI.
 
-## Host-neutral snapshot contract
+## Package boundary
+
+| Package | Browser-safe parts | Node/runtime parts |
+|---|---|---|
+| `@surprisal-io/hyperchart` | normalized types, inspection models, host models/adapters | module loading, machine, replay, generic runtime |
+| `@surprisal-io/pi-hyperchart` | React entry point and CSS | Pi extension, runner, TUI, Pi host adapter |
+
+Do not import Node-only root or internal modules into browser bundles. The normalized AST inspector is browser-safe; chart module loading is not.
+
+## Host models
+
+Import canonical models from:
+
+```ts
+import type {
+  HyperchartInfo,
+  HyperchartRunInfo,
+  HyperchartSessionSnapshot,
+  HyperchartHostAdapter,
+} from "@surprisal-io/hyperchart/host";
+```
+
+`HyperchartInfo` describes a discovered chart. `HyperchartRunInfo` combines static chart information with optional runtime overlays. UI components consume these models instead of reading `log.jsonl` directly.
+
+The boundary is intentional:
+
+- static source, contracts, schemas, and topology come from normalized chart inspection;
+- status, visits, resolved invocations, artifacts, usage, and replay issues come from a concrete run;
+- host-specific files are adapted once, outside React.
+
+## Implement a host adapter
+
+A host adapter has one method:
 
 ```ts
 import type {
   HyperchartHostAdapter,
   HyperchartSessionSnapshot,
 } from "@surprisal-io/hyperchart/host";
-```
 
-A host implements:
-
-```ts
-interface HyperchartHostAdapter {
-  readSessionSnapshot(
+export class MyHyperchartHost implements HyperchartHostAdapter {
+  async readSessionSnapshot(
     cwd: string,
-    options?: HyperchartSnapshotOptions,
-  ): Promise<HyperchartSessionSnapshot>;
+    options?: { runLimit?: number },
+  ): Promise<HyperchartSessionSnapshot> {
+    const hypercharts = await discoverCharts(cwd);
+    const runs = await readRuns(cwd, options?.runLimit);
+    return { hypercharts, runs };
+  }
 }
 ```
 
-A snapshot contains discovered chart definitions and concrete runs. Transport `snapshot.hypercharts` and `snapshot.runs` without converting them into a parallel model. The canonical types already distinguish static definition data, runtime status, issues, visits, fan-out progress, and usage.
+The adapter owns discovery and host I/O. It should:
 
-Host adapters own:
+1. resolve charts and runs for the supplied working directory;
+2. enforce run ownership/scope;
+3. use normalized static inspection;
+4. adapt runtime facts and operational files into canonical models;
+5. preserve static/runtime separation;
+6. surface malformed files as typed issues rather than silently dropping them.
 
-- chart discovery and precedence;
-- run storage and metadata;
-- runtime/session status sources;
-- agent-definition defaults;
-- mapping durable facts to canonical host models.
+## Use the Pi host adapter
 
-Host adapters do not redefine machine semantics. Use `hyperchartRunFromRuntime()` and exported projection APIs.
-
-## Pi host adapter
+The Pi package exports a ready adapter:
 
 ```ts
 import {
@@ -42,124 +73,163 @@ import {
   piHyperchartHost,
 } from "@surprisal-io/pi-hyperchart/pi-host";
 
-const snapshot = await piHyperchartHost.readSessionSnapshot(cwd, {
-  runLimit: 50,
+const snapshot = await piHyperchartHost.readSessionSnapshot(process.cwd(), {
+  runLimit: 20,
 });
 ```
 
-`createPiHyperchartHost(options)` allows an explicit Pi agent directory or custom agent-default resolver. The adapter owns project/user `.pi/hypercharts` discovery, Pi runs, status/session files, and unavailable agent definitions. Failed run inspection is isolated so one damaged run does not prevent the rest of a dashboard snapshot.
+Use `createPiHyperchartHost()` when you need explicit configuration or an isolated instance. Use `piHyperchartHost` for normal process-wide access.
 
-Another harness should implement the core interface with its own paths and session metadata instead of importing Pi filesystem conventions.
+## Adapt existing data
 
-## Model adapters
+The host entry point exports adapters for common sources:
 
-`@surprisal-io/hyperchart/host` exports:
-
-- `hyperchartRunFromInfo()` — static run-shaped model from a discovered chart;
-- `hyperchartRunFromInspectResult()` — static inspector model from validated inspection;
-- `hyperchartRunFromRuntime()` — durable/runtime overlay;
-- `hyperchartRunFromToolDetails()` — normalize Pi tool details for UI.
-
-Static inspection remains static: do not inject logs, status, sessions, or usage into the source definition. A concrete run overlay supplies those fields.
-
-## React inspector
-
-Install the Pi package and UI peers in the host application:
-
-```sh
-npm install @surprisal-io/pi-hyperchart react react-dom @xyflow/react elkjs react-syntax-highlighter
+```ts
+import {
+  hyperchartRunFromInfo,
+  hyperchartRunFromInspectResult,
+  hyperchartRunFromRuntime,
+  hyperchartRunFromToolDetails,
+} from "@surprisal-io/hyperchart/host";
 ```
 
-Then import components and one stylesheet:
+Use the adapter matching the data you actually have. Do not fabricate runtime fields for a static inspect result.
+
+## Install the React UI
+
+Install the Pi package and its UI peers in the host application:
+
+```sh
+npm install @surprisal-io/pi-hyperchart \
+  react react-dom @xyflow/react elkjs react-syntax-highlighter
+```
+
+Import components from one entry point and one stylesheet:
 
 ```tsx
 import {
   HyperchartInspectorDialog,
-  HyperchartLaunchDialog,
   HyperchartRunStrip,
-  HyperchartToolSummary,
   HyperchartUiThemeProvider,
 } from "@surprisal-io/pi-hyperchart/react";
 import "@surprisal-io/pi-hyperchart/react/styles.css";
 ```
 
-### Components
+Do not import component files or React Flow CSS separately. `styles.css` contains the complete public stylesheet contract, including scoped React Flow styles.
 
-| Component | Purpose |
+## Render a run strip and inspector
+
+```tsx
+import { useState } from "react";
+import {
+  HyperchartInspectorDialog,
+  HyperchartRunStrip,
+} from "@surprisal-io/pi-hyperchart/react";
+import type { HyperchartRunInfo } from "@surprisal-io/hyperchart/host";
+
+export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+
+  return (
+    <>
+      <HyperchartRunStrip
+        hypercharts={[]}
+        runs={runs}
+        onSelectRun={setSelectedRunId}
+      />
+      {selectedRunId !== null && (
+        <HyperchartInspectorDialog
+          runs={runs}
+          selectedRunId={selectedRunId}
+          onSelectRun={setSelectedRunId}
+          onClose={() => setSelectedRunId(null)}
+        />
+      )}
+    </>
+  );
+}
+```
+
+Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The UI does not mutate run files by itself.
+
+## Public React components
+
+| Export | Purpose |
 |---|---|
-| `HyperchartRunStrip` | Compact discovered-chart/current-run surface. |
-| `HyperchartLaunchDialog` | Select chart and submit a JSON-object argument payload. |
-| `HyperchartInspectorDialog` | Full graph + side-panel inspector for static or runtime models. |
-| `HyperchartInspectorSidePanel` | Embed only the detail panel. |
-| `HyperchartGraphPreview` | Embed graph visualization. |
-| `HyperchartToolSummary` | Render inspector information returned by Pi tools. |
-| `HyperchartPortalProvider` | Supply a host-controlled portal renderer. |
-| `HyperchartUiThemeProvider` | Preserve the selected UI theme through portals. |
+| `HyperchartInspectorDialog` | full modal inspector for one or more runs |
+| `HyperchartInspectorSidePanel` | details panel without the surrounding dialog |
+| `HyperchartGraphPreview` | chart graph and runtime overlay |
+| `HyperchartRunStrip` | compact list of active/recent runs |
+| `HyperchartToolSummary` | summary for Hyperchart tool results |
+| `HyperchartLaunchDialog` | launch form for discovered charts |
+| `HyperchartPortalProvider` | portal target for nested host modal stacks |
+| `HyperchartUiThemeProvider` | explicit light/dark theme contract |
 
-The package also exports graph construction/filter helpers and display helpers for status, timestamps, usage, progress, and labels.
+Graph helpers such as `buildGraph`, `immediateMapScopeId`, and `visibleStateIdsForScope` are also public from the React entry point.
 
-### Data flow
+## Theme
 
-1. read a snapshot through a host adapter;
-2. pass canonical `HyperchartInfo`/`HyperchartRunInfo` models to React;
-3. invoke host callbacks for run/open/abort/launch actions;
-4. refresh snapshots after host events;
-5. never let UI-local state become run truth.
-
-The inspector accepts static definitions as well as runtime runs. Script arguments render only for script states; run arguments are overview data. Operational detail is grouped in a collapsed Runtime section so source definition remains primary.
-
-## Styles and host isolation
-
-`react/styles.css` contains the generated Tailwind utilities, XYFlow CSS, and Hyperchart variables. It does not apply global Tailwind Preflight. Required control/typography resets are scoped under `[data-hyperchart-root]`, so importing the file does not reset the surrounding dashboard.
-
-Import the stylesheet exactly once at application entry. Do not import source CSS directly from the npm package.
-
-## Theme contract
-
-Wrap standalone UI:
+Wrap the UI when the host already owns theme state:
 
 ```tsx
 <HyperchartUiThemeProvider
-  theme={{ resolved: "dark", themeName: "base" }}
+  theme={{ resolved: "light", themeName: "base" }}
 >
-  <HyperchartRunStrip {...props} />
+  <WorkflowView runs={runs} />
 </HyperchartUiThemeProvider>
 ```
 
-Portaled dialogs inherit this provider. A host-owned portal may instead establish `data-theme="light"` or `data-theme="dark"` at the portal root.
+`resolved` is `"light"` or `"dark"`. The provider avoids relying on global body classes that may belong to another application.
 
-Override the documented variable families to integrate a host theme:
+Tailwind Preflight is scoped to `[data-hyperchart-root]`. Hyperchart does not reset the rest of the host page.
 
-- `--bg-*` — surfaces;
-- `--text-*` — primary/secondary/muted text;
-- `--border-*` — separators and outlines;
-- `--hc-*` — status/accent colors.
+## Portals and modal stacks
 
-Maintain contrast for text, focus rings, validation issues, and graph statuses in both themes.
+By default, dialogs portal to the document. In an application with its own modal layer, provide a portal renderer:
 
-## Portals, modal behavior, and focus
+```tsx
+import { createPortal } from "react-dom";
 
-Use `HyperchartPortalProvider` when the host dashboard owns overlay placement. Hyperchart's modal primitive handles stacked dialogs, focus return, tab containment, and Escape ordering. The host portal renderer must preserve the supplied tree and should not clone/reparent interactive content in a way that breaks focus ownership.
+<HyperchartPortalProvider
+  portal={(children) => createPortal(children, modalLayerElement)}
+>
+  <WorkflowView runs={runs} />
+</HyperchartPortalProvider>
+```
 
-## Large-content behavior
+Use one portal boundary around the Hyperchart subtree. Nested dialogs, full-content previews, and launch/inspector overlays inherit it.
 
-Definition, prompt, command, JSON, and map previews are bounded before React rendering. Truncated content exposes one `Open full` action; full content is not mounted in the initial DOM. Preserve this property when customizing components to avoid large logs/prompts bloating host dashboards.
+## Server rendering
 
-## Launch arguments
+The public React entry point is safe to import during SSR. Browser-dependent behavior is deferred until render/effect time.
 
-`HyperchartLaunchDialog` accepts an optional JSON object. Scalars, arrays, and free-form instructions are rejected because chart arguments are named contracts. Validate/serialize the object in the host callback and surface parse errors before starting a run.
+Practical rules:
 
-## SSR and bundlers
+- import the stylesheet from the client application entry;
+- render dialogs only when the host has a DOM;
+- avoid reading run directories in React components;
+- perform Node discovery and adaptation on the server/host side;
+- pass serializable canonical models to the client.
 
-The public React entry avoids Node-only runtime imports. Use ESM-aware bundlers and keep the CSS side effect. The Pi host adapter is Node-only and should not be imported into browser bundles; fetch/transport its snapshots from the server side.
+## Content previews
 
-## Integration checklist
+The inspector bounds large prompts, command text, JSON, schemas, and definitions before syntax rendering. Truncated content shows `Open full`; the full value is mounted only after the user opens the dialog.
 
-- Use `@surprisal-io/hyperchart/host` types end to end.
-- Keep Pi host code server-side.
-- Import the compiled stylesheet once.
-- Provide React/React DOM/XYFlow/ELK/syntax-highlighter peers.
-- Test light/dark themes and mobile width.
-- Preserve portal focus and Escape behavior.
-- Keep large preview content lazy.
-- Add/update Storybook coverage for visible changes.
+Hosts should pass complete canonical data. Do not pre-truncate fields unless the transport itself requires a limit, because the inspector owns display truncation and full-content access.
+
+## Accessibility and responsive behavior
+
+The components provide dialog semantics, keyboard close behavior, labelled graph controls, and responsive graph/detail layouts. The host remains responsible for:
+
+- placing focus into the surrounding application correctly;
+- selecting a portal layer with the expected z-index;
+- ensuring callbacks do not close unrelated host dialogs;
+- testing at the host's actual breakpoints and font scale.
+
+The repository's Storybook boards cover light/dark themes, mobile layouts, long content, validation issues, maps, parallel states, and runtime history.
+
+## Next steps
+
+- [Host-neutral runtime contract](runtime-and-durability.md)
+- [Pi commands and run files](pi.md)
+- [Public exports](reference.md)

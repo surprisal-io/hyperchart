@@ -1,56 +1,82 @@
 # Examples
 
-Examples are executable chart modules and are typechecked by the repository test suite.
+Each example has different prerequisites. Start with the script-only chart; the larger files are reference implementations to adapt, not zero-configuration demos.
 
-## Minimal review workflow
+| Example | Runs as checked in? | Requires | Demonstrates |
+|---|---:|---|---|
+| [`examples/quickstart.chart.ts`](../examples/quickstart.chart.ts) | yes | Node.js, Pi package | script action, implicit successful event, declared artifact, final state |
+| [`examples/api/review.chart.ts`](../examples/api/review.chart.ts) | no | project agent definitions; Pi user-action support for the approval state | typed refs, agent replies, transition input, validation/review loop |
+| [`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) | no | named Deck Director agents, scripts under `bin/`, project schemas/artifact conventions | large map/parallel pipeline, fan-in, validation, deadlines, artifacts |
 
-[`examples/api/review.chart.ts`](../examples/api/review.chart.ts) demonstrates:
+## Portable smoke test
 
-- scoped package imports;
-- typed `refs()` registries;
-- agent reply schemas;
-- a user-action branch;
-- explicit success/failure transitions.
+Copy the quickstart chart into project discovery:
 
-Inspect it in Pi:
-
-```text
-hyperchart_inspect({ chartPath: "examples/api/review.chart.ts" })
+```sh
+mkdir -p .pi/hypercharts
+cp examples/quickstart.chart.ts .pi/hypercharts/hello.chart.ts
 ```
 
-Or copy it to `.pi/hypercharts/review.chart.ts` and run by basename.
-
-## Deck Director workflow
-
-[`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) demonstrates a production-shaped workflow with:
-
-- run arguments and typed refs;
-- agent definitions and model/tool overrides;
-- compound, parallel, and map composition;
-- bounded concurrency;
-- declared artifacts and mapped fan-in;
-- script actions and guards;
-- validation feedback/retries;
-- deadlines and failure paths.
-
-Run with explicit arguments:
+Run it:
 
 ```text
-/hyperchart run examples/deck-director.chart.ts --args '{"topic":"Durable agent workflows","audience":"engineers","goal":"explain the architecture","style":"analytical","constraints":"cite evidence"}'
+/hyperchart run hello
 ```
 
-## Project-local review/fix cycle
+Expected result:
 
-[`.pi/hypercharts/code-review-fix-cycle.chart.ts`](../.pi/hypercharts/code-review-fix-cycle.chart.ts) is a project chart that coordinates the repository's reviewer/fixer agent definitions. It is useful as an example of chart discovery and a feedback cycle, but its agents are project-specific.
+- terminal run status `complete`;
+- `hello.txt` created in the project;
+- one run directory under `.pi/hypercharts/runs/`;
+- an `args` record followed by action invocation/completion facts in `log.jsonl`.
 
-## Adapting an example
+Read [Run your first chart](quickstart.md) for inspection and troubleshooting.
 
-1. Copy the chart under a new stable chart ID.
-2. Replace agent names with definitions available in your Pi installation.
-3. Keep state IDs stable after a durable run exists.
-4. Update `refs()` registries when reply/artifact/map/input contracts change.
-5. Inspect the chart and resolve every diagnostic.
-6. Run with a small deterministic input first.
-7. Add a focused test when the example becomes production workflow code.
+## Review chart
 
-Examples are documentation, not compatibility shims. They always use the current scoped package names and supported authoring surface.
+[`examples/api/review.chart.ts`](../examples/api/review.chart.ts) is a compact API example. It shows:
+
+- typed `Args`, `Results`, and transition inputs;
+- a reviewer agent returning structured output;
+- routing through named events;
+- passing accepted data into another state;
+- looping from fix back to review.
+
+Before using it, define every named agent in your Pi configuration. The file also reaches a `user()` action; the current Pi executor does not implement user actions. Replace that state with an agent/script action or provide a host executor that implements the user effect.
+
+Use this file to study authoring, not as the first installation test.
+
+## Deck Director chart
+
+[`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) is a large reference chart extracted from a project-specific workflow. It demonstrates:
+
+- planning followed by data-driven research fan-out;
+- pinned map items and bounded `concurrency`;
+- `joinArtifactOf()` fan-in;
+- agent and script validators;
+- `onReject` and retry budgets;
+- deadlines and failure routes;
+- nested map/compound structure;
+- artifact contracts across a long run.
+
+It refers to agent names, scripts, and project files that are not supplied by this package. To adapt it:
+
+1. list every `agent("...")` name and create concrete Pi definitions;
+2. replace each `bin/...` command with a checked-in executable;
+3. review every artifact path and schema;
+4. make external operations idempotent;
+5. keep explicit failure and deadline routes;
+6. inspect the normalized chart before starting a run;
+7. test with disposable inputs before using real external systems.
+
+## Add an example
+
+A checked-in example should state:
+
+- whether it runs without repository-specific resources;
+- required agents, scripts, credentials, and external services;
+- expected files and terminal outcome;
+- the one behavior it is intended to teach;
+- safety implications for external effects and replay.
+
+Examples are typechecked and covered by `tests/examples.test.ts`. If an example is intentionally non-runnable, its missing prerequisites must be explicit here and near the source file.

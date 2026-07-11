@@ -1,22 +1,34 @@
 # Hyperchart documentation
 
-Hyperchart is experimental software for durable TypeScript workflows. Start with the package that matches your job:
+Hyperchart is a TypeScript statechart runtime for work that may span scripts, agent sessions, validation, fan-out, and process restarts.
 
-| Need | Package | Start |
-|---|---|---|
-| Author or embed charts in any Node host | `@surprisal-io/hyperchart` | [Core quickstart](core-authoring.md) |
-| Run charts as Pi agents; use commands, tools, TUI or React UI | `@surprisal-io/pi-hyperchart` | [Pi quickstart](pi.md) |
+## Start here
 
-## Guides
+- [Run your first chart](quickstart.md) — install the Pi package, run a script-only chart, inspect the result, and find its durable log.
+- [Examples](examples.md) — choose a checked-in example by prerequisite and behavior.
 
-1. [Core authoring](core-authoring.md) — first chart, states/actions, refs, templates, transitions and inputs.
-2. [Composition and reliability](composition.md) — compound/parallel/map, artifacts, validation, retries, deadlines.
-3. [Runtime and durability](runtime-and-durability.md) — adapter contract, logs, replay, crash resume and chart changes.
-4. [Pi extension](pi.md) — install/discovery, commands, four tools, lifecycle, inspect, rewind, agents and troubleshooting.
-5. [Host and React integration](integration.md) — host snapshots, React inspector and theming.
-6. [Reference](reference.md) — exports, chart/log shapes, limitations and glossary.
-7. [Architecture](architecture.md) — execution semantics, boundaries and TLA+ trace validation.
-8. [Examples](examples.md) — runnable charts and adaptation guidance.
-9. [Development](development.md) — tests, documentation ownership and release procedure.
+## Build charts
 
-Use [examples](../examples/) as executable companions. The package READMEs are intentionally short; these pages are canonical.
+- [Author charts](core-authoring.md) — chart structure, actions, events, typed refs, templates, schemas, and artifacts.
+- [Compose states](composition.md) — compound, parallel, and map states; validation; deadlines; re-entry; and fan-in.
+
+## Run in Pi
+
+- [Pi extension](pi.md) — discovery, `/hyperchart`, the four agent tools, agent definitions, run files, and troubleshooting.
+- [Recovery and safety](safety.md) — executable chart modules, external side effects, replay warnings, rewind, and deletion.
+
+## Embed Hyperchart
+
+- [Runtime and durability](runtime-and-durability.md) — generic runtime, durable facts, projection, status overlays, and replay compatibility.
+- [Host and React integration](integration.md) — host adapters, canonical models, React components, CSS, themes, portals, and SSR.
+
+## Reference
+
+- [API and file reference](reference.md) — public entry points, DSL functions, durable record kinds, status values, tool names, and limitations.
+- [Architecture](architecture.md) — package boundary, execution loop, control/data separation, TLA+ model, and trace validation.
+
+## Contribute
+
+- [Development and release](development.md) — repository setup, checks, documentation ownership, package validation, and release order.
+
+> Hyperchart loads chart modules as executable TypeScript. Inspecting a chart does not execute its workflow actions, but loading the module can execute top-level code. Review untrusted source before using `hyperchart_inspect` or starting a run.

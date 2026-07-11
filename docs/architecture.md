@@ -1,121 +1,158 @@
-# Architecture, execution semantics, and formal model
+# Architecture
 
-![Diagram showing the core chart machine and durable log connected to Pi tools and inspector](../assets/readme/architecture.svg)
+![Hyperchart architecture from typed chart module through durable facts and Pi effects](../assets/readme/architecture.svg)
 
-## Two-package boundary
+Hyperchart separates chart semantics from effect execution. The core package decides what a run means; a host runtime performs requested work and reports events back.
+
+## Two packages
 
 ### `@surprisal-io/hyperchart`
 
-Host-neutral:
+The core package owns:
 
-- chart CST/AST types and authoring DSL;
-- normalization and module parsing;
-- generated definition source and static inspection;
-- pure machine, projection, replay explanation, and execution loop;
-- generic log/script/artifact/guard/runtime components;
+- authoring CST and typed refs;
+- normalization into the frozen AST;
+- generated source and static inspection;
+- pure machine and projection;
+- durable record contract and replay explanation;
+- generic runtime, log, script, guard, artifact, and schema components;
 - canonical host/inspector models.
 
-It has no Pi or React dependency.
+It has no dependency on Pi or React.
 
 ### `@surprisal-io/pi-hyperchart`
 
-Pi integration:
+The Pi package owns:
 
-- package command event API;
-- Pi chart/agent/run discovery;
-- detached runner and Pi agent executor;
-- run status/session progress;
+- Pi extension and command event API;
+- chart, run, and agent-definition discovery;
+- detached runner and heartbeat/status files;
+- Pi agent executor and session progress;
 - `/hyperchart` and four agent tools;
-- TUI views/widgets;
-- React inspector, launch/run components, and styles;
+- terminal views;
+- React inspector, launch dialog, run strip, and stylesheet;
 - bundled Hyperchart skill.
 
-It depends on the exact matching core version. This prevents two copies of chart semantics from drifting.
+It depends on the exact matching core version. This avoids loading two semantic implementations into one run.
 
 ## Definition pipeline
 
 ```text
 TypeScript chart module
-        │
+        │ load executable module
         ▼
-authoring CST + Zod values
-        │ normalizeChartConfig
+authoring CST + Zod schemas
+        │ normalizeChartConfig()
         ▼
 frozen serializable AST + diagnostics
-        │
-        ├── static source/contracts/topology inspection
-        └── machine/projection execution
+        ├── generated source and static inspector model
+        └── machine, projection, and replay
 ```
 
-CST is optimized for TypeScript authoring. AST is flattened and data-first. Zod values are converted to JSON Schema. Paths, transitions, refs, inputs, artifact sources, and structural completion rules are validated during normalization.
+The authoring CST is optimized for TypeScript. The AST is flattened, serializable, and explicit about defaults. Normalization resolves paths, assigns action identities, converts schemas, validates transitions and refs, and rejects malformed structure before execution.
 
-## Execution micro-steps
+Static inspection begins at the AST boundary. It does not need a run, but loading the source module can execute top-level TypeScript.
 
-At a high level:
+## Pure decision loop
 
-1. load AST and ordered facts;
-2. project the current branch, visits, results, map spawns, and pending actions;
-3. derive machine output;
-4. request durable append and runtime effects;
-5. persist requested records;
-6. dispatch agent/script/user/timer/validation/cancel work;
-7. feed acknowledgements/completions back as machine events;
-8. repeat until the root reaches final or the runtime stops.
+The machine receives state plus one machine event and returns one output. It does not perform I/O.
 
-The engine does not call Pi directly. It asks a `Runtime` to execute effects.
+```text
+ordered facts
+    │
+    ▼
+projection ──► machine ──► append/effect requests
+    ▲                          │
+    └──── acknowledgements ◄── runtime
+```
 
-## Why transitions are recomputed
+A runtime iteration:
 
-The log stores external and accepted workflow facts, not a mutable state snapshot. Completion records contain events; the current chart determines their targets. This permits limited compatible chart evolution, while invocation and guard provenance lets `explainReplay()` detect definitions that no longer mean the same thing.
+1. project the branch from durable records;
+2. derive the next machine request;
+3. persist requested facts before dependent work;
+4. dispatch agent, script, timer, validation, rejection, or cancellation effects;
+5. feed completion and acknowledgement events back;
+6. stop when the root reaches final or the runtime is stopped.
 
-Silently storing/restoring an old current-state snapshot would hide these changes and could resume in an impossible branch.
+Persist-before-dispatch is important: after a crash, the log can show that an action was invoked even when completion is unknown.
 
-## Hierarchy and fan-out
+## Facts, not transitions
 
-Nested authoring states are flattened to absolute template paths for O(1) lookup. Projection retains parent/scope relationships.
+The durable log records:
 
-- compound states enter one initial child and complete through one direct final child;
-- parallel states enter all regions and join after every region completes;
-- maps persist a spawn set, materialize keyed paths, gate invocation concurrency, and join after every instance completes.
+- run arguments;
+- session references;
+- map spawn sets;
+- action invocations with normalized definition provenance;
+- completion events;
+- stored validation verdicts;
+- deadline firing.
 
-Runtime map paths include keys (`map#key.child`); template paths omit them (`map.child`). A visit is distinct from a state path: re-entry can create multiple visits of the same node.
+It does not record transition targets. Projection recomputes targets from completion events and the current AST.
+
+This permits compatible chart edits while making incompatible edits detectable. If a historical event would now route differently, replay must report it rather than restore an old mutable state snapshot.
 
 ## Control and data
 
-Control moves through events/transitions. Data moves through explicit channels:
+Control moves through events and transitions.
+
+Data moves through named channels:
 
 - run arguments;
 - accepted reply payloads;
 - transition inputs;
-- map key/item facts;
-- declared artifacts;
+- pinned map keys/items;
+- declared artifact paths;
 - visit identity.
 
-Templates resolve these channels immediately before dispatch. This avoids making prompt strings or ambient files the workflow database.
+Templates resolve those channels immediately before dispatch. Prompt text and ambient files are not implicit workflow state.
 
-## Runtime and storage ownership
+## Hierarchy
 
-The generic runtime owns effect interpretation mechanics but receives a host agent executor. Pi adds:
+Normalization flattens nested authoring states to absolute template paths for lookup while retaining parent/scope relationships.
 
-- actual Pi agent sessions and finish tool;
-- runner process/heartbeat/status;
-- Pi agent definitions/defaults;
-- project/user chart locations;
-- session progress and TUI.
+- compound states enter one initial child and complete through a direct final child;
+- parallel states enter every region and complete when every region is final;
+- maps persist a spawn set, create keyed runtime paths, gate invocation concurrency, and complete when every instance is final.
 
-`log.jsonl` defines semantic history. `status.json` and session progress are operational overlays. React/UI consume canonical models produced by adapters; they do not replay raw facts independently.
+A transition leaving a scope abandons active descendants. The runtime receives cancellation effects for work that is no longer part of the branch.
 
-## Static versus runtime inspection
+## Visits and generations
 
-Static inspection includes source definition, topology, contracts, schemas, transitions, and source/agent-definition issues. It is repeatable without a run.
+A state path identifies a node definition. A visit identifies one entry into that node.
 
-Runtime inspection overlays status, visits, resolved invocations, map generations, usage, session failures, validation attempts, artifacts, and replay issues. Keeping this boundary prevents operational state from contaminating the chart definition.
+Re-entry can create multiple visits of the same path. Maps also create generations: a later entry may spawn a new instance set while old completions remain historical. The runtime model marks those old completions `stale`; it does not present them as pending work in the current generation.
 
-## TLA+ model
+## Host boundary
 
-`tla/Hyperchart.tla` independently articulates core semantics and fairness. It is not generated from TypeScript and should not be edited merely to make an implementation test pass. A divergence is a correctness finding to investigate.
+The generic runtime accepts an `AgentExecutor`. The executor owns provider/session transport, but it must return chart events rather than choosing transition targets.
 
-Model-check scenarios cover review/fix, linear pipeline, validation gate, fan-out, map, and nested behavior:
+Pi adds:
+
+- concrete agent definitions and defaults;
+- agent sessions and finish tool;
+- process lifecycle and heartbeat;
+- project/user discovery;
+- command, tool, TUI, and React surfaces.
+
+`status.json` and session progress are operational overlays. They do not replace `log.jsonl`.
+
+## Inspector boundary
+
+Canonical inspection has two layers.
+
+**Static:** normalized source, topology, contracts, schemas, transitions, artifact declarations, and definition issues.
+
+**Runtime overlay:** process status, visits, resolved invocations/inputs, map generations, usage, sessions, validation attempts, artifacts, and replay issues.
+
+Adapters produce canonical models. React components do not parse raw logs or rediscover agent definitions independently.
+
+## Formal model
+
+`tla/Hyperchart.tla` is an independent articulation of machine semantics. It is not generated from TypeScript and should not be changed merely to make an implementation test pass.
+
+Model-check scenarios cover review/fix, pipeline, validation gate, fan-out, map, and nesting:
 
 ```sh
 for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do
@@ -123,25 +160,34 @@ for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do
 done
 ```
 
-Read the spec header before changing machine/projection/normalization semantics; it documents fairness, micro-steps, and intentionally unmodeled host behavior.
+The spec header documents fairness, micro-steps, and deliberately unmodeled host behavior. Read it before editing the machine or model.
 
 ## Real trace validation
 
-`tla/HyperchartTrace.tla` validates a JSONL trace recorded from the TypeScript engine:
+The trace exporter records a sample run from the TypeScript engine. `tla/HyperchartTrace.tla` checks that the exported trace is admitted by the formal spec.
 
 ```sh
 node tla/trace/record-sample.mjs
 tla/trace/validate.sh sample_chart.ts sample-run.jsonl
 ```
 
-`TRACE ACCEPTED` means that sampled engine behavior is admitted by the spec. `DIVERGENCE` means implementation/export/model disagree; identify which articulation is wrong.
+`TRACE ACCEPTED` means the sampled engine behavior and spec agree. `DIVERGENCE` means the implementation, exporter, or model disagrees and must be investigated.
 
-A semantic change is complete only when:
+## Semantic change checklist
 
-1. TypeScript machine/projection/normalization agree;
-2. durable log/replay detection handles old records explicitly;
-3. TLA+ models pass;
-4. the recorded real trace is accepted;
-5. user docs describe the resulting behavior.
+A change to normalization, machine, projection, execution loop, or durable facts is complete only when:
 
-A package move or documentation-only change must not alter these semantics or edit the TLA+ model.
+1. implementation semantics agree across normalization, projection, and machine;
+2. durable-log replay either preserves old meaning or reports incompatibility;
+3. replay-check tests cover the contract change;
+4. the TLA+ model and model-check configurations agree;
+5. the recorded sample trace is accepted;
+6. user documentation describes the changed behavior.
+
+Package moves, UI work, and documentation edits must not alter this contract accidentally.
+
+## Related pages
+
+- [Runtime and durability](runtime-and-durability.md)
+- [Recovery and safety](safety.md)
+- [Development and release](development.md)

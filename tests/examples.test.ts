@@ -1,8 +1,41 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import deckDirector from "../examples/deck-director.chart.js";
+import quickstart from "../examples/quickstart.chart.js";
 import { normalizeChartConfig, z } from "../packages/hyperchart/src/index.js";
+import { ScriptRunner } from "../packages/hyperchart/src/runtime/index.js";
 
 describe("examples", () => {
+	it("runs the portable quickstart and produces its documented artifact", async () => {
+		const parsed = normalizeChartConfig(quickstart);
+		expect(parsed.diagnostics).toEqual([]);
+		if (!parsed.ok) throw new Error("expected valid quickstart chart");
+		const write = parsed.ast.states.write;
+		if (write?.kind !== "state" || write.action.kind !== "script") throw new Error("expected script state");
+
+		const workDir = await mkdtemp(join(tmpdir(), "hyperchart-quickstart-"));
+		const runner = new ScriptRunner({ workDir });
+		try {
+			const completion = await runner.run({
+				kind: "script",
+				id: "quickstart",
+				actionUid: write.action.uid,
+				action: write.action,
+				command: write.action.command,
+				args: write.action.args,
+				artifacts: [{ name: "greeting", path: "hello.txt" }],
+				events: ["DONE", "FAILED"],
+			});
+			expect(completion).toEqual({ type: "DONE" });
+			expect(await readFile(join(workDir, "hello.txt"), "utf8")).toBe("Hello from Hyperchart\n");
+		} finally {
+			await runner.dispose();
+			await rm(workDir, { recursive: true, force: true });
+		}
+	});
+
 	it("deck-director chart normalizes cleanly", () => {
 		const result = normalizeChartConfig(deckDirector);
 

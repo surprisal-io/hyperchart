@@ -1,261 +1,272 @@
-# Pi extension: install, operate, inspect, and recover
+# Pi extension
 
-`@surprisal-io/pi-hyperchart` is a Pi package containing one extension, one bundled `hyperchart` skill, the Pi runtime/host adapter, terminal UI, and React inspector.
+`@surprisal-io/pi-hyperchart` adds chart discovery, run management, four agent tools, a terminal run view, a React inspector, and a bundled `hyperchart` skill to Pi.
+
+It does not define chart semantics. Those come from the exact matching version of `@surprisal-io/hyperchart`.
 
 ## Install
 
-Global installation:
+Install the Pi package from your shell:
 
 ```sh
 pi install npm:@surprisal-io/pi-hyperchart
 ```
 
-Project-local installation:
+Start Pi after the install, or restart an existing Pi process. Pi loads:
+
+- `extensions/hyperchart.ts`;
+- `skills/hyperchart/SKILL.md`.
+
+The extension and skill are declared in the package's `pi` manifest. See [Pi Packages](https://pi.dev/docs/latest/packages) for package scope and installation behavior.
+
+For local repository development, run:
 
 ```sh
-pi install -l npm:@surprisal-io/pi-hyperchart
+npm install
+npm run build
+pi
 ```
 
-Try without persisting settings:
+The repository root `package.json` points Pi at the workspace extension and skill.
 
-```sh
-pi -e npm:@surprisal-io/pi-hyperchart
-```
+## Discovery
 
-Pi discovers `extensions/hyperchart.ts` and `skills/hyperchart/` from the package's `pi.extensions` and `pi.skills` manifest entries. Pi packages execute with full system access; review package source before installation.
+A chart name resolves from the current project first, then from user scope:
 
-Use `pi list` to verify the package and `pi config` to enable/disable its extension or skill. The skill is available as `/skill:hyperchart` when skill commands are enabled.
+| Scope | Location |
+|---|---|
+| project | `.pi/hypercharts/*.chart.ts` |
+| user | `~/.pi/agent/hypercharts/*.chart.ts` |
 
-## Chart discovery
+You may also pass an absolute or relative module path.
 
-Project charts live in:
+A run id is visible only from the working directory recorded in its `meta.json`. Open the owning directory before viewing, resuming, stopping, or rewinding that run.
 
-```text
-.pi/hypercharts/*.chart.ts
-```
+## `/hyperchart`
 
-The command/tools accept:
-
-- a discovered basename such as `review`;
-- `review.chart.ts` under the project chart directory;
-- an explicit relative or absolute module path;
-- an optional named export.
-
-Project charts take their normal project trust boundary. TypeScript source is linted/typechecked before a run starts. Fix diagnostics instead of bypassing them with casts.
-
-## Slash command reference
+Run `/hyperchart` with no arguments to open recent runs for the current working directory.
 
 ```text
 /hyperchart
-/hyperchart --limit N
-/hyperchart <runId>
-/hyperchart run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--ignore-replay-warnings]
-/hyperchart resume <runId> [--ignore-replay-warnings]
-/hyperchart restart <runId>
-/hyperchart status
-/hyperchart view [runId]
-/hyperchart stop <runId>
-/hyperchart delete <runId>
-/hyperchart rm <runId>
+/hyperchart --limit 20
 ```
 
-| Form | Behavior |
-|---|---|
-| no arguments | Opens recent runs in TUI; in non-TUI modes prints a compact list. |
-| `--limit N` | Limits the recent-run list (`-n N` is also accepted). |
-| bare run ID | Opens that run's view. |
-| `run` | Starts a chart, or resumes/targets a run directory with `--run-dir`. |
-| `resume` | Continues an existing durable run. |
-| `restart` | Creates a new run using the original chart/export and persisted arguments. |
-| `status` | Shows attached/live/recent status. |
-| `view` | Opens the TUI run overlay or prints the directory outside TUI. |
-| `stop` | Sends termination to a live runner or marks a dead runner stopped. |
-| `delete` / `rm` | Confirms, stops if necessary, then recursively removes the run directory. |
-
-`--args` must be a JSON object. Quote it for your shell/editor, for example:
+### Start a run
 
 ```text
-/hyperchart run review --args '{"topic":"durable agents"}'
+/hyperchart run <name-or-chart.ts> [options]
 ```
 
-`--run-dir` can name an existing run to resume or an explicit destination. A run may only be controlled from the work directory recorded in its metadata.
+Options:
 
-`requestHyperchartCommand()` from `@surprisal-io/pi-hyperchart/command` lets another Pi extension invoke the same handler through Pi's shared event bus. It returns `false` if the Hyperchart extension did not claim the request.
+| Option | Meaning |
+|---|---|
+| `--args <json>` | run arguments object |
+| `--run-dir <run-id-or-path>` | existing run to resume, or explicit destination directory |
+| `--export <name>` | named chart export instead of the default export |
+| `--ignore-replay-warnings` | continue despite stale or skipped replay records |
 
-## Tool reference
+Example:
+
+```text
+/hyperchart run review --args '{"pullRequest":42}'
+```
+
+### Resume or restart
+
+```text
+/hyperchart resume <run-id>
+/hyperchart resume <run-id> --ignore-replay-warnings
+/hyperchart restart <run-id>
+```
+
+`resume` continues in the existing run directory. `restart` creates a new run using the old run's chart metadata and arguments; it does not mutate the old log.
+
+### View status
+
+```text
+/hyperchart status
+/hyperchart view <run-id>
+/hyperchart <run-id>
+```
+
+`view` opens the terminal run view. A bare run id is shorthand when it resolves to a run in the current working directory.
+
+### Stop a run
+
+```text
+/hyperchart stop <run-id>
+```
+
+Stopping requests process termination and changes operational status. It does not undo scripts, files, API calls, or agent-side effects that already occurred.
+
+### Delete a run
+
+```text
+/hyperchart delete <run-id>
+/hyperchart rm <run-id>
+```
+
+Delete recursively removes the run directory, including its durable log, status, session data, and rewind backups stored inside that directory. Copy important runs outside the run directory before deletion. Deletion is not a rewind and has no built-in restore command.
+
+## Agent tools
+
+The extension registers four tools. These are intended for Pi agents and programmatic tool calls; the slash command remains the direct human interface.
 
 ### `hyperchart_inspect`
 
-Static inspection without a run.
+Load a chart module and return its static inspector model without starting a run.
 
-| Parameter | Required | Meaning |
-|---|---:|---|
-| `chartPath` | yes | Discovered chart name or module path. |
-| `exportName` | no | Named export; default is `default`. |
+```json
+{
+  "chartPath": ".pi/hypercharts/review.chart.ts",
+  "exportName": "reviewChart"
+}
+```
 
-The result contains normalized source/graph/contracts/diagnostics and resolved Pi agent defaults. It does not contain statuses, visits, logs, sessions, or usage.
+`chartPath` is required. `exportName` is optional.
 
-Use this before running an unfamiliar or modified chart.
+The result contains source, contracts, topology, transitions, schemas, and definition issues. It contains no run status, visits, usage, session failures, or artifacts from a concrete run.
+
+> The tool loads executable TypeScript. It does not dispatch chart actions, but top-level code in the module can run with your permissions.
 
 ### `hyperchart_run`
 
-Start or resume.
+Start or resume a run.
+
+```json
+{
+  "chartPath": "review",
+  "args": { "pullRequest": 42 },
+  "wait": true
+}
+```
 
 | Parameter | Required | Meaning |
 |---|---:|---|
-| `chartPath` | unless resuming | Chart name/path. |
-| `args` | no | Run argument object. |
-| `runDir` | no | Existing run to resume or destination directory. |
-| `exportName` | no | Named chart export. |
-| `wait` | no | Wait for terminal status and return final inspector data. |
-| `ignoreReplayWarnings` | no | Explicitly continue despite stale/skipped warnings. Default `false`. |
+| `chartPath` | no | chart name or module path; omit when `runDir` identifies an existing run |
+| `args` | no | run arguments object |
+| `runDir` | no | existing run directory/id or destination directory |
+| `exportName` | no | named export |
+| `wait` | no | wait for terminal status before returning |
+| `ignoreReplayWarnings` | no | explicitly continue despite stale/skipped replay records |
 
-When `wait` is false, the tool returns after launching/attaching and includes the initial runtime inspector model. When true, cancellation of the calling turn does not make external side effects reversible; inspect the run afterward.
+When `wait` is false or omitted, the tool returns after startup with `final: false`. When `wait` is true, it returns the terminal status and runtime-enriched inspector model.
 
 ### `hyperchart_run_inspect`
 
-Runtime inspection of one run.
+Load a concrete run and return the runtime-enriched inspector model.
 
-| Parameter | Required | Meaning |
-|---|---:|---|
-| `runDir` | yes | Run ID or directory. |
+```json
+{
+  "runDir": "review-20260711-142500"
+}
+```
 
-The result overlays durable facts, status, issues, session progress, visits, resolved invocations, usage, artifacts, map generations, stale states, and current control flow on the static chart model.
+The overlay includes run status, runtime issues, visits, resolved invocations, map generations, validation attempts, artifacts, usage, session failures, and replay findings. Historical tool results remain historical snapshots; rerun the tool to read new facts.
 
 ### `hyperchart_rewind`
 
-Back up and truncate a stopped run.
+Back up and truncate a stopped run log.
 
-| Parameter | Required | Meaning |
+```json
+{
+  "runDir": "review-20260711-142500",
+  "state": "review",
+  "mode": "before"
+}
+```
+
+Exactly one target is required:
+
+- `state` — state or runtime instance path;
+- `seqId` — durable record sequence id;
+- `to: "compatible"` — first prefix compatible with the current chart.
+
+Other parameters:
+
+| Parameter | Default | Meaning |
 |---|---:|---|
-| `runDir` | yes | Existing run ID/directory. |
-| exactly one of `state`, `seqId`, `to: "compatible"` | yes | Selects the cut target. |
-| `mode` | no | `before` (default) or `after` the matching record. `to: compatible` always cuts before the first broken record. |
-| `cleanupSessions` | no | Back up/remove downstream session progress and directories. Default `true`. |
-| `cleanupArtifacts` | no | Best-effort backup/remove declared downstream artifact files. Default `false`. |
-| `start` | no | Resume immediately after truncation. Default `false`. |
-| `ignoreReplayWarnings` | no | Only applies when `start` is true. |
+| `mode` | `before` | cut before or after the matching record |
+| `cleanupSessions` | `true` | move downstream session directories/progress into the backup |
+| `cleanupArtifacts` | `false` | best-effort backup and removal of downstream declared artifact files |
+| `start` | `false` | start the rewound run immediately |
+| `ignoreReplayWarnings` | `false` | when starting, allow stale/skipped records explicitly |
 
-## Rewind reference
+A live run cannot be rewound. Read [Recovery and safety](safety.md#rewind-a-run) before using this tool.
 
-**Rewind is destructive to the active history tail.** It creates a timestamped backup under `rewind-backups/`, but the live log is then replaced by its kept prefix. A resumed run creates new facts from that point.
+## Run files
 
-Safe sequence:
+By default, run directories live under:
 
-1. stop the run and verify it is not live;
-2. call `hyperchart_run_inspect`;
-3. inspect replay explanation and external side effects;
-4. retain an independent backup when the run matters;
-5. select one exact target;
-6. rewind with `start: false`;
-7. inspect files/status again;
-8. resume only after review.
+```text
+.pi/hypercharts/runs/<run-id>/
+```
 
-`state` matches runtime or template paths and cuts at the first matching durable record. `seqId` selects one exact record. `to: "compatible"` cuts before the first structurally broken replay record; it refuses to run when history is already structurally compatible.
+| Path | Owner | Meaning |
+|---|---|---|
+| `meta.json` | runner | chart path/export, args, working directory, run identity |
+| `log.jsonl` | core runtime | ordered semantic facts |
+| `status.json` | Pi runner | process state, pid, heartbeat, exit, error |
+| `sessions/` | Pi executor | agent sessions and progress |
+| `rewind-backups/` | rewind tool | timestamped copies of truncated state |
 
-Session cleanup moves downstream session directories into the backup. Artifact cleanup only knows declared artifacts and is best-effort. Neither option reverses network requests, commits, messages, deployments, or other external side effects.
+Only `log.jsonl` defines semantic history. The other files describe how the current process and host are doing.
+
+## Agent definitions
+
+An agent action names a Pi agent definition:
+
+```ts
+agent("reviewer", { task: "Review the change." })
+```
+
+The Pi adapter resolves project and user agent-definition directories using Pi's normal rules. The definition supplies system prompt, model, thinking level, and tool defaults. Chart-level values may override invocation settings.
+
+If the concrete definition cannot be loaded, inspection reports `agentDefinitionUnavailable`, and execution refuses to run that state.
 
 ## Run lifecycle
 
-Status values are:
+Operational status normally moves through:
 
 ```text
 starting → running → complete
                    ↘ failed
-running → stopping → stopped
+running  → stopping → stopped
 ```
 
-A detached runner writes a heartbeat. If the extension observes a lost heartbeat beyond its grace period, it marks the run failed. `complete`, `failed`, and `stopped` are terminal process statuses; a stopped run can later resume.
-
-The extension restores run widgets on startup, reload, and session resume. `/hyperchart view` and `hyperchart_run_inspect` reconstruct state from durable facts rather than trusting UI memory.
-
-## Run directory layout
-
-Runs are stored below the Pi agent directory:
-
-```text
-$PI_CODING_AGENT_DIR/hypercharts/runs/<runId>/
-  meta.json
-  log.jsonl
-  status.json
-  runner.config.json
-  runner.stdout.log
-  runner.stderr.log
-  sessions/
-    progress.json              # optional
-    <action-session dirs>/
-  rewind-backups/              # only after rewind
-```
-
-`meta.json` records chart path/export, work directory, chart ID, and creation time. `status.json` is an atomic operational snapshot. `log.jsonl` is the semantic source of truth. `sessions/progress.json` is optional host progress and does not define workflow state.
-
-Do not edit these files while a runner is live.
-
-## Agent definitions and invocation defaults
-
-`agent("name", options)` resolves Pi agent definitions from project and user definition directories. The definition supplies system prompt and defaults such as model, thinking, and tools. Chart options override per invocation. The task is a user message, not the agent system prompt.
-
-If the definition cannot be loaded, static and runtime inspection marks the state unavailable; it does not display the misleading fallback "all tools allowed". Create/fix the agent definition before running.
-
-Each agent receives an injected finish tool. Its completion event and payload must match the chart contract. Validation rejection may resume the same session or start a new attempt according to `onReject`.
-
-## Inspection model
-
-Use static inspect to answer “what is defined?” and run inspect to answer “what happened?”
-
-Static information includes:
-
-- validated DSL definition source;
-- state topology and transitions;
-- agent/script/user invocation contract;
-- input, reply, artifact, and validation schemas;
-- source diagnostics and agent-definition availability.
-
-Runtime overlays include:
-
-- current status/timestamps;
-- active/pending/stale/skipped states;
-- visit history and resolved invocations;
-- validation attempts and issues;
-- map item generations and fan-out progress;
-- session usage and artifacts;
-- replay/status/session-file issues.
-
-Runtime issue sources are explicitly identified (`meta.json`, `log.jsonl`, `status.json`, or `sessions/progress.json`).
+A dead pid or stale heartbeat can make a run operationally stale while its durable log remains valid. Inspect both layers before deciding to resume or rewind.
 
 ## Reload behavior
 
-Auto-discovered package resources reload with `/reload`. An extension passed explicitly with `--extension` may remain bound to the old process/module graph; exit and start/resume the Pi session when a changed explicitly loaded extension does not update.
+Auto-discovered extensions and skills can be refreshed with `/reload`. An extension loaded explicitly with `pi -e` may remain bound to the process. If behavior or exports appear stale, exit Pi and start a new process.
 
 ## Troubleshooting
 
-### Package or tool missing
+### `Cannot find module @surprisal-io/hyperchart`
 
-1. `pi list` — confirm the scoped package is installed.
-2. `pi config` — confirm extension and skill are enabled in the intended scope.
-3. `/reload` — reload package resources.
-4. Restart Pi if the package was supplied through an explicit extension flag.
+Install the Pi package normally instead of copying only `extensions/hyperchart.ts`. Pi package installs use production dependencies; copied source files do not bring their dependency tree.
 
-### Chart not found
+### A chart is missing from completion
 
-Check current working directory and `.pi/hypercharts/<name>.chart.ts`; otherwise pass an explicit path. Use `exportName` for named exports.
+Check the filename and scope:
 
-### Typecheck/module-load failure
+- `.pi/hypercharts/name.chart.ts` for the project;
+- `~/.pi/agent/hypercharts/name.chart.ts` for the user.
 
-Run the chart's TypeScript diagnostics directly. Ensure ESM imports use installed package names and the module is data-first. Avoid inline closures in chart definitions.
+You can still pass an explicit path.
 
-### Run appears stuck
+### A run belongs to another directory
 
-Inspect status and run details, then check `runner.stderr.log`, heartbeat, PID, and current pending action. Do not immediately restart; doing so can duplicate external work.
+Change into the working directory recorded in `meta.json`, then reopen Pi. Run ids are scoped by working directory to avoid mutating unrelated projects.
 
-### Replay warning
+### Replay blocks startup
 
-Read [Replay explanation](runtime-and-durability.md#replay-explanation). Compare stored provenance with the current chart. Prefer a new run for material changes.
+Do not add `--ignore-replay-warnings` first. Inspect the run, read the stale/skipped/broken explanation, compare the current chart with the chart that produced the log, then choose resume, restart, or rewind. See [Replay warnings](safety.md#replay-warnings).
 
-### Schema or artifact rejection
+## Next steps
 
-Inspect the producer's completion payload, declared schema, artifact path, and validation feedback. Verify structured files are valid JSON where required.
-
-### React styles missing
-
-Import `@surprisal-io/pi-hyperchart/react/styles.css` exactly once and follow [React integration](integration.md#react-inspector).
+- [Run your first chart](quickstart.md)
+- [Recovery and safety](safety.md)
+- [React and host integration](integration.md)
+- [Exact tool and status reference](reference.md)

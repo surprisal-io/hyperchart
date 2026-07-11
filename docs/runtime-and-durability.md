@@ -1,177 +1,210 @@
-# Runtime, durable logs, replay, and recovery
+# Runtime and durability
 
-Hyperchart separates a pure state machine from effect execution. This page defines the adapter boundary and the guarantees a host must preserve.
+Hyperchart stores external and accepted workflow facts, then recomputes control state from those facts and the current chart.
 
-## Stable runtime entry point
+This page describes the host-neutral runtime contract. For operator procedures, use [Recovery and safety](safety.md).
 
-```ts
-import { loop, start } from "@surprisal-io/hyperchart";
-import type { Runtime } from "@surprisal-io/hyperchart/runtime";
-```
+## The execution loop
 
-```ts
-interface Runtime {
-  runEffects(effects: Effect[]): void;
-  eventsQueue(): AsyncIterable<MachineEvent>;
-  loadAst(): Promise<ChartAst>;
-  loadLogs(): Promise<readonly DurableLogRecord[]>;
-}
-```
+A runtime iteration is:
 
-- `loadAst()` supplies one validated normalized chart.
-- `loadLogs()` returns ordered durable facts.
-- `runEffects()` receives work requested by the machine.
-- `eventsQueue()` yields completions and durable-append acknowledgements back to the loop.
+1. read the normalized chart and ordered durable records;
+2. project visits, accepted results, map instances, and pending actions;
+3. ask the pure machine for the next output;
+4. append requested records;
+5. execute requested effects;
+6. convert acknowledgements and completions into machine events;
+7. repeat until the root reaches final or execution stops.
 
-`start(runtime, args)` seeds a fresh run with arguments and begins execution. `loop(runtime)` continues from the current AST/log. Do not call `start` on a non-empty run as a substitute for resume.
+The machine does not call an agent provider, spawn a process, write a log file, or update Pi status. It returns data describing what the runtime must do.
 
-## Effects and machine events
+## Machine output
 
-The pure machine requests effects for:
+The machine returns either:
 
-- durable record append;
-- agent, script, and user actions;
-- validation;
-- timers;
-- rejection feedback/restart;
-- cancellation.
+- `MachineOutputEffect` — append records, invoke an action, validate, start a timer, reject/resume, or cancel work;
+- `MachineOutputFinal` — the root chart is complete.
 
-The host executes those effects and sends typed machine events. Durable records must be persisted before dependent work is treated as accepted. Preserve per-run ordering and do not invent transitions in the adapter; routing comes from the chart AST.
+Effect interpreters live in the runtime. This boundary keeps transition semantics testable without Pi.
 
-The package root exports `createMachineOutput()` and `stepMachine()` for lower-level integrations. Most hosts should use `start()`/`loop()` or `ChartRuntime` rather than hand-driving micro-steps.
+## Durable records
 
-## Generic runtime utilities
+`log.jsonl` is an ordered stream of `DurableLogRecord` values. Every record has:
 
-`@surprisal-io/hyperchart/runtime` exports the reusable host-neutral implementation pieces:
+- `seqId` — monotonically increasing sequence id;
+- `parentId` — branch parent, or `null`;
+- `timestamp` — append time;
+- a record-specific payload.
 
-- `ChartRuntime` — effect interpreter over a log store and agent executor;
-- `AgentExecutor` / `EmitCompletion` — host agent boundary;
-- `JsonlLogStore`, `MemoryLogStore`, and `LogStore`;
-- `ScriptRunner`, `runGuard`, and schema/artifact helpers;
-- run-directory metadata helpers;
-- final-machine outcome helpers.
-
-Pi composes these with its own agent executor, status files, and runner process. A custom host may do the same without importing Pi.
-
-## Minimal custom adapter shape
-
-A practical adapter needs:
-
-1. a durable `LogStore`;
-2. an `AgentExecutor` implementation;
-3. a work directory for scripts/artifacts;
-4. a queue connecting effect completions to the execution loop;
-5. timer and cancellation ownership;
-6. a process-level status/health strategy.
-
-The agent executor contract starts, rejects/resumes, cancels, and disposes actions by `ActionUID`. It must emit exactly the completion associated with that action identity and must not reuse a session across unrelated action UIDs.
-
-Before production use, test crashes at every boundary: before append, after append/before dispatch, during external work, after external completion/before durable acceptance, and during cancellation.
-
-## Durable record contract
-
-The log is append-only JSONL facts, not serialized machine state. Every record has:
-
-- monotonic `seqId`;
-- causal `parentId` where applicable;
-- `timestamp`;
-- a typed record payload.
-
-Current record families:
+Record kinds:
 
 | Record | Meaning |
 |---|---|
-| `args` | Immutable run input arguments; first fact of a fresh run. |
-| `spawned` | Pinned map instance keys and item values for one map visit. |
-| `state_action / invoke` | An action visit was invoked; includes normalized action-definition provenance. |
-| `state_action / complete` | The action emitted a completion or `FAILED` event. |
-| `state_action / validated` | A guard and its accepted/rejected outcome; validation is not rerun on replay. |
-| `state_action / timer_fired` | The action deadline won. |
-| `session_ref` | Host session-file reference associated with a run/action. |
+| `args` | run arguments for a fresh log |
+| `session_ref` | Pi session file associated with an action invocation |
+| `spawned` | pinned key/item set for one map entry |
+| `state_action / invoke` | action identity and full normalized action definition |
+| `state_action / complete` | completion event claimed by the action |
+| `state_action / validated` | validator reference and stored verdict for a completion claim |
+| `state_action / timer_fired` | deadline expired for an invocation |
 
-Transitions are deliberately not records. Projection looks up the current chart transition for each accepted event. This enables controlled chart evolution while making provenance mismatches visible.
+Transitions are deliberately absent. The projection reads the event and asks the current chart where it leads.
 
-Never reorder records, rewrite IDs, edit a live `log.jsonl`, or append a hand-created transition. Use exported projection/replay APIs.
+Cancellation is a runtime effect derived from scope exit, deadline, terminal rejection, or stop. The durable cause is recorded where applicable—for example `timer_fired`—but there is no standalone cancellation record kind in the current log contract.
+
+## Why store facts instead of current state
+
+A mutable checkpoint answers “where did the old program say it was?” A fact log lets Hyperchart ask “what state follows from these accepted facts under this chart?”
+
+That distinction supports:
+
+- deterministic projection;
+- visit and result history;
+- pinned map instances;
+- replay compatibility checks after chart edits;
+- detection of missing action provenance;
+- independent validation against the TLA+ model.
+
+It also means chart changes are not automatically safe. If an old event would route differently, `explainReplay()` reports the mismatch.
 
 ## Projection
 
-`createBranchProjection(ast)` creates an empty projection; `projectBranch(projection, ast, records)` applies facts. The projection derives:
+Projection derives:
 
-- active leaves and entered scopes;
-- pending action UIDs;
-- accepted results;
-- explicit transition inputs;
-- map spawn sets;
-- visit counts and timing-relevant facts.
+- the active branch;
+- one visit identity per entry;
+- accepted results by runtime state path;
+- transition inputs bound to visits;
+- map spawn generations and instance paths;
+- pending action invocations;
+- completed and stale visits;
+- deadlines and validation attempts.
 
-Projection is deterministic for the same AST and ordered records. UI adapters should consume canonical host models rather than independently interpreting raw records.
+Runtime map paths include keys:
 
-## Crash and resume behavior
+```text
+chapters#intro.write
+```
 
-On resume:
+Template paths omit keys:
 
-1. load the exact chart export recorded in run metadata;
-2. load all durable facts;
-3. run `explainReplay(ast, records)`;
-4. stop on structural breakage and surface warnings;
-5. project accepted history;
-6. recreate only pending effects;
-7. continue consuming events.
+```text
+chapters.write
+```
 
-Accepted completed work is not rerun. A map's persisted `spawned` value recreates the same instance membership even if the original source value changed.
+The distinction matters for artifact lookup, state selection, rewind, and replay diagnostics.
 
-A local log cannot guarantee exactly-once external side effects. A process may crash after an API accepted a request but before Hyperchart persisted completion. Use idempotency keys derived from action UID, transactional outboxes, content-addressed artifacts, or host-specific reconciliation.
+## Invocations and provenance
 
-## Replay explanation
+Every `state_action / invoke` record stores an `actionUid` and the normalized action definition. Replay compares that definition with the current chart.
 
-`explainReplay()` classifies problems:
+The definition includes the action kind and settings needed to establish meaning: agent name and invocation overrides, script command/args/environment templates, schemas, reads, and artifact declarations.
 
-- **broken** — a structurally required fact cannot be interpreted safely; normal resume must stop;
-- **stale** — recorded provenance no longer matches the relevant current definition;
-- **skipped** — a record is outside the current projected traversal or cannot be applied as before.
+A historical log without required provenance is structurally incompatible. Hyperchart must detect it as broken instead of assigning the current definition retroactively.
 
-A warning is evidence to investigate, not noise to suppress. The result includes record/state details suitable for operator and inspector UI.
+## Completion and validation
 
-## Chart evolution and replay warnings
+An action completion is a claim. The runtime checks:
 
-Changes likely to affect replay include:
+1. event type is allowed;
+2. reply output matches the declared schema;
+3. declared artifacts exist and match their shapes;
+4. an optional validator accepts the claim.
 
-- chart ID, state ID, or nested topology changes;
-- action kind, definition, reply, artifact, validation, deadline, or transition changes;
-- map `over`, keys, or nested template paths;
-- event names and explicit input bindings;
-- changing the named module export used by the run.
+A validation verdict is durable. Replay reads the stored verdict; it does not run validator code again.
 
-Safe changes depend on which states have durable facts. Run replay explanation against representative logs before shipping a migration. Preserve old chart source or package version with important runs.
+Because validator identity is stored, changing the validator can make replay stale or broken. This is intentional: the same accepted fact must not acquire a new meaning silently.
 
-Prefer a new run after material topology changes.
+## Map durability
 
-## `--ignore-replay-warnings`
+A map appends `spawned` with the exact keys and items resolved on entry. Replay uses that record rather than re-reading a changed upstream value.
 
-The Pi command/tool option continues despite stale or skipped warnings. It does not repair history and never makes a broken log valid.
+`concurrency` affects when instances may invoke actions. It does not change the persisted spawn set.
 
-Use it only when all of the following are true:
+Re-entering a map can create a new generation. Runtime inspection distinguishes generations so completions from an older traversal are shown as stale rather than pending in the current one.
 
-1. the run is backed up;
-2. the replay explanation was inspected record by record;
-3. every affected external side effect is accounted for;
-4. the surviving history has the intended meaning under the new chart;
-5. the decision is recorded for operators.
+## Operational overlays
 
-If any condition is uncertain, start a new run or perform a reviewed rewind.
+The Pi package adds files that are useful but not semantic history:
 
-## Rewind
+| File | Meaning |
+|---|---|
+| `status.json` | pid, heartbeat, process state, terminal error, timestamps |
+| `sessions/progress.json` | optional agent progress summaries |
+| agent session files | host conversation state and usage |
 
-Rewind is implemented by the Pi package because it owns run/session/artifact layout. It backs up and truncates a stopped run, optionally cleans downstream sessions/artifacts, and leaves the run stopped unless explicitly restarted. It cannot undo external side effects. See [Pi rewind reference](pi.md#rewind-reference).
+A run may have a valid log and a stale process status. Conversely, a process can be alive while replay is incompatible. Operators must inspect both.
 
-## Runtime correctness checklist
+## Generic runtime components
 
-- Append facts atomically and preserve order.
-- Validate record provenance before replay.
-- Keep action UID stable through one invocation lifecycle.
-- Make external operations idempotent or reconcilable.
-- Treat cancellation as cooperative.
-- Persist map spawn membership.
-- Do not rerun validators for accepted history.
-- Test replay after process death and chart edits.
-- Expose logs, status, and issues without letting UI code define a second semantics.
+`@surprisal-io/hyperchart/runtime` exports the supported runtime building blocks:
+
+- the `Runtime` effect-interpreter interface;
+- `ChartRuntime`;
+- `AgentExecutor`;
+- `ScriptRunner`;
+- `JsonlLogStore`;
+- run-directory and metadata helpers;
+- artifact, guard, schema, and terminal-outcome helpers.
+
+The generic runtime receives a host `AgentExecutor`. It owns effect interpretation and log mechanics; the host owns actual agent transport and session lifecycle.
+
+## Agent executor contract
+
+A host executor receives a normalized agent effect and must report a completion event or failure through the runtime contract. It is also responsible for cancellation and cleanup of live work.
+
+The executor must not invent transition targets. It returns events; the machine resolves targets from the chart.
+
+For a custom host:
+
+1. normalize the chart;
+2. create a `JsonlLogStore` and runtime working directory;
+3. implement `AgentExecutor` with stable invocation identity;
+4. preserve event and artifact validation;
+5. propagate cancellation;
+6. expose semantic logs separately from host status.
+
+See the exact exported types in [API reference](reference.md) and canonical UI models in [Host and React integration](integration.md).
+
+## Replay compatibility
+
+`explainReplay()` returns compatible, stale, skipped, and broken findings. The runner blocks stale/skipped replay unless the operator explicitly overrides warnings. Broken records remain unsafe.
+
+Typical causes:
+
+- an event now targets another state;
+- a state or action no longer exists;
+- an invocation definition changed;
+- validator provenance changed;
+- map or hierarchy structure changed;
+- old logs lack mandatory provenance;
+- a record belongs to a traversal skipped by the current chart.
+
+Do not treat an override as migration. For recovery steps, read [Replay warnings](safety.md#replay-warnings).
+
+## Crash ambiguity
+
+The log append and an external side effect are not one atomic transaction. The critical ambiguous window is:
+
+```text
+invoke persisted → external side effect → crash → no completion persisted
+```
+
+The runtime can show the pending invocation and associated session/process information. It cannot infer whether a remote side effect happened. Reconciliation belongs to the host action and operator.
+
+## Formal trace validation
+
+The repository records a sample run from the TypeScript engine and checks that its exported trace is a behavior accepted by `tla/HyperchartTrace.tla`.
+
+```sh
+node tla/trace/record-sample.mjs
+tla/trace/validate.sh sample_chart.ts sample-run.jsonl
+```
+
+`TRACE ACCEPTED` means the sampled engine and formal spec agree. It does not prove external agent or script side effects are transactional.
+
+## Related pages
+
+- [Recovery and safety](safety.md)
+- [Architecture and TLA+](architecture.md)
+- [Host and React integration](integration.md)

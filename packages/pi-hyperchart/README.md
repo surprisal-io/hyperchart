@@ -1,17 +1,53 @@
 # `@surprisal-io/pi-hyperchart`
 
-Pi extension, tools, TUI and React inspector for [`@surprisal-io/hyperchart`](https://www.npmjs.com/package/@surprisal-io/hyperchart). Experimental 0.1.0, MIT, ESM, Node >=22.19.
+Pi extension, run manager, agent executor, terminal UI, React inspector, and bundled Hyperchart skill.
+
+## Install in Pi
+
+Run from your shell:
 
 ```sh
 pi install npm:@surprisal-io/pi-hyperchart
 ```
 
-Put a chart in `.pi/hypercharts/review.chart.ts`, then:
+Start Pi after the install, or restart an existing Pi process. The package declares:
+
+- `extensions/hyperchart.ts`;
+- `skills/hyperchart/`.
+
+It requires Node.js 22.19 or newer and the exact matching version of `@surprisal-io/hyperchart`.
+
+## Start a chart
+
+Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 
 ```text
-/hyperchart run review --args '{"topic":"durable agents"}'
+/hyperchart run name
 ```
 
-Tools: `hyperchart_run`, `hyperchart_inspect`, `hyperchart_run_inspect`, `hyperchart_rewind`. **Rewind and `--ignore-replay-warnings` are dangerous recovery operations; inspect and back up first.**
+Run `/hyperchart` with no arguments to list recent runs for the current project.
 
-React hosts import `@surprisal-io/pi-hyperchart/react` and `@surprisal-io/pi-hyperchart/react/styles.css`. See the [Pi guide](https://github.com/surprisal-io/hyperchart/blob/main/docs/pi.md) and [integration guide](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md).
+## Pi tools
+
+- `hyperchart_inspect`
+- `hyperchart_run`
+- `hyperchart_run_inspect`
+- `hyperchart_rewind`
+
+## Application entry points
+
+| Import | Purpose |
+|---|---|
+| `@surprisal-io/pi-hyperchart/command` | in-process `/hyperchart` request event |
+| `@surprisal-io/pi-hyperchart/pi-host` | Pi chart/run host adapter |
+| `@surprisal-io/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
+| `@surprisal-io/pi-hyperchart/react/styles.css` | required React stylesheet |
+
+## Documentation
+
+- [Pi extension](https://github.com/surprisal-io/hyperchart/blob/main/docs/pi.md)
+- [Run your first chart](https://github.com/surprisal-io/hyperchart/blob/main/docs/quickstart.md)
+- [Recovery and safety](https://github.com/surprisal-io/hyperchart/blob/main/docs/safety.md)
+- [React and host integration](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md)
+
+MIT · experimental `0.1.0`

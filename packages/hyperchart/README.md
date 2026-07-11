@@ -1,39 +1,52 @@
 # `@surprisal-io/hyperchart`
 
-Host-neutral TypeScript statecharts for durable agent and script workflows. Experimental 0.1.0, MIT, ESM, Node >=22.19.
+Host-neutral Hyperchart authoring, machine, replay, runtime, and inspector models.
+
+## Install
 
 ```sh
 npm install @surprisal-io/hyperchart
 ```
 
+Requires Node.js 22.19 or newer.
+
+## Create a chart
+
 ```ts
-import { agent, final, refs, z } from "@surprisal-io/hyperchart";
-
-const Reply = z.object({ ok: z.boolean() });
-type Reply = z.infer<typeof Reply>;
-
-const { chart } = refs<Record<string, never>, { work: Reply }>();
+import { chart, final, script } from "@surprisal-io/hyperchart";
 
 export default chart({
   kind: "chart",
   id: "hello",
-  initial: "work",
+  initial: "run",
   states: {
-    work: {
+    run: {
       kind: "state",
-      action: agent("worker", { task: "Do the work", reply: Reply }),
-      transitions: { DONE: "done", FAILED: "failed" },
+      action: script("node", ["-e", "console.log('done')"]),
+      transitions: { DONE: "done" },
     },
     done: final(),
-    failed: final(),
   },
 });
 ```
 
-Public entry points:
+A script with one successful transition may select it implicitly on exit code `0`.
 
-- `.` — authoring, parsing/inspection, machine, projection, replay, and execution loop;
-- `./host` — canonical host/inspector models and adapters;
-- `./runtime` — runtime contract and generic runtime components.
+## Entry points
 
-See the [complete documentation](https://github.com/surprisal-io/hyperchart/tree/main/docs), [core authoring guide](https://github.com/surprisal-io/hyperchart/blob/main/docs/core-authoring.md), and [examples](https://github.com/surprisal-io/hyperchart/tree/main/examples).
+| Import | Purpose |
+|---|---|
+| `@surprisal-io/hyperchart` | DSL, types, parsing, inspection, machine, projection, replay |
+| `@surprisal-io/hyperchart/runtime` | generic runtime, log stores, scripts, guards, artifacts |
+| `@surprisal-io/hyperchart/host` | canonical chart/run models and adapters |
+
+This package has no Pi or React dependency.
+
+## Documentation
+
+- [Run your first chart](https://github.com/surprisal-io/hyperchart/blob/main/docs/quickstart.md)
+- [Author charts](https://github.com/surprisal-io/hyperchart/blob/main/docs/core-authoring.md)
+- [Runtime and durability](https://github.com/surprisal-io/hyperchart/blob/main/docs/runtime-and-durability.md)
+- [API reference](https://github.com/surprisal-io/hyperchart/blob/main/docs/reference.md)
+
+MIT · experimental `0.1.0`
