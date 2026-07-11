@@ -30,7 +30,6 @@ try {
 				"dist/react/styles.css",
 				"extensions/hyperchart.ts",
 				"skills/hyperchart/SKILL.md",
-				"skills/hyperchart/references/authoring.md",
 				"LICENSE",
 				"README.md",
 			],

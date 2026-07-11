@@ -86,7 +86,9 @@ The pure machine requests facts and effects; it does not call Pi directly. The P
 - [Use the Pi extension](docs/pi.md)
 - [Operate and recover runs](docs/safety.md)
 - [Embed the runtime or React inspector](docs/integration.md)
-- [API and file reference](docs/reference.md)
+- [Complete API reference](docs/api/README.md)
+- [DSL reference and examples](docs/api/dsl.md)
+- [File contracts and limitations](docs/reference.md)
 - [Develop and release](docs/development.md)
 
 Hyperchart is experimental. Pin exact package versions for durable runs and keep the chart source that produced each log.

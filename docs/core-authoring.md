@@ -283,4 +283,4 @@ The Pi runner normalizes automatically. Hosts embedding the core package should 
 
 - [Compose states](composition.md)
 - [Runtime and durable facts](runtime-and-durability.md)
-- [API reference](reference.md)
+- [DSL reference](api/dsl.md)

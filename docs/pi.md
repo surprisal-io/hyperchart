@@ -269,4 +269,4 @@ Do not add `--ignore-replay-warnings` first. Inspect the run, read the stale/ski
 - [Run your first chart](quickstart.md)
 - [Recovery and safety](safety.md)
 - [React and host integration](integration.md)
-- [Exact tool and status reference](reference.md)
+- [Exact Pi tool and status reference](api/pi.md)

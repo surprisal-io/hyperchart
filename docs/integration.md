@@ -232,4 +232,5 @@ The repository's Storybook boards cover light/dark themes, mobile layouts, long 
 
 - [Host-neutral runtime contract](runtime-and-durability.md)
 - [Pi commands and run files](pi.md)
-- [Public exports](reference.md)
+- [Host API](api/host.md)
+- [React API](api/react.md)

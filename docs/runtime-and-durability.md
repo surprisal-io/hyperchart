@@ -164,7 +164,7 @@ For a custom host:
 5. propagate cancellation;
 6. expose semantic logs separately from host status.
 
-See the exact exported types in [API reference](reference.md) and canonical UI models in [Host and React integration](integration.md).
+See the exact exports in [Core API](api/core.md) and [Runtime API](api/runtime.md), and canonical UI models in [Host API](api/host.md).
 
 ## Replay compatibility
 

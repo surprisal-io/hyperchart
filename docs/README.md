@@ -24,7 +24,9 @@ Hyperchart is a TypeScript statechart runtime for work that may span scripts, ag
 
 ## Reference
 
-- [API and file reference](reference.md) — public entry points, DSL functions, durable record kinds, status values, tool names, and limitations.
+- [API reference](api/README.md) — complete reference by public entry point.
+- [DSL reference](api/dsl.md) — constructors, typed refs, state fields, schemas, transitions, artifacts, validation, and composition examples.
+- [File contracts and limitations](reference.md) — run directory, lifecycle values, and current constraints.
 - [Architecture](architecture.md) — package boundary, execution loop, control/data separation, TLA+ model, and trace validation.
 
 ## Contribute

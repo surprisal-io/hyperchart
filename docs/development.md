@@ -132,18 +132,18 @@ Documentation is part of the change.
 
 | Change | Required documentation |
 |---|---|
-| DSL, schemas, refs, actions | `docs/core-authoring.md`, `docs/reference.md`, core package README |
-| compound/parallel/map/validation/re-entry | `docs/composition.md`, semantic/replay notes where applicable |
-| runtime, log, projection, replay | `docs/runtime-and-durability.md`, `docs/safety.md`, `docs/architecture.md` |
-| Pi command, tool, lifecycle, discovery | `docs/pi.md`, bundled skill and references |
-| rewind, delete, override behavior | `docs/safety.md`, tool reference, skill safety rules |
-| host models or adapters | `docs/integration.md`, `docs/reference.md` |
-| React components, CSS, themes, portals | `docs/integration.md`, Storybook, package README |
+| DSL, schemas, refs, actions | `docs/core-authoring.md`, `docs/api/dsl.md`, core package README |
+| compound/parallel/map/validation/re-entry | `docs/composition.md`, `docs/api/dsl.md`, semantic/replay notes where applicable |
+| runtime, log, projection, replay | `docs/runtime-and-durability.md`, `docs/api/core.md`, `docs/api/runtime.md`, `docs/safety.md`, `docs/architecture.md` |
+| Pi command, tool, lifecycle, discovery | `docs/pi.md`, `docs/api/pi.md`, bundled agent skill |
+| rewind, delete, override behavior | `docs/safety.md`, `docs/api/pi.md`, skill safety rules |
+| host models or adapters | `docs/integration.md`, `docs/api/host.md` |
+| React components, CSS, themes, portals | `docs/integration.md`, `docs/api/react.md`, Storybook, package README |
 | examples | `docs/examples.md`, runnable source/test |
-| package exports/dependencies | root README, affected package README, `docs/reference.md` |
+| package exports/dependencies | root README, affected package README, matching page under `docs/api/` |
 | visible product identity | README assets and their surrounding alt text/copy |
 
-Do not duplicate the full manual into package READMEs or the skill. Those files must remain usable on their own for installation/routing, then link to canonical pages.
+Do not duplicate the manual or API reference into package READMEs or the skill. Package READMEs own installation and entry-point routing. The skill owns agent procedure and safety rules, uses `hyperchart_*` tools directly, and links to canonical pages for API detail.
 
 Every command and code sample must match a checked-in implementation, test, or example. State prerequisites before the procedure, especially agent definitions, model credentials, external scripts, and unsupported user actions.
 
@@ -153,7 +153,7 @@ Every command and code sample must match a checked-in implementation, test, or e
 2. update the package `exports` map if a new subpath is needed;
 3. build declarations;
 4. add a clean-consumer runtime and type import to `scripts/validate-packages.mjs`;
-5. document the entry point in `docs/reference.md` and the package README;
+5. document every exported value and type on the matching page under `docs/api/`, then update the package README entry-point link;
 6. run `npm run validate:packages`.
 
 Avoid expanding `./internal/*` as an application API. Add a deliberate public subpath when third-party consumers need a supported contract.

@@ -38,14 +38,18 @@ Run `/hyperchart` with no arguments to list recent runs for the current project.
 
 | Import | Purpose |
 |---|---|
+| `@surprisal-io/pi-hyperchart` | same in-process command API as `/command` |
 | `@surprisal-io/pi-hyperchart/command` | in-process `/hyperchart` request event |
 | `@surprisal-io/pi-hyperchart/pi-host` | Pi chart/run host adapter |
 | `@surprisal-io/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
 | `@surprisal-io/pi-hyperchart/react/styles.css` | required React stylesheet |
+| `@surprisal-io/pi-hyperchart/package.json` | package metadata and Pi manifest |
 
 ## Documentation
 
 - [Pi extension](https://github.com/surprisal-io/hyperchart/blob/main/docs/pi.md)
+- [Pi API and agent tools](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/pi.md)
+- [React API](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/react.md)
 - [Run your first chart](https://github.com/surprisal-io/hyperchart/blob/main/docs/quickstart.md)
 - [Recovery and safety](https://github.com/surprisal-io/hyperchart/blob/main/docs/safety.md)
 - [React and host integration](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md)

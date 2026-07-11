@@ -39,6 +39,7 @@ A script with one successful transition may select it implicitly on exit code `0
 | `@surprisal-io/hyperchart` | DSL, types, parsing, inspection, machine, projection, replay |
 | `@surprisal-io/hyperchart/runtime` | generic runtime, log stores, scripts, guards, artifacts |
 | `@surprisal-io/hyperchart/host` | canonical chart/run models and adapters |
+| `@surprisal-io/hyperchart/package.json` | package metadata |
 
 This package has no Pi or React dependency.
 
@@ -47,6 +48,7 @@ This package has no Pi or React dependency.
 - [Run your first chart](https://github.com/surprisal-io/hyperchart/blob/main/docs/quickstart.md)
 - [Author charts](https://github.com/surprisal-io/hyperchart/blob/main/docs/core-authoring.md)
 - [Runtime and durability](https://github.com/surprisal-io/hyperchart/blob/main/docs/runtime-and-durability.md)
-- [API reference](https://github.com/surprisal-io/hyperchart/blob/main/docs/reference.md)
+- [Complete API reference](https://github.com/surprisal-io/hyperchart/tree/main/docs/api)
+- [DSL reference and examples](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/dsl.md)
 
 MIT · experimental `0.1.0`
