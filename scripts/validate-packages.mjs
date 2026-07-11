@@ -176,12 +176,37 @@ if (typeof extension !== "function" && typeof extension.default !== "function") 
 	writeFileSync(
 		resolve(consumer, "smoke.ts"),
 		`import { final, refs } from "@surprisal-io/hyperchart";
-import type { Runtime } from "@surprisal-io/hyperchart/runtime";
+import type {
+  ArtifactCst,
+  ArtifactOfCst,
+  JoinArtifactOfCst,
+  MachineOutputError,
+  MachineStartEvent,
+  MapStateAst,
+  MapStateCst,
+  ParseChartModuleOptions,
+  RenderedArtifact,
+} from "@surprisal-io/hyperchart";
+import type { GuardContext, Runtime, SchemaCheck } from "@surprisal-io/hyperchart/runtime";
 import type { HyperchartHostAdapter } from "@surprisal-io/hyperchart/host";
 import type { HyperchartInspectorDialogProps } from "@surprisal-io/pi-hyperchart/react";
 const { chart } = refs<Record<string, never>, Record<never, never>>();
 export const definition = chart({ kind: "chart", id: "smoke", initial: "done", states: { done: final() } });
-export type SmokeTypes = Runtime | HyperchartHostAdapter | HyperchartInspectorDialogProps;
+export type SmokeTypes =
+  | Runtime
+  | HyperchartHostAdapter
+  | HyperchartInspectorDialogProps
+  | ArtifactCst
+  | ArtifactOfCst
+  | JoinArtifactOfCst
+  | MachineOutputError
+  | MachineStartEvent
+  | MapStateAst
+  | MapStateCst
+  | ParseChartModuleOptions
+  | RenderedArtifact
+  | GuardContext
+  | SchemaCheck;
 `,
 	);
 	writeFileSync(

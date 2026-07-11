@@ -7,7 +7,9 @@ export type {
 	AgentActionAst,
 	AgentActionCst,
 	ArtifactAst,
+	ArtifactCst,
 	ArtifactOfAst,
+	ArtifactOfCst,
 	AuthoringDiagnostic,
 	ChartAst,
 	ChartCst,
@@ -22,7 +24,10 @@ export type {
 	FinalStateCst,
 	InputRef,
 	JoinArtifactOfAst,
+	JoinArtifactOfCst,
 	JsonSchema,
+	MapStateAst,
+	MapStateCst,
 	SchemaAst,
 	SchemaCst,
 	ParallelStateAst,
@@ -81,6 +86,7 @@ export { refs } from "./core/typed.js";
 export type { InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
+export type { ParseChartModuleOptions } from "./core/parser.js";
 export { inspectChartAst, inspectChartModuleSync, parseChartModuleSync } from "./core/inspect.js";
 export { hyperchartSource, hyperchartStateSources } from "./core/source.js";
 export type {
@@ -116,10 +122,13 @@ export type {
 	ValidatedMachineEvent,
 	EffectId,
 	MachineEvent,
+	MachineStartEvent,
 	MachineOutput,
 	MachineOutputEffect,
+	MachineOutputError,
 	MachineOutputFinal,
 	MachineState,
+	RenderedArtifact,
 	UserEffect,
 	UserMachineEvent,
 } from "./core/machine.js";
