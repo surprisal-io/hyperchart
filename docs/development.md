@@ -212,7 +212,17 @@ make release-prepare VERSION=0.2.0-rc.1 NPM_TAG=next
 make release-publish VERSION=0.2.0-rc.1 NPM_TAG=next CONFIRM=publish-0.2.0-rc.1
 ```
 
-`release-publish` repeats all gates and dry-runs, verifies npm authentication, publishes `@surprisal/hyperchart` first, waits until that exact version is visible, then publishes `@surprisal/pi-hyperchart`. It deliberately does not create or push a git tag.
+`release-publish` repeats all gates and dry-runs, verifies npm authentication, publishes `@surprisal/hyperchart` first, then prints progress while waiting up to ten minutes for that exact version to become visible before publishing `@surprisal/pi-hyperchart`. Override the wait with `NPM_VISIBILITY_TIMEOUT=<seconds>` when the registry is unusually slow.
+
+If the process is interrupted after npm prints `+ @surprisal/hyperchart@<version>` but before Pi is published, do not rerun the core publish. Resume safely after committing or pulling the release-workflow fix:
+
+```sh
+make release-resume \
+  VERSION=0.2.0 \
+  CONFIRM=resume-0.2.0
+```
+
+The resume target waits for the existing core version, repeats the release gate, and publishes only the missing Pi package. Both publish targets deliberately avoid creating or pushing a git tag.
 
 After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and all four tools. Create the release/tag only after registry verification.
 
