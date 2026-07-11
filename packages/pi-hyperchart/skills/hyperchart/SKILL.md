@@ -40,6 +40,75 @@ These files ship inside the Pi package. Prefer them over network documentation s
 5. Resolve all diagnostics and unavailable agent definitions before starting a real run.
 6. Do not start the chart unless the user asked to execute it.
 
+### Best practice: typed artifacts first
+
+Put every substantial or reusable result in a declared artifact by default. Give JSON artifacts a Zod shape, mirror them in the `Files` registry passed to `refs()`, and pass them downstream with `artifactOf()` or `joinArtifactOf()`. Reserve `reply` for small routing data that belongs in a completion event.
+
+This catches different failures at the right boundary:
+
+- TypeScript catches a missing producer, artifact-name mismatch, invalid selector, or `Files` registry drift.
+- Runtime validation catches a missing file, invalid JSON, or content that does not match the Zod shape.
+- Durable files make inspection, recovery, replay analysis, and manual verification easier than large prompt/result payloads.
+
+```ts
+import { agent, artifact, final, refs, t, z } from "@surprisal-io/hyperchart";
+
+const Report = z.object({
+  title: z.string(),
+  findings: z.array(z.string()),
+});
+
+const Review = z.object({
+  approved: z.boolean(),
+  issues: z.array(z.string()),
+});
+
+type Args = { topic: string };
+type Files = {
+  write: { report: z.infer<typeof Report> };
+  review: { review: z.infer<typeof Review> };
+};
+
+const { chart, arg, artifactOf } = refs<
+  Args,
+  Record<never, never>,
+  Files
+>();
+
+export default chart({
+  kind: "chart",
+  id: "typed-artifacts",
+  initial: "write",
+  states: {
+    write: {
+      kind: "state",
+      action: agent("writer", {
+        task: t`Research ${arg("topic")} and write the declared JSON report artifact.`,
+        artifacts: {
+          report: artifact("artifacts/report.json", Report),
+        },
+      }),
+      transitions: { DONE: "review", FAILED: "failed" },
+    },
+    review: {
+      kind: "state",
+      action: agent("reviewer", {
+        task: "Review the supplied report and write the declared JSON review artifact.",
+        reads: [artifactOf("write", { artifact: "report" })],
+        artifacts: {
+          review: artifact("artifacts/review.json", Review),
+        },
+      }),
+      transitions: { DONE: "done", FAILED: "failed" },
+    },
+    done: final(),
+    failed: final(),
+  },
+});
+```
+
+After editing this pattern, call `hyperchart_inspect`; do not rely on TypeScript alone because agent availability and normalized-chart diagnostics are host/runtime concerns.
+
 ## Start a run
 
 1. Inspect the chart first with `hyperchart_inspect`.
