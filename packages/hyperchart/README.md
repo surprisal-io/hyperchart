@@ -51,4 +51,4 @@ This package has no Pi or React dependency.
 - [Complete API reference](https://github.com/surprisal-io/hyperchart/tree/main/docs/api)
 - [DSL reference and examples](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/dsl.md)
 
-MIT · experimental `0.1.0`
+MIT · experimental `0.1.1`

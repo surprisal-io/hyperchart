@@ -1,7 +1,7 @@
 <p align="center"><img src="assets/readme/hyperchart-logo.svg" width="112" alt="Hyperchart logo"></p>
 <h1 align="center">Hyperchart</h1>
 <p align="center"><strong>Durable, typed statechart workflows for agents and scripts.</strong></p>
-<p align="center"><a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-6366f1"></a> <img alt="experimental version 0.1.0" src="https://img.shields.io/badge/status-experimental-f59e0b"> <img alt="Node 22.19 or newer" src="https://img.shields.io/badge/node-%3E%3D22.19-22c55e"></p>
+<p align="center"><a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-6366f1"></a> <img alt="experimental version 0.1.1" src="https://img.shields.io/badge/status-experimental-f59e0b"> <img alt="Node 22.19 or newer" src="https://img.shields.io/badge/node-%3E%3D22.19-22c55e"></p>
 
 Hyperchart runs long-lived work as an explicit statechart. The chart defines what may run, which event advances it, what data crosses each transition, and how a run can be reconstructed after a crash.
 
