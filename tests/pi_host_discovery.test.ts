@@ -209,4 +209,46 @@ console.log(JSON.stringify(snapshot.runs));`;
 		expect(snapshot.runs[0]?.states.map((state) => state.id)).toEqual(["work", "done"]);
 		expect(snapshot.runs[0]).not.toHaveProperty("phases");
 	});
+
+	it("keeps a metadata-only run visible with persisted status when runtime inspection fails", async () => {
+		const projectDir = await tempDir("hyperchart-project-");
+		const agentDir = await tempDir("hyperchart-agent-");
+		const runDir = join(agentDir, "hypercharts", "runs", "missing-chart-run");
+		await mkdir(runDir, { recursive: true });
+		await writeFile(join(runDir, "meta.json"), JSON.stringify({
+			chartPath: join(projectDir, "deleted.chart.ts"),
+			workDir: projectDir,
+			chartId: "deleted-chart",
+			createdAt: "2026-07-10T00:00:00.000Z",
+		}), "utf8");
+		await writeFile(join(runDir, "status.json"), JSON.stringify({
+			version: 1,
+			runId: "missing-chart-run",
+			runDir,
+			chartId: "deleted-chart",
+			state: "complete",
+			startedAt: 10,
+			updatedAt: 20,
+			exitCode: 0,
+		}), "utf8");
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+		const snapshot = await createPiHyperchartHost({ agentDir }).readSessionSnapshot(projectDir);
+
+		warn.mockRestore();
+		expect(snapshot.runs).toEqual([
+			expect.objectContaining({
+				runId: "missing-chart-run",
+				chartName: "deleted-chart",
+				status: "completed",
+				cwd: projectDir,
+				stateCount: 0,
+			}),
+		]);
+		expect(snapshot.runs[0]?.issues?.[0]).toMatchObject({
+			severity: "error",
+			kind: "run_failed",
+			source: "status",
+		});
+	});
 });

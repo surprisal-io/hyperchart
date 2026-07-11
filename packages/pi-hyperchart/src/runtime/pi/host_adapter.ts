@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal-io/hyperchart/internal/core/inspect";
 import type {
 	HyperchartHostAdapter,
@@ -13,6 +13,7 @@ import { loadRunMeta } from "@surprisal-io/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { hyperchartRunFromRunDir } from "./run_inspect.js";
+import { isRunLive, readRunStatus, type HyperchartRunStatus } from "./run_status.js";
 
 export interface PiHyperchartHostOptions {
 	agentDir?: string;
@@ -21,11 +22,19 @@ export interface PiHyperchartHostOptions {
 
 export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): HyperchartHostAdapter {
 	const failedRunMetaFingerprints = new Map<string, string>();
+	const failedRunInspectionFingerprints = new Map<string, string>();
 	const agentDir = resolve(options.agentDir ?? defaultAgentDir());
 
 	return {
 		readSessionSnapshot: (cwd, snapshotOptions = {}) =>
-			readSessionSnapshot(resolve(cwd), agentDir, snapshotOptions, options.agentDefaults, failedRunMetaFingerprints),
+			readSessionSnapshot(
+				resolve(cwd),
+				agentDir,
+				snapshotOptions,
+				options.agentDefaults,
+				failedRunMetaFingerprints,
+				failedRunInspectionFingerprints,
+			),
 	};
 }
 
@@ -41,11 +50,19 @@ async function readSessionSnapshot(
 	options: HyperchartSnapshotOptions,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
+	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartSessionSnapshot> {
 	const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir);
 	const [hypercharts, runs] = await Promise.all([
 		readHypercharts(cwd, agentDir, resolvedAgentDefaults),
-		readRuns(cwd, agentDir, options.runLimit ?? 50, resolvedAgentDefaults, failedRunMetaFingerprints),
+		readRuns(
+			cwd,
+			agentDir,
+			options.runLimit ?? 50,
+			resolvedAgentDefaults,
+			failedRunMetaFingerprints,
+			failedRunInspectionFingerprints,
+		),
 	]);
 	return { hypercharts, runs };
 }
@@ -107,6 +124,7 @@ async function readRuns(
 	limit: number,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
+	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartRunInfo[]> {
 	const root = getHyperchartRunsRoot(agentDir);
 	let entries;
@@ -119,7 +137,15 @@ async function readRuns(
 	const runs = await Promise.all(
 		entries
 			.filter((entry) => entry.isDirectory())
-			.map((entry) => readRun(join(root, entry.name), cwd, agentDefaults, failedRunMetaFingerprints)),
+			.map((entry) =>
+				readRun(
+					join(root, entry.name),
+					cwd,
+					agentDefaults,
+					failedRunMetaFingerprints,
+					failedRunInspectionFingerprints,
+				),
+			),
 	);
 	return runs
 		.filter((run): run is HyperchartRunInfo => run !== undefined)
@@ -132,6 +158,7 @@ async function readRun(
 	cwd: string,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
+	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartRunInfo | undefined> {
 	const metaFingerprint = await fileFingerprint(join(runDir, "meta.json"));
 	if (failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
@@ -146,14 +173,65 @@ async function readRun(
 	}
 	try {
 		if (resolve(meta.workDir) !== cwd) return undefined;
-		return await hyperchartRunFromRunDir(runDir, {
+		const run = await hyperchartRunFromRunDir(runDir, {
 			meta,
 			...(agentDefaults === undefined ? {} : { agentDefaults }),
 		});
+		failedRunInspectionFingerprints.delete(runDir);
+		return run;
 	} catch (error) {
-		console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
-		return undefined;
+		if (failedRunInspectionFingerprints.get(runDir) !== metaFingerprint) {
+			failedRunInspectionFingerprints.set(runDir, metaFingerprint);
+			console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
+		}
+		const persistedStatus = readRunStatus(runDir);
+		const metaCreatedAt = Date.parse(meta.createdAt);
+		const createdAt = persistedStatus?.startedAt ?? (Number.isFinite(metaCreatedAt) ? metaCreatedAt : 0);
+		const updatedAt = persistedStatus?.updatedAt ?? await runUpdatedAt(runDir, createdAt);
+		return {
+			runId: persistedStatus?.runId ?? basename(runDir),
+			chartName: persistedStatus?.chartId ?? meta.chartId,
+			description: meta.chartPath,
+			status: metadataOnlyStatus(persistedStatus),
+			cwd: resolve(meta.workDir),
+			createdAt: createdAt || updatedAt,
+			updatedAt,
+			args: {},
+			states: [],
+			stateCount: 0,
+			issues: [{
+				severity: "error",
+				kind: "run_failed",
+				message: `Run inspection failed: ${error instanceof Error ? error.message : String(error)}`,
+				source: "status",
+			}],
+		};
 	}
+}
+
+function metadataOnlyStatus(status: HyperchartRunStatus | undefined): HyperchartRunInfo["status"] {
+	switch (status?.state) {
+		case "complete": return "completed";
+		case "failed": return "failed";
+		case "stopped": return "paused";
+		case "starting":
+		case "running":
+		case "stopping": return isRunLive(status) ? "running" : "blocked";
+		default: return "blocked";
+	}
+}
+
+async function runUpdatedAt(runDir: string, fallback: number): Promise<number> {
+	const timestamps = await Promise.all(
+		["meta.json", "status.json", "log.jsonl"].map(async (name) => {
+			try {
+				return (await stat(join(runDir, name))).mtimeMs;
+			} catch {
+				return 0;
+			}
+		}),
+	);
+	return Math.max(fallback, ...timestamps);
 }
 
 async function fileFingerprint(path: string): Promise<string> {
