@@ -73,6 +73,8 @@ describe("agent definitions", () => {
 		const project = await makeTempDir();
 		const agentDir = await makeTempDir();
 		const packageRoot = join(agentDir, "npm", "node_modules", "agent-pack");
+		const chartDir = join(project, ".pi", "hypercharts", "review");
+		await mkdir(join(chartDir, "agents"), { recursive: true });
 		await mkdir(join(project, ".pi", "agents"), { recursive: true });
 		await mkdir(join(agentDir, "agents"), { recursive: true });
 		await mkdir(join(packageRoot, "agents"), { recursive: true });
@@ -81,6 +83,7 @@ describe("agent definitions", () => {
 			"---\nname: worker\ndescription: project\n---\nProject prompt\n",
 			"utf8",
 		);
+		await writeFile(join(chartDir, "agents", "worker.md"), "---\ndescription: bundle\n---\nBundle prompt\n", "utf8");
 		await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:agent-pack"] }), "utf8");
 		await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "agent-pack" }), "utf8");
 		await writeFile(
@@ -89,12 +92,12 @@ describe("agent definitions", () => {
 			"utf8",
 		);
 
-		const dirs = resolvePiSubagentDefinitionDirs(join(project, "nested"), agentDir);
+		const dirs = resolvePiSubagentDefinitionDirs(join(project, "nested"), agentDir, join(chartDir, "chart.ts"));
 
-		expect(dirs[0]).toBe(join(project, ".pi", "agents"));
+		expect(dirs[0]).toBe(join(chartDir, "agents"));
 		expect(dirs).toContain(join(agentDir, "agents"));
 		expect(dirs).toContain(join(packageRoot, "agents"));
-		expect(loadAgentDefinition("worker", dirs).systemPrompt).toBe("Project prompt");
+		expect(loadAgentDefinition("worker", dirs).systemPrompt).toBe("Bundle prompt");
 		expect(loadAgentDefinition("qa-pack.critic", dirs)).toMatchObject({
 			name: "qa-pack.critic",
 			tools: ["read", "grep"],

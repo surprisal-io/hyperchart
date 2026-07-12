@@ -102,11 +102,7 @@ export function HyperchartRunStrip({
 									{hyperchartChartName(run)}
 								</span>
 							)}
-							{run && (
-								<span className="text-[10px] text-[var(--text-tertiary)] shrink-0">
-									{progress.done}/{progress.total} states
-								</span>
-							)}
+
 							{usage && (
 								<span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] shrink-0">
 									<CircleStackIcon className="h-3 w-3" aria-hidden="true" /> {usage}

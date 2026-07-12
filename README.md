@@ -48,7 +48,7 @@ Pi loads the local package in place, so later source changes remain available af
 
 ## Run a chart in Pi
 
-After installing the Pi package, create `.pi/hypercharts/hello.chart.ts`:
+After installing the Pi package, create flat `.pi/hypercharts/hello.chart.ts` or bundle entrypoint `.pi/hypercharts/hello/chart.ts`:
 
 ```ts
 import { artifact, chart, final, script } from "@surprisal/hyperchart";
@@ -73,14 +73,16 @@ export default chart({
 });
 ```
 
-A successful script with one non-`FAILED` transition emits that event implicitly. Ask Pi to inspect the chart with `hyperchart_inspect`, then start it:
+A successful script with one non-`FAILED` transition emits that event implicitly. Ask Pi to inspect the chart with `hyperchart` with `action: "inspect"`, then start it:
 
 ```text
-Use hyperchart_inspect on .pi/hypercharts/hello.chart.ts
+Use hyperchart action=inspect on .pi/hypercharts/hello.chart.ts
 /hyperchart run .pi/hypercharts/hello.chart.ts
 ```
 
-The run writes `hello.txt` and records its history under `.pi/hypercharts/runs/`.
+The run writes `hello.txt` and records its history under `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/`.
+
+Self-contained bundles may include chart-private `agents/`, `extensions/<name>/index.ts`, scripts, and guards. See [Pi extension: self-contained bundles](docs/pi.md#self-contained-bundles).
 
 Read [Run your first chart](docs/quickstart.md) for installation checks, expected output, agent setup, and troubleshooting.
 

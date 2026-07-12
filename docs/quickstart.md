@@ -64,7 +64,7 @@ The checked-in copy is [`examples/quickstart.chart.ts`](../examples/quickstart.c
 Ask Pi:
 
 ```text
-Use hyperchart_inspect on .pi/hypercharts/hello.chart.ts
+Use hyperchart action=inspect on .pi/hypercharts/hello.chart.ts
 ```
 
 The tool call is equivalent to:

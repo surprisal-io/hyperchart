@@ -290,7 +290,7 @@ function hyperchartChartName(run: HyperchartRunInfo): string;
 function hyperchartRunLabel(run: HyperchartRunInfo): string;
 ```
 
-Time formatters return `—` for missing/zero timestamps and use the host locale. Progress counts states whose status is `done`. Usage displays total tokens and cost when positive.
+Time formatters return `—` for missing/zero timestamps and use host locale. Progress combines completed visits on actual run path with shortest remaining transition path from current state to any final state. Reaching any final outcome forces `pct: 100`, including failure finals. Inspector and run strip render progress bar without `done/total states` counters. Usage displays total tokens and cost when positive.
 
 ## Data adapters and model types
 

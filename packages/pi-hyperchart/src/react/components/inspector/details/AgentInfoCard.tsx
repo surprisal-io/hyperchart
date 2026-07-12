@@ -44,6 +44,9 @@ export function AgentInfoCard({
 					</span>
 				)}
 			</div>
+			{state.agentDescription ? (
+				<p className="mt-2 text-xs leading-relaxed text-[var(--text-secondary)]">{state.agentDescription}</p>
+			) : null}
 			{state.agentDefinitionUnavailable === true ? (
 				<div
 					role="alert"

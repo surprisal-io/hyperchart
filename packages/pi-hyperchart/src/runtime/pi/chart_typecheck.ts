@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, extname } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -56,26 +57,28 @@ export async function typecheckChartModule(chartPath: string): Promise<ChartType
 	if (!TYPESCRIPT_EXTENSIONS.has(extname(chartPath))) return { ok: true, skipped: true };
 	const tscPath = resolveTypeScriptCompiler();
 	const nodeTypeRoot = resolveNodeTypeRoot();
-	const args = [
-		"--noEmit",
-		"--pretty",
-		"false",
-		"--skipLibCheck",
-		"--strict",
-		"--noUncheckedIndexedAccess",
-		"--exactOptionalPropertyTypes",
-		"--target",
-		"ES2022",
-		"--module",
-		"NodeNext",
-		"--moduleResolution",
-		"NodeNext",
-		"--typeRoots",
-		nodeTypeRoot,
-		"--types",
-		"node",
-		chartPath,
-	];
+	const tempDir = mkdtempSync(join(tmpdir(), "hyperchart-typecheck-"));
+	const configPath = join(tempDir, "tsconfig.json");
+	const hyperchartEntry = resolveHyperchartTypeEntry();
+	writeFileSync(configPath, JSON.stringify({
+		compilerOptions: {
+			noEmit: true,
+			pretty: false,
+			skipLibCheck: true,
+			strict: true,
+			noUncheckedIndexedAccess: true,
+			exactOptionalPropertyTypes: true,
+			target: "ES2022",
+			module: "NodeNext",
+			moduleResolution: "NodeNext",
+			baseUrl: dirname(chartPath),
+			paths: { "@surprisal/hyperchart": [hyperchartEntry] },
+			typeRoots: [nodeTypeRoot],
+			types: ["node"],
+		},
+		files: [resolve(chartPath)],
+	}, null, 2));
+	const args = ["--project", configPath];
 	const command = `${process.execPath} ${tscPath} ${args.map(shellQuote).join(" ")}`;
 	try {
 		await execFileAsync(process.execPath, [tscPath, ...args], { maxBuffer: 4 * 1024 * 1024 });
@@ -87,6 +90,8 @@ export async function typecheckChartModule(chartPath: string): Promise<ChartType
 			command,
 			diagnostics: output.length === 0 ? "TypeScript exited with a non-zero status and no diagnostics." : output,
 		};
+	} finally {
+		rmSync(tempDir, { recursive: true, force: true });
 	}
 }
 
@@ -142,6 +147,19 @@ function resolveTypeScriptCompiler(): string {
 	} catch (error) {
 		throw new Error(
 			`Hyperchart TypeScript typecheck requires the 'typescript' package, but it could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+function resolveHyperchartTypeEntry(): string {
+	try {
+		const nodeModules = resolve(dirname(require.resolve("typescript/package.json")), "..");
+		const entry = join(nodeModules, "@surprisal", "hyperchart", "dist", "index.d.ts");
+		if (existsSync(entry)) return entry;
+		throw new Error(`missing ${entry}`);
+	} catch (error) {
+		throw new Error(
+			`Hyperchart TypeScript typecheck could not resolve its core package: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
 }

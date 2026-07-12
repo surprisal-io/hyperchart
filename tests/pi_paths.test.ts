@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	getHyperchartRunsRoot,
 	getProjectHyperchartsDir,
+	listProjectHypercharts,
 	resolveHyperchartPath,
 	resolveHyperchartRunDir,
 } from "../packages/pi-hyperchart/src/runtime/pi/paths.js";
@@ -33,6 +34,23 @@ describe("pi hyperchart paths", () => {
 
 		expect(getProjectHyperchartsDir(subdir)).toBe(chartsDir);
 		expect(resolveHyperchartPath("deck-director", subdir)).toBe(join(chartsDir, "deck-director.chart.ts"));
+	});
+
+	it("resolves self-contained project and user bundles by name", async () => {
+		const project = await makeTempDir();
+		const agentDir = await makeTempDir();
+		const projectBundle = join(project, ".pi", "hypercharts", "review");
+		const userBundle = join(agentDir, "hypercharts", "global-review");
+		await mkdir(projectBundle, { recursive: true });
+		await mkdir(userBundle, { recursive: true });
+		await writeFile(join(projectBundle, "chart.ts"), "export default {}", "utf8");
+		await mkdir(join(projectBundle, "extensions", "custom"), { recursive: true });
+		await writeFile(join(projectBundle, "extensions", "custom", "index.ts"), "export default () => {}", "utf8");
+		await writeFile(join(userBundle, "chart.ts"), "export default {}", "utf8");
+
+		expect(resolveHyperchartPath("review", project, agentDir)).toBe(join(projectBundle, "chart.ts"));
+		expect(resolveHyperchartPath("global-review", project, agentDir)).toBe(join(userBundle, "chart.ts"));
+		expect(listProjectHypercharts(project)).toEqual(["review/chart.ts"]);
 	});
 
 	it("keeps run ids under the pi agent directory", async () => {

@@ -125,9 +125,6 @@ export function HyperchartInspectorDialogInner({
 									{hyperchartChartName(run)}
 								</span>
 								<StatusPill status={run.status} />
-								<span className="text-[11px] text-[var(--text-tertiary)]">
-									{progress.done}/{progress.total} states
-								</span>
 							</div>
 							<div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
 								<div
@@ -280,7 +277,7 @@ export function HyperchartInspectorDialogInner({
 									show all
 								</button>
 								<span className="ml-auto shrink-0 text-[11px] text-[var(--text-tertiary)]">
-									visible {visibleIds.size}/{run.states.length} · updated {formatHyperchartTime(run.updatedAt)}
+									updated {formatHyperchartTime(run.updatedAt)}
 								</span>
 							</div>
 							<div className="min-h-0 flex-1 bg-[var(--bg-primary)]">

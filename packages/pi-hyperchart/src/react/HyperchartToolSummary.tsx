@@ -2,7 +2,7 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { ArrowPathIcon, ArrowTopRightOnSquareIcon, QueueListIcon } from "@heroicons/react/24/outline";
 import { hyperchartRunFromToolDetails } from "@surprisal/hyperchart/host";
 import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
-import { formatHyperchartUsage, runningHyperchartStates, summarizeHyperchartProgress } from "./hyperchart-display.js";
+import { formatHyperchartUsage, runningHyperchartStates } from "./hyperchart-display.js";
 
 const HyperchartInspectorDialog = lazy(async () => {
 	const module = await import("./HyperchartInspectorDialog.js");
@@ -53,10 +53,12 @@ function persistedRun(
 	return runs.find((run) => run.status === "running") ?? runs[0];
 }
 
-function actionLabel(toolName: string): string {
-	if (toolName === "hyperchart_inspect") return "inspect definition";
-	if (toolName === "hyperchart_run_inspect") return "inspect run";
-	if (toolName === "hyperchart_rewind") return "rewind";
+function actionLabel(toolName: string, args?: Record<string, unknown>): string {
+	if (toolName !== "hyperchart") return toolName;
+	if (args?.action === "inspect") return "inspect definition";
+	if (args?.action === "run_inspect") return "inspect run";
+	if (args?.action === "rewind") return "rewind";
+	if (args?.action === "list") return "list definitions";
 	return "run";
 }
 
@@ -79,15 +81,14 @@ export function HyperchartToolSummary({
 	const run = inspected ?? persisted;
 	const [inspectorOpen, setInspectorOpen] = useState(false);
 	const running = runningHyperchartStates(run);
-	const progress = summarizeHyperchartProgress(run);
 	const usage = formatHyperchartUsage(run?.totalUsage);
 	const chartName = run?.chartName ?? chartNameFromArgs(args) ?? "hyperchart";
 	const isDefinition = run?.mode === "static";
 	const canOpen = run !== undefined;
 	const meta = run
 		? isDefinition
-			? `${run.stateCount} states`
-			: [`${progress.done}/${progress.total} states`, usage].filter(Boolean).join(" · ")
+			? "definition"
+			: usage ?? run.status
 		: status === "running"
 			? "waiting…"
 			: "not found";
@@ -104,7 +105,7 @@ export function HyperchartToolSummary({
 				disabled={!canOpen}
 				onClick={open}
 				className={`group flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left text-xs transition ${canOpen ? "hover:bg-blue-500/5" : "cursor-default opacity-80"}`}
-				data-testid={toolName === "hyperchart_inspect" ? "inspected-hyperchart-graph-snippet" : undefined}
+				data-testid={toolName === "hyperchart" && args?.action === "inspect" ? "inspected-hyperchart-graph-snippet" : undefined}
 			>
 				<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-[var(--hc-blue-text)]">
 					{run?.status === "running" ? (
@@ -118,7 +119,7 @@ export function HyperchartToolSummary({
 						<span className="truncate text-sm font-semibold text-[var(--text-primary)]" title={chartName}>
 							{chartName}
 						</span>
-						<span className="shrink-0 text-[11px] text-[var(--text-muted)]">{actionLabel(toolName)}</span>
+						<span className="shrink-0 text-[11px] text-[var(--text-muted)]">{actionLabel(toolName, args)}</span>
 					</span>
 					<span className="mt-0.5 block truncate text-[11px] text-[var(--text-muted)]">{meta}</span>
 					{running.length > 0 && (

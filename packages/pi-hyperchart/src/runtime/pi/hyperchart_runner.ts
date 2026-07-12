@@ -1,11 +1,12 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { explainReplay, parseChartModule, start, type ReplayExplanation } from "@surprisal/hyperchart";
+import { explainReplay, parseChartModuleSync, start, type ReplayExplanation } from "@surprisal/hyperchart";
 import { ChartRuntime } from "@surprisal/hyperchart/runtime";
 import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
 import { finalMachineFailureMessage, terminalStateForFinalMachine } from "@surprisal/hyperchart/runtime";
 import { assertChartPreflight } from "./chart_typecheck.js";
+import { resolvePiSubagentDefinitionDirs } from "./agent_definitions.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
 
@@ -47,7 +48,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 
 	try {
 		await assertChartPreflight(config.chartPath);
-		const parsed = await parseChartModule(
+		const parsed = parseChartModuleSync(
 			config.chartPath,
 			config.exportName === undefined ? {} : { exportName: config.exportName },
 		);
@@ -74,9 +75,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			...(replayWarnings.length === 0 ? { replayWarnings: undefined } : { replayWarnings }),
 		});
 		const modelRegistry = createModelRegistry(config.agentDir);
+		const chartDir = dirname(config.chartPath);
 		const executor = new PiAgentExecutor({
 			workDir: config.workDir,
 			agentDir: config.agentDir,
+			definitionDirs: resolvePiSubagentDefinitionDirs(config.workDir, config.agentDir, config.chartPath),
 			modelRegistry,
 			sessionsDir: join(config.runDir, "sessions"),
 			...(config.defaultModel === undefined ? {} : { defaultModel: config.defaultModel }),
@@ -86,7 +89,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			logStore,
 			agentExecutor: executor,
 			workDir: config.workDir,
-			chartDir: dirname(config.chartPath),
+			chartDir,
 			onWarn: (message) => console.warn(message),
 		});
 		const finalState = await start(runtime, config.args);
@@ -153,7 +156,7 @@ function formatReplayWarningsError(runDir: string, warnings: readonly string[]):
 	return [
 		"Replay over the current chart produced warning-level compatibility issues.",
 		...warnings,
-		`Resolve them by rewinding, or explicitly confirm continuing with: hyperchart_run runDir=${runDir} ignoreReplayWarnings=true`,
+		`Resolve them by rewinding, or explicitly confirm continuing with: hyperchart action=run runDir=${runDir} ignoreReplayWarnings=true`,
 	].join("\n");
 }
 
@@ -164,8 +167,8 @@ function formatReplayCompatibilityError(runDir: string, explanation: ReplayExpla
 	return [
 		`Replay over the current chart is incompatible at seqId ${broken.seqId}${broken.state === undefined ? "" : ` (${broken.state})`}.`,
 		`Original error: ${broken.error}`,
-		`Rewind to the compatible prefix explicitly before resuming: hyperchart_rewind runDir=${runDir} seqId=${target} mode=before`,
-		`Or use: hyperchart_rewind runDir=${runDir} to=compatible`,
+		`Rewind to the compatible prefix explicitly before resuming: hyperchart action=rewind runDir=${runDir} seqId=${target} mode=before`,
+		`Or use: hyperchart action=rewind runDir=${runDir} to=compatible`,
 	].join("\n");
 }
 

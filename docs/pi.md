@@ -1,6 +1,6 @@
 # Pi extension
 
-`@surprisal/pi-hyperchart` adds chart discovery, run management, four agent tools, a terminal run view, a React inspector, and a bundled `hyperchart` skill to Pi.
+`@surprisal/pi-hyperchart` adds chart discovery, run management, one consolidated `hyperchart` agent tool, a terminal run view, a React inspector, and a bundled `hyperchart` skill to Pi.
 
 It does not define chart semantics. Those come from the exact matching version of `@surprisal/hyperchart`.
 
@@ -33,12 +33,40 @@ The repository root `package.json` points Pi at the workspace extension and skil
 
 A chart name resolves from the current project first, then from user scope:
 
-| Scope | Location |
-|---|---|
-| project | `.pi/hypercharts/*.chart.ts` |
-| user | `~/.pi/agent/hypercharts/*.chart.ts` |
+| Scope | Flat chart | Self-contained bundle |
+|---|---|---|
+| project | `.pi/hypercharts/*.chart.ts` | `.pi/hypercharts/<name>/chart.ts` |
+| user | `~/.pi/agent/hypercharts/*.chart.ts` | `~/.pi/agent/hypercharts/<name>/chart.ts` |
 
-You may also pass an absolute or relative module path.
+Project definitions override same-name user definitions. You may also pass an absolute or relative module path.
+
+### Self-contained bundles
+
+Use a bundle when chart needs private agents, extensions, guards, or scripts:
+
+```text
+hypercharts/video-review/
+├── chart.ts
+├── agents/
+│   ├── analyzer.md
+│   └── localizer.md
+├── extensions/
+│   └── video-tools/
+│       └── index.ts
+├── scripts/
+└── guards/
+```
+
+Rules:
+
+- `chart.ts` defines bundle entrypoint and discovery name.
+- `agents/` definitions override project and user definitions only for this chart.
+- `extensions/<name>/index.ts` exports a default Pi extension registration function.
+- Bundle extensions register when Pi loads or reloads Hyperchart.
+- Project bundle overrides same-name user bundle, including its extensions.
+- Guards and chart-owned paths resolve relative to `chart.ts`.
+- Extension implementation files do not appear as separate charts.
+- Flat charts remain supported.
 
 A run id is visible only from the working directory recorded in its `meta.json`. Open the owning directory before viewing, resuming, stopping, or rewinding that run.
 
@@ -109,16 +137,25 @@ Stopping requests process termination and changes operational status. It does no
 
 Delete recursively removes the run directory, including its durable log, status, session data, and rewind backups stored inside that directory. Copy important runs outside the run directory before deletion. Deletion is not a rewind and has no built-in restore command.
 
-## Agent tools
+## Agent tool
 
-The extension registers four tools. These are intended for Pi agents and programmatic tool calls; the slash command remains the direct human interface.
+The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `rewind`, or `stop`. The slash command remains the direct human interface.
 
-### `hyperchart_inspect`
+### `hyperchart` with `action: "list"`
+
+List project and user definitions without executing chart modules. Each result includes chart name, scope, and absolute path.
+
+```json
+{ "action": "list" }
+```
+
+### `hyperchart` with `action: "inspect"`
 
 Load a chart module and return its static inspector model without starting a run.
 
 ```json
 {
+  "action": "inspect",
   "chartPath": ".pi/hypercharts/review.chart.ts",
   "exportName": "reviewChart"
 }
@@ -130,12 +167,13 @@ The result contains source, contracts, topology, transitions, schemas, and defin
 
 > The tool loads executable TypeScript. It does not dispatch chart actions, but top-level code in the module can run with your permissions.
 
-### `hyperchart_run`
+### `hyperchart` with `action: "run"`
 
 Start or resume a run.
 
 ```json
 {
+  "action": "run",
   "chartPath": "review",
   "args": { "pullRequest": 42 },
   "wait": true
@@ -153,24 +191,42 @@ Start or resume a run.
 
 When `wait` is false or omitted, the tool returns after startup with `final: false`. When `wait` is true, it returns the terminal status and runtime-enriched inspector model.
 
-### `hyperchart_run_inspect`
+### `hyperchart` with `action: "run_inspect"`
 
 Load a concrete run and return the runtime-enriched inspector model.
 
 ```json
 {
+  "action": "run_inspect",
   "runDir": "review-20260711-142500"
 }
 ```
 
 The overlay includes run status, runtime issues, visits, resolved invocations, map generations, validation attempts, artifacts, usage, session failures, and replay findings. Historical tool results remain historical snapshots; rerun the tool to read new facts.
 
-### `hyperchart_rewind`
+### `hyperchart` with `action: "stop"`
+
+Stop one run:
+
+```json
+{ "action": "stop", "runDir": "review-20260711-142500" }
+```
+
+Stop every active run owned by current working directory:
+
+```json
+{ "action": "stop", "all": true }
+```
+
+Exactly one of `runDir` or `all: true` required.
+
+### `hyperchart` with `action: "rewind"`
 
 Back up and truncate a stopped run log.
 
 ```json
 {
+  "action": "rewind",
   "runDir": "review-20260711-142500",
   "state": "review",
   "mode": "before"
@@ -200,7 +256,7 @@ A live run cannot be rewound. Read [Recovery and safety](safety.md#rewind-a-run)
 By default, run directories live under:
 
 ```text
-.pi/hypercharts/runs/<run-id>/
+${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 ```
 
 | Path | Owner | Meaning |
@@ -221,7 +277,7 @@ An agent action names a Pi agent definition:
 agent("reviewer", { task: "Review the change." })
 ```
 
-The Pi adapter resolves project and user agent-definition directories using Pi's normal rules. The definition supplies system prompt, model, thinking level, and tool defaults. Chart-level values may override invocation settings.
+The Pi adapter checks bundle `agents/` first, then resolves project and user agent-definition directories using Pi's normal rules. The definition supplies system prompt, model, thinking level, and tool defaults. Chart-level values may override invocation settings.
 
 If the concrete definition cannot be loaded, inspection reports `agentDefinitionUnavailable`, and execution refuses to run that state.
 
@@ -251,8 +307,8 @@ Install the Pi package normally instead of copying only `extensions/hyperchart.t
 
 Check the filename and scope:
 
-- `.pi/hypercharts/name.chart.ts` for the project;
-- `~/.pi/agent/hypercharts/name.chart.ts` for the user.
+- `.pi/hypercharts/name.chart.ts` or `.pi/hypercharts/name/chart.ts` for project scope;
+- `~/.pi/agent/hypercharts/name.chart.ts` or `~/.pi/agent/hypercharts/name/chart.ts` for user scope.
 
 You can still pass an explicit path.
 

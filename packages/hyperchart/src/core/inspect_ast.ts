@@ -13,11 +13,11 @@ import type {
 	SchemaAst,
 	StateActionAst,
 	StateAst,
-	StatePath,
 	TemplateAst,
 } from "./types.js";
 
 export type HyperchartInspectAgentDefaults = {
+	description?: string;
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -94,6 +94,7 @@ export type HyperchartInspectState = {
 	reply?: JsonSchema;
 	guard?: HyperchartInspectGuard;
 	onReject?: OnReject;
+	description?: string;
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -205,6 +206,7 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 	if (action.kind === "agent") {
 		const task = templatePreview(action.task);
 		const defaults = options.agentDefaults?.(action.name);
+		const description = defaults?.description;
 		const model = action.model ?? defaults?.model;
 		const thinking = action.thinking ?? defaults?.thinking;
 		const tools = action.tools ?? defaults?.tools;
@@ -212,6 +214,7 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 			...base,
 			kind: "agent",
 			agent: action.name,
+			...(description === undefined ? {} : { description }),
 			...(task === undefined ? {} : { task }),
 			...(model === undefined ? {} : { model }),
 			...(thinking === undefined ? {} : { thinking }),

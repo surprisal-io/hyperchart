@@ -16,7 +16,7 @@ describe("chart preflight", () => {
 		const chartPath = join(dir, "external.chart.ts");
 		writeFileSync(
 			chartPath,
-			"const pid: number = process.pid;\nconst timer: NodeJS.Timeout | undefined = undefined;\nexport default { pid, timer };\n",
+			'import { refs } from "@surprisal/hyperchart";\nconst pid: number = process.pid;\nconst timer: NodeJS.Timeout | undefined = undefined;\nexport default { pid, timer, refs };\n',
 			"utf8",
 		);
 

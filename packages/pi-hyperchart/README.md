@@ -29,10 +29,10 @@ Run `/hyperchart` with no arguments to list recent runs for the current project.
 
 ## Pi tools
 
-- `hyperchart_inspect`
-- `hyperchart_run`
-- `hyperchart_run_inspect`
-- `hyperchart_rewind`
+- `hyperchart` with `action: "inspect"`
+- `hyperchart` with `action: "run"`
+- `hyperchart` with `action: "run_inspect"`
+- `hyperchart` with `action: "rewind"`
 
 ## Application entry points
 

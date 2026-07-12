@@ -197,6 +197,7 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 		...(state.definitionSource === undefined ? {} : { definitionSource: state.definitionSource }),
 		...(state.kind === "final" ? { final: true } : {}),
 		...(state.agent === undefined ? {} : { agent: state.agent }),
+		...(state.description === undefined ? {} : { agentDescription: state.description }),
 		...(state.model === undefined ? {} : { model: state.model }),
 		...(state.thinking === undefined ? {} : { thinking: state.thinking }),
 		...(state.tools === undefined ? {} : { tools: [...state.tools] }),

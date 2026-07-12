@@ -175,6 +175,7 @@ export interface HyperchartStateInfo {
 	id: string;
 	type?: HyperchartStateType;
 	agent?: string;
+	agentDescription?: string;
 	definitionSource?: string;
 	status: HyperchartStateStatus;
 	startedAt?: number;

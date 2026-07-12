@@ -52,14 +52,13 @@ async function readSessionSnapshot(
 	failedRunMetaFingerprints: Map<string, string>,
 	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartSessionSnapshot> {
-	const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir);
 	const [hypercharts, runs] = await Promise.all([
-		readHypercharts(cwd, agentDir, resolvedAgentDefaults),
+		readHypercharts(cwd, agentDir, agentDefaults),
 		readRuns(
 			cwd,
 			agentDir,
 			options.runLimit ?? 50,
-			resolvedAgentDefaults,
+			agentDefaults,
 			failedRunMetaFingerprints,
 			failedRunInspectionFingerprints,
 		),
@@ -83,7 +82,7 @@ async function readHypercharts(
 		["project", projectFiles, projectRoot],
 	] as const) {
 		for (const source of files) {
-			const info = await readChart(source, root, scope, cwd, agentDefaults);
+			const info = await readChart(source, root, scope, cwd, agentDir, agentDefaults);
 			if (info) byName.set(info.name, info);
 		}
 	}
@@ -96,11 +95,13 @@ async function readChart(
 	root: string,
 	scope: HyperchartInfo["scope"],
 	cwd: string,
+	agentDir: string,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 ): Promise<HyperchartInfo | undefined> {
 	try {
 		const file = await stat(source);
-		const inspect = inspectChartModuleSync(source, agentDefaults === undefined ? {} : { agentDefaults });
+		const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir, source);
+		const inspect = inspectChartModuleSync(source, { agentDefaults: resolvedAgentDefaults });
 		const run = hyperchartRunFromInspectResult(inspect, { cwd, updatedAt: file.mtimeMs });
 		const rel = relative(root, source).replaceAll("\\", "/");
 		return {
@@ -141,6 +142,7 @@ async function readRuns(
 				readRun(
 					join(root, entry.name),
 					cwd,
+					agentDir,
 					agentDefaults,
 					failedRunMetaFingerprints,
 					failedRunInspectionFingerprints,
@@ -156,6 +158,7 @@ async function readRuns(
 async function readRun(
 	runDir: string,
 	cwd: string,
+	agentDir: string,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
 	failedRunInspectionFingerprints: Map<string, string>,
@@ -173,9 +176,10 @@ async function readRun(
 	}
 	try {
 		if (resolve(meta.workDir) !== cwd) return undefined;
+		const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir, meta.chartPath);
 		const run = await hyperchartRunFromRunDir(runDir, {
 			meta,
-			...(agentDefaults === undefined ? {} : { agentDefaults }),
+			agentDefaults: resolvedAgentDefaults,
 		});
 		failedRunInspectionFingerprints.delete(runDir);
 		return run;
@@ -245,15 +249,19 @@ async function fileFingerprint(path: string): Promise<string> {
 
 async function listChartFiles(root: string): Promise<string[]> {
 	const files: string[] = [];
-	await walk(root, files);
+	await walk(root, files, root);
 	return files.sort();
 }
 
-async function walk(dir: string, files: string[]): Promise<void> {
+async function walk(dir: string, files: string[], root: string): Promise<void> {
 	let entries;
 	try {
 		entries = await readdir(dir, { withFileTypes: true });
 	} catch {
+		return;
+	}
+	if (dir !== root && entries.some((entry) => entry.isFile() && entry.name === "chart.ts")) {
+		files.push(join(dir, "chart.ts"));
 		return;
 	}
 	await Promise.all(
@@ -261,7 +269,7 @@ async function walk(dir: string, files: string[]): Promise<void> {
 			const path = join(dir, entry.name);
 			if (entry.isDirectory()) {
 				if (entry.name === "runs" || entry.name === "node_modules" || entry.name.startsWith(".")) return;
-				await walk(path, files);
+				await walk(path, files, root);
 			} else if (
 				entry.isFile() &&
 				(entry.name.endsWith(".chart.ts") || entry.name.endsWith(".ts")) &&

@@ -33,4 +33,4 @@ Hyperchart is a TypeScript statechart runtime for work that may span scripts, ag
 
 - [Development and release](development.md) — repository setup, checks, documentation ownership, package validation, and release order.
 
-> Hyperchart loads chart modules as executable TypeScript. Inspecting a chart does not execute its workflow actions, but loading the module can execute top-level code. Review untrusted source before using `hyperchart_inspect` or starting a run.
+> Hyperchart loads chart modules as executable TypeScript. Inspecting a chart does not execute its workflow actions, but loading the module can execute top-level code. Review untrusted source before using `hyperchart` with `action: "inspect"` or starting a run.
