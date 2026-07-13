@@ -1,41 +1,45 @@
 # TODO
 
-## Пересмотреть дизайн `onReenter`
+## Revisit the `onReenter` design
 
-Текущий дизайн `onReenter` получился слишком общим и с неочевидной семантикой.
+The current `onReenter` design is too broad and has unclear semantics.
 
-### Что стоит упростить
+### Potential simplifications
 
-`onReenter` логично разрешать только для state с `agent` action. Возобновление предыдущего контекста имеет смысл только для агента с сохранённой сессией. Для `user` и `script` отдельная политика re-entry, вероятно, не нужна: при повторном входе они просто запускаются заново.
+`onReenter` should probably be allowed only for states with an `agent` action. Resuming a previous context makes sense only for an agent with a persisted session. `user` and `script` likely do not need a separate re-entry policy: when entered again, they can simply run again from scratch.
 
-Нужно решить, следует ли полностью убрать `"restart"` из `onReenter`. Если отсутствие `onReenter` уже означает новый запуск, отдельное значение `"restart"` ничего не добавляет.
+Decide whether `"restart"` should be removed from `onReenter` entirely. If omitting `onReenter` already means starting a new run, a separate `"restart"` value adds nothing.
 
-### Нерешённая семантика `map` и `parallel`
+### Unresolved `map` and `parallel` semantics
 
-Непонятно, как должен работать частичный возврат элементов или веток на переделку:
+It is unclear how partially returning items or branches for rework should behave:
 
-- восстанавливать старую агентскую сессию для каждого повторно выбранного item/branch;
-- всегда создавать новую сессию;
-- позволять задавать политику отдельно для дочернего agent state;
-- должна ли политика зависеть от причины повторного входа: review feedback, retry, изменение input или обычный цикл графа.
+- resume the previous agent session for every selected item or branch;
+- always create a new session;
+- allow the policy to be configured separately on the child agent state;
+- make the policy depend on the reason for re-entry: review feedback, retry, changed input, or a regular graph cycle.
 
-Особенно важно определить:
+The following questions are especially important:
 
-1. Как идентифицируется «тот же» map item между обходами: только по key или также по значению/input.
-2. Что делать, если key сохранился, но item полностью изменился.
-3. Должна ли завершённая branch/item-сессия считаться пригодной для resume после выхода из `map`/`parallel`.
-4. Новая branch/item должна всегда начинаться с новой сессии.
-5. Где задаётся решение: на child agent state, на контейнере `map`/`parallel` или автоматически runtime.
+1. How is the “same” map item identified across traversals: by key alone, or also by its value/input?
+2. What happens when the key remains the same but the item has changed completely?
+3. Should a completed branch/item session remain eligible for resume after leaving the `map`/`parallel` state?
+4. Should a new branch/item always start with a new session?
+5. Where is this decision configured: on the child agent state, on the `map`/`parallel` container, or automatically by the runtime?
 
-### Требуемый результат
+### Required outcome
 
-Нужен единый простой контракт, который явно отвечает на два вопроса:
+Define a single, simple contract that clearly answers two questions:
 
-1. Когда повторный вход продолжает старую агентскую сессию, а когда создаёт новую.
-2. Как этот контракт применяется к отдельным items/branches внутри `map` и `parallel`.
+1. When does re-entry resume a previous agent session, and when does it create a new one?
+2. How does this contract apply to individual items and branches inside `map` and `parallel`?
 
-До принятия этого решения не расширять API `onReenter` и не добавлять новые специальные случаи.
+Do not expand the `onReenter` API or add more special cases until this decision is made.
 
-## Пересмотреть дизайн replay
+## Revisit the replay design
 
-Продумать, что делать с replay: изначально идея предполагала ветвление, но текущая реализация работает иначе.
+Decide what replay should mean. The original idea was based on branching, but the current implementation behaves differently.
+
+## Rework the documentation
+
+Review and restructure the documentation. Its current organization and presentation are not effective enough and need a broader redesign.
