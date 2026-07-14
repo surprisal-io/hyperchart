@@ -239,3 +239,14 @@
 	--hc-yellow-text: #854d0e;
 	--shadow-card: rgba(0, 0, 0, 0.08);
 }
+
+/* A modal inspector fully covers its host. Pause animations in sibling application roots so
+   off-screen spinners and pulses do not keep painting behind the dialog. */
+html[data-hyperchart-inspector-open]
+	body
+	> :not([data-testid="hyperchart-inspector-dialog"]):not(:has([data-testid="hyperchart-inspector-dialog"])) *,
+html[data-hyperchart-inspector-open]
+	body
+	> :not([data-testid="hyperchart-inspector-dialog"]):not(:has([data-testid="hyperchart-inspector-dialog"])) {
+	animation-play-state: paused !important;
+}

@@ -5,7 +5,9 @@ import {
 	GRAPH_COMPACT_NODE_HEIGHT,
 	GRAPH_COMPACT_NODE_WIDTH,
 	graphLayoutSignature,
+	reconcileGraphElements,
 } from "../packages/pi-hyperchart/src/react/components/inspector/graph/graphModel.js";
+import { edgeMotionPoints } from "../packages/pi-hyperchart/src/react/components/inspector/graph/edgeRouting.js";
 
 function run(status: "pending" | "running" | "done", target = "done"): HyperchartRunInfo {
 	return {
@@ -34,14 +36,86 @@ function run(status: "pending" | "running" | "done", target = "done"): Hyperchar
 }
 
 describe("graph nodes", () => {
-	it("declare fixed dimensions so controlled updates never hide nodes for remeasurement", () => {
+	it("keeps fixed and measured dimensions across controlled updates", () => {
 		const graph = buildGraph(run("running"), new Set(["work", "done"]));
 
 		expect(graph.nodes).toHaveLength(2);
 		for (const node of graph.nodes) {
 			expect(node.width).toBe(GRAPH_COMPACT_NODE_WIDTH);
 			expect(node.height).toBe(GRAPH_COMPACT_NODE_HEIGHT);
+			expect(node.measured).toEqual({
+				width: GRAPH_COMPACT_NODE_WIDTH,
+				height: GRAPH_COMPACT_NODE_HEIGHT,
+			});
 		}
+		expect(graph.nodes.find((node) => node.id === "work")?.data.snapshotAt).toBe(3);
+		expect(graph.nodes.find((node) => node.id === "done")?.data.snapshotAt).toBeUndefined();
+	});
+
+	it("reuses the complete graph when only a non-running snapshot timestamp changes", () => {
+		const visible = new Set(["work", "done"]);
+		const previous = buildGraph(run("pending"), visible);
+		const next = buildGraph({ ...run("pending"), updatedAt: 4 }, visible);
+
+		expect(reconcileGraphElements(previous, next)).toBe(previous);
+	});
+
+	it("reuses the complete graph when a running duration heartbeat advances", () => {
+		const visible = new Set(["work", "done"]);
+		const previous = buildGraph(run("running"), visible);
+		const next = buildGraph({ ...run("running"), updatedAt: 4 }, visible);
+
+		expect(reconcileGraphElements(previous, next)).toBe(previous);
+	});
+
+	it("marks running transitions for a compositor marker without React Flow's SVG dash animation", () => {
+		const edge = buildGraph(run("running"), new Set(["work", "done"])).edges[0];
+
+		expect(edge?.animated).not.toBe(true);
+		expect(edge?.data).toMatchObject({ running: true });
+	});
+
+	it("does not serialize non-visual unknown runtime payloads while reconciling", () => {
+		const previousRun = run("running");
+		previousRun.states[0] = {
+			...previousRun.states[0]!,
+			mapConfig: { items: [{ key: "one", label: "one", value: 1n }] },
+		};
+		const nextRun = run("running");
+		nextRun.states[0] = {
+			...nextRun.states[0]!,
+			mapConfig: { items: [{ key: "one", label: "one", value: 1n }] },
+		};
+		const visible = new Set(["work", "done"]);
+		const previous = buildGraph(previousRun, visible);
+		const next = buildGraph(nextRun, visible);
+
+		expect(reconcileGraphElements(previous, next)).toBe(previous);
+	});
+});
+
+describe("edgeMotionPoints", () => {
+	it("samples routed paths at stable graph-space intervals", () => {
+		const points = edgeMotionPoints({
+			sourceX: 0,
+			sourceY: 0,
+			targetX: 100,
+			targetY: 100,
+			routedPoints: [
+				{ x: 0, y: 0 },
+				{ x: 100, y: 0 },
+				{ x: 100, y: 100 },
+			],
+			count: 5,
+		});
+
+		expect(points).toEqual([
+			{ x: 0, y: 0 },
+			{ x: 50, y: 0 },
+			{ x: 100, y: 0 },
+			{ x: 100, y: 50 },
+			{ x: 100, y: 100 },
+		]);
 	});
 });
 

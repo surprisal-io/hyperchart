@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { hyperchartStatusClasses, hyperchartStatusDotClass } from "../../../hyperchart-display.js";
 import type { StateNode } from "../types.js";
@@ -15,6 +16,19 @@ import { graphNodeSize } from "./graphModel.js";
 import { CompactMapNodePreview } from "./CompactMapNodePreview.js";
 import { CompactParallelNodePreview } from "./CompactParallelNodePreview.js";
 
+function useDurationSnapshot(active: boolean, snapshotAt?: number): number | undefined {
+	const [current, setCurrent] = useState(() => snapshotAt ?? Date.now());
+	useEffect(() => {
+		if (!active) return;
+		const baseline = snapshotAt ?? Date.now();
+		const mountedAt = Date.now();
+		setCurrent(baseline);
+		const timer = window.setInterval(() => setCurrent(baseline + Date.now() - mountedAt), 1_000);
+		return () => window.clearInterval(timer);
+	}, [active, snapshotAt]);
+	return active ? current : snapshotAt;
+}
+
 export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode>) {
 	const state = data.state;
 	const displayState = data.displayType ? { ...state, type: data.displayType } : state;
@@ -23,7 +37,11 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 	const validationLabel = validationRetryLabel(state);
 	const hasStructuredPreview = displayState.type === "map" || displayState.type === "parallel";
 	const mechanism = hasStructuredPreview ? undefined : stateMechanismLabel(displayState);
-	const duration = formatStateDuration(state);
+	const durationSnapshot = useDurationSnapshot(
+		state.status === "running" && state.startedAt !== undefined && state.endedAt === undefined,
+		data.snapshotAt,
+	);
+	const duration = formatStateDuration(state, durationSnapshot);
 	const runtimeChips = compactRuntimeFacts(state).slice(0, 2);
 	const triageChips = compactTriageFacts(state, validationLabel).slice(0, 2);
 	const outlineClass = selected
