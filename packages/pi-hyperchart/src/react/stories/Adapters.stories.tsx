@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useMemo } from "react";
 import type { HyperchartInspectResult } from "@surprisal/hyperchart/internal/core/inspect";
 import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
 import { HyperchartGraphPreview } from "../HyperchartInspectorDialog.js";
@@ -44,21 +43,38 @@ const inspectResult: HyperchartInspectResult = {
 	],
 };
 
+const inspectRun = hyperchartRunFromInspectResult(inspectResult, { runId: "inspect:static-review" });
+
 const meta = {
-	title: "Hyperchart/Adapters",
-	parameters: { layout: "fullscreen" },
-} satisfies Meta;
+	title: "Hyperchart/Examples/Adapters",
+	component: HyperchartGraphPreview,
+	parameters: {
+		layout: "fullscreen",
+		docs: {
+			description: {
+				component: "Visual checks for adapting core inspection data into React UI models.",
+			},
+		},
+	},
+	args: {
+		run: inspectRun,
+		className: "h-[520px]",
+	},
+	argTypes: {
+		run: { control: false },
+	},
+} satisfies Meta<typeof HyperchartGraphPreview>;
 
 export default meta;
-type Story = StoryObj;
+type Story = StoryObj<typeof meta>;
 
 export const InspectResultToGraph: Story = {
-	render: () => {
-		const run = useMemo(() => hyperchartRunFromInspectResult(inspectResult, { runId: "inspect:static-review" }), []);
-		return (
-			<div className="p-6">
-				<HyperchartGraphPreview run={run} className="h-[520px]" />
-			</div>
-		);
+	render: (args) => (
+		<div className="p-6">
+			<HyperchartGraphPreview {...args} />
+		</div>
+	),
+	parameters: {
+		docs: { description: { story: "Static inspect output adapted into the graph preview model." } },
 	},
 };
