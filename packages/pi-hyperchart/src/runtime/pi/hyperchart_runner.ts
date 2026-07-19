@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { explainReplay, parseChartModuleSync, start, type ReplayExplanation } from "@surprisal/hyperchart";
 import { ChartRuntime } from "@surprisal/hyperchart/runtime";
 import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
@@ -74,15 +74,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			exitCode: undefined,
 			...(replayWarnings.length === 0 ? { replayWarnings: undefined } : { replayWarnings }),
 		});
-		const modelRegistry = createModelRegistry(config.agentDir);
+		const modelRuntime = await createModelRuntime(config.agentDir);
 		const chartDir = dirname(config.chartPath);
 		const executor = new PiAgentExecutor({
 			workDir: config.workDir,
 			agentDir: config.agentDir,
 			definitionDirs: resolvePiSubagentDefinitionDirs(config.workDir, config.agentDir, config.chartPath),
-			modelRegistry,
+			modelRuntime,
 			sessionsDir: join(config.runDir, "sessions"),
 			...(config.defaultModel === undefined ? {} : { defaultModel: config.defaultModel }),
+			schemaRegistry: parsed.schemaRegistry,
 		});
 		runtime = new ChartRuntime({
 			ast: parsed.ast,
@@ -90,6 +91,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			agentExecutor: executor,
 			workDir: config.workDir,
 			chartDir,
+			schemaRegistry: parsed.schemaRegistry,
 			onWarn: (message) => console.warn(message),
 		});
 		const finalState = await start(runtime, config.args);
@@ -189,9 +191,11 @@ function formatReplayWarnings(explanation: ReplayExplanation): string[] {
 	return warnings;
 }
 
-function createModelRegistry(agentDir: string): ModelRegistry {
-	const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-	return ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+async function createModelRuntime(agentDir: string): Promise<ModelRuntime> {
+	return ModelRuntime.create({
+		authPath: join(agentDir, "auth.json"),
+		modelsPath: join(agentDir, "models.json"),
+	});
 }
 
 function installSignalHandlers(runDir: string): void {

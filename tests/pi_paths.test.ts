@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtemp } from "node:fs/promises";
@@ -51,6 +51,19 @@ describe("pi hyperchart paths", () => {
 		expect(resolveHyperchartPath("review", project, agentDir)).toBe(join(projectBundle, "chart.ts"));
 		expect(resolveHyperchartPath("global-review", project, agentDir)).toBe(join(userBundle, "chart.ts"));
 		expect(listProjectHypercharts(project)).toEqual(["review/chart.ts"]);
+	});
+
+	it("discovers symlinked chart bundles without following directory cycles", async () => {
+		const project = await makeTempDir();
+		const externalBundle = await makeTempDir();
+		const chartsDir = join(project, ".pi", "hypercharts");
+		await mkdir(chartsDir, { recursive: true });
+		await writeFile(join(externalBundle, "chart.ts"), "export default {}", "utf8");
+		await symlink(externalBundle, join(chartsDir, "odyssey"), "dir");
+		await symlink(chartsDir, join(chartsDir, "cycle"), "dir");
+
+		expect(listProjectHypercharts(project)).toEqual(["odyssey/chart.ts"]);
+		expect(resolveHyperchartPath("odyssey", project)).toBe(join(chartsDir, "odyssey", "chart.ts"));
 	});
 
 	it("keeps run ids under the pi agent directory", async () => {

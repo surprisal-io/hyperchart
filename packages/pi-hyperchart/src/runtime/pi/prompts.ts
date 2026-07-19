@@ -62,11 +62,10 @@ export function formatCompletion(effect: AgentEffect): string {
 	const lines = [
 		"## Completion",
 		"When done, call the `finish` tool exactly once.",
-		`- invocationId: exactly ${JSON.stringify(effect.id)}`,
 		`- event: one of ${JSON.stringify(finishableEvents(effect))}`,
 	];
 	if (effect.reply !== undefined) {
-		lines.push("- output must match this JSON schema:");
+		lines.push("- output must match this JSON schema (validation metadata only; do not write the schema object as output):");
 		lines.push("```json");
 		lines.push(JSON.stringify(effect.reply.schema, null, 2));
 		lines.push("```");
@@ -100,7 +99,7 @@ function formatDeliverables(artifacts: readonly RenderedArtifact[]): string {
 	for (const artifact of artifacts) {
 		lines.push(`Write the file \`${artifact.path}\`.`);
 		if (artifact.shape !== undefined) {
-			lines.push("Its content MUST match this JSON schema:");
+			lines.push("The schema below is validation metadata only; write deliverable data, never this schema object:");
 			lines.push("```json");
 			lines.push(JSON.stringify(artifact.shape.schema, null, 2));
 			lines.push("```");

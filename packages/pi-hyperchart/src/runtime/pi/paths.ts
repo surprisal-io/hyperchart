@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
 
@@ -34,12 +34,15 @@ export function resolveHyperchartPath(spec: string, cwd: string, agentDir: strin
 
 export function listProjectHypercharts(cwd: string): string[] {
 	const root = getProjectHyperchartsDir(cwd);
+	return listHyperchartFiles(root).map((file) => file.slice(root.length + 1));
+}
+
+export function listHyperchartFiles(root: string): string[] {
 	if (!isDirectory(root)) return [];
 	const files: string[] = [];
-	walk(root, files, root);
+	walk(root, files, root, new Set());
 	return files
 		.filter((file) => file.endsWith(".chart.ts") || file.endsWith(".ts"))
-		.map((file) => file.slice(root.length + 1))
 		.sort();
 }
 
@@ -80,18 +83,22 @@ function findNearestProjectRoot(cwd: string): string | undefined {
 	}
 }
 
-function walk(dir: string, files: string[], root: string): void {
+function walk(dir: string, files: string[], root: string, visitedDirectories: Set<string>): void {
+	let realDirectory: string;
+	try { realDirectory = realpathSync(dir); } catch { return; }
+	if (visitedDirectories.has(realDirectory)) return;
+	visitedDirectories.add(realDirectory);
 	const bundleEntry = join(dir, "chart.ts");
 	if (dir !== root && isFile(bundleEntry)) {
 		files.push(bundleEntry);
 		return;
 	}
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (entry.name === RUNS_DIR_NAME || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
 		const path = join(dir, entry.name);
-		if (entry.isDirectory()) {
-			if (entry.name === RUNS_DIR_NAME || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-			walk(path, files, root);
-		} else if (entry.isFile()) {
+		if (entry.isDirectory() || (entry.isSymbolicLink() && isDirectory(path))) {
+			walk(path, files, root, visitedDirectories);
+		} else if (entry.isFile() || (entry.isSymbolicLink() && isFile(path))) {
 			files.push(path);
 		}
 	}
