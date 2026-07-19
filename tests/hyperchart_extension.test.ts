@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -6,9 +6,13 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
-import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus, readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
 import { updateSessionProgress } from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
+import {
+	closeRunInspectorServer,
+	openRunInspector,
+} from "../packages/pi-hyperchart/src/runtime/pi/inspector_server.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
@@ -48,7 +52,8 @@ beforeEach(() => {
 	process.chdir(projectDir);
 });
 
-afterEach(() => {
+afterEach(async () => {
+	await closeRunInspectorServer();
 	process.chdir(previousCwd);
 	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -58,6 +63,21 @@ afterEach(() => {
 describe("hyperchart extension", () => {
 	it("registers one consolidated hyperchart tool", () => {
 		expect(registeredToolNames()).toEqual(["hyperchart"]);
+	});
+
+	it("records the originating pi session on a new run", async () => {
+		const chartPath = join(tempDir, "session-owned.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "owned", initial: "done", states: { done: { kind: "final" } } };\n`);
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "run", chartPath, wait: true },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const runDir = (result.details as { runDir: string }).runDir;
+
+		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
 	});
 
 	it("lists project and user charts with project precedence", async () => {
@@ -84,6 +104,25 @@ describe("hyperchart extension", () => {
 			expect.objectContaining({ name: "shared", scope: "project" }),
 			expect.objectContaining({ name: "user-only", scope: "user" }),
 		]);
+	});
+
+	it("lists a user chart bundle installed as a directory symlink", async () => {
+		const userCharts = join(agentDir, "hypercharts");
+		const externalBundle = join(tempDir, "odyssey-source");
+		mkdirSync(userCharts, { recursive: true });
+		mkdirSync(externalBundle, { recursive: true });
+		writeFileSync(join(externalBundle, "chart.ts"), "export default {};\n");
+		symlinkSync(externalBundle, join(userCharts, "odyssey"), "dir");
+
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "list" },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const charts = (result.details as { charts: Array<{ name: string; path: string }> }).charts;
+		expect(charts).toEqual([expect.objectContaining({ name: "odyssey", path: join(userCharts, "odyssey", "chart.ts") })]);
 	});
 
 	it("registers tools from a self-contained chart bundle extension without listing its implementation files", async () => {
@@ -163,6 +202,29 @@ describe("hyperchart extension", () => {
 				if (event === HYPERCHART_COMMAND_EVENT) commandRequest?.(payload as HyperchartCommandRequest);
 			},
 		}, "resume")).rejects.toThrow("resume requires a runId");
+	});
+
+	it("closes the browser inspector server on session shutdown", async () => {
+		let sessionShutdown: (() => Promise<void>) | undefined;
+		const pi = {
+			registerCommand: () => {},
+			registerTool: () => {},
+			on: (event: string, handler: () => Promise<void>) => {
+				if (event === "session_shutdown") sessionShutdown = handler;
+			},
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const { url } = await openRunInspector({
+			runId: "lifecycle-run",
+			loadRun: async () => ({ runId: "lifecycle-run" }) as never,
+			openBrowser: () => undefined,
+		});
+		expect((await fetch(url)).status).toBe(200);
+
+		await sessionShutdown?.();
+
+		await expect(fetch(url)).rejects.toThrow();
 	});
 
 	it("offers documented top-level commands and run ids with an empty prefix", () => {
@@ -415,6 +477,7 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 			cwd,
 			mode: "print",
 			model: undefined,
+			sessionManager: { getSessionId: () => "session-a" },
 			ui: {
 				notify: (message: string, type: "info" | "warning" | "error" | undefined) => {
 					notifications.push({ message, type });

@@ -182,7 +182,10 @@ async function readRun(
 			agentDefaults: resolvedAgentDefaults,
 		});
 		failedRunInspectionFingerprints.delete(runDir);
-		return run;
+		return {
+			...run,
+			...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
+		};
 	} catch (error) {
 		if (failedRunInspectionFingerprints.get(runDir) !== metaFingerprint) {
 			failedRunInspectionFingerprints.set(runDir, metaFingerprint);
@@ -195,6 +198,7 @@ async function readRun(
 		return {
 			runId: persistedStatus?.runId ?? basename(runDir),
 			chartName: persistedStatus?.chartId ?? meta.chartId,
+			...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
 			description: meta.chartPath,
 			status: metadataOnlyStatus(persistedStatus),
 			cwd: resolve(meta.workDir),
