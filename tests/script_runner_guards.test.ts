@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -298,8 +299,14 @@ describe("guards", () => {
 		const dir = await makeTempDir();
 		const runner = new ScriptRunner({ workDir: dir, killGraceMs: 50 });
 		const actionUid = { chart: "cancel-test", state: "work", action: "script" } as const;
-		const pending = runner.runGuard({ kind: "script", command: node, args: ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"] }, { type: "DONE" }, undefined, undefined, undefined, actionUid);
-		await new Promise((resolve) => setTimeout(resolve, 30));
+		// The guard confirms its SIGTERM trap is installed before the test cancels; a fixed sleep
+		// races Node startup and would let SIGTERM kill the process directly.
+		const pending = runner.runGuard({ kind: "script", command: node, args: ["-e", "process.on('SIGTERM',()=>{}); require('node:fs').writeFileSync('ready',''); setInterval(()=>{},1000)"] }, { type: "DONE" }, undefined, undefined, undefined, actionUid);
+		const ready = join(dir, "ready");
+		for (let attempt = 0; attempt < 300 && !existsSync(ready); attempt++) {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		expect(existsSync(ready)).toBe(true);
 		runner.cancel(actionUid);
 		await expect(withTimeout(pending)).resolves.toEqual({ ok: false, reason: "exit SIGKILL" });
 		await runner.dispose();
