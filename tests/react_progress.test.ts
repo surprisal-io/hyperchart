@@ -38,6 +38,20 @@ describe("Hyperchart path progress", () => {
 		expect(progress).toEqual({ done: 1, total: 2, pct: 50 });
 	});
 
+	it("does not treat a completed nested map-instance final as whole-run completion", () => {
+		const progress = summarizeHyperchartProgress(run([
+			state("prepare", "done", { endedAt: 10, transitions: [{ event: "READY", target: "research#market.scout" }] }),
+			state("research#official.done", "done", { final: true }),
+			state("research#market.scout", "running", {
+				startedAt: 20,
+				transitions: [{ event: "SCOUTED", target: "research#market.done" }],
+			}),
+			state("research#market.done", "pending", { final: true }),
+		]));
+
+		expect(progress).toEqual({ done: 1, total: 2, pct: 50 });
+	});
+
 	it("reports full progress whenever the run reaches a final outcome", () => {
 		const states = [
 			state("work", "done", { transitions: [{ event: "DONE", target: "done" }] }),

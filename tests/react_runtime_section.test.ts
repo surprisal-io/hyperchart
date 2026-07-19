@@ -48,6 +48,33 @@ describe("Runtime inspector section", () => {
 		expect(agentStatesForSelection(map, [map, worker])).toEqual([worker]);
 	});
 
+	it("keeps one in-scope state per agent name in source order", () => {
+		const map: HyperchartStateInfo = { id: "workers", type: "map", status: "running" };
+		const firstWriter: HyperchartStateInfo = {
+			id: "workers#alpha.work",
+			type: "agent",
+			status: "running",
+			agent: "writer",
+		};
+		const reviewer: HyperchartStateInfo = {
+			id: "workers#alpha.review",
+			type: "agent",
+			status: "running",
+			agent: "reviewer",
+		};
+		const secondWriter: HyperchartStateInfo = {
+			id: "workers#beta.work",
+			type: "agent",
+			status: "running",
+			agent: "writer",
+		};
+
+		expect(agentStatesForSelection(map, [map, firstWriter, reviewer, secondWriter])).toEqual([
+			firstWriter,
+			reviewer,
+		]);
+	});
+
 	it("renders fitting map values without a full-content control", () => {
 		const state: HyperchartStateInfo = {
 			id: "items",

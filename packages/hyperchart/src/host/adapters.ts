@@ -165,7 +165,7 @@ export function hyperchartRunFromRuntime(
 	const runtimeStates = [...staticStates, ...materializedMapStates(staticRun.states, ast, projection, runtime)].filter(
 		(state) => !isUnmaterializedMapTemplateState(ast, state.id),
 	);
-	const states = markStaleRuntimeStates(runtimeStates, ast, projection);
+	const states = markStaleRuntimeStates(runtimeStates, ast, projection, runtime);
 	const issues = runIssues(options.status);
 	return {
 		...staticRun,
@@ -192,8 +192,9 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 	);
 	return {
 		id: state.id,
-		status: state.kind === "final" ? "done" : "pending",
+		status: "pending",
 		type: inspectStateKindToStateType(state.kind),
+		...(state.initial === true ? { initial: true } : {}),
 		...(state.definitionSource === undefined ? {} : { definitionSource: state.definitionSource }),
 		...(state.kind === "final" ? { final: true } : {}),
 		...(state.agent === undefined ? {} : { agent: state.agent }),
@@ -283,6 +284,7 @@ function markStaleRuntimeStates(
 	states: HyperchartStateInfo[],
 	ast: ChartAst,
 	projection: ReturnType<typeof createBranchProjection>,
+	runtime: RuntimeFacts,
 ): HyperchartStateInfo[] {
 	const byId = new Map(states.map((state) => [state.id, state]));
 	const controlEdges = runtimeControlEdges(states, ast);
@@ -331,6 +333,9 @@ function markStaleRuntimeStates(
 		const target = predecessor.transitions?.find((transition) => transition.event === predecessor.completedEvent)?.target;
 		if (target !== undefined && byId.get(target)?.type === "final") staleIds.add(target);
 	}
+	for (const stateId of [...staleIds]) {
+		if (closedByCompletedAncestor(stateId, ast, projection, runtime)) staleIds.delete(stateId);
+	}
 	let addedContainer = true;
 	while (addedContainer) {
 		addedContainer = false;
@@ -338,6 +343,7 @@ function markStaleRuntimeStates(
 			if (state.status !== "done" || staleIds.has(state.id)) continue;
 			if (state.type !== "map" && state.type !== "parallel" && state.type !== "compound" && state.type !== "region")
 				continue;
+			if (completedScopeIsClosed(state.id, ast, projection, runtime)) continue;
 			if ([...staleIds].some((stateId) => stateId.startsWith(`${state.id}.`) || stateId.startsWith(`${state.id}#`))) {
 				staleIds.add(state.id);
 				addedContainer = true;
@@ -1077,8 +1083,14 @@ function runtimeStateStatus(
 	if (state.type === "final") {
 		return projection.activeLeaves.includes(state.id) || finalReached(state.id, ast, runtime) ? "done" : "pending";
 	}
+	if (
+		(state.type === "compound" || state.type === "region") &&
+		scopeReachedFinal(state.id, ast, projection, runtime)
+	)
+		return "done";
 	if (projection.activeLeaves.some((leaf) => leaf === state.id || underScope(leaf, state.id))) return "running";
 	if (facts?.completedAt !== undefined) return "done";
+	if (closedByCompletedAncestor(state.id, ast, projection, runtime)) return "done";
 	if (state.type === "map") {
 		const spawned = projection.spawns[state.id];
 		if (spawned !== undefined) {
@@ -1116,7 +1128,10 @@ function overlayMapRuntime(
 	projection: ReturnType<typeof createBranchProjection>,
 	runtime: RuntimeFacts,
 ): HyperchartStateInfo {
-	const items = mapItems(state, ast, projection, runtime);
+	const rawItems = mapItems(state, ast, projection, runtime);
+	const items = state.status === "done" || closedByCompletedAncestor(state.id, ast, projection, runtime)
+		? rawItems.map((item) => item.status === "stale" ? { ...item, status: "done" as const } : item)
+		: rawItems;
 	const visitHistory = runtime.mapVisitHistoryByState.get(state.id);
 	if (items.length === 0 && projection.spawns[state.id] === undefined && visitHistory === undefined) return state;
 	const progressItems = currentMapItems(state.id, items, projection);
@@ -1191,6 +1206,46 @@ function mapItemSummary(value: unknown): string | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
 	const record = value as Record<string, unknown>;
 	return typeof record.summary === "string" ? record.summary : undefined;
+}
+
+function closedByCompletedAncestor(
+	statePath: StatePath,
+	ast: ChartAst,
+	projection: ReturnType<typeof createBranchProjection>,
+	runtime: RuntimeFacts,
+): boolean {
+	let scope = parentPath(statePath);
+	while (scope !== undefined) {
+		if (completedScopeIsClosed(scope, ast, projection, runtime)) return true;
+		scope = parentPath(scope);
+	}
+	return false;
+}
+
+function completedScopeIsClosed(
+	scopePath: StatePath,
+	ast: ChartAst,
+	projection: ReturnType<typeof createBranchProjection>,
+	runtime: RuntimeFacts,
+): boolean {
+	return (
+		scopeReachedFinal(scopePath, ast, projection, runtime) &&
+		!projection.activeLeaves.some((leaf) => leaf === scopePath || underScope(leaf, scopePath))
+	);
+}
+
+function scopeReachedFinal(
+	scopePath: StatePath,
+	ast: ChartAst,
+	projection: ReturnType<typeof createBranchProjection>,
+	runtime: RuntimeFacts,
+): boolean {
+	const templateScope = templatePath(scopePath);
+	return Object.values(ast.states).some((candidate) => {
+		if (candidate.kind !== "final" || candidate.parent !== templateScope) return false;
+		const finalPath = `${scopePath}.${candidate.id}`;
+		return projection.activeLeaves.includes(finalPath) || finalReached(finalPath, ast, runtime);
+	});
 }
 
 function finalReached(finalPath: StatePath, ast: ChartAst, runtime: RuntimeFacts): boolean {
@@ -1331,6 +1386,22 @@ function guardInfo(guard: NonNullable<HyperchartInspectState["guard"]>): NonNull
 			kind: "script",
 			command: guard.command,
 			...(guard.args === undefined ? {} : { args: [...guard.args] }),
+			...(guard.env === undefined
+				? {}
+				: {
+						env: guard.env.map((env) => ({
+							name: env.name,
+							type: env.type,
+							...(env.value === undefined ? {} : { value: env.value }),
+							...(env.schema === undefined ? {} : { schema: { schema: env.schema } }),
+						})),
+					}),
+			...(guard.artifacts === undefined ? {} : { artifacts: guard.artifacts.map((artifact) => ({
+					name: artifact.name,
+					...(artifact.path === undefined ? {} : { path: artifact.path }),
+					...(artifact.shape === undefined ? {} : { schema: { schema: artifact.shape } }),
+				})) }),
+			...(guard.reply === undefined ? {} : { reply: { schema: guard.reply } }),
 		};
 	}
 	return { kind: "tsImport", module: guard.module, export: guard.export };

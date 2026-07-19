@@ -44,10 +44,39 @@ describe("React runtime adapter", () => {
 		expect(run.mode).toBe("static");
 		expect(run.definitionSource).toContain("chart(");
 		expect(run.states.find((state) => state.id === "work")?.definitionSource).toContain("work:");
-		expect(run.states.find((state) => state.id === "work")?.status).toBe("pending");
+		expect(run.states.find((state) => state.id === "work")).toMatchObject({ status: "pending", initial: true });
+		expect(run.states.find((state) => state.id === "done")).toMatchObject({ status: "pending", final: true });
 		expect(run.states.find((state) => state.id === "work")?.validationAttempts).toBeUndefined();
 		expect(run.issues).toBeUndefined();
 		expect(run.states.find((state) => state.id === "work")?.issues).toBeUndefined();
+	});
+
+	it("marks initial states at the chart root and inside compound scopes", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "initial-markers",
+				initial: "pipeline",
+				states: {
+					pipeline: compound({
+						initial: "work",
+						onDone: "done",
+						states: {
+							work: { kind: "state", action: agent("worker"), transitions: { DONE: "complete" } },
+							complete: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+
+		const run = hyperchartRunFromInspectResult(inspectChartAst(chartAst));
+		expect(run.states.filter((state) => state.initial).map((state) => state.id).sort()).toEqual([
+			"pipeline",
+			"pipeline.work",
+		]);
+		expect(run.states.filter((state) => state.final).every((state) => state.status === "pending")).toBe(true);
 	});
 
 	it("unwraps runtime inspector models from tool details", () => {
@@ -106,7 +135,262 @@ describe("React runtime adapter", () => {
 		expect(run.pid).toBe(123);
 		expect(run.cwd).toBe("/tmp/project");
 		expect(work).toMatchObject({ status: "done", startedAt: 2000, endedAt: 3000, completedEvent: "DONE", attempts: 1 });
+		expect(run.states.find((state) => state.id === "done")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "failed")?.status).toBe("pending");
 		expect(work?.transitions?.find((transition) => transition.event === "DONE")?.taken).toBe(true);
+	});
+
+	it("marks an exited compound done while the next compound is running", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "sequential-compounds",
+				initial: "first",
+				states: {
+					first: compound({
+						initial: "work",
+						onDone: "second",
+						states: {
+							work: { kind: "state", action: agent("first-worker"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					second: compound({
+						initial: "work",
+						onDone: "complete",
+						states: {
+							work: { kind: "state", action: agent("second-worker"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					complete: final(),
+				},
+			}),
+		);
+		const firstWork = chartAst.states["first.work"];
+		const secondWork = chartAst.states["second.work"];
+		if (firstWork?.kind !== "state" || secondWork?.kind !== "state") throw new Error("missing compound work state");
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				actionUid: actionUid(chartAst, "first.work"),
+				definition: firstWork.action,
+				...baseRecord(2),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "first.work"),
+				event: { type: "DONE" },
+				...baseRecord(3),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				actionUid: actionUid(chartAst, "second.work"),
+				definition: secondWork.action,
+				...baseRecord(4),
+			},
+		];
+
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "first")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "first.done")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "second")?.status).toBe("running");
+	});
+
+	it("marks an untaken compound branch done after the scope reaches final", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "closed-compound-branch",
+				initial: "pipeline",
+				states: {
+					pipeline: compound({
+						initial: "route",
+						onDone: "publish",
+						states: {
+							route: { kind: "state", action: agent("router"), transitions: { FAST: "done", SLOW: "slow" } },
+							slow: { kind: "state", action: agent("slow"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					publish: { kind: "state", action: agent("publisher"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		const route = chartAst.states["pipeline.route"];
+		const publish = chartAst.states.publish;
+		if (route?.kind !== "state" || publish?.kind !== "state") throw new Error("missing action state");
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "pipeline.route"), definition: route.action, ...baseRecord(2) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "pipeline.route"), event: { type: "FAST" }, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(4) },
+		];
+
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "pipeline")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "pipeline.slow")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "publish")?.status).toBe("running");
+	});
+
+	it("marks historical descendants done after their enclosing scope is completed and closed", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "completed-container-with-history",
+				initial: "write",
+				states: {
+					write: compound({
+						initial: "route",
+						onDone: "done",
+						states: {
+							route: { kind: "state", action: agent("router"), transitions: { PLAN: "plan", FAST: "copy" } },
+							plan: { kind: "state", action: agent("planner"), transitions: { DONE: "copy" } },
+							copy: { kind: "state", action: agent("copywriter"), transitions: { DONE: "gate" } },
+							gate: { kind: "state", action: agent("gate"), transitions: { RETRY: "route", PASS: "done" } },
+							done: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		const action = (path: string) => {
+			const state = chartAst.states[path];
+			if (state?.kind !== "state") throw new Error(`missing action state ${path}`);
+			return state.action;
+		};
+		const invoke = (path: string, seqId: number): DurableLogRecord => ({
+			type: "state_action",
+			kind: "invoke",
+			actionUid: actionUid(chartAst, path),
+			definition: action(path),
+			...baseRecord(seqId),
+		});
+		const complete = (path: string, eventType: string, seqId: number): DurableLogRecord => ({
+			type: "state_action",
+			kind: "complete",
+			actionUid: actionUid(chartAst, path),
+			event: { type: eventType },
+			...baseRecord(seqId),
+		});
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			invoke("write.route", 2),
+			complete("write.route", "PLAN", 3),
+			invoke("write.plan", 4),
+			complete("write.plan", "DONE", 5),
+			invoke("write.copy", 6),
+			complete("write.copy", "DONE", 7),
+			invoke("write.gate", 8),
+			complete("write.gate", "RETRY", 9),
+			invoke("write.route", 10),
+			complete("write.route", "FAST", 11),
+			invoke("write.copy", 12),
+			complete("write.copy", "DONE", 13),
+			invoke("write.gate", 14),
+			complete("write.gate", "PASS", 15),
+		];
+
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "write.plan")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "write")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "done")?.status).toBe("done");
+	});
+
+	it("marks an untaken map-instance branch done after the instance reaches final", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "closed-map-branch",
+				initial: "items",
+				states: {
+					items: map({
+						over: arg("items"),
+						initial: "route",
+						onDone: "publish",
+						states: {
+							route: { kind: "state", action: agent("router"), transitions: { FAST: "done", SLOW: "slow" } },
+							slow: { kind: "state", action: agent("slow"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					publish: { kind: "state", action: agent("publisher"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		const route = chartAst.states["items.route"];
+		const publish = chartAst.states.publish;
+		if (route?.kind !== "state" || publish?.kind !== "state") throw new Error("missing action state");
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
+			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "items#a.route"), definition: route.action, ...baseRecord(3) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#a.route"), event: { type: "FAST" }, ...baseRecord(4) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(5) },
+		];
+
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "items#a.slow")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "publish")?.status).toBe("running");
+	});
+
+	it("marks an untaken parallel-region branch done after the region reaches final", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "closed-parallel-branch",
+				initial: "fan",
+				states: {
+					fan: parallel({
+						states: {
+							left: compound({
+								initial: "route",
+								states: {
+									route: { kind: "state", action: agent("left-router"), transitions: { FAST: "done", SLOW: "slow" } },
+									slow: { kind: "state", action: agent("left-slow"), transitions: { DONE: "done" } },
+									done: final(),
+								},
+							}),
+							right: compound({
+								initial: "work",
+								states: {
+									work: { kind: "state", action: agent("right-worker"), transitions: { DONE: "done" } },
+									done: final(),
+								},
+							}),
+						},
+						onDone: "publish",
+					}),
+					publish: { kind: "state", action: agent("publisher"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		const leftRoute = chartAst.states["fan.left.route"];
+		const rightWork = chartAst.states["fan.right.work"];
+		const publish = chartAst.states.publish;
+		if (leftRoute?.kind !== "state" || rightWork?.kind !== "state" || publish?.kind !== "state") {
+			throw new Error("missing action state");
+		}
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "fan.left.route"), definition: leftRoute.action, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "fan.right.work"), definition: rightWork.action, ...baseRecord(3) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "fan.left.route"), event: { type: "FAST" }, ...baseRecord(4) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "fan.right.work"), event: { type: "DONE" }, ...baseRecord(5) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(6) },
+		];
+
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "fan.left.slow")?.status).toBe("done");
+		expect(run.states.find((state) => state.id === "publish")?.status).toBe("running");
 	});
 
 	it("reconstructs resolved inputs and invocation details for every visit", () => {
@@ -1021,6 +1305,54 @@ describe("React runtime adapter", () => {
 			{ key: "c", label: "Gamma", visits: [2] },
 		]);
 		expect(mapState?.subProgress).toEqual({ done: 0, running: 2, failed: 0, total: 2 });
+	});
+
+	it("marks historical map items done after the map completes and closes", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "closed-map-generations",
+				initial: "items",
+				states: {
+					items: map({
+						over: arg("items"),
+						initial: "work",
+						onDone: "gate",
+						states: {
+							work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					gate: { kind: "state", action: agent("gate"), transitions: { REDO: "items", PASS: "done" } },
+					done: final(),
+				},
+			}),
+		);
+		const worker = chartAst.states["items.work"];
+		const gate = chartAst.states.gate;
+		if (worker?.kind !== "state" || gate?.kind !== "state") throw new Error("missing action state");
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
+			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "items#a.work"), definition: worker.action, ...baseRecord(3) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#a.work"), event: { type: "DONE" }, ...baseRecord(4) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(5) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "gate"), event: { type: "REDO" }, ...baseRecord(6) },
+			{ type: "spawned", path: "items", instances: { b: "Beta" }, ...baseRecord(7) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "items#b.work"), definition: worker.action, ...baseRecord(8) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#b.work"), event: { type: "DONE" }, ...baseRecord(9) },
+			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(10) },
+			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "gate"), event: { type: "PASS" }, ...baseRecord(11) },
+		];
+
+		const mapState = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records).states.find(
+			(state) => state.id === "items",
+		);
+		expect(mapState?.status).toBe("done");
+		expect(mapState?.mapConfig?.items).toMatchObject([
+			{ key: "a", status: "done" },
+			{ key: "b", status: "done" },
+		]);
 	});
 
 	it("materializes nested map workers from concrete spawn paths", () => {

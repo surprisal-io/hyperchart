@@ -240,6 +240,26 @@
 	--shadow-card: rgba(0, 0, 0, 0.08);
 }
 
+/* React Flow defaults are light-only. Keep its floating controls inside Hyperchart theme tokens. */
+[data-hyperchart-root] .react-flow__controls {
+	box-shadow: 0 1px 4px var(--shadow-card);
+}
+
+[data-hyperchart-root] .react-flow__controls-button {
+	border-bottom-color: var(--border-primary);
+	background: var(--bg-secondary);
+	color: var(--text-primary);
+	fill: currentColor;
+}
+
+[data-hyperchart-root] .react-flow__controls-button:hover {
+	background: var(--bg-hover);
+}
+
+[data-hyperchart-root] .react-flow__controls-button svg {
+	fill: currentColor;
+}
+
 /* A modal inspector fully covers its host. Pause animations in sibling application roots so
    off-screen spinners and pulses do not keep painting behind the dialog. */
 html[data-hyperchart-inspector-open]

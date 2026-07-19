@@ -292,6 +292,7 @@ function nodeVisualSignature(node: StateNode): string {
 		id: state.id,
 		type: displayState.type,
 		status: state.status,
+		initial: state.initial,
 		startedAt: state.startedAt,
 		endedAt: state.endedAt,
 		mechanism: stateMechanismLabel(displayState),

@@ -42,6 +42,7 @@ const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
 	graph,
 	isMobile,
 	miniMapMaskColor,
+	miniMapBackgroundColor,
 	onNodeClick,
 	onNodeDoubleClick,
 }: {
@@ -49,6 +50,7 @@ const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
 	graph: GraphLayout;
 	isMobile: boolean;
 	miniMapMaskColor: string;
+	miniMapBackgroundColor: string;
 	onNodeClick: NodeMouseHandler<StateNode>;
 	onNodeDoubleClick: NodeMouseHandler<StateNode>;
 }) {
@@ -69,7 +71,15 @@ const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
 			onNodeDoubleClick={onNodeDoubleClick}
 		>
 			<Controls position="bottom-left" />
-			{!isMobile && <MiniMap pannable zoomable nodeColor={nodeMiniMapColor} maskColor={miniMapMaskColor} />}
+			{!isMobile && (
+				<MiniMap
+					pannable
+					zoomable
+					nodeColor={nodeMiniMapColor}
+					maskColor={miniMapMaskColor}
+					bgColor={miniMapBackgroundColor}
+				/>
+			)}
 		</ReactFlow>
 	);
 });
@@ -88,6 +98,7 @@ export function HyperchartInspectorDialogInner({
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
 	const { resolved } = useHyperchartTheme();
 	const miniMapMaskColor = resolved === "light" ? "rgba(0, 0, 0, 0.14)" : "rgba(0, 0, 0, 0.45)";
+	const miniMapBackgroundColor = resolved === "light" ? "#f0f0f0" : "#1e1e1e";
 	const run = useMemo(() => {
 		if (selectedRunId) return runs.find((candidate) => candidate.runId === selectedRunId) ?? runs[0];
 		return runs.find((candidate) => candidate.status === "running") ?? runs[0];
@@ -337,6 +348,7 @@ export function HyperchartInspectorDialogInner({
 									graph={graph}
 									isMobile={isMobile}
 									miniMapMaskColor={miniMapMaskColor}
+									miniMapBackgroundColor={miniMapBackgroundColor}
 									onNodeClick={handleNodeClick}
 									onNodeDoubleClick={handleNodeDoubleClick}
 								/>

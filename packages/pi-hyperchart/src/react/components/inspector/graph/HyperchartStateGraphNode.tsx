@@ -97,6 +97,14 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 					>
 						{stateDisplayName(state)}
 					</div>
+					{state.initial === true && (
+						<span
+							className="inline-flex shrink-0 rounded border border-violet-500/35 bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--hc-purple-text)]"
+							title="Initial state"
+						>
+							initial
+						</span>
+					)}
 					<span
 						className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${hyperchartStatusClasses(state.status)}`}
 					>

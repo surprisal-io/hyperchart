@@ -22,6 +22,7 @@ function run(status: "pending" | "running" | "done", target = "done"): Hyperchar
 			{
 				id: "work",
 				type: "script",
+				initial: true,
 				status,
 				...(status === "pending" ? {} : { startedAt: 10 }),
 				...(status === "running" ? { subProgress: { done: 1, total: 2, running: 1, failed: 0 } } : {}),
@@ -49,6 +50,7 @@ describe("graph nodes", () => {
 			});
 		}
 		expect(graph.nodes.find((node) => node.id === "work")?.data.snapshotAt).toBe(3);
+		expect(graph.nodes.find((node) => node.id === "work")?.data.state.initial).toBe(true);
 		expect(graph.nodes.find((node) => node.id === "done")?.data.snapshotAt).toBeUndefined();
 	});
 
@@ -66,6 +68,16 @@ describe("graph nodes", () => {
 		const next = buildGraph({ ...run("running"), updatedAt: 4 }, visible);
 
 		expect(reconcileGraphElements(previous, next)).toBe(previous);
+	});
+
+	it("replaces a graph node when its initial marker changes", () => {
+		const visible = new Set(["work", "done"]);
+		const previous = buildGraph(run("pending"), visible);
+		const nextRun = run("pending");
+		nextRun.states[0] = { ...nextRun.states[0]!, initial: false };
+		const next = buildGraph(nextRun, visible);
+
+		expect(reconcileGraphElements(previous, next).nodes[0]).not.toBe(previous.nodes[0]);
 	});
 
 	it("marks running transitions for a compositor marker without React Flow's SVG dash animation", () => {

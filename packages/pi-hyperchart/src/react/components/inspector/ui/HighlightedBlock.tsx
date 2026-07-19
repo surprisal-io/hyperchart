@@ -7,10 +7,12 @@ export function HighlightedBlock({
 	children,
 	language,
 	full = false,
+	wrapLongLines = false,
 }: {
 	children: React.ReactNode;
 	language?: string | undefined;
 	full?: boolean;
+	wrapLongLines?: boolean;
 }) {
 	const { resolved, themeName } = useHyperchartTheme();
 	const syntaxStyle = useMemo(() => getSyntaxTheme(resolved, themeName), [resolved, themeName]);
@@ -21,21 +23,32 @@ export function HighlightedBlock({
 				style={syntaxStyle}
 				language={language}
 				PreTag="div"
+				wrapLongLines={wrapLongLines}
 				customStyle={{
 					margin: 0,
-					width: "max-content",
+					width: wrapLongLines ? "100%" : "max-content",
 					minWidth: "100%",
 					padding: full ? "0.75rem" : "0.5rem",
 					background: "var(--bg-code)",
 					fontSize: full ? "0.75rem" : "0.7rem",
 					lineHeight: 1.55,
 				}}
-				codeTagProps={{ style: { background: "transparent", whiteSpace: "pre", overflowWrap: "normal" } }}
+				codeTagProps={{
+					style: {
+						background: "transparent",
+						whiteSpace: wrapLongLines ? "pre-wrap" : "pre",
+						overflowWrap: wrapLongLines ? "anywhere" : "normal",
+					},
+				}}
 			>
 				{text}
 			</SyntaxHighlighter>
 		);
 	}
-	const preClassName = `${full ? "p-3 text-[12px] leading-relaxed" : "p-2 text-[11px]"} w-max min-w-full text-[var(--text-secondary)]`;
-	return <pre className={`${preClassName} whitespace-pre [overflow-wrap:normal]`}>{children}</pre>;
+	const preClassName = `${full ? "p-3 text-[12px] leading-relaxed" : "p-2 text-[11px]"} min-w-full text-[var(--text-secondary)]`;
+	return (
+		<pre className={wrapLongLines ? `${preClassName} w-full whitespace-pre-wrap break-words` : `${preClassName} w-max whitespace-pre [overflow-wrap:normal]`}>
+			{children}
+		</pre>
+	);
 }

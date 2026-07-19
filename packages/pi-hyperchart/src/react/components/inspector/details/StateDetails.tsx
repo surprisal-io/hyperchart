@@ -135,6 +135,14 @@ export function StateDetails({
 						)}
 						<div className="mt-1 flex flex-wrap items-center gap-1.5">
 							<StatusPill status={state.status} />
+							{state.initial === true && (
+								<span
+									className="inline-flex rounded border border-violet-500/35 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--hc-purple-text)]"
+									title="Initial state"
+								>
+									initial
+								</span>
+							)}
 							{state.agent ? (
 								<span
 									className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] ${kind.className}`}
