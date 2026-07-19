@@ -777,8 +777,8 @@ Inspect a chart before execution to obtain the complete diagnostics for that def
 Values:
 
 ```text
-chart, agent, artifact, compound, event, final, input, json, map,
-parallel, refs, resume, script, t, tsImport, user, visit, z
+chart, agent, artifact, compound, contract, event, final, input, json,
+map, parallel, refs, resume, script, t, tsImport, user, visit, z
 ```
 
 The argument, result, artifact-read, map-key, and map-item constructors are methods returned by `refs()`.

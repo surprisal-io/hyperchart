@@ -26,7 +26,8 @@ import {
   type RenderedArtifact,
   type Runtime,
   type SchemaCheck,
-  type SchemaRegistry,
+  SchemaRegistry,
+  type SchemaRegistryLike,
 } from "@surprisal/hyperchart/runtime";
 ```
 
@@ -63,7 +64,7 @@ type ChartRuntimeOptions = {
   agentExecutor: AgentExecutor;
   workDir: string;
   chartDir: string;
-  schemaRegistry?: SchemaRegistry;
+  schemaRegistry?: SchemaRegistryLike;
   now?: () => number;
   onWarn?: (message: string) => void;
 };
@@ -173,11 +174,19 @@ The constructor and `readAll()` copy their arrays. Use this store for tests and 
 
 ```ts
 class ScriptRunner {
-  constructor(options: { workDir: string; schemaRegistry?: SchemaRegistry });
+  constructor(options: { workDir: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number });
   run(
     effect: ScriptEffect,
     validationAttempt?: { n: number; reason?: string },
   ): Promise<ChartEvent>;
+  runGuard(
+    guard: Extract<GuardRefAst, { kind: "script" }>,
+    event: ChartEvent,
+    renderedEnv?: Readonly<Record<string, string | RenderedArtifact>>,
+    artifacts?: readonly RenderedArtifact[],
+    reply?: SchemaAst,
+    actionUid?: ActionUID,
+  ): Promise<GuardOutcome>;
   cancel(actionUid: ActionUID): void;
   dispose(): Promise<void>;
 }
@@ -207,7 +216,7 @@ HYPERCHART_VALIDATION_ATTEMPT=<1-based rejection count>
 HYPERCHART_REJECT_REASON=<reason, when present>
 ```
 
-`cancel()` sends `SIGTERM`, then schedules `SIGKILL` after five seconds if needed.
+`cancel()` sends `SIGTERM`, then schedules `SIGKILL` after `killGraceMs` (default five seconds) if needed.
 
 ## Guards
 
@@ -228,7 +237,7 @@ type RenderedGuardInvocation = Readonly<{
 }>;
 
 function runGuard(
-  guard: GuardRef,
+  guard: GuardRefAst,
   event: ChartEvent,
   context: GuardContext,
   invocation?: RenderedGuardInvocation,
@@ -242,7 +251,6 @@ For `tsImport` guards:
 - the named export must be a function;
 - the function receives `(event, context)`; existing one-argument guards remain valid;
 - the context contains only `chartDir` and `workDir`; dynamic values belong in a script guard's `env`;
-- the same script-runner env resolver handles selected artifact reads and chart-scoped runtime-contract validation, failing closed when an exact contract is unavailable;
 - the result must be `boolean` or `{ ok: false, reason: string }`.
 
 For script guards:
@@ -251,6 +259,7 @@ For script guards:
 - the process runs in `workDir`;
 - stdin is the unchanged plain ChartEvent root object (`type`, `output`, or `error`); no guard-only artifacts field is added;
 - dynamic env values use the same rendered script-action contract, including the validating action's own `artifactOf` and joined path refs;
+- selected artifact reads resolve through the shared env resolver, including chart-scoped runtime-contract validation, failing closed when an exact contract is unavailable;
 - when no `reply` is declared, stdout is ignored; when `reply` is declared, the last completion envelope is validated with the shared script reply checker;
 - declared guard artifacts are checked with the shared artifact checker after exit;
 - exit 0 accepts only after reply/artifact checks pass;
@@ -270,13 +279,13 @@ type SchemaCheck = { ok: true } | { ok: false; errors: string[] };
 function checkSchema(
   schema: SchemaAst,
   value: unknown,
-  registry?: SchemaRegistry,
+  registry?: SchemaRegistryLike,
 ): SchemaCheck;
 
 function checkSchemaAsync(
   schema: SchemaAst,
   value: unknown,
-  registry?: SchemaRegistry,
+  registry?: SchemaRegistryLike,
 ): Promise<SchemaCheck>;
 ```
 
@@ -306,7 +315,7 @@ type RenderedArtifact = {
 function resolveArtifactValue(
   artifact: RenderedArtifact,
   workDir: string,
-  registry?: SchemaRegistry,
+  registry?: SchemaRegistryLike,
 ): Promise<unknown>;
 ```
 
@@ -317,7 +326,7 @@ function resolveArtifactValue(
 - validates the full parsed value when `shape` exists, including the original runtime Zod contract when one is declared;
 - returns the selected dot-path when `select` exists.
 
-Guard validation uses this resolver for every named output artifact, never a read declaration. Duplicate or missing artifact names fail closed.
+Guard env resolution uses this resolver for selected `artifactOf()` reads; declared guard output artifacts are checked with `checkArtifactFile()` after exit. Duplicate or missing artifact names fail closed.
 
 It throws for unreadable files, invalid JSON, schema mismatch, and unresolved selectors.
 
@@ -327,7 +336,7 @@ It throws for unreadable files, invalid JSON, schema mismatch, and unresolved se
 function checkArtifactFile(
   artifact: RenderedArtifact,
   workDir: string,
-  registry?: SchemaRegistry,
+  registry?: SchemaRegistryLike,
 ): Promise<{ ok: true } | { ok: false; errors: string[] }>;
 ```
 
@@ -428,7 +437,7 @@ Checks whether the final template segment, ignoring a map key, is `failed`, `fai
 ```text
 Runtime
 AgentExecutor, EmitCompletion
-RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry
+RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry, SchemaRegistryLike
 ChartRuntime, ChartRuntimeOptions
 LogStore, JsonlLogStore, MemoryLogStore
 ScriptRunner

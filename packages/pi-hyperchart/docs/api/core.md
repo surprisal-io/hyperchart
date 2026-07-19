@@ -458,7 +458,7 @@ type ValidateEffect = {
   kind: "validate";
   id: EffectId;
   actionUid: ActionUID;
-  guard: GuardRef;
+  guard: GuardRefAst;
   event: ChartEvent;
   env?: Readonly<Record<string, string | RenderedArtifact>>;
   artifacts?: readonly RenderedArtifact[];
@@ -466,7 +466,7 @@ type ValidateEffect = {
 };
 ```
 
-Env, guard artifacts, and guard reply are resolved/validated only for the pending guard. Reply output is validation-only; guard artifacts remain part of the containing state's declared Files surface. Artifact values are never durable facts or stdin/context fields. `ActionEffect` is `AgentEffect | ScriptEffect | UserEffect`. `ResumeRequest` contains a rendered message and optional session file. `RecordAppend` is an unstamped append request used before durable seqIds and timestamps are assigned.
+`GuardRefAst` is the normalized guard union: `GuardRef` plus a script variant whose `env`, `artifacts`, and `reply` are normalized AST values. Env, guard artifacts, and guard reply are resolved/validated only for the pending guard. Reply output is validation-only; guard artifacts remain part of the containing state's declared Files surface. Artifact values are never durable facts or stdin/context fields. `ActionEffect` is `AgentEffect | ScriptEffect | UserEffect`. `ResumeRequest` contains a rendered message and optional session file. `RecordAppend` is an unstamped append request used before durable seqIds and timestamps are assigned.
 
 ### Machine events
 
@@ -654,7 +654,7 @@ explainReplay
 concatAsyncIterables, createAsyncQueue, toAsyncIterable
 ```
 
-The DSL values, `refs`, and `z` are listed in [DSL reference](dsl.md).
+The DSL values, `refs`, and `z` are listed in [DSL reference](dsl.md). The root also re-exports the `SchemaRegistry` class and the `checkSchema`/`checkSchemaAsync` functions for host integrations.
 
 ## Complete root type export inventory
 
@@ -668,11 +668,12 @@ ChartCst, ChartEvent, ChartSource,
 CompoundStateAst, CompoundStateCst, EventBindingAst, EventBindingCst,
 EventType, FinalStateAst, FinalStateCst, InputRef, JoinArtifactOfAst,
 JoinArtifactOfCst, JsonSchema, MapStateAst, MapStateCst,
-SchemaAst, SchemaCst, ParallelStateAst, ParallelStateCst,
+RuntimeContract, RuntimeContractMetadata, SchemaAst, SchemaCst,
+SchemaRegistryLike, ParallelStateAst, ParallelStateCst,
 ParsedChart, RegionStateAst, ReservedSystemEventType, ScriptActionAst,
 ScriptActionCst, StateActionAst, StateActionCst, StateAst, StateCst,
 StateId, StatePath, SystemEvent, TemplateAst, TemplateCst, Templatable,
-GuardOutcome, GuardRef, OnReject, OnReenterAst, OnReenterCst,
+GuardOutcome, GuardRef, GuardRefAst, OnReject, OnReenterAst, OnReenterCst,
 TransitionAst, TransitionCst, TransitionMapCst, UserActionAst,
 UserActionCst, InputsOf, Paths, ValueAt,
 HyperchartInspectAgentDefaults, HyperchartInspectArtifact,

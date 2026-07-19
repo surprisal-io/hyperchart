@@ -209,7 +209,7 @@ A guard returns `true` or `{ ok: false, reason }`.
 A script guard accepts the complete script option surface (`env`, `artifacts`, and `reply`) as a script action:
 
 ```ts
-validate: script("node", ["bin/check.py"], {
+validate: script("node", ["bin/check.mjs"], {
   env: {
     INPUT: t`${input("review")}`,
     SELF: artifactOf("review", { select: "approved" }),
