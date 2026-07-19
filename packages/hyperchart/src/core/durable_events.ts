@@ -1,4 +1,4 @@
-import type { ActionUID, ChartEvent, GuardOutcome, GuardRef, StateActionAst, StatePath } from "./types.js";
+import type { ActionUID, ChartEvent, GuardOutcome, GuardRefAst, StateActionAst, StatePath } from "./types.js";
 
 type SessionParams = {
 	seqId: number;
@@ -56,7 +56,7 @@ type StateActionValidatedLog = {
 	kind: "validated";
 	actionUid: ActionUID;
 	event: ChartEvent;
-	guard: GuardRef;
+	guard: GuardRefAst;
 	outcome: GuardOutcome;
 } & SessionParams;
 

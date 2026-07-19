@@ -1,5 +1,6 @@
 import type { Runtime } from "../runtime.js";
 import type { ChartAst, GuardOutcome } from "../../core/types.js";
+import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { Effect, MachineEvent, RejectedEffect } from "../../core/machine.js";
 import { nodeAt } from "../../core/paths.js";
@@ -7,7 +8,7 @@ import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { AgentExecutor } from "./agent_executor.js";
 import type { LogStore } from "./log_store.js";
-import { runGuard } from "./guards.js";
+import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
 
 export type ChartRuntimeOptions = {
@@ -16,6 +17,7 @@ export type ChartRuntimeOptions = {
 	agentExecutor: AgentExecutor;
 	workDir: string;
 	chartDir: string;
+	schemaRegistry?: SchemaRegistryLike;
 	now?: () => number;
 	onWarn?: (msg: string) => void;
 };
@@ -28,7 +30,10 @@ export class ChartRuntime implements Runtime {
 	private readonly onWarn: (msg: string) => void;
 
 	constructor(private readonly options: ChartRuntimeOptions) {
-		this.scripts = new ScriptRunner({ workDir: options.workDir });
+		this.scripts = new ScriptRunner({
+			workDir: options.workDir,
+			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
+		});
 		this.now = options.now ?? Date.now;
 		this.onWarn = options.onWarn ?? (() => {});
 	}
@@ -54,7 +59,18 @@ export class ChartRuntime implements Runtime {
 						);
 					break;
 				case "validate":
-					void runGuard(effect.guard, effect.event, { chartDir: this.options.chartDir, workDir: this.options.workDir })
+					void runGuard(
+						effect.guard,
+						effect.event,
+						{ chartDir: this.options.chartDir, workDir: this.options.workDir },
+						{
+							scripts: this.scripts,
+							...(effect.env === undefined ? {} : { env: effect.env }),
+							...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
+							...(effect.reply === undefined ? {} : { reply: effect.reply }),
+							actionUid: effect.actionUid,
+						} satisfies RenderedGuardInvocation,
+					)
 						.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
 						.then((outcome) => this.queue.send({ kind: "validated", effectId: effect.id, outcome }));
 					break;

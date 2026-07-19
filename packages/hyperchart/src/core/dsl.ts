@@ -175,3 +175,4 @@ export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 }
 
 export type { SchemaCst } from "./types.js";
+export { contract } from "./schema_contract.js";

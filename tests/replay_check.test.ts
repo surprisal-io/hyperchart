@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	agent,
 	chart,
+	script,
 	event,
 	explainReplay,
 	final,
@@ -13,7 +14,9 @@ import {
 	type ActionUID,
 	type ChartAst,
 	type DurableLogRecord,
+	type GuardRefAst,
 	type StateActionAst,
+	type StateAst,
 	type StatePath,
 } from "../packages/hyperchart/src/index.js";
 import { arg } from "../packages/hyperchart/src/core/dsl.js";
@@ -83,7 +86,7 @@ function complete(uid: ActionUID, eventType: string, seqId: number, output?: unk
 	};
 }
 
-function validated(uid: ActionUID, eventType: string, seqId: number, guard = tsImport("./checks.js", "ok")): DurableLogRecord {
+function validated(uid: ActionUID, eventType: string, seqId: number, guard: GuardRefAst = tsImport("./checks.js", "ok")): DurableLogRecord {
 	return {
 		type: "state_action",
 		kind: "validated",
@@ -96,6 +99,20 @@ function validated(uid: ActionUID, eventType: string, seqId: number, guard = tsI
 }
 
 describe("explainReplay", () => {
+	it("treats guard env, reply, and artifact provenance as replay-sensitive", () => {
+		const make = (value: string) => ast(chart({ kind: "chart", id: "guard-provenance", initial: "work", states: {
+			work: { kind: "state", action: agent("worker"), validate: script("node", [], { env: { CHECK: value }, artifacts: { report: "report.json" }, reply: z.object({ ok: z.boolean() }) }), transitions: { DONE: "done" } }, done: final(),
+		} }));
+		const original = make("one");
+		const changed = make("two");
+		const uid = actionUid(original, "work");
+		const guard = (original.states.work as Extract<StateAst, { kind: "state" }>).validate;
+		if (guard === undefined) throw new Error("expected guard");
+		const log: DurableLogRecord[] = [args(), invoke(uid, 2, definition(original, "work")), complete(uid, "DONE", 3), validated(uid, "DONE", 4, guard)];
+		const explanation = explainReplay(changed, log);
+		expect(explanation.stale).toEqual(expect.arrayContaining([expect.objectContaining({ reason: "guard_changed" })]));
+	});
+
 	it("accepts compatible edits without skipped or stale facts", () => {
 		const original = twoStep();
 		const current = ast(

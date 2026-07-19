@@ -32,6 +32,29 @@ describe("parseChartModule", () => {
 		}
 	});
 
+	it("retains runtime contract registries for sync and async parsing", async () => {
+		const dir = mkdtempSync(join(process.cwd(), "tests", ".hyperchart-contract-parser-"));
+		const path = join(dir, "chart.ts");
+		try {
+			writeFileSync(path, [
+				'import { chart, contract, final, script, z } from "@surprisal/hyperchart";',
+				'const Reply = contract("parser-reply", "1", z.string().refine((value) => value === "ok"));',
+				'export default chart({ id: "contract-parser", initial: "run", states: { run: { kind: "state", action: script(process.execPath, ["-e", ""] , { reply: Reply }), transitions: { DONE: "done" } }, done: final() } });',
+			].join("\n"));
+			const sync = parseChartModuleSync(path);
+			const asyncResult = await parseChartModule(path);
+			for (const result of [sync, asyncResult]) {
+				expect(result.ok).toBe(true);
+				if (!result.ok) continue;
+				const state = result.ast.states.run;
+				if (state?.kind !== "state" || state.action.kind !== "script" || state.action.reply === undefined) throw new Error("missing reply");
+				expect(result.schemaRegistry.get(state.action.reply.runtimeContract!)).toBeDefined();
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("loads a trusted local TS chart module and returns a normalized AST", async () => {
 		const result = await parseChartModule(examplePath);
 

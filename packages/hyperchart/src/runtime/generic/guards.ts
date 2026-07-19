@@ -1,11 +1,30 @@
-import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { ChartEvent, GuardOutcome, GuardRef } from "../../core/types.js";
+import type { ActionUID, ChartEvent, GuardOutcome, GuardRefAst, SchemaAst } from "../../core/types.js";
+import type { RenderedArtifact } from "../../core/machine.js";
+import { ScriptRunner, type RenderedScriptEnv } from "./script_runner.js";
 
-export type GuardContext = { chartDir: string; workDir: string };
+export type GuardContext = Readonly<{
+	chartDir: string;
+	workDir: string;
+}>;
 
-export async function runGuard(guard: GuardRef, event: ChartEvent, ctx: GuardContext): Promise<GuardOutcome> {
+/** Runtime-rendered script options. Raw dynamic guard options are never silently discarded. */
+export type RenderedGuardInvocation = Readonly<{
+	scripts?: ScriptRunner;
+	env?: RenderedScriptEnv;
+	artifacts?: readonly RenderedArtifact[];
+	reply?: SchemaAst;
+	actionUid?: ActionUID;
+}>;
+
+/** Run a validator. Script guards delegate process, stdin, stderr, and env handling to ScriptRunner. */
+export async function runGuard(
+	guard: GuardRefAst,
+	event: ChartEvent,
+	ctx: GuardContext,
+	invocation?: RenderedGuardInvocation,
+): Promise<GuardOutcome> {
 	if (guard.kind === "tsImport") {
 		const moduleUrl =
 			guard.module.startsWith("./") || guard.module.startsWith("../")
@@ -16,34 +35,16 @@ export async function runGuard(guard: GuardRef, event: ChartEvent, ctx: GuardCon
 		if (typeof fn !== "function") {
 			throw new Error(`Guard export '${guard.export}' is not a function in ${guard.module}`);
 		}
-		return normalizeGuardOutcome(await fn(event));
+		// Existing one-argument guards remain compatible; context is only chartDir/workDir.
+		return normalizeGuardOutcome(await fn(event, ctx));
 	}
 
-	return runScriptGuard(guard.command, guard.args ?? [], event, ctx.workDir);
-}
-
-async function runScriptGuard(
-	command: string,
-	args: readonly string[],
-	event: ChartEvent,
-	workDir: string,
-): Promise<GuardOutcome> {
-	const child = spawn(command, [...args], { cwd: workDir });
-	child.stdout.resume();
-	let stderr = "";
-	child.stderr.setEncoding("utf8");
-	child.stderr.on("data", (chunk: string) => {
-		stderr += chunk;
-	});
-	child.stdin.end(JSON.stringify(event));
-	const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-		child.once("error", reject);
-		child.once("close", (code, signal) => resolve({ code, signal }));
-	});
-	if (exit.code === 0) {
-		return true;
+	const hasRawOptions = guard.env !== undefined || ("artifacts" in guard && guard.artifacts !== undefined) || ("reply" in guard && guard.reply !== undefined);
+	if (invocation === undefined && hasRawOptions) {
+		throw new Error("Script guard env/artifacts/reply require a rendered guard invocation from ChartRuntime; call runGuard with RenderedGuardInvocation options.");
 	}
-	return { ok: false, reason: stderr.trim() || `exit ${exit.code ?? exit.signal ?? "unknown"}` };
+	const runner = invocation?.scripts ?? new ScriptRunner({ workDir: ctx.workDir });
+	return runner.runGuard(guard, event, invocation?.env, invocation?.artifacts, invocation?.reply, invocation?.actionUid);
 }
 
 function normalizeGuardOutcome(value: unknown): GuardOutcome {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, final, json, map, refs, t, z } from "../packages/hyperchart/src/index.js";
+import { agent, final, json, map, refs, script, t, z } from "../packages/hyperchart/src/index.js";
 import { arg as untypedArg, event as untypedEvent, result as untypedResult } from "../packages/hyperchart/src/core/dsl.js";
 
 type Args = { topic: string; goal: string };
@@ -94,6 +94,26 @@ describe("typed refs (TS-first)", () => {
 		>();
 		// @ts-expect-error artifact name drifted
 		wrongArtifact.chart(body);
+	});
+
+	it("includes guard-produced artifacts in the typed Files registry", () => {
+		const body = {
+			kind: "chart",
+			id: "typed-guard-files",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: script("node"),
+					validate: script("node", [], { artifacts: { review: "review.json" } }),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		} as const;
+		const typed = refs<Record<string, never>, Record<string, never>, { work: { review: unknown } }>();
+		expect(typed.artifactOf("work", { artifact: "review" })).toEqual({ kind: "artifactOf", state: "work", artifact: "review" });
+		expect(typed.chart(body).id).toBe("typed-guard-files");
 	});
 
 	it("types key()/item() from the map registry and verifies it against over", () => {

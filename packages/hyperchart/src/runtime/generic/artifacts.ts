@@ -2,9 +2,14 @@ import { promises as fsp } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { RenderedArtifact } from "../../core/machine.js";
 import { errorMessage } from "../../utils/errors.js";
-import { checkSchema, type SchemaCheck } from "./schema.js";
+import { checkSchemaAsync, type SchemaCheck } from "./schema.js";
+import type { SchemaRegistryLike as SchemaRegistry } from "../../core/schema_registry.js";
 
-export async function resolveArtifactValue(artifact: RenderedArtifact, workDir: string): Promise<unknown> {
+export async function resolveArtifactValue(
+	artifact: RenderedArtifact,
+	workDir: string,
+	registry?: SchemaRegistry,
+): Promise<unknown> {
 	const filePath = artifactPath(artifact, workDir);
 	let content: string;
 	try {
@@ -19,7 +24,7 @@ export async function resolveArtifactValue(artifact: RenderedArtifact, workDir: 
 
 	const parsed = parseJsonArtifact(content, artifact.path);
 	if (artifact.shape !== undefined) {
-		const check = checkSchema(artifact.shape, parsed);
+		const check = await checkSchemaAsync(artifact.shape, parsed, registry);
 		if (!check.ok) {
 			throw new Error(`Artifact ${artifact.path}: schema mismatch: ${check.errors.join("; ")}`);
 		}
@@ -37,7 +42,11 @@ export function serializeEnvValue(value: unknown): string {
 	return serialized;
 }
 
-export async function checkArtifactFile(artifact: RenderedArtifact, workDir: string): Promise<SchemaCheck> {
+export async function checkArtifactFile(
+	artifact: RenderedArtifact,
+	workDir: string,
+	registry?: SchemaRegistry,
+): Promise<SchemaCheck> {
 	let filePath: string;
 	try {
 		filePath = artifactPath(artifact, workDir);
@@ -62,11 +71,14 @@ export async function checkArtifactFile(artifact: RenderedArtifact, workDir: str
 		return { ok: false, errors: [`${artifact.path}: invalid JSON: ${errorMessage(error)}`] };
 	}
 
-	const check = checkSchema(artifact.shape, parsed);
+	const check = await checkSchemaAsync(artifact.shape, parsed, registry);
 	return check.ok ? check : { ok: false, errors: check.errors.map((message) => `${artifact.path}: ${message}`) };
 }
 
 function artifactPath(artifact: RenderedArtifact, workDir: string): string {
+	if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path)) {
+		throw new Error(`Artifact ${artifact.path}: web URLs are not local artifacts; use a browser/search tool or acquire a local asset first`);
+	}
 	const root = resolve(workDir);
 	const filePath = resolve(root, artifact.path);
 	const relativePath = relative(root, filePath);

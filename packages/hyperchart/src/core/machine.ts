@@ -7,8 +7,10 @@ import type {
 	GuardOutcome,
 	ArtifactAst,
 	ArtifactOfAst,
+	ArtifactOfCst,
 	JoinArtifactOfAst,
-	GuardRef,
+	JoinArtifactOfCst,
+	GuardRefAst,
 	InputRef,
 	OnReject,
 	OnReenterAst,
@@ -16,10 +18,12 @@ import type {
 	ScriptActionAst,
 	StatePath,
 	TemplateAst,
+	Templatable,
 	UserActionAst,
 } from "./types.js";
 import type { DurableLogRecord } from "./durable_events.js";
 import { actionUidKey } from "./action_uid.js";
+import { declaredArtifactsForState } from "./normalize.js";
 import {
 	allowedEvents,
 	type BranchProjection,
@@ -127,8 +131,13 @@ export type ValidateEffect = Readonly<{
 	kind: "validate";
 	id: EffectId;
 	actionUid: ActionUID;
-	guard: GuardRef;
+	guard: GuardRefAst;
 	event: ChartEvent;
+	// Rendered exactly like a script action's options. Values are resolved only while this
+	// completion is pending; they are never durable facts or action results.
+	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	artifacts?: readonly RenderedArtifact[];
+	reply?: SchemaAst;
 }>;
 
 // A completion did not pass the state's validate check. The action is still pending; the runtime
@@ -361,11 +370,24 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	switch (pending.phase) {
 		case "running":
 			return actionInvocationForAction(state, pending.actionUid, node.action, id);
-		case "validating":
+		case "validating": {
 			if (node.validate === undefined) {
 				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without a validator`);
 			}
-			return { kind: "validate", id, actionUid: pending.actionUid, guard: node.validate, event: pending.event };
+			// Render from the same projection and original invoke context as the action effect. The
+			// completion is still pending, so its output has not entered results and cannot perturb
+			// the rendered paths. This also makes a replayed pending completion deterministic.
+			return {
+				kind: "validate",
+				id,
+				actionUid: pending.actionUid,
+				guard: node.validate,
+				event: pending.event,
+				...(node.validate.kind === "script"
+					? renderScriptOptions(state, node.validate as ScriptOptionsAst, pending.actionUid.state, pending.actionUid.state)
+					: {}),
+			};
+		}
 		case "rejected":
 			return {
 				kind: "rejected",
@@ -454,6 +476,51 @@ function agentInvocationForAction(
 	};
 }
 
+type ScriptOptionsAst = {
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+	artifacts?: Readonly<Record<string, ArtifactAst>>;
+	reply?: SchemaAst;
+};
+
+function renderScriptOptions(
+	state: MachineState,
+	action: ScriptOptionsAst,
+	stateId: StatePath,
+	selfActionArtifactsState?: StatePath,
+): {
+	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	artifacts?: readonly RenderedArtifact[];
+	reply?: SchemaAst;
+} {
+	return {
+		...(action.env === undefined ? {} : { env: renderScriptEnv(state, action.env, stateId, selfActionArtifactsState) }),
+		...(action.artifacts === undefined
+			? {}
+			: { artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({ name, ...renderArtifact(state, declared, stateId) })) }),
+		...(action.reply === undefined ? {} : { reply: action.reply }),
+	};
+}
+
+function renderScriptEnv(
+	state: MachineState,
+	env: Readonly<Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>>,
+	stateId: StatePath,
+	selfActionArtifactsState?: StatePath,
+): Readonly<Record<string, string | RenderedArtifact>> {
+	return Object.fromEntries(
+		Object.entries(env).map(([name, value]) => {
+			if (typeof value === "string") return [name, value];
+			if (value.kind === "template") return [name, renderTemplate(state, value, stateId)];
+			if (value.kind === "joinArtifactOf") {
+				const paths = renderJoin(state, value, stateId).map((read) => read.path);
+				return [name, JSON.stringify(paths)];
+			}
+			const read = renderRead(state, value, stateId, selfActionArtifactsState);
+			return [name, read.select === undefined ? read.path : read];
+		}),
+	);
+}
+
 function scriptInvocationForAction(
 	state: MachineState,
 	actionUid: ActionUID,
@@ -468,32 +535,7 @@ function scriptInvocationForAction(
 		command: action.command,
 		args: action.args,
 		events: allowedEvents(state.ast, actionUid.state),
-		...(action.reply === undefined ? {} : { reply: action.reply }),
-		...(action.env === undefined
-			? {}
-			: {
-					env: Object.fromEntries(
-						Object.entries(action.env).map(([name, value]) => {
-							if (value.kind === "template") {
-								return [name, renderTemplate(state, value, actionUid.state)];
-							}
-							if (value.kind === "joinArtifactOf") {
-								const paths = renderJoin(state, value, actionUid.state).map((read) => read.path);
-								return [name, JSON.stringify(paths)];
-							}
-							const read = renderRead(state, value, actionUid.state);
-							return [name, read.select === undefined ? read.path : read];
-						}),
-					),
-				}),
-		...(action.artifacts === undefined
-			? {}
-			: {
-					artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
-						name,
-						...renderArtifact(state, declared, actionUid.state),
-					})),
-				}),
+		...renderScriptOptions(state, action, actionUid.state),
 	};
 }
 
@@ -815,14 +857,22 @@ function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: str
 // path and shape can never drift from what the producer was told to write. Normalize guarantees
 // the reference resolves to exactly one artifact; a miss here means the chart changed under a
 // live log — fail loud.
-function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stateId: string): RenderedArtifact {
+function renderRead(
+	state: MachineState,
+	read: TemplateAst | ArtifactOfAst,
+	stateId: string,
+	selfActionArtifactsState?: StatePath,
+): RenderedArtifact {
 	if (read.kind === "template") {
 		return { path: renderTemplate(state, read, stateId) };
 	}
 	const producerState = instancePathFor(read.state, stateId);
 	const producer = nodeAt(state.ast, producerState);
-	const artifacts =
-		producer?.kind === "state" && producer.action.kind !== "user" ? producer.action.artifacts : undefined;
+	const artifacts = producer?.kind === "state"
+		? producerState === selfActionArtifactsState && producer.action.kind !== "user"
+			? producer.action.artifacts
+			: declaredArtifactsForState(producer)
+		: undefined;
 	const names = Object.keys(artifacts ?? {});
 	const name = read.artifact ?? (names.length === 1 ? names[0] : undefined);
 	const declared = name === undefined ? undefined : artifacts?.[name];
@@ -840,7 +890,12 @@ function renderRead(state: MachineState, read: TemplateAst | ArtifactOfAst, stat
 // it resolve exactly as they did for the producer itself.
 function renderJoin(state: MachineState, read: JoinArtifactOfAst, stateId: string): RenderedArtifact[] {
 	const container = enclosingMapPath(state.ast, read.state, stateId);
-	const mapPath = instancePathFor(container, stateId);
+	// A top-level map has one shared spawn fact. A nested map has one spawn fact per enclosing
+	// parent instance (for example `chapters#intro.visuals`). Re-scope the template container to
+	// the caller, then strip the joined map's own instance key: a join inside `items#a.check` still
+	// fans in all `items`, while a join inside `chapters#intro` fans in only that chapter's nested
+	// `visuals` instances.
+	const mapPath = stripLastKey(instancePathFor(container, stateId));
 	const instances = state.projection.spawns[mapPath];
 	if (instances === undefined) {
 		throw new Error(`Read in state ${stateId}: map ${mapPath} has no spawned instances`);
