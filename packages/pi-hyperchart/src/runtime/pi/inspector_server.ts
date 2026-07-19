@@ -45,6 +45,8 @@ export async function closeRunInspectorServer(): Promise<void> {
 	state.entries.clear();
 	await new Promise<void>((resolveClose, reject) => {
 		state.server.close((error) => (error === undefined ? resolveClose() : reject(error)));
+		// close() alone waits for browser keep-alive sockets; drop them so shutdown cannot hang.
+		state.server.closeAllConnections();
 	});
 }
 

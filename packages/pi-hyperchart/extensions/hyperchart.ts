@@ -460,10 +460,14 @@ const hyperchartRunTool = defineTool({
 	},
 });
 
-async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContext) {
+async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContext, ast?: ChartAst) {
 	const meta = loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
 	if (meta === undefined) throw new Error(`Run '${basename(runDir)}' belongs to another working directory or is missing metadata`);
-	return hyperchartRunFromRunDir(runDir, { meta, agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir(), meta.chartPath) });
+	return hyperchartRunFromRunDir(runDir, {
+		meta,
+		...(ast === undefined ? {} : { ast }),
+		agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir(), meta.chartPath),
+	});
 }
 
 const hyperchartInspectTool = defineTool({
@@ -1310,7 +1314,8 @@ async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 	}
 	const { url } = await openRunInspector({
 		runId: run.runId,
-		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx),
+		// The snapshot's parsed AST avoids a synchronous chart-module re-parse on every poll.
+		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, run.ast),
 	});
 	ctx.ui.notify(`Opened Hyperchart inspector for ${run.runId}: ${url}`, "info");
 }
