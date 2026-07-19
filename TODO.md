@@ -43,3 +43,42 @@ Decide what replay should mean. The original idea was based on branching, but th
 ## Rework the documentation
 
 Review and restructure the documentation. Its current organization and presentation are not effective enough and need a broader redesign.
+
+## Allow guards to resolve authoritative runtime artifacts
+
+Hyperchart guards currently receive only the completion event and cannot dynamically resolve values such as:
+
+```ts
+artifactOf("plan.narrative-strategy")
+artifactOf("research.assemble-evidence")
+```
+
+A guard that trusts paths returned by an agent can validate an outdated artifact while the next state reads the current version and fails. Validation needs the authoritative runtime paths for the current strategy and evidence versions.
+
+The current workaround is a deterministic script-state adapter with runtime-resolved environment variables:
+
+```ts
+env: {
+  STRATEGY_FILE: artifactOf("plan.narrative-strategy"),
+  EVIDENCE_FILE: artifactOf("research.assemble-evidence"),
+}
+```
+
+This enables explicit routing:
+
+```text
+STRATEGY_INVALID → narrative-strategy
+STRATEGY_VALID   → semantic gate
+```
+
+Investigate a first-class mechanism for guards to access authoritative dynamic runtime values without trusting agent-returned paths or requiring a technical state. Preserve durable artifact version history: a fixed `strategy.json` overwritten during rework is not an acceptable substitute.
+
+## Let final states notify the parent session
+
+Add a first-class way for final states to send a message back to the parent/main session. The notification should support a configurable prompt and references or attachments to selected workflow artifacts, so a completed workflow can proactively surface its result instead of requiring the parent session to poll for it.
+
+Define how this interacts with durability and replay: the notification must be represented as an explicit, idempotent effect and must not be emitted again accidentally during recovery or replay.
+
+## Complete the `user` action implementation
+
+The `user` action is currently only partially implemented and does not yet provide a coherent end-to-end interaction model. Define its intended semantics and finish the runtime, host-adapter, persistence/recovery, inspection, and UI behavior required to make it a fully supported action type.

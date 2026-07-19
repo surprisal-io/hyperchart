@@ -116,6 +116,8 @@ The adapter discovers:
 - user charts under `<agentDir>/hypercharts`;
 - runs under the Pi Hyperchart runs root whose `meta.workDir` equals `cwd`.
 
+New runs record the creating Pi session as `meta.originSessionId`. The adapter exposes it as `HyperchartRunInfo.originSessionId`; older runs leave it undefined.
+
 Project charts replace same-name user charts. Definitions are sorted by name; runs are sorted newest first and limited by `runLimit`, defaulting to 50.
 
 If run metadata is readable but full chart/runtime inspection fails, the adapter keeps a metadata-only run entry with `status: "blocked"` or a status-derived terminal value and a `run_failed` issue. Corrupt or missing `meta.json` cannot be attributed to a working directory and is omitted.
@@ -264,7 +266,7 @@ Resume example:
 }
 ```
 
-The extension type-checks the chart, normalizes it, creates or loads run metadata, starts a detached runner, and writes process status. It attaches instead of spawning a second process when the run is already live.
+The extension type-checks the chart, normalizes it, creates or loads run metadata, records the creating Pi session for new runs, starts a detached runner, and writes process status. It attaches instead of spawning a second process when the run is already live.
 
 ### `action: "run_inspect"`
 

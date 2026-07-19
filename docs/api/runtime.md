@@ -10,6 +10,7 @@ import {
   ScriptRunner,
   checkArtifactFile,
   checkSchema,
+  checkSchemaAsync,
   createRunDir,
   finalMachineFailureMessage,
   isFailureStatePath,
@@ -21,9 +22,11 @@ import {
   terminalStateForFinalMachine,
   type AgentExecutor,
   type GuardContext,
+  type RenderedGuardInvocation,
   type RenderedArtifact,
   type Runtime,
   type SchemaCheck,
+  type SchemaRegistry,
 } from "@surprisal/hyperchart/runtime";
 ```
 
@@ -60,6 +63,7 @@ type ChartRuntimeOptions = {
   agentExecutor: AgentExecutor;
   workDir: string;
   chartDir: string;
+  schemaRegistry?: SchemaRegistry;
   now?: () => number;
   onWarn?: (message: string) => void;
 };
@@ -169,7 +173,7 @@ The constructor and `readAll()` copy their arrays. Use this store for tests and 
 
 ```ts
 class ScriptRunner {
-  constructor(options: { workDir: string });
+  constructor(options: { workDir: string; schemaRegistry?: SchemaRegistry });
   run(
     effect: ScriptEffect,
     validationAttempt?: { n: number; reason?: string },
@@ -210,12 +214,24 @@ HYPERCHART_REJECT_REASON=<reason, when present>
 ### `runGuard()`
 
 ```ts
-type GuardContext = { chartDir: string; workDir: string };
+type GuardContext = Readonly<{
+  chartDir: string;
+  workDir: string;
+}>;
+
+type RenderedGuardInvocation = Readonly<{
+  scripts?: ScriptRunner;
+  env?: Readonly<Record<string, string | RenderedArtifact>>;
+  artifacts?: readonly RenderedArtifact[];
+  reply?: SchemaAst;
+  actionUid?: ActionUID;
+}>;
 
 function runGuard(
   guard: GuardRef,
   event: ChartEvent,
   context: GuardContext,
+  invocation?: RenderedGuardInvocation,
 ): Promise<GuardOutcome>;
 ```
 
@@ -224,16 +240,23 @@ For `tsImport` guards:
 - relative modules resolve from `chartDir`;
 - package specifiers are imported directly;
 - the named export must be a function;
-- the function receives the full chart event;
+- the function receives `(event, context)`; existing one-argument guards remain valid;
+- the context contains only `chartDir` and `workDir`; dynamic values belong in a script guard's `env`;
+- the same script-runner env resolver handles selected artifact reads and chart-scoped runtime-contract validation, failing closed when an exact contract is unavailable;
 - the result must be `boolean` or `{ ok: false, reason: string }`.
 
 For script guards:
 
+- simple static guards can be called directly; guards carrying `env`, `artifacts`, or `reply` must receive a `RenderedGuardInvocation` from ChartRuntime or fail with an actionable error;
 - the process runs in `workDir`;
-- the chart event is JSON on stdin;
-- stdout is ignored;
-- exit 0 accepts;
+- stdin is the unchanged plain ChartEvent root object (`type`, `output`, or `error`); no guard-only artifacts field is added;
+- dynamic env values use the same rendered script-action contract, including the validating action's own `artifactOf` and joined path refs;
+- when no `reply` is declared, stdout is ignored; when `reply` is declared, the last completion envelope is validated with the shared script reply checker;
+- declared guard artifacts are checked with the shared artifact checker after exit;
+- exit 0 accepts only after reply/artifact checks pass;
 - non-zero rejects using trimmed stderr or the exit status as reason.
+
+Guard env and artifacts are resolved only while a completion is pending validation. Reply output is validation-only, guard artifact declarations remain part of AST/provenance and the containing state's Files surface, and accepted durable verdicts are replayed without re-running the guard.
 
 The function throws for import failures, missing exports, process-spawn failures, and invalid TypeScript-guard return values.
 
@@ -247,10 +270,17 @@ type SchemaCheck = { ok: true } | { ok: false; errors: string[] };
 function checkSchema(
   schema: SchemaAst,
   value: unknown,
+  registry?: SchemaRegistry,
 ): SchemaCheck;
+
+function checkSchemaAsync(
+  schema: SchemaAst,
+  value: unknown,
+  registry?: SchemaRegistry,
+): Promise<SchemaCheck>;
 ```
 
-Validates against the normalized JSON Schema using TypeBox. It returns at most ten validation errors and converts validator exceptions into an unsuccessful result.
+For ordinary schemas, validates against the normalized JSON Schema using TypeBox. For a `runtimeContract`, synchronous callers may validate only synchronous refinements; use `checkSchemaAsync` for exact validation. Contract metadata without its chart-scoped registry fails closed and never falls back to JSON Schema. Results retain original input values; Zod transform outputs are not substituted into the workflow.
 
 ```ts
 const checked = checkSchema(schema, value);
@@ -276,6 +306,7 @@ type RenderedArtifact = {
 function resolveArtifactValue(
   artifact: RenderedArtifact,
   workDir: string,
+  registry?: SchemaRegistry,
 ): Promise<unknown>;
 ```
 
@@ -283,8 +314,10 @@ function resolveArtifactValue(
 - rejects paths escaping `workDir`;
 - returns raw UTF-8 text when neither `shape` nor `select` is present;
 - otherwise parses JSON;
-- validates the full parsed value when `shape` exists;
+- validates the full parsed value when `shape` exists, including the original runtime Zod contract when one is declared;
 - returns the selected dot-path when `select` exists.
+
+Guard validation uses this resolver for every named output artifact, never a read declaration. Duplicate or missing artifact names fail closed.
 
 It throws for unreadable files, invalid JSON, schema mismatch, and unresolved selectors.
 
@@ -294,6 +327,7 @@ It throws for unreadable files, invalid JSON, schema mismatch, and unresolved se
 function checkArtifactFile(
   artifact: RenderedArtifact,
   workDir: string,
+  registry?: SchemaRegistry,
 ): Promise<{ ok: true } | { ok: false; errors: string[] }>;
 ```
 
@@ -394,12 +428,12 @@ Checks whether the final template segment, ignoring a map key, is `failed`, `fai
 ```text
 Runtime
 AgentExecutor, EmitCompletion
-RenderedArtifact, GuardContext, SchemaCheck
+RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry
 ChartRuntime, ChartRuntimeOptions
 LogStore, JsonlLogStore, MemoryLogStore
 ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue
-runGuard, checkSchema
+runGuard, checkSchema, checkSchemaAsync
 createRunDir, loadRunMeta, saveRunMeta, RunMeta
 terminalStateForFinalMachine, finalMachineFailureMessage,
 isFailureStatePath, RunTerminalState

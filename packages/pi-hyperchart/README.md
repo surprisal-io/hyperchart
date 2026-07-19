@@ -22,10 +22,11 @@ It requires Node.js 22.19 or newer and the exact matching version of `@surprisal
 Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 
 ```text
-/hyperchart run name
+/hyperchart run name          # asynchronous
+/hyperchart run name --wait   # synchronous
 ```
 
-Run `/hyperchart` with no arguments to list recent runs for the current project.
+The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector.
 
 ## Pi tools
 
@@ -40,7 +41,7 @@ Run `/hyperchart` with no arguments to list recent runs for the current project.
 |---|---|
 | `@surprisal/pi-hyperchart` | same in-process command API as `/command` |
 | `@surprisal/pi-hyperchart/command` | in-process `/hyperchart` request event |
-| `@surprisal/pi-hyperchart/pi-host` | Pi chart/run host adapter |
+| `@surprisal/pi-hyperchart/pi-host` | Pi chart/run host adapter; exposes originating Pi session for new runs |
 | `@surprisal/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
 | `@surprisal/pi-hyperchart/react/styles.css` | required React stylesheet |
 | `@surprisal/pi-hyperchart/package.json` | package metadata and Pi manifest |

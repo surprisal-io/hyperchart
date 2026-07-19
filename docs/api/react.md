@@ -75,7 +75,7 @@ function HyperchartInspectorSidePanel(
 ): React.ReactElement;
 ```
 
-Renders run overview or one selected state's full details without the outer dialog or graph. `definitionSource` overrides generated source for the active view.
+Renders run overview or one selected state's full details without the outer dialog or graph. `Agents in scope` keeps first state for each unique `state.agent` name, preserving source order across map and parallel instances. Compound selections omit aggregated descendant `Contracts in scope`; selecting an action state still shows its own contracts. `definitionSource` overrides generated source for the active view.
 
 ## `HyperchartGraphPreview`
 
@@ -224,7 +224,7 @@ function buildGraph(
 };
 ```
 
-Builds React Flow nodes and transition edges. Without layout positions it uses a deterministic vertical fallback. The inspector's hook applies ELK layout separately. Running transitions keep the SVG path static and move a separate HTML marker with precomputed `transform` keyframes, avoiding React Flow's repaint-heavy `stroke-dashoffset` animation.
+Builds React Flow nodes and transition edges. Without layout positions it uses a deterministic vertical fallback. The inspector's hook applies ELK layout separately. States selected by a root or nested `initial` declaration display an `initial` badge independently from their runtime status; final nodes remain `pending` until reached. Running transitions keep the SVG path static and move a separate HTML marker with precomputed `transform` keyframes, avoiding React Flow's repaint-heavy `stroke-dashoffset` animation.
 
 ### `immediateMapScopeId()`
 

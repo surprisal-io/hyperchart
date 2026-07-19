@@ -1,6 +1,6 @@
 # Pi extension
 
-`@surprisal/pi-hyperchart` adds chart discovery, run management, one consolidated `hyperchart` agent tool, a terminal run view, a React inspector, and a bundled `hyperchart` skill to Pi.
+`@surprisal/pi-hyperchart` adds chart discovery, run management, one consolidated `hyperchart` agent tool, compact terminal progress/history surfaces, a localhost React inspector, and a bundled `hyperchart` skill to Pi.
 
 It does not define chart semantics. Those come from the exact matching version of `@surprisal/hyperchart`.
 
@@ -72,7 +72,7 @@ A run id is visible only from the working directory recorded in its `meta.json`.
 
 ## `/hyperchart`
 
-Run `/hyperchart` with no arguments to open recent runs for the current working directory.
+Run `/hyperchart` with no arguments to open the minimal run picker for the current working directory. Use ↑/↓ to select a run, Enter to open its browser inspector, and Esc to close the picker.
 
 ```text
 /hyperchart
@@ -92,12 +92,14 @@ Options:
 | `--args <json>` | run arguments object |
 | `--run-dir <run-id-or-path>` | existing run to resume, or explicit destination directory |
 | `--export <name>` | named chart export instead of the default export |
+| `--wait` | wait synchronously until the run reaches a terminal status |
 | `--ignore-replay-warnings` | continue despite stale or skipped replay records |
 
-Example:
+Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. Add `--wait` when the command should remain blocked until completion.
 
 ```text
 /hyperchart run review --args '{"pullRequest":42}'
+/hyperchart run review --args '{"pullRequest":42}' --wait
 ```
 
 ### Resume or restart
@@ -118,7 +120,7 @@ Example:
 /hyperchart <run-id>
 ```
 
-`view` opens the terminal run view. A bare run id is shorthand when it resolves to a run in the current working directory.
+`view` opens the full React inspector for that run in the system browser. A bare run id is shorthand when it resolves to a run in the current working directory. The extension starts one loopback-only HTTP server lazily per active Pi session and selects the run through a unique URL; it does not duplicate graph, session, or transcript inspection in the TUI. Pi closes the server during session shutdown, reload, switch, or fork, so reopen the inspector from the new session when needed.
 
 ### Stop a run
 
@@ -261,7 +263,7 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 
 | Path | Owner | Meaning |
 |---|---|---|
-| `meta.json` | runner | chart path/export, args, working directory, run identity |
+| `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
 | `log.jsonl` | core runtime | ordered semantic facts |
 | `status.json` | Pi runner | process state, pid, heartbeat, exit, error |
 | `sessions/` | Pi executor | agent sessions and progress |

@@ -24,7 +24,7 @@ import type {
 } from "@surprisal/hyperchart/host";
 ```
 
-`HyperchartInfo` describes a discovered chart. `HyperchartRunInfo` combines static chart information with optional runtime overlays. UI components consume these models instead of reading `log.jsonl` directly.
+`HyperchartInfo` describes a discovered chart. `HyperchartRunInfo` combines static chart information with optional runtime overlays. Its optional `originSessionId` lets harnesses isolate runs by creating session. UI components consume these models instead of reading `log.jsonl` directly.
 
 The boundary is intentional:
 
