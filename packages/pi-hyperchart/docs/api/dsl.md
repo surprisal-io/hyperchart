@@ -374,6 +374,22 @@ transitions: { PLANNED: "write", FAILED: "failed" },
 
 `reply` validates the completion event's `output`; it is for small routing data. Put large deliverables in artifacts.
 
+### Exact runtime contracts
+
+Use `contract(id, version, schema)` when a reply or artifact must execute the original Zod value at runtime:
+
+```ts
+const Reply = contract("planner-reply", "1", z.object({
+  approved: z.boolean(),
+}).superRefine(async (value, ctx) => {
+  if (!value.approved) ctx.addIssue({ code: "custom", message: "approval required" });
+}));
+```
+
+The helper returns the same Zod value, so `z.infer<typeof Reply>` remains available. Normalization stores only JSON Schema and `runtimeContract: { id, version }` in the serializable AST; the original schema is retained in a parsed chart's in-memory registry. Runtime paths use async exact validation and fail closed if that registry is not threaded into the runtime. Unmarked Zod schemas retain the JSON Schema fallback behavior.
+
+State and map inputs are replay-derived synchronously, so exact runtime contracts are rejected there; use ordinary Zod input schemas. Runtime contracts validate the supplied value but do not replace it with Zod defaulted or transformed output.
+
 ### `script(command, args?, options?)`
 
 ```ts
@@ -405,7 +421,7 @@ On success, a script should print a JSON completion envelope as its last non-emp
 
 If exactly one non-`FAILED` event is reachable, exit code 0 may omit the envelope. With multiple possible events, the envelope is required. A non-zero exit becomes `FAILED`.
 
-The same `script(command, args)` value can be used as a validation guard.
+The same `script(command, args, { env, artifacts, reply })` value can be used as a validation guard. Guard scripts use the same env renderer and artifact/reply validation as script actions. Guard reply output is validation-only and is not stored as the action result; guard-produced artifacts become downstream-declarable artifacts of the containing state. Stdin remains the plain ChartEvent; no guard-only artifacts field or TypeScript context artifacts are injected. Missing or invalid reads reject closed.
 
 ### `user(options)`
 
@@ -488,6 +504,8 @@ artifacts: {
 ```
 
 A shape means the file contains JSON matching the Zod schema. Without a shape, the runtime only requires a readable file. Artifact paths are resolved from the run working directory; the generic runtime rejects paths escaping that directory.
+
+A validation guard returns only a verdict, but a script guard supports the complete script option surface: `env`, `artifacts`, and `reply`. Its `reply` validates the guard script's optional completion-envelope output and is not stored as the containing action's result. Guard artifacts are validated after exit and become declared artifacts of the containing action state for downstream `artifactOf()`/Files references; duplicate names with action artifacts are rejected. Env values use the same args/results/input/map-item/key/visit renderer as script actions. `artifactOf()` values without a selector become paths; selected values are read, shape-validated, and serialized exactly like script-action env. A guard may read the validated action's own artifact because that file exists before the verdict. `joinArtifactOf()` becomes a JSON array of rendered paths. Missing or invalid reads reject closed. Values are resolved only while validation is pending, never placed in stdin/context or durable facts.
 
 ## Compound states
 
@@ -663,10 +681,19 @@ validate: tsImport("./validators/report.ts", "acceptReport")
 ### Script guard
 
 ```ts
-validate: script("node", ["validators/report.mjs"])
+validate: script("node", ["validators/report.mjs"], {
+  env: {
+    RESULT: t`${result("draft", "path")}`,
+    REPORT: artifactOf("draft", { select: "approved" }),
+    ALL_REPORTS: joinArtifactOf("map.review"),
+    VISIT: t`${visit()}`,
+  },
+  artifacts: { diagnostic: artifact("out/diagnostic.json", DiagnosticFile) },
+  reply: z.object({ approved: z.boolean() }),
+})
 ```
 
-The event is written as JSON to stdin. Exit 0 accepts. A non-zero exit rejects; stderr becomes the rejection reason.
+Guard env, artifacts, reply parsing, schema checks, and process execution use the exact same helpers as script actions. A declared reply validates the guard completion envelope but is not stored as the action result; declared guard artifacts are checked after exit and become downstream artifacts of the containing state. The event is written unchanged as plain `ChartEvent` JSON to stdin (no special `artifacts` field). Exit 0 accepts only after optional reply/artifact checks pass. A non-zero exit rejects; stderr becomes the rejection reason.
 
 ### Rejection and retries
 
@@ -750,8 +777,8 @@ Inspect a chart before execution to obtain the complete diagnostics for that def
 Values:
 
 ```text
-chart, agent, artifact, compound, event, final, input, json, map,
-parallel, refs, resume, script, t, tsImport, user, visit, z
+chart, agent, artifact, compound, contract, event, final, input, json,
+map, parallel, refs, resume, script, t, tsImport, user, visit, z
 ```
 
 The argument, result, artifact-read, map-key, and map-item constructors are methods returned by `refs()`.

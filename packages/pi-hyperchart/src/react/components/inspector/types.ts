@@ -9,13 +9,14 @@ export interface StateNodeData extends Record<string, unknown> {
 	state: HyperchartStateInfo;
 	displayType?: HyperchartStateType;
 	childPreview?: string;
+	snapshotAt?: number;
 }
 
 export type StateNode = Node<StateNodeData>;
 
 export type GraphLayout = { nodes: StateNode[]; edges: Edge[] };
 export type NodePosition = { x: number; y: number };
-export type RoutedEdgeData = { points?: ElkPoint[] };
+export type RoutedEdgeData = { points?: ElkPoint[]; running?: boolean };
 export type ElkLayoutEngine = {
 	layout: (graph: import("elkjs/lib/elk.bundled.js").ElkNode) => Promise<import("elkjs/lib/elk.bundled.js").ElkNode>;
 };

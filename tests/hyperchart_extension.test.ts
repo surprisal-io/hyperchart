@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -6,9 +6,13 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
-import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
-import { patchRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
+import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import { patchRunStatus, readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
 import { updateSessionProgress } from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
+import {
+	closeRunInspectorServer,
+	openRunInspector,
+} from "../packages/pi-hyperchart/src/runtime/pi/inspector_server.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
@@ -48,7 +52,8 @@ beforeEach(() => {
 	process.chdir(projectDir);
 });
 
-afterEach(() => {
+afterEach(async () => {
+	await closeRunInspectorServer();
 	process.chdir(previousCwd);
 	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
@@ -56,6 +61,114 @@ afterEach(() => {
 });
 
 describe("hyperchart extension", () => {
+	it("registers one consolidated hyperchart tool", () => {
+		expect(registeredToolNames()).toEqual(["hyperchart"]);
+	});
+
+	it("records the originating pi session on a new run", async () => {
+		const chartPath = join(tempDir, "session-owned.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "owned", initial: "done", states: { done: { kind: "final" } } };\n`);
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "run", chartPath, wait: true },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const runDir = (result.details as { runDir: string }).runDir;
+
+		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
+	});
+
+	it("lists project and user charts with project precedence", async () => {
+		const projectCharts = join(projectDir, ".pi", "hypercharts");
+		const userCharts = join(agentDir, "hypercharts");
+		mkdirSync(projectCharts, { recursive: true });
+		mkdirSync(userCharts, { recursive: true });
+		writeFileSync(join(userCharts, "shared.chart.ts"), "export default {};\n");
+		writeFileSync(join(userCharts, "user-only.chart.ts"), "export default {};\n");
+		writeFileSync(join(projectCharts, "shared.chart.ts"), "export default {};\n");
+		const tool = registeredTool("hyperchart");
+		const { ctx } = commandContext(projectDir);
+
+		const result = await tool.execute("tool-call", { action: "list" }, new AbortController().signal, () => undefined, ctx);
+		const charts = (result.details as { charts: Array<{ name: string; scope: string }> }).charts;
+		const text = (result as { content: Array<{ type: string; text: string }> }).content[0]?.text;
+
+		expect(text).toBe([
+			"Found 2 Hyperchart definitions:",
+			`- shared [project] ${join(projectCharts, "shared.chart.ts")}`,
+			`- user-only [user] ${join(userCharts, "user-only.chart.ts")}`,
+		].join("\n"));
+		expect(charts).toEqual([
+			expect.objectContaining({ name: "shared", scope: "project" }),
+			expect.objectContaining({ name: "user-only", scope: "user" }),
+		]);
+	});
+
+	it("lists a user chart bundle installed as a directory symlink", async () => {
+		const userCharts = join(agentDir, "hypercharts");
+		const externalBundle = join(tempDir, "odyssey-source");
+		mkdirSync(userCharts, { recursive: true });
+		mkdirSync(externalBundle, { recursive: true });
+		writeFileSync(join(externalBundle, "chart.ts"), "export default {};\n");
+		symlinkSync(externalBundle, join(userCharts, "odyssey"), "dir");
+
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "list" },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const charts = (result.details as { charts: Array<{ name: string; path: string }> }).charts;
+		expect(charts).toEqual([expect.objectContaining({ name: "odyssey", path: join(userCharts, "odyssey", "chart.ts") })]);
+	});
+
+	it("registers tools from a self-contained chart bundle extension without listing its implementation files", async () => {
+		const bundleDir = join(projectDir, ".pi", "hypercharts", "bundled");
+		mkdirSync(join(bundleDir, "extensions", "custom"), { recursive: true });
+		writeFileSync(join(bundleDir, "chart.ts"), "export default {};\n");
+		writeFileSync(join(bundleDir, "extensions", "custom", "index.ts"), [
+			"export default function register(pi: any) {",
+			"  pi.registerTool({ name: 'bundle_tool', parameters: {}, execute() {} });",
+			"}",
+		].join("\n"));
+
+		expect(registeredToolNames()).toEqual(["bundle_tool", "hyperchart"]);
+		const list = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "list" },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const charts = (list.details as { charts: Array<{ name: string }> }).charts;
+		expect(charts.map((chart) => chart.name)).toEqual(["bundled"]);
+	});
+
+	it("stops one run through the consolidated tool", async () => {
+		const chartPath = writeChart("stoppable");
+		const runDir = createRun("stoppable-run", projectDir, chartPath);
+		patchRunStatus(runDir, {
+			runId: "stoppable-run",
+			chartId: "demo",
+			state: "running",
+			pid: 999_999_999,
+			heartbeatAt: Date.now(),
+		});
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "stop", runDir: "stoppable-run" },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+
+		expect(readRunStatus(runDir)).toMatchObject({ state: "stopped", exitCode: 0 });
+		expect((result as { content: Array<{ text: string }> }).content[0]?.text).toContain("stoppable-run (marked stopped)");
+	});
+
 	it("accepts commands from another pi extension over the shared event bus", async () => {
 		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
 		let commandRequest: ((request: HyperchartCommandRequest) => void) | undefined;
@@ -91,6 +204,29 @@ describe("hyperchart extension", () => {
 		}, "resume")).rejects.toThrow("resume requires a runId");
 	});
 
+	it("closes the browser inspector server on session shutdown", async () => {
+		let sessionShutdown: (() => Promise<void>) | undefined;
+		const pi = {
+			registerCommand: () => {},
+			registerTool: () => {},
+			on: (event: string, handler: () => Promise<void>) => {
+				if (event === "session_shutdown") sessionShutdown = handler;
+			},
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const { url } = await openRunInspector({
+			runId: "lifecycle-run",
+			loadRun: async () => ({ runId: "lifecycle-run" }) as never,
+			openBrowser: () => undefined,
+		});
+		expect((await fetch(url)).status).toBe(200);
+
+		await sessionShutdown?.();
+
+		await expect(fetch(url)).rejects.toThrow();
+	});
+
 	it("offers documented top-level commands and run ids with an empty prefix", () => {
 		const runId = "demo-run";
 		createRun(runId, projectDir, writeChart("demo"));
@@ -107,29 +243,54 @@ describe("hyperchart extension", () => {
 		mkdirSync(join(agentDir, "agents"), { recursive: true });
 		writeFileSync(
 			join(agentDir, "agents", "worker.md"),
-			"---\nmodel: anthropic/claude-sonnet\nthinking: high\ntools:\n  - read\n  - grep\n---\nWorker prompt\n",
+			"---\ndescription: Reviews implementation details\nmodel: anthropic/claude-sonnet\nthinking: high\ntools:\n  - read\n  - grep\n---\nWorker prompt\n",
 			"utf8",
 		);
 		const chartPath = writeChart("inspect-defaults");
-		const tool = registeredTool("hyperchart_inspect");
+		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
-		const result = await tool.execute("tool-call", { chartPath }, new AbortController().signal, () => undefined, ctx);
+		const result = await tool.execute("tool-call", { action: "inspect", chartPath }, new AbortController().signal, () => undefined, ctx);
 		const details = result.details as { states: Array<Record<string, unknown>> };
 
 		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+			description: "Reviews implementation details",
 			model: "anthropic/claude-sonnet",
 			thinking: "high",
 			tools: ["read", "grep"],
 		});
 	});
 
+	it("loads agent descriptions from the selected chart bundle", async () => {
+		const bundleDir = join(agentDir, "hypercharts", "described-bundle");
+		mkdirSync(join(bundleDir, "agents"), { recursive: true });
+		copyFileSync(writeChart("described-source"), join(bundleDir, "chart.ts"));
+		writeFileSync(
+			join(bundleDir, "agents", "worker.md"),
+			"---\ndescription: Bundle-local analyzer\n---\nAnalyze locally\n",
+			"utf8",
+		);
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "inspect", chartPath: join(bundleDir, "chart.ts") },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const details = result.details as { states: Array<Record<string, unknown>> };
+
+		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+			agent: "worker",
+			description: "Bundle-local analyzer",
+		});
+	});
+
 	it("marks unavailable agent definitions in static inspect results", async () => {
 		const chartPath = writeChart("inspect-missing-agent");
-		const tool = registeredTool("hyperchart_inspect");
+		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
-		const result = await tool.execute("tool-call", { chartPath }, new AbortController().signal, () => undefined, ctx);
+		const result = await tool.execute("tool-call", { action: "inspect", chartPath }, new AbortController().signal, () => undefined, ctx);
 		const details = result.details as { states: Array<Record<string, unknown>> };
 
 		expect(details.states.find((state) => state.id === "work")).toMatchObject({
@@ -165,10 +326,10 @@ describe("hyperchart extension", () => {
 		);
 		patchRunStatus(runDir, { runId, chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] });
 		updateSessionProgress(join(runDir, "sessions"), uid, { actionName: "worker", status: "failed", error: "session failed", lastActivityAt: 4 });
-		const tool = registeredTool("hyperchart_run_inspect");
+		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
-		const result = await tool.execute("tool-call", { runDir: runId }, new AbortController().signal, () => undefined, ctx);
+		const result = await tool.execute("tool-call", { action: "run_inspect", runDir: runId }, new AbortController().signal, () => undefined, ctx);
 		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; states: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }> };
 
 		expect(details.mode).toBe("run");
@@ -249,12 +410,12 @@ describe("hyperchart extension", () => {
 				.join("\n") + "\n",
 			"utf8",
 		);
-		const tool = registeredTool("hyperchart_rewind");
+		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
 		const result = await tool.execute(
 			"tool-call",
-			{ runDir, to: "compatible", cleanupSessions: true, cleanupArtifacts: false },
+			{ action: "rewind", runDir, to: "compatible", cleanupSessions: true, cleanupArtifacts: false },
 			new AbortController().signal,
 			() => undefined,
 			ctx,
@@ -282,6 +443,18 @@ function registeredCommand(): HyperchartCommand {
 	return command;
 }
 
+function registeredToolNames(): string[] {
+	const tools: HyperchartTool[] = [];
+	const pi = {
+		registerCommand: () => {},
+		registerTool: (tool: HyperchartTool) => tools.push(tool),
+		on: () => {},
+		events: { on: () => {}, emit: () => {} },
+	} as unknown as ExtensionAPI;
+	register(pi);
+	return tools.map((tool) => tool.name);
+}
+
 function registeredTool(name: string): HyperchartTool {
 	const tools: HyperchartTool[] = [];
 	const pi = {
@@ -304,6 +477,7 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 			cwd,
 			mode: "print",
 			model: undefined,
+			sessionManager: { getSessionId: () => "session-a" },
 			ui: {
 				notify: (message: string, type: "info" | "warning" | "error" | undefined) => {
 					notifications.push({ message, type });

@@ -177,6 +177,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 			workDir: projectDir,
 			chartId: "sample",
 			createdAt: "2026-07-10T00:00:00.000Z",
+			originSessionId: "session-a",
 		}), "utf8");
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
 			version: 1,
@@ -203,6 +204,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 			chartName: "sample",
 			status: "running",
 			cwd: projectDir,
+			originSessionId: "session-a",
 			args: { topic: "native" },
 			stateCount: 2,
 		});

@@ -9,6 +9,7 @@ export type RunMeta = {
 	workDir: string;
 	chartId: string;
 	createdAt: string;
+	originSessionId?: string;
 };
 
 export function createRunDir(workDir: string, chartId: string, options: { rootDir?: string } = {}): string {

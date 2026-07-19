@@ -1,5 +1,6 @@
 import { ArrowPathIcon, CheckCircleIcon, ClockIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo, HyperchartRunInfo, HyperchartUsageInfo } from "./types.js";
+export { summarizeHyperchartProgress } from "../run_progress.js";
 
 export function hyperchartStatusClasses(status: string): string {
 	switch (status) {
@@ -76,12 +77,6 @@ export function formatHyperchartDateTime(ts?: number): string {
 		minute: "2-digit",
 		second: "2-digit",
 	});
-}
-
-export function summarizeHyperchartProgress(run?: HyperchartRunInfo): { done: number; total: number; pct: number } {
-	const done = run?.states.filter((state) => state.status === "done").length ?? 0;
-	const total = run?.stateCount || run?.states.length || 0;
-	return { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
 }
 
 export function runningHyperchartStates(run?: HyperchartRunInfo): HyperchartStateInfo[] {

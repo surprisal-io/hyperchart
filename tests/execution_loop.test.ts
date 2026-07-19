@@ -89,6 +89,23 @@ function twoStepAst(): ChartAst {
 	return result.ast;
 }
 
+function semanticDownstreamAst(): ChartAst {
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "semantic-resume-chart",
+			initial: "semantic-gate",
+			states: {
+				"semantic-gate": { kind: "state", action: agent("semantic-gate"), transitions: { SEMANTIC_PASS: "downstream" } },
+				downstream: { kind: "state", action: agent("downstream"), transitions: { DOWNSTREAM_DONE: "done" } },
+				done: final(),
+			},
+		}),
+	);
+	if (!result.ok) throw new Error("test chart should be valid");
+	return result.ast;
+}
+
 function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartAst {
 	const result = normalizeChartConfig(
 		chart({
@@ -531,6 +548,31 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["failed"]);
 		expect(rejections).toEqual([]);
 		expect(validations).toEqual([]);
+	});
+
+	it("resumes a durable semantic gate run by invoking only the unresolved downstream action", async () => {
+		const ast = semanticDownstreamAst();
+		const semanticUid = actionUid(ast, "semantic-gate");
+		const downstreamUid = actionUid(ast, "downstream");
+		const events: MachineEvent[] = [];
+		const agentStates: string[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(semanticUid, 1), complete(semanticUid, "SEMANTIC_PASS", 2), invoke(downstreamUid, 3)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						agentStates.push(effect.actionUid.state);
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "DOWNSTREAM_DONE" } });
+					}
+					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+				}
+			},
+		});
+		const state = await loop(runtime);
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(agentStates).toEqual(["downstream"]);
 	});
 
 	it("replays stored verdicts without re-running the validator", async () => {
@@ -1836,6 +1878,98 @@ describe("execution loop", () => {
 		// One artifact per spawned instance, in spawn-fact key order, shape carried along.
 		expect(reads.map((read) => read.path)).toEqual(["out/intro.json", "out/body.json"]);
 		expect(files).toBe(JSON.stringify(["out/intro.json", "out/body.json"]));
+	});
+
+	it("joins nested-map artifacts within the current outer-map instance", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "nested-join-chart",
+				initial: "plan",
+				states: {
+					plan: {
+						kind: "state",
+						action: agent("planner"),
+						transitions: { OK: "sections" },
+					},
+					sections: map({
+						over: result("plan", "sections"),
+						initial: "items",
+						onDone: "done",
+						states: {
+							items: map({
+								over: item("items"),
+								initial: "produce",
+								onDone: "gather",
+								states: {
+									produce: {
+										kind: "state",
+										action: agent("producer", {
+											artifacts: {
+												output: artifact(t`out/${key()}.json`),
+											},
+										}),
+										transitions: { OK: "written" },
+									},
+									written: final(),
+								},
+							}),
+							gather: {
+								kind: "state",
+								action: script("gather", [], {
+									env: { FILES: joinArtifactOf("sections.items.produce") },
+								}),
+								transitions: { OK: "finished" },
+							},
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		const ast = parsed.ast;
+		const events: MachineEvent[] = [];
+		const joined = new Map<string, string>();
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent" && effect.actionUid.state === "plan") {
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							event: {
+								type: "OK",
+								output: {
+									sections: {
+										a: { items: { x: {}, y: {} } },
+										b: { items: { z: {} } },
+									},
+								},
+							},
+						});
+					} else if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "script") {
+						joined.set(effect.actionUid.state, typeof effect.env?.FILES === "string" ? effect.env.FILES : "");
+						events.push({ kind: "script", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(joined.get("sections#a.gather")).toBe(JSON.stringify(["out/x.json", "out/y.json"]));
+		expect(joined.get("sections#b.gather")).toBe(JSON.stringify(["out/z.json"]));
 	});
 
 	it("replays a map log without re-running agents", async () => {

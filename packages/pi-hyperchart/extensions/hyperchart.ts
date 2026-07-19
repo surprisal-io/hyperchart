@@ -12,8 +12,9 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	defineTool,
 	type ExtensionAPI,
@@ -22,11 +23,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { createJiti } from "jiti";
 import {
 	createBranchProjection,
 	explainReplay,
 	inspectChartModuleSync,
-	parseChartModule,
+	parseChartModuleSync,
 	projectBranch,
 	type BranchProjection,
 	type ChartAst,
@@ -43,6 +45,8 @@ import { isFailureStatePath, type RunTerminalState } from "@surprisal/hyperchart
 import { assertChartPreflight } from "../src/runtime/pi/chart_typecheck.js";
 import {
 	getHyperchartRunsRoot,
+	getProjectHyperchartsDir,
+	listHyperchartFiles,
 	listProjectHypercharts,
 	resolveHyperchartPath,
 	resolveHyperchartRunDir,
@@ -60,13 +64,15 @@ import { createAgentDefaultsResolver } from "../src/runtime/pi/agent_definitions
 import { readSessionProgress, sessionProgressPath } from "../src/runtime/pi/session_progress.js";
 import {
 	RunHistoryOverlay,
-	RunOverlay,
 	RunWidget,
 	type RunHistoryAction,
 	type RunHistoryItem,
 } from "../src/tui/components.js";
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
 import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
+import { closeRunInspectorServer, openRunInspector } from "../src/runtime/pi/inspector_server.js";
+
+const require = createRequire(import.meta.url);
 import { HYPERCHART_COMMAND_EVENT, type HyperchartCommandRequest } from "../src/command.js";
 
 type RunSnapshot = {
@@ -88,7 +94,7 @@ type RunHistoryEntry = {
 	updatedAt: number;
 };
 type ActiveRun = RunSnapshot & { done: Promise<HyperchartRunStatus> };
-type HyperchartContext = Pick<ExtensionContext, "cwd" | "mode" | "model" | "ui">;
+type HyperchartContext = Pick<ExtensionContext, "cwd" | "mode" | "model" | "sessionManager" | "ui">;
 type RunStartOptions = {
 	chartPath?: string;
 	args?: Record<string, unknown>;
@@ -133,10 +139,11 @@ const RUN_OPTION_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "--args", label: "--args", description: "JSON args" },
 	{ value: "--run-dir", label: "--run-dir", description: "resume/destination run dir" },
 	{ value: "--export", label: "--export", description: "named chart export" },
+	{ value: "--wait", label: "--wait", description: "wait synchronously for completion" },
 	{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" },
 ];
 const HYPERCHART_USAGE =
-	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--ignore-replay-warnings] | resume <runId> [--ignore-replay-warnings] | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
+	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--wait] [--ignore-replay-warnings] | resume <runId> [--ignore-replay-warnings] | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
 
 function completeHyperchartArgs(argumentPrefix: string): AutocompleteItem[] | null {
 	const parsed = parseCompletionPrefix(argumentPrefix);
@@ -253,16 +260,14 @@ function filterCompletions(items: readonly AutocompleteItem[], current: string):
 }
 
 export default function register(pi: ExtensionAPI) {
+	registerBundleExtensions(pi, process.cwd());
 	let currentCtx: HyperchartContext | undefined;
 	pi.registerCommand("hyperchart", {
 		description: "Run and inspect hyperchart workflows",
 		handler: async (args, ctx) => dispatch(args, ctx),
 		getArgumentCompletions: (prefix) => completeHyperchartArgs(prefix),
 	});
-	pi.registerTool(hyperchartRunTool);
-	pi.registerTool(hyperchartInspectTool);
-	pi.registerTool(hyperchartRunInspectTool);
-	pi.registerTool(hyperchartRewindTool);
+	pi.registerTool(hyperchartTool);
 	pi.events.on(HYPERCHART_COMMAND_EVENT, (payload) => {
 		const request = payload as HyperchartCommandRequest;
 		request.claim(async () => {
@@ -276,6 +281,140 @@ export default function register(pi: ExtensionAPI) {
 			await restoreRunWidgets(ctx);
 		}
 	});
+	pi.on("session_shutdown", async () => {
+		currentCtx = undefined;
+		await closeRunInspectorServer();
+	});
+}
+
+function registerBundleExtensions(pi: ExtensionAPI, cwd: string): void {
+	for (const bundleDir of discoverBundleDirs(cwd)) {
+		const extensionsDir = join(bundleDir, "extensions");
+		for (const entryPath of bundleExtensionEntries(extensionsDir)) {
+			try {
+				const jiti = createJiti(pathToFileURL(entryPath).href, {
+					interopDefault: true,
+					moduleCache: false,
+					alias: { typebox: require.resolve("typebox") },
+				});
+				const loaded = jiti(entryPath) as unknown;
+				const register = typeof loaded === "function"
+					? loaded
+					: typeof (loaded as { default?: unknown })?.default === "function"
+						? (loaded as { default: (api: ExtensionAPI) => void }).default
+						: undefined;
+				if (register === undefined) throw new Error("default export must be an extension registration function");
+				register(pi);
+			} catch (error) {
+				console.warn(`[pi-hyperchart] Failed to load bundle extension ${entryPath}:`, error);
+			}
+		}
+	}
+}
+
+function discoverBundleDirs(cwd: string): string[] {
+	const projectRoot = getProjectHyperchartsDir(cwd);
+	const userRoot = resolve(getAgentDir(), "hypercharts");
+	const byName = new Map<string, string>();
+	for (const root of [userRoot, projectRoot]) {
+		if (!existsSync(root)) continue;
+		for (const entry of readdirSync(root, { withFileTypes: true })) {
+			if (entry.name.startsWith(".") || entry.name === "runs" || entry.name === "node_modules") continue;
+			const bundleDir = join(root, entry.name);
+			if (!(entry.isDirectory() || (entry.isSymbolicLink() && existsSync(bundleDir) && statSync(bundleDir).isDirectory()))) continue;
+			if (existsSync(join(bundleDir, "chart.ts"))) byName.set(entry.name, bundleDir);
+		}
+	}
+	return [...byName.values()];
+}
+
+function bundleExtensionEntries(extensionsDir: string): string[] {
+	if (!existsSync(extensionsDir)) return [];
+	const entries: string[] = [];
+	if (existsSync(join(extensionsDir, "index.ts"))) entries.push(join(extensionsDir, "index.ts"));
+	for (const entry of readdirSync(extensionsDir, { withFileTypes: true })) {
+		if (entry.isDirectory() && !entry.name.startsWith(".") && existsSync(join(extensionsDir, entry.name, "index.ts"))) {
+			entries.push(join(extensionsDir, entry.name, "index.ts"));
+		}
+	}
+	return entries.sort();
+}
+
+const hyperchartTool = defineTool({
+	name: "hyperchart",
+	label: "Hyperchart",
+	description: "List, inspect, run, inspect runs, and rewind durable Hyperchart workflows.",
+	parameters: Type.Object({
+		action: Type.Union([
+			Type.Literal("list"),
+			Type.Literal("inspect"),
+			Type.Literal("run"),
+			Type.Literal("run_inspect"),
+			Type.Literal("rewind"),
+			Type.Literal("stop"),
+		]),
+		chartPath: Type.Optional(Type.String()),
+		args: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+		runDir: Type.Optional(Type.String()),
+		exportName: Type.Optional(Type.String()),
+		wait: Type.Optional(Type.Boolean()),
+		ignoreReplayWarnings: Type.Optional(Type.Boolean()),
+		state: Type.Optional(Type.String()),
+		seqId: Type.Optional(Type.Number()),
+		to: Type.Optional(Type.Literal("compatible")),
+		mode: Type.Optional(Type.Union([Type.Literal("before"), Type.Literal("after")])),
+		cleanupSessions: Type.Optional(Type.Boolean()),
+		cleanupArtifacts: Type.Optional(Type.Boolean()),
+		start: Type.Optional(Type.Boolean()),
+		all: Type.Optional(Type.Boolean()),
+	}),
+	async execute(toolCallId, params, signal, onUpdate, ctx) {
+		if (params.action === "list") return listHypercharts(ctx.cwd);
+		if (params.action === "inspect") {
+			if (params.chartPath === undefined) throw new Error("hyperchart action=inspect requires chartPath");
+			return hyperchartInspectTool.execute(toolCallId, { chartPath: params.chartPath, exportName: params.exportName }, signal, onUpdate, ctx);
+		}
+		if (params.action === "run") {
+			if (params.chartPath === undefined && params.runDir === undefined) throw new Error("hyperchart action=run requires chartPath or runDir");
+			return hyperchartRunTool.execute(toolCallId, params, signal, onUpdate, ctx);
+		}
+		if (params.action === "run_inspect") {
+			if (params.runDir === undefined) throw new Error("hyperchart action=run_inspect requires runDir");
+			return hyperchartRunInspectTool.execute(toolCallId, { runDir: params.runDir }, signal, onUpdate, ctx);
+		}
+		if (params.action === "stop") return stopHyperchartRuns(params, ctx);
+		if (params.runDir === undefined) throw new Error("hyperchart action=rewind requires runDir");
+		return hyperchartRewindTool.execute(toolCallId, params, signal, onUpdate, ctx);
+	},
+});
+
+function listHypercharts(cwd: string) {
+	const projectRoot = getProjectHyperchartsDir(cwd);
+	const userRoot = resolve(getAgentDir(), "hypercharts");
+	const byName = new Map<string, { name: string; scope: "user" | "project"; path: string }>();
+	for (const [scope, root, files] of [
+		["user", userRoot, listHyperchartFiles(userRoot)],
+		["project", projectRoot, listProjectHypercharts(cwd).map((file) => resolve(projectRoot, file))],
+	] as const) {
+		for (const path of files) {
+			const rel = relative(root, path).replaceAll("\\", "/");
+			const name = rel.endsWith("/chart.ts")
+				? rel.slice(0, -"/chart.ts".length)
+				: rel.replace(/\.chart\.ts$/, "").replace(/\.ts$/, "");
+			byName.set(name, { name, scope, path: resolve(path) });
+		}
+	}
+	const charts = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+	const text = charts.length === 0
+		? "No Hyperchart definitions found"
+		: [
+			`Found ${charts.length} Hyperchart definition${charts.length === 1 ? "" : "s"}:`,
+			...charts.map((chart) => `- ${chart.name} [${chart.scope}] ${chart.path}`),
+		].join("\n");
+	return {
+		content: [{ type: "text" as const, text }],
+		details: { charts },
+	};
 }
 
 const hyperchartRunTool = defineTool({
@@ -321,10 +460,14 @@ const hyperchartRunTool = defineTool({
 	},
 });
 
-async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContext) {
+async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContext, ast?: ChartAst) {
 	const meta = loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
 	if (meta === undefined) throw new Error(`Run '${basename(runDir)}' belongs to another working directory or is missing metadata`);
-	return hyperchartRunFromRunDir(runDir, { meta, agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir()) });
+	return hyperchartRunFromRunDir(runDir, {
+		meta,
+		...(ast === undefined ? {} : { ast }),
+		agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir(), meta.chartPath),
+	});
 }
 
 const hyperchartInspectTool = defineTool({
@@ -337,7 +480,7 @@ const hyperchartInspectTool = defineTool({
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
-		const agentDefaults = createAgentDefaultsResolver(ctx.cwd, getAgentDir());
+		const agentDefaults = createAgentDefaultsResolver(ctx.cwd, getAgentDir(), chartPath);
 		const result = inspectChartModuleSync(
 			chartPath,
 			{
@@ -420,7 +563,7 @@ const hyperchartRewindTool = defineTool({
 			};
 		}
 		return {
-			content: [{ type: "text", text: `Rewound ${result.runId} to ${result.targetLabel}. Resume with hyperchart_run runDir=${result.runDir}` }],
+			content: [{ type: "text", text: `Rewound ${result.runId} to ${result.targetLabel}. Resume with hyperchart action=run runDir=${result.runDir}` }],
 			details: result,
 		};
 	},
@@ -452,7 +595,7 @@ type RewindResult = {
 async function rewindHyperchartRun(opts: RewindOptions, ctx: HyperchartContext): Promise<RewindResult> {
 	const targetCount = [opts.state, opts.seqId, opts.to].filter((target) => target !== undefined).length;
 	if (targetCount !== 1) {
-		throw new Error("hyperchart_rewind requires exactly one of state, seqId, or to=compatible");
+		throw new Error("hyperchart action=rewind requires exactly one of state, seqId, or to=compatible");
 	}
 	const status = readRunStatus(opts.runDir);
 	if (isRunLive(status)) throw new Error(`Run '${basename(opts.runDir)}' is live; stop it before rewinding`);
@@ -460,7 +603,7 @@ async function rewindHyperchartRun(opts: RewindOptions, ctx: HyperchartContext):
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 		throw new Error(`Run '${basename(opts.runDir)}' belongs to ${meta.workDir}; open that directory first`);
 	}
-	const parsed = await parseChartModule(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
+	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const logPath = resolve(opts.runDir, "log.jsonl");
 	const records = readDurableLogSync(logPath);
@@ -818,7 +961,9 @@ async function dispatch(args: string, ctx: HyperchartContext, notifyErrors = tru
 }
 
 async function runCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
-	await startHyperchartRun(parseRunOptions(tokens), ctx);
+	const { wait, ...options } = parseRunOptions(tokens);
+	const result = await startHyperchartRun(options, ctx);
+	if (wait === true) await result.done;
 }
 
 async function runsCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
@@ -893,21 +1038,7 @@ async function restartRun(runId: string, ctx: HyperchartContext): Promise<RunSta
 }
 
 async function executeRunHistoryAction(action: RunHistoryAction, ctx: HyperchartContext): Promise<void> {
-	if (action.kind === "close") return;
-	if (action.kind === "view") return viewCommand([action.runId], ctx);
-	if (action.kind === "resume") {
-		await resumeRun(action.runId, ctx);
-		return;
-	}
-	if (action.kind === "restart") {
-		await restartRun(action.runId, ctx);
-		return;
-	}
-	if (action.kind === "delete") {
-		await deleteRun(action.runId, ctx);
-		return;
-	}
-	await stopRun(action.runId, ctx);
+	if (action.kind === "view") await viewCommand([action.runId], ctx);
 }
 
 async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext): Promise<RunStartResult> {
@@ -929,11 +1060,11 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	} else if (opts.chartPath !== undefined) {
 		chartPath = resolveHyperchartPath(opts.chartPath, ctx.cwd);
 	} else {
-		throw new Error("hyperchart_run requires chartPath unless runDir points at an existing run");
+		throw new Error("hyperchart action=run requires chartPath unless runDir points at an existing run");
 	}
 
 	await assertChartPreflight(chartPath);
-	const parsed = await parseChartModule(chartPath, exportName === undefined ? {} : { exportName });
+	const parsed = parseChartModuleSync(chartPath, exportName === undefined ? {} : { exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	warnOnUserActions(parsed.ast, ctx);
 
@@ -945,6 +1076,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 			workDir,
 			chartId: parsed.ast.id,
 			createdAt: new Date().toISOString(),
+			originSessionId: ctx.sessionManager.getSessionId(),
 		});
 	}
 	mkdirSync(resolve(actualRunDir, "sessions"), { recursive: true });
@@ -963,6 +1095,11 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		runs.add(active);
 		setRunWidget(ctx, active);
 		ctx.ui.notify(`Attached to live hyperchart run ${runId}`, "info");
+		void done.finally(() => {
+			runs.remove(runId);
+			ctx.ui.setWidget(`hyperchart:${runId}`, undefined);
+			ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
+		});
 		return { runId, runDir: actualRunDir, chartId: parsed.ast.id, done };
 	}
 
@@ -1010,6 +1147,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		})
 		.finally(() => {
 			runs.remove(runId);
+			ctx.ui.setWidget(`hyperchart:${runId}`, undefined);
 			ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
 		});
 	return { runId, runDir: actualRunDir, chartId: parsed.ast.id, done };
@@ -1076,6 +1214,56 @@ async function statusCommand(ctx: HyperchartContext): Promise<void> {
 	);
 }
 
+function stopHyperchartRuns(
+	params: { runDir?: string; all?: boolean },
+	ctx: HyperchartContext,
+) {
+	if ((params.runDir === undefined) === (params.all !== true)) {
+		throw new Error("hyperchart action=stop requires exactly one of runDir or all=true");
+	}
+	const targets = params.all === true
+		? activeRunDirsForWorkDir(ctx.cwd)
+		: [resolveHyperchartRunDir(params.runDir as string, ctx.cwd)];
+	const stopped = targets.map((runDir) => stopRunDirectory(runDir, ctx));
+	return {
+		content: [{
+			type: "text" as const,
+			text: stopped.length === 0
+				? "No active Hyperchart runs found"
+				: `Stopping ${stopped.length} Hyperchart run${stopped.length === 1 ? "" : "s"}:\n${stopped.map((run) => `- ${run.runId}${run.pid === undefined ? " (marked stopped)" : ` (pid ${run.pid})`}`).join("\n")}`,
+		}],
+		details: { stopped },
+	};
+}
+
+function activeRunDirsForWorkDir(cwd: string): string[] {
+	const root = getHyperchartRunsRoot();
+	if (!existsSync(root)) return [];
+	return runDirs(root).filter((runDir) => {
+		const meta = loadRunMetaIfPresent(runDir);
+		if (meta === undefined || resolve(meta.workDir) !== resolve(cwd)) return false;
+		const status = readRunStatus(runDir);
+		return status !== undefined && (isRunLive(status) || ["starting", "running", "stopping"].includes(status.state));
+	});
+}
+
+function stopRunDirectory(runDir: string, ctx: HyperchartContext): { runId: string; runDir: string; pid?: number } {
+	const meta = loadRunMeta(runDir);
+	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
+		throw new Error(`Run '${basename(runDir)}' belongs to ${meta.workDir}; open that directory first`);
+	}
+	const status = readRunStatus(runDir);
+	patchRunStatus(runDir, { state: "stopping" });
+	const pid = status?.pid !== undefined && isPidAlive(status.pid) ? status.pid : undefined;
+	if (pid === undefined) patchRunStatus(runDir, { state: "stopped", exitCode: 0, error: "runner was not live" });
+	else process.kill(pid, "SIGTERM");
+	const runId = basename(runDir);
+	runs.remove(runId);
+	ctx.ui.setWidget(`hyperchart:${runId}`, undefined);
+	ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
+	return { runId, runDir, ...(pid === undefined ? {} : { pid }) };
+}
+
 async function stopCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
 	await stopRun(tokens[0], ctx);
 }
@@ -1083,18 +1271,13 @@ async function stopCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 async function stopRun(runId: string | undefined, ctx: HyperchartContext): Promise<void> {
 	const target = runs.get(runId) ?? (await resolveRunForView(runId, ctx.cwd));
 	if (target === undefined) throw new Error(`Run '${runId ?? "<last>"}' was not found`);
-	const status = readRunStatus(target.runDir);
-	patchRunStatus(target.runDir, { state: "stopping" });
-	if (status?.pid !== undefined && isPidAlive(status.pid)) {
-		process.kill(status.pid, "SIGTERM");
-		ctx.ui.notify(`Stopping hyperchart run ${target.runId} (pid ${status.pid})`, "warning");
-	} else {
-		patchRunStatus(target.runDir, { state: "stopped", exitCode: 0, error: "runner was not live" });
-		ctx.ui.notify(`Marked hyperchart run ${target.runId} stopped`, "warning");
-	}
-	runs.remove(target.runId);
-	ctx.ui.setWidget(`hyperchart:${target.runId}`, undefined);
-	ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
+	const result = stopRunDirectory(target.runDir, ctx);
+	ctx.ui.notify(
+		result.pid === undefined
+			? `Marked hyperchart run ${target.runId} stopped`
+			: `Stopping hyperchart run ${target.runId} (pid ${result.pid})`,
+		"warning",
+	);
 }
 
 async function deleteRun(runId: string, ctx: HyperchartContext): Promise<void> {
@@ -1129,23 +1312,12 @@ async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 		ctx.ui.notify(`Run ${run.runId}: ${run.runDir}`, "info");
 		return;
 	}
-	await ctx.ui.custom<void>(
-		(tui, theme, _keybindings, done) =>
-			new RunOverlay(
-				tui,
-				theme,
-				{
-					runId: run.runId,
-					runDir: run.runDir,
-					logPath: resolve(run.runDir, "log.jsonl"),
-					ast: run.ast,
-					live: run.live,
-					cwd: ctx.cwd,
-				},
-				() => done(),
-			),
-		{ overlay: true },
-	);
+	const { url } = await openRunInspector({
+		runId: run.runId,
+		// The snapshot's parsed AST avoids a synchronous chart-module re-parse on every poll.
+		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, run.ast),
+	});
+	ctx.ui.notify(`Opened Hyperchart inspector for ${run.runId}: ${url}`, "info");
 }
 
 function setRunWidget(ctx: HyperchartContext, run: RunSnapshot): void {
@@ -1297,7 +1469,7 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 async function loadRunSnapshot(runDir: string, meta: RunMeta = loadRunMeta(runDir)): Promise<RunSnapshot> {
-	const parsed = await parseChartModule(
+	const parsed = parseChartModuleSync(
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
 	);
@@ -1408,12 +1580,14 @@ function parseRunOptions(tokens: string[]): {
 	args?: Record<string, unknown>;
 	runDir?: string;
 	exportName?: string;
+	wait?: boolean;
 	ignoreReplayWarnings?: boolean;
 } {
 	let chartPath: string | undefined;
 	let args: Record<string, unknown> | undefined;
 	let runDir: string | undefined;
 	let exportName: string | undefined;
+	let wait = false;
 	let ignoreReplayWarnings = false;
 	for (let index = 0; index < tokens.length; index++) {
 		const token = tokens[index];
@@ -1431,6 +1605,8 @@ function parseRunOptions(tokens: string[]): {
 		} else if (token === "--export") {
 			exportName = tokens[++index];
 			if (exportName === undefined) throw new Error("--export requires a name");
+		} else if (token === "--wait") {
+			wait = true;
 		} else if (token === "--ignore-replay-warnings") {
 			ignoreReplayWarnings = true;
 		} else if (chartPath === undefined) {
@@ -1444,6 +1620,7 @@ function parseRunOptions(tokens: string[]): {
 		...(args === undefined ? {} : { args }),
 		...(runDir === undefined ? {} : { runDir }),
 		...(exportName === undefined ? {} : { exportName }),
+		...(wait ? { wait: true } : {}),
 		...(ignoreReplayWarnings ? { ignoreReplayWarnings: true } : {}),
 	};
 }

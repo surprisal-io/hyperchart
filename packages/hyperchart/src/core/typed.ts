@@ -52,15 +52,29 @@ type ArtifactShapes<A> = Simplify2<{
 	[N in keyof A]: A[N] extends { shape: infer S } ? InferSpec<S> : unknown;
 }>;
 
+type PresentArtifactMap<A> = [A] extends [never]
+	? Record<never, never>
+	: [A] extends [Record<string, unknown>]
+		? A
+		: Record<never, never>;
+
+type ActionAndGuardArtifacts<A, G> = PresentArtifactMap<A> & PresentArtifactMap<G>;
+
 // The file registry the chart itself declares: every artifact-declaring state, artifact name →
 // content type (unknown when no shape is declared).
 export type FilesOf<C> = C extends { states: infer S }
 	? Simplify2<
 			UnionToIntersection<
 				FlattenStates<S> extends infer E
-					? E extends [infer P extends string, { action: { artifacts: infer A } }]
-						? { [K in P]: ArtifactShapes<A> }
-						: never
+					? E extends [infer P extends string, { action: { artifacts: infer A }; validate?: { kind: "script"; artifacts?: infer G } }]
+						? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<A, G>> }
+						: E extends [infer P extends string, { action: { artifacts: infer A } }]
+							? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<A, never>> }
+							: E extends [infer P extends string, { validate: infer V }]
+								? V extends { artifacts: infer G }
+									? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<never, G>> }
+									: never
+								: never
 					: never
 			> &
 				NonNullable<unknown> // intersection identity for the no-entries case

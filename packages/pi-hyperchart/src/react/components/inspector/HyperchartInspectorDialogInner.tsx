@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { FolderIcon, EyeIcon, EyeSlashIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Controls, MiniMap, ReactFlow, type NodeMouseHandler } from "@xyflow/react";
 import {
@@ -11,7 +11,7 @@ import { DialogPortal } from "../../support/DialogPortal.js";
 import { useHyperchartTheme } from "../../support/theme-context.js";
 import { useMobile } from "../../support/useMobile.js";
 import type { HyperchartInspectorDialogProps } from "./dialog-props.js";
-import type { StateNode } from "./types.js";
+import type { GraphLayout, StateNode } from "./types.js";
 import { nodeMiniMapColor, useGraphLayout } from "./graph/graphModel.js";
 import { HyperchartStateGraphNode } from "./graph/HyperchartStateGraphNode.js";
 import { HyperchartTransitionEdge } from "./graph/HyperchartTransitionEdge.js";
@@ -23,6 +23,66 @@ import { HyperchartInspectorSidePanel } from "./HyperchartInspectorSidePanel.js"
 
 const nodeTypes = { hyperchartState: HyperchartStateGraphNode };
 const edgeTypes = { transition: HyperchartTransitionEdge };
+let openInspectorCount = 0;
+
+function usePauseBackgroundAnimations(active: boolean): void {
+	useEffect(() => {
+		if (!active || typeof document === "undefined") return;
+		openInspectorCount += 1;
+		document.documentElement.setAttribute("data-hyperchart-inspector-open", "");
+		return () => {
+			openInspectorCount = Math.max(0, openInspectorCount - 1);
+			if (openInspectorCount === 0) document.documentElement.removeAttribute("data-hyperchart-inspector-open");
+		};
+	}, [active]);
+}
+
+const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
+	runId,
+	graph,
+	isMobile,
+	miniMapMaskColor,
+	miniMapBackgroundColor,
+	onNodeClick,
+	onNodeDoubleClick,
+}: {
+	runId: string;
+	graph: GraphLayout;
+	isMobile: boolean;
+	miniMapMaskColor: string;
+	miniMapBackgroundColor: string;
+	onNodeClick: NodeMouseHandler<StateNode>;
+	onNodeDoubleClick: NodeMouseHandler<StateNode>;
+}) {
+	return (
+		<ReactFlow
+			key={runId}
+			nodes={graph.nodes}
+			edges={graph.edges}
+			nodeTypes={nodeTypes}
+			edgeTypes={edgeTypes}
+			defaultViewport={{ x: isMobile ? 12 : 36, y: isMobile ? 18 : 36, zoom: isMobile ? 0.82 : 0.85 }}
+			fitView
+			fitViewOptions={{ padding: 0.2, minZoom: 0.45, maxZoom: 1.05 }}
+			minZoom={0.12}
+			maxZoom={1.6}
+			nodesDraggable={false}
+			onNodeClick={onNodeClick}
+			onNodeDoubleClick={onNodeDoubleClick}
+		>
+			<Controls position="bottom-left" />
+			{!isMobile && (
+				<MiniMap
+					pannable
+					zoomable
+					nodeColor={nodeMiniMapColor}
+					maskColor={miniMapMaskColor}
+					bgColor={miniMapBackgroundColor}
+				/>
+			)}
+		</ReactFlow>
+	);
+});
 
 export function HyperchartInspectorDialogInner({
 	runs,
@@ -38,10 +98,14 @@ export function HyperchartInspectorDialogInner({
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
 	const { resolved } = useHyperchartTheme();
 	const miniMapMaskColor = resolved === "light" ? "rgba(0, 0, 0, 0.14)" : "rgba(0, 0, 0, 0.45)";
+	const miniMapBackgroundColor = resolved === "light" ? "#f0f0f0" : "#1e1e1e";
 	const run = useMemo(() => {
 		if (selectedRunId) return runs.find((candidate) => candidate.runId === selectedRunId) ?? runs[0];
 		return runs.find((candidate) => candidate.status === "running") ?? runs[0];
 	}, [runs, selectedRunId]);
+	const runRef = useRef(run);
+	runRef.current = run;
+	usePauseBackgroundAnimations(run !== undefined);
 	useModalDialog({ dialogRef, initialFocusRef: closeButtonRef, onClose, open: run !== undefined });
 	const [selectedStateId, setSelectedStateId] = useState<string | null>(null);
 	const [showDone, setShowDone] = useState(true);
@@ -76,19 +140,17 @@ export function HyperchartInspectorDialogInner({
 		selectedStateId && visibleIds.has(selectedStateId)
 			? (run?.states.find((state) => state.id === selectedStateId) ?? null)
 			: null;
-	const scopeChildIds = useMemo(
-		() => new Set((run?.states ?? []).map((state) => immediateMapScopeId(state.id)).filter((id): id is string => !!id)),
-		[run],
-	);
 	const progress = summarizeHyperchartProgress(run);
-	const openScope = (stateId: string) => {
-		const state = run?.states.find((candidate) => candidate.id === stateId);
-		if (!state || !scopeChildIds.has(state.id)) return;
+	const openScope = useCallback((stateId: string) => {
+		const latestRun = runRef.current;
+		const state = latestRun?.states.find((candidate) => candidate.id === stateId);
+		const hasChildScope = latestRun?.states.some((candidate) => immediateMapScopeId(candidate.id) === state?.id);
+		if (!state || !hasChildScope) return;
 		setScopeStack((prev) => [...prev, state.id]);
 		setSelectedStateId(null);
-	};
-	const handleNodeClick: NodeMouseHandler<StateNode> = (_, node) => setSelectedStateId(node.id);
-	const handleNodeDoubleClick: NodeMouseHandler<StateNode> = (_, node) => openScope(node.id);
+	}, []);
+	const handleNodeClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => setSelectedStateId(node.id), []);
+	const handleNodeDoubleClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => openScope(node.id), [openScope]);
 
 	if (!run) return null;
 
@@ -125,9 +187,6 @@ export function HyperchartInspectorDialogInner({
 									{hyperchartChartName(run)}
 								</span>
 								<StatusPill status={run.status} />
-								<span className="text-[11px] text-[var(--text-tertiary)]">
-									{progress.done}/{progress.total} states
-								</span>
 							</div>
 							<div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
 								<div
@@ -280,28 +339,19 @@ export function HyperchartInspectorDialogInner({
 									show all
 								</button>
 								<span className="ml-auto shrink-0 text-[11px] text-[var(--text-tertiary)]">
-									visible {visibleIds.size}/{run.states.length} · updated {formatHyperchartTime(run.updatedAt)}
+									updated {formatHyperchartTime(run.updatedAt)}
 								</span>
 							</div>
 							<div className="min-h-0 flex-1 bg-[var(--bg-primary)]">
-								<ReactFlow
-									key={run.runId}
-									nodes={graph.nodes}
-									edges={graph.edges}
-									nodeTypes={nodeTypes}
-									edgeTypes={edgeTypes}
-									defaultViewport={{ x: isMobile ? 12 : 36, y: isMobile ? 18 : 36, zoom: isMobile ? 0.82 : 0.85 }}
-									fitView
-									fitViewOptions={{ padding: 0.2, minZoom: 0.45, maxZoom: 1.05 }}
-									minZoom={0.12}
-									maxZoom={1.6}
-									nodesDraggable={false}
+								<InspectorGraphCanvas
+									runId={run.runId}
+									graph={graph}
+									isMobile={isMobile}
+									miniMapMaskColor={miniMapMaskColor}
+									miniMapBackgroundColor={miniMapBackgroundColor}
 									onNodeClick={handleNodeClick}
 									onNodeDoubleClick={handleNodeDoubleClick}
-								>
-									<Controls position="bottom-left" />
-									{!isMobile && <MiniMap pannable zoomable nodeColor={nodeMiniMapColor} maskColor={miniMapMaskColor} />}
-								</ReactFlow>
+								/>
 							</div>
 						</main>
 						<HyperchartInspectorSidePanel

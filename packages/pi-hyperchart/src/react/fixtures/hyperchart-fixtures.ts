@@ -1,6 +1,7 @@
 import type { HyperchartRunInfo } from "../types.js";
 
-const now = Date.now();
+const FIXTURE_NOW = Date.UTC(2026, 6, 7, 22, 45, 0);
+const now = FIXTURE_NOW;
 
 export const runningRun: HyperchartRunInfo = {
 	runId: "deck-director-20260707-224500",

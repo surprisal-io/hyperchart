@@ -8,6 +8,7 @@ import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchar
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { runGuard } from "../packages/hyperchart/src/runtime/generic/guards.js";
+import { ScriptRunner } from "../packages/hyperchart/src/runtime/generic/script_runner.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];
@@ -286,6 +287,22 @@ describe("guards", () => {
 				{ chartDir: dir, workDir: dir },
 			),
 		).resolves.toEqual({ ok: false, reason: "bad" });
+	});
+
+	it("fails clearly when raw dynamic script options lack a rendered invocation", async () => {
+		const dir = await makeTempDir();
+		await expect(runGuard(script(node, ["-e", "process.exit(0)"], { env: { VALUE: "raw" }, reply: z.object({ ok: z.boolean() }) }), { type: "DONE" }, { chartDir: dir, workDir: dir })).rejects.toThrow("rendered guard invocation");
+	});
+
+	it("escalates cancellation to SIGKILL when a guard ignores SIGTERM", async () => {
+		const dir = await makeTempDir();
+		const runner = new ScriptRunner({ workDir: dir, killGraceMs: 50 });
+		const actionUid = { chart: "cancel-test", state: "work", action: "script" } as const;
+		const pending = runner.runGuard({ kind: "script", command: node, args: ["-e", "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"] }, { type: "DONE" }, undefined, undefined, undefined, actionUid);
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		runner.cancel(actionUid);
+		await expect(withTimeout(pending)).resolves.toEqual({ ok: false, reason: "exit SIGKILL" });
+		await runner.dispose();
 	});
 
 	it("turns script guard stderr into a rejection reason", async () => {

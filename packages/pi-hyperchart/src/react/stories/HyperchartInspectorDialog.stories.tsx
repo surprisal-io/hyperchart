@@ -1,46 +1,46 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useState } from "react";
+import { fn } from "storybook/test";
 import { HyperchartInspectorDialog } from "../HyperchartInspectorDialog.js";
-import { allRuns, failedRun, inspectRun, runningRun } from "../fixtures/hyperchart-fixtures.js";
+import { allRuns, runningRun } from "../fixtures/hyperchart-fixtures.js";
+import { InteractiveInspector } from "./harnesses/InteractiveInspector.js";
 
 const meta = {
-	title: "Hyperchart/Inspector Dialog",
+	title: "Hyperchart/Components/Inspector Dialog",
 	component: HyperchartInspectorDialog,
-	parameters: { layout: "fullscreen" },
-} satisfies Meta;
+	parameters: {
+		layout: "fullscreen",
+		docs: {
+			description: {
+				component: "Editable inspector playground. Product states live under Features/Inspector Dialog.",
+			},
+		},
+	},
+	args: {
+		runs: allRuns,
+		selectedRunId: runningRun.runId,
+		onSelectRun: fn(),
+		onClose: fn(),
+		onResume: fn(),
+		onAbort: fn(),
+	},
+	argTypes: {
+		runs: { control: "object", description: "Runs available in the top selector." },
+		selectedRunId: { control: "text" },
+		onSelectRun: { control: false },
+		onClose: { control: false },
+		onResume: { control: false },
+		onAbort: { control: false },
+		portal: { control: false },
+		theme: { control: false },
+	},
+} satisfies Meta<typeof HyperchartInspectorDialog>;
 
 export default meta;
-type Story = StoryObj;
+type Story = StoryObj<typeof meta>;
 
-export const Running: Story = {
-	render: () => {
-		const [selectedRunId, setSelectedRunId] = useState<string | null>(runningRun.runId);
-		return (
-			<HyperchartInspectorDialog
-				runs={allRuns}
-				selectedRunId={selectedRunId}
-				onSelectRun={setSelectedRunId}
-				onClose={() => undefined}
-				onResume={() => undefined}
-				onAbort={() => undefined}
-			/>
-		);
+export const Playground: Story = {
+	render: (args) => <InteractiveInspector {...args} />,
+	parameters: {
+		docs: { description: { story: "Change the run collection and selected run through Controls." } },
 	},
-};
-
-export const StaticInspect: Story = {
-	render: () => (
-		<HyperchartInspectorDialog runs={[inspectRun]} selectedRunId={inspectRun.runId} onClose={() => undefined} />
-	),
-};
-
-export const FailedValidation: Story = {
-	render: () => (
-		<HyperchartInspectorDialog
-			runs={[failedRun]}
-			selectedRunId={failedRun.runId}
-			onClose={() => undefined}
-			onResume={() => undefined}
-		/>
-	),
 };

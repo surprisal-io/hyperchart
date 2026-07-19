@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import type { StorybookConfig } from "@storybook/react-vite";
+import { tuiPreviewPlugin } from "./tui-preview-plugin.js";
 
 const config: StorybookConfig = {
 	stories: ["../packages/pi-hyperchart/src/react/**/*.stories.@(ts|tsx)"],
@@ -13,7 +14,7 @@ const config: StorybookConfig = {
 		reactDocgen: "react-docgen-typescript",
 	},
 	viteFinal(config) {
-		config.plugins = [...(config.plugins ?? []), tailwindcss()];
+		config.plugins = [...(config.plugins ?? []), tailwindcss(), tuiPreviewPlugin()];
 		return config;
 	},
 };

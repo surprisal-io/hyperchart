@@ -24,6 +24,11 @@ const preview: Preview = {
 	parameters: {
 		layout: "fullscreen",
 		controls: { expanded: true },
+		options: {
+			storySort: {
+				order: ["Hyperchart", ["Components", "Features", "Examples", "TUI", "Visual Tests"]],
+			},
+		},
 	},
 	decorators: [
 		(Story, context) => {

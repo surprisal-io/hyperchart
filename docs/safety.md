@@ -8,7 +8,7 @@ Use this page before resuming after a crash, overriding replay warnings, rewindi
 
 A chart is a TypeScript module. Parsing and inspection load it through Jiti, which can execute top-level JavaScript with the current user's permissions.
 
-`hyperchart_inspect` is static only in the data-model sense: it returns chart source, contracts, and topology without runtime overlays and without dispatching workflow actions. It is not a sandbox.
+`hyperchart` with `action: "inspect"` is static only in the data-model sense: it returns chart source, contracts, and topology without runtime overlays and without dispatching workflow actions. It is not a sandbox.
 
 Before loading an unfamiliar chart:
 
@@ -63,7 +63,7 @@ The runner blocks stale and skipped replay by default. Broken replay is not an o
 Before overriding:
 
 1. stop the run if it is live;
-2. call `hyperchart_run_inspect` or open the run view;
+2. call `hyperchart` with `action: "run_inspect"` or open the run view;
 3. read every replay issue and affected state path;
 4. diff the chart source and imported validators;
 5. decide whether the old facts still mean what the new chart expects;
@@ -114,7 +114,7 @@ Then call:
 { "runDir": "<run-id>" }
 ```
 
-with `hyperchart_run_inspect`. Identify the target state or `seqId`, affected visits, downstream sessions, and artifacts.
+with `hyperchart` with `action: "run_inspect"`. Identify the target state or `seqId`, affected visits, downstream sessions, and artifacts.
 
 ### 2. Make an independent backup
 
@@ -170,7 +170,7 @@ Artifact cleanup is best effort because paths may be dynamic or shared. Even whe
 
 ### 5. Reinspect before starting
 
-Run `hyperchart_run_inspect` again. Verify:
+Run `hyperchart` with `action: "run_inspect"` again. Verify:
 
 - the retained log ends where expected;
 - status is `stopped`;

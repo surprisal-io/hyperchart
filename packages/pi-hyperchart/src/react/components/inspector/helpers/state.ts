@@ -119,9 +119,9 @@ export function statePrimitiveSummary(state: HyperchartStateInfo): string | unde
 	}
 }
 
-export function formatStateDuration(state: HyperchartStateInfo): string | undefined {
+export function formatStateDuration(state: HyperchartStateInfo, snapshotAt = Date.now()): string | undefined {
 	if (state.startedAt === undefined) return undefined;
-	const end = state.endedAt ?? Date.now();
+	const end = state.endedAt ?? snapshotAt;
 	const seconds = Math.max(0, Math.round((end - state.startedAt) / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
@@ -213,11 +213,18 @@ export function agentStatesForSelection(
 	if (state.agent) return [state];
 	const childPrefix = `${state.id}.`;
 	const mapInstancePrefix = `${state.id}#`;
-	return allStates.filter(
-		(candidate) =>
-			candidate.agent &&
-			(candidate.id.startsWith(childPrefix) || (state.type === "map" && candidate.id.startsWith(mapInstancePrefix))),
-	);
+	const seenAgents = new Set<string>();
+	return allStates.filter((candidate) => {
+		if (
+			!candidate.agent ||
+			(!candidate.id.startsWith(childPrefix) && !(state.type === "map" && candidate.id.startsWith(mapInstancePrefix))) ||
+			seenAgents.has(candidate.agent)
+		) {
+			return false;
+		}
+		seenAgents.add(candidate.agent);
+		return true;
+	});
 }
 
 export function stateHasContracts(state: HyperchartStateInfo): boolean {
@@ -243,6 +250,7 @@ export function contractStatesForSelection(
 	highlightedReply?: { stateId: string; path: string } | null,
 	revealedReplyStateIds: readonly string[] = [],
 ): HyperchartStateInfo[] {
+	if (state.type === "compound" && !stateHasContracts(state)) return [];
 	const prefix = `${state.id}.`;
 	const selected = stateHasContracts(state)
 		? [state]

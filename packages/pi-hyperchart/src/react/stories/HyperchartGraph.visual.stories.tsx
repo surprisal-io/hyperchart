@@ -1,38 +1,27 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { useMemo, useState } from "react";
-import { HyperchartInspectorDialog } from "../HyperchartInspectorDialog.js";
 import type { HyperchartRunInfo } from "../types.js";
 import {
-	allBoardRuns,
 	fanoutVariantsRun,
 	mapVariantsRun,
-	stateKindsRun,
 	richCardsRun,
+	stateKindsRun,
 	statusMatrixRun,
-	stressRun,
 	transitionEdgeRun,
 } from "../fixtures/hyperchart-board-fixtures.js";
-import { BoardPage, BoardSection, ContentPreviewBoard, GraphTile, RunStripBoardInner } from "./components/index.js";
+import { BoardPage, GraphTile } from "./components/index.js";
 import { singleStateRun } from "./components/singleStateRun.js";
 
 const meta = {
-	title: "Hyperchart/Boards",
+	title: "Hyperchart/Visual Tests/Graph",
 	parameters: {
 		layout: "fullscreen",
 		controls: { disable: true },
+		docs: { description: { component: "Visual regression boards for graph cards and transition edges." } },
 	},
 } satisfies Meta;
 
 export default meta;
 type Story = StoryObj;
-
-export const RunStripStates: Story = {
-	render: () => <RunStripBoardInner />,
-};
-
-export const ContentPreviewStates: Story = {
-	render: () => <ContentPreviewBoard />,
-};
 
 export const CardAtlas: Story = {
 	render: () => {
@@ -71,6 +60,7 @@ export const CardAtlas: Story = {
 			</BoardPage>
 		);
 	},
+	parameters: { docs: { description: { story: "Status, state-kind, rich-card, map, and fanout card coverage." } } },
 };
 
 export const EdgeTypes: Story = {
@@ -88,30 +78,5 @@ export const EdgeTypes: Story = {
 			</div>
 		</BoardPage>
 	),
-};
-
-export const FullStressBoard: Story = {
-	render: () => {
-		const [selectedRunId, setSelectedRunId] = useState<string | null>(stressRun.runId);
-		const runs = useMemo(() => allBoardRuns, []);
-		return (
-			<BoardPage
-				title="Full stress inspector"
-				description="Один большой стенд inspector со всеми fixture runs в селекторе. Run strip и launch dialog проверяются отдельными stories."
-			>
-				<BoardSection title="Full inspector stress graph">
-					<div className="h-[900px] overflow-hidden rounded-xl border border-[var(--border-primary)] bg-[var(--bg-primary)]">
-						<HyperchartInspectorDialog
-							runs={runs}
-							selectedRunId={selectedRunId}
-							onSelectRun={setSelectedRunId}
-							onClose={() => undefined}
-							onResume={() => undefined}
-							onAbort={() => undefined}
-						/>
-					</div>
-				</BoardSection>
-			</BoardPage>
-		);
-	},
+	parameters: { docs: { description: { story: "Forward, branch, fan-in, retry, and back-transition edges." } } },
 };

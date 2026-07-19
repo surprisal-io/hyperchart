@@ -44,7 +44,8 @@ Rules:
 - transition targets declared inside `pipeline` resolve among its children;
 - an unhandled event bubbles to `pipeline.transitions` and then outward;
 - a direct final child requires `onDone` on the compound state;
-- leaving the compound state cancels running descendants.
+- leaving the compound state cancels running descendants;
+- inspector marks untaken and historical descendants `done` after the scope reaches final and closes; `stale` remains only while re-entry is still active.
 
 Use a final child for local completion. Do not model a compound state as an endless container with no completion path.
 
@@ -204,6 +205,23 @@ validate: tsImport("./guards/review.ts", "validateReview")
 ```
 
 A guard returns `true` or `{ ok: false, reason }`.
+
+A script guard accepts the complete script option surface (`env`, `artifacts`, and `reply`) as a script action:
+
+```ts
+validate: script("node", ["bin/check.mjs"], {
+  env: {
+    INPUT: t`${input("review")}`,
+    SELF: artifactOf("review", { select: "approved" }),
+    ALL: joinArtifactOf("items.produce"),
+    VISIT: t`${visit()}`,
+  },
+})
+```
+
+Env templates resolve from the same args/results/input/item/key/visit projection scope and through the same renderer as script actions. `artifactOf()` without a selector passes a path; selected refs read and shape-validate the exact declared file; `joinArtifactOf()` passes a JSON array of paths. A validating action may read its own declared artifact. Prior refs retain normal dominance and ambiguity/name/select/shape checks. Missing or invalid reads reject closed. TypeScript guards receive only `(event, { chartDir, workDir })`; script stdin is the unchanged plain `ChartEvent`, with no special artifacts field.
+
+A declared guard `reply` validates the guard completion envelope but is not stored as the action result. Guard-produced artifacts are validated after exit, unioned into the containing state's Files/artifact registry, and can be read by downstream `artifactOf()` refs; duplicate names with action artifacts are rejected. Env values are resolved only while validation is pending. Definitions and provenance remain in the AST/log, while accepted durable verdicts are replayed without re-running the guard.
 
 ### Rejection policy
 

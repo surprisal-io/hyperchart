@@ -100,7 +100,14 @@ export interface HyperchartEnvInfo {
 }
 
 export type HyperchartGuardInfo =
-	| { kind: "script"; command: string; args?: string[] }
+	| {
+			kind: "script";
+			command: string;
+			args?: string[];
+			env?: HyperchartEnvInfo[];
+			artifacts?: HyperchartArtifactInfo[];
+			reply?: HyperchartSchemaInfo;
+	  }
 	| { kind: "tsImport"; module: string; export: string };
 
 export interface HyperchartInputInfo {
@@ -174,7 +181,9 @@ export interface HyperchartVisitInfo {
 export interface HyperchartStateInfo {
 	id: string;
 	type?: HyperchartStateType;
+	initial?: boolean;
 	agent?: string;
+	agentDescription?: string;
 	definitionSource?: string;
 	status: HyperchartStateStatus;
 	startedAt?: number;
@@ -224,6 +233,7 @@ export interface HyperchartStateInfo {
 export interface HyperchartRunInfo {
 	runId: string;
 	chartName: string;
+	originSessionId?: string;
 	mode?: HyperchartInspectMode;
 	definitionSource?: string;
 	description?: string;

@@ -4,7 +4,7 @@ import type {
 	ArtifactOfAst,
 	ChartAst,
 	EventBindingAst,
-	GuardRef,
+	GuardRefAst,
 	InputRef,
 	JoinArtifactOfAst,
 	JsonSchema,
@@ -13,11 +13,11 @@ import type {
 	SchemaAst,
 	StateActionAst,
 	StateAst,
-	StatePath,
 	TemplateAst,
 } from "./types.js";
 
 export type HyperchartInspectAgentDefaults = {
+	description?: string;
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -69,7 +69,14 @@ export type HyperchartInspectEnv = {
 };
 
 export type HyperchartInspectGuard =
-	| { kind: "script"; command: string; args?: string[] }
+	| {
+			kind: "script";
+			command: string;
+			args?: string[];
+			env?: HyperchartInspectEnv[];
+			artifacts?: HyperchartInspectArtifact[];
+			reply?: JsonSchema;
+	  }
 	| { kind: "tsImport"; module: string; export: string };
 
 export type HyperchartInspectBranch = {
@@ -81,6 +88,7 @@ export type HyperchartInspectBranch = {
 export type HyperchartInspectState = {
 	id: string;
 	kind: "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
+	initial?: boolean;
 	definitionSource?: string;
 	agent?: string;
 	task?: string;
@@ -94,6 +102,7 @@ export type HyperchartInspectState = {
 	reply?: JsonSchema;
 	guard?: HyperchartInspectGuard;
 	onReject?: OnReject;
+	description?: string;
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -132,14 +141,29 @@ export function inspectChartAst(
 
 function statesFromAst(ast: ChartAst, options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined } = {}): HyperchartInspectState[] {
 	return Object.entries(ast.states).map(([path, state]) => {
-		if (state.kind === "final") return { id: path, kind: "final", definitionSource: hyperchartSource(ast, path) };
+		const initial = isInitialState(ast, path, state);
+		if (state.kind === "final") {
+			return {
+				id: path,
+				kind: "final",
+				...(initial ? { initial: true } : {}),
+				definitionSource: hyperchartSource(ast, path),
+			};
+		}
 		const transitions = transitionEntries(state);
 		return {
 			...stateFromAst(ast, path, state, options),
+			...(initial ? { initial: true } : {}),
 			definitionSource: hyperchartSource(ast, path),
 			...(transitions.length === 0 ? {} : { transitions }),
 		};
 	});
+}
+
+function isInitialState(ast: ChartAst, path: string, state: StateAst): boolean {
+	if (state.parent === undefined) return path === ast.initial;
+	const parent = ast.states[state.parent];
+	return parent !== undefined && "initial" in parent && parent.initial === state.id;
 }
 
 function stateFromAst(ast: ChartAst, path: string, state: Exclude<StateAst, { kind: "final" }>, options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined } = {}): HyperchartInspectState {
@@ -189,7 +213,7 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 	const action = state.action;
 	const refs = actionRefs(action);
 	const reads = refs.flatMap((ref) => (ref.state === undefined ? [] : [ref.state]));
-	const artifacts = actionArtifacts(action);
+	const artifacts = actionArtifacts(action, state.validate);
 	const inputs = inputDefinitions(state.input);
 	const base = {
 		id: path,
@@ -199,12 +223,13 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 		...(state.onReenter === undefined ? {} : { onReenter: onReenterInfo(state.onReenter) }),
 		...(artifacts.length === 0 ? {} : { artifacts }),
 		...(action.reply === undefined ? {} : { reply: action.reply.schema }),
-		...(state.validate === undefined ? {} : { guard: guardInfo(state.validate), onReject: state.onReject ?? "resume" }),
+		...(state.validate === undefined ? {} : { guard: guardInfo(state.validate, ast, path), onReject: state.onReject ?? "resume" }),
 		...(state.retries === undefined ? {} : { retries: state.retries }),
 	};
 	if (action.kind === "agent") {
 		const task = templatePreview(action.task);
 		const defaults = options.agentDefaults?.(action.name);
+		const description = defaults?.description;
 		const model = action.model ?? defaults?.model;
 		const thinking = action.thinking ?? defaults?.thinking;
 		const tools = action.tools ?? defaults?.tools;
@@ -212,6 +237,7 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 			...base,
 			kind: "agent",
 			agent: action.name,
+			...(description === undefined ? {} : { description }),
 			...(task === undefined ? {} : { task }),
 			...(model === undefined ? {} : { model }),
 			...(thinking === undefined ? {} : { thinking }),
@@ -232,20 +258,26 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 	return { ...base, kind: "user", ...(task === undefined ? {} : { task }) };
 }
 
-function guardInfo(guard: GuardRef): HyperchartInspectGuard {
+function guardInfo(guard: GuardRefAst, ast: ChartAst, statePath: string): HyperchartInspectGuard {
 	if (guard.kind === "script") {
+		const env = envInfo(guard.env, ast, statePath);
+		const artifacts = "artifacts" in guard ? actionArtifactsFromMap(guard.artifacts as Readonly<Record<string, ArtifactAst>>) : [];
 		return {
 			kind: "script",
 			command: guard.command,
 			...(guard.args === undefined ? {} : { args: [...guard.args] }),
+			...(env === undefined ? {} : { env }),
+			...(artifacts.length === 0 ? {} : { artifacts }),
+			...(guard.reply === undefined ? {} : { reply: (guard.reply as SchemaAst).schema }),
 		};
 	}
 	return { kind: "tsImport", module: guard.module, export: guard.export };
 }
 
-function envInfo(env: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined, ast: ChartAst, statePath: string): HyperchartInspectEnv[] | undefined {
+function envInfo(env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined, ast: ChartAst, statePath: string): HyperchartInspectEnv[] | undefined {
 	if (env === undefined) return undefined;
 	const entries = Object.entries(env).map(([name, value]): HyperchartInspectEnv => {
+		if (typeof value === "string") return { name, type: "string", value };
 		if (value.kind === "artifactOf") return { name, type: "string (artifact path)", value: artifactRefPreview(value) };
 		if (value.kind === "joinArtifactOf") return { name, type: "string (joined artifact paths)", value: artifactRefPreview(value) };
 		const preview = templatePreview(value);
@@ -334,9 +366,14 @@ function artifactInfo(name: string, artifact: ArtifactAst): HyperchartInspectArt
 	};
 }
 
-function actionArtifacts(action: StateActionAst): HyperchartInspectArtifact[] {
-	if (action.kind === "user") return [];
-	return Object.entries(action.artifacts ?? {}).map(([name, artifact]) => artifactInfo(name, artifact));
+function actionArtifacts(action: StateActionAst, guard: GuardRefAst | undefined): HyperchartInspectArtifact[] {
+	const entries = action.kind === "user" ? [] : Object.entries(action.artifacts ?? {});
+	const guardEntries = guard?.kind === "script" && "artifacts" in guard ? Object.entries(guard.artifacts ?? {}) : [];
+	return [...entries, ...guardEntries].map(([name, artifact]) => artifactInfo(name, artifact));
+}
+
+function actionArtifactsFromMap(artifacts: Readonly<Record<string, ArtifactAst>> | undefined): HyperchartInspectArtifact[] {
+	return Object.entries(artifacts ?? {}).map(([name, artifact]) => artifactInfo(name, artifact));
 }
 
 function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): HyperchartInspectTransition[] {

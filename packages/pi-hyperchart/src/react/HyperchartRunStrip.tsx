@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import {
 	ArrowPathIcon,
 	CircleStackIcon,
@@ -35,7 +35,7 @@ export interface HyperchartRunStripProps {
 
 const RUN_STRIP_VISIBLE_RUNS = 5;
 
-export function HyperchartRunStrip({
+const MemoizedHyperchartRunStrip = memo(function MemoizedHyperchartRunStrip({
 	hypercharts,
 	runs,
 	selectedRunId,
@@ -102,11 +102,7 @@ export function HyperchartRunStrip({
 									{hyperchartChartName(run)}
 								</span>
 							)}
-							{run && (
-								<span className="text-[10px] text-[var(--text-tertiary)] shrink-0">
-									{progress.done}/{progress.total} states
-								</span>
-							)}
+
 							{usage && (
 								<span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] shrink-0">
 									<CircleStackIcon className="h-3 w-3" aria-hidden="true" /> {usage}
@@ -224,4 +220,8 @@ export function HyperchartRunStrip({
 			</div>
 		</div>
 	);
+});
+
+export function HyperchartRunStrip(props: HyperchartRunStripProps) {
+	return <MemoizedHyperchartRunStrip {...props} />;
 }

@@ -187,6 +187,7 @@ type HyperchartInspectResult = {
 |---|---|---|
 | `id` | `string` | Absolute state path. |
 | `kind` | `"agent" \| "user" \| "script" \| "map" \| "parallel" \| "compound" \| "region" \| "final"` | Normalized display kind. |
+| `initial` | `boolean?` | State selected by the chart root or an enclosing compound, region, or map `initial` declaration. |
 | `definitionSource` | `string?` | Generated DSL for this state. |
 | `agent` | `string?` | Agent definition name. |
 | `task` | `string?` | Static template preview. |
@@ -284,12 +285,32 @@ Public AST exports:
 | `ArtifactAst` | normalized `path` template and optional schema |
 | `ArtifactOfAst` | producer state, optional artifact and selector |
 | `JoinArtifactOfAst` | map-contained producer and optional artifact |
-| `SchemaAst` | `{ kind: "jsonSchema", schema: JsonSchema }` |
+| `SchemaAst` | `{ kind: "jsonSchema", schema: JsonSchema, runtimeContract?: { id: string; version: string } }` |
 | `TemplateAst` | immutable `strings` and refs |
 | `TransitionAst` | target and optional event-output bindings |
 | `EventBindingAst` | event-output selector |
 
 The root entry point also exports the corresponding public CST types listed in [DSL reference](dsl.md).
+
+### Exact runtime Zod contracts
+
+`contract(id, version, schema)` returns the original Zod schema value, preserving normal `z.infer<typeof Schema>` usage. Explicitly contracted schemas carry serializable `{ id, version }` metadata in `SchemaAst.runtimeContract`; their original Zod values live only in the parsed chart's in-memory `schemaRegistry` sidecar. Runtime validation uses `safeParseAsync`, including refine/superRefine and asynchronous refinements. If the sidecar is unavailable, validation fails closed rather than falling back to JSON Schema. Ordinary Zod schemas continue to use the normalized JSON Schema compatibility path.
+
+```ts
+const Reply = contract("review-reply", "2025-01", z.object({
+  approved: z.boolean(),
+}).superRefine(async (value, ctx) => {
+  if (!value.approved) ctx.addIssue({ code: "custom", message: "approval required" });
+}));
+
+const parsed = normalizeChartConfig(chart({ /* ... reply: Reply ... */ }));
+if (parsed.ok) {
+  // Pass both values to ChartRuntime; the registry is intentionally chart-instance scoped.
+  new ChartRuntime({ ast: parsed.ast, schemaRegistry: parsed.schemaRegistry, /* ... */ });
+}
+```
+
+Changing a contract version changes normalized AST action provenance, so replay reports stale definitions instead of silently reinterpreting existing runs. Inspectors and source projections expose only serializable JSON Schema and metadata; closures and Zod instances are never serialized.
 
 ## Projection
 
@@ -430,7 +451,22 @@ Handle the third variant with `output.kind === "error"`; it contains `state` and
 | `TimerEffect` | `timer` | Emit a timer event at `firesAt`. |
 | `CancelEffect` | `cancel` | Stop abandoned work. |
 
-`ActionEffect` is `AgentEffect | ScriptEffect | UserEffect`. `ResumeRequest` contains a rendered message and optional session file. `RecordAppend` is an unstamped append request used before durable seqIds and timestamps are assigned.
+`ValidateEffect` carries guard env rendered by the same helper as `ScriptEffect.env`:
+
+```ts
+type ValidateEffect = {
+  kind: "validate";
+  id: EffectId;
+  actionUid: ActionUID;
+  guard: GuardRefAst;
+  event: ChartEvent;
+  env?: Readonly<Record<string, string | RenderedArtifact>>;
+  artifacts?: readonly RenderedArtifact[];
+  reply?: SchemaAst;
+};
+```
+
+`GuardRefAst` is the normalized guard union: `GuardRef` plus a script variant whose `env`, `artifacts`, and `reply` are normalized AST values. Env, guard artifacts, and guard reply are resolved/validated only for the pending guard. Reply output is validation-only; guard artifacts remain part of the containing state's declared Files surface. Artifact values are never durable facts or stdin/context fields. `ActionEffect` is `AgentEffect | ScriptEffect | UserEffect`. `ResumeRequest` contains a rendered message and optional session file. `RecordAppend` is an unstamped append request used before durable seqIds and timestamps are assigned.
 
 ### Machine events
 
@@ -618,7 +654,7 @@ explainReplay
 concatAsyncIterables, createAsyncQueue, toAsyncIterable
 ```
 
-The DSL values, `refs`, and `z` are listed in [DSL reference](dsl.md).
+The DSL values, `refs`, and `z` are listed in [DSL reference](dsl.md). The root also re-exports the `SchemaRegistry` class and the `checkSchema`/`checkSchemaAsync` functions for host integrations.
 
 ## Complete root type export inventory
 
@@ -632,11 +668,12 @@ ChartCst, ChartEvent, ChartSource,
 CompoundStateAst, CompoundStateCst, EventBindingAst, EventBindingCst,
 EventType, FinalStateAst, FinalStateCst, InputRef, JoinArtifactOfAst,
 JoinArtifactOfCst, JsonSchema, MapStateAst, MapStateCst,
-SchemaAst, SchemaCst, ParallelStateAst, ParallelStateCst,
+RuntimeContract, RuntimeContractMetadata, SchemaAst, SchemaCst,
+SchemaRegistryLike, ParallelStateAst, ParallelStateCst,
 ParsedChart, RegionStateAst, ReservedSystemEventType, ScriptActionAst,
 ScriptActionCst, StateActionAst, StateActionCst, StateAst, StateCst,
 StateId, StatePath, SystemEvent, TemplateAst, TemplateCst, Templatable,
-GuardOutcome, GuardRef, OnReject, OnReenterAst, OnReenterCst,
+GuardOutcome, GuardRef, GuardRefAst, OnReject, OnReenterAst, OnReenterCst,
 TransitionAst, TransitionCst, TransitionMapCst, UserActionAst,
 UserActionCst, InputsOf, Paths, ValueAt,
 HyperchartInspectAgentDefaults, HyperchartInspectArtifact,

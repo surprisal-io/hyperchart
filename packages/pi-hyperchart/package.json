@@ -49,6 +49,7 @@
 	"files": [
 		"dist",
 		"src/command.ts",
+		"src/run_progress.ts",
 		"src/runtime/pi",
 		"src/tui",
 		"extensions",
@@ -101,7 +102,7 @@
 		"image": "https://raw.githubusercontent.com/surprisal-io/hyperchart/main/assets/readme/inspector.png"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json && node ../../scripts/build-react-styles.mjs",
+		"build": "tsc -p tsconfig.build.json && node ../../scripts/build-react-styles.mjs && node ../../scripts/build-inspector-web.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"prepack": "node ../../scripts/sync-pi-docs.mjs --check && npm run build"
 	}

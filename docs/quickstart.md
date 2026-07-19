@@ -64,7 +64,7 @@ The checked-in copy is [`examples/quickstart.chart.ts`](../examples/quickstart.c
 Ask Pi:
 
 ```text
-Use hyperchart_inspect on .pi/hypercharts/hello.chart.ts
+Use hyperchart action=inspect on .pi/hypercharts/hello.chart.ts
 ```
 
 The tool call is equivalent to:
@@ -91,19 +91,19 @@ Inspection should report:
 /hyperchart run .pi/hypercharts/hello.chart.ts
 ```
 
-The command opens a run view. The final status should be `complete`, and `hello.txt` should contain:
+The command starts asynchronously and shows a compact progress widget. To block until completion instead, append `--wait`. The final status should be `complete`, and `hello.txt` should contain:
 
 ```text
 Hello from Hyperchart
 ```
 
-List recent runs at any time:
+List recent runs at any time. Select with ↑/↓ and press Enter to open the full browser inspector:
 
 ```text
 /hyperchart
 ```
 
-Open a specific run:
+Open a specific run directly in the browser inspector:
 
 ```text
 /hyperchart view <run-id>

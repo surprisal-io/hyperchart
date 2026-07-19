@@ -10,12 +10,14 @@ export function ExpandablePre({
 	maxPreviewCharacters = 2_000,
 	language,
 	renderContent,
+	wrapLongLines = false,
 }: {
 	children: string;
 	collapsedLines?: number;
 	maxPreviewCharacters?: number;
 	language?: string | undefined;
 	renderContent?: (text: string) => ReactNode;
+	wrapLongLines?: boolean;
 }) {
 	const [fullOpen, setFullOpen] = useState(false);
 	const preview = createTextPreview(children, collapsedLines, maxPreviewCharacters);
@@ -26,7 +28,7 @@ export function ExpandablePre({
 				{renderContent ? (
 					renderContent(preview.text)
 				) : (
-					<HighlightedBlock language={language}>{preview.text}</HighlightedBlock>
+					<HighlightedBlock language={language} wrapLongLines={wrapLongLines}>{preview.text}</HighlightedBlock>
 				)}
 			</div>
 			{preview.truncated && (

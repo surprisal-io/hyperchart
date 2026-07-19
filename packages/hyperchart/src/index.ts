@@ -30,6 +30,7 @@ export type {
 	MapStateCst,
 	SchemaAst,
 	SchemaCst,
+	RuntimeContractMetadata,
 	ParallelStateAst,
 	ParallelStateCst,
 	ParsedChart,
@@ -49,6 +50,7 @@ export type {
 	Templatable,
 	GuardOutcome,
 	GuardRef,
+	GuardRefAst,
 	OnReject,
 	OnReenterAst,
 	OnReenterCst,
@@ -76,6 +78,7 @@ export {
 	script,
 	tsImport,
 	user,
+	contract,
 } from "./core/dsl.js";
 
 export { loop, start } from "./core/execution_loop.js";
@@ -85,6 +88,10 @@ export { z } from "zod";
 export { refs } from "./core/typed.js";
 export type { InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
+export { SchemaRegistry } from "./core/schema_registry.js";
+export type { SchemaRegistryLike } from "./core/schema_registry.js";
+export { checkSchema, checkSchemaAsync } from "./runtime/generic/schema.js";
+export type { RuntimeContractMetadata as RuntimeContract } from "./core/schema_contract.js";
 export { ChartParseError, parseChartExport, parseChartModule, parseChartModuleAst } from "./core/parser.js";
 export type { ParseChartModuleOptions } from "./core/parser.js";
 export { inspectChartAst, inspectChartModuleSync, parseChartModuleSync } from "./core/inspect.js";

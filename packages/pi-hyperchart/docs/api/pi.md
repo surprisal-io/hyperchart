@@ -116,6 +116,8 @@ The adapter discovers:
 - user charts under `<agentDir>/hypercharts`;
 - runs under the Pi Hyperchart runs root whose `meta.workDir` equals `cwd`.
 
+New runs record the creating Pi session as `meta.originSessionId`. The adapter exposes it as `HyperchartRunInfo.originSessionId`; older runs leave it undefined.
+
 Project charts replace same-name user charts. Definitions are sorted by name; runs are sorted newest first and limited by `runLimit`, defaulting to 50.
 
 If run metadata is readable but full chart/runtime inspection fails, the adapter keeps a metadata-only run entry with `status: "blocked"` or a status-derived terminal value and a `run_failed` issue. Corrupt or missing `meta.json` cannot be attributed to a working directory and is omitted.
@@ -128,16 +130,39 @@ const piHyperchartHost: HyperchartHostAdapter;
 
 Singleton created with default options.
 
-## Agent tools
+## Agent tool
 
-The tool schemas are registered by the Pi extension. They are not JavaScript exports.
+The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `rewind`, or `stop`. The schema is not a JavaScript export.
 
-### `hyperchart_inspect`
+### `action: "list"`
+
+Lists project and user chart definitions without loading chart modules. Result `details.charts[]` contains `name`, `scope`, and absolute `path`. Project definitions replace same-name user definitions.
+
+Charts may use a flat file or self-contained bundle:
+
+```text
+.pi/hypercharts/review.chart.ts
+.pi/hypercharts/review/
+├── chart.ts
+├── agents/
+├── extensions/
+│   └── custom-tools/index.ts
+└── scripts/
+```
+
+Bundle `agents/` overrides project and user agent definitions for that chart. Bundle extension entrypoints load when Pi loads Hyperchart. Each entrypoint exports a default Pi extension registration function. Guards and scripts resolve relative to `chart.ts`.
+
+```json
+{ "action": "list" }
+```
+
+### `action: "inspect"`
 
 Loads and normalizes a chart without dispatching workflow actions.
 
 ```ts
 {
+  action: "inspect";
   chartPath: string;
   exportName?: string;
 }
@@ -152,18 +177,20 @@ Result `details` is `HyperchartInspectResult`.
 
 ```json
 {
+  "action": "inspect",
   "chartPath": ".pi/hypercharts/review.chart.ts"
 }
 ```
 
 Loading still executes module-level TypeScript. Do not inspect untrusted modules without reviewing their top-level code.
 
-### `hyperchart_run`
+### `action: "run"`
 
 Starts a new run, attaches to a live run, or resumes an existing stopped run.
 
 ```ts
 {
+  action: "run";
   chartPath?: string;
   args?: Record<string, unknown>;
   runDir?: string;
@@ -223,6 +250,7 @@ Start example:
 
 ```json
 {
+  "action": "run",
   "chartPath": "review",
   "args": { "topic": "API design" },
   "wait": false
@@ -233,16 +261,18 @@ Resume example:
 
 ```json
 {
+  "action": "run",
   "runDir": "review-20260711-180000"
 }
 ```
 
-The extension type-checks the chart, normalizes it, creates or loads run metadata, starts a detached runner, and writes process status. It attaches instead of spawning a second process when the run is already live.
+The extension type-checks the chart, normalizes it, creates or loads run metadata, records the creating Pi session for new runs, starts a detached runner, and writes process status. It attaches instead of spawning a second process when the run is already live.
 
-### `hyperchart_run_inspect`
+### `action: "run_inspect"`
 
 ```ts
 {
+  action: "run_inspect";
   runDir: string;
 }
 ```
@@ -251,18 +281,34 @@ Loads a run id or directory belonging to the current working directory and retur
 
 ```json
 {
+  "action": "run_inspect",
   "runDir": "review-20260711-180000"
 }
 ```
 
 Use this tool before resume, replay override, rewind, or recovery after a crash.
 
-### `hyperchart_rewind`
+### `action: "stop"`
+
+Stop one run or every active run owned by current working directory. Exactly one of `runDir` or `all: true` required.
+
+```json
+{ "action": "stop", "runDir": "review-20260711-180000" }
+```
+
+```json
+{ "action": "stop", "all": true }
+```
+
+Live runners receive `SIGTERM`. Stale active statuses become `stopped` without signaling unrelated processes.
+
+### `action: "rewind"`
 
 Backs up and truncates a stopped run.
 
 ```ts
 {
+  action: "rewind";
   runDir: string;
   state?: string;
   seqId?: number;
@@ -289,6 +335,7 @@ State target:
 
 ```json
 {
+  "action": "rewind",
   "runDir": "review-20260711-180000",
   "state": "pipeline.review",
   "mode": "before"
@@ -299,6 +346,7 @@ Compatibility target:
 
 ```json
 {
+  "action": "rewind",
   "runDir": "review-20260711-180000",
   "to": "compatible"
 }

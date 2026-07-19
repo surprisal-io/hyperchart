@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
 	type AgentSession,
@@ -6,13 +6,14 @@ import {
 	DefaultResourceLoader,
 	getAgentDir,
 	SessionManager,
-	type ModelRegistry,
+	type ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "@surprisal/hyperchart/internal/core/action_uid";
 import type { ActionUID, ChartEvent } from "@surprisal/hyperchart/internal/core/types";
 import type { AgentEffect, RejectedEffect } from "@surprisal/hyperchart/internal/core/machine";
 import { errorMessage } from "@surprisal/hyperchart/internal/utils/errors";
 import type { AgentExecutor, EmitCompletion } from "@surprisal/hyperchart/runtime";
+import type { SchemaRegistryLike as SchemaRegistry } from "@surprisal/hyperchart/internal/core/schema_registry";
 import { checkArtifactFile, resolveArtifactValue } from "@surprisal/hyperchart/runtime";
 import {
 	loadAgentDefinition,
@@ -36,9 +37,10 @@ export type PiExecutorOptions = {
 	agentDir?: string;
 	definitionDirs?: string[];
 	sessionsDir: string;
-	modelRegistry: ModelRegistry;
+	modelRuntime: ModelRuntime;
 	defaultModel?: string;
 	maxFinishRetries?: number;
+	schemaRegistry?: SchemaRegistry;
 };
 
 type LiveAgent = {
@@ -53,7 +55,6 @@ type RunOptions = {
 	forceNewSession: boolean;
 	resumePrompt?: string;
 	rejectReason?: string;
-	resumeInvocationId?: string;
 	resumeSessionFile?: string;
 };
 
@@ -133,7 +134,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			void this.run(
 				retryEffect,
 				emit,
-				{ forceNewSession: false, resumePrompt: buildRejectPrompt(effect), resumeInvocationId: live.effect.id },
+				{ forceNewSession: false, resumePrompt: buildRejectPrompt(effect) },
 				generation,
 			).catch((error: unknown) => {
 				this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
@@ -146,7 +147,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		const runOptions: RunOptions =
 			effect.onReject === "restart"
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
-				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect), resumeInvocationId: effect.invocation.id };
+				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
 		void this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
 			this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
@@ -198,6 +199,9 @@ export class PiAgentExecutor implements AgentExecutor {
 			error: undefined,
 		});
 		const definition = loadAgentDefinition(effect.action.name, this.definitionDirs);
+		// Validate every declared read before selecting or opening any restored session. A resumed
+		// session must not bypass the local-artifact/URL boundary that a fresh run enforces.
+		const reads = await resolveReads(effect, this.options.workDir, this.options.schemaRegistry);
 		const dir = actionSessionDir(this.options.sessionsDir, effect);
 		const latest = latestSessionForRunOptions(this.options.sessionsDir, dir, effect, runOptions);
 		const sink: CompletionSink = { captured: undefined };
@@ -211,18 +215,19 @@ export class PiAgentExecutor implements AgentExecutor {
 		live.unsubscribeProgress = this.attachProgress(session, effect, definition);
 		this.live.set(key, live);
 
-		if (latest !== undefined) {
-			const captured = findCapturedFinish(session.messages, effect);
+		if (latest !== undefined && shouldRecoverRestoredFinish(runOptions)) {
+			const captured = await findCapturedFinish(session.messages, effect, this.options.schemaRegistry);
 			if (captured !== undefined) {
 				sink.captured = captured;
 				await this.acceptanceLoop(key, generation, emit, live);
 				return;
 			}
+		}
+		if (latest !== undefined) {
 			await this.promptAndAccept(key, generation, emit, live, runOptions.resumePrompt ?? buildResumePrompt(effect));
 			return;
 		}
 
-		const reads = await resolveReads(effect, this.options.workDir);
 		const taskPrompt = [
 			runOptions.resumePrompt,
 			runOptions.rejectReason === undefined
@@ -247,7 +252,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			effect,
 			this.options.defaultModel === undefined ? {} : { defaultModel: this.options.defaultModel },
 		);
-		const model = plan.modelRef === undefined ? undefined : resolveModel(this.options.modelRegistry, plan.modelRef);
+		const model = plan.modelRef === undefined ? undefined : resolveModel(this.options.modelRuntime, plan.modelRef);
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: this.options.workDir,
 			agentDir: this.agentDir,
@@ -266,11 +271,11 @@ export class PiAgentExecutor implements AgentExecutor {
 		const { session } = await createAgentSession({
 			cwd: this.options.workDir,
 			agentDir: this.agentDir,
-			modelRegistry: this.options.modelRegistry,
+			modelRuntime: this.options.modelRuntime,
 			...(model === undefined ? {} : { model }),
 			...(plan.thinkingLevel === undefined ? {} : { thinkingLevel: plan.thinkingLevel }),
 			...(plan.tools === undefined ? {} : { tools: plan.tools }),
-			customTools: [createFinishTool(effect, sink)],
+			customTools: [createFinishTool(effect, sink, this.options.schemaRegistry)],
 			resourceLoader,
 			sessionManager,
 		});
@@ -330,7 +335,7 @@ export class PiAgentExecutor implements AgentExecutor {
 	private async checkArtifacts(effect: AgentEffect): Promise<string[]> {
 		const errors: string[] = [];
 		for (const artifact of effect.artifacts ?? []) {
-			const check = await checkArtifactFile(artifact, this.options.workDir);
+			const check = await checkArtifactFile(artifact, this.options.workDir, this.options.schemaRegistry);
 			if (!check.ok) errors.push(...check.errors);
 		}
 		return errors;
@@ -423,6 +428,10 @@ export class PiAgentExecutor implements AgentExecutor {
 	}
 }
 
+export function shouldRecoverRestoredFinish(runOptions: Pick<RunOptions, "resumePrompt" | "rejectReason">): boolean {
+	return runOptions.resumePrompt === undefined && runOptions.rejectReason === undefined;
+}
+
 function rejectedAgentInvocation(effect: RejectedEffect): AgentEffect | undefined {
 	return effect.invocation.kind === "agent" ? { ...effect.invocation, id: effect.id } : undefined;
 }
@@ -443,15 +452,11 @@ export function buildSessionPlan(
 	};
 }
 
-export function sessionMentionsInvocationId(sessionFile: string, invocationId: string): boolean {
-	try {
-		return readFileSync(sessionFile, "utf8").includes(invocationId);
-	} catch {
-		return false;
-	}
-}
-
-export function findCapturedFinish(messages: readonly unknown[], effect: AgentEffect): ChartEvent | undefined {
+export async function findCapturedFinish(
+	messages: readonly unknown[],
+	effect: AgentEffect,
+	registry?: SchemaRegistry,
+): Promise<ChartEvent | undefined> {
 	let lastUser = -1;
 	messages.forEach((message, index) => {
 		if (isRecord(message) && message.role === "user") lastUser = index;
@@ -474,33 +479,44 @@ export function findCapturedFinish(messages: readonly unknown[], effect: AgentEf
 			typeof message.toolCallId === "string" &&
 			calls.has(message.toolCallId)
 		) {
-			const result = validateFinishParams(
-				effect,
-				calls.get(message.toolCallId) as { invocationId?: unknown; event?: unknown; output?: unknown; error?: unknown },
-			);
+			const params = calls.get(message.toolCallId) as { event?: unknown; output?: unknown };
+			const result = await validateFinishParams(effect, params, registry);
 			if (result.ok) captured = result.event;
 		}
 	}
 	return captured;
 }
 
-async function resolveReads(effect: AgentEffect, workDir: string): Promise<ResolvedRead[]> {
+export function validateDeclaredReadPaths(reads: readonly { path: string }[] | undefined): void {
+	for (const artifact of reads ?? []) {
+		if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path)) throw new Error(`Read '${artifact.path}' is a web URL, not a local artifact; use browser/search acquisition first`);
+	}
+}
+
+async function resolveReads(
+	effect: AgentEffect,
+	workDir: string,
+	registry?: SchemaRegistry,
+): Promise<ResolvedRead[]> {
 	const reads: ResolvedRead[] = [];
+	validateDeclaredReadPaths(effect.reads);
 	for (const artifact of effect.reads ?? []) {
 		reads.push(
-			artifact.select === undefined ? { artifact } : { artifact, value: await resolveArtifactValue(artifact, workDir) },
+			artifact.select === undefined
+				? { artifact }
+				: { artifact, value: await resolveArtifactValue(artifact, workDir, registry) },
 		);
 	}
 	return reads;
 }
 
-function resolveModel(modelRegistry: ModelRegistry, modelRef: string) {
+function resolveModel(modelRuntime: ModelRuntime, modelRef: string) {
 	const [provider, ...rest] = modelRef.split("/");
 	const modelId = rest.join("/");
 	if (!provider || !modelId) {
 		throw new Error(`Model '${modelRef}' must be in provider/model-id format`);
 	}
-	const model = modelRegistry.find(provider, modelId);
+	const model = modelRuntime.getModel(provider, modelId);
 	if (model === undefined) {
 		throw new Error(`Model '${modelRef}' was not found in the model registry`);
 	}
@@ -517,21 +533,17 @@ function latestSessionForRunOptions(
 	if (runOptions.resumeSessionFile !== undefined && existsSync(runOptions.resumeSessionFile)) {
 		return runOptions.resumeSessionFile;
 	}
-	if (runOptions.resumeInvocationId !== undefined) {
-		return latestJsonlForInvocation(dir, runOptions.resumeInvocationId);
-	}
 	if (runOptions.resumePrompt !== undefined) {
 		return latestJsonlForPreviousActionSession(sessionsDir, effect);
 	}
-	return latestJsonlForInvocation(dir, effect.id);
+	return latestJsonl(dir);
 }
 
-function latestJsonlForInvocation(dir: string, invocationId: string): string | undefined {
+function latestJsonl(dir: string): string | undefined {
 	if (!existsSync(dir)) return undefined;
 	return readdirSync(dir)
 		.filter((file) => file.endsWith(".jsonl"))
 		.map((file) => join(dir, file))
-		.filter((file) => sessionMentionsInvocationId(file, invocationId))
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
 }
 

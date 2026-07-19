@@ -1,4 +1,8 @@
 import type { ZodType } from "zod";
+import type { RuntimeContractMetadata } from "./schema_contract.js";
+import type { SchemaRegistry } from "./schema_registry.js";
+
+export type { RuntimeContractMetadata } from "./schema_contract.js";
 
 export type StateId = string;
 export type ActionUID = Readonly<{
@@ -33,6 +37,8 @@ export type SchemaCst = ZodType;
 export type SchemaAst = Readonly<{
 	kind: "jsonSchema";
 	schema: Readonly<JsonSchema>;
+	/** Stable identity for an exact runtime Zod contract. */
+	runtimeContract?: RuntimeContractMetadata;
 }>;
 
 // A deliverable file the agent must produce: where to write and — optionally — what shape the
@@ -128,6 +134,23 @@ export type GuardRef =
 			kind: "script";
 			command: string;
 			args?: readonly string[];
+			// A script guard has the complete script-option surface. Its reply is validation-only and
+			// its artifacts are declared outputs of the containing action state.
+			env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
+			artifacts?: Record<string, Templatable | ArtifactCst>;
+			reply?: SchemaCst;
+	  };
+
+/** Normalized, replayable guard definition (the runtime normalizer converts templates to AST values). */
+export type GuardRefAst =
+	| GuardRef
+	| {
+			kind: "script";
+			command: string;
+			args?: readonly string[];
+			env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+			artifacts?: Readonly<Record<string, ArtifactAst>>;
+			reply?: SchemaAst;
 	  };
 
 export type GuardOutcome = boolean | { ok: false; reason: string };
@@ -357,7 +380,7 @@ export type ActionStateAst = Readonly<{
 	input?: Readonly<Record<string, SchemaAst>>;
 	transitions: Readonly<Record<EventType, TransitionAst>>;
 	after?: Readonly<AfterCst>;
-	validate?: GuardRef;
+	validate?: GuardRefAst;
 	// Present only when validate is set; defaults to "resume".
 	onReject?: OnReject;
 	onReenter?: OnReenterAst;
@@ -452,6 +475,8 @@ export type ParsedChart =
 			source: ChartSource;
 			cst: ChartCst;
 			ast: ChartAst;
+			/** Original runtime Zod schemas for this parsed chart; never serialized. */
+			schemaRegistry: SchemaRegistry;
 			diagnostics: readonly [];
 	  }
 	| {

@@ -1,6 +1,7 @@
 import type { HyperchartInfo, HyperchartStateInfo, HyperchartRunInfo, HyperchartRunStatus } from "../types.js";
 
-const now = Date.now();
+const FIXTURE_NOW = Date.UTC(2026, 6, 7, 22, 45, 0);
+const now = FIXTURE_NOW;
 
 export const boardCharts: HyperchartInfo[] = [
 	{

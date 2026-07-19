@@ -14,5 +14,8 @@ describe("React stylesheet", () => {
 		expect(css).toContain("background-color: transparent");
 		expect(css).toContain("box-sizing: border-box");
 		expect(css).toContain("text-size-adjust: 100%");
+		expect(css).toContain('html[data-hyperchart-inspector-open]');
+		expect(css).toContain(':not(:has([data-testid="hyperchart-inspector-dialog"]))');
+		expect(css).toContain("animation-play-state: paused !important");
 	});
 });

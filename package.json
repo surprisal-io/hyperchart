@@ -8,8 +8,12 @@
 		"packages/pi-hyperchart"
 	],
 	"pi": {
-		"extensions": ["./packages/pi-hyperchart/extensions"],
-		"skills": ["./packages/pi-hyperchart/skills"]
+		"extensions": [
+			"./packages/pi-hyperchart/extensions"
+		],
+		"skills": [
+			"./packages/pi-hyperchart/skills"
+		]
 	},
 	"engines": {
 		"node": ">=22.19"
@@ -26,14 +30,15 @@
 		"sync:pi-docs": "node scripts/sync-pi-docs.mjs"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-coding-agent": "^0.80.3",
-		"@earendil-works/pi-tui": "^0.80.3",
+		"@earendil-works/pi-coding-agent": "^0.80.10",
+		"@earendil-works/pi-tui": "^0.80.10",
 		"@storybook/react-vite": "^10.1.7",
 		"@tailwindcss/vite": "^4.3.2",
 		"@types/node": "22.19.19",
 		"@types/react": "^19.0.0",
 		"@types/react-dom": "^19.0.0",
 		"@types/react-syntax-highlighter": "^15.5.13",
+		"@xterm/xterm": "^6.0.0",
 		"@xyflow/react": "^12.11.1",
 		"elkjs": "^0.11.1",
 		"react": "^19.0.0",

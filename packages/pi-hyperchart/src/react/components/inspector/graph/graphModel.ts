@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ElkConstructor, { type ElkNode, type ElkPoint } from "elkjs/lib/elk.bundled.js";
 import { MarkerType, type Edge, type Node } from "@xyflow/react";
 import type { HyperchartRunInfo, HyperchartStateInfo, HyperchartStateType } from "../../../types.js";
 import type { ElkLayoutEngine, GraphLayout, NodePosition, StateNode } from "../types.js";
 import { EDGE_NEUTRAL_COLOR, EDGE_RUNNING_COLOR, routedEdgePoints } from "./edgeRouting.js";
+import { fanoutStatusSummary } from "../helpers/fanout.js";
 import { childPreviewForState, effectiveDisplayType } from "../helpers/scope.js";
+import {
+	compactRuntimeFacts,
+	compactTriageFacts,
+	stateMechanismLabel,
+	validationRetryLabel,
+} from "../helpers/state.js";
 import { graphInput } from "./graphInput.js";
 
 export const GRAPH_COMPACT_NODE_WIDTH = 270;
@@ -87,6 +94,7 @@ function nodesFromPositions(
 	input: ReturnType<typeof graphInput>,
 	positions: Map<string, NodePosition>,
 	allStates: HyperchartStateInfo[],
+	snapshotAt?: number,
 ): StateNode[] {
 	return input.visibleStates.map((state) => {
 		const displayType = effectiveDisplayType(state, input.stateById);
@@ -98,10 +106,14 @@ function nodesFromPositions(
 			position: positions.get(state.id) ?? { x: 36, y: 36 },
 			width: size.width,
 			height: size.height,
+			// Controlled React Flow updates otherwise discard the measured size and handle bounds.
+			// Nodes remain visible from width/height, but their edges disappear until ResizeObserver runs again.
+			measured: { width: size.width, height: size.height },
 			data: {
 				state,
 				...(displayType === undefined ? {} : { displayType }),
 				...(childPreview === undefined ? {} : { childPreview }),
+				...(state.status !== "running" || snapshotAt === undefined ? {} : { snapshotAt }),
 			},
 		};
 	});
@@ -127,7 +139,7 @@ export function buildGraph(
 ): GraphLayout {
 	const input = graphInput(run, visibleIds);
 	const positions = layoutPositions ?? fallbackPositions(input.visibleStates);
-	const nodes = nodesFromPositions(input, positions, run.states);
+	const nodes = nodesFromPositions(input, positions, run.states, run.updatedAt);
 	const edges: Edge[] = [];
 	if (input.useStateTransitions) {
 		for (const edge of input.transitionEdges) {
@@ -135,6 +147,8 @@ export function buildGraph(
 			const sides = edgePortSides(edge, input);
 			const label = edge.labels.join(" / ");
 			const edgeId = visualTransitionEdgeId(edge);
+			const running = sourceState?.status === "running";
+			const routedPoints = layoutRoutes?.get(edgeId);
 			edges.push({
 				id: edgeId,
 				source: edge.source,
@@ -142,20 +156,19 @@ export function buildGraph(
 				sourceHandle: reactFlowHandleId("source", sides.source),
 				targetHandle: reactFlowHandleId("target", sides.target),
 				type: "transition",
-				animated: sourceState?.status === "running",
 				label,
 				markerEnd: {
 					type: MarkerType.ArrowClosed,
-					color: sourceState?.status === "running" ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
+					color: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
 					width: 12,
 					height: 12,
 				},
 				style: {
-					stroke: sourceState?.status === "running" ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
-					strokeWidth: sourceState?.status === "running" ? 1.6 : 1.15,
+					stroke: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
+					strokeWidth: running ? 1.6 : 1.15,
 					opacity: 0.72,
 				},
-				data: layoutRoutes?.has(edgeId) ? { points: layoutRoutes.get(edgeId) } : undefined,
+				data: routedPoints === undefined && !running ? undefined : { points: routedPoints, running },
 			} as Edge);
 		}
 		return { nodes, edges };
@@ -271,6 +284,65 @@ function positionsForUpdatedGraph(previous: GraphLayout, fallback: GraphLayout):
 	return positions;
 }
 
+function nodeVisualSignature(node: StateNode): string {
+	const state = node.data.state;
+	const displayState = node.data.displayType ? { ...state, type: node.data.displayType } : state;
+	const validationLabel = validationRetryLabel(state);
+	return JSON.stringify({
+		id: state.id,
+		type: displayState.type,
+		status: state.status,
+		initial: state.initial,
+		startedAt: state.startedAt,
+		endedAt: state.endedAt,
+		mechanism: stateMechanismLabel(displayState),
+		runtimeChips: compactRuntimeFacts(state).slice(0, 2),
+		triageChips: compactTriageFacts(state, validationLabel).slice(0, 2),
+		fanout: fanoutStatusSummary(displayState),
+	});
+}
+
+function sameNode(left: StateNode, right: StateNode): boolean {
+	return (
+		left.id === right.id &&
+		left.type === right.type &&
+		left.position.x === right.position.x &&
+		left.position.y === right.position.y &&
+		left.width === right.width &&
+		left.height === right.height &&
+		left.measured?.width === right.measured?.width &&
+		left.measured?.height === right.measured?.height &&
+		nodeVisualSignature(left) === nodeVisualSignature(right)
+	);
+}
+
+/** Preserve React Flow element identities when a fresh host snapshot has no visual changes. */
+export function reconcileGraphElements(previous: GraphLayout, next: GraphLayout): GraphLayout {
+	const previousNodes = new Map(previous.nodes.map((node) => [node.id, node]));
+	let nodesChanged = previous.nodes.length !== next.nodes.length;
+	const nodes = next.nodes.map((node, index) => {
+		const candidate = previousNodes.get(node.id);
+		const reconciled = candidate !== undefined && sameNode(candidate, node) ? candidate : node;
+		if (previous.nodes[index] !== reconciled) nodesChanged = true;
+		return reconciled;
+	});
+
+	const previousEdges = new Map(previous.edges.map((edge) => [edge.id, edge]));
+	let edgesChanged = previous.edges.length !== next.edges.length;
+	const edges = next.edges.map((edge, index) => {
+		const candidate = previousEdges.get(edge.id);
+		const reconciled = candidate !== undefined && JSON.stringify(candidate) === JSON.stringify(edge) ? candidate : edge;
+		if (previous.edges[index] !== reconciled) edgesChanged = true;
+		return reconciled;
+	});
+
+	if (!nodesChanged && !edgesChanged) return previous;
+	return {
+		nodes: nodesChanged ? nodes : previous.nodes,
+		edges: edgesChanged ? edges : previous.edges,
+	};
+}
+
 export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibleIds: Set<string>): GraphLayout {
 	const fallback = useMemo(() => (run ? buildGraph(run, visibleIds) : { nodes: [], edges: [] }), [run, visibleIds]);
 	const signature = useMemo(() => (run ? graphLayoutSignature(run, visibleIds) : ""), [run, visibleIds]);
@@ -288,17 +360,26 @@ export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibl
 		fallbackRef.current = fallback;
 	}, [fallback]);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!run) {
-			setGraph({ nodes: [], edges: [] });
+			const empty = { nodes: [], edges: [] };
+			graphRef.current = empty;
+			setGraph(empty);
 			return;
 		}
 		const previous = graphRef.current;
 		if (previous.nodes.length === 0) {
+			graphRef.current = fallback;
 			setGraph(fallback);
 			return;
 		}
-		setGraph(buildGraph(run, visibleIds, positionsForUpdatedGraph(previous, fallback), routesFromGraph(previous)));
+		const next = reconcileGraphElements(
+			previous,
+			buildGraph(run, visibleIds, positionsForUpdatedGraph(previous, fallback), routesFromGraph(previous)),
+		);
+		if (next === previous) return;
+		graphRef.current = next;
+		setGraph(next);
 	}, [fallback, run, visibleIds]);
 
 	useEffect(() => {
@@ -313,9 +394,14 @@ export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibl
 				if (cancelled) return;
 				const latest = layoutInputRef.current;
 				if (!latest.run || graphLayoutSignature(latest.run, latest.visibleIds) !== signature) return;
-				setGraph(
+				const previous = graphRef.current;
+				const next = reconcileGraphElements(
+					previous,
 					buildGraph(latest.run, latest.visibleIds, positionsFromGraph(layoutGraph), routesFromGraph(layoutGraph)),
 				);
+				if (next === previous) return;
+				graphRef.current = next;
+				setGraph(next);
 			})
 			.catch(() => {
 				if (!cancelled && graphRef.current.nodes.length === 0) setGraph(fallbackRef.current);

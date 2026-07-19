@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import type { HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect_ast";
 
@@ -44,8 +44,9 @@ export function loadAgentDefinition(name: string, dirs: string[]): AgentDefiniti
 	throw new Error(`Agent definition '${name}' not found in ${dirs.join(", ")}`);
 }
 
-export function resolvePiSubagentDefinitionDirs(cwd: string, agentDir: string = getAgentDir()): string[] {
+export function resolvePiSubagentDefinitionDirs(cwd: string, agentDir: string = getAgentDir(), chartPath?: string): string[] {
 	return uniqueExistingDirs([
+		...(chartPath === undefined ? [] : [join(dirname(resolve(chartPath)), "agents")]),
 		...projectAgentDirs(cwd),
 		join(homedir(), ".agents"),
 		join(agentDir, "agents"),
@@ -56,8 +57,9 @@ export function resolvePiSubagentDefinitionDirs(cwd: string, agentDir: string = 
 export function createAgentDefaultsResolver(
 	cwd: string,
 	agentDir: string = getAgentDir(),
+	chartPath?: string,
 ): (agentName: string) => HyperchartInspectAgentDefaults {
-	const dirs = resolvePiSubagentDefinitionDirs(cwd, agentDir);
+	const dirs = resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath);
 	const cache = new Map<string, HyperchartInspectAgentDefaults>();
 	return (agentName) => {
 		const cached = cache.get(agentName);
@@ -66,6 +68,7 @@ export function createAgentDefaultsResolver(
 		try {
 			const definition = loadAgentDefinition(agentName, dirs);
 			defaults = {
+				...(definition.description === undefined ? {} : { description: definition.description }),
 				...(definition.model === undefined ? {} : { model: definition.model }),
 				...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
 				...(definition.tools === undefined ? {} : { tools: definition.tools }),

@@ -3,7 +3,7 @@ import type {
 	ArtifactOfAst,
 	ChartAst,
 	EventBindingAst,
-	GuardRef,
+	GuardRefAst,
 	InputRef,
 	JoinArtifactOfAst,
 	JsonSchema,
@@ -146,16 +146,12 @@ function actionDsl(action: StateActionAst): string {
 	])})`;
 }
 
-function scriptDsl(value: Extract<StateActionAst, { kind: "script" }> | Extract<GuardRef, { kind: "script" }>): string {
+function scriptDsl(value: Extract<StateActionAst, { kind: "script" }> | Extract<GuardRefAst, { kind: "script" }>): string {
 	const args = "args" in value && value.args.length > 0 ? value.args : undefined;
-	const options =
-		"uid" in value
-			? objectDsl([
-					["env", envDsl(value.env)],
-					["artifacts", artifactsDsl(value.artifacts)],
-					["reply", value.reply === undefined ? undefined : schemaDsl(value.reply)],
-				])
-			: "{}";
+	const optionEntries: Array<[string, string | undefined]> = [["env", envDsl(value.env)]];
+	if ("artifacts" in value) optionEntries.push(["artifacts", artifactsDsl(value.artifacts as Readonly<Record<string, ArtifactAst>>)]);
+	if ("reply" in value) optionEntries.push(["reply", value.reply === undefined ? undefined : schemaDsl(value.reply as SchemaAst)]);
+	const options = objectDsl(optionEntries);
 	const callArgs = [
 		stringDsl(value.command),
 		...(args === undefined ? (options === "{}" ? [] : ["[]"]) : [arrayDsl(args.map(stringDsl))]),
@@ -164,7 +160,7 @@ function scriptDsl(value: Extract<StateActionAst, { kind: "script" }> | Extract<
 	return `script(${callArgs.join(", ")})`;
 }
 
-function guardDsl(value: GuardRef): string {
+function guardDsl(value: GuardRefAst): string {
 	if (value.kind === "script") return scriptDsl(value);
 	return `tsImport(${stringDsl(value.module)}, ${stringDsl(value.export)})`;
 }
@@ -474,8 +470,8 @@ function joinArtifactOfDsl(read: JoinArtifactOfAst): string {
 }
 
 function envDsl(
-	env: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined,
+	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined,
 ): string | undefined {
 	if (env === undefined || Object.keys(env).length === 0) return undefined;
-	return objectDsl(Object.entries(env).map(([name, value]) => [name, readDsl(value)]));
+	return objectDsl(Object.entries(env).map(([name, value]) => [name, typeof value === "string" ? stringDsl(value) : readDsl(value)]));
 }

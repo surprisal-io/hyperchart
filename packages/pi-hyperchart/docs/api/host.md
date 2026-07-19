@@ -72,6 +72,7 @@ type HyperchartInspectMode = "static" | "run";
 interface HyperchartRunInfo {
   runId: string;
   chartName: string;
+  originSessionId?: string;
   mode?: HyperchartInspectMode;
   definitionSource?: string;
   description?: string;
@@ -89,6 +90,8 @@ interface HyperchartRunInfo {
   issues?: HyperchartIssueInfo[];
 }
 ```
+
+`originSessionId` identifies the harness session that created a run when the host can provide it. Consumers may use exact matching for per-session views; absence means ownership is unknown.
 
 `mode: "static"` represents a definition with no durable run overlay. `mode: "run"` represents a concrete run.
 
@@ -118,6 +121,7 @@ type HyperchartStateType =
 interface HyperchartStateInfo {
   id: string;
   type?: HyperchartStateType;
+  initial?: boolean;
   agent?: string;
   definitionSource?: string;
   status: HyperchartStateStatus;
@@ -175,7 +179,7 @@ interface HyperchartStateInfo {
 }
 ```
 
-`stale` is historical completion outside the current traversal or map generation. It is not pending work.
+`initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `stale` is historical completion outside the current traversal or map generation. It is not pending work. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
 
 ## Visits
 
@@ -278,7 +282,14 @@ interface HyperchartEnvInfo {
 }
 
 type HyperchartGuardInfo =
-  | { kind: "script"; command: string; args?: string[] }
+  | {
+      kind: "script";
+      command: string;
+      args?: string[];
+      env?: HyperchartEnvInfo[];
+      artifacts?: HyperchartArtifactInfo[];
+      reply?: HyperchartSchemaInfo;
+    }
   | { kind: "tsImport"; module: string; export: string };
 ```
 

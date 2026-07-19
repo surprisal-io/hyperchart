@@ -11,7 +11,9 @@ import { buildNudgePrompt, buildTaskPrompt } from "../packages/pi-hyperchart/src
 import {
 	buildSessionPlan,
 	findCapturedFinish,
-	sessionMentionsInvocationId,
+	PiAgentExecutor,
+	validateDeclaredReadPaths,
+	shouldRecoverRestoredFinish,
 } from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
 
 const tempDirs: string[] = [];
@@ -73,6 +75,8 @@ describe("agent definitions", () => {
 		const project = await makeTempDir();
 		const agentDir = await makeTempDir();
 		const packageRoot = join(agentDir, "npm", "node_modules", "agent-pack");
+		const chartDir = join(project, ".pi", "hypercharts", "review");
+		await mkdir(join(chartDir, "agents"), { recursive: true });
 		await mkdir(join(project, ".pi", "agents"), { recursive: true });
 		await mkdir(join(agentDir, "agents"), { recursive: true });
 		await mkdir(join(packageRoot, "agents"), { recursive: true });
@@ -81,6 +85,7 @@ describe("agent definitions", () => {
 			"---\nname: worker\ndescription: project\n---\nProject prompt\n",
 			"utf8",
 		);
+		await writeFile(join(chartDir, "agents", "worker.md"), "---\ndescription: bundle\n---\nBundle prompt\n", "utf8");
 		await writeFile(join(agentDir, "settings.json"), JSON.stringify({ packages: ["npm:agent-pack"] }), "utf8");
 		await writeFile(join(packageRoot, "package.json"), JSON.stringify({ name: "agent-pack" }), "utf8");
 		await writeFile(
@@ -89,12 +94,12 @@ describe("agent definitions", () => {
 			"utf8",
 		);
 
-		const dirs = resolvePiSubagentDefinitionDirs(join(project, "nested"), agentDir);
+		const dirs = resolvePiSubagentDefinitionDirs(join(project, "nested"), agentDir, join(chartDir, "chart.ts"));
 
-		expect(dirs[0]).toBe(join(project, ".pi", "agents"));
+		expect(dirs[0]).toBe(join(chartDir, "agents"));
 		expect(dirs).toContain(join(agentDir, "agents"));
 		expect(dirs).toContain(join(packageRoot, "agents"));
-		expect(loadAgentDefinition("worker", dirs).systemPrompt).toBe("Project prompt");
+		expect(loadAgentDefinition("worker", dirs).systemPrompt).toBe("Bundle prompt");
 		expect(loadAgentDefinition("qa-pack.critic", dirs)).toMatchObject({
 			name: "qa-pack.critic",
 			tools: ["read", "grep"],
@@ -111,7 +116,6 @@ describe("finish tool", () => {
 		expect(tool.parameters).toMatchObject({
 			type: "object",
 			properties: {
-				invocationId: { enum: [currentEffect.id] },
 				event: { enum: ["DONE"] },
 				output: { type: "object" },
 			},
@@ -120,7 +124,7 @@ describe("finish tool", () => {
 
 		const result = await tool.execute(
 			"call",
-			{ invocationId: currentEffect.id, event: "DONE", output: { value: 3 } },
+			{ event: "DONE", output: { value: 3 } },
 			undefined,
 			undefined,
 			{} as never,
@@ -137,7 +141,7 @@ describe("finish tool", () => {
 
 		const invalid = (await tool.execute(
 			"call",
-			{ invocationId: currentEffect.id, event: "DONE", output: { value: "bad" } },
+			{ event: "DONE", output: { value: "bad" } },
 			undefined,
 			undefined,
 			{} as never,
@@ -147,7 +151,7 @@ describe("finish tool", () => {
 
 		const failed = (await tool.execute(
 			"call",
-			{ invocationId: currentEffect.id, event: "FAILED", error: "boom" },
+			{ event: "FAILED", output: { value: 1 } },
 			undefined,
 			undefined,
 			{} as never,
@@ -157,14 +161,14 @@ describe("finish tool", () => {
 
 		await tool.execute(
 			"call",
-			{ invocationId: currentEffect.id, event: "DONE", output: { value: 1 } },
+			{ event: "DONE", output: { value: 1 } },
 			undefined,
 			undefined,
 			{} as never,
 		);
 		const second = (await tool.execute(
 			"call",
-			{ invocationId: currentEffect.id, event: "DONE", output: { value: 2 } },
+			{ event: "DONE", output: { value: 2 } },
 			undefined,
 			undefined,
 			{} as never,
@@ -196,34 +200,31 @@ describe("pi executor helpers", () => {
 		});
 	});
 
-	it("only resumes a session that mentions the current invocation id", async () => {
+	it.each([
+		["fresh", { forceNewSession: false }],
+		["restored", { forceNewSession: false, resumePrompt: "continue", resumeSessionFile: "/tmp/restored.jsonl" }],
+		["rejected", { forceNewSession: false, resumePrompt: "fix the rejection", rejectReason: "invalid artifact" }],
+	] as const)("rejects URL reads before the %s session branch", async (_name, runOptions) => {
 		const dir = await makeTempDir();
-		const sessionFile = join(dir, "session.jsonl");
-		await writeFile(sessionFile, JSON.stringify({ content: "chart:work:worker:1:1" }), "utf8");
-
-		expect(sessionMentionsInvocationId(sessionFile, "chart:work:worker:1:1")).toBe(true);
-		expect(sessionMentionsInvocationId(sessionFile, "chart:work:worker:1:2")).toBe(false);
-		expect(sessionMentionsInvocationId(join(dir, "missing.jsonl"), "chart:work:worker:1:1")).toBe(false);
+		const definitions = join(dir, "agents");
+		await mkdir(definitions, { recursive: true });
+		await writeFile(join(definitions, "worker.md"), "---\ndescription: worker\n---\nworker\n", "utf8");
+		const sessionsDir = join(dir, "sessions");
+		await mkdir(sessionsDir, { recursive: true });
+		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [definitions], sessionsDir, modelRuntime: {} as never });
+		await expect((executor as unknown as { run: Function }).run(effect({ reads: [{ path: "https://example.com/data.json" }] }), () => undefined, runOptions, 1)).rejects.toThrow("not a local artifact");
+		expect(() => validateDeclaredReadPaths([{ path: "https://example.com/data.json" }])).toThrow("not a local artifact");
 	});
 
-	it("does not recover stale finish calls for a newer rejected phase", () => {
+	it("does not recover stale id-free finish calls for a newer rejected phase", async () => {
 		const messages = [
-			{ role: "user", content: "task with invocation chart:work:worker:1:1" },
-			{
-				role: "assistant",
-				content: [
-					{
-						type: "toolCall",
-						name: "finish",
-						id: "call-1",
-						arguments: { invocationId: "chart:work:worker:1:1", event: "DONE", output: { value: 1 } },
-					},
-				],
-			},
-			{ role: "toolResult", toolName: "finish", toolCallId: "call-1", isError: false },
+			{ role: "user", content: "old phase" },
+			{ role: "assistant", content: [{ type: "toolCall", name: "finish", id: "old-id-free", arguments: { event: "DONE", output: { value: 1 } } }] },
+			{ role: "toolResult", toolName: "finish", toolCallId: "old-id-free", isError: false },
 		];
-
-		expect(findCapturedFinish(messages, effect({ id: "chart:work:worker:1:3" }))).toBeUndefined();
+		expect(await findCapturedFinish(messages, effect({ id: "chart:work:worker:1:3" }))).toEqual({ type: "DONE", output: { value: 1 } });
+		expect(shouldRecoverRestoredFinish({})).toBe(true);
+		expect(shouldRecoverRestoredFinish({ resumePrompt: "fix the rejection" })).toBe(false);
 	});
 
 	it("builds a corrective nudge when the model writes textual tool-call syntax", () => {
@@ -232,7 +233,7 @@ describe("pi executor helpers", () => {
 		expect(prompt).toContain("actual tool-calling interface");
 		expect(prompt).toContain("Plain text like `read<arg_key>...`");
 		expect(prompt).toContain("## Completion");
-		expect(prompt).toContain(`invocationId: exactly ${JSON.stringify(effect().id)}`);
+		expect(prompt).not.toContain("invocationId");
 	});
 
 	it("builds task prompts with selected reads, deliverables and completion contract", () => {
@@ -250,10 +251,10 @@ describe("pi executor helpers", () => {
 		expect(prompt).toContain("facts (from facts.json)");
 		expect(prompt).toContain("## Deliverables");
 		expect(prompt).toContain("## Completion");
-		expect(prompt).toContain(`invocationId: exactly ${JSON.stringify(effect().id)}`);
+		expect(prompt).not.toContain("invocationId");
 	});
 
-	it("finds a successful finish call after the last user message in restored messages", () => {
+	it("finds a successful finish call after the last user message in restored messages", async () => {
 		const currentEffect = effect();
 		const messages = [
 			{ role: "user", content: "old" },
@@ -264,7 +265,7 @@ describe("pi executor helpers", () => {
 						type: "toolCall",
 						id: "old",
 						name: "finish",
-						arguments: { invocationId: "old-invocation", event: "DONE", output: { value: 1 } },
+						arguments: { event: "DONE", output: { value: 1 } },
 					},
 				],
 			},
@@ -277,13 +278,13 @@ describe("pi executor helpers", () => {
 						type: "toolCall",
 						id: "new",
 						name: "finish",
-						arguments: { invocationId: currentEffect.id, event: "DONE", output: { value: 2 } },
+						arguments: { event: "DONE", output: { value: 2 } },
 					},
 				],
 			},
 			{ role: "toolResult", toolCallId: "new", toolName: "finish", isError: false },
 		];
 
-		expect(findCapturedFinish(messages, currentEffect)).toEqual({ type: "DONE", output: { value: 2 } });
+		expect(await findCapturedFinish(messages, currentEffect)).toEqual({ type: "DONE", output: { value: 2 } });
 	});
 });

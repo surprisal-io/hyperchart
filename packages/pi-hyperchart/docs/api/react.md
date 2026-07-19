@@ -43,7 +43,7 @@ function HyperchartInspectorDialog(
 ): React.ReactElement;
 ```
 
-The dialog owns run selection, graph navigation, state detail selection, responsive layout, and nested full-content dialogs. It does not fetch data or mutate runs.
+The dialog owns run selection, graph navigation, state detail selection, responsive layout, and nested full-content dialogs. It does not fetch data or mutate runs. The exported component is memoized; hosts should preserve `runs` and callback references when a poll produces no semantic change so shallow equality can skip the inspector subtree.
 
 ```tsx
 <HyperchartInspectorDialog
@@ -57,7 +57,7 @@ The dialog owns run selection, graph navigation, state detail selection, respons
 />
 ```
 
-Historical `HyperchartRunInfo` values are treated as immutable snapshots.
+Historical `HyperchartRunInfo` values are treated as immutable snapshots. While the modal inspector is open, the public stylesheet pauses CSS animations in sibling application roots under `body`; visible animations inside the inspector continue normally.
 
 ## `HyperchartInspectorSidePanel`
 
@@ -75,7 +75,7 @@ function HyperchartInspectorSidePanel(
 ): React.ReactElement;
 ```
 
-Renders run overview or one selected state's full details without the outer dialog or graph. `definitionSource` overrides generated source for the active view.
+Renders run overview or one selected state's full details without the outer dialog or graph. `Agents in scope` keeps first state for each unique `state.agent` name, preserving source order across map and parallel instances. Compound selections omit aggregated descendant `Contracts in scope`; selecting an action state still shows its own contracts. `definitionSource` overrides generated source for the active view.
 
 ## `HyperchartGraphPreview`
 
@@ -112,7 +112,7 @@ function HyperchartRunStrip(
 ): React.ReactElement | null;
 ```
 
-Shows the selected or running run, progress, usage, active states, up to five recent runs, and a dialog for additional runs/definitions. Returns `null` when no run is available.
+Shows the selected or running run, progress, usage, active states, up to five recent runs, and a dialog for additional runs/definitions. Returns `null` when no run is available. The component is memoized and follows the same immutable-array and stable-callback reference contract as the inspector.
 
 ## `HyperchartToolSummary`
 
@@ -224,7 +224,7 @@ function buildGraph(
 };
 ```
 
-Builds React Flow nodes and transition edges. Without layout positions it uses a deterministic vertical fallback. The inspector's hook applies ELK layout separately.
+Builds React Flow nodes and transition edges. Without layout positions it uses a deterministic vertical fallback. The inspector's hook applies ELK layout separately. States selected by a root or nested `initial` declaration display an `initial` badge independently from their runtime status; final nodes remain `pending` until reached. Running transitions keep the SVG path static and move a separate HTML marker with precomputed `transform` keyframes, avoiding React Flow's repaint-heavy `stroke-dashoffset` animation.
 
 ### `immediateMapScopeId()`
 
@@ -290,7 +290,7 @@ function hyperchartChartName(run: HyperchartRunInfo): string;
 function hyperchartRunLabel(run: HyperchartRunInfo): string;
 ```
 
-Time formatters return `—` for missing/zero timestamps and use the host locale. Progress counts states whose status is `done`. Usage displays total tokens and cost when positive.
+Time formatters return `—` for missing/zero timestamps and use host locale. Progress combines completed visits on actual run path with shortest remaining transition path from current state to any final state. Reaching any final outcome forces `pct: 100`, including failure finals. Inspector and run strip render progress bar without `done/total states` counters. Usage displays total tokens and cost when positive.
 
 ## Data adapters and model types
 
