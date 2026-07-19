@@ -1,6 +1,6 @@
 {
 	"name": "@surprisal/hyperchart",
-	"version": "0.1.1",
+	"version": "0.2.0",
 	"description": "Durable, typed statechart workflows for agents and scripts",
 	"license": "MIT",
 	"type": "module",

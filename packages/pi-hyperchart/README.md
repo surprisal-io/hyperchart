@@ -71,4 +71,4 @@ The published package includes `docs/`, runnable `examples/`, and the architectu
 - [Recovery and safety](https://github.com/surprisal-io/hyperchart/blob/main/docs/safety.md)
 - [React and host integration](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md)
 
-MIT · experimental `0.1.1`
+MIT · experimental `0.2.0`
