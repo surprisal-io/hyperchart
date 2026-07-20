@@ -309,9 +309,10 @@ function applyTransition(
 		throw new Error(`No transition for event type ${eventType} in state ${fromLeaf}`);
 	}
 	const target = siblingPath(handler.path, handler.transition.target);
-	if (event !== undefined) {
-		applyInputsForEntry(projection, ast, target, handler.transition, event);
-	}
+	// Validation-budget exhaustion synthesizes a FAILED transition without a ChartEvent. Input
+	// defaults still belong to the entered state and must be materialized; only event-bound inputs
+	// require an event and fail explicitly inside applyInputsForEntry when one is unavailable.
+	applyInputsForEntry(projection, ast, target, handler.transition, event);
 	exitAndEnter(projection, ast, handler.path, target, abandoned);
 }
 
