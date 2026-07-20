@@ -24,7 +24,15 @@ try {
 	const packageSpecs = [
 		{
 			dir: "packages/hyperchart",
-			expected: ["dist/index.js", "dist/index.d.ts", "dist/runtime/index.js", "LICENSE", "README.md"],
+			expected: [
+				"dist/index.js",
+				"dist/index.d.ts",
+				"dist/runtime/index.js",
+				"dist/inspect/index.js",
+				"dist/sessions/index.js",
+				"LICENSE",
+				"README.md",
+			],
 		},
 		{
 			dir: "packages/pi-hyperchart",
@@ -166,12 +174,16 @@ import { createJiti } from "jiti";
 import * as core from "@surprisal/hyperchart";
 import * as host from "@surprisal/hyperchart/host";
 import * as runtime from "@surprisal/hyperchart/runtime";
+import * as inspect from "@surprisal/hyperchart/inspect";
+import * as sessions from "@surprisal/hyperchart/sessions";
 import * as command from "@surprisal/pi-hyperchart/command";
 import * as piHost from "@surprisal/pi-hyperchart/pi-host";
 import * as react from "@surprisal/pi-hyperchart/react";
 if (typeof core.refs !== "function" || typeof core.start !== "function") throw new Error("core exports missing");
 if (typeof host.hyperchartRunFromRuntime !== "function") throw new Error("host exports missing");
 if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !== "function") throw new Error("runtime exports missing");
+if (typeof inspect.hyperchartRunFromRunDir !== "function" || typeof inspect.openRunInspector !== "function") throw new Error("inspect exports missing");
+if (typeof sessions.updateSessionProgress !== "function" || typeof sessions.queueSessionSteering !== "function") throw new Error("sessions exports missing");
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");
 if (typeof piHost.createPiHyperchartHost !== "function") throw new Error("Pi host exports missing");
 if (typeof react.HyperchartInspectorDialog !== "function") throw new Error("React exports missing");

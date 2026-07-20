@@ -7,7 +7,7 @@ import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/cor
 import type { AgentActionAst, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
 import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
-import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/pi-hyperchart/src/runtime/pi/prompts.js";
+import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,

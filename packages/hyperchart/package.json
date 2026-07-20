@@ -38,6 +38,14 @@
 			"types": "./dist/runtime/index.d.ts",
 			"import": "./dist/runtime/index.js"
 		},
+		"./inspect": {
+			"types": "./dist/inspect/index.d.ts",
+			"import": "./dist/inspect/index.js"
+		},
+		"./sessions": {
+			"types": "./dist/sessions/index.d.ts",
+			"import": "./dist/sessions/index.js"
+		},
 		"./internal/core/*": {
 			"types": "./dist/core/*.d.ts",
 			"import": "./dist/core/*.js"

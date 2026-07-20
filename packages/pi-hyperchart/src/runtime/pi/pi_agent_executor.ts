@@ -29,8 +29,8 @@ import {
 	buildResumePrompt,
 	buildTaskPrompt,
 	type ResolvedRead,
-} from "./prompts.js";
-import { updateSessionProgress } from "./session_progress.js";
+} from "@surprisal/hyperchart/runtime";
+import { updateSessionProgress } from "@surprisal/hyperchart/sessions";
 
 export type PiExecutorOptions = {
 	workDir: string;

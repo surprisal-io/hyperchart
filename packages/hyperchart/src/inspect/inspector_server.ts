@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
+import type { HyperchartRunInfo } from "../host/index.js";
 
 export type RunInspectorSource = {
 	runId: string;
@@ -171,7 +171,7 @@ function inspectorHtml(): string {
 function sendAsset(response: ServerResponse, fileName: "client.js" | "styles.css", contentType: string): void {
 	const path = resolveInspectorAsset(fileName);
 	if (path === undefined) {
-		return sendText(response, 503, "Inspector browser assets are missing. Rebuild @surprisal/pi-hyperchart.");
+		return sendText(response, 503, "Inspector browser assets are missing. Rebuild @surprisal/hyperchart.");
 	}
 	response.statusCode = 200;
 	response.setHeader("Content-Type", contentType);
@@ -182,8 +182,11 @@ function sendAsset(response: ServerResponse, fileName: "client.js" | "styles.css
 function resolveInspectorAsset(fileName: string): string | undefined {
 	const moduleDir = dirname(fileURLToPath(import.meta.url));
 	const candidates = [
-		resolve(moduleDir, "../../inspector-web", fileName),
-		resolve(moduleDir, "../../../dist/inspector-web", fileName),
+		// Built module: dist/inspect -> dist/inspector-web. Source module (jiti/tests): src/inspect -> dist/inspector-web.
+		resolve(moduleDir, "../inspector-web", fileName),
+		resolve(moduleDir, "../../dist/inspector-web", fileName),
+		// Until the web bundle build moves into this package, fall back to the sibling Pi package's bundle.
+		resolve(moduleDir, "../../../pi-hyperchart/dist/inspector-web", fileName),
 	];
 	return candidates.find((candidate) => existsSync(candidate));
 }

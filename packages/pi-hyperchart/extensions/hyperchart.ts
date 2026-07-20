@@ -42,7 +42,7 @@ import { instancePathFor, nearestInstance, nodeAt, stripLastKey } from "@surpris
 import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
 import { createRunDir, loadRunMeta, saveRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
 import { isFailureStatePath, type RunTerminalState } from "@surprisal/hyperchart/runtime";
-import { assertChartPreflight } from "../src/runtime/pi/chart_typecheck.js";
+import { assertChartPreflight } from "@surprisal/hyperchart/runtime";
 import {
 	getHyperchartRunsRoot,
 	getProjectHyperchartsDir,
@@ -58,10 +58,10 @@ import {
 	patchRunStatus,
 	readRunStatus,
 	type HyperchartRunStatus,
-} from "../src/runtime/pi/run_status.js";
+} from "@surprisal/hyperchart/sessions";
 import type { HyperchartRunnerConfig } from "../src/runtime/pi/hyperchart_runner.js";
 import { createAgentDefaultsResolver } from "../src/runtime/pi/agent_definitions.js";
-import { readSessionProgress, sessionProgressPath } from "../src/runtime/pi/session_progress.js";
+import { readSessionProgress, sessionProgressPath } from "@surprisal/hyperchart/sessions";
 import {
 	RunHistoryOverlay,
 	RunWidget,
@@ -70,8 +70,8 @@ import {
 } from "../src/tui/components.js";
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
 import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
-import { closeRunInspectorServer, openRunInspector } from "../src/runtime/pi/inspector_server.js";
-import { queueSessionSteering } from "../src/runtime/pi/session_steering.js";
+import { closeRunInspectorServer, openRunInspector } from "@surprisal/hyperchart/inspect";
+import { queueSessionSteering } from "@surprisal/hyperchart/sessions";
 
 const require = createRequire(import.meta.url);
 import { HYPERCHART_COMMAND_EVENT, type HyperchartCommandRequest } from "../src/command.js";

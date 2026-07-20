@@ -3,7 +3,7 @@ import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 import {
 	closeRunInspectorServer,
 	openRunInspector,
-} from "../packages/pi-hyperchart/src/runtime/pi/inspector_server.js";
+} from "../packages/hyperchart/src/inspect/inspector_server.js";
 
 afterEach(async () => {
 	await closeRunInspectorServer();

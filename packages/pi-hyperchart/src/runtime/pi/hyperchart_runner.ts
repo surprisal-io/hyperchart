@@ -5,11 +5,11 @@ import { explainReplay, parseChartModuleSync, start, type ReplayExplanation } fr
 import { ChartRuntime } from "@surprisal/hyperchart/runtime";
 import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
 import { finalMachineFailureMessage, terminalStateForFinalMachine } from "@surprisal/hyperchart/runtime";
-import { assertChartPreflight } from "./chart_typecheck.js";
+import { assertChartPreflight } from "@surprisal/hyperchart/runtime";
 import { resolvePiSubagentDefinitionDirs } from "./agent_definitions.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
-import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
-import { watchSessionSteering } from "./session_steering.js";
+import { markRunHeartbeat, patchRunStatus } from "@surprisal/hyperchart/sessions";
+import { watchSessionSteering } from "@surprisal/hyperchart/sessions";
 
 export type HyperchartRunnerConfig = {
 	runId: string;

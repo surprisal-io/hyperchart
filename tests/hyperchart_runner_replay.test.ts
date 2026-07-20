@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { main, type HyperchartRunnerConfig } from "../packages/pi-hyperchart/src/runtime/pi/hyperchart_runner.js";
-import { readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
+import { readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 
 let previousCwd = process.cwd();
 let previousExitCode: string | number | null | undefined;

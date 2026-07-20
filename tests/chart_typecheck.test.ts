@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { lintChartModuleSource, preflightChartModule, typecheckChartModule } from "../packages/pi-hyperchart/src/runtime/pi/chart_typecheck.js";
+import { lintChartModuleSource, preflightChartModule, typecheckChartModule } from "../packages/hyperchart/src/runtime/generic/chart_typecheck.js";
 
 describe("chart preflight", () => {
 	it("passes valid TypeScript chart modules", async () => {

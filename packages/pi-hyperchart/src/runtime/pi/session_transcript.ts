@@ -1,23 +1,21 @@
-import { readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import type { HyperchartSessionMessageInfo } from "@surprisal/hyperchart/host";
+import {
+	MAX_TRANSCRIPT_MESSAGES,
+	combineToolLifecycle,
+	resolveContainedSessionFile,
+	truncateTranscriptText,
+} from "@surprisal/hyperchart/inspect";
 
-const MAX_MESSAGES = 120;
-const MAX_TEXT_LENGTH = 16_000;
-
+/** Parses Pi's session JSONL format into display transcript messages. */
 export function readSessionTranscript(
 	sessionsDir: string,
 	sessionFile: string | undefined,
 ): HyperchartSessionMessageInfo[] | undefined {
 	if (sessionFile === undefined) return undefined;
-	const root = resolve(sessionsDir);
-	const file = resolve(sessionFile);
-	if (!isAbsolute(file)) return undefined;
+	const file = resolveContainedSessionFile(sessionsDir, sessionFile);
+	if (file === undefined) return undefined;
 	try {
-		const realRoot = realpathSync(root);
-		const realFile = realpathSync(file);
-		const fromRoot = relative(realRoot, realFile);
-		if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) return undefined;
 		const messages: HyperchartSessionMessageInfo[] = [];
 		for (const line of readFileSync(file, "utf8").split("\n")) {
 			if (line.trim().length === 0) continue;
@@ -30,7 +28,7 @@ export function readSessionTranscript(
 			}
 			messages.push(...messagesFromEntry(entry));
 		}
-		return combineToolLifecycle(messages).slice(-MAX_MESSAGES);
+		return combineToolLifecycle(messages).slice(-MAX_TRANSCRIPT_MESSAGES);
 	} catch {
 		return undefined;
 	}
@@ -62,7 +60,7 @@ function messagesFromEntry(value: unknown): HyperchartSessionMessageInfo[] {
 						role: "tool",
 						toolName: block.name,
 						...(typeof block.id === "string" ? { toolCallId: block.id } : {}),
-						toolInput: truncate(stringify(block.arguments)),
+						toolInput: truncateTranscriptText(stringify(block.arguments)),
 						toolStatus: "running",
 						...(timestamp === undefined ? {} : { timestamp }),
 					});
@@ -93,36 +91,6 @@ function messagesFromEntry(value: unknown): HyperchartSessionMessageInfo[] {
 	return [];
 }
 
-function combineToolLifecycle(messages: HyperchartSessionMessageInfo[]): HyperchartSessionMessageInfo[] {
-	const combined: HyperchartSessionMessageInfo[] = [];
-	const calls = new Map<string, number>();
-	for (const message of messages) {
-		if (message.role !== "tool" || message.toolCallId === undefined) {
-			combined.push(message);
-			continue;
-		}
-		if (message.toolStatus === "running") {
-			calls.set(message.toolCallId, combined.length);
-			combined.push(message);
-			continue;
-		}
-		const callIndex = calls.get(message.toolCallId);
-		if (callIndex === undefined) {
-			combined.push(message);
-			continue;
-		}
-		const call = combined[callIndex];
-		if (call === undefined) continue;
-		combined[callIndex] = {
-			...call,
-			toolStatus: message.toolStatus ?? (message.isError === true ? "error" : "completed"),
-			...(message.toolOutput === undefined ? {} : { toolOutput: message.toolOutput }),
-			...(message.isError === true ? { isError: true } : {}),
-		};
-	}
-	return combined;
-}
-
 function messageInfo(
 	id: string,
 	role: HyperchartSessionMessageInfo["role"],
@@ -132,7 +100,7 @@ function messageInfo(
 	return {
 		id,
 		role,
-		...(text === undefined ? {} : { text: truncate(text) }),
+		...(text === undefined ? {} : { text: truncateTranscriptText(text) }),
 		...(timestamp === undefined ? {} : { timestamp }),
 	};
 }
@@ -162,10 +130,6 @@ function stringify(value: unknown): string {
 	} catch {
 		return String(value);
 	}
-}
-
-function truncate(value: string): string {
-	return value.length <= MAX_TEXT_LENGTH ? value : `${value.slice(0, MAX_TEXT_LENGTH)}\n…`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

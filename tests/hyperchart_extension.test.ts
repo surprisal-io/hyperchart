@@ -7,12 +7,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
 import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
-import { patchRunStatus, readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
-import { updateSessionProgress } from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
+import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
+import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import {
 	closeRunInspectorServer,
 	openRunInspector,
-} from "../packages/pi-hyperchart/src/runtime/pi/inspector_server.js";
+} from "../packages/hyperchart/src/inspect/inspector_server.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;

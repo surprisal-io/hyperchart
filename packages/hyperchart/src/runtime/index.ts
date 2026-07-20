@@ -21,3 +21,28 @@ export type { SchemaRegistryLike } from "../core/schema_registry.js";
 export { checkSchema, checkSchemaAsync } from "./generic/schema.js";
 export type { SchemaCheck } from "./generic/schema.js";
 export { ScriptRunner } from "./generic/script_runner.js";
+export { buildFinishSchema, finishableEvents, validateFinishParams } from "./generic/finish_protocol.js";
+export type { CompletionSink, FinishParams } from "./generic/finish_protocol.js";
+export {
+	buildArtifactFeedbackPrompt,
+	buildNudgePrompt,
+	buildRejectPrompt,
+	buildResumePrompt,
+	buildTaskPrompt,
+	formatCompletion,
+} from "./generic/agent_prompts.js";
+export type { ResolvedRead } from "./generic/agent_prompts.js";
+export {
+	assertChartPreflight,
+	assertChartTypechecks,
+	lintChartModuleSource,
+	preflightChartModule,
+	typecheckChartModule,
+} from "./generic/chart_typecheck.js";
+export type {
+	ChartPreflightResult,
+	ChartSourceLintDiagnostic,
+	ChartTypecheckResult,
+} from "./generic/chart_typecheck.js";
+export { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, createHostPaths, listHyperchartFiles } from "./generic/host_paths.js";
+export type { HostPaths, HostPathsConfig } from "./generic/host_paths.js";
