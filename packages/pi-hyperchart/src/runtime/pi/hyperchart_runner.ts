@@ -9,6 +9,7 @@ import { assertChartPreflight } from "./chart_typecheck.js";
 import { resolvePiSubagentDefinitionDirs } from "./agent_definitions.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
+import { watchSessionSteering } from "./session_steering.js";
 
 export type HyperchartRunnerConfig = {
 	runId: string;
@@ -25,6 +26,7 @@ export type HyperchartRunnerConfig = {
 
 let runtime: ChartRuntime | undefined;
 let heartbeat: NodeJS.Timeout | undefined;
+let stopSteering: (() => void) | undefined;
 let stopping = false;
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -76,15 +78,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		});
 		const modelRuntime = await createModelRuntime(config.agentDir);
 		const chartDir = dirname(config.chartPath);
+		const sessionsDir = join(config.runDir, "sessions");
 		const executor = new PiAgentExecutor({
 			workDir: config.workDir,
 			agentDir: config.agentDir,
 			definitionDirs: resolvePiSubagentDefinitionDirs(config.workDir, config.agentDir, config.chartPath),
 			modelRuntime,
-			sessionsDir: join(config.runDir, "sessions"),
+			sessionsDir,
 			...(config.defaultModel === undefined ? {} : { defaultModel: config.defaultModel }),
 			schemaRegistry: parsed.schemaRegistry,
 		});
+		stopSteering = watchSessionSteering(sessionsDir, (request) => executor.steer(request.actionKey, request.message));
 		runtime = new ChartRuntime({
 			ast: parsed.ast,
 			logStore,
@@ -124,6 +128,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		}
 	} finally {
 		if (heartbeat !== undefined) clearInterval(heartbeat);
+		stopSteering?.();
 		await runtime?.dispose().catch(() => undefined);
 	}
 }
@@ -203,6 +208,7 @@ function installSignalHandlers(runDir: string): void {
 		if (stopping) return;
 		stopping = true;
 		if (heartbeat !== undefined) clearInterval(heartbeat);
+		stopSteering?.();
 		const exitCode = signal === "SIGTERM" ? 143 : 130;
 		patchRunStatus(runDir, {
 			state: "stopped",

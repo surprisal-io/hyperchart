@@ -9,6 +9,7 @@ import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 export type RunInspectorSource = {
 	runId: string;
 	loadRun: () => Promise<HyperchartRunInfo>;
+	steerSession?: (actionKey: string, message: string) => void | Promise<void>;
 };
 
 export type OpenRunInspectorOptions = RunInspectorSource & {
@@ -29,7 +30,12 @@ let singleton: Promise<InspectorServerState> | undefined;
 export async function openRunInspector(options: OpenRunInspectorOptions): Promise<{ url: string }> {
 	const state = await getInspectorServer();
 	const token = randomBytes(18).toString("base64url");
-	state.entries.set(token, { runId: options.runId, loadRun: options.loadRun, touchedAt: Date.now() });
+	state.entries.set(token, {
+		runId: options.runId,
+		loadRun: options.loadRun,
+		...(options.steerSession === undefined ? {} : { steerSession: options.steerSession }),
+		touchedAt: Date.now(),
+	});
 	trimEntries(state.entries);
 	const url = `${state.origin}/runs/${token}`;
 	await (options.openBrowser ?? openSystemBrowser)(url);
@@ -82,10 +88,29 @@ async function routeRequest(
 	try {
 		const url = new URL(request.url ?? "/", "http://127.0.0.1");
 		setSecurityHeaders(response);
-		if (request.method !== "GET") return sendText(response, 405, "Method not allowed");
+
+		const steerToken = routeToken(url.pathname, "/api/runs/", "/steer");
+		if (steerToken !== undefined) {
+			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
+			const entry = entries.get(steerToken);
+			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
+			if (entry.steerSession === undefined) return sendJson(response, 409, { error: "Steering is unavailable for this run" });
+			entry.touchedAt = Date.now();
+			try {
+				const body = await readJsonBody(request);
+				if (typeof body.actionKey !== "string" || typeof body.message !== "string") {
+					return sendJson(response, 400, { error: "actionKey and message are required" });
+				}
+				await entry.steerSession(body.actionKey, body.message);
+				return sendJson(response, 202, { queued: true });
+			} catch (error) {
+				return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+			}
+		}
 
 		const apiToken = routeToken(url.pathname, "/api/runs/");
 		if (apiToken !== undefined) {
+			if (request.method !== "GET") return sendText(response, 405, "Method not allowed");
 			const entry = entries.get(apiToken);
 			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
 			entry.touchedAt = Date.now();
@@ -96,6 +121,7 @@ async function routeRequest(
 			}
 		}
 
+		if (request.method !== "GET") return sendText(response, 405, "Method not allowed");
 		const pageToken = routeToken(url.pathname, "/runs/");
 		if (pageToken !== undefined) {
 			if (!entries.has(pageToken)) return sendText(response, 404, "Inspector run not found or expired");
@@ -109,10 +135,24 @@ async function routeRequest(
 	}
 }
 
-function routeToken(pathname: string, prefix: string): string | undefined {
-	if (!pathname.startsWith(prefix)) return undefined;
-	const token = pathname.slice(prefix.length);
+function routeToken(pathname: string, prefix: string, suffix = ""): string | undefined {
+	if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+	const token = pathname.slice(prefix.length, suffix.length === 0 ? undefined : -suffix.length);
 	return /^[A-Za-z0-9_-]+$/.test(token) ? token : undefined;
+}
+
+async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+	const chunks: Buffer[] = [];
+	let size = 0;
+	for await (const chunk of request) {
+		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+		size += buffer.length;
+		if (size > 16_384) throw new Error("Request body is too large");
+		chunks.push(buffer);
+	}
+	const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("JSON object required");
+	return value as Record<string, unknown>;
 }
 
 function inspectorHtml(): string {

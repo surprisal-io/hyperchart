@@ -154,6 +154,13 @@ export class PiAgentExecutor implements AgentExecutor {
 		});
 	}
 
+	async steer(actionKey: string, message: string): Promise<boolean> {
+		const live = this.live.get(actionKey);
+		if (live === undefined) return false;
+		await live.session.steer(message);
+		return true;
+	}
+
 	cancel(actionUid: ActionUID): void {
 		const key = actionUidKey(actionUid);
 		const generation = this.generations.get(key);

@@ -39,6 +39,26 @@ describe("browser run inspector server", () => {
 		expect(response.headers.get("cache-control")).toBe("no-store");
 	});
 
+	it("accepts steering only through the registered run token", async () => {
+		const steering: Array<{ actionKey: string; message: string }> = [];
+		const { url } = await openRunInspector({
+			runId: "run-one",
+			loadRun: async () => ({ runId: "run-one" }) as HyperchartRunInfo,
+			steerSession: (actionKey, message) => {
+				steering.push({ actionKey, message });
+			},
+			openBrowser: () => undefined,
+		});
+		const response = await fetch(`${url.replace("/runs/", "/api/runs/")}/steer`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ actionKey: "agent-key", message: "Check the narrow layout" }),
+		});
+		expect(response.status).toBe(202);
+		expect(await response.json()).toEqual({ queued: true });
+		expect(steering).toEqual([{ actionKey: "agent-key", message: "Check the narrow layout" }]);
+	});
+
 	it("does not expose unregistered run tokens", async () => {
 		const { url } = await openRunInspector({
 			runId: "run-one",

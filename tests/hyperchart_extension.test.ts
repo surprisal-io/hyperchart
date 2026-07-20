@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -255,6 +255,28 @@ describe("hyperchart extension", () => {
 		await expect(fetch(url)).rejects.toThrow();
 	});
 
+	it("queues steering for a live agent session", async () => {
+		const runId = "steerable-run";
+		const runDir = createRun(runId, projectDir, writeChart("steerable"));
+		const actionUid = { chart: "demo", state: "work", action: "agent" };
+		const actionKey = `${actionUid.chart}:${actionUid.state}:${actionUid.action}`;
+		updateSessionProgress(join(runDir, "sessions"), actionUid, {
+			actionName: "worker",
+			status: "running",
+		});
+		const { ctx, notifications } = commandContext(projectDir);
+
+		await registeredCommand().handler(`steer '${runId}' '${actionKey}' 'Prioritize the narrow layout'`, ctx);
+
+		const files = readdirSync(join(runDir, "sessions", "steering"));
+		expect(files).toHaveLength(1);
+		expect(JSON.parse(readFileSync(join(runDir, "sessions", "steering", files[0]!), "utf8"))).toMatchObject({
+			actionKey,
+			message: "Prioritize the narrow layout",
+		});
+		expect(notifications).toContainEqual({ message: "Steering queued for @worker", type: "info" });
+	});
+
 	it("offers documented top-level commands and run ids with an empty prefix", () => {
 		const runId = "demo-run";
 		createRun(runId, projectDir, writeChart("demo"));
@@ -264,6 +286,7 @@ describe("hyperchart extension", () => {
 			?.map((item) => item.value);
 
 		expect(values).toContain("view");
+		expect(values).toContain("steer");
 		expect(values).toContain(runId);
 	});
 

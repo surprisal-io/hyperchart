@@ -71,6 +71,7 @@ import {
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
 import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
 import { closeRunInspectorServer, openRunInspector } from "../src/runtime/pi/inspector_server.js";
+import { queueSessionSteering } from "../src/runtime/pi/session_steering.js";
 
 const require = createRequire(import.meta.url);
 import { HYPERCHART_COMMAND_EVENT, type HyperchartCommandRequest } from "../src/command.js";
@@ -127,6 +128,7 @@ const runnerEntry = fileURLToPath(new URL("../src/runtime/pi/hyperchart_runner.m
 const SUBCOMMAND_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "run", label: "run", description: "start chart" },
 	{ value: "resume", label: "resume", description: "resume run id" },
+	{ value: "steer", label: "steer", description: "steer a live agent session" },
 	{ value: "restart", label: "restart", description: "restart run as new run" },
 	{ value: "stop", label: "stop", description: "stop run id" },
 	{ value: "delete", label: "delete", description: "delete old run dir" },
@@ -143,7 +145,7 @@ const RUN_OPTION_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" },
 ];
 const HYPERCHART_USAGE =
-	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--wait] [--ignore-replay-warnings] | resume <runId> [--ignore-replay-warnings] | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
+	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--wait] [--ignore-replay-warnings] | resume <runId> [--ignore-replay-warnings] | steer <runId> <actionKey> <message> | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
 
 function completeHyperchartArgs(argumentPrefix: string): AutocompleteItem[] | null {
 	const parsed = parseCompletionPrefix(argumentPrefix);
@@ -152,6 +154,9 @@ function completeHyperchartArgs(argumentPrefix: string): AutocompleteItem[] | nu
 	const previous = parsed.previous.slice(1);
 	if (command === "run") return prependCompletionPrefix(completeRunArgs(previous, parsed.current), parsed.previous);
 	if (command === "resume") return prependCompletionPrefix(completeResumeArgs(previous, parsed.current), parsed.previous);
+	if (command === "steer" && previous.length === 0) {
+		return prependCompletionPrefix(filterCompletions(runIdCompletions(process.cwd()), parsed.current), parsed.previous);
+	}
 	if (
 		command === "restart" ||
 		command === "stop" ||
@@ -927,6 +932,9 @@ async function dispatch(args: string, ctx: HyperchartContext, notifyErrors = tru
 			case "resume":
 				await resumeCommand(tokens, ctx);
 				break;
+			case "steer":
+				await steerCommand(tokens, ctx);
+				break;
 			case "status":
 				await statusCommand(ctx);
 				break;
@@ -996,6 +1004,28 @@ async function resumeCommand(tokens: string[], ctx: HyperchartContext): Promise<
 		ctx,
 		options.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {},
 	);
+}
+
+async function steerCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
+	const runId = tokens.shift();
+	const actionKey = tokens.shift();
+	const message = tokens.join(" ").trim();
+	if (runId === undefined || actionKey === undefined || message.length === 0) {
+		throw new Error("steer requires a runId, actionKey, and message");
+	}
+	const runDir = resolveHyperchartRunDir(runId, ctx.cwd);
+	const meta = loadRunMeta(runDir);
+	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
+		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; open that directory first`);
+	}
+	const sessionsDir = resolve(runDir, "sessions");
+	const session = readSessionProgress(sessionsDir).sessions[actionKey];
+	if (session === undefined) throw new Error(`Agent session '${actionKey}' was not found in run '${runId}'`);
+	if (session.status !== "starting" && session.status !== "running") {
+		throw new Error(`Agent session '${session.actionName}' is ${session.status} and cannot be steered`);
+	}
+	queueSessionSteering(sessionsDir, actionKey, message);
+	ctx.ui.notify(`Steering queued for @${session.actionName}`, "info");
 }
 
 async function restartCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
@@ -1316,6 +1346,9 @@ async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 		runId: run.runId,
 		// The snapshot's parsed AST avoids a synchronous chart-module re-parse on every poll.
 		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, run.ast),
+		steerSession: (actionKey, message) => {
+			queueSessionSteering(join(run.runDir, "sessions"), actionKey, message);
+		},
 	});
 	ctx.ui.notify(`Opened Hyperchart inspector for ${run.runId}: ${url}`, "info");
 }
