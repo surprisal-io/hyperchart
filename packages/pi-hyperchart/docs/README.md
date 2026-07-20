@@ -15,7 +15,7 @@ Hyperchart is a TypeScript statechart runtime for work that may span scripts, ag
 ## Run in a host
 
 - [Pi extension](pi.md) — discovery, `/hyperchart`, the four agent tools, agent definitions, run files, and troubleshooting.
-- [Claude Code plugin](claude.md) — `hyperchart_*` MCP tools, agent actions as Claude sessions, the browser inspector, steering, and remote setups.
+- [Claude Code plugin](claude-code.md) — `hyperchart_*` MCP tools, agent actions as Claude sessions, the browser inspector, steering, and remote setups.
 - [Recovery and safety](safety.md) — executable chart modules, external side effects, replay warnings, rewind, and deletion.
 
 ## Embed Hyperchart

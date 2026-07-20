@@ -55,7 +55,7 @@ Load the plugin from a checkout and talk to Claude — charts live in `.claude/h
 claude --plugin-dir "$PWD/packages/claude-hyperchart"
 ```
 
-See the [Claude Code plugin guide](docs/claude.md) for tools, locations, steering, and remote setups.
+See the [Claude Code plugin guide](docs/claude-code.md) for tools, locations, steering, and remote setups.
 
 ## Run a chart in Pi
 

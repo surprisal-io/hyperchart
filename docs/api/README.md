@@ -12,7 +12,7 @@ This is the canonical reference for the three published packages. Task guides ex
 | `@surprisal/hyperchart/host` | [Host API](host.md) |
 | `@surprisal/hyperchart/inspect` and `/sessions` | [Hosting API](hosting.md) |
 | `@surprisal/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
-| `@surprisal/claude-hyperchart` and the Claude Code plugin surfaces | [Claude Code plugin](../claude.md) |
+| `@surprisal/claude-hyperchart` and the Claude Code plugin surfaces | [Claude Code plugin](../claude-code.md) |
 | `@surprisal/hyperchart/react` and `/react/styles.css` | [React API](react.md) |
 | Both packages' `/package.json` subpaths | Package metadata (`name`, version, exports, engines, and manifest fields) |
 
