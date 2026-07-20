@@ -31,6 +31,19 @@ Requires Node.js 22.19+ and a working Claude Code login (the detached runner inh
 
 Agent definitions use the same markdown + frontmatter format as the Pi host (`name`, `description`, `model`, `thinking`, `tools`, `systemPromptMode`; body = system prompt), so charts that ship agents next to the chart file are portable between hosts.
 
+## Remote / SSH
+
+The inspector binds `127.0.0.1` on the machine where Claude Code runs. Working over SSH, pin the port and forward it once:
+
+```bash
+# on the server (or in the environment that launches claude)
+export HYPERCHART_INSPECTOR_PORT=8377
+# on your local machine
+ssh -L 8377:127.0.0.1:8377 <server>
+```
+
+Under SSH the plugin does not try to open a server-side browser; `hyperchart_view` returns the URL — open it locally through the forwarded port.
+
 ## Run layout
 
 Each run directory contains `meta.json`, `status.json` (heartbeat + terminal state), `log.jsonl` (the durable event log), `runner.config.json`, runner stdout/stderr logs, and `sessions/` with per-action session progress, neutral JSONL transcripts, and the steering queue.

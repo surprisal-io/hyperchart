@@ -69,7 +69,7 @@ async function startInspectorServer(): Promise<InspectorServerState> {
 	const server = createServer((request, response) => void routeRequest(entries, request, response));
 	await new Promise<void>((resolveListen, reject) => {
 		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => {
+		server.listen(inspectorPort(), "127.0.0.1", () => {
 			server.off("error", reject);
 			resolveListen();
 		});
@@ -223,7 +223,23 @@ function trimEntries(entries: Map<string, InspectorEntry>): void {
 	for (const [token] of oldest.slice(0, entries.size - MAX_INSPECTOR_ENTRIES)) entries.delete(token);
 }
 
+/** Fixed inspector port for remote setups so `ssh -L` can be configured once; 0 picks a free port. */
+function inspectorPort(): number {
+	const raw = process.env.HYPERCHART_INSPECTOR_PORT;
+	if (raw === undefined || raw.trim().length === 0) return 0;
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+		throw new Error(`HYPERCHART_INSPECTOR_PORT must be a port number, got '${raw}'`);
+	}
+	return port;
+}
+
 function openSystemBrowser(url: string): Promise<void> {
+	// Over SSH there is no local browser to open; the caller surfaces the URL and
+	// the user opens it through a forwarded port on their own machine.
+	if (process.env.SSH_CONNECTION !== undefined || process.env.SSH_TTY !== undefined) {
+		return Promise.resolve();
+	}
 	const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
 	const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
 	return new Promise((resolveOpen, reject) => {

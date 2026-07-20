@@ -74,6 +74,9 @@ A run id is visible only from the working directory recorded in its `meta.json`.
 
 Run `/hyperchart` with no arguments to open the minimal run picker for the current working directory. Use ↑/↓ to select a run, Enter to open its browser inspector, and Esc to close the picker.
 
+Over SSH, set `HYPERCHART_INSPECTOR_PORT` to a fixed port and forward it (`ssh -L <port>:127.0.0.1:<port>`); the inspector then skips opening a server-side browser and the printed URL works through the tunnel.
+
+
 For active agent states, the inspector shows `View session` on the agent card. The session window polls the persisted Pi transcript, completed reasoning blocks, current tool activity, and throttled live text/reasoning deltas alongside the run. Its composer sends a steering message to the runner through a run-scoped local queue; Pi delivers it after the agent's current tool call. Steering is available only while the runner and matching agent session are active.
 
 ```text
