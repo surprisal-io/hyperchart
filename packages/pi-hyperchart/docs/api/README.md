@@ -11,7 +11,7 @@ This is the canonical reference for the two published packages. Task guides expl
 | `@surprisal/hyperchart/runtime` | [Runtime API](runtime.md) |
 | `@surprisal/hyperchart/host` | [Host API](host.md) |
 | `@surprisal/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
-| `@surprisal/pi-hyperchart/react` and `/react/styles.css` | [React API](react.md) |
+| `@surprisal/hyperchart/react` and `/react/styles.css` | [React API](react.md) |
 | Both packages' `/package.json` subpaths | Package metadata (`name`, version, exports, engines, and manifest fields) |
 
 ## Stability boundary
@@ -26,8 +26,8 @@ The supported package entry points are:
 @surprisal/pi-hyperchart
 @surprisal/pi-hyperchart/command
 @surprisal/pi-hyperchart/pi-host
-@surprisal/pi-hyperchart/react
-@surprisal/pi-hyperchart/react/styles.css
+@surprisal/hyperchart/react
+@surprisal/hyperchart/react/styles.css
 @surprisal/pi-hyperchart/package.json
 ```
 

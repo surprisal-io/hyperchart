@@ -6,9 +6,11 @@ import {
   HyperchartPortalProvider,
   HyperchartUiThemeProvider,
   type HyperchartRunInfo,
-} from "@surprisal/pi-hyperchart/react";
-import "@surprisal/pi-hyperchart/react/styles.css";
+} from "@surprisal/hyperchart/react";
+import "@surprisal/hyperchart/react/styles.css";
 ```
+
+The React surface ships in the core package; `@surprisal/pi-hyperchart/react` remains as a compatibility re-export.
 
 React is part of `@surprisal/pi-hyperchart`; there is no third package.
 

@@ -103,7 +103,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			},
 			generation,
 		).catch((error: unknown) => {
-			this.markProgressFailed(effect.actionUid, errorMessage(error));
+			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect.actionUid, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
@@ -131,7 +131,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
 				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
 		void this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
-			this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
