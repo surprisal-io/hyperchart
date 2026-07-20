@@ -1,5 +1,5 @@
 import type { Preview } from "@storybook/react-vite";
-import { HyperchartUiThemeProvider } from "../packages/pi-hyperchart/src/react/support/HyperchartUiThemeProvider.js";
+import { HyperchartUiThemeProvider } from "../packages/hyperchart/src/react/support/HyperchartUiThemeProvider.js";
 import { ThemeFrame } from "./ThemeFrame.js";
 import "./storybook.css";
 

@@ -12,3 +12,4 @@ export type {
 	HyperchartRuntimeSessionProgressFile,
 	HyperchartRuntimeSessionProgressInfo,
 } from "./adapters.js";
+export { summarizeHyperchartProgress } from "./run_progress.js";

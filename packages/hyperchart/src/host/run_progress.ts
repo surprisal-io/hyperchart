@@ -1,4 +1,4 @@
-import type { HyperchartRunInfo, HyperchartStateInfo } from "@surprisal/hyperchart/host";
+import type { HyperchartRunInfo, HyperchartStateInfo } from "./models.js";
 
 /**
  * Estimate durable run progress from completed action visits and the shortest remaining

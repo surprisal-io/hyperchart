@@ -1,0 +1,61 @@
+{
+	"name": "@surprisal/claude-hyperchart",
+	"version": "0.1.1",
+	"description": "Claude Code plugin for Hyperchart: durable, typed statechart workflows run as Claude agent sessions",
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=22.19"
+	},
+	"keywords": [
+		"statecharts",
+		"workflow",
+		"agents",
+		"claude-code",
+		"claude-code-plugin"
+	],
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/surprisal-io/hyperchart.git",
+		"directory": "packages/claude-hyperchart"
+	},
+	"homepage": "https://github.com/surprisal-io/hyperchart#readme",
+	"bugs": {
+		"url": "https://github.com/surprisal-io/hyperchart/issues"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		},
+		"./package.json": "./package.json"
+	},
+	"files": [
+		"dist",
+		"src",
+		"bin",
+		"hooks",
+		"skills",
+		".claude-plugin",
+		"README.md",
+		"LICENSE"
+	],
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"@anthropic-ai/claude-agent-sdk": "^0.3.215",
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@surprisal/hyperchart": "0.1.1",
+		"jiti": "^2.7.0",
+		"typescript": "5.9.3",
+		"zod": "^4.4.3"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"prepack": "npm run build"
+	}
+}

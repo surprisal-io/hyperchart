@@ -1,5 +1,5 @@
-import type { AgentEffect, RenderedArtifact, RejectedEffect } from "@surprisal/hyperchart/internal/core/machine";
-import { finishableEvents } from "./finish_tool.js";
+import type { AgentEffect, RenderedArtifact, RejectedEffect } from "../../core/machine.js";
+import { finishableEvents } from "./finish_protocol.js";
 
 export type ResolvedRead = {
 	artifact: RenderedArtifact;

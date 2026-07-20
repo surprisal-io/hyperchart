@@ -112,8 +112,8 @@ import {
   HyperchartInspectorDialog,
   HyperchartRunStrip,
   HyperchartUiThemeProvider,
-} from "@surprisal/pi-hyperchart/react";
-import "@surprisal/pi-hyperchart/react/styles.css";
+} from "@surprisal/hyperchart/react";
+import "@surprisal/hyperchart/react/styles.css";
 ```
 
 Do not import component files or React Flow CSS separately. `styles.css` contains the complete public stylesheet contract, including scoped React Flow styles.
@@ -125,7 +125,7 @@ import { useState } from "react";
 import {
   HyperchartInspectorDialog,
   HyperchartRunStrip,
-} from "@surprisal/pi-hyperchart/react";
+} from "@surprisal/hyperchart/react";
 import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 
 export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {

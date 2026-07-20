@@ -1,68 +1,16 @@
-import { basename, resolve } from "node:path";
 import {
-	inspectChartAst,
-	parseChartModuleSync,
-	type HyperchartInspectAgentDefaults,
-} from "@surprisal/hyperchart/internal/core/inspect";
-import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
-import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
-import { hyperchartRunFromRuntime } from "@surprisal/hyperchart/host";
+	hyperchartRunFromRunDir as hyperchartRunFromRunDirWithReader,
+	type HyperchartRunFromRunDirOptions,
+} from "@surprisal/hyperchart/inspect";
 import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
-import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
-import { loadRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
-import { readRunStatus } from "./run_status.js";
-import { readSessionProgress } from "./session_progress.js";
 import { readSessionTranscript } from "./session_transcript.js";
 
-export type HyperchartRunFromRunDirOptions = {
-	meta?: RunMeta;
-	ast?: ChartAst;
-	records?: readonly DurableLogRecord[];
-	agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined;
-	now?: number;
-};
+export type { HyperchartRunFromRunDirOptions };
 
-export async function hyperchartRunFromRunDir(
+/** Run inspection with the Pi session-transcript format bound as the default reader. */
+export function hyperchartRunFromRunDir(
 	runDir: string,
 	options: HyperchartRunFromRunDirOptions = {},
 ): Promise<HyperchartRunInfo> {
-	const absoluteRunDir = resolve(runDir);
-	const meta = options.meta ?? loadRunMeta(absoluteRunDir);
-	const ast = options.ast ?? parsedRunAst(meta);
-	const inspect = inspectChartAst(ast, {
-		chartPath: meta.chartPath,
-		...(meta.exportName === undefined ? {} : { exportName: meta.exportName }),
-		...(options.agentDefaults === undefined ? {} : { agentDefaults: options.agentDefaults }),
-	});
-	const records = options.records ?? await new JsonlLogStore(resolve(absoluteRunDir, "log.jsonl")).readAll();
-	const status = readRunStatus(absoluteRunDir);
-	const sessionsDir = resolve(absoluteRunDir, "sessions");
-	const rawSessionProgress = readSessionProgress(sessionsDir);
-	const sessionProgress = {
-		...rawSessionProgress,
-		sessions: Object.fromEntries(
-			Object.entries(rawSessionProgress.sessions).map(([key, session]) => {
-				const messages = readSessionTranscript(sessionsDir, session.sessionFile);
-				return [key, { ...session, ...(messages === undefined ? {} : { messages }) }];
-			}),
-		),
-	};
-	const createdAt = Date.parse(meta.createdAt);
-	return hyperchartRunFromRuntime(inspect, ast, records, {
-		runId: status?.runId ?? basename(absoluteRunDir),
-		...(status === undefined ? {} : { status }),
-		sessionProgress,
-		cwd: meta.workDir,
-		...(Number.isNaN(createdAt) ? {} : { createdAt }),
-		...(options.now === undefined ? {} : { now: options.now }),
-	});
-}
-
-function parsedRunAst(meta: RunMeta): ChartAst {
-	const parsed = parseChartModuleSync(
-		meta.chartPath,
-		meta.exportName === undefined ? {} : { exportName: meta.exportName },
-	);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-	return parsed.ast;
+	return hyperchartRunFromRunDirWithReader(runDir, { readTranscript: readSessionTranscript, ...options });
 }

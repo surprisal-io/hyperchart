@@ -13,7 +13,7 @@ import { loadRunMeta } from "@surprisal/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { hyperchartRunFromRunDir } from "./run_inspect.js";
-import { isRunLive, readRunStatus, type HyperchartRunStatus } from "./run_status.js";
+import { isRunLive, readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
 
 export interface PiHyperchartHostOptions {
 	agentDir?: string;

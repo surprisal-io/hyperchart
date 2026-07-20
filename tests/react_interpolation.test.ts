@@ -4,7 +4,7 @@ import {
 	hasInterpolation,
 	interpolationAction,
 	isPromptInterpolationToken,
-} from "../packages/pi-hyperchart/src/react/components/inspector/helpers/interpolation.js";
+} from "../packages/hyperchart/src/react/components/inspector/helpers/interpolation.js";
 
 const sourceState: HyperchartStateInfo = {
 	id: "work",

@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { queueSessionSteering, watchSessionSteering } from "../packages/pi-hyperchart/src/runtime/pi/session_steering.js";
+import { queueSessionSteering, watchSessionSteering } from "../packages/hyperchart/src/runtime/generic/session_steering.js";
 import { readSessionTranscript } from "../packages/pi-hyperchart/src/runtime/pi/session_transcript.js";
 
 const roots: string[] = [];

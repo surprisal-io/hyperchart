@@ -13,7 +13,7 @@ import type {
 import type {
 	HyperchartSessionProgress,
 	HyperchartSessionProgressFile,
-} from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
+} from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 
 const STORY_NOW = Date.UTC(2026, 6, 14, 12, 0, 0);
 const RUNTIME_NOW = Date.now();

@@ -1,121 +1,45 @@
-import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, isAbsolute, join, resolve } from "node:path";
+import { join } from "node:path";
+import {
+	HYPERCHARTS_DIR_NAME,
+	RUNS_DIR_NAME,
+	createHostPaths,
+	listHyperchartFiles,
+	type HostPaths,
+} from "@surprisal/hyperchart/runtime";
 
 const CONFIG_DIR_NAME = ".pi";
-export const HYPERCHARTS_DIR_NAME = "hypercharts";
-export const RUNS_DIR_NAME = "runs";
 
-export function getProjectHyperchartsDir(cwd: string): string {
-	return join(findNearestProjectRoot(cwd) ?? cwd, CONFIG_DIR_NAME, HYPERCHARTS_DIR_NAME);
-}
+export { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, listHyperchartFiles };
 
 function defaultAgentDir(): string {
 	return process.env.PI_CODING_AGENT_DIR ?? join(homedir(), CONFIG_DIR_NAME, "agent");
 }
 
+function piHostPaths(agentDir: string): HostPaths {
+	return createHostPaths({
+		configDirName: CONFIG_DIR_NAME,
+		runsRoot: join(agentDir, HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME),
+		userChartsDir: join(agentDir, HYPERCHARTS_DIR_NAME),
+	});
+}
+
+export function getProjectHyperchartsDir(cwd: string): string {
+	return piHostPaths(defaultAgentDir()).getProjectHyperchartsDir(cwd);
+}
+
 export function getHyperchartRunsRoot(agentDir: string = defaultAgentDir()): string {
-	return join(agentDir, HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME);
+	return piHostPaths(agentDir).getRunsRoot();
 }
 
 export function resolveHyperchartRunDir(spec: string, cwd: string, agentDir: string = defaultAgentDir()): string {
-	if (isPathLike(spec)) return resolve(cwd, spec);
-	return join(getHyperchartRunsRoot(agentDir), spec);
+	return piHostPaths(agentDir).resolveRunDir(spec, cwd);
 }
 
 export function resolveHyperchartPath(spec: string, cwd: string, agentDir: string = defaultAgentDir()): string {
-	const candidates = hyperchartPathCandidates(spec, cwd, agentDir);
-	const found = candidates.find((candidate) => isFile(candidate));
-	if (found !== undefined) return found;
-	throw new Error(
-		`Hyperchart '${spec}' was not found. Looked in project, user, and cwd locations. Tried: ${candidates.join(", ")}`,
-	);
+	return piHostPaths(agentDir).resolveChartPath(spec, cwd);
 }
 
 export function listProjectHypercharts(cwd: string): string[] {
-	const root = getProjectHyperchartsDir(cwd);
-	return listHyperchartFiles(root).map((file) => file.slice(root.length + 1));
-}
-
-export function listHyperchartFiles(root: string): string[] {
-	if (!isDirectory(root)) return [];
-	const files: string[] = [];
-	walk(root, files, root, new Set());
-	return files
-		.filter((file) => file.endsWith(".chart.ts") || file.endsWith(".ts"))
-		.sort();
-}
-
-function hyperchartPathCandidates(spec: string, cwd: string, agentDir: string): string[] {
-	const variants = chartNameVariants(spec);
-	const candidates: string[] = [];
-	const projectChartsDir = getProjectHyperchartsDir(cwd);
-	const userChartsDir = join(agentDir, HYPERCHARTS_DIR_NAME);
-	if (!isAbsolute(spec) && !spec.startsWith(".")) {
-		for (const variant of variants) candidates.push(resolve(projectChartsDir, variant));
-		for (const variant of variants) candidates.push(resolve(userChartsDir, variant));
-	}
-	for (const variant of variants) candidates.push(resolve(cwd, variant));
-	return [...new Set(candidates)];
-}
-
-function chartNameVariants(spec: string): string[] {
-	if (hasKnownModuleExtension(spec)) return [spec];
-	if (extname(spec) !== "") return [spec];
-	return [`${spec}/chart.ts`, spec, `${spec}.chart.ts`, `${spec}.ts`];
-}
-
-function hasKnownModuleExtension(spec: string): boolean {
-	return [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"].some((extension) => spec.endsWith(extension));
-}
-
-function isPathLike(spec: string): boolean {
-	return isAbsolute(spec) || spec.startsWith(".") || spec.includes("/") || spec.includes("\\");
-}
-
-function findNearestProjectRoot(cwd: string): string | undefined {
-	let current = resolve(cwd);
-	while (true) {
-		if (isDirectory(join(current, CONFIG_DIR_NAME))) return current;
-		const parent = resolve(current, "..");
-		if (parent === current) return undefined;
-		current = parent;
-	}
-}
-
-function walk(dir: string, files: string[], root: string, visitedDirectories: Set<string>): void {
-	let realDirectory: string;
-	try { realDirectory = realpathSync(dir); } catch { return; }
-	if (visitedDirectories.has(realDirectory)) return;
-	visitedDirectories.add(realDirectory);
-	const bundleEntry = join(dir, "chart.ts");
-	if (dir !== root && isFile(bundleEntry)) {
-		files.push(bundleEntry);
-		return;
-	}
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		if (entry.name === RUNS_DIR_NAME || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-		const path = join(dir, entry.name);
-		if (entry.isDirectory() || (entry.isSymbolicLink() && isDirectory(path))) {
-			walk(path, files, root, visitedDirectories);
-		} else if (entry.isFile() || (entry.isSymbolicLink() && isFile(path))) {
-			files.push(path);
-		}
-	}
-}
-
-function isFile(path: string): boolean {
-	try {
-		return statSync(path).isFile();
-	} catch {
-		return false;
-	}
-}
-
-function isDirectory(path: string): boolean {
-	try {
-		return statSync(path).isDirectory();
-	} catch {
-		return false;
-	}
+	return piHostPaths(defaultAgentDir()).listProjectHypercharts(cwd);
 }

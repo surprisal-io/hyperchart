@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 describe("React stylesheet", () => {
 	it("scopes the required Preflight reset without resetting the host", () => {
-		const css = readFileSync(fileURLToPath(new URL("../packages/pi-hyperchart/src/react/styles.css", import.meta.url)), "utf8");
+		const css = readFileSync(fileURLToPath(new URL("../packages/hyperchart/src/react/styles.css", import.meta.url)), "utf8");
 
 		expect(css).not.toContain('@import "tailwindcss";');
 		expect(css).not.toContain("tailwindcss/preflight.css");

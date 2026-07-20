@@ -1,0 +1,13 @@
+{
+	"name": "hyperchart",
+	"version": "0.1.1",
+	"description": "Durable, typed statechart workflows whose agent actions run as Claude sessions, with a live browser inspector and steering",
+	"author": { "name": "surprisal" },
+	"mcpServers": {
+		"hyperchart": {
+			"command": "node",
+			"args": ["${CLAUDE_PLUGIN_ROOT}/bin/hyperchart-mcp.mjs"]
+		}
+	},
+	"hooks": "./hooks/hooks.json"
+}

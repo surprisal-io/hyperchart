@@ -39,10 +39,16 @@ import {
 } from "@surprisal/hyperchart";
 import { actionUidDirName, actionUidKey } from "@surprisal/hyperchart/internal/core/action_uid";
 import { instancePathFor, nearestInstance, nodeAt, stripLastKey } from "@surprisal/hyperchart/internal/core/paths";
-import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
-import { createRunDir, loadRunMeta, saveRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
-import { isFailureStatePath, type RunTerminalState } from "@surprisal/hyperchart/runtime";
-import { assertChartPreflight } from "../src/runtime/pi/chart_typecheck.js";
+import {
+	JsonlLogStore,
+	assertChartPreflight,
+	createRunDir,
+	isFailureStatePath,
+	loadRunMeta,
+	saveRunMeta,
+	type RunMeta,
+	type RunTerminalState,
+} from "@surprisal/hyperchart/runtime";
 import {
 	getHyperchartRunsRoot,
 	getProjectHyperchartsDir,
@@ -56,12 +62,14 @@ import {
 	isRunLive,
 	isTerminalRunState,
 	patchRunStatus,
+	queueSessionSteering,
 	readRunStatus,
+	readSessionProgress,
+	sessionProgressPath,
 	type HyperchartRunStatus,
-} from "../src/runtime/pi/run_status.js";
+} from "@surprisal/hyperchart/sessions";
 import type { HyperchartRunnerConfig } from "../src/runtime/pi/hyperchart_runner.js";
 import { createAgentDefaultsResolver } from "../src/runtime/pi/agent_definitions.js";
-import { readSessionProgress, sessionProgressPath } from "../src/runtime/pi/session_progress.js";
 import {
 	RunHistoryOverlay,
 	RunWidget,
@@ -70,8 +78,7 @@ import {
 } from "../src/tui/components.js";
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
 import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
-import { closeRunInspectorServer, openRunInspector } from "../src/runtime/pi/inspector_server.js";
-import { queueSessionSteering } from "../src/runtime/pi/session_steering.js";
+import { closeRunInspectorServer, openRunInspector } from "@surprisal/hyperchart/inspect";
 
 const require = createRequire(import.meta.url);
 import { HYPERCHART_COMMAND_EVENT, type HyperchartCommandRequest } from "../src/command.js";

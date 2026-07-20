@@ -13,6 +13,7 @@ Hyperchart runs long-lived work as an explicit statechart. The chart defines wha
 |---|---|
 | [`@surprisal/hyperchart`](packages/hyperchart) | Chart authoring, the pure machine, replay, the generic runtime, and host-neutral models. |
 | [`@surprisal/pi-hyperchart`](packages/pi-hyperchart) | The Pi extension, `/hyperchart`, agent tools, terminal UI, and React inspector. |
+| [`@surprisal/claude-hyperchart`](packages/claude-hyperchart) | The Claude Code plugin: `hyperchart_*` MCP tools, agent actions as Claude sessions, browser inspector, steering. |
 
 Both packages require Node.js 22.19 or newer. The Pi package depends on the same version of the core package.
 

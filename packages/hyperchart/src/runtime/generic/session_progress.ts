@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { actionUidKey } from "@surprisal/hyperchart/internal/core/action_uid";
-import type { ActionUID } from "@surprisal/hyperchart/internal/core/types";
+import { actionUidKey } from "../../core/action_uid.js";
+import type { ActionUID } from "../../core/types.js";
 
 export { actionUidKey };
 
@@ -171,4 +171,68 @@ function valueFor<K extends keyof Omit<HyperchartSessionProgress, "actionKey" | 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export type StreamingProgressWriter = {
+	appendText(delta: string): void;
+	appendReasoning(delta: string): void;
+	/** Clears buffers and any pending write without publishing. */
+	reset(): void;
+	dispose(): void;
+};
+
+/**
+ * Buffers streaming text/thinking deltas and writes them to session progress at
+ * most every 250ms, so live views stay fresh without a write per token.
+ */
+export function createThrottledProgressWriter(
+	sessionsDir: string,
+	actionUid: ActionUID,
+	actionName: string,
+): StreamingProgressWriter {
+	let currentText = "";
+	let currentReasoning = "";
+	let lastWrite = 0;
+	let timer: NodeJS.Timeout | undefined;
+	const clearTimer = () => {
+		if (timer !== undefined) clearTimeout(timer);
+		timer = undefined;
+	};
+	const publish = () => {
+		clearTimer();
+		lastWrite = Date.now();
+		updateSessionProgress(sessionsDir, actionUid, {
+			actionName,
+			status: "running",
+			currentText: currentText.length === 0 ? undefined : currentText.slice(-32_000),
+			currentReasoning: currentReasoning.length === 0 ? undefined : currentReasoning.slice(-32_000),
+		});
+	};
+	const schedule = () => {
+		const wait = 250 - (Date.now() - lastWrite);
+		if (wait <= 0) {
+			publish();
+			return;
+		}
+		if (timer === undefined) {
+			timer = setTimeout(publish, wait);
+			timer.unref();
+		}
+	};
+	return {
+		appendText(delta) {
+			currentText += delta;
+			schedule();
+		},
+		appendReasoning(delta) {
+			currentReasoning += delta;
+			schedule();
+		},
+		reset() {
+			currentText = "";
+			currentReasoning = "";
+			clearTimer();
+		},
+		dispose: clearTimer,
+	};
 }

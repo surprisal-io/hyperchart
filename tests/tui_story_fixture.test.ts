@@ -4,10 +4,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
 import { buildRunView } from "../packages/pi-hyperchart/src/tui/run_view.js";
-import { readRunStatus } from "../packages/pi-hyperchart/src/runtime/pi/run_status.js";
-import { readSessionProgress } from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
+import { readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
+import { readSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { hyperchartRunFromRunDir } from "../packages/pi-hyperchart/src/runtime/pi/run_inspect.js";
-import { summarizeHyperchartProgress } from "../packages/pi-hyperchart/src/run_progress.js";
+import { summarizeHyperchartProgress } from "../packages/hyperchart/src/host/run_progress.js";
 import {
 	cleanupProductionTuiFixture,
 	materializeProductionTuiFixture,

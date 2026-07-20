@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readSessionProgress, updateSessionProgress } from "../packages/pi-hyperchart/src/runtime/pi/session_progress.js";
+import { readSessionProgress, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 
 const tempDirs: string[] = [];
 

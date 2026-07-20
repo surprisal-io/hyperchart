@@ -1,8 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { HyperchartInspectorDialog } from "../packages/pi-hyperchart/src/react/HyperchartInspectorDialog.js";
-import type { HyperchartRunInfo } from "../packages/pi-hyperchart/src/react/types.js";
+import { HyperchartInspectorDialog } from "../packages/hyperchart/src/react/HyperchartInspectorDialog.js";
+import type { HyperchartRunInfo } from "../packages/hyperchart/src/react/types.js";
 
 const run: HyperchartRunInfo = {
 	runId: "layout-run",

@@ -8,9 +8,9 @@ import {
 	readSessionProgress,
 	sessionProgressPath,
 	type HyperchartSessionProgress,
-} from "../runtime/pi/session_progress.js";
+} from "@surprisal/hyperchart/sessions";
 import { hyperchartRunFromRunDir } from "../runtime/pi/run_inspect.js";
-import { summarizeHyperchartProgress } from "../run_progress.js";
+import { summarizeHyperchartProgress } from "@surprisal/hyperchart/host";
 import { buildRunView, type GraphRow, type RunView } from "./run_view.js";
 
 export type RunComponentOptions = {

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { build } from "vite";
 
-const root = resolve(import.meta.dirname, "../packages/pi-hyperchart");
+const root = resolve(import.meta.dirname, "../packages/hyperchart");
 const outputDir = resolve(root, "dist/inspector-web");
 await build({
 	root,
@@ -14,7 +14,7 @@ await build({
 		emptyOutDir: true,
 		cssMinify: true,
 		rollupOptions: {
-			input: resolve(root, "src/runtime/pi/inspector-web-client.tsx"),
+			input: resolve(root, "src/inspect/inspector-web-client.tsx"),
 			output: {
 				entryFileNames: "client.js",
 				assetFileNames: "styles.css",

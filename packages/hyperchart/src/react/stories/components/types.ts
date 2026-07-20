@@ -1,4 +1,4 @@
-import type { StatePath } from "@surprisal/hyperchart/internal/core/types";
+import type { StatePath } from "../../../core/types.js";
 import type { HyperchartRunInfo } from "../../types.js";
 
 export type RuntimeSourceBlock = {
