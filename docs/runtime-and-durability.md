@@ -119,7 +119,7 @@ Because validator identity is stored, changing the validator can make replay sta
 
 A map appends `spawned` with the exact keys and items resolved on entry. Replay uses that record rather than re-reading a changed upstream value.
 
-`concurrency` affects when instances may invoke actions. It does not change the persisted spawn set.
+`concurrency` affects when instances may invoke actions. It does not change the persisted spawn set. Runtime inspection marks active instances held before invoke as `waiting`; only admitted instances are `running`.
 
 Re-entering a map can create a new generation. Runtime inspection distinguishes generations so completions from an older traversal are shown as stale rather than pending in the current one.
 

@@ -26,7 +26,7 @@ Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 /hyperchart run name --wait   # synchronous
 ```
 
-The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Active agent cards include a live session window with transcript/current-tool polling and steering.
+The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Active agent cards include a live session window with transcript/current-tool polling and steering.
 
 ## Pi tools
 

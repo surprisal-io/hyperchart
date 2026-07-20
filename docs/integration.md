@@ -30,6 +30,7 @@ The boundary is intentional:
 
 - static source, contracts, schemas, and topology come from normalized chart inspection;
 - status, visits, resolved invocations, artifacts, usage, and replay issues come from a concrete run;
+- active map actions held behind a `concurrency` gate use `waiting`, while only admitted/invoked work uses `running`;
 - host-specific files are adapted once, outside React.
 
 ## Implement a host adapter
@@ -150,7 +151,7 @@ export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {
 }
 ```
 
-Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. When a run snapshot includes `state.session`, agent cards expose a live-session dialog. Provide `onSteerSession` to enable its composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
+Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The inspector renders concurrency-gated map states and items as `waiting`; they do not expose a session until the runtime admits and invokes them. When a run snapshot includes `state.session`, agent cards expose a live-session dialog. Provide `onSteerSession` to enable its composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
 
 ## Public React components
 

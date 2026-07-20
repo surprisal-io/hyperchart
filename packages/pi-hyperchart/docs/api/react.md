@@ -233,7 +233,7 @@ function buildGraph(
 };
 ```
 
-Builds React Flow nodes and transition edges. Without layout positions it uses a deterministic vertical fallback. The inspector's hook applies ELK layout separately. States selected by a root or nested `initial` declaration display an `initial` badge independently from their runtime status; final nodes remain `pending` until reached. Running transitions keep the SVG path static and move a separate HTML marker with precomputed `transform` keyframes, avoiding React Flow's repaint-heavy `stroke-dashoffset` animation.
+Builds React Flow nodes and transition edges. Without layout positions it uses a deterministic vertical fallback. The inspector's hook applies ELK layout separately. States selected by a root or nested `initial` declaration display an `initial` badge independently from their runtime status; final nodes remain `pending` until reached. Concurrency-gated map actions use the amber `waiting` status until their invoke is admitted, instead of presenting them as active sessions. Running transitions keep the SVG path static and move a separate HTML marker with precomputed `transform` keyframes, avoiding React Flow's repaint-heavy `stroke-dashoffset` animation.
 
 ### `immediateMapScopeId()`
 

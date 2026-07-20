@@ -392,7 +392,7 @@ type HyperchartRunState =
   | "stopped";
 ```
 
-These are process lifecycle states. Canonical host models use `running`, `completed`, `failed`, `paused`, and `blocked`; individual state overlays use a separate status union including `pending`, `done`, `skipped`, and `stale`.
+These are process lifecycle states. Canonical host models use `running`, `completed`, `failed`, `paused`, and `blocked`; individual state overlays use a separate status union including `pending`, concurrency-gated `waiting`, `running`, `done`, `skipped`, and `stale`.
 
 ## Human command
 

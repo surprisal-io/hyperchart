@@ -100,6 +100,7 @@ interface HyperchartRunInfo {
 ```ts
 type HyperchartStateStatus =
   | "pending"
+  | "waiting"
   | "running"
   | "done"
   | "failed"
@@ -167,6 +168,7 @@ interface HyperchartStateInfo {
     total: number;
     running: number;
     failed: number;
+    waiting?: number;
     stale?: number;
   };
   retry?: HyperchartRetryInfo;
@@ -180,7 +182,7 @@ interface HyperchartStateInfo {
 }
 ```
 
-`initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `stale` is historical completion outside the current traversal or map generation. It is not pending work. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
+`initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `waiting` means the state is active but its map instance is held behind a `concurrency` gate; no invoke, visit, or agent session exists until a slot is admitted. `stale` is historical completion outside the current traversal or map generation. It is not pending work. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
 
 ## Live agent sessions
 
