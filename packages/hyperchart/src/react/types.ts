@@ -1,6 +1,6 @@
 import type { ReactNode, ReactPortal } from "react";
 
-export type * from "@surprisal/hyperchart/host";
+export type * from "../host/index.js";
 
 export interface HyperchartUiTheme {
 	resolved?: "light" | "dark";

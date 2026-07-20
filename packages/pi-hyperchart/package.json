@@ -49,7 +49,6 @@
 	"files": [
 		"dist",
 		"src/command.ts",
-		"src/run_progress.ts",
 		"src/runtime/pi",
 		"src/tui",
 		"extensions",
@@ -67,7 +66,6 @@
 		"access": "public"
 	},
 	"dependencies": {
-		"@heroicons/react": "^2.2.0",
 		"@surprisal/hyperchart": "0.1.1",
 		"jiti": "^2.7.0",
 		"typescript": "5.9.3"
@@ -83,14 +81,30 @@
 		"typebox": "*"
 	},
 	"peerDependenciesMeta": {
-		"@earendil-works/pi-coding-agent": { "optional": true },
-		"@earendil-works/pi-tui": { "optional": true },
-		"@xyflow/react": { "optional": true },
-		"elkjs": { "optional": true },
-		"react": { "optional": true },
-		"react-dom": { "optional": true },
-		"react-syntax-highlighter": { "optional": true },
-		"typebox": { "optional": true }
+		"@earendil-works/pi-coding-agent": {
+			"optional": true
+		},
+		"@earendil-works/pi-tui": {
+			"optional": true
+		},
+		"@xyflow/react": {
+			"optional": true
+		},
+		"elkjs": {
+			"optional": true
+		},
+		"react": {
+			"optional": true
+		},
+		"react-dom": {
+			"optional": true
+		},
+		"react-syntax-highlighter": {
+			"optional": true
+		},
+		"typebox": {
+			"optional": true
+		}
 	},
 	"pi": {
 		"extensions": [
@@ -102,7 +116,7 @@
 		"image": "https://raw.githubusercontent.com/surprisal-io/hyperchart/main/assets/readme/inspector.png"
 	},
 	"scripts": {
-		"build": "tsc -p tsconfig.build.json && node ../../scripts/build-react-styles.mjs && node ../../scripts/build-inspector-web.mjs",
+		"build": "tsc -p tsconfig.build.json && node ../../scripts/copy-react-styles.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
 		"prepack": "node ../../scripts/sync-pi-docs.mjs --check && npm run build"
 	}

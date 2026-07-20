@@ -185,8 +185,6 @@ function resolveInspectorAsset(fileName: string): string | undefined {
 		// Built module: dist/inspect -> dist/inspector-web. Source module (jiti/tests): src/inspect -> dist/inspector-web.
 		resolve(moduleDir, "../inspector-web", fileName),
 		resolve(moduleDir, "../../dist/inspector-web", fileName),
-		// Until the web bundle build moves into this package, fall back to the sibling Pi package's bundle.
-		resolve(moduleDir, "../../../pi-hyperchart/dist/inspector-web", fileName),
 	];
 	return candidates.find((candidate) => existsSync(candidate));
 }

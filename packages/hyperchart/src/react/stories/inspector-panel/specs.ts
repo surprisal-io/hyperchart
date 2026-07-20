@@ -17,11 +17,11 @@ import {
 	tsImport,
 	user,
 	visit,
-} from "@surprisal/hyperchart/internal/core/dsl";
-import { templatePath } from "@surprisal/hyperchart/internal/core/paths";
-import type { ActionUID, ChartAst, ChartCst, ChartEvent, StateAst, StatePath } from "@surprisal/hyperchart/internal/core/types";
-import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
-import type { HyperchartRuntimeSessionProgressFile } from "@surprisal/hyperchart/host";
+} from "../../../core/dsl.js";
+import { templatePath } from "../../../core/paths.js";
+import type { ActionUID, ChartAst, ChartCst, ChartEvent, StateAst, StatePath } from "../../../core/types.js";
+import type { DurableLogRecord } from "../../../core/durable_events.js";
+import type { HyperchartRuntimeSessionProgressFile } from "../../../host/index.js";
 import type { HyperchartRunStatus } from "../../types.js";
 
 export type InspectorPanelRuntime = {

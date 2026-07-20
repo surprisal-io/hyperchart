@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { HyperchartRunInfo } from "../packages/pi-hyperchart/src/react/types.js";
+import type { HyperchartRunInfo } from "../packages/hyperchart/src/react/types.js";
 import {
 	buildGraph,
 	GRAPH_COMPACT_NODE_HEIGHT,
 	GRAPH_COMPACT_NODE_WIDTH,
 	graphLayoutSignature,
 	reconcileGraphElements,
-} from "../packages/pi-hyperchart/src/react/components/inspector/graph/graphModel.js";
-import { edgeMotionPoints } from "../packages/pi-hyperchart/src/react/components/inspector/graph/edgeRouting.js";
+} from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
+import { edgeMotionPoints } from "../packages/hyperchart/src/react/components/inspector/graph/edgeRouting.js";
 
 function run(status: "pending" | "running" | "done", target = "done"): HyperchartRunInfo {
 	return {

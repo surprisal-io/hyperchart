@@ -1,14 +1,14 @@
-import { inspectChartAst } from "@surprisal/hyperchart/internal/core/inspect_ast";
-import { normalizeChartConfig } from "@surprisal/hyperchart/internal/core/normalize";
-import { templatePath } from "@surprisal/hyperchart/internal/core/paths";
-import { hyperchartSource as coreHyperchartSource } from "@surprisal/hyperchart/internal/core/source";
-import type { ChartAst, ChartCst } from "@surprisal/hyperchart/internal/core/types";
-import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
+import { inspectChartAst } from "../../../core/inspect_ast.js";
+import { normalizeChartConfig } from "../../../core/normalize.js";
+import { templatePath } from "../../../core/paths.js";
+import { hyperchartSource as coreHyperchartSource } from "../../../core/source.js";
+import type { ChartAst, ChartCst } from "../../../core/types.js";
+import type { DurableLogRecord } from "../../../core/durable_events.js";
 import {
 	hyperchartRunFromRuntime,
 	type HyperchartRunFromRuntimeOptions,
 	type HyperchartRuntimeSessionProgressFile,
-} from "@surprisal/hyperchart/host";
+} from "../../../host/index.js";
 import type { HyperchartRunInfo, HyperchartRunStatus } from "../../types.js";
 import type { InspectorPanelTileProps, RuntimeSourceBlock } from "../components/index.js";
 import { storyLog, type InspectorPanelSpec } from "./specs.js";

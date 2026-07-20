@@ -30,6 +30,10 @@ try {
 				"dist/runtime/index.js",
 				"dist/inspect/index.js",
 				"dist/sessions/index.js",
+				"dist/react/index.js",
+				"dist/react/styles.css",
+				"dist/inspector-web/client.js",
+				"dist/inspector-web/styles.css",
 				"LICENSE",
 				"README.md",
 			],
@@ -41,9 +45,6 @@ try {
 				"dist/runtime/pi/host_adapter.js",
 				"dist/react/index.js",
 				"dist/react/styles.css",
-				"dist/inspector-web/client.js",
-				"dist/inspector-web/styles.css",
-				"src/run_progress.ts",
 				"extensions/hyperchart.ts",
 				"skills/hyperchart/SKILL.md",
 				"docs/api/dsl.md",
@@ -176,6 +177,7 @@ import * as host from "@surprisal/hyperchart/host";
 import * as runtime from "@surprisal/hyperchart/runtime";
 import * as inspect from "@surprisal/hyperchart/inspect";
 import * as sessions from "@surprisal/hyperchart/sessions";
+import * as coreReact from "@surprisal/hyperchart/react";
 import * as command from "@surprisal/pi-hyperchart/command";
 import * as piHost from "@surprisal/pi-hyperchart/pi-host";
 import * as react from "@surprisal/pi-hyperchart/react";
@@ -186,6 +188,7 @@ if (typeof inspect.hyperchartRunFromRunDir !== "function" || typeof inspect.open
 if (typeof sessions.updateSessionProgress !== "function" || typeof sessions.queueSessionSteering !== "function") throw new Error("sessions exports missing");
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");
 if (typeof piHost.createPiHyperchartHost !== "function") throw new Error("Pi host exports missing");
+if (typeof coreReact.HyperchartInspectorDialog !== "function") throw new Error("core React exports missing");
 if (typeof react.HyperchartInspectorDialog !== "function") throw new Error("React exports missing");
 writeFileSync("external.chart.ts", \`import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "external-smoke", initial: "done", states: { done: final() } });\n\`);
 const inspected = core.inspectChartModuleSync(resolve("external.chart.ts"));

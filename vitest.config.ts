@@ -13,6 +13,8 @@ export default defineConfig({
 			{ find: "@surprisal/hyperchart/runtime", replacement: core("runtime/index.ts") },
 			{ find: "@surprisal/hyperchart/inspect", replacement: core("inspect/index.ts") },
 			{ find: "@surprisal/hyperchart/sessions", replacement: core("sessions/index.ts") },
+			{ find: "@surprisal/hyperchart/react/styles.css", replacement: core("react/styles.css") },
+			{ find: "@surprisal/hyperchart/react", replacement: core("react/index.ts") },
 			{ find: /^@surprisal\/hyperchart\/internal\/core\/(.*)$/, replacement: core("core/$1.ts") },
 			{ find: /^@surprisal\/hyperchart\/internal\/utils\/(.*)$/, replacement: core("utils/$1.ts") },
 			{ find: /^@surprisal\/hyperchart$/, replacement: core("index.ts") },

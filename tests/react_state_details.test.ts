@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { StateDetails } from "../packages/pi-hyperchart/src/react/components/inspector/details/StateDetails.js";
+import { StateDetails } from "../packages/hyperchart/src/react/components/inspector/details/StateDetails.js";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
 
 describe("StateDetails", () => {

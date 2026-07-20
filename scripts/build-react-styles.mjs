@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import { build } from "vite";
 
-const root = resolve(import.meta.dirname, "../packages/pi-hyperchart");
+const root = resolve(import.meta.dirname, "../packages/hyperchart");
 const outputDir = resolve(root, "dist/react");
 const outputFile = resolve(outputDir, "styles.css");
 await build({

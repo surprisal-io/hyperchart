@@ -1,8 +1,8 @@
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
-import { HyperchartInspectorDialog } from "../../react/HyperchartInspectorDialog.js";
-import "../../react/styles.css";
+import type { HyperchartRunInfo } from "../host/index.js";
+import { HyperchartInspectorDialog } from "../react/HyperchartInspectorDialog.js";
+import "../react/styles.css";
 
 type ThemeName = "light" | "dark";
 type RunResponse = { run?: HyperchartRunInfo; error?: string };

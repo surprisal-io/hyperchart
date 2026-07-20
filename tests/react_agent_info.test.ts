@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
-import { AgentInfoCard } from "../packages/pi-hyperchart/src/react/components/inspector/details/AgentInfoCard.js";
+import { AgentInfoCard } from "../packages/hyperchart/src/react/components/inspector/details/AgentInfoCard.js";
 
 describe("Agent inspector details", () => {
 	it("renders the loaded agent description", () => {

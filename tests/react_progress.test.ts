@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HyperchartRunInfo, HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
-import { summarizeHyperchartProgress } from "../packages/pi-hyperchart/src/react/hyperchart-display.js";
+import { summarizeHyperchartProgress } from "../packages/hyperchart/src/react/hyperchart-display.js";
 
 function state(id: string, status: HyperchartStateInfo["status"], options: Partial<HyperchartStateInfo> = {}): HyperchartStateInfo {
 	return { id, status, ...options };

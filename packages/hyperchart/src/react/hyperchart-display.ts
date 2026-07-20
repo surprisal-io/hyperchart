@@ -1,6 +1,6 @@
 import { ArrowPathIcon, CheckCircleIcon, ClockIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo, HyperchartRunInfo, HyperchartUsageInfo } from "./types.js";
-export { summarizeHyperchartProgress } from "../run_progress.js";
+export { summarizeHyperchartProgress } from "../host/run_progress.js";
 
 export function hyperchartStatusClasses(status: string): string {
 	switch (status) {
