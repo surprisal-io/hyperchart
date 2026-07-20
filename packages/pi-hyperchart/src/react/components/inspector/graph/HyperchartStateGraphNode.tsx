@@ -52,7 +52,7 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 				? "border-blue-500/30 shadow-blue-950/15"
 				: state.status === "done"
 					? "border-green-500/25 shadow-green-950/10"
-					: state.status === "stale"
+					: state.status === "waiting" || state.status === "stale"
 						? "border-amber-500/35 shadow-amber-950/10 ring-1 ring-amber-500/10"
 						: displayState.type === "map"
 							? "border-cyan-400/70 shadow-cyan-950/20 ring-1 ring-cyan-500/15"
