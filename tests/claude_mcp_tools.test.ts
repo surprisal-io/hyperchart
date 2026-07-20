@@ -128,6 +128,15 @@ describe("hyperchart MCP tools", () => {
 		expect(response.status).toBe(200);
 		const payload = (await response.json()) as { run: { runId: string } };
 		expect(payload.run.runId).toBe("view-run");
+
+		// The inspector's steering endpoint must land in the run's file queue.
+		const steer = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/steer`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ actionKey: "simple:work:agent", message: "from inspector" }),
+		});
+		expect(steer.status).toBe(202);
+		expect(readdirSync(join(runDir, "sessions", "steering"))).toHaveLength(1);
 	});
 });
 

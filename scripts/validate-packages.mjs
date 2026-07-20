@@ -146,6 +146,8 @@ function validateMarkdownLinks() {
 		"packages/pi-hyperchart/README.md",
 		"packages/pi-hyperchart/skills",
 		"packages/pi-hyperchart/docs",
+		"packages/claude-hyperchart/README.md",
+		"packages/claude-hyperchart/skills",
 	]) {
 		const path = resolve(root, base);
 		if (statSync(path).isDirectory()) walkMarkdown(path, markdown);
