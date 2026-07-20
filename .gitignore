@@ -10,3 +10,4 @@ tla/.cache/
 .pi-subagents/
 tla/MCTrace*
 tla/trace/sample-run.jsonl
+artifacts
