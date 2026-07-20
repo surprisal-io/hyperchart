@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { HyperchartSessionMessageInfo } from "@surprisal/hyperchart/host";
 import type { NeutralTranscriptHeader } from "@surprisal/hyperchart/inspect";
@@ -15,8 +15,11 @@ export type NeutralTranscriptWriter = {
  */
 export function createNeutralTranscriptWriter(path: string, sessionId: string): NeutralTranscriptWriter {
 	mkdirSync(dirname(path), { recursive: true });
-	const header: NeutralTranscriptHeader = { hyperchartTranscript: 1, sessionId, createdAt: Date.now() };
-	appendFileSync(path, `${JSON.stringify(header)}\n`, "utf8");
+	if (!existsSync(path)) {
+		// A resumed session appends to its existing transcript; the header is written once.
+		const header: NeutralTranscriptHeader = { hyperchartTranscript: 1, sessionId, createdAt: Date.now() };
+		appendFileSync(path, `${JSON.stringify(header)}\n`, "utf8");
+	}
 	return {
 		path,
 		append(record) {

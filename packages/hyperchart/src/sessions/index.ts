@@ -9,6 +9,8 @@ export type {
 	HyperchartSessionProgressFile,
 	HyperchartSessionStatus,
 } from "../runtime/generic/session_progress.js";
+export { createThrottledProgressWriter } from "../runtime/generic/session_progress.js";
+export type { StreamingProgressWriter } from "../runtime/generic/session_progress.js";
 export { queueSessionSteering, watchSessionSteering } from "../runtime/generic/session_steering.js";
 export type { SessionSteeringRequest } from "../runtime/generic/session_steering.js";
 export {

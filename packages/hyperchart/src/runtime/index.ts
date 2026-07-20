@@ -56,3 +56,19 @@ export {
 export type { AgentDefinition, ThinkingLevel } from "./generic/agent_definitions.js";
 export { parseSimpleFrontmatter } from "./generic/frontmatter.js";
 export type { FrontmatterParser, ParsedFrontmatter } from "./generic/frontmatter.js";
+export {
+	GenerationTracker,
+	actionSessionDir,
+	buildSessionPlan,
+	checkEffectArtifacts,
+	previewText,
+	resolveReads,
+	runAcceptanceLoop,
+	sessionKey,
+	shouldRecoverRestoredFinish,
+	stringifyToolArgs,
+	validateDeclaredReadPaths,
+} from "./generic/executor_helpers.js";
+export type { AcceptanceLoopOptions, SessionPlan } from "./generic/executor_helpers.js";
+export { readRunnerConfig, runHyperchartRunner } from "./generic/runner_main.js";
+export type { ExecutorContext, HyperchartRunnerConfig, SteerableAgentExecutor } from "./generic/runner_main.js";
