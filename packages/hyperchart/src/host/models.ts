@@ -11,7 +11,7 @@ export interface HyperchartInfo {
 }
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
-export type HyperchartStateStatus = "pending" | "running" | "done" | "failed" | "skipped" | "stale";
+export type HyperchartStateStatus = "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale";
 export type HyperchartStateType = "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
 
 export interface HyperchartUsageInfo {
@@ -252,7 +252,7 @@ export interface HyperchartStateInfo {
 	mapKey?: string;
 	mapItemLabel?: string;
 	parallelConfig?: { branches?: HyperchartBranchInfo[]; count?: number };
-	subProgress?: { done: number; total: number; running: number; failed: number; stale?: number };
+	subProgress?: { done: number; total: number; running: number; failed: number; waiting?: number; stale?: number };
 	retry?: HyperchartRetryInfo;
 	attempts?: number;
 	validationAttempts?: number;

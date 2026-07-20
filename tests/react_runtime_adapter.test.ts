@@ -1168,6 +1168,56 @@ describe("React runtime adapter", () => {
 		expect(work?.transitions?.find((transition) => transition.event === "DONE")?.taken).toBeUndefined();
 	});
 
+	it("marks map instances blocked by concurrency as waiting until their invoke is admitted", () => {
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "limited-map",
+				initial: "items",
+				states: {
+					items: map({
+						over: arg("items"),
+						concurrency: 1,
+						initial: "work",
+						onDone: "done",
+						states: {
+							work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+							done: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		const worker = chartAst.states["items.work"];
+		if (worker?.kind !== "state") throw new Error("missing map worker");
+		const instances = { a: "Alpha", b: "Beta", c: "Gamma" };
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: { items: instances }, ...baseRecord(1) },
+			{ type: "spawned", path: "items", instances, ...baseRecord(2) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				actionUid: actionUid(chartAst, "items#a.work"),
+				definition: worker.action,
+				...baseRecord(3),
+			},
+		];
+
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "items#a.work")?.status).toBe("running");
+		expect(run.states.find((state) => state.id === "items#b.work")?.status).toBe("waiting");
+		expect(run.states.find((state) => state.id === "items#c.work")?.status).toBe("waiting");
+		expect(run.states.find((state) => state.id === "items#b.work")?.session).toBeUndefined();
+		const mapState = run.states.find((state) => state.id === "items");
+		expect(mapState?.mapConfig?.items).toMatchObject([
+			{ key: "a", status: "running" },
+			{ key: "b", status: "waiting" },
+			{ key: "c", status: "waiting" },
+		]);
+		expect(mapState?.subProgress).toEqual({ done: 0, running: 1, failed: 0, waiting: 2, total: 3 });
+	});
+
 	it("maps spawned map instances, item values, item progress, and materialized workers", () => {
 		const chartAst = ast(
 			chart({
