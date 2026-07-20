@@ -740,7 +740,7 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 // seqId, but between two entries into the same state the action is always pending, so the
 // dispatch marker is dropped in between.
 function dueInvokes(state: MachineState): ActionUID[] {
-	const blocked = blockedInstances(state);
+	const blocked = concurrencyBlockedActionLeaves(state.ast, state.projection);
 	const due: ActionUID[] = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const node = nodeAt(state.ast, leaf);
@@ -755,25 +755,28 @@ function dueInvokes(state: MachineState): ActionUID[] {
 	return due;
 }
 
-// The leaves a map's concurrency gate holds shut right now. Per limited map: instances already
-// holding pending work keep their slots; idle instances take the free slots in activeLeaves
-// order — the spawn fact's key order, so slots fill deterministically — and the rest wait. A
-// completed instance has nothing pending and no action leaf, so it holds no slot.
-function blockedInstances(state: MachineState): Set<StatePath> {
+// The action leaves a map's concurrency gate holds shut right now. Per limited map: instances
+// already holding pending work keep their slots; idle instances take the free slots in
+// activeLeaves order — the spawn fact's key order, so slots fill deterministically — and the rest
+// wait. A completed instance has nothing pending and no action leaf, so it holds no slot.
+//
+// The host adapter reuses this exact admission view so inspector status cannot drift from the
+// machine and label a gated action as running before its invoke exists.
+export function concurrencyBlockedActionLeaves(ast: ChartAst, projection: BranchProjection): Set<StatePath> {
 	const blocked = new Set<StatePath>();
 	const running = new Map<StatePath, Set<string>>();
-	for (const entry of state.projection.pendingActions) {
+	for (const entry of projection.pendingActions) {
 		const instance = nearestInstance(entry.actionUid.state);
 		if (instance === undefined) continue;
 		const keys = running.get(instance.container) ?? new Set<string>();
 		keys.add(instance.key);
 		running.set(instance.container, keys);
 	}
-	for (const leaf of state.projection.activeLeaves) {
-		if (nodeAt(state.ast, leaf)?.kind !== "state") continue;
+	for (const leaf of projection.activeLeaves) {
+		if (nodeAt(ast, leaf)?.kind !== "state") continue;
 		const instance = nearestInstance(leaf);
 		if (instance === undefined) continue;
-		const container = nodeAt(state.ast, instance.container);
+		const container = nodeAt(ast, instance.container);
 		if (container?.kind !== "map" || container.concurrency === undefined) continue;
 		const keys = running.get(instance.container) ?? new Set<string>();
 		if (keys.has(instance.key)) continue;

@@ -44,6 +44,7 @@ export type FanoutStatusSummary = {
 	emptyHint: string;
 	total?: number | undefined;
 	done: number;
+	waiting: number;
 	running: number;
 	failed: number;
 	stale: number;

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -78,6 +78,34 @@ describe("hyperchart extension", () => {
 		const runDir = (result.details as { runDir: string }).runDir;
 
 		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
+	});
+
+	it("restores widgets only for non-terminal runs owned by the current pi session", async () => {
+		const chartPath = writeChart("session-restore");
+		createRun("owned-running", projectDir, chartPath, "session-a");
+		createRun("foreign-session", projectDir, chartPath, "session-b");
+		createRun("legacy-unowned", projectDir, chartPath);
+		createRun("foreign-project", otherProjectDir, chartPath, "session-a");
+		const failedRunDir = createRun("owned-failed", projectDir, chartPath, "session-a");
+		patchRunStatus(failedRunDir, { runId: "owned-failed", chartId: "demo", state: "failed", exitCode: 1 });
+		const completedRunDir = createRun("owned-complete", projectDir, chartPath, "session-a");
+		patchRunStatus(completedRunDir, { runId: "owned-complete", chartId: "demo", state: "complete", exitCode: 0 });
+
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		const pi = {
+			registerCommand: () => {},
+			registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const { ctx, widgetKeys } = commandContext(projectDir);
+
+		await sessionStart?.({ reason: "startup" }, ctx);
+
+		expect(widgetKeys).toEqual(["hyperchart:owned-running"]);
 	});
 
 	it("lists project and user charts with project precedence", async () => {
@@ -227,6 +255,28 @@ describe("hyperchart extension", () => {
 		await expect(fetch(url)).rejects.toThrow();
 	});
 
+	it("queues steering for a live agent session", async () => {
+		const runId = "steerable-run";
+		const runDir = createRun(runId, projectDir, writeChart("steerable"));
+		const actionUid = { chart: "demo", state: "work", action: "agent" };
+		const actionKey = `${actionUid.chart}:${actionUid.state}:${actionUid.action}`;
+		updateSessionProgress(join(runDir, "sessions"), actionUid, {
+			actionName: "worker",
+			status: "running",
+		});
+		const { ctx, notifications } = commandContext(projectDir);
+
+		await registeredCommand().handler(`steer '${runId}' '${actionKey}' 'Prioritize the narrow layout'`, ctx);
+
+		const files = readdirSync(join(runDir, "sessions", "steering"));
+		expect(files).toHaveLength(1);
+		expect(JSON.parse(readFileSync(join(runDir, "sessions", "steering", files[0]!), "utf8"))).toMatchObject({
+			actionKey,
+			message: "Prioritize the narrow layout",
+		});
+		expect(notifications).toContainEqual({ message: "Steering queued for @worker", type: "info" });
+	});
+
 	it("offers documented top-level commands and run ids with an empty prefix", () => {
 		const runId = "demo-run";
 		createRun(runId, projectDir, writeChart("demo"));
@@ -236,6 +286,7 @@ describe("hyperchart extension", () => {
 			?.map((item) => item.value);
 
 		expect(values).toContain("view");
+		expect(values).toContain("steer");
 		expect(values).toContain(runId);
 	});
 
@@ -469,10 +520,12 @@ function registeredTool(name: string): HyperchartTool {
 	return tool;
 }
 
-function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[] } {
+function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[]; widgetKeys: string[] } {
 	const notifications: Notification[] = [];
+	const widgetKeys: string[] = [];
 	return {
 		notifications,
+		widgetKeys,
 		ctx: {
 			cwd,
 			mode: "print",
@@ -483,7 +536,9 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 					notifications.push({ message, type });
 				},
 				setStatus: () => {},
-				setWidget: () => {},
+				setWidget: (key: string, widget: unknown) => {
+					if (widget !== undefined) widgetKeys.push(key);
+				},
 				confirm: async () => false,
 				custom: async () => undefined,
 			},
@@ -491,13 +546,14 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 	};
 }
 
-function createRun(runId: string, workDir: string, chartPath: string): string {
+function createRun(runId: string, workDir: string, chartPath: string, originSessionId?: string): string {
 	const runDir = join(agentDir, "hypercharts", "runs", runId);
 	saveRunMeta(runDir, {
 		chartPath,
 		workDir,
 		chartId: "demo",
 		createdAt: new Date().toISOString(),
+		...(originSessionId === undefined ? {} : { originSessionId }),
 	});
 	return runDir;
 }

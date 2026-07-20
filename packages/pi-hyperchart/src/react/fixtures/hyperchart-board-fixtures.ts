@@ -100,7 +100,7 @@ export const runStripRuns: HyperchartRunInfo[] = [
 	run("map-workers-blocked", "blocked", [
 		state("chapters", "running", "map", {
 			concurrency: 3,
-			subProgress: { done: 2, running: 1, failed: 1, total: 5 },
+			subProgress: { done: 2, running: 1, failed: 1, waiting: 1, total: 5 },
 			mapConfig: {
 				over: "plan.chapters",
 				as: "chapter",
@@ -108,7 +108,7 @@ export const runStripRuns: HyperchartRunInfo[] = [
 					{ key: "intro", label: "Intro", status: "done" },
 					{ key: "platform", label: "Platform", status: "running" },
 					{ key: "risk", label: "Risk", status: "failed" },
-					{ key: "next", label: "Next", status: "pending" },
+					{ key: "next", label: "Next", status: "waiting" },
 				],
 			},
 		}),
@@ -130,7 +130,12 @@ export const statusMatrixRun = run("status-matrix-running", "running", [
 	state("draft-summary", "running", "agent", {
 		agent: "worker",
 		taskPreview: "Draft report summary",
-		transitions: [{ event: "DONE", target: "review-coverage" }],
+		transitions: [{ event: "DONE", target: "await-map-slot" }],
+	}),
+	state("await-map-slot", "waiting", "agent", {
+		agent: "worker",
+		taskPreview: "Waiting for a map concurrency slot",
+		transitions: [{ event: "ADMITTED", target: "review-coverage" }],
 	}),
 	state("review-coverage", "done", "agent", {
 		agent: "worker",
@@ -173,7 +178,7 @@ export const stateKindsRun = run("state-kinds-running", "running", [
 	}),
 	state("map", "running", "map", {
 		concurrency: 2,
-		subProgress: { done: 2, running: 1, failed: 1, total: 5 },
+		subProgress: { done: 2, running: 1, failed: 1, waiting: 1, total: 5 },
 		mapConfig: {
 			over: "plan.sections",
 			as: "section",
@@ -181,7 +186,7 @@ export const stateKindsRun = run("state-kinds-running", "running", [
 				{ key: "a", label: "A", summary: "finished", status: "done", state: "map#a" },
 				{ key: "b", label: "B", summary: "active", status: "running", state: "map#b" },
 				{ key: "c", label: "C", summary: "failed", status: "failed", state: "map#c" },
-				{ key: "d", label: "D", summary: "waiting", status: "pending", state: "map#d" },
+				{ key: "d", label: "D", summary: "waiting", status: "waiting", state: "map#d" },
 			],
 		},
 		transitions: [{ event: "MAP_DONE", target: "parallel" }],
@@ -303,7 +308,7 @@ export const mapVariantsRun = run("map-variants-running", "running", [
 	}),
 	state("map-running", "running", "map", {
 		concurrency: 3,
-		subProgress: { done: 1, running: 2, failed: 0, total: 5 },
+		subProgress: { done: 1, running: 2, failed: 0, waiting: 2, total: 5 },
 		mapConfig: {
 			over: "chapters",
 			as: "chapter",
@@ -328,7 +333,8 @@ export const mapVariantsRun = run("map-variants-running", "running", [
 				},
 				{ key: "two", label: "Two", status: "running" },
 				{ key: "three", label: "Three", status: "running" },
-				{ key: "four", label: "Four", status: "pending" },
+				{ key: "four", label: "Four", status: "waiting" },
+				{ key: "five", label: "Five", status: "waiting" },
 			],
 		},
 		transitions: [{ event: "NEXT", target: "map-failed" }],
@@ -446,7 +452,7 @@ export const stressRun = run(
 		}),
 		state("chapter-map", "running", "map", {
 			concurrency: 3,
-			subProgress: { done: 2, running: 1, failed: 0, total: 4 },
+			subProgress: { done: 2, running: 1, failed: 0, waiting: 1, total: 4 },
 			mapConfig: {
 				over: "plan.chapters",
 				as: "chapter",
@@ -454,7 +460,7 @@ export const stressRun = run(
 					{ key: "intro", label: "Intro", status: "done" },
 					{ key: "platform", label: "Platform", status: "done" },
 					{ key: "risk", label: "Risk", status: "running" },
-					{ key: "next", label: "Next", status: "pending" },
+					{ key: "next", label: "Next", status: "waiting" },
 				],
 			},
 			transitions: [{ event: "MAP_DONE", target: "visual-review" }],

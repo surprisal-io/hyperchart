@@ -128,6 +128,7 @@ export class RunWidget implements Component {
 	private view: RunView | undefined;
 	private progress: Record<string, HyperchartSessionProgress> = {};
 	private progressPercent = 0;
+	private refreshError: string | undefined;
 	private disposed = false;
 	private lastStat = "";
 	private readonly timer: NodeJS.Timeout;
@@ -137,16 +138,22 @@ export class RunWidget implements Component {
 		private readonly theme: Theme,
 		private readonly opts: RunComponentOptions,
 	) {
-		this.timer = setInterval(() => void this.refresh(), 300);
+		this.timer = setInterval(() => void this.refresh().catch((cause) => this.handleRefreshError(cause)), 300);
 		this.timer.unref();
-		void this.refresh();
+		void this.refresh().catch((cause) => this.handleRefreshError(cause));
 	}
 
 	invalidate(): void {}
 
 	render(width: number): string[] {
 		const view = this.view;
-		if (view === undefined) return [truncate(dim(this.theme, `hyperchart ${this.opts.runId} · loading`), width)];
+		if (view === undefined) {
+			const status =
+				this.refreshError === undefined
+					? dim(this.theme, `hyperchart ${this.opts.runId} · loading`)
+					: error(this.theme, `hyperchart ${this.opts.runId} · inspect failed: ${this.refreshError}`);
+			return [truncate(status, width)];
+		}
 
 		const active = actionRows(view).filter((row) => activeStatus(row.status));
 		const sessions = activeSessions(this.progress);
@@ -166,7 +173,12 @@ export class RunWidget implements Component {
 			activeLines.push(...sessions.slice(0, 3).map((session) => compactSessionLine(session, this.theme, live)));
 		}
 		const hidden = Math.max(active.length, sessions.length) - activeLines.length;
-		return [header, ...activeLines, hidden > 0 ? dim(this.theme, `  +${hidden} more`) : undefined]
+		return [
+			header,
+			this.refreshError === undefined ? undefined : error(this.theme, `  inspect failed: ${this.refreshError}`),
+			...activeLines,
+			hidden > 0 ? dim(this.theme, `  +${hidden} more`) : undefined,
+		]
 			.filter((line): line is string => line !== undefined)
 			.map((line) => truncate(line, width));
 	}
@@ -187,6 +199,13 @@ export class RunWidget implements Component {
 		this.view = buildRunView(this.opts.ast, records, Date.now());
 		this.progress = readSessionProgress(resolve(this.opts.runDir, "sessions")).sessions;
 		this.progressPercent = summarizeHyperchartProgress(run).pct;
+		this.refreshError = undefined;
+		this.tui.requestRender();
+	}
+
+	private handleRefreshError(cause: unknown): void {
+		if (this.disposed) return;
+		this.refreshError = cause instanceof Error ? cause.message : String(cause);
 		this.tui.requestRender();
 	}
 }

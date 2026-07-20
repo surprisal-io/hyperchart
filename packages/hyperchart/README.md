@@ -41,6 +41,8 @@ A script with one successful transition may select it implicitly on exit code `0
 | `@surprisal/hyperchart/host` | canonical chart/run models and adapters |
 | `@surprisal/hyperchart/package.json` | package metadata |
 
+The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`.
+
 This package has no Pi or React dependency.
 
 ## Documentation

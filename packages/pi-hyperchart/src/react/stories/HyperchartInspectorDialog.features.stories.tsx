@@ -52,7 +52,16 @@ export const StaticInspect: Story = {
 		selectedRunId: inspectRun.runId,
 	},
 	parameters: {
-		docs: { description: { story: "Read-only inspection of a statically analyzed chart." } },
+		docs: { description: { story: "Read-only inspection with explicit return from state details to the chart overview." } },
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await expect(canvas.getByText("Static graph")).toBeVisible();
+		await userEvent.click(await canvas.findByText("research-plan"));
+		const overviewButton = await canvas.findByRole("button", { name: "Chart overview" });
+		await expect(overviewButton).toBeVisible();
+		await userEvent.click(overviewButton);
+		await expect(canvas.getByText("Static graph")).toBeVisible();
 	},
 };
 

@@ -7,6 +7,7 @@ export interface HyperchartInspectorDialogProps {
 	onClose: () => void;
 	onResume?: (runId: string) => void;
 	onAbort?: () => void;
+	onSteerSession?: (runId: string, actionKey: string, message: string) => void | Promise<void>;
 	portal?: HyperchartPortalRenderer;
 	theme?: HyperchartUiTheme;
 }

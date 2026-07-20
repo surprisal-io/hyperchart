@@ -17,6 +17,7 @@ export function FanoutStatusCard({ state, compact = false }: { state: Hyperchart
 	const countLabel = hasKnownCount ? `${total} ${summary.label}` : summary.emptyLabel;
 	const counts = [
 		summary.running > 0 ? `${summary.running} running` : undefined,
+		summary.waiting > 0 ? `${summary.waiting} waiting` : undefined,
 		summary.pending > 0 ? `${summary.pending} pending` : undefined,
 		summary.failed > 0 ? `${summary.failed} failed` : undefined,
 		summary.stale > 0 ? `${summary.stale} stale` : undefined,

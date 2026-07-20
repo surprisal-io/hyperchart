@@ -41,11 +41,24 @@ function looksLikeTextualToolCall(text: string): boolean {
 }
 
 export function buildRejectPrompt(effect: RejectedEffect): string {
-	const completion =
-		effect.invocation.kind === "agent" ? `\n\n${formatCompletion({ ...effect.invocation, id: effect.id })}` : "";
+	if (effect.invocation.kind !== "agent") {
+		return `Your result was rejected by the validator (validation attempt ${effect.validationAttempts}). Reason: ${
+			effect.reason ?? "No reason provided."
+		}. Fix the issues and call \`finish\` again.`;
+	}
+	const deliverables =
+		(effect.invocation.artifacts?.length ?? 0) === 0
+			? ""
+			: `\n\nOverwrite the exact declared deliverable path below; do not increment, rename, or version it yourself:\n${(
+				effect.invocation.artifacts ?? []
+			)
+				.map((artifact) => `- \`${artifact.path}\``)
+				.join("\n")}`;
 	return `Your result was rejected by the validator (validation attempt ${effect.validationAttempts}). Reason: ${
 		effect.reason ?? "No reason provided."
-	}. Fix the issues and call \`finish\` again.${completion}`;
+	}. Preserve valid work, fix only the rejected issue, overwrite the declared deliverable, and call \`finish\` again.${deliverables}\n\n${formatCompletion(
+		{ ...effect.invocation, id: effect.id },
+	)}`;
 }
 
 export function buildArtifactFeedbackPrompt(errors: string[]): string {

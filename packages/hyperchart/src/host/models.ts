@@ -11,7 +11,7 @@ export interface HyperchartInfo {
 }
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
-export type HyperchartStateStatus = "pending" | "running" | "done" | "failed" | "skipped" | "stale";
+export type HyperchartStateStatus = "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale";
 export type HyperchartStateType = "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
 
 export interface HyperchartUsageInfo {
@@ -178,6 +178,38 @@ export interface HyperchartVisitInfo {
 	invocation: HyperchartVisitInvocationInfo;
 }
 
+export interface HyperchartSessionMessageInfo {
+	id: string;
+	role: "user" | "assistant" | "reasoning" | "tool" | "system";
+	text?: string;
+	toolName?: string;
+	toolCallId?: string;
+	toolInput?: string;
+	toolOutput?: string;
+	toolStatus?: "running" | "completed" | "error";
+	isError?: boolean;
+	timestamp?: number;
+}
+
+export interface HyperchartAgentSessionInfo {
+	actionKey: string;
+	status: string;
+	startedAt?: number;
+	lastActivityAt?: number;
+	model?: string;
+	thinking?: string;
+	turnCount?: number;
+	toolCount?: number;
+	tokenCount?: number;
+	currentTool?: string;
+	currentToolArgs?: string;
+	currentText?: string;
+	currentReasoning?: string;
+	lastMessage?: string;
+	error?: string;
+	messages?: HyperchartSessionMessageInfo[];
+}
+
 export interface HyperchartStateInfo {
 	id: string;
 	type?: HyperchartStateType;
@@ -220,7 +252,7 @@ export interface HyperchartStateInfo {
 	mapKey?: string;
 	mapItemLabel?: string;
 	parallelConfig?: { branches?: HyperchartBranchInfo[]; count?: number };
-	subProgress?: { done: number; total: number; running: number; failed: number; stale?: number };
+	subProgress?: { done: number; total: number; running: number; failed: number; waiting?: number; stale?: number };
 	retry?: HyperchartRetryInfo;
 	attempts?: number;
 	validationAttempts?: number;
@@ -228,6 +260,7 @@ export interface HyperchartStateInfo {
 	visits?: number;
 	visitHistory?: HyperchartVisitInfo[];
 	issues?: HyperchartIssueInfo[];
+	session?: HyperchartAgentSessionInfo;
 }
 
 export interface HyperchartRunInfo {

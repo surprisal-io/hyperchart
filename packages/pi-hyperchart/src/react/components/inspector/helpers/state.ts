@@ -157,6 +157,7 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 				return [
 					`${progress.done} done`,
 					`${progress.running} running`,
+					progress.waiting ? `${progress.waiting} waiting` : undefined,
 					`${progress.failed} failed`,
 					progress.stale ? `${progress.stale} stale` : undefined,
 					`/ ${progress.total}`,

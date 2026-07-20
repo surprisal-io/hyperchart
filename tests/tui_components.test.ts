@@ -4,6 +4,7 @@ import type { TUI } from "@earendil-works/pi-tui";
 import {
 	RunHistoryOverlay,
 	type RunHistoryAction,
+	RunWidget,
 	type RunHistoryItem,
 } from "../packages/pi-hyperchart/src/tui/components.js";
 
@@ -61,6 +62,18 @@ describe("minimal Hyperchart TUI", () => {
 		picker.handleInput("\u001b[B");
 		picker.handleInput("\r");
 		expect(actions).toEqual([{ kind: "view", runId: "second-run" }]);
+	});
+
+	it("renders refresh failures instead of leaking an unhandled rejection", async () => {
+		const widget = new RunWidget(fakeTui(), testTheme, {
+			runId: "broken-run",
+			runDir: "/definitely-missing-hyperchart-run",
+			logPath: "/definitely-missing-hyperchart-run/log.jsonl",
+			ast: {} as never,
+		});
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(widget.render(120).join("\n")).toContain("inspect failed");
+		widget.dispose();
 	});
 
 	it("closes the picker with Escape", () => {

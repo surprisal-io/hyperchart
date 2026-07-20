@@ -12,6 +12,7 @@ export function hyperchartStatusClasses(status: string): string {
 		case "failed":
 			return "border-red-500/40 text-[var(--hc-red-text)] bg-red-500/10";
 		case "blocked":
+		case "waiting":
 		case "stale":
 			return "border-amber-500/40 text-[var(--hc-amber-text)] bg-amber-500/10";
 		case "paused":
@@ -34,6 +35,7 @@ export function hyperchartStatusDotClass(status: string): string {
 		case "failed":
 			return "bg-[var(--accent-red)]";
 		case "blocked":
+		case "waiting":
 		case "stale":
 			return "bg-[var(--accent-yellow)]";
 		case "paused":
@@ -56,6 +58,7 @@ export function hyperchartStatusIcon(status: string) {
 		case "failed":
 		case "blocked":
 			return ExclamationTriangleIcon;
+		case "waiting":
 		case "stale":
 			return ClockIcon;
 		default:

@@ -3,11 +3,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
-import type { AgentEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
 import type { AgentActionAst, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
 import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
-import { buildNudgePrompt, buildTaskPrompt } from "../packages/pi-hyperchart/src/runtime/pi/prompts.js";
+import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/pi-hyperchart/src/runtime/pi/prompts.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,
@@ -234,6 +234,24 @@ describe("pi executor helpers", () => {
 		expect(prompt).toContain("Plain text like `read<arg_key>...`");
 		expect(prompt).toContain("## Completion");
 		expect(prompt).not.toContain("invocationId");
+	});
+
+	it("pins the exact declared artifact path in validation correction prompts", () => {
+		const invocation = effect({ artifacts: [{ name: "research", path: "artifacts/research/deep/take/research-3.json" }] });
+		const rejected: RejectedEffect = {
+			kind: "rejected",
+			id: "chart:work:worker:1:2",
+			actionUid: invocation.actionUid,
+			event: { type: "DONE" },
+			onReject: "resume",
+			validationAttempts: 1,
+			reason: "source cap exceeded",
+			invocation,
+		};
+		const prompt = buildRejectPrompt(rejected);
+		expect(prompt).toContain("source cap exceeded");
+		expect(prompt).toContain("artifacts/research/deep/take/research-3.json");
+		expect(prompt).toContain("do not increment, rename, or version it yourself");
 	});
 
 	it("builds task prompts with selected reads, deliverables and completion contract", () => {

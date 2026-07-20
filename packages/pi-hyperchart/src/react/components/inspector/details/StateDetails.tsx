@@ -46,6 +46,7 @@ export function StateDetails({
 	onHighlightInput,
 	highlightedRefValue = null,
 	onHighlightRef,
+	onSteerSession,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -59,6 +60,7 @@ export function StateDetails({
 	onHighlightInput?: (name: string) => void;
 	highlightedRefValue?: string | null;
 	onHighlightRef?: (value: string) => void;
+	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 }) {
 	const kind = stateKindMeta(state);
 	const DetailKindIcon = kind.Icon;
@@ -189,6 +191,7 @@ export function StateDetails({
 								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+								{...(onSteerSession === undefined ? {} : { onSteerSession })}
 							/>
 						))}
 					</div>

@@ -626,6 +626,42 @@ describe("replay gauntlet", () => {
 		expect(live.state.projection.inputs).toEqual({ work: { feedback: "keep" } });
 	});
 
+	it("materializes target defaults after an exhausted validation retry", async () => {
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "gauntlet-input-retry-default-target",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker"),
+						validate: tsImport("./checks.js", "testsPass"),
+						retries: 0,
+						transitions: { DONE: "done", FAILED: "recover" },
+					},
+					recover: {
+						kind: "state",
+						input: { feedback: z.string().default("fallback") },
+						action: agent("fixer", { task: t`Fix: ${input("feedback")}` }),
+						transitions: { FIXED: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const live = await runLive(ast, {
+			agents: { work: ["DONE"], recover: ["FIXED"] },
+			verdicts: [{ ok: false, reason: "no" }],
+		});
+		const recoverAgent = live.runtime.effectBatches
+			.flat()
+			.find((effect) => effect.kind === "agent" && effect.actionUid.state === "recover");
+		expect(recoverAgent?.kind === "agent" ? recoverAgent.task : undefined).toBe("Fix: fallback");
+		expect(live.state.projection.inputs.recover).toEqual({ feedback: "fallback" });
+		expect(live.state.projection.activeLeaves).toEqual(["done"]);
+	});
+
 	it("transition input can drive a re-entered map fan-out", async () => {
 		const ast = make(
 			chart({

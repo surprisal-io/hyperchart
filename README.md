@@ -94,7 +94,7 @@ This makes crash recovery inspectable, but it does not undo external effects. A 
 
 ## Inspector
 
-The Pi package includes a terminal view and a React inspector built from canonical host models. Static chart information and runtime overlays remain separate.
+The Pi package includes a terminal view and a React inspector built from canonical host models. Static chart information and runtime overlays remain separate. Map actions held behind a `concurrency` limit appear as `waiting`, not as running sessions.
 
 ![Hyperchart inspector showing a running map state and its resolved details](assets/readme/inspector.png)
 

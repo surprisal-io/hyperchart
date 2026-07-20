@@ -5,6 +5,8 @@ export function mapItemDotClass(status?: string): string {
 	switch (status) {
 		case "running":
 			return "bg-[var(--accent-blue)]";
+		case "waiting":
+			return "bg-[var(--accent-yellow)]";
 		case "done":
 			return "bg-[var(--accent-green)]";
 		case "failed":
@@ -44,15 +46,17 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 		}));
 		const total = state.subProgress?.total ?? (state.mapConfig?.items !== undefined ? items.length : undefined);
 		const done = state.subProgress?.done ?? items.filter((item) => item.status === "done").length;
+		const waiting = state.subProgress?.waiting ?? items.filter((item) => item.status === "waiting").length;
 		const running = state.subProgress?.running ?? items.filter((item) => item.status === "running").length;
 		const failed = state.subProgress?.failed ?? items.filter((item) => item.status === "failed").length;
 		const stale = state.subProgress?.stale ?? items.filter((item) => item.status === "stale").length;
 		const pending =
 			total !== undefined
-				? Math.max(0, total - done - running - failed - stale)
+				? Math.max(0, total - done - waiting - running - failed - stale)
 				: items.filter(
 						(item) =>
 							item.status !== "done" &&
+							item.status !== "waiting" &&
 							item.status !== "running" &&
 							item.status !== "failed" &&
 							item.status !== "stale",
@@ -65,6 +69,7 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 				state.mapConfig?.items !== undefined ? "Nothing to fan out for this map." : "Waiting for the map item list.",
 			total,
 			done,
+			waiting,
 			running,
 			failed,
 			stale,
@@ -91,10 +96,11 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 		const total =
 			state.subProgress?.total ?? state.parallelConfig?.count ?? (entries.length > 0 ? entries.length : undefined);
 		const done = state.subProgress?.done ?? (state.status === "done" && total !== undefined ? total : 0);
+		const waiting = state.subProgress?.waiting ?? 0;
 		const running = state.subProgress?.running ?? 0;
 		const failed = state.subProgress?.failed ?? 0;
 		const stale = state.subProgress?.stale ?? 0;
-		const pending = total !== undefined ? Math.max(0, total - done - running - failed - stale) : 0;
+		const pending = total !== undefined ? Math.max(0, total - done - waiting - running - failed - stale) : 0;
 		return {
 			kind: "parallel",
 			label: "branches",
@@ -102,6 +108,7 @@ export function fanoutStatusSummary(state: HyperchartStateInfo): FanoutStatusSum
 			emptyHint: "Waiting for parallel branches.",
 			total,
 			done,
+			waiting,
 			running,
 			failed,
 			stale,

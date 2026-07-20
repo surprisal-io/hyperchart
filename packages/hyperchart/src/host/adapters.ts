@@ -1,7 +1,12 @@
 import { actionUidKey } from "../core/action_uid.js";
 import type { DurableLogRecord } from "../core/durable_events.js";
 import type { HyperchartInspectResult, HyperchartInspectState } from "../core/inspect.js";
-import { renderPendingActionInvocation, type ActionEffect, type RenderedArtifact } from "../core/machine.js";
+import {
+	concurrencyBlockedActionLeaves,
+	renderPendingActionInvocation,
+	type ActionEffect,
+	type RenderedArtifact,
+} from "../core/machine.js";
 import {
 	createBranchProjection,
 	projectBranch,
@@ -19,9 +24,11 @@ import {
 	underScope,
 } from "../core/paths.js";
 import type {
+	HyperchartAgentSessionInfo,
 	HyperchartInputInfo,
 	HyperchartIssueInfo,
 	HyperchartMapVisitInfo,
+	HyperchartSessionMessageInfo,
 	HyperchartStateInfo,
 	HyperchartRefInfo,
 	HyperchartRunInfo,
@@ -121,10 +128,17 @@ export type HyperchartRuntimeSessionProgressInfo = {
 	completedAt?: number;
 	sessionFile?: string;
 	model?: string;
+	thinking?: string;
 	turnCount?: number;
 	toolCount?: number;
 	tokenCount?: number;
+	currentTool?: string;
+	currentToolArgs?: string;
+	currentText?: string;
+	currentReasoning?: string;
+	lastMessage?: string;
 	error?: string;
+	messages?: HyperchartSessionMessageInfo[];
 };
 
 export type HyperchartRuntimeSessionProgressFile = {
@@ -271,11 +285,13 @@ type StateRuntimeFacts = {
 	attempts?: number;
 	visits?: number;
 	visitHistory?: HyperchartVisitInfo[];
+	session?: HyperchartAgentSessionInfo;
 };
 
 type RuntimeFacts = {
 	byState: Map<StatePath, StateRuntimeFacts>;
 	pendingByState: Map<StatePath, PendingAction>;
+	waitingLeaves: ReadonlySet<StatePath>;
 	issuesByState: Map<StatePath, HyperchartIssueInfo[]>;
 	mapVisitHistoryByState: Map<StatePath, HyperchartMapVisitInfo[]>;
 };
@@ -365,6 +381,7 @@ function markStaleRuntimeStates(
 		if (state.type === "map" && mapItemsWithStale !== undefined) {
 			const progressItems = currentMapItems(state.id, mapItemsWithStale, projection);
 			const done = progressItems.filter((item) => item.status === "done").length;
+			const waiting = progressItems.filter((item) => item.status === "waiting").length;
 			const running = progressItems.filter((item) => item.status === "running").length;
 			const failed = progressItems.filter((item) => item.status === "failed").length;
 			const stale = progressItems.filter((item) => item.status === "stale").length;
@@ -373,6 +390,7 @@ function markStaleRuntimeStates(
 				running,
 				failed,
 				total: progressItems.length,
+				...(waiting === 0 ? {} : { waiting }),
 				...(stale === 0 ? {} : { stale }),
 			};
 		} else if (state.type === "parallel" && state.subProgress !== undefined) {
@@ -383,7 +401,8 @@ function markStaleRuntimeStates(
 						(candidate) => candidate.id === branch.id || candidate.id.startsWith(`${branch.id}.`),
 					);
 					const hasCurrentWork = branchStates.some(
-						(candidate) => candidate.status === "running" || candidate.status === "failed",
+						(candidate) =>
+							candidate.status === "waiting" || candidate.status === "running" || candidate.status === "failed",
 					);
 					return !hasCurrentWork && branchStates.some((candidate) => staleIds.has(candidate.id));
 				}).length ?? 0;
@@ -635,8 +654,10 @@ function runtimeFacts(
 		byState.set(stateId, facts);
 	}
 	const mapVisitHistoryByState = runtimeMapVisitHistories(records, skippedRecords);
+	const waitingLeaves = concurrencyBlockedActionLeaves(ast, projection);
+	appendSessionFacts(byState, sessionProgress);
 	appendSessionIssues(issuesByState, sessionProgress);
-	return { byState, pendingByState, issuesByState, mapVisitHistoryByState };
+	return { byState, pendingByState, waitingLeaves, issuesByState, mapVisitHistoryByState };
 }
 
 function runtimeMapVisitHistories(
@@ -858,6 +879,36 @@ function validationRejectionReason(outcome: unknown): string | undefined {
 	return undefined;
 }
 
+function appendSessionFacts(
+	map: Map<StatePath, StateRuntimeFacts>,
+	progress: HyperchartRuntimeSessionProgressFile | undefined,
+): void {
+	if (progress === undefined) return;
+	for (const session of Object.values(progress.sessions)) {
+		const stateId = session.actionUid.state;
+		const facts = map.get(stateId) ?? {};
+		facts.session = {
+			actionKey: session.actionKey ?? actionUidKey(session.actionUid),
+			status: session.status ?? "unknown",
+			...(session.startedAt === undefined ? {} : { startedAt: session.startedAt }),
+			...(session.lastActivityAt === undefined ? {} : { lastActivityAt: session.lastActivityAt }),
+			...(session.model === undefined ? {} : { model: session.model }),
+			...(session.thinking === undefined ? {} : { thinking: session.thinking }),
+			...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
+			...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
+			...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),
+			...(session.currentTool === undefined ? {} : { currentTool: session.currentTool }),
+			...(session.currentToolArgs === undefined ? {} : { currentToolArgs: session.currentToolArgs }),
+			...(session.currentText === undefined ? {} : { currentText: session.currentText }),
+			...(session.currentReasoning === undefined ? {} : { currentReasoning: session.currentReasoning }),
+			...(session.lastMessage === undefined ? {} : { lastMessage: session.lastMessage }),
+			...(session.error === undefined ? {} : { error: session.error }),
+			...(session.messages === undefined ? {} : { messages: session.messages }),
+		};
+		map.set(stateId, facts);
+	}
+}
+
 function appendSessionIssues(
 	map: Map<StatePath, HyperchartIssueInfo[]>,
 	progress: HyperchartRuntimeSessionProgressFile | undefined,
@@ -1056,6 +1107,7 @@ function overlayRuntimeState(
 		...(latestRejectedReason === undefined ? {} : { validation: { latestRejectedReason } }),
 		...(facts?.visits === undefined ? {} : { visits: facts.visits }),
 		...(facts?.visitHistory === undefined ? {} : { visitHistory: facts.visitHistory }),
+		...(facts?.session === undefined ? {} : { session: facts.session }),
 		...(issues === undefined || issues.length === 0 ? {} : { issues }),
 		...(mapItem === undefined ? {} : mapItem),
 	};
@@ -1068,6 +1120,21 @@ function overlayRuntimeState(
 	if (state.type === "map") return overlayMapRuntime(next, ast, projection, runtime);
 	if (state.type === "parallel") return overlayParallelRuntime(next, ast, projection, runtime);
 	return next;
+}
+
+function activeLeavesStatus(
+	activeLeaves: readonly StatePath[],
+	ast: ChartAst,
+	runtime: RuntimeFacts,
+	finalLeavesAreDone = false,
+): "running" | "waiting" | "done" | undefined {
+	if (activeLeaves.length === 0) return undefined;
+	if (activeLeaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final")) {
+		return finalLeavesAreDone ? "done" : "running";
+	}
+	const actionLeaves = activeLeaves.filter((leaf) => nodeAt(ast, leaf)?.kind === "state");
+	if (actionLeaves.length > 0 && actionLeaves.every((leaf) => runtime.waitingLeaves.has(leaf))) return "waiting";
+	return "running";
 }
 
 function runtimeStateStatus(
@@ -1088,7 +1155,12 @@ function runtimeStateStatus(
 		scopeReachedFinal(state.id, ast, projection, runtime)
 	)
 		return "done";
-	if (projection.activeLeaves.some((leaf) => leaf === state.id || underScope(leaf, state.id))) return "running";
+	const activeStatus = activeLeavesStatus(
+		projection.activeLeaves.filter((leaf) => leaf === state.id || underScope(leaf, state.id)),
+		ast,
+		runtime,
+	);
+	if (activeStatus !== undefined) return activeStatus;
 	if (facts?.completedAt !== undefined) return "done";
 	if (closedByCompletedAncestor(state.id, ast, projection, runtime)) return "done";
 	if (state.type === "map") {
@@ -1098,6 +1170,7 @@ function runtimeStateStatus(
 			if (items.every((item) => item.status === "done")) return "done";
 			if (items.some((item) => item.status === "failed")) return "failed";
 			if (items.some((item) => item.status === "running")) return "running";
+			if (items.some((item) => item.status === "waiting")) return "waiting";
 		}
 	}
 	if (state.type === "parallel") {
@@ -1110,6 +1183,7 @@ function runtimeStateStatus(
 		);
 		if (progress.failed > 0) return "failed";
 		if (progress.running > 0) return "running";
+		if ((progress.waiting ?? 0) > 0) return "waiting";
 		if (progress.total > 0 && progress.done === progress.total) return "done";
 	}
 	const node = ast.states[state.id];
@@ -1136,6 +1210,7 @@ function overlayMapRuntime(
 	if (items.length === 0 && projection.spawns[state.id] === undefined && visitHistory === undefined) return state;
 	const progressItems = currentMapItems(state.id, items, projection);
 	const done = progressItems.filter((item) => item.status === "done").length;
+	const waiting = progressItems.filter((item) => item.status === "waiting").length;
 	const running = progressItems.filter((item) => item.status === "running").length;
 	const failed = progressItems.filter((item) => item.status === "failed").length;
 	const stale = progressItems.filter((item) => item.status === "stale").length;
@@ -1147,7 +1222,14 @@ function overlayMapRuntime(
 			items,
 			...(visitHistory === undefined ? {} : { visitHistory }),
 		},
-		subProgress: { done, running, failed, total: progressItems.length, ...(stale === 0 ? {} : { stale }) },
+		subProgress: {
+			done,
+			running,
+			failed,
+			total: progressItems.length,
+			...(waiting === 0 ? {} : { waiting }),
+			...(stale === 0 ? {} : { stale }),
+		},
 	};
 }
 
@@ -1269,8 +1351,12 @@ function mapItemStatus(
 	const childFacts = [...runtime.byState.entries()].filter(([path]) => underScope(path, instancePath));
 	if (childFacts.some(([, facts]) => facts.completedEvent?.type === "FAILED")) return "failed";
 	const activeLeaves = projection.activeLeaves.filter((leaf) => underScope(leaf, instancePath));
-	if (activeLeaves.length > 0)
-		return ast !== undefined && activeLeaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final") ? "done" : "running";
+	if (ast !== undefined) {
+		const activeStatus = activeLeavesStatus(activeLeaves, ast, runtime, true);
+		if (activeStatus !== undefined) return activeStatus;
+	} else if (activeLeaves.length > 0) {
+		return "running";
+	}
 	if (childFacts.some(([, facts]) => facts.completedAt !== undefined)) return "done";
 	return "pending";
 }
@@ -1319,15 +1405,17 @@ function fanoutProgressForScope(
 					),
 				];
 	let done = 0;
+	let waiting = 0;
 	let running = 0;
 	let failed = 0;
 	for (const childScope of scopes) {
 		const status = scopeStatus(childScope, projection, runtime, ast);
 		if (status === "done") done++;
 		else if (status === "failed") failed++;
+		else if (status === "waiting") waiting++;
 		else if (status === "running") running++;
 	}
-	return { done, running, failed, total: scopes.length };
+	return { done, running, failed, total: scopes.length, ...(waiting === 0 ? {} : { waiting }) };
 }
 
 function directChildScope(scope: StatePath, leaf: StatePath): string | undefined {
@@ -1350,8 +1438,12 @@ function scopeStatus(
 	const facts = [...runtime.byState.entries()].filter(([path]) => underScope(path, scope));
 	if (facts.some(([, fact]) => fact.completedEvent?.type === "FAILED")) return "failed";
 	const activeLeaves = projection.activeLeaves.filter((leaf) => underScope(leaf, scope));
-	if (activeLeaves.length > 0)
-		return ast !== undefined && activeLeaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final") ? "done" : "running";
+	if (ast !== undefined) {
+		const activeStatus = activeLeavesStatus(activeLeaves, ast, runtime, true);
+		if (activeStatus !== undefined) return activeStatus;
+	} else if (activeLeaves.length > 0) {
+		return "running";
+	}
 	if (facts.some(([, fact]) => fact.completedAt !== undefined)) return "done";
 	return "pending";
 }
