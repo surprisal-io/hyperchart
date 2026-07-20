@@ -24,6 +24,8 @@ export type HyperchartSessionProgress = {
 	currentTool?: string;
 	currentToolArgs?: string;
 	currentToolStartedAt?: number;
+	currentText?: string;
+	currentReasoning?: string;
 	lastMessage?: string;
 	error?: string;
 };
@@ -72,6 +74,8 @@ export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID,
 	const currentTool = valueFor("currentTool", patch, previous);
 	const currentToolArgs = valueFor("currentToolArgs", patch, previous);
 	const currentToolStartedAt = valueFor("currentToolStartedAt", patch, previous);
+	const currentText = valueFor("currentText", patch, previous);
+	const currentReasoning = valueFor("currentReasoning", patch, previous);
 	const lastMessage = valueFor("lastMessage", patch, previous);
 	const error = valueFor("error", patch, previous);
 	const next: HyperchartSessionProgress = {
@@ -91,6 +95,8 @@ export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID,
 		...(currentTool === undefined ? {} : { currentTool }),
 		...(currentToolArgs === undefined ? {} : { currentToolArgs }),
 		...(currentToolStartedAt === undefined ? {} : { currentToolStartedAt }),
+		...(currentText === undefined ? {} : { currentText }),
+		...(currentReasoning === undefined ? {} : { currentReasoning }),
 		...(lastMessage === undefined ? {} : { lastMessage }),
 		...(error === undefined ? {} : { error }),
 	};
@@ -127,6 +133,8 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 			...(typeof entry.currentTool === "string" ? { currentTool: entry.currentTool } : {}),
 			...(typeof entry.currentToolArgs === "string" ? { currentToolArgs: entry.currentToolArgs } : {}),
 			...(typeof entry.currentToolStartedAt === "number" ? { currentToolStartedAt: entry.currentToolStartedAt } : {}),
+			...(typeof entry.currentText === "string" ? { currentText: entry.currentText } : {}),
+			...(typeof entry.currentReasoning === "string" ? { currentReasoning: entry.currentReasoning } : {}),
 			...(typeof entry.lastMessage === "string" ? { lastMessage: entry.lastMessage } : {}),
 			...(typeof entry.error === "string" ? { error: entry.error } : {}),
 		};

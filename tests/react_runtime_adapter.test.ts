@@ -1586,14 +1586,31 @@ describe("React runtime adapter", () => {
 							error: "session crashed",
 							startedAt: 1000,
 							lastActivityAt: 2500,
+							model: "test/model",
+							thinking: "medium",
 							turnCount: 3,
 							toolCount: 4,
+							currentTool: "read",
+							currentToolArgs: '{"path":"src/a.ts"}',
+							currentText: "Reading the file…",
+							currentReasoning: "Need the current implementation first.",
+							messages: [{ id: "m1", role: "assistant", text: "Working" }],
 						},
 					},
 				},
 			},
 		);
 		const work = run.states.find((state) => state.id === "work");
+		expect(work?.session).toMatchObject({
+			actionKey: actionUidKey(uid),
+			status: "failed",
+			model: "test/model",
+			thinking: "medium",
+			currentTool: "read",
+			currentText: "Reading the file…",
+			currentReasoning: "Need the current implementation first.",
+			messages: [{ id: "m1", role: "assistant", text: "Working" }],
+		});
 		expect(work?.issues).toMatchObject([
 			{
 				severity: "error",

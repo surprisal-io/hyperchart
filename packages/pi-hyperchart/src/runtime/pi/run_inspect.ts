@@ -12,6 +12,7 @@ import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
 import { loadRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
 import { readRunStatus } from "./run_status.js";
 import { readSessionProgress } from "./session_progress.js";
+import { readSessionTranscript } from "./session_transcript.js";
 
 export type HyperchartRunFromRunDirOptions = {
 	meta?: RunMeta;
@@ -35,7 +36,17 @@ export async function hyperchartRunFromRunDir(
 	});
 	const records = options.records ?? await new JsonlLogStore(resolve(absoluteRunDir, "log.jsonl")).readAll();
 	const status = readRunStatus(absoluteRunDir);
-	const sessionProgress = readSessionProgress(resolve(absoluteRunDir, "sessions"));
+	const sessionsDir = resolve(absoluteRunDir, "sessions");
+	const rawSessionProgress = readSessionProgress(sessionsDir);
+	const sessionProgress = {
+		...rawSessionProgress,
+		sessions: Object.fromEntries(
+			Object.entries(rawSessionProgress.sessions).map(([key, session]) => {
+				const messages = readSessionTranscript(sessionsDir, session.sessionFile);
+				return [key, { ...session, ...(messages === undefined ? {} : { messages }) }];
+			}),
+		),
+	};
 	const createdAt = Date.parse(meta.createdAt);
 	return hyperchartRunFromRuntime(inspect, ast, records, {
 		runId: status?.runId ?? basename(absoluteRunDir),

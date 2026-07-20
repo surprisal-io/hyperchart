@@ -19,9 +19,11 @@ import {
 	underScope,
 } from "../core/paths.js";
 import type {
+	HyperchartAgentSessionInfo,
 	HyperchartInputInfo,
 	HyperchartIssueInfo,
 	HyperchartMapVisitInfo,
+	HyperchartSessionMessageInfo,
 	HyperchartStateInfo,
 	HyperchartRefInfo,
 	HyperchartRunInfo,
@@ -121,10 +123,17 @@ export type HyperchartRuntimeSessionProgressInfo = {
 	completedAt?: number;
 	sessionFile?: string;
 	model?: string;
+	thinking?: string;
 	turnCount?: number;
 	toolCount?: number;
 	tokenCount?: number;
+	currentTool?: string;
+	currentToolArgs?: string;
+	currentText?: string;
+	currentReasoning?: string;
+	lastMessage?: string;
 	error?: string;
+	messages?: HyperchartSessionMessageInfo[];
 };
 
 export type HyperchartRuntimeSessionProgressFile = {
@@ -271,6 +280,7 @@ type StateRuntimeFacts = {
 	attempts?: number;
 	visits?: number;
 	visitHistory?: HyperchartVisitInfo[];
+	session?: HyperchartAgentSessionInfo;
 };
 
 type RuntimeFacts = {
@@ -635,6 +645,7 @@ function runtimeFacts(
 		byState.set(stateId, facts);
 	}
 	const mapVisitHistoryByState = runtimeMapVisitHistories(records, skippedRecords);
+	appendSessionFacts(byState, sessionProgress);
 	appendSessionIssues(issuesByState, sessionProgress);
 	return { byState, pendingByState, issuesByState, mapVisitHistoryByState };
 }
@@ -858,6 +869,36 @@ function validationRejectionReason(outcome: unknown): string | undefined {
 	return undefined;
 }
 
+function appendSessionFacts(
+	map: Map<StatePath, StateRuntimeFacts>,
+	progress: HyperchartRuntimeSessionProgressFile | undefined,
+): void {
+	if (progress === undefined) return;
+	for (const session of Object.values(progress.sessions)) {
+		const stateId = session.actionUid.state;
+		const facts = map.get(stateId) ?? {};
+		facts.session = {
+			actionKey: session.actionKey ?? actionUidKey(session.actionUid),
+			status: session.status ?? "unknown",
+			...(session.startedAt === undefined ? {} : { startedAt: session.startedAt }),
+			...(session.lastActivityAt === undefined ? {} : { lastActivityAt: session.lastActivityAt }),
+			...(session.model === undefined ? {} : { model: session.model }),
+			...(session.thinking === undefined ? {} : { thinking: session.thinking }),
+			...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
+			...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
+			...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),
+			...(session.currentTool === undefined ? {} : { currentTool: session.currentTool }),
+			...(session.currentToolArgs === undefined ? {} : { currentToolArgs: session.currentToolArgs }),
+			...(session.currentText === undefined ? {} : { currentText: session.currentText }),
+			...(session.currentReasoning === undefined ? {} : { currentReasoning: session.currentReasoning }),
+			...(session.lastMessage === undefined ? {} : { lastMessage: session.lastMessage }),
+			...(session.error === undefined ? {} : { error: session.error }),
+			...(session.messages === undefined ? {} : { messages: session.messages }),
+		};
+		map.set(stateId, facts);
+	}
+}
+
 function appendSessionIssues(
 	map: Map<StatePath, HyperchartIssueInfo[]>,
 	progress: HyperchartRuntimeSessionProgressFile | undefined,
@@ -1056,6 +1097,7 @@ function overlayRuntimeState(
 		...(latestRejectedReason === undefined ? {} : { validation: { latestRejectedReason } }),
 		...(facts?.visits === undefined ? {} : { visits: facts.visits }),
 		...(facts?.visitHistory === undefined ? {} : { visitHistory: facts.visitHistory }),
+		...(facts?.session === undefined ? {} : { session: facts.session }),
 		...(issues === undefined || issues.length === 0 ? {} : { issues }),
 		...(mapItem === undefined ? {} : mapItem),
 	};

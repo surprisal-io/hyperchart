@@ -345,14 +345,54 @@ export class PiAgentExecutor implements AgentExecutor {
 		let turnCount = 0;
 		let toolCount = 0;
 		let tokenCount = 0;
-		return session.subscribe((event) => {
+		let currentText = "";
+		let currentReasoning = "";
+		let lastStreamWrite = 0;
+		let streamTimer: NodeJS.Timeout | undefined;
+		const clearStreamTimer = () => {
+			if (streamTimer !== undefined) clearTimeout(streamTimer);
+			streamTimer = undefined;
+		};
+		const publishStream = () => {
+			clearStreamTimer();
+			lastStreamWrite = Date.now();
+			updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				actionName: definition.name,
+				status: "running",
+				currentText: currentText.length === 0 ? undefined : currentText.slice(-32_000),
+				currentReasoning: currentReasoning.length === 0 ? undefined : currentReasoning.slice(-32_000),
+			});
+		};
+		const scheduleStreamWrite = () => {
+			const wait = 250 - (Date.now() - lastStreamWrite);
+			if (wait <= 0) {
+				publishStream();
+				return;
+			}
+			if (streamTimer === undefined) {
+				streamTimer = setTimeout(publishStream, wait);
+				streamTimer.unref();
+			}
+		};
+		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "turn_start") {
 				turnCount++;
+				currentText = "";
+				currentReasoning = "";
+				clearStreamTimer();
 				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
 					actionName: definition.name,
 					status: "running",
 					turnCount,
+					currentText: undefined,
+					currentReasoning: undefined,
 				});
+				return;
+			}
+			if (event.type === "message_update") {
+				if (event.assistantMessageEvent.type === "text_delta") currentText += event.assistantMessageEvent.delta;
+				if (event.assistantMessageEvent.type === "thinking_delta") currentReasoning += event.assistantMessageEvent.delta;
+				scheduleStreamWrite();
 				return;
 			}
 			if (event.type === "tool_execution_start") {
@@ -381,15 +421,23 @@ export class PiAgentExecutor implements AgentExecutor {
 			}
 			if (event.type === "message_end") {
 				tokenCount += usageTokens(event.message);
+				currentText = "";
+				currentReasoning = "";
+				clearStreamTimer();
 				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
 					actionName: definition.name,
 					status: "running",
+					currentText: undefined,
+					currentReasoning: undefined,
 					lastMessage: messagePreview(event.message),
 					...(tokenCount > 0 ? { tokenCount } : {}),
 				});
 				return;
 			}
 			if (event.type === "agent_end") {
+				currentText = "";
+				currentReasoning = "";
+				clearStreamTimer();
 				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
 					actionName: definition.name,
 					status: event.willRetry ? "running" : "completed",
@@ -397,9 +445,15 @@ export class PiAgentExecutor implements AgentExecutor {
 					currentTool: undefined,
 					currentToolArgs: undefined,
 					currentToolStartedAt: undefined,
+					currentText: undefined,
+					currentReasoning: undefined,
 				});
 			}
 		});
+		return () => {
+			clearStreamTimer();
+			unsubscribe();
+		};
 	}
 
 	private markProgressFailed(actionUid: ActionUID, error: string): void {

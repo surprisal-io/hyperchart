@@ -178,6 +178,38 @@ export interface HyperchartVisitInfo {
 	invocation: HyperchartVisitInvocationInfo;
 }
 
+export interface HyperchartSessionMessageInfo {
+	id: string;
+	role: "user" | "assistant" | "reasoning" | "tool" | "system";
+	text?: string;
+	toolName?: string;
+	toolCallId?: string;
+	toolInput?: string;
+	toolOutput?: string;
+	toolStatus?: "running" | "completed" | "error";
+	isError?: boolean;
+	timestamp?: number;
+}
+
+export interface HyperchartAgentSessionInfo {
+	actionKey: string;
+	status: string;
+	startedAt?: number;
+	lastActivityAt?: number;
+	model?: string;
+	thinking?: string;
+	turnCount?: number;
+	toolCount?: number;
+	tokenCount?: number;
+	currentTool?: string;
+	currentToolArgs?: string;
+	currentText?: string;
+	currentReasoning?: string;
+	lastMessage?: string;
+	error?: string;
+	messages?: HyperchartSessionMessageInfo[];
+}
+
 export interface HyperchartStateInfo {
 	id: string;
 	type?: HyperchartStateType;
@@ -228,6 +260,7 @@ export interface HyperchartStateInfo {
 	visits?: number;
 	visitHistory?: HyperchartVisitInfo[];
 	issues?: HyperchartIssueInfo[];
+	session?: HyperchartAgentSessionInfo;
 }
 
 export interface HyperchartRunInfo {
