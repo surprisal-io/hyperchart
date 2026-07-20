@@ -30,7 +30,10 @@ function InspectorApp() {
 			return;
 		}
 		let disposed = false;
+		let loading = false;
 		const load = async () => {
+			if (loading) return;
+			loading = true;
 			try {
 				const response = await fetch(`/api/runs/${token}`, { cache: "no-store" });
 				const payload = (await response.json()) as RunResponse;
@@ -41,10 +44,12 @@ function InspectorApp() {
 				}
 			} catch (nextError) {
 				if (!disposed) setError(nextError instanceof Error ? nextError.message : String(nextError));
+			} finally {
+				loading = false;
 			}
 		};
 		void load();
-		const timer = window.setInterval(() => void load(), 1_000);
+		const timer = window.setInterval(() => void load(), 400);
 		return () => {
 			disposed = true;
 			window.clearInterval(timer);
@@ -55,6 +60,17 @@ function InspectorApp() {
 		const next = theme === "dark" ? "light" : "dark";
 		window.localStorage.setItem("hyperchart-inspector-theme", next);
 		setTheme(next);
+	};
+
+	const steerSession = async (_runId: string, actionKey: string, message: string) => {
+		if (token === undefined) throw new Error("Invalid inspector URL");
+		const response = await fetch(`/api/runs/${token}/steer`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ actionKey, message }),
+		});
+		const payload = (await response.json()) as { error?: string };
+		if (!response.ok) throw new Error(payload.error ?? `Steering request failed (${response.status})`);
 	};
 
 	return (
@@ -71,6 +87,7 @@ function InspectorApp() {
 					runs={[run]}
 					selectedRunId={run.runId}
 					onClose={() => window.close()}
+					onSteerSession={steerSession}
 					theme={{ resolved: theme, themeName: theme }}
 				/>
 			) : (

@@ -254,6 +254,35 @@ function pushSpawned(builder: StoryLogBuilder, path: StatePath, instances: Recor
 	});
 }
 
+function storyLiveSession(ast: ChartAst, statePath: StatePath): HyperchartRuntimeSessionProgressFile {
+	const actionUid = storyActionUid(ast, statePath);
+	return {
+		updatedAt: 1_700_000_060_000,
+		sessions: {
+			[JSON.stringify(actionUid)]: {
+				actionUid,
+				status: "running",
+				startedAt: 1_700_000_000_000,
+				lastActivityAt: 1_700_000_060_000,
+				model: "claude-sonnet",
+				thinking: "medium",
+				turnCount: 3,
+				toolCount: 4,
+				tokenCount: 8_412,
+				currentTool: "edit",
+				currentToolArgs: '{\n  "path": "src/react/session.tsx"\n}',
+				lastMessage: "I found the existing inspector styles and am wiring the live session view.",
+				messages: [
+					{ id: "m1", role: "user", text: "Add the live agent session view and keep it consistent with the inspector.", timestamp: 1_700_000_000_000 },
+					{ id: "m2", role: "assistant", text: "I’ll inspect the existing card and modal patterns first.", timestamp: 1_700_000_010_000 },
+					{ id: "m3", role: "tool", toolName: "read", text: "AgentInfoCard.tsx\nHyperchartInspectorDialogInner.tsx", timestamp: 1_700_000_020_000 },
+					{ id: "m4", role: "assistant", text: "The inspector already has the right portal and theme primitives. I’m reusing those and adding a compact transcript renderer.", timestamp: 1_700_000_040_000 },
+				],
+			},
+		},
+	};
+}
+
 function storySessionFailure(
 	ast: ChartAst,
 	statePath: StatePath,
@@ -432,6 +461,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				pushInvoke(b, ast, "rich-agent");
 				return b.records;
 			},
+			sessionProgress: (ast) => storyLiveSession(ast, "rich-agent"),
 		},
 	},
 	{

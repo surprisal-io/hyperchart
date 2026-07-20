@@ -45,6 +45,7 @@ const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
 	miniMapBackgroundColor,
 	onNodeClick,
 	onNodeDoubleClick,
+	onPaneClick,
 }: {
 	runId: string;
 	graph: GraphLayout;
@@ -53,6 +54,7 @@ const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
 	miniMapBackgroundColor: string;
 	onNodeClick: NodeMouseHandler<StateNode>;
 	onNodeDoubleClick: NodeMouseHandler<StateNode>;
+	onPaneClick: () => void;
 }) {
 	return (
 		<ReactFlow
@@ -69,6 +71,7 @@ const InspectorGraphCanvas = React.memo(function InspectorGraphCanvas({
 			nodesDraggable={false}
 			onNodeClick={onNodeClick}
 			onNodeDoubleClick={onNodeDoubleClick}
+			onPaneClick={onPaneClick}
 		>
 			<Controls position="bottom-left" />
 			{!isMobile && (
@@ -91,6 +94,7 @@ export function HyperchartInspectorDialogInner({
 	onClose,
 	onResume,
 	onAbort,
+	onSteerSession,
 }: Omit<HyperchartInspectorDialogProps, "portal" | "theme">) {
 	const isMobile = useMobile();
 	const titleId = useId();
@@ -149,6 +153,7 @@ export function HyperchartInspectorDialogInner({
 		setScopeStack((prev) => [...prev, state.id]);
 		setSelectedStateId(null);
 	}, []);
+	const clearStateSelection = useCallback(() => setSelectedStateId(null), []);
 	const handleNodeClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => setSelectedStateId(node.id), []);
 	const handleNodeDoubleClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => openScope(node.id), [openScope]);
 
@@ -351,13 +356,18 @@ export function HyperchartInspectorDialogInner({
 									miniMapBackgroundColor={miniMapBackgroundColor}
 									onNodeClick={handleNodeClick}
 									onNodeDoubleClick={handleNodeDoubleClick}
+									onPaneClick={clearStateSelection}
 								/>
 							</div>
 						</main>
 						<HyperchartInspectorSidePanel
 							run={run}
 							selectedStateId={selectedState?.id ?? null}
+							onClearSelection={clearStateSelection}
 							onOpenScope={openScope}
+							{...(onSteerSession === undefined
+								? {}
+								: { onSteerSession: (actionKey: string, message: string) => onSteerSession(run.runId, actionKey, message) })}
 						/>
 					</div>
 				</div>
