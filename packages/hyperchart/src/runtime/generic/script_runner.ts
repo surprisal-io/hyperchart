@@ -124,6 +124,7 @@ export class ScriptRunner {
 		if (key !== undefined) this.live.set(key, { child });
 		let stdout = "";
 		let stderr = "";
+		let stdinError: Error | undefined;
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => {
@@ -132,9 +133,18 @@ export class ScriptRunner {
 		child.stderr.on("data", (chunk: string) => {
 			stderr += chunk;
 		});
+		child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+			// A guard is allowed to ignore stdin. Large completion envelopes can still be in flight
+			// when such a guard exits, causing the parent-side pipe to report EPIPE. The child exit
+			// status remains authoritative; without this listener Node terminates the runner.
+			if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") stdinError = error;
+		});
 		if (stdin !== undefined) child.stdin.end(stdin);
 		try {
 			const exit = await waitForExit(child);
+			if (stdinError !== undefined && exit.code === 0) {
+				return { code: 1, signal: exit.signal, stdout, stderr: `${stderr}${stdinError.message}` };
+			}
 			return { ...exit, stdout, stderr };
 		} finally {
 			if (key !== undefined) {

@@ -323,6 +323,20 @@ describe("guards", () => {
 		).resolves.toEqual({ ok: false, reason: "nope" });
 	});
 
+	it("does not crash when a guard exits without consuming a large stdin event", async () => {
+		const dir = await makeTempDir();
+		const runner = new ScriptRunner({ workDir: dir });
+		await expect(
+			withTimeout(
+				runner.runGuard(
+					{ kind: "script", command: node, args: ["-e", "process.exit(0)"] },
+					{ type: "DONE", output: { payload: "x".repeat(8 * 1024 * 1024) } },
+				),
+			),
+		).resolves.toBe(true);
+		await runner.dispose();
+	});
+
 	it("drains script guard stdout so verbose guards can exit", async () => {
 		const dir = await makeTempDir();
 		await expect(
