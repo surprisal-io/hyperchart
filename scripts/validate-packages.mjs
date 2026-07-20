@@ -40,7 +40,20 @@ try {
 		},
 		{
 			dir: "packages/claude-hyperchart",
-			expected: ["dist/index.js", "dist/index.d.ts", "LICENSE", "README.md"],
+			expected: [
+				"dist/index.js",
+				"dist/index.d.ts",
+				"dist/mcp/server.js",
+				"dist/claude/hyperchart_runner.js",
+				"src/claude/hyperchart_runner.mjs",
+				"bin/hyperchart-mcp.mjs",
+				".claude-plugin/plugin.json",
+				"hooks/hooks.json",
+				"hooks/session_start.mjs",
+				"skills/hyperchart/SKILL.md",
+				"LICENSE",
+				"README.md",
+			],
 		},
 		{
 			dir: "packages/pi-hyperchart",
