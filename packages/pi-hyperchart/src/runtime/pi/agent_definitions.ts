@@ -1,47 +1,24 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import type { HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect_ast";
+import {
+	createAgentDefaultsResolver as createDefaultsResolverForDirs,
+	loadAgentDefinition as loadAgentDefinitionGeneric,
+	uniqueExistingDirs,
+	type AgentDefinition,
+	type ThinkingLevel,
+} from "@surprisal/hyperchart/runtime";
 
-export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type { AgentDefinition, ThinkingLevel };
 
-export type AgentDefinition = {
-	name: string;
-	description?: string;
-	systemPrompt: string;
-	tools?: string[];
-	model?: string;
-	thinking?: ThinkingLevel;
-	systemPromptMode?: "replace" | "append";
-};
-
-type AgentFrontmatter = {
-	name?: unknown;
-	package?: unknown;
-	description?: unknown;
-	tools?: unknown;
-	model?: unknown;
-	thinking?: unknown;
-	systemPromptMode?: unknown;
-	system_prompt_mode?: unknown;
-};
-
-const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+// Pi's own frontmatter parser keeps definition parsing byte-compatible with the
+// rest of the Pi agent ecosystem.
+const parsePiFrontmatter = (content: string) => parseFrontmatter<Record<string, unknown>>(content);
 
 export function loadAgentDefinition(name: string, dirs: string[]): AgentDefinition {
-	for (const dir of dirs) {
-		const direct = parseAgentFile(join(dir, `${name}.md`), name);
-		if (direct !== undefined) return direct;
-	}
-
-	for (const dir of dirs) {
-		for (const path of listAgentFiles(dir)) {
-			const definition = parseAgentFile(path, name);
-			if (definition !== undefined) return definition;
-		}
-	}
-	throw new Error(`Agent definition '${name}' not found in ${dirs.join(", ")}`);
+	return loadAgentDefinitionGeneric(name, dirs, parsePiFrontmatter);
 }
 
 export function resolvePiSubagentDefinitionDirs(cwd: string, agentDir: string = getAgentDir(), chartPath?: string): string[] {
@@ -59,61 +36,7 @@ export function createAgentDefaultsResolver(
 	agentDir: string = getAgentDir(),
 	chartPath?: string,
 ): (agentName: string) => HyperchartInspectAgentDefaults {
-	const dirs = resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath);
-	const cache = new Map<string, HyperchartInspectAgentDefaults>();
-	return (agentName) => {
-		const cached = cache.get(agentName);
-		if (cached !== undefined) return cached;
-		let defaults: HyperchartInspectAgentDefaults;
-		try {
-			const definition = loadAgentDefinition(agentName, dirs);
-			defaults = {
-				...(definition.description === undefined ? {} : { description: definition.description }),
-				...(definition.model === undefined ? {} : { model: definition.model }),
-				...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
-				...(definition.tools === undefined ? {} : { tools: definition.tools }),
-			};
-		} catch {
-			defaults = { agentDefinitionUnavailable: true };
-		}
-		cache.set(agentName, defaults);
-		return defaults;
-	};
-}
-
-function parseAgentFile(path: string, requestedName: string): AgentDefinition | undefined {
-	if (!existsSync(path)) return undefined;
-	let content: string;
-	try {
-		content = readFileSync(path, "utf8");
-	} catch {
-		return undefined;
-	}
-	let parsed: { frontmatter: AgentFrontmatter; body: string };
-	try {
-		parsed = parseFrontmatter<AgentFrontmatter>(content);
-	} catch {
-		return undefined;
-	}
-	const { frontmatter, body } = parsed;
-	const localName =
-		typeof frontmatter.name === "string" && frontmatter.name.trim() !== "" ? frontmatter.name.trim() : fileStem(path);
-	const packageName = parsePackageName(frontmatter.package);
-	const runtimeName = packageName === undefined ? localName : `${packageName}.${localName}`;
-	if (requestedName !== runtimeName && requestedName !== localName && requestedName !== fileStem(path))
-		return undefined;
-
-	const tools = parseTools(frontmatter.tools);
-	const thinking = parseThinking(frontmatter.thinking);
-	return {
-		name: runtimeName,
-		...(typeof frontmatter.description === "string" ? { description: frontmatter.description } : {}),
-		systemPrompt: body.trim(),
-		...(tools === undefined ? {} : { tools }),
-		...(typeof frontmatter.model === "string" ? { model: frontmatter.model } : {}),
-		...(thinking === undefined ? {} : { thinking }),
-		systemPromptMode: parsePromptMode(frontmatter.systemPromptMode ?? frontmatter.system_prompt_mode, localName),
-	};
+	return createDefaultsResolverForDirs(resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath), parsePiFrontmatter);
 }
 
 function projectAgentDirs(cwd: string): string[] {
@@ -219,87 +142,6 @@ function findNearestProjectRoot(cwd: string): string | undefined {
 		if (parent === current) return undefined;
 		current = parent;
 	}
-}
-
-function listAgentFiles(dir: string): string[] {
-	if (!isDirectory(dir)) return [];
-	const files: string[] = [];
-	walk(dir, files);
-	return files.sort();
-}
-
-function walk(dir: string, files: string[]): void {
-	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		const path = join(dir, entry.name);
-		if (entry.isDirectory()) {
-			if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-			walk(path, files);
-		} else if (entry.isFile() && entry.name.endsWith(".md") && !entry.name.endsWith(".chain.md")) {
-			if (!isLegacyAgentSkillPath(path)) files.push(path);
-		}
-	}
-}
-
-function isLegacyAgentSkillPath(path: string): boolean {
-	return path.split(/[\\/]/).some((part, index, parts) => part === ".agents" && parts[index + 1] === "skills");
-}
-
-function uniqueExistingDirs(dirs: string[]): string[] {
-	const out: string[] = [];
-	const seen = new Set<string>();
-	for (const dir of dirs) {
-		const resolved = resolve(dir);
-		if (seen.has(resolved) || !isDirectory(resolved)) continue;
-		seen.add(resolved);
-		out.push(resolved);
-	}
-	return out;
-}
-
-function parsePackageName(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
-	const normalized = value
-		.trim()
-		.toLowerCase()
-		.replace(/\s+/g, "-")
-		.replace(/[^a-z0-9.-]/g, "")
-		.replace(/-+/g, "-")
-		.replace(/\.+/g, ".")
-		.replace(/(?:^[-.]+|[-.]+$)/g, "");
-	return normalized.length === 0 ? undefined : normalized;
-}
-
-function parseTools(value: unknown): string[] | undefined {
-	if (Array.isArray(value)) {
-		const tools = value
-			.filter((entry): entry is string => typeof entry === "string")
-			.map((entry) => entry.trim())
-			.filter(Boolean);
-		return tools.length === 0 ? undefined : tools;
-	}
-	if (typeof value === "string") {
-		const tools = value
-			.split(",")
-			.map((entry) => entry.trim())
-			.filter(Boolean);
-		return tools.length === 0 ? undefined : tools;
-	}
-	return undefined;
-}
-
-function parseThinking(value: unknown): ThinkingLevel | undefined {
-	return typeof value === "string" && THINKING_LEVELS.has(value as ThinkingLevel)
-		? (value as ThinkingLevel)
-		: undefined;
-}
-
-function parsePromptMode(value: unknown, localName: string): "replace" | "append" {
-	if (value === "replace" || value === "append") return value;
-	return localName === "delegate" ? "append" : "replace";
-}
-
-function fileStem(path: string): string {
-	return basename(path, ".md");
 }
 
 function isDirectory(path: string): boolean {

@@ -39,6 +39,10 @@ try {
 			],
 		},
 		{
+			dir: "packages/claude-hyperchart",
+			expected: ["dist/index.js", "dist/index.d.ts", "LICENSE", "README.md"],
+		},
+		{
 			dir: "packages/pi-hyperchart",
 			expected: [
 				"dist/command.js",
@@ -90,9 +94,16 @@ try {
 function validateManifests() {
 	const core = JSON.parse(readFileSync(resolve(root, "packages/hyperchart/package.json"), "utf8"));
 	const pi = JSON.parse(readFileSync(resolve(root, "packages/pi-hyperchart/package.json"), "utf8"));
-	if (core.private === true || pi.private === true) throw new Error("publishable packages must not be private");
-	if (core.version !== pi.version) throw new Error("core and Pi package versions must match");
-	if (pi.dependencies?.[core.name] !== core.version) throw new Error("Pi package must pin the matching core version");
+	const claude = JSON.parse(readFileSync(resolve(root, "packages/claude-hyperchart/package.json"), "utf8"));
+	for (const pkg of [core, pi, claude]) {
+		if (pkg.private === true) throw new Error("publishable packages must not be private");
+		if (pkg.version !== core.version) throw new Error("package versions must stay in lockstep");
+	}
+	for (const pkg of [pi, claude]) {
+		if (pkg.dependencies?.[core.name] !== core.version) {
+			throw new Error(`${pkg.name} must pin the matching core version`);
+		}
+	}
 	if (!pi.keywords?.includes("pi-package")) throw new Error("Pi package must include the pi-package keyword");
 	if (!Array.isArray(pi.pi?.extensions) || !Array.isArray(pi.pi?.skills)) {
 		throw new Error("Pi package must declare pi.extensions and pi.skills");
@@ -101,12 +112,14 @@ function validateManifests() {
 }
 
 function validateCrossPackageImports() {
-	const sourceFiles = [];
-	walk(resolve(root, "packages/pi-hyperchart"), sourceFiles);
-	for (const file of sourceFiles.filter((file) => /\.(?:ts|tsx|mjs)$/.test(file))) {
-		const text = readFileSync(file, "utf8");
-		if (/from\s+["'][.]{1,2}\/.*packages\/hyperchart/.test(text)) {
-			throw new Error(`private cross-package relative import: ${file}`);
+	for (const dir of ["packages/pi-hyperchart", "packages/claude-hyperchart"]) {
+		const sourceFiles = [];
+		walk(resolve(root, dir), sourceFiles);
+		for (const file of sourceFiles.filter((file) => /\.(?:ts|tsx|mjs)$/.test(file))) {
+			const text = readFileSync(file, "utf8");
+			if (/from\s+["'][.]{1,2}\/.*packages\/(?:hyperchart|pi-hyperchart|claude-hyperchart)/.test(text)) {
+				throw new Error(`private cross-package relative import: ${file}`);
+			}
 		}
 	}
 }
@@ -178,6 +191,7 @@ import * as runtime from "@surprisal/hyperchart/runtime";
 import * as inspect from "@surprisal/hyperchart/inspect";
 import * as sessions from "@surprisal/hyperchart/sessions";
 import * as coreReact from "@surprisal/hyperchart/react";
+import * as claudeHost from "@surprisal/claude-hyperchart";
 import * as command from "@surprisal/pi-hyperchart/command";
 import * as piHost from "@surprisal/pi-hyperchart/pi-host";
 import * as react from "@surprisal/pi-hyperchart/react";
@@ -189,6 +203,7 @@ if (typeof sessions.updateSessionProgress !== "function" || typeof sessions.queu
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");
 if (typeof piHost.createPiHyperchartHost !== "function") throw new Error("Pi host exports missing");
 if (typeof coreReact.HyperchartInspectorDialog !== "function") throw new Error("core React exports missing");
+if (typeof claudeHost.resolveClaudeSubagentDefinitionDirs !== "function") throw new Error("Claude host exports missing");
 if (typeof react.HyperchartInspectorDialog !== "function") throw new Error("React exports missing");
 writeFileSync("external.chart.ts", \`import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "external-smoke", initial: "done", states: { done: final() } });\n\`);
 const inspected = core.inspectChartModuleSync(resolve("external.chart.ts"));

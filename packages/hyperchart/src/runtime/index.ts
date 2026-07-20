@@ -46,3 +46,13 @@ export type {
 } from "./generic/chart_typecheck.js";
 export { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, createHostPaths, listHyperchartFiles } from "./generic/host_paths.js";
 export type { HostPaths, HostPathsConfig } from "./generic/host_paths.js";
+export {
+	createAgentDefaultsResolver,
+	listAgentFiles,
+	loadAgentDefinition,
+	parseAgentFile,
+	uniqueExistingDirs,
+} from "./generic/agent_definitions.js";
+export type { AgentDefinition, ThinkingLevel } from "./generic/agent_definitions.js";
+export { parseSimpleFrontmatter } from "./generic/frontmatter.js";
+export type { FrontmatterParser, ParsedFrontmatter } from "./generic/frontmatter.js";
