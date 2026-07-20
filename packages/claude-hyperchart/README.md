@@ -33,16 +33,26 @@ Agent definitions use the same markdown + frontmatter format as the Pi host (`na
 
 ## Remote / SSH
 
-The inspector binds `127.0.0.1` on the machine where Claude Code runs. Working over SSH, pin the port and forward it once:
+By default the inspector binds `127.0.0.1` on the machine where Claude Code runs. Two ways to reach it from your own machine, configured via environment variables — the supported settings channel is the `env` block in Claude Code's `settings.json`, which the plugin's MCP server and spawned runners inherit:
+
+```json
+{
+	"env": {
+		"HYPERCHART_INSPECTOR_PORT": "8377",
+		"HYPERCHART_INSPECTOR_HOST": "127.0.0.1"
+	}
+}
+```
+
+**Option A — SSH tunnel (recommended).** Pin the port and forward it once:
 
 ```bash
-# on the server (or in the environment that launches claude)
-export HYPERCHART_INSPECTOR_PORT=8377
-# on your local machine
 ssh -L 8377:127.0.0.1:8377 <server>
 ```
 
 Under SSH the plugin does not try to open a server-side browser; `hyperchart_view` returns the URL — open it locally through the forwarded port.
+
+**Option B — LAN binding (trusted networks only).** Set `HYPERCHART_INSPECTOR_HOST=0.0.0.0`; the inspector then listens on all interfaces and advertises the machine's LAN address in its URLs, so `hyperchart_view` returns a link that opens directly from your machine. The unguessable per-run URL token is the only access control in this mode (including session steering) — use it only on networks you trust (home LAN, VPN); prefer the SSH tunnel otherwise.
 
 ## Run layout
 
