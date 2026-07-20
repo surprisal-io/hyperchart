@@ -117,6 +117,10 @@ function validateManifests() {
 			throw new Error(`${pkg.name} must pin the matching core version`);
 		}
 	}
+	const plugin = JSON.parse(
+		readFileSync(resolve(root, "packages/claude-hyperchart/.claude-plugin/plugin.json"), "utf8"),
+	);
+	if (plugin.version !== claude.version) throw new Error("Claude plugin manifest version must match the package version");
 	if (!pi.keywords?.includes("pi-package")) throw new Error("Pi package must include the pi-package keyword");
 	if (!Array.isArray(pi.pi?.extensions) || !Array.isArray(pi.pi?.skills)) {
 		throw new Error("Pi package must declare pi.extensions and pi.skills");

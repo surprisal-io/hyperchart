@@ -143,7 +143,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				if (!parsed.ok) return fail(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 
 				const runDir = requestedRunDir ?? createRunDir(workDir, parsed.ast.id, { rootDir: runsRoot() });
-				if (meta === undefined && requestedRunDir === undefined) {
+				if (meta === undefined) {
 					saveRunMeta(runDir, {
 						chartPath,
 						...(exportName === undefined ? {} : { exportName }),

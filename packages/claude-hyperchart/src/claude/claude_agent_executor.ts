@@ -208,6 +208,12 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			const validated = await captured;
 			if (validated !== undefined) {
 				sink.captured = validated;
+				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+					actionName: definition.name,
+					status: "completed",
+					completedAt: Date.now(),
+					sessionFile: restored.path,
+				});
 				// The finish already happened in a previous process; only artifact validation remains.
 				await runAcceptanceLoop({
 					effect,
@@ -512,6 +518,8 @@ class ClaudeSession {
 				updateSessionProgress(this.options.sessionsDir, this.options.effect.actionUid, {
 					actionName: this.options.definition.name,
 					status: "running",
+					currentText: undefined,
+					currentReasoning: undefined,
 					...(preview === undefined ? {} : { lastMessage: preview }),
 				});
 			}
