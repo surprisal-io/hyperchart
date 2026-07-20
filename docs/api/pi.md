@@ -76,7 +76,7 @@ if (!handled) {
 }
 ```
 
-This bridge is for other Pi extensions. Agents should use the `hyperchart_*` tools instead of constructing command strings.
+This bridge is for other Pi extensions. Integrated React hosts may send `steer <run-id> <action-key> <message>` when handling `onSteerSession`; the extension validates ownership and live-session status before queueing. Agents should use the `hyperchart_*` tools instead of constructing command strings.
 
 ## Pi host adapter
 

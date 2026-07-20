@@ -34,6 +34,11 @@ interface HyperchartInspectorDialogProps {
   onClose: () => void;
   onResume?: (runId: string) => void;
   onAbort?: () => void;
+  onSteerSession?: (
+    runId: string,
+    actionKey: string,
+    message: string,
+  ) => void | Promise<void>;
   portal?: HyperchartPortalRenderer;
   theme?: HyperchartUiTheme;
 }
@@ -43,7 +48,7 @@ function HyperchartInspectorDialog(
 ): React.ReactElement;
 ```
 
-The dialog owns run selection, graph navigation, state detail selection, responsive layout, and nested full-content dialogs. It does not fetch data or mutate runs. The exported component is memoized; hosts should preserve `runs` and callback references when a poll produces no semantic change so shallow equality can skip the inspector subtree.
+The dialog owns run selection, graph navigation, state detail selection, responsive layout, and nested full-content dialogs. Agent cards with `state.session` show `View session`, which opens a compact transcript with completed reasoning, throttled live reasoning/text, and current-tool activity. Completed reasoning and tool/read entries start collapsed with a two-line preview and an ellipsis when content is hidden; user and assistant messages stay fully visible, as do currently streaming blocks. Each tool call and its result render as one lifecycle card with loading, complete, or error status. The session dialog grows with its transcript up to its viewport cap rather than reserving a fixed empty height; once assistant text or a tool starts, the preceding live reasoning becomes a normal collapsible reasoning block. Supplying `onSteerSession` enables its steering composer; the host must deliver the message to the matching live session. The component does not fetch data or mutate runs itself. The exported component is memoized; hosts should preserve `runs` and callback references when a poll produces no semantic change so shallow equality can skip the inspector subtree.
 
 ```tsx
 <HyperchartInspectorDialog
@@ -66,6 +71,10 @@ interface HyperchartInspectorSidePanelProps {
   run: HyperchartRunInfo;
   selectedStateId?: string | null;
   onOpenScope?: (stateId: string) => void;
+  onSteerSession?: (
+    actionKey: string,
+    message: string,
+  ) => void | Promise<void>;
   className?: string;
   definitionSource?: string;
 }

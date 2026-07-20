@@ -74,6 +74,8 @@ A run id is visible only from the working directory recorded in its `meta.json`.
 
 Run `/hyperchart` with no arguments to open the minimal run picker for the current working directory. Use ↑/↓ to select a run, Enter to open its browser inspector, and Esc to close the picker.
 
+For active agent states, the inspector shows `View session` on the agent card. The session window polls the persisted Pi transcript, completed reasoning blocks, current tool activity, and throttled live text/reasoning deltas alongside the run. Its composer sends a steering message to the runner through a run-scoped local queue; Pi delivers it after the agent's current tool call. Steering is available only while the runner and matching agent session are active.
+
 ```text
 /hyperchart
 /hyperchart --limit 20
@@ -95,7 +97,7 @@ Options:
 | `--wait` | wait synchronously until the run reaches a terminal status |
 | `--ignore-replay-warnings` | continue despite stale or skipped replay records |
 
-Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. Add `--wait` when the command should remain blocked until completion.
+Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. On startup or session resume, Pi restores widgets only for non-terminal runs created by that exact Pi session; terminal runs and older runs without ownership metadata remain available through run history but do not appear as active widgets. Add `--wait` when the command should remain blocked until completion.
 
 ```text
 /hyperchart run review --args '{"pullRequest":42}'
@@ -111,6 +113,16 @@ Runs are asynchronous by default. Pi shows a compact live widget with active sta
 ```
 
 `resume` continues in the existing run directory. `restart` creates a new run using the old run's chart metadata and arguments; it does not mutate the old log.
+
+### Steer a live agent
+
+The browser inspector and integrated hosts use the same command transport:
+
+```text
+/hyperchart steer <run-id> <action-key> <message>
+```
+
+The command validates run ownership and requires the matching session to be `starting` or `running`, then writes the message to the run-scoped steering queue. Normal users should use the session window composer rather than copying action keys manually.
 
 ### View status
 

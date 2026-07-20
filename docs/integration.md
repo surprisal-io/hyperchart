@@ -150,13 +150,13 @@ export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {
 }
 ```
 
-Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The UI does not mutate run files by itself.
+Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. When a run snapshot includes `state.session`, agent cards expose a live-session dialog. Provide `onSteerSession` to enable its composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
 
 ## Public React components
 
 | Export | Purpose |
 |---|---|
-| `HyperchartInspectorDialog` | full modal inspector for one or more runs |
+| `HyperchartInspectorDialog` | full modal inspector for one or more runs, including live agent sessions and optional steering |
 | `HyperchartInspectorSidePanel` | details panel without the surrounding dialog |
 | `HyperchartGraphPreview` | chart graph and runtime overlay |
 | `HyperchartRunStrip` | compact list of active/recent runs |

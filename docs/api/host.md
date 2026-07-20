@@ -176,10 +176,49 @@ interface HyperchartStateInfo {
   visits?: number;
   visitHistory?: HyperchartVisitInfo[];
   issues?: HyperchartIssueInfo[];
+  session?: HyperchartAgentSessionInfo;
 }
 ```
 
 `initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `stale` is historical completion outside the current traversal or map generation. It is not pending work. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
+
+## Live agent sessions
+
+```ts
+interface HyperchartAgentSessionInfo {
+  actionKey: string;
+  status: string;
+  startedAt?: number;
+  lastActivityAt?: number;
+  model?: string;
+  thinking?: string;
+  turnCount?: number;
+  toolCount?: number;
+  tokenCount?: number;
+  currentTool?: string;
+  currentToolArgs?: string;
+  currentText?: string;
+  currentReasoning?: string;
+  lastMessage?: string;
+  error?: string;
+  messages?: HyperchartSessionMessageInfo[];
+}
+
+interface HyperchartSessionMessageInfo {
+  id: string;
+  role: "user" | "assistant" | "reasoning" | "tool" | "system";
+  text?: string;
+  toolName?: string;
+  toolCallId?: string;
+  toolInput?: string;
+  toolOutput?: string;
+  toolStatus?: "running" | "completed" | "error";
+  isError?: boolean;
+  timestamp?: number;
+}
+```
+
+`session` is an optional, immutable live snapshot supplied by a host adapter. `actionKey` identifies the running action for steering. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. Hosts may bound or omit historical messages while preserving current activity fields.
 
 ## Visits
 
@@ -501,6 +540,7 @@ It does not read files itself. The host supplies already-loaded status and sessi
 HyperchartHostAdapter, HyperchartSessionSnapshot, HyperchartSnapshotOptions
 HyperchartInfo, HyperchartRunInfo, HyperchartRunStatus,
 HyperchartStateInfo, HyperchartStateStatus, HyperchartStateType,
+HyperchartAgentSessionInfo, HyperchartSessionMessageInfo,
 HyperchartUsageInfo, HyperchartRetryInfo, HyperchartTransitionInfo,
 HyperchartIssueInfo, HyperchartIssueSeverity, HyperchartIssueKind,
 HyperchartIssueSource, HyperchartBranchInfo, HyperchartMapItemInfo,
