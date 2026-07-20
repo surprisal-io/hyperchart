@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
 import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 import {
@@ -67,5 +68,57 @@ describe("browser run inspector server", () => {
 		});
 		const response = await fetch(`${new URL(url).origin}/api/runs/not-registered`);
 		expect(response.status).toBe(404);
+	});
+});
+
+describe("remote-friendly inspector options", () => {
+	afterEach(async () => {
+		delete process.env.HYPERCHART_INSPECTOR_PORT;
+		delete process.env.HYPERCHART_INSPECTOR_HOST;
+		delete process.env.SSH_CONNECTION;
+		await closeRunInspectorServer();
+	});
+
+	it("binds the port from HYPERCHART_INSPECTOR_PORT", async () => {
+		const probe = await new Promise<number>((resolve, reject) => {
+			const server = createServer();
+			server.once("error", reject);
+			server.listen(0, "127.0.0.1", () => {
+				const address = server.address();
+				if (address === null || typeof address === "string") return reject(new Error("no port"));
+				server.close(() => resolve(address.port));
+			});
+		});
+		process.env.HYPERCHART_INSPECTOR_PORT = String(probe);
+		const { url } = await openRunInspector({
+			runId: "fixed-port",
+			loadRun: async () => ({ runId: "fixed-port" }) as never,
+			openBrowser: () => undefined,
+		});
+		expect(new URL(url).port).toBe(String(probe));
+	});
+
+	it("does not try to open a server-side browser under SSH", async () => {
+		process.env.SSH_CONNECTION = "203.0.113.5 50000 203.0.113.9 22";
+		// No openBrowser stub: without the SSH guard this would spawn a real browser.
+		const { url } = await openRunInspector({
+			runId: "ssh-run",
+			loadRun: async () => ({ runId: "ssh-run" }) as never,
+		});
+		expect((await fetch(url)).status).toBe(200);
+	});
+
+	it("binds a wildcard host on request and advertises a LAN address", async () => {
+		process.env.HYPERCHART_INSPECTOR_HOST = "0.0.0.0";
+		const { url } = await openRunInspector({
+			runId: "lan-run",
+			loadRun: async () => ({ runId: "lan-run" }) as never,
+			openBrowser: () => undefined,
+		});
+		const parsed = new URL(url);
+		expect(parsed.hostname).toMatch(/^\d+\.\d+\.\d+\.\d+$/);
+		// Listening on all interfaces: loopback must still reach it regardless of the advertised host.
+		const viaLoopback = await fetch(`http://127.0.0.1:${parsed.port}${parsed.pathname}`);
+		expect(viaLoopback.status).toBe(200);
 	});
 });

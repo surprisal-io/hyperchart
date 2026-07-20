@@ -1,6 +1,6 @@
 # API reference
 
-This is the canonical reference for the two published packages. Task guides explain workflows; these pages document the complete supported import surface.
+This is the canonical reference for the three published packages. Task guides explain workflows; these pages document the complete supported import surface.
 
 ## Choose an entry point
 
@@ -10,7 +10,9 @@ This is the canonical reference for the two published packages. Task guides expl
 | `@surprisal/hyperchart` parser, inspector, machine, projection, replay, and utilities | [Core API](core.md) |
 | `@surprisal/hyperchart/runtime` | [Runtime API](runtime.md) |
 | `@surprisal/hyperchart/host` | [Host API](host.md) |
+| `@surprisal/hyperchart/inspect` and `/sessions` | [Hosting API](hosting.md) |
 | `@surprisal/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
+| `@surprisal/claude-hyperchart` and the Claude Code plugin surfaces | [Claude Code plugin](../claude-code.md) |
 | `@surprisal/hyperchart/react` and `/react/styles.css` | [React API](react.md) |
 | Both packages' `/package.json` subpaths | Package metadata (`name`, version, exports, engines, and manifest fields) |
 
@@ -22,6 +24,8 @@ The supported package entry points are:
 @surprisal/hyperchart
 @surprisal/hyperchart/host
 @surprisal/hyperchart/runtime
+@surprisal/hyperchart/inspect
+@surprisal/hyperchart/sessions
 @surprisal/hyperchart/package.json
 @surprisal/pi-hyperchart
 @surprisal/pi-hyperchart/command
@@ -29,6 +33,8 @@ The supported package entry points are:
 @surprisal/hyperchart/react
 @surprisal/hyperchart/react/styles.css
 @surprisal/pi-hyperchart/package.json
+@surprisal/claude-hyperchart
+@surprisal/claude-hyperchart/package.json
 ```
 
 `@surprisal/hyperchart/internal/core/*` and `@surprisal/hyperchart/internal/utils/*` are available for first-party package wiring. They are not compatibility promises for application code and are intentionally excluded from this reference.

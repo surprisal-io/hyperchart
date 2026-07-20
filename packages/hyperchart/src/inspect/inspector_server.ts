@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -66,10 +67,11 @@ async function getInspectorServer(): Promise<InspectorServerState> {
 
 async function startInspectorServer(): Promise<InspectorServerState> {
 	const entries = new Map<string, InspectorEntry>();
+	const host = inspectorHost();
 	const server = createServer((request, response) => void routeRequest(entries, request, response));
 	await new Promise<void>((resolveListen, reject) => {
 		server.once("error", reject);
-		server.listen(0, "127.0.0.1", () => {
+		server.listen(inspectorPort(), host, () => {
 			server.off("error", reject);
 			resolveListen();
 		});
@@ -77,7 +79,29 @@ async function startInspectorServer(): Promise<InspectorServerState> {
 	const address = server.address();
 	if (address === null || typeof address === "string") throw new Error("Inspector server did not bind a TCP port");
 	server.unref();
-	return { server, origin: `http://127.0.0.1:${address.port}`, entries };
+	return { server, origin: `http://${inspectorUrlHost(host)}:${address.port}`, entries };
+}
+
+/**
+ * Bind host for the inspector. The default is loopback-only; binding a
+ * non-loopback host (e.g. 0.0.0.0 for LAN access) is an explicit opt-in — the
+ * unguessable per-run URL token is then the only access control, so use it on
+ * trusted networks only.
+ */
+function inspectorHost(): string {
+	const raw = process.env.HYPERCHART_INSPECTOR_HOST?.trim();
+	return raw === undefined || raw.length === 0 ? "127.0.0.1" : raw;
+}
+
+/** The host to advertise in inspector URLs; wildcard binds resolve to the machine's LAN address. */
+function inspectorUrlHost(bindHost: string): string {
+	if (bindHost !== "0.0.0.0" && bindHost !== "::") return bindHost;
+	for (const interfaces of Object.values(networkInterfaces())) {
+		for (const entry of interfaces ?? []) {
+			if (entry.family === "IPv4" && !entry.internal) return entry.address;
+		}
+	}
+	return "127.0.0.1";
 }
 
 async function routeRequest(
@@ -223,7 +247,23 @@ function trimEntries(entries: Map<string, InspectorEntry>): void {
 	for (const [token] of oldest.slice(0, entries.size - MAX_INSPECTOR_ENTRIES)) entries.delete(token);
 }
 
+/** Fixed inspector port for remote setups so `ssh -L` can be configured once; 0 picks a free port. */
+function inspectorPort(): number {
+	const raw = process.env.HYPERCHART_INSPECTOR_PORT;
+	if (raw === undefined || raw.trim().length === 0) return 0;
+	const port = Number(raw);
+	if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+		throw new Error(`HYPERCHART_INSPECTOR_PORT must be a port number, got '${raw}'`);
+	}
+	return port;
+}
+
 function openSystemBrowser(url: string): Promise<void> {
+	// Over SSH there is no local browser to open; the caller surfaces the URL and
+	// the user opens it through a forwarded port on their own machine.
+	if (process.env.SSH_CONNECTION !== undefined || process.env.SSH_TTY !== undefined) {
+		return Promise.resolve();
+	}
 	const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
 	const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
 	return new Promise((resolveOpen, reject) => {

@@ -15,7 +15,7 @@ Hyperchart runs long-lived work as an explicit statechart. The chart defines wha
 | [`@surprisal/pi-hyperchart`](packages/pi-hyperchart) | The Pi extension, `/hyperchart`, agent tools, terminal UI, and React inspector. |
 | [`@surprisal/claude-hyperchart`](packages/claude-hyperchart) | The Claude Code plugin: `hyperchart_*` MCP tools, agent actions as Claude sessions, browser inspector, steering. |
 
-Both packages require Node.js 22.19 or newer. The Pi package depends on the same version of the core package.
+All packages require Node.js 22.19 or newer. The host packages depend on the same version of the core package.
 
 ## Install
 
@@ -46,6 +46,16 @@ pi install "$PWD/packages/pi-hyperchart"
 ```
 
 Pi loads the local package in place, so later source changes remain available after rebuilding. Use `npm run check` before relying on a local checkout for real runs.
+
+## Run a chart in Claude Code
+
+Load the plugin from a checkout and talk to Claude — charts live in `.claude/hypercharts/`, agent actions run as real Claude sessions, and `hyperchart_view` opens the live browser inspector:
+
+```sh
+claude --plugin-dir "$PWD/packages/claude-hyperchart"
+```
+
+See the [Claude Code plugin guide](docs/claude-code.md) for tools, locations, steering, and remote setups.
 
 ## Run a chart in Pi
 
