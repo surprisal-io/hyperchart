@@ -407,6 +407,13 @@ class ClaudeSession {
 		const definition = this.options.definition;
 		const toolsWithoutFinish = plan.tools?.filter((name) => name !== "finish");
 		const systemPrompt = definition.systemPrompt.trim();
+		// A replaced system prompt drops Claude Code's environment block, so the
+		// session would not know its working directory; restate it explicitly or
+		// agents guess absolute paths and write outside the run's workDir.
+		const environmentNote = [
+			`Working directory: ${this.options.workDir}`,
+			"Create and reference files relative to this working directory; do not write outside it unless the task names an absolute path inside it.",
+		].join("\n");
 		return {
 			cwd: this.options.workDir,
 			abortController: this.abortController,
@@ -425,7 +432,7 @@ class ClaudeSession {
 						systemPrompt:
 							plan.promptMode === "append"
 								? { type: "preset", preset: "claude_code", append: systemPrompt }
-								: systemPrompt,
+								: `${systemPrompt}\n\n${environmentNote}`,
 					}),
 			...(plan.modelRef === undefined ? {} : { model: plan.modelRef }),
 			...thinkingOptions(plan.thinkingLevel),

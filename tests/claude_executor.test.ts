@@ -156,7 +156,8 @@ describe("ClaudeAgentExecutor", () => {
 		expect(options.settingSources).toEqual([]);
 		expect(options.tools).toEqual(["Read", "Bash"]);
 		expect(options.allowedTools).toEqual(["Read", "Bash", FINISH_TOOL_NAME]);
-		expect(options.systemPrompt).toBe("Do the assigned work.");
+		expect(options.systemPrompt).toContain("Do the assigned work.");
+		expect(options.systemPrompt).toContain(`Working directory: ${workDir}`);
 		expect(options.thinking).toEqual({ type: "adaptive" });
 		expect(options.effort).toBe("medium");
 
