@@ -80,6 +80,34 @@ describe("hyperchart extension", () => {
 		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
 	});
 
+	it("restores widgets only for non-terminal runs owned by the current pi session", async () => {
+		const chartPath = writeChart("session-restore");
+		createRun("owned-running", projectDir, chartPath, "session-a");
+		createRun("foreign-session", projectDir, chartPath, "session-b");
+		createRun("legacy-unowned", projectDir, chartPath);
+		createRun("foreign-project", otherProjectDir, chartPath, "session-a");
+		const failedRunDir = createRun("owned-failed", projectDir, chartPath, "session-a");
+		patchRunStatus(failedRunDir, { runId: "owned-failed", chartId: "demo", state: "failed", exitCode: 1 });
+		const completedRunDir = createRun("owned-complete", projectDir, chartPath, "session-a");
+		patchRunStatus(completedRunDir, { runId: "owned-complete", chartId: "demo", state: "complete", exitCode: 0 });
+
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		const pi = {
+			registerCommand: () => {},
+			registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const { ctx, widgetKeys } = commandContext(projectDir);
+
+		await sessionStart?.({ reason: "startup" }, ctx);
+
+		expect(widgetKeys).toEqual(["hyperchart:owned-running"]);
+	});
+
 	it("lists project and user charts with project precedence", async () => {
 		const projectCharts = join(projectDir, ".pi", "hypercharts");
 		const userCharts = join(agentDir, "hypercharts");
@@ -469,10 +497,12 @@ function registeredTool(name: string): HyperchartTool {
 	return tool;
 }
 
-function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[] } {
+function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[]; widgetKeys: string[] } {
 	const notifications: Notification[] = [];
+	const widgetKeys: string[] = [];
 	return {
 		notifications,
+		widgetKeys,
 		ctx: {
 			cwd,
 			mode: "print",
@@ -483,7 +513,9 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 					notifications.push({ message, type });
 				},
 				setStatus: () => {},
-				setWidget: () => {},
+				setWidget: (key: string, widget: unknown) => {
+					if (widget !== undefined) widgetKeys.push(key);
+				},
 				confirm: async () => false,
 				custom: async () => undefined,
 			},
@@ -491,13 +523,14 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 	};
 }
 
-function createRun(runId: string, workDir: string, chartPath: string): string {
+function createRun(runId: string, workDir: string, chartPath: string, originSessionId?: string): string {
 	const runDir = join(agentDir, "hypercharts", "runs", runId);
 	saveRunMeta(runDir, {
 		chartPath,
 		workDir,
 		chartId: "demo",
 		createdAt: new Date().toISOString(),
+		...(originSessionId === undefined ? {} : { originSessionId }),
 	});
 	return runDir;
 }

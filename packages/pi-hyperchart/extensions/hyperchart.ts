@@ -1337,7 +1337,7 @@ function setRunWidget(ctx: HyperchartContext, run: RunSnapshot): void {
 }
 
 async function restoreRunWidgets(ctx: HyperchartContext): Promise<void> {
-	const snapshots = await recentRunSnapshots();
+	const snapshots = await recentRunSnapshots(5, ctx.cwd, ctx.sessionManager.getSessionId());
 	for (const run of snapshots) {
 		if (runs.active.has(run.runId)) continue;
 		setRunWidget(ctx, run);
@@ -1373,22 +1373,21 @@ async function resolveRunForView(runId: string | undefined, cwd: string): Promis
 	return (await recentRunSnapshots(5, cwd))[0];
 }
 
-async function recentRunSnapshots(limit = 5, cwd?: string): Promise<RunSnapshot[]> {
+async function recentRunSnapshots(limit = 5, cwd?: string, originSessionId?: string): Promise<RunSnapshot[]> {
 	const root = getHyperchartRunsRoot();
 	if (!existsSync(root)) return [];
 	const dirs = runDirs(root);
 	const snapshots: RunSnapshot[] = [];
 	for (const dir of dirs) {
-		let meta: RunMeta | undefined;
 		try {
-			if (cwd !== undefined) {
-				meta = loadRunMetaForCurrentWorkDir(dir, cwd);
-				if (meta === undefined) continue;
-			}
+			const meta = loadRunMeta(dir);
+			if (cwd !== undefined && resolve(meta.workDir) !== resolve(cwd)) continue;
+			if (originSessionId !== undefined && meta.originSessionId !== originSessionId) continue;
 			const snapshot = await loadRunSnapshot(dir, meta);
+			if (snapshot.status !== undefined && isTerminalRunState(snapshot.status.state)) continue;
 			const store = new JsonlLogStore(resolve(dir, "log.jsonl"));
 			const view = buildRunView(snapshot.ast, await store.readAll(), Date.now());
-			if (!view.final && snapshot.status?.state !== "stopped") snapshots.push(snapshot);
+			if (!view.final) snapshots.push(snapshot);
 		} catch {
 			continue;
 		}
