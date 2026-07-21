@@ -49,6 +49,7 @@ export type PiExecutorOptions = {
 	modelRuntime: ModelRuntime;
 	defaultModel?: string;
 	modelRoles?: Record<string, string>;
+	toolsets?: Record<string, string[]>;
 	maxFinishRetries?: number;
 	schemaRegistry?: SchemaRegistry;
 };
@@ -259,6 +260,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		const plan = buildSessionPlan(definition, effect, {
 			...(this.options.defaultModel === undefined ? {} : { defaultModel: this.options.defaultModel }),
 			...(this.options.modelRoles === undefined ? {} : { modelRoles: this.options.modelRoles }),
+			...(this.options.toolsets === undefined ? {} : { toolsets: this.options.toolsets }),
 		});
 		const model = plan.modelRef === undefined ? undefined : resolveModel(this.options.modelRuntime, plan.modelRef);
 		const resourceLoader = new DefaultResourceLoader({

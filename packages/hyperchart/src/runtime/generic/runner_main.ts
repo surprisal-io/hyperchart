@@ -24,6 +24,8 @@ export type HyperchartRunnerConfig = {
 	defaultModel?: string;
 	/** Role name -> model ref (in the host's model format) applied to agent definitions declaring `role`. */
 	modelRoles?: Record<string, string>;
+	/** Toolset name -> tool names (in the host's tool vocabulary) applied to agent definitions declaring `toolset`. */
+	toolsets?: Record<string, string[]>;
 	ignoreReplayWarnings?: boolean;
 	/** Host-specific configuration directory; interpretation belongs to the host's executor factory. */
 	agentDir?: string;
@@ -62,6 +64,7 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 		...(isRecord(value.args) ? { args: value.args } : {}),
 		...(typeof value.defaultModel === "string" ? { defaultModel: value.defaultModel } : {}),
 		...(isRecord(value.modelRoles) ? { modelRoles: stringEntries(value.modelRoles) } : {}),
+		...(isRecord(value.toolsets) ? { toolsets: stringArrayEntries(value.toolsets) } : {}),
 		...(value.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 	};
 }
@@ -234,4 +237,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringEntries(value: Record<string, unknown>): Record<string, string> {
 	return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+function stringArrayEntries(value: Record<string, unknown>): Record<string, string[]> {
+	return Object.fromEntries(
+		Object.entries(value).filter(
+			(entry): entry is [string, string[]] =>
+				Array.isArray(entry[1]) && entry[1].every((item) => typeof item === "string"),
+		),
+	);
 }

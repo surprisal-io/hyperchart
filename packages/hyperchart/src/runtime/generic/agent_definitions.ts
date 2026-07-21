@@ -13,6 +13,9 @@ export type AgentDefinition = {
 	// A symbolic model tier ("reviewer", "fast") resolved through the host's role->model settings;
 	// `model` stays the fallback when the role is not configured.
 	role?: string;
+	// A symbolic tool-list name resolved through the host's toolset settings;
+	// `tools` stays the fallback when the toolset is not configured.
+	toolset?: string;
 	model?: string;
 	thinking?: ThinkingLevel;
 	systemPromptMode?: "replace" | "append";
@@ -24,6 +27,7 @@ type AgentFrontmatter = {
 	description?: unknown;
 	tools?: unknown;
 	role?: unknown;
+	toolset?: unknown;
 	model?: unknown;
 	thinking?: unknown;
 	systemPromptMode?: unknown;
@@ -111,6 +115,9 @@ export function parseAgentFile(
 		...(tools === undefined ? {} : { tools }),
 		...(typeof frontmatter.role === "string" && frontmatter.role.trim() !== ""
 			? { role: frontmatter.role.trim() }
+			: {}),
+		...(typeof frontmatter.toolset === "string" && frontmatter.toolset.trim() !== ""
+			? { toolset: frontmatter.toolset.trim() }
 			: {}),
 		...(typeof frontmatter.model === "string" ? { model: frontmatter.model } : {}),
 		...(thinking === undefined ? {} : { thinking }),
