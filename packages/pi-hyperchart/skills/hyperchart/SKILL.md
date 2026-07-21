@@ -44,6 +44,8 @@ hypercharts/<name>/
 
 Bundle agent definitions override project and user definitions. Bundle extensions export default Pi registration functions and load with Hyperchart. Resolve scripts relative to `chart.ts`.
 
+Agent definitions can declare a symbolic `role` (model tier) and `toolset` (tool list) in frontmatter instead of a concrete `model`/`tools`. Both are mapped to concrete values in `settings.json` under the charts directories (`.pi/hypercharts/settings.json` project scope, `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/settings.json` user scope; project entries win per key): `{ "roles": { "reviewer": "anthropic/claude-opus-4-8" }, "toolsets": { "reading": ["read", "grep"] } }`. Resolution per invocation: chart `model`/`tools` override → configured role/toolset → frontmatter `model`/`tools` (fallback for an unconfigured name) → default model. An unconfigured role/toolset with no fallback (and no chart override) fails the action with an error — declare a fallback or configure the mapping before running.
+
 Use `find`/`ls` only as fallback:
 
 ```bash
