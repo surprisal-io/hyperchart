@@ -5,6 +5,7 @@ import { inspectChartAst, parseChartModuleSync } from "@surprisal/hyperchart";
 import {
 	assertChartPreflight,
 	createRunDir,
+	loadModelRoles,
 	loadRunMeta,
 	saveRunMeta,
 	type HyperchartRunnerConfig,
@@ -20,7 +21,7 @@ import {
 	readRunStatus,
 	readSessionProgress,
 } from "@surprisal/hyperchart/sessions";
-import { claudeHostPaths, claudeRunsRoot } from "../claude/paths.js";
+import { claudeHostPaths, claudeRunsRoot, claudeUserChartsDir } from "../claude/paths.js";
 import { createClaudeAgentDefaultsResolver } from "../claude/agent_definitions.js";
 import { spawnDetachedRunner, watchRun } from "./spawn_runner.js";
 
@@ -168,6 +169,10 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					error: undefined,
 					exitCode: undefined,
 				});
+				const modelRoles = loadModelRoles([
+					claudeUserChartsDir(),
+					claudeHostPaths().getProjectHyperchartsDir(workDir),
+				]);
 				const config: HyperchartRunnerConfig = {
 					runId,
 					runDir,
@@ -178,6 +183,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					...(isRecord(args.args) ? { args: args.args } : {}),
 					...(args.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 					...(typeof args.defaultModel === "string" ? { defaultModel: args.defaultModel } : {}),
+					...(Object.keys(modelRoles).length === 0 ? {} : { modelRoles }),
 				};
 				const pid = spawnDetachedRunner(config);
 				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, state: "running", pid, heartbeatAt: Date.now() });
