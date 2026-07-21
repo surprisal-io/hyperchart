@@ -5,7 +5,7 @@ import { inspectChartAst, parseChartModuleSync } from "@surprisal/hyperchart";
 import {
 	assertChartPreflight,
 	createRunDir,
-	loadModelRoles,
+	loadHostSettings,
 	loadRunMeta,
 	saveRunMeta,
 	type HyperchartRunnerConfig,
@@ -169,7 +169,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					error: undefined,
 					exitCode: undefined,
 				});
-				const modelRoles = loadModelRoles([
+				const { modelRoles, toolsets } = loadHostSettings([
 					claudeUserChartsDir(),
 					claudeHostPaths().getProjectHyperchartsDir(workDir),
 				]);
@@ -184,6 +184,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					...(args.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 					...(typeof args.defaultModel === "string" ? { defaultModel: args.defaultModel } : {}),
 					...(Object.keys(modelRoles).length === 0 ? {} : { modelRoles }),
+					...(Object.keys(toolsets).length === 0 ? {} : { toolsets }),
 				};
 				const pid = spawnDetachedRunner(config);
 				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, state: "running", pid, heartbeatAt: Date.now() });

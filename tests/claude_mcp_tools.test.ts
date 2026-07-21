@@ -99,19 +99,23 @@ describe("hyperchart MCP tools", () => {
 		expect(relisted.runs).toHaveLength(1);
 	}, 30_000);
 
-	it("passes merged model roles from settings into the runner config", async () => {
+	it("passes merged model roles and toolsets from settings into the runner config", async () => {
 		const { tools, chartsDir, userChartsDir } = makeWorld();
 		mkdirSync(userChartsDir, { recursive: true });
 		writeFileSync(
 			join(userChartsDir, "settings.json"),
-			JSON.stringify({ roles: { reviewer: "haiku", scout: "haiku" } }),
+			JSON.stringify({ roles: { reviewer: "haiku", scout: "haiku" }, toolsets: { reading: ["Read", "Grep"] } }),
 		);
-		writeFileSync(join(chartsDir, "settings.json"), JSON.stringify({ roles: { reviewer: "opus" } }));
+		writeFileSync(
+			join(chartsDir, "settings.json"),
+			JSON.stringify({ roles: { reviewer: "opus" }, toolsets: { coding: ["Read", "Edit", "Bash"] } }),
+		);
 
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true })));
 		const config = JSON.parse(readFileSync(join(run.runDir, "runner.config.json"), "utf8"));
 
 		expect(config.modelRoles).toEqual({ reviewer: "opus", scout: "haiku" });
+		expect(config.toolsets).toEqual({ reading: ["Read", "Grep"], coding: ["Read", "Edit", "Bash"] });
 	}, 30_000);
 
 	it("queues steering for a live session and rejects dead sessions", async () => {

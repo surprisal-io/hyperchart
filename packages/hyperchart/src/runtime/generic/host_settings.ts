@@ -3,26 +3,35 @@ import { join } from "node:path";
 
 export const SETTINGS_FILE_NAME = "settings.json";
 
+export type HyperchartHostSettings = {
+	/** Role name -> model ref in the host's model format. */
+	modelRoles: Record<string, string>;
+	/** Toolset name -> tool names in the host's tool vocabulary. */
+	toolsets: Record<string, string[]>;
+};
+
 /**
- * Merge role -> model maps from `settings.json` files inside the given charts
- * directories, in scope order: later directories win per role key (pass user
- * scope first, project scope last). A missing file contributes nothing; a
- * malformed one fails loudly so a typo never silently drops the mapping.
+ * Merge `settings.json` files inside the given charts directories, in scope
+ * order: later directories win per key (pass user scope first, project scope
+ * last). A missing file contributes nothing; a malformed one fails loudly so
+ * a typo never silently drops a mapping.
  */
-export function loadModelRoles(chartsDirs: readonly string[]): Record<string, string> {
-	const roles: Record<string, string> = {};
+export function loadHostSettings(chartsDirs: readonly string[]): HyperchartHostSettings {
+	const settings: HyperchartHostSettings = { modelRoles: {}, toolsets: {} };
 	for (const dir of chartsDirs) {
-		Object.assign(roles, readSettingsRoles(join(dir, SETTINGS_FILE_NAME)));
+		const parsed = readSettingsFile(join(dir, SETTINGS_FILE_NAME));
+		Object.assign(settings.modelRoles, parsed.modelRoles);
+		Object.assign(settings.toolsets, parsed.toolsets);
 	}
-	return roles;
+	return settings;
 }
 
-function readSettingsRoles(path: string): Record<string, string> {
+function readSettingsFile(path: string): HyperchartHostSettings {
 	let content: string;
 	try {
 		content = readFileSync(path, "utf8");
 	} catch {
-		return {};
+		return { modelRoles: {}, toolsets: {} };
 	}
 	let parsed: unknown;
 	try {
@@ -33,14 +42,31 @@ function readSettingsRoles(path: string): Record<string, string> {
 		);
 	}
 	if (!isRecord(parsed)) throw new Error(`Invalid hypercharts settings at ${path}: expected a JSON object`);
-	if (parsed.roles === undefined) return {};
-	if (!isRecord(parsed.roles)) throw new Error(`Invalid hypercharts settings at ${path}: 'roles' must be an object`);
-	for (const [role, model] of Object.entries(parsed.roles)) {
+	return { modelRoles: parseRoles(parsed.roles, path), toolsets: parseToolsets(parsed.toolsets, path) };
+}
+
+function parseRoles(value: unknown, path: string): Record<string, string> {
+	if (value === undefined) return {};
+	if (!isRecord(value)) throw new Error(`Invalid hypercharts settings at ${path}: 'roles' must be an object`);
+	for (const [role, model] of Object.entries(value)) {
 		if (typeof model !== "string" || model.trim() === "") {
 			throw new Error(`Invalid hypercharts settings at ${path}: role '${role}' must map to a model string`);
 		}
 	}
-	return parsed.roles as Record<string, string>;
+	return value as Record<string, string>;
+}
+
+function parseToolsets(value: unknown, path: string): Record<string, string[]> {
+	if (value === undefined) return {};
+	if (!isRecord(value)) throw new Error(`Invalid hypercharts settings at ${path}: 'toolsets' must be an object`);
+	for (const [name, tools] of Object.entries(value)) {
+		if (!Array.isArray(tools) || tools.some((tool) => typeof tool !== "string" || tool.trim() === "")) {
+			throw new Error(
+				`Invalid hypercharts settings at ${path}: toolset '${name}' must map to an array of tool names`,
+			);
+		}
+	}
+	return value as Record<string, string[]>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
