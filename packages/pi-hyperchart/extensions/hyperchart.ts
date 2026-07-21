@@ -44,6 +44,7 @@ import {
 	assertChartPreflight,
 	createRunDir,
 	isFailureStatePath,
+	loadModelRoles,
 	loadRunMeta,
 	saveRunMeta,
 	type RunMeta,
@@ -1148,6 +1149,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		error: undefined,
 		exitCode: undefined,
 	});
+	const modelRoles = loadModelRoles([resolve(getAgentDir(), "hypercharts"), getProjectHyperchartsDir(workDir)]);
 	const config: HyperchartRunnerConfig = {
 		runId,
 		runDir: actualRunDir,
@@ -1159,6 +1161,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		...(opts.args === undefined ? {} : { args: opts.args }),
 		...(opts.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 		...(ctx.model === undefined ? {} : { defaultModel: `${ctx.model.provider}/${ctx.model.id}` }),
+		...(Object.keys(modelRoles).length === 0 ? {} : { modelRoles }),
 	};
 	const pid = spawnRunner(config);
 	patchRunStatus(actualRunDir, { runId, chartId: parsed.ast.id, state: "running", pid, heartbeatAt: Date.now() });

@@ -16,13 +16,18 @@ export type SessionPlan = {
 	promptMode: "replace" | "append";
 };
 
-/** Effect overrides win over the agent definition, which wins over host defaults. */
+/**
+ * Effect overrides win over the agent definition, which wins over host defaults.
+ * A definition role configured in `modelRoles` wins over the definition's own
+ * model; an unconfigured role falls through to the definition model.
+ */
 export function buildSessionPlan(
 	definition: AgentDefinition,
 	effect: AgentEffect,
-	options: { defaultModel?: string } = {},
+	options: { defaultModel?: string; modelRoles?: Record<string, string> } = {},
 ): SessionPlan {
-	const modelRef = effect.action.model ?? definition.model ?? options.defaultModel;
+	const roleModel = definition.role === undefined ? undefined : options.modelRoles?.[definition.role];
+	const modelRef = effect.action.model ?? roleModel ?? definition.model ?? options.defaultModel;
 	const thinkingLevel = (effect.action.thinking ?? definition.thinking) as ThinkingLevel | undefined;
 	const tools = effect.action.tools ?? definition.tools;
 	return {

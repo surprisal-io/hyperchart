@@ -22,6 +22,8 @@ export type HyperchartRunnerConfig = {
 	workDir: string;
 	args?: Record<string, unknown>;
 	defaultModel?: string;
+	/** Role name -> model ref (in the host's model format) applied to agent definitions declaring `role`. */
+	modelRoles?: Record<string, string>;
 	ignoreReplayWarnings?: boolean;
 	/** Host-specific configuration directory; interpretation belongs to the host's executor factory. */
 	agentDir?: string;
@@ -59,6 +61,7 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 		...(typeof value.exportName === "string" ? { exportName: value.exportName } : {}),
 		...(isRecord(value.args) ? { args: value.args } : {}),
 		...(typeof value.defaultModel === "string" ? { defaultModel: value.defaultModel } : {}),
+		...(isRecord(value.modelRoles) ? { modelRoles: stringEntries(value.modelRoles) } : {}),
 		...(value.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 	};
 }
@@ -227,4 +230,8 @@ function formatReplayWarnings(explanation: ReplayExplanation): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringEntries(value: Record<string, unknown>): Record<string, string> {
+	return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }

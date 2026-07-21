@@ -80,6 +80,33 @@ describe("hyperchart extension", () => {
 		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
 	});
 
+	it("passes merged model roles from settings into the runner config", async () => {
+		mkdirSync(join(agentDir, "hypercharts"), { recursive: true });
+		writeFileSync(
+			join(agentDir, "hypercharts", "settings.json"),
+			JSON.stringify({ roles: { reviewer: "user/model", scout: "user/scout" } }),
+		);
+		mkdirSync(join(projectDir, ".pi", "hypercharts"), { recursive: true });
+		writeFileSync(
+			join(projectDir, ".pi", "hypercharts", "settings.json"),
+			JSON.stringify({ roles: { reviewer: "project/model" } }),
+		);
+		const chartPath = join(tempDir, "roles-config.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "roles", initial: "done", states: { done: { kind: "final" } } };\n`);
+
+		const result = await registeredTool("hyperchart").execute(
+			"tool-call",
+			{ action: "run", chartPath, wait: true },
+			new AbortController().signal,
+			() => undefined,
+			commandContext(projectDir).ctx,
+		);
+		const runDir = (result.details as { runDir: string }).runDir;
+		const config = JSON.parse(readFileSync(join(runDir, "runner.config.json"), "utf8"));
+
+		expect(config.modelRoles).toEqual({ reviewer: "project/model", scout: "user/scout" });
+	});
+
 	it("restores widgets only for non-terminal runs owned by the current pi session", async () => {
 		const chartPath = writeChart("session-restore");
 		createRun("owned-running", projectDir, chartPath, "session-a");

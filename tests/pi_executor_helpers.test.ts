@@ -71,6 +71,20 @@ describe("agent definitions", () => {
 		});
 	});
 
+	it("parses a role from frontmatter alongside the fallback model", async () => {
+		const dir = await makeTempDir();
+		await writeFile(
+			join(dir, "critic.md"),
+			"---\ndescription: critic\nrole: reviewer\nmodel: anthropic/claude\n---\nCritic prompt\n",
+			"utf8",
+		);
+
+		expect(loadAgentDefinition("critic", [dir])).toMatchObject({
+			role: "reviewer",
+			model: "anthropic/claude",
+		});
+	});
+
 	it("resolves pi-subagents style project, user and package agent directories", async () => {
 		const project = await makeTempDir();
 		const agentDir = await makeTempDir();
@@ -198,6 +212,27 @@ describe("pi executor helpers", () => {
 			tools: ["bash", "finish"],
 			promptMode: "append",
 		});
+	});
+
+	it("resolves a definition role through the model roles map", () => {
+		const definition = {
+			name: "critic",
+			systemPrompt: "prompt",
+			role: "reviewer",
+			model: "anthropic/fallback",
+		};
+		const options = { defaultModel: "fallback/model", modelRoles: { reviewer: "anthropic/claude-opus" } };
+
+		// A configured role wins over the definition's own model; an action model wins over both.
+		expect(buildSessionPlan(definition, effect(), options).modelRef).toBe("anthropic/claude-opus");
+		expect(buildSessionPlan(definition, effect({}, { model: "openai/gpt" }), options).modelRef).toBe("openai/gpt");
+		// An unconfigured role falls through to the definition model, then the host default.
+		expect(buildSessionPlan(definition, effect(), { modelRoles: { other: "x/y" } }).modelRef).toBe("anthropic/fallback");
+		expect(
+			buildSessionPlan({ name: "critic", systemPrompt: "prompt", role: "reviewer" }, effect(), {
+				defaultModel: "fallback/model",
+			}).modelRef,
+		).toBe("fallback/model");
 	});
 
 	it.each([

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
@@ -13,15 +13,36 @@ import {
 } from "../packages/claude-hyperchart/src/mcp/tools.js";
 
 const roots: string[] = [];
+let previousClaudeConfigDir: string | undefined;
+
+beforeEach(() => {
+	// Inspector overrides exported by the developer's shell must not leak into tests.
+	delete process.env.HYPERCHART_INSPECTOR_PORT;
+	delete process.env.HYPERCHART_INSPECTOR_HOST;
+	delete process.env.SSH_CONNECTION;
+	previousClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
+});
 
 afterEach(async () => {
+	if (previousClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+	else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	await closeRunInspectorServer();
 });
 
-function makeWorld(): { cwd: string; runsRoot: string; tools: Map<string, HyperchartMcpTool>; chartPath: string } {
+function makeWorld(): {
+	cwd: string;
+	runsRoot: string;
+	tools: Map<string, HyperchartMcpTool>;
+	chartPath: string;
+	chartsDir: string;
+	userChartsDir: string;
+} {
 	const root = mkdtempSync(join(tmpdir(), "claude-mcp-"));
 	roots.push(root);
+	// User-scope settings must come from the test world, not the developer's ~/.claude.
+	process.env.CLAUDE_CONFIG_DIR = join(root, "claude-config");
+	const userChartsDir = join(root, "claude-config", "hypercharts");
 	const cwd = join(root, "project");
 	const chartsDir = join(cwd, ".claude", "hypercharts");
 	mkdirSync(chartsDir, { recursive: true });
@@ -36,7 +57,7 @@ export default chart({ kind: "chart", id: "simple", initial: "done", states: { d
 	const tools = new Map(
 		createHyperchartMcpTools({ cwd, runsRoot, openBrowser: () => undefined }).map((tool) => [tool.name, tool]),
 	);
-	return { cwd, runsRoot, tools, chartPath };
+	return { cwd, runsRoot, tools, chartPath, chartsDir, userChartsDir };
 }
 
 function text(result: { content: Array<{ text: string }> }): string {
@@ -76,6 +97,21 @@ describe("hyperchart MCP tools", () => {
 
 		const relisted = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
 		expect(relisted.runs).toHaveLength(1);
+	}, 30_000);
+
+	it("passes merged model roles from settings into the runner config", async () => {
+		const { tools, chartsDir, userChartsDir } = makeWorld();
+		mkdirSync(userChartsDir, { recursive: true });
+		writeFileSync(
+			join(userChartsDir, "settings.json"),
+			JSON.stringify({ roles: { reviewer: "haiku", scout: "haiku" } }),
+		);
+		writeFileSync(join(chartsDir, "settings.json"), JSON.stringify({ roles: { reviewer: "opus" } }));
+
+		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true })));
+		const config = JSON.parse(readFileSync(join(run.runDir, "runner.config.json"), "utf8"));
+
+		expect(config.modelRoles).toEqual({ reviewer: "opus", scout: "haiku" });
 	}, 30_000);
 
 	it("queues steering for a live session and rejects dead sessions", async () => {

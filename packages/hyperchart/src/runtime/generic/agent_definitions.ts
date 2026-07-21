@@ -10,6 +10,9 @@ export type AgentDefinition = {
 	description?: string;
 	systemPrompt: string;
 	tools?: string[];
+	// A symbolic model tier ("reviewer", "fast") resolved through the host's role->model settings;
+	// `model` stays the fallback when the role is not configured.
+	role?: string;
 	model?: string;
 	thinking?: ThinkingLevel;
 	systemPromptMode?: "replace" | "append";
@@ -20,6 +23,7 @@ type AgentFrontmatter = {
 	package?: unknown;
 	description?: unknown;
 	tools?: unknown;
+	role?: unknown;
 	model?: unknown;
 	thinking?: unknown;
 	systemPromptMode?: unknown;
@@ -105,6 +109,9 @@ export function parseAgentFile(
 		...(typeof frontmatter.description === "string" ? { description: frontmatter.description } : {}),
 		systemPrompt: body.trim(),
 		...(tools === undefined ? {} : { tools }),
+		...(typeof frontmatter.role === "string" && frontmatter.role.trim() !== ""
+			? { role: frontmatter.role.trim() }
+			: {}),
 		...(typeof frontmatter.model === "string" ? { model: frontmatter.model } : {}),
 		...(thinking === undefined ? {} : { thinking }),
 		systemPromptMode: parsePromptMode(frontmatter.systemPromptMode ?? frontmatter.system_prompt_mode, localName),

@@ -1,10 +1,17 @@
 import { createServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
 import {
 	closeRunInspectorServer,
 	openRunInspector,
 } from "../packages/hyperchart/src/inspect/inspector_server.js";
+
+beforeEach(() => {
+	// Inspector overrides exported by the developer's shell must not leak into tests.
+	delete process.env.HYPERCHART_INSPECTOR_PORT;
+	delete process.env.HYPERCHART_INSPECTOR_HOST;
+	delete process.env.SSH_CONNECTION;
+});
 
 afterEach(async () => {
 	await closeRunInspectorServer();

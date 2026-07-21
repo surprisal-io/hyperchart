@@ -296,6 +296,8 @@ agent("reviewer", { task: "Review the change." })
 
 The Pi adapter checks bundle `agents/` first, then resolves project and user agent-definition directories using Pi's normal rules. The definition supplies system prompt, model, thinking level, and tool defaults. Chart-level values may override invocation settings.
 
+A definition can declare a symbolic `role` instead of a concrete model; roles map to models in `settings.json` under `<projectRoot>/.pi/hypercharts/` or `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/` (project entries win per key), e.g. `{ "roles": { "reviewer": "anthropic/claude-opus-4-8" } }`. See [Core authoring](core-authoring.md#model-roles) for the resolution order.
+
 If the concrete definition cannot be loaded, inspection reports `agentDefinitionUnavailable`, and execution refuses to run that state.
 
 ## Run lifecycle

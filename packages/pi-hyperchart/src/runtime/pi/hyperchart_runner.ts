@@ -25,6 +25,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			modelRuntime,
 			sessionsDir,
 			...(runnerConfig.defaultModel === undefined ? {} : { defaultModel: runnerConfig.defaultModel }),
+			...(runnerConfig.modelRoles === undefined ? {} : { modelRoles: runnerConfig.modelRoles }),
 			schemaRegistry,
 		});
 	});

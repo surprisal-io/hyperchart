@@ -142,6 +142,26 @@ The first argument is a Pi agent-definition name. Hyperchart resolves the concre
 
 `model`, `thinking`, and `tools` in the chart override the resolved agent defaults for that invocation.
 
+### Model roles
+
+Instead of a concrete model, an agent definition can declare a symbolic `role` in its frontmatter:
+
+```markdown
+---
+description: Reviews changes against the plan.
+role: reviewer
+model: anthropic/claude-sonnet-4
+---
+```
+
+Roles are mapped to models once, in `settings.json` next to the charts — `<projectRoot>/<configDir>/hypercharts/settings.json` (project scope) and the user charts directory (user scope); project entries win per role key:
+
+```json
+{ "roles": { "reviewer": "anthropic/claude-opus-4-8", "fast": "anthropic/claude-haiku-4-5" } }
+```
+
+Model refs use the host's format, so charts stay portable between hosts. Resolution order per invocation: chart `model` override → configured role → definition `model` (the fallback when the role is not configured) → the host default model.
+
 ### Script actions
 
 ```ts
