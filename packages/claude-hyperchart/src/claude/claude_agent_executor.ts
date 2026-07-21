@@ -451,7 +451,14 @@ class ClaudeSession {
 			"Call exactly once when the task is complete. This ends the assignment.",
 			{ event: z.string(), output: z.unknown().optional() },
 			async (args) => {
-				const result = await validateFinishParams(effect, args as FinishParams, schemaRegistry);
+				let result = await validateFinishParams(effect, args as FinishParams, schemaRegistry);
+				if (!result.ok) {
+					const reparsed = reparseStringOutput(args as FinishParams);
+					if (reparsed !== undefined) {
+						const retry = await validateFinishParams(effect, reparsed, schemaRegistry);
+						if (retry.ok) result = retry;
+					}
+				}
 				if (!result.ok) return { content: [{ type: "text" as const, text: result.errors.join("\n") }], isError: true };
 				if (sink.captured !== undefined) {
 					return {
@@ -718,6 +725,18 @@ function latestTranscriptForPreviousActionSession(sessionsDir: string, effect: A
 		}
 	}
 	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
+}
+
+// The SDK MCP bridge presents the finish tool's schemaless `output` field to the
+// model as a string, so structured replies arrive JSON-encoded. When raw validation
+// fails, retry with the parsed value; genuine string replies pass raw validation first.
+function reparseStringOutput(params: FinishParams): FinishParams | undefined {
+	if (typeof params.output !== "string") return undefined;
+	try {
+		return { ...params, output: JSON.parse(params.output) };
+	} catch {
+		return undefined;
+	}
 }
 
 function thinkingOptions(level: ThinkingLevel | undefined): Pick<Options, "thinking" | "effort"> {
