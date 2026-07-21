@@ -19,7 +19,9 @@ export type SessionPlan = {
 /**
  * Effect overrides win over the agent definition, which wins over host defaults.
  * A definition role/toolset configured in `modelRoles`/`toolsets` wins over the
- * definition's own model/tools; an unconfigured name falls through to them.
+ * definition's own model/tools; an unconfigured name falls through to them, and
+ * with no fallback declared either the plan fails loudly — a declared role or
+ * toolset is a requirement, not a hint.
  */
 export function buildSessionPlan(
 	definition: AgentDefinition,
@@ -31,9 +33,29 @@ export function buildSessionPlan(
 	} = {},
 ): SessionPlan {
 	const roleModel = definition.role === undefined ? undefined : options.modelRoles?.[definition.role];
+	if (
+		definition.role !== undefined &&
+		roleModel === undefined &&
+		effect.action.model === undefined &&
+		definition.model === undefined
+	) {
+		throw new Error(
+			`Agent '${definition.name}' declares model role '${definition.role}' which is not configured; add it to the 'roles' section of hypercharts settings.json or declare a fallback 'model' in the definition`,
+		);
+	}
 	const modelRef = effect.action.model ?? roleModel ?? definition.model ?? options.defaultModel;
 	const thinkingLevel = (effect.action.thinking ?? definition.thinking) as ThinkingLevel | undefined;
 	const toolsetTools = definition.toolset === undefined ? undefined : options.toolsets?.[definition.toolset];
+	if (
+		definition.toolset !== undefined &&
+		toolsetTools === undefined &&
+		effect.action.tools === undefined &&
+		definition.tools === undefined
+	) {
+		throw new Error(
+			`Agent '${definition.name}' declares toolset '${definition.toolset}' which is not configured; add it to the 'toolsets' section of hypercharts settings.json or declare fallback 'tools' in the definition`,
+		);
+	}
 	const tools = effect.action.tools ?? toolsetTools ?? definition.tools;
 	return {
 		...(modelRef === undefined ? {} : { modelRef }),
