@@ -18,6 +18,7 @@ Hypercharts are durable, typed statechart workflows. Each agent action of a char
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Steer a live agent session of a run | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
+| Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
 | Open the browser inspector for a run | `hyperchart_view` |
 
 Pass `cwd` explicitly when working outside the session's starting directory.
@@ -53,7 +54,7 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 
 ## Start a run
 
-1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available.
+1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available. Inspect tools return a compact digest by default; pass `verbose: true` only when you need chart source, schemas, or transcripts.
 2. Call `hyperchart_run` with `chartPath` and `args`.
 3. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory; the run continues in the background.
 4. Inspect the concrete result with `hyperchart_run_inspect` before reporting completion.
@@ -70,6 +71,7 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
 4. Resume with `hyperchart_run` and `runDir`. Create a different run with `chartPath` and no `runDir`.
+5. If a failure was durably recorded (the log ends in a FAILED completion), plain resume replays back into the failed state. Recover with `hyperchart_rewind`: stop the run, rewind to before the failing record (`state` or `seqId`), then resume. Rewind backs up the log, status, and downstream sessions under `rewind-backups/` before truncating.
 5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
 ## Safety rules

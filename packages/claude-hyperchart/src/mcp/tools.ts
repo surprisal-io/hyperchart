@@ -1,16 +1,19 @@
 import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
 import { z } from "zod";
 import { inspectChartAst, parseChartModuleSync } from "@surprisal/hyperchart";
 import {
 	assertChartPreflight,
 	createRunDir,
+	listHyperchartFiles,
 	loadHostSettings,
 	loadRunMeta,
+	rewindHyperchartRun,
 	saveRunMeta,
 	type HyperchartRunnerConfig,
 	type RunMeta,
 } from "@surprisal/hyperchart/runtime";
+import { summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromRunDir } from "@surprisal/hyperchart/inspect";
 import { openRunInspector } from "@surprisal/hyperchart/inspect";
 import {
@@ -66,7 +69,20 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			handler: async (args) => {
 				const cwd = cwdOf(args);
 				const paths = claudeHostPaths();
-				const charts = paths.listProjectHypercharts(cwd);
+				const projectChartsDir = paths.getProjectHyperchartsDir(cwd);
+				const userChartsDir = claudeUserChartsDir();
+				// User scope first so a project chart with the same name wins, matching
+				// resolveChartPath's candidate order.
+				const chartsByName = new Map<string, { name: string; scope: "user" | "project"; chartPath: string }>();
+				for (const [scope, root] of [
+					["user", userChartsDir],
+					["project", projectChartsDir],
+				] as const) {
+					for (const chartPath of listHyperchartFiles(root)) {
+						const name = chartNameFor(chartPath, root);
+						chartsByName.set(name, { name, scope, chartPath });
+					}
+				}
 				const runs = runDirsFor(runsRoot(), cwd).map((runDir) => {
 					const status = readRunStatus(runDir);
 					return {
@@ -77,15 +93,17 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						updatedAt: status?.updatedAt,
 					};
 				});
-				return ok({ projectChartsDir: paths.getProjectHyperchartsDir(cwd), charts, runs });
+				return ok({ projectChartsDir, userChartsDir, charts: [...chartsByName.values()], runs });
 			},
 		},
 		{
 			name: "hyperchart_inspect",
-			description: "Statically validate and inspect a chart definition without running it.",
+			description:
+				"Statically validate and inspect a chart definition without running it. Returns a compact digest by default; pass verbose=true for the full object (large — includes chart source and schemas).",
 			inputSchema: {
 				chartPath: z.string().describe("Chart name or path (resolved against project and user chart dirs)"),
 				exportName: z.string().optional(),
+				verbose: z.boolean().optional().describe("Return the full inspection object instead of the compact digest"),
 				...cwdField,
 			},
 			handler: async (args) => {
@@ -101,7 +119,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					chartPath,
 					agentDefaults: createClaudeAgentDefaultsResolver(cwd, chartPath),
 				});
-				return ok(inspected);
+				return ok(args.verbose === true ? inspected : summarizeChartInspect(inspected));
 			},
 		},
 		{
@@ -197,9 +215,11 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		},
 		{
 			name: "hyperchart_run_inspect",
-			description: "Inspect the durable state of one run: states, transitions, sessions, artifacts, issues.",
+			description:
+				"Inspect the durable state of one run: state statuses, sessions, artifacts, issues. Returns a compact digest by default; pass verbose=true for the full object (large — includes chart source, schemas, and transcripts).",
 			inputSchema: {
 				runDir: z.string().describe("Run id or directory"),
+				verbose: z.boolean().optional().describe("Return the full inspection object instead of the compact digest"),
 				...cwdField,
 			},
 			handler: async (args) => {
@@ -209,7 +229,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const run = await hyperchartRunFromRunDir(runDir, {
 					agentDefaults: createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath),
 				});
-				return ok(run);
+				return ok(args.verbose === true ? run : summarizeRunInspect(run));
 			},
 		},
 		{
@@ -231,6 +251,42 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						: [resolveRunDirArg(args.runDir as string, cwd)];
 				const stopped = targets.map((runDir) => stopRunDirectory(runDir, cwd));
 				return ok({ stopped });
+			},
+		},
+		{
+			name: "hyperchart_rewind",
+			description:
+				"Back up and truncate a stopped run's durable log so replay can continue from a specific state or seqId (recovery after a durably-recorded failure).",
+			inputSchema: {
+				runDir: z.string().describe("Existing run directory or run id to rewind"),
+				state: z.string().optional().describe("State path to rewind to, e.g. plan.verify-beats#key.verify"),
+				seqId: z.number().optional().describe("Durable log seqId to rewind to"),
+				to: z.literal("compatible").optional().describe("Cut to the first prefix compatible with the current chart"),
+				mode: z.enum(["before", "after"]).optional().describe("Cut before or after the matching record. Default: before"),
+				cleanupSessions: z
+					.boolean()
+					.optional()
+					.describe("Remove downstream session progress and move downstream session dirs into the backup. Default: true"),
+				cleanupArtifacts: z
+					.boolean()
+					.optional()
+					.describe("Best-effort backup+remove artifact files declared by downstream actions. Default: false"),
+				...cwdField,
+			},
+			handler: async (args) => {
+				const cwd = cwdOf(args);
+				const runDir = resolveRunDirArg(args.runDir as string, cwd);
+				const result = await rewindHyperchartRun({
+					runDir,
+					...(typeof args.state === "string" ? { state: args.state } : {}),
+					...(typeof args.seqId === "number" ? { seqId: args.seqId } : {}),
+					...(args.to === "compatible" ? { to: "compatible" as const } : {}),
+					mode: args.mode === "after" ? "after" : "before",
+					cleanupSessions: args.cleanupSessions !== false,
+					cleanupArtifacts: args.cleanupArtifacts === true,
+					cwd,
+				});
+				return ok(result);
 			},
 		},
 		{
@@ -293,6 +349,13 @@ function ok(value: unknown): ToolResult {
 
 function fail(message: string): ToolResult {
 	return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/** Derive the spec `resolveChartPath` accepts back: bundle dir for `<dir>/chart.ts`, else the filename without its chart extension. */
+function chartNameFor(chartPath: string, root: string): string {
+	const rel = relative(root, chartPath).replaceAll("\\", "/");
+	if (rel !== "chart.ts" && rel.endsWith("/chart.ts")) return rel.slice(0, -"/chart.ts".length);
+	return rel.replace(/(?:\.chart)?\.ts$/, "");
 }
 
 function runDirsFor(root: string, cwd: string): string[] {

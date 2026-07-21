@@ -24,6 +24,7 @@ The bundled MCP server exposes seven tools. Claude picks them up through the `hy
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Queue a steering message for a live agent session | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
+| Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
 | Open the browser inspector and return its URL | `hyperchart_view` |
 
 `hyperchart_run` is asynchronous by default: the runner is a detached process that survives the Claude session. Pass `wait: true` only when the current task must block until a terminal status.

@@ -48,6 +48,8 @@ export { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, createHostPaths, listHyperchartFil
 export type { HostPaths, HostPathsConfig } from "./generic/host_paths.js";
 export { SETTINGS_FILE_NAME, loadHostSettings } from "./generic/host_settings.js";
 export type { HyperchartHostSettings } from "./generic/host_settings.js";
+export { readDurableLogSync, rewindHyperchartRun, writeDurableLogSync } from "./generic/rewind.js";
+export type { RewindMode, RewindOptions, RewindResult } from "./generic/rewind.js";
 export {
 	createAgentDefaultsResolver,
 	listAgentFiles,

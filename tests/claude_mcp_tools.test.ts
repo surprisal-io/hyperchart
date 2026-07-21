@@ -70,6 +70,7 @@ describe("hyperchart MCP tools", () => {
 		expect([...tools.keys()].sort()).toEqual([
 			"hyperchart_inspect",
 			"hyperchart_list",
+			"hyperchart_rewind",
 			"hyperchart_run",
 			"hyperchart_run_inspect",
 			"hyperchart_steer",
@@ -78,10 +79,56 @@ describe("hyperchart MCP tools", () => {
 		]);
 	});
 
+	it("returns compact inspect digests by default and full objects with verbose", async () => {
+		const { tools } = makeWorld();
+		const digest = JSON.parse(text(await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple" })));
+		expect(digest.chartId).toBe("simple");
+		expect(digest.definitionSource).toBeUndefined();
+		expect(digest.states.every((state: object) => !("definitionSource" in state))).toBe(true);
+
+		const full = JSON.parse(text(await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple", verbose: true })));
+		expect(full.definitionSource).toContain("chart(");
+
+		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true })));
+		const runDigest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ runDir: run.runId })));
+		expect(runDigest.runId).toBe(run.runId);
+		expect(runDigest.status).toBe("completed");
+		expect(runDigest.states.every((state: object) => !("definitionSource" in state))).toBe(true);
+	}, 30_000);
+
+	it("rewinds a completed run and replays it to completion", async () => {
+		const { tools, chartsDir } = makeWorld();
+		writeFileSync(
+			join(chartsDir, "steps.chart.ts"),
+			`import { chart, final, script } from "@surprisal/hyperchart";
+export default chart({
+	kind: "chart",
+	id: "steps",
+	initial: "work",
+	states: {
+		work: { kind: "state", action: script("node", ["-e", "process.exit(0)"]), transitions: { DONE: "done" } },
+		done: final(),
+	},
+});
+`,
+		);
+		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "steps", wait: true })));
+		expect(run.status.state).toBe("complete");
+
+		const rewound = JSON.parse(text(await tools.get("hyperchart_rewind")!.handler({ runDir: run.runId, state: "work" })));
+		expect(rewound.removedRecords).toBeGreaterThan(0);
+		expect(rewound.backupDir).toContain("rewind-backups");
+
+		const resumed = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ runDir: run.runId, wait: true })));
+		expect(resumed.status.state).toBe("complete");
+	}, 30_000);
+
 	it("lists charts, runs a chart to completion, and inspects the run", async () => {
 		const { tools, runsRoot } = makeWorld();
 		const listed = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
-		expect(listed.charts).toEqual(["simple.chart.ts"]);
+		expect(listed.charts).toEqual([
+			{ name: "simple", scope: "project", chartPath: join(listed.projectChartsDir, "simple.chart.ts") },
+		]);
 		expect(listed.runs).toEqual([]);
 
 		const inspected = JSON.parse(text(await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple" })));
@@ -98,6 +145,21 @@ describe("hyperchart MCP tools", () => {
 		const relisted = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
 		expect(relisted.runs).toHaveLength(1);
 	}, 30_000);
+
+	it("lists user-scope charts and lets a same-named project chart win", async () => {
+		const { tools, chartsDir, userChartsDir } = makeWorld();
+		mkdirSync(join(userChartsDir, "bundle"), { recursive: true });
+		writeFileSync(join(userChartsDir, "bundle", "chart.ts"), "export default {};\n");
+		writeFileSync(join(userChartsDir, "simple.chart.ts"), "export default {};\n");
+		writeFileSync(join(userChartsDir, "settings.json"), "{}");
+
+		const listed = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
+		expect(listed.userChartsDir).toBe(userChartsDir);
+		expect(listed.charts).toEqual([
+			{ name: "bundle", scope: "user", chartPath: join(userChartsDir, "bundle", "chart.ts") },
+			{ name: "simple", scope: "project", chartPath: join(chartsDir, "simple.chart.ts") },
+		]);
+	});
 
 	it("passes merged model roles and toolsets from settings into the runner config", async () => {
 		const { tools, chartsDir, userChartsDir } = makeWorld();
