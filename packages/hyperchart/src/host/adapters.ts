@@ -1148,7 +1148,11 @@ function runtimeStateStatus(
 	if (pending !== undefined) return "running";
 	if (facts?.completedEvent?.type === "FAILED") return "failed";
 	if (state.type === "final") {
-		return projection.activeLeaves.includes(state.id) || finalReached(state.id, ast, runtime) ? "done" : "pending";
+		return projection.activeLeaves.includes(state.id) ||
+			finalReached(state.id, ast, runtime) ||
+			finalReachedViaOnDone(state.id, ast, projection, runtime)
+			? "done"
+			: "pending";
 	}
 	if (
 		(state.type === "compound" || state.type === "region") &&
@@ -1326,7 +1330,11 @@ function scopeReachedFinal(
 	return Object.values(ast.states).some((candidate) => {
 		if (candidate.kind !== "final" || candidate.parent !== templateScope) return false;
 		const finalPath = `${scopePath}.${candidate.id}`;
-		return projection.activeLeaves.includes(finalPath) || finalReached(finalPath, ast, runtime);
+		return (
+			projection.activeLeaves.includes(finalPath) ||
+			finalReached(finalPath, ast, runtime) ||
+			finalReachedViaOnDone(finalPath, ast, projection, runtime)
+		);
 	});
 }
 
@@ -1340,6 +1348,39 @@ function finalReached(finalPath: StatePath, ast: ChartAst, runtime: RuntimeFacts
 		if (transition !== undefined && siblingPath(statePath, transition.target) === finalPath) return true;
 	}
 	return false;
+}
+
+// A final entered through a sibling container's onDone leaves no action-completion
+// record targeting it; derive it from the container's own completion instead.
+function finalReachedViaOnDone(
+	finalPath: StatePath,
+	ast: ChartAst,
+	projection: ReturnType<typeof createBranchProjection>,
+	runtime: RuntimeFacts,
+): boolean {
+	const scope = parentPath(finalPath);
+	if (scope === undefined) return false;
+	const finalId = finalPath.slice(scope.length + 1);
+	const templateScope = templatePath(scope);
+	return Object.values(ast.states).some((candidate) => {
+		if (candidate.parent !== templateScope) return false;
+		if (candidate.kind !== "compound" && candidate.kind !== "map" && candidate.kind !== "parallel") return false;
+		if (candidate.onDone !== finalId) return false;
+		const containerPath = `${scope}.${candidate.id}`;
+		if (candidate.kind === "compound") return scopeReachedFinal(containerPath, ast, projection, runtime);
+		if (candidate.kind === "parallel") {
+			return candidate.regions.every((region) =>
+				scopeReachedFinal(`${containerPath}.${region}`, ast, projection, runtime),
+			);
+		}
+		const spawned = projection.spawns[containerPath];
+		if (spawned === undefined) return false;
+		const keys = Object.keys(spawned);
+		return (
+			keys.length > 0 &&
+			keys.every((key) => mapItemStatus(`${containerPath}#${key}`, projection, runtime, ast) === "done")
+		);
+	});
 }
 
 function mapItemStatus(

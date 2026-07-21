@@ -96,6 +96,48 @@ describe("hyperchart MCP tools", () => {
 		expect(runDigest.states.every((state: object) => !("definitionSource" in state))).toBe(true);
 	}, 30_000);
 
+	it("marks finals entered through a container's onDone as done", async () => {
+		const { tools, chartsDir } = makeWorld();
+		writeFileSync(
+			join(chartsDir, "pardone.chart.ts"),
+			`import { chart, compound, final, parallel, script } from "@surprisal/hyperchart";
+const worker = () =>
+	compound({
+		initial: "step",
+		states: {
+			step: { kind: "state", action: script("node", ["-e", "process.exit(0)"]), transitions: { DONE: "done" } },
+			done: final(),
+		},
+	});
+export default chart({
+	kind: "chart",
+	id: "pardone",
+	initial: "wrap",
+	states: {
+		wrap: compound({
+			initial: "fan",
+			states: {
+				fan: parallel({ states: { left: worker(), right: worker() }, onDone: "done" }),
+				done: final(),
+			},
+			onDone: "end",
+		}),
+		end: final(),
+	},
+});
+`,
+		);
+		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "pardone", wait: true })));
+		expect(run.status.state).toBe("complete");
+		const digest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ runDir: run.runId })));
+		const statusOf = (id: string) =>
+			digest.states.find((state: { id: string }) => state.id === id)?.status ??
+			(digest.pendingStates.includes(id) ? "pending" : undefined);
+		expect(statusOf("wrap.done")).toBe("done");
+		expect(statusOf("wrap")).toBe("done");
+		expect(statusOf("wrap.fan")).toBe("done");
+	}, 30_000);
+
 	it("rewinds a completed run and replays it to completion", async () => {
 		const { tools, chartsDir } = makeWorld();
 		writeFileSync(
