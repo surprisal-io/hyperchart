@@ -14,6 +14,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			sessionsDir,
 			definitionDirs: resolveClaudeSubagentDefinitionDirs(runnerConfig.workDir, runnerConfig.chartPath),
 			...(runnerConfig.defaultModel === undefined ? {} : { defaultModel: runnerConfig.defaultModel }),
+			...(runnerConfig.modelRoles === undefined ? {} : { modelRoles: runnerConfig.modelRoles }),
 			schemaRegistry,
 		});
 	});
