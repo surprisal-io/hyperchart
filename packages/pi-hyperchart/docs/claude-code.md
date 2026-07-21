@@ -24,6 +24,7 @@ The bundled MCP server exposes seven tools. Claude picks them up through the `hy
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Queue a steering message for a live agent session | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
+| Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
 | Open the browser inspector and return its URL | `hyperchart_view` |
 
 `hyperchart_run` is asynchronous by default: the runner is a detached process that survives the Claude session. Pass `wait: true` only when the current task must block until a terminal status.
@@ -51,7 +52,7 @@ Each agent action becomes one SDK `query()` session in the run's working directo
 
 Remote setups are configured through environment variables — set them in the `env` block of Claude Code's `settings.json` so the MCP server and runners inherit them:
 
-- `HYPERCHART_INSPECTOR_PORT` — fixed port, so an `ssh -L <port>:127.0.0.1:<port>` tunnel can be configured once. Under SSH the server does not attempt to open a remote browser; open the returned URL locally through the tunnel.
+- `HYPERCHART_INSPECTOR_PORT` — fixed port, so an `ssh -L <port>:127.0.0.1:<port>` tunnel can be configured once. The fixed port serves one process; when another session already holds it, the inspector falls back to an ephemeral port and the returned URL carries the actual port. Under SSH the server does not attempt to open a remote browser; open the returned URL locally through the tunnel.
 - `HYPERCHART_INSPECTOR_HOST=0.0.0.0` — bind all interfaces and advertise the machine's LAN address in inspector URLs, so links open directly from another device. The unguessable per-run URL token is the only access control in this mode (including steering); use it on trusted networks only and prefer the SSH tunnel otherwise.
 
 ## Safety

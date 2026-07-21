@@ -10,7 +10,7 @@
 | `readNeutralSessionTranscript(sessionsDir, sessionFile)` | Default transcript reader: header-tagged JSONL of pre-flattened `HyperchartSessionMessageInfo` records. |
 | `resolveContainedSessionFile(sessionsDir, sessionFile)` | Realpath containment guard shared by transcript readers. |
 | `combineToolLifecycle(messages)` / `truncateTranscriptText(value)` | Shared transcript shaping: fold tool call + result into one lifecycle entry; cap displayed text. |
-| `openRunInspector({ runId, loadRun, steerSession?, openBrowser? })` | Register a run with the process-wide localhost inspector and return its tokenized URL. `HYPERCHART_INSPECTOR_PORT` pins the port; `HYPERCHART_INSPECTOR_HOST` sets the bind host (default loopback; `0.0.0.0` advertises the machine's LAN address in URLs). Under SSH no server-side browser is opened. |
+| `openRunInspector({ runId, loadRun, steerSession?, openBrowser? })` | Register a run with the process-wide localhost inspector and return its tokenized URL. `HYPERCHART_INSPECTOR_PORT` pins the port (falling back to an ephemeral port when it is already taken by another process); `HYPERCHART_INSPECTOR_HOST` sets the bind host (default loopback; `0.0.0.0` advertises the machine's LAN address in URLs). Under SSH no server-side browser is opened. |
 | `closeRunInspectorServer()` | Test/shutdown hook for the inspector singleton. |
 | Types | `HyperchartRunFromRunDirOptions`, `SessionTranscriptReader`, `NeutralTranscriptHeader`, `RunInspectorSource`, `OpenRunInspectorOptions`, `MAX_TRANSCRIPT_MESSAGES`, `MAX_TRANSCRIPT_TEXT_LENGTH`. |
 

@@ -52,7 +52,7 @@ Each agent action becomes one SDK `query()` session in the run's working directo
 
 Remote setups are configured through environment variables — set them in the `env` block of Claude Code's `settings.json` so the MCP server and runners inherit them:
 
-- `HYPERCHART_INSPECTOR_PORT` — fixed port, so an `ssh -L <port>:127.0.0.1:<port>` tunnel can be configured once. Under SSH the server does not attempt to open a remote browser; open the returned URL locally through the tunnel.
+- `HYPERCHART_INSPECTOR_PORT` — fixed port, so an `ssh -L <port>:127.0.0.1:<port>` tunnel can be configured once. The fixed port serves one process; when another session already holds it, the inspector falls back to an ephemeral port and the returned URL carries the actual port. Under SSH the server does not attempt to open a remote browser; open the returned URL locally through the tunnel.
 - `HYPERCHART_INSPECTOR_HOST=0.0.0.0` — bind all interfaces and advertise the machine's LAN address in inspector URLs, so links open directly from another device. The unguessable per-run URL token is the only access control in this mode (including steering); use it on trusted networks only and prefer the SSH tunnel otherwise.
 
 ## Safety

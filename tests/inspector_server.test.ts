@@ -105,6 +105,30 @@ describe("remote-friendly inspector options", () => {
 		expect(new URL(url).port).toBe(String(probe));
 	});
 
+	it("falls back to an ephemeral port when the fixed port is taken by another process", async () => {
+		const blocker = createServer();
+		const blockedPort = await new Promise<number>((resolve, reject) => {
+			blocker.once("error", reject);
+			blocker.listen(0, "127.0.0.1", () => {
+				const address = blocker.address();
+				if (address === null || typeof address === "string") return reject(new Error("no port"));
+				resolve(address.port);
+			});
+		});
+		try {
+			process.env.HYPERCHART_INSPECTOR_PORT = String(blockedPort);
+			const { url } = await openRunInspector({
+				runId: "fallback-port",
+				loadRun: async () => ({ runId: "fallback-port" }) as never,
+				openBrowser: () => undefined,
+			});
+			expect(new URL(url).port).not.toBe(String(blockedPort));
+			expect((await fetch(url)).status).toBe(200);
+		} finally {
+			await new Promise((resolve) => blocker.close(resolve));
+		}
+	});
+
 	it("does not try to open a server-side browser under SSH", async () => {
 		process.env.SSH_CONNECTION = "203.0.113.5 50000 203.0.113.9 22";
 		// No openBrowser stub: without the SSH guard this would spawn a real browser.

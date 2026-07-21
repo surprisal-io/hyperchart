@@ -69,17 +69,29 @@ async function startInspectorServer(): Promise<InspectorServerState> {
 	const entries = new Map<string, InspectorEntry>();
 	const host = inspectorHost();
 	const server = createServer((request, response) => void routeRequest(entries, request, response));
-	await new Promise<void>((resolveListen, reject) => {
-		server.once("error", reject);
-		server.listen(inspectorPort(), host, () => {
-			server.off("error", reject);
-			resolveListen();
-		});
-	});
+	const fixedPort = inspectorPort();
+	try {
+		await listenOnce(server, fixedPort, host);
+	} catch (error) {
+		// A fixed port serves one process; parallel sessions fall back to an
+		// ephemeral port so every inspector still hands out a working URL.
+		if (fixedPort === 0 || (error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+		await listenOnce(server, 0, host);
+	}
 	const address = server.address();
 	if (address === null || typeof address === "string") throw new Error("Inspector server did not bind a TCP port");
 	server.unref();
 	return { server, origin: `http://${inspectorUrlHost(host)}:${address.port}`, entries };
+}
+
+function listenOnce(server: Server, port: number, host: string): Promise<void> {
+	return new Promise((resolveListen, reject) => {
+		server.once("error", reject);
+		server.listen(port, host, () => {
+			server.off("error", reject);
+			resolveListen();
+		});
+	});
 }
 
 /**
