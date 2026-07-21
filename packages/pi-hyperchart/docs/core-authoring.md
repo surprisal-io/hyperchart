@@ -162,6 +162,26 @@ Roles are mapped to models once, in `settings.json` next to the charts — `<pro
 
 Model refs use the host's format, so charts stay portable between hosts. Resolution order per invocation: chart `model` override → configured role → definition `model` (the fallback when the role is not configured) → the host default model.
 
+### Toolsets
+
+Tool lists work the same way: a definition can declare a symbolic `toolset` instead of enumerating tools, with `tools` as the fallback when the toolset is not configured:
+
+```markdown
+---
+description: Reviews changes against the plan.
+toolset: reading
+tools: read, grep
+---
+```
+
+Toolsets live in the same `settings.json`, in the host's tool vocabulary (tool names differ between hosts, which is exactly why a symbolic name keeps the chart portable):
+
+```json
+{ "toolsets": { "reading": ["read", "grep"], "coding": ["read", "edit", "bash"] } }
+```
+
+Resolution order per invocation: chart `tools` override → configured toolset → definition `tools`.
+
 ### Script actions
 
 ```ts

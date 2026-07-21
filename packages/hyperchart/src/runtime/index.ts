@@ -46,7 +46,8 @@ export type {
 } from "./generic/chart_typecheck.js";
 export { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, createHostPaths, listHyperchartFiles } from "./generic/host_paths.js";
 export type { HostPaths, HostPathsConfig } from "./generic/host_paths.js";
-export { SETTINGS_FILE_NAME, loadModelRoles } from "./generic/host_settings.js";
+export { SETTINGS_FILE_NAME, loadHostSettings } from "./generic/host_settings.js";
+export type { HyperchartHostSettings } from "./generic/host_settings.js";
 export {
 	createAgentDefaultsResolver,
 	listAgentFiles,

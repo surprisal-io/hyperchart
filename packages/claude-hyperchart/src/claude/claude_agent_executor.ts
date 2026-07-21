@@ -58,6 +58,7 @@ export type ClaudeExecutorOptions = {
 	definitionDirs?: string[];
 	defaultModel?: string;
 	modelRoles?: Record<string, string>;
+	toolsets?: Record<string, string[]>;
 	maxFinishRetries?: number;
 	schemaRegistry?: SchemaRegistry;
 	queryFn?: QueryFn;
@@ -195,6 +196,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		const plan = buildSessionPlan(definition, effect, {
 			...(this.options.defaultModel === undefined ? {} : { defaultModel: this.options.defaultModel }),
 			...(this.options.modelRoles === undefined ? {} : { modelRoles: this.options.modelRoles }),
+			...(this.options.toolsets === undefined ? {} : { toolsets: this.options.toolsets }),
 		});
 		const sink: CompletionSink = { captured: undefined };
 

@@ -71,17 +71,19 @@ describe("agent definitions", () => {
 		});
 	});
 
-	it("parses a role from frontmatter alongside the fallback model", async () => {
+	it("parses role and toolset from frontmatter alongside their fallbacks", async () => {
 		const dir = await makeTempDir();
 		await writeFile(
 			join(dir, "critic.md"),
-			"---\ndescription: critic\nrole: reviewer\nmodel: anthropic/claude\n---\nCritic prompt\n",
+			"---\ndescription: critic\nrole: reviewer\ntoolset: reading\nmodel: anthropic/claude\ntools: read, grep\n---\nCritic prompt\n",
 			"utf8",
 		);
 
 		expect(loadAgentDefinition("critic", [dir])).toMatchObject({
 			role: "reviewer",
+			toolset: "reading",
 			model: "anthropic/claude",
+			tools: ["read", "grep"],
 		});
 	});
 
@@ -212,6 +214,25 @@ describe("pi executor helpers", () => {
 			tools: ["bash", "finish"],
 			promptMode: "append",
 		});
+	});
+
+	it("resolves a definition toolset through the toolsets map", () => {
+		const definition = {
+			name: "critic",
+			systemPrompt: "prompt",
+			toolset: "reading",
+			tools: ["bash"],
+		};
+		const options = { toolsets: { reading: ["read", "grep"] } };
+
+		// A configured toolset wins over the definition's own tools; action tools win over both.
+		expect(buildSessionPlan(definition, effect(), options).tools).toEqual(["read", "grep", "finish"]);
+		expect(buildSessionPlan(definition, effect({}, { tools: ["edit"] }), options).tools).toEqual(["edit", "finish"]);
+		// An unconfigured toolset falls through to the definition tools.
+		expect(buildSessionPlan(definition, effect(), { toolsets: { other: ["fetch"] } }).tools).toEqual([
+			"bash",
+			"finish",
+		]);
 	});
 
 	it("resolves a definition role through the model roles map", () => {

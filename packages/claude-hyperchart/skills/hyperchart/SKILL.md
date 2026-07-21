@@ -37,9 +37,9 @@ hypercharts/<name>/
 └── scripts/
 ```
 
-Agent definitions are markdown files with frontmatter (`name`, `description`, `role`, `model`, `thinking`, `tools`, `systemPromptMode`); the body is the agent's system prompt. Resolution order: `<chartDir>/agents`, `<projectRoot>/.claude/agents`, `<projectRoot>/.agents`, `~/.agents`, `~/.claude/agents`. Model ids are passed to the Claude Agent SDK verbatim (e.g. `claude-sonnet-5`, `claude-opus-4-8`).
+Agent definitions are markdown files with frontmatter (`name`, `description`, `role`, `toolset`, `model`, `thinking`, `tools`, `systemPromptMode`); the body is the agent's system prompt. Resolution order: `<chartDir>/agents`, `<projectRoot>/.claude/agents`, `<projectRoot>/.agents`, `~/.agents`, `~/.claude/agents`. Model ids are passed to the Claude Agent SDK verbatim (e.g. `claude-sonnet-5`, `claude-opus-4-8`).
 
-`role` names a symbolic model tier instead of a concrete model. Roles are mapped to models once in `settings.json` under the charts directories — `<projectRoot>/.claude/hypercharts/settings.json` and `~/.claude/hypercharts/settings.json`, project entries winning per key — e.g. `{ "roles": { "reviewer": "opus" } }`. Resolution per invocation: chart `model` override → configured role → frontmatter `model` (fallback for an unconfigured role) → default model.
+`role` names a symbolic model tier instead of a concrete model, and `toolset` a symbolic tool list instead of enumerating tools. Both are mapped to concrete values once in `settings.json` under the charts directories — `<projectRoot>/.claude/hypercharts/settings.json` and `~/.claude/hypercharts/settings.json`, project entries winning per key — e.g. `{ "roles": { "reviewer": "opus" }, "toolsets": { "reading": ["Read", "Grep"] } }`. Resolution per invocation: chart `model`/`tools` override → configured role/toolset → frontmatter `model`/`tools` (fallback for an unconfigured name) → default model.
 
 ## Author or modify a chart
 

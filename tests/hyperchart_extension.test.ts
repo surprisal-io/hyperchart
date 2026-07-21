@@ -80,16 +80,19 @@ describe("hyperchart extension", () => {
 		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
 	});
 
-	it("passes merged model roles from settings into the runner config", async () => {
+	it("passes merged model roles and toolsets from settings into the runner config", async () => {
 		mkdirSync(join(agentDir, "hypercharts"), { recursive: true });
 		writeFileSync(
 			join(agentDir, "hypercharts", "settings.json"),
-			JSON.stringify({ roles: { reviewer: "user/model", scout: "user/scout" } }),
+			JSON.stringify({
+				roles: { reviewer: "user/model", scout: "user/scout" },
+				toolsets: { reading: ["read", "grep"] },
+			}),
 		);
 		mkdirSync(join(projectDir, ".pi", "hypercharts"), { recursive: true });
 		writeFileSync(
 			join(projectDir, ".pi", "hypercharts", "settings.json"),
-			JSON.stringify({ roles: { reviewer: "project/model" } }),
+			JSON.stringify({ roles: { reviewer: "project/model" }, toolsets: { reading: ["read"] } }),
 		);
 		const chartPath = join(tempDir, "roles-config.mjs");
 		writeFileSync(chartPath, `export default { kind: "chart", id: "roles", initial: "done", states: { done: { kind: "final" } } };\n`);
@@ -105,6 +108,7 @@ describe("hyperchart extension", () => {
 		const config = JSON.parse(readFileSync(join(runDir, "runner.config.json"), "utf8"));
 
 		expect(config.modelRoles).toEqual({ reviewer: "project/model", scout: "user/scout" });
+		expect(config.toolsets).toEqual({ reading: ["read"] });
 	});
 
 	it("restores widgets only for non-terminal runs owned by the current pi session", async () => {

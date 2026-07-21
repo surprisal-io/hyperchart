@@ -18,18 +18,23 @@ export type SessionPlan = {
 
 /**
  * Effect overrides win over the agent definition, which wins over host defaults.
- * A definition role configured in `modelRoles` wins over the definition's own
- * model; an unconfigured role falls through to the definition model.
+ * A definition role/toolset configured in `modelRoles`/`toolsets` wins over the
+ * definition's own model/tools; an unconfigured name falls through to them.
  */
 export function buildSessionPlan(
 	definition: AgentDefinition,
 	effect: AgentEffect,
-	options: { defaultModel?: string; modelRoles?: Record<string, string> } = {},
+	options: {
+		defaultModel?: string;
+		modelRoles?: Record<string, string>;
+		toolsets?: Record<string, string[]>;
+	} = {},
 ): SessionPlan {
 	const roleModel = definition.role === undefined ? undefined : options.modelRoles?.[definition.role];
 	const modelRef = effect.action.model ?? roleModel ?? definition.model ?? options.defaultModel;
 	const thinkingLevel = (effect.action.thinking ?? definition.thinking) as ThinkingLevel | undefined;
-	const tools = effect.action.tools ?? definition.tools;
+	const toolsetTools = definition.toolset === undefined ? undefined : options.toolsets?.[definition.toolset];
+	const tools = effect.action.tools ?? toolsetTools ?? definition.tools;
 	return {
 		...(modelRef === undefined ? {} : { modelRef }),
 		...(thinkingLevel === undefined ? {} : { thinkingLevel }),
