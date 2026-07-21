@@ -247,13 +247,23 @@ describe("pi executor helpers", () => {
 		// A configured role wins over the definition's own model; an action model wins over both.
 		expect(buildSessionPlan(definition, effect(), options).modelRef).toBe("anthropic/claude-opus");
 		expect(buildSessionPlan(definition, effect({}, { model: "openai/gpt" }), options).modelRef).toBe("openai/gpt");
-		// An unconfigured role falls through to the definition model, then the host default.
+		// An unconfigured role falls through to the definition model.
 		expect(buildSessionPlan(definition, effect(), { modelRoles: { other: "x/y" } }).modelRef).toBe("anthropic/fallback");
-		expect(
-			buildSessionPlan({ name: "critic", systemPrompt: "prompt", role: "reviewer" }, effect(), {
-				defaultModel: "fallback/model",
-			}).modelRef,
-		).toBe("fallback/model");
+	});
+
+	it("fails loudly when a declared role or toolset is unconfigured and has no fallback", () => {
+		const roleOnly = { name: "critic", systemPrompt: "prompt", role: "reviewer" };
+		const toolsetOnly = { name: "critic", systemPrompt: "prompt", toolset: "reading" };
+
+		expect(() => buildSessionPlan(roleOnly, effect(), { defaultModel: "fallback/model" })).toThrow(
+			"declares model role 'reviewer' which is not configured",
+		);
+		expect(() => buildSessionPlan(toolsetOnly, effect(), {})).toThrow(
+			"declares toolset 'reading' which is not configured",
+		);
+		// An explicit chart-level override sidesteps the unconfigured name entirely.
+		expect(buildSessionPlan(roleOnly, effect({}, { model: "openai/gpt" }), {}).modelRef).toBe("openai/gpt");
+		expect(buildSessionPlan(toolsetOnly, effect({}, { tools: ["edit"] }), {}).tools).toEqual(["edit", "finish"]);
 	});
 
 	it.each([

@@ -162,6 +162,8 @@ Roles are mapped to models once, in `settings.json` next to the charts — `<pro
 
 Model refs use the host's format, so charts stay portable between hosts. Resolution order per invocation: chart `model` override → configured role → definition `model` (the fallback when the role is not configured) → the host default model.
 
+A declared role is a requirement, not a hint: if the role is not configured in settings and the definition declares no fallback `model` (and the chart does not override `model` for that invocation), the action fails with an error instead of silently running on the default model.
+
 ### Toolsets
 
 Tool lists work the same way: a definition can declare a symbolic `toolset` instead of enumerating tools, with `tools` as the fallback when the toolset is not configured:
@@ -180,7 +182,7 @@ Toolsets live in the same `settings.json`, in the host's tool vocabulary (tool n
 { "toolsets": { "reading": ["read", "grep"], "coding": ["read", "edit", "bash"] } }
 ```
 
-Resolution order per invocation: chart `tools` override → configured toolset → definition `tools`.
+Resolution order per invocation: chart `tools` override → configured toolset → definition `tools`. Same strictness as roles: an unconfigured toolset with no fallback `tools` (and no chart override) fails the action with an error.
 
 ### Script actions
 
