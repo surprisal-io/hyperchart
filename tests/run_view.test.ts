@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeChartConfig } from "../packages/hyperchart/src/index.js";
-import { agent, arg, chart, final, map, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, arg, chart, final, failed, map, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import type { ActionUID, ChartAst, ChartCst, DurableLogRecord, StateActionAst } from "../packages/hyperchart/src/index.js";
 import { buildRunView } from "../packages/pi-hyperchart/src/tui/run_view.js";
 
@@ -24,7 +24,7 @@ function linearChart(validate = false): ChartAst {
 					transitions: { DONE: "done", FAILED: "failed" },
 				},
 				done: final(),
-				failed: final(),
+				failed: failed(),
 			},
 		}),
 	);

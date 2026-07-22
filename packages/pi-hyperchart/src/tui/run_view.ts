@@ -39,6 +39,7 @@ export type GraphRow = {
 export type RunView = {
 	chartId: string;
 	final: boolean;
+	failedTerminal: boolean;
 	args?: Record<string, unknown>;
 	rows: TreeRow[];
 	graph: GraphRow[];
@@ -55,6 +56,7 @@ export function buildRunView(ast: ChartAst, log: readonly DurableLogRecord[], no
 	return {
 		chartId: ast.id,
 		final,
+		failedTerminal: final && projection.activeLeaves.some((leaf) => ast.states[leaf]?.kind === "final" && ast.states[leaf]?.outcome === "failed"),
 		...(projection.args === undefined ? {} : { args: { ...projection.args } }),
 		rows: buildRows(ast, projection.activeLeaves, projection.spawns),
 		graph: buildGraphRows(

@@ -8,6 +8,11 @@ import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
 import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import {
+	hasTerminalNotificationReceipt,
+	persistTerminalNotificationRequest,
+	removeTerminalNotificationOutbox,
+} from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { readSessionProgress, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import {
@@ -138,6 +143,170 @@ describe("hyperchart extension", () => {
 		await sessionStart?.({ reason: "startup" }, ctx);
 
 		expect(widgetKeys).toEqual(["hyperchart:owned-running"]);
+	});
+
+	it("recovers terminal notifications only into the exact owning session and workDir", async () => {
+		const chartPath = writeChart("terminal-routing");
+		const owned = createRun("owned-terminal", projectDir, chartPath, "session-a");
+		const foreignSession = createRun("foreign-terminal", projectDir, chartPath, "session-b");
+		const foreignWorkDir = createRun("foreign-workdir-terminal", otherProjectDir, chartPath, "session-a");
+		for (const runDir of [owned, foreignSession, foreignWorkDir]) {
+			persistTerminalNotificationRequest(runDir, {
+				runId: runDir.split("/").at(-1)!,
+				runDir,
+				chartId: "demo",
+				outcome: "complete",
+				prompt: `terminal ${runDir}`,
+				artifacts: [],
+			});
+			patchRunStatus(runDir, { runId: runDir.split("/").at(-1)!, chartId: "demo", state: "complete" });
+		}
+		// Created last so it is scanned first: its malformed outbox must not prevent the
+		// valid owned run from being recovered.
+		const malformed = createRun("malformed-terminal", projectDir, chartPath, "session-a");
+		mkdirSync(join(malformed, "terminal-notification"), { recursive: true });
+		writeFileSync(join(malformed, "terminal-notification", "request.json"), "{not-json\n");
+		patchRunStatus(malformed, { runId: "malformed-terminal", chartId: "demo", state: "complete" });
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		const sent: Array<{ customType: string; details: { requestId: string } }> = [];
+		const pi = {
+			registerCommand: () => {},
+			registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			sendMessage: (message: { customType: string; details: { requestId: string } }) => sent.push(message),
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		context.sessionManager.getEntries = () => [];
+
+		await sessionStart?.({ reason: "startup" }, context);
+
+		expect(sent).toHaveLength(1);
+		expect(sent[0]?.customType).toBe("hyperchart-terminal");
+		expect(hasTerminalNotificationReceipt(owned, "pi", "session-a")).toBe(true);
+		expect(hasTerminalNotificationReceipt(foreignSession, "pi", "session-a")).toBe(false);
+		expect(hasTerminalNotificationReceipt(foreignWorkDir, "pi", "session-a")).toBe(false);
+	});
+
+	it("confirms only after Pi accepts the message and retries a pre-delivery failure", async () => {
+		const chartPath = writeChart("terminal-send-order");
+		const runDir = createRun("terminal-send-order", projectDir, chartPath, "session-a");
+		persistTerminalNotificationRequest(runDir, {
+			runId: "terminal-send-order", runDir, chartId: "demo", outcome: "complete", prompt: "done", artifacts: [],
+		});
+		patchRunStatus(runDir, { runId: "terminal-send-order", chartId: "demo", state: "complete" });
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		let attempts = 0;
+		const pi = {
+			registerCommand: () => {}, registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			sendMessage: () => {
+				attempts++;
+				expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(false);
+				if (attempts === 1) throw new Error("send failed");
+			},
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		context.sessionManager.getEntries = () => [];
+
+		await sessionStart?.({ reason: "startup" }, context);
+		expect(attempts).toBe(1);
+		expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(false);
+		await sessionStart?.({ reason: "resume" }, context);
+		expect(attempts).toBe(2);
+		expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(true);
+	});
+
+	it("does not resend a terminal request already persisted in the Pi session", async () => {
+		const chartPath = writeChart("terminal-persisted");
+		const runDir = createRun("persisted-terminal", projectDir, chartPath, "session-a");
+		const request = persistTerminalNotificationRequest(runDir, {
+			runId: "persisted-terminal",
+			runDir,
+			chartId: "demo",
+			outcome: "failed",
+			prompt: "failed terminal",
+			artifacts: [],
+			error: "boom",
+		});
+		patchRunStatus(runDir, { runId: "persisted-terminal", chartId: "demo", state: "failed", error: "boom" });
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		let sends = 0;
+		const pi = {
+			registerCommand: () => {}, registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			sendMessage: () => { sends++; },
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		context.sessionManager.getEntries = () => [{
+			type: "custom_message",
+			id: "entry",
+			parentId: null,
+			timestamp: new Date().toISOString(),
+			customType: "hyperchart-terminal",
+			content: "failed terminal",
+			display: true,
+			details: { requestId: request.requestId },
+		}];
+
+		await sessionStart?.({ reason: "resume" }, context);
+
+		expect(sends).toBe(0);
+		expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(true);
+	});
+
+	it("delivers an identical post-rewind notification because it has a new request identity", async () => {
+		const chartPath = writeChart("terminal-rewind-generation");
+		const runDir = createRun("terminal-rewind-generation", projectDir, chartPath, "session-a");
+		const payload = {
+			runId: "terminal-rewind-generation",
+			runDir,
+			chartId: "demo",
+			outcome: "complete" as const,
+			prompt: "identical terminal",
+			artifacts: [],
+		};
+		const oldRequest = persistTerminalNotificationRequest(runDir, payload);
+		removeTerminalNotificationOutbox(runDir);
+		const newRequest = persistTerminalNotificationRequest(runDir, payload);
+		patchRunStatus(runDir, { runId: payload.runId, chartId: "demo", state: "complete" });
+		expect(newRequest.requestId).not.toBe(oldRequest.requestId);
+		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
+		const sent: Array<{ details: { requestId: string } }> = [];
+		const pi = {
+			registerCommand: () => {}, registerTool: () => {},
+			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
+				if (event === "session_start") sessionStart = handler;
+			},
+			sendMessage: (message: { details: { requestId: string } }) => sent.push(message),
+			events: { on: () => {}, emit: () => {} },
+		} as unknown as ExtensionAPI;
+		register(pi);
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		context.sessionManager.getEntries = () => [{
+			type: "custom_message",
+			id: "old-terminal",
+			parentId: null,
+			timestamp: new Date().toISOString(),
+			customType: "hyperchart-terminal",
+			content: "identical terminal",
+			display: true,
+			details: { requestId: oldRequest.requestId },
+		}];
+
+		await sessionStart?.({ reason: "resume" }, context);
+		expect(sent.map((message) => message.details.requestId)).toEqual([newRequest.requestId]);
 	});
 
 	it("lists project and user charts with project precedence", async () => {

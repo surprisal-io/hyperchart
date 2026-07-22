@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, visibleWidth, type Component, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
-import { JsonlLogStore, isFailureStatePath } from "@surprisal/hyperchart/runtime";
+import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
 import {
 	readSessionProgress,
 	sessionProgressPath,
@@ -266,9 +266,7 @@ function activeStatus(status: GraphRow["status"]): boolean {
 }
 
 function runStateLabel(view: RunView, live: boolean): string {
-	if (view.final) return view.graph.some((row) => row.status === "failed" || (row.status === "final" && isFailureStatePath(row.path)))
-		? "FAILED"
-		: "DONE";
+	if (view.final) return view.failedTerminal ? "FAILED" : "DONE";
 	return live ? "RUNNING" : "DETACHED";
 }
 
