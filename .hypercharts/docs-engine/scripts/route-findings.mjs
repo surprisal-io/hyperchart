@@ -1,31 +1,32 @@
-import { writeFileSync } from "node:fs";
-import { emit, readJson } from "./doc-checks.mjs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { emit, readJson, rejectAll } from "./doc-checks.mjs";
 
-// Merges per-unit findings into the drift report and decides whether the run
-// stops at the report (audit mode / clean tree) or continues into rewrites.
+const mode = process.env.MODE ?? "audit";
+const units = readJson(process.env.UNITS_FILE ?? "").items ?? {};
+const ledger = readJson(process.env.GATE_LEDGER_FILE ?? "").units ?? {};
+const missing = Object.keys(units).filter((unitId) => !ledger[unitId]);
+if (missing.length > 0) rejectAll([`Gate ledger is missing units: ${missing.join(", ")}`]);
 
-const mode = process.env.MODE === "fix" ? "fix" : "audit";
-const units = readJson(process.env.UNITS_FILE ?? "").items;
-const findingsFiles = (process.env.FINDINGS_FILES ?? "").split("\n").filter((line) => line.trim() !== "");
-
-const report = { mode, units: {}, totals: { units: Object.keys(units).length, dirtyUnits: 0, findings: 0 } };
-const rewriteItems = {};
-for (const file of findingsFiles) {
-	const { unitId, findings } = readJson(file);
-	report.units[unitId] = { path: units[unitId]?.path, findings };
+const report = { mode, totals: { units: Object.keys(units).length, dirtyUnits: 0, findings: 0 }, units: {} };
+const dirty = {};
+for (const [unitId, unit] of Object.entries(units)) {
+	const approved = ledger[unitId];
+	const findings = approved.findings ?? [];
+	report.units[unitId] = { path: unit.path, findings, decisions: approved.decisions ?? [] };
 	if (findings.length === 0) continue;
 	report.totals.dirtyUnits += 1;
 	report.totals.findings += findings.length;
-	const unit = units[unitId];
-	rewriteItems[unitId] = { ...unit, findingsPath: file, findingsCount: findings.length };
+	dirty[unitId] = {
+		...unit,
+		findingsPath: approved.findingsPath,
+		findingsCount: findings.length,
+	};
 }
 
-writeFileSync("artifacts/docs-engine/drift-report.json", `${JSON.stringify(report, null, 2)}\n`);
-
-if (mode === "fix" && report.totals.findings > 0) {
-	emit("REWRITE_REQUIRED", { items: rewriteItems, totals: report.totals });
-} else if (mode === "fix") {
-	emit("DOCS_CLEAN", { totals: report.totals });
-} else {
-	emit("DRIFT_REPORTED", { totals: report.totals });
-}
+const reportPath = "artifacts/docs-engine/drift-report.json";
+mkdirSync(dirname(reportPath), { recursive: true });
+writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+if (mode !== "fix") emit("DRIFT_REPORTED", { totals: report.totals });
+else if (report.totals.dirtyUnits === 0) emit("DOCS_CLEAN", { totals: report.totals });
+else emit("REWRITE_REQUIRED", { rewriteItems: dirty, totals: report.totals });
