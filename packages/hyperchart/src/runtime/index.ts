@@ -10,7 +10,7 @@ export { JsonlLogStore, MemoryLogStore } from "./generic/log_store.js";
 export type { LogStore } from "./generic/log_store.js";
 export { createRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
 export type { RunMeta } from "./generic/run_dir.js";
-export { finalMachineFailureMessage, isFailureStatePath, terminalStateForFinalMachine } from "./generic/run_outcome.js";
+export { finalMachineFailureMessage, terminalStateForFinalMachine } from "./generic/run_outcome.js";
 export type { RunTerminalState } from "./generic/run_outcome.js";
 export {
 	TERMINAL_NOTIFICATION_DIR,

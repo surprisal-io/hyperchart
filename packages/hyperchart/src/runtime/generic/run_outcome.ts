@@ -1,57 +1,70 @@
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { MachineState } from "../../core/machine.js";
 import { nodeAt } from "../../core/paths.js";
+import { createBranchProjection, projectBranch } from "../../core/projection.js";
 
 export type RunTerminalState = "complete" | "failed";
 
-export function terminalStateForFinalMachine(state: MachineState, log: readonly DurableLogRecord[]): RunTerminalState {
-	if (state.projection.activeLeaves.some((leaf) => isFailureFinalLeaf(state, leaf))) return "failed";
-	return latestCompletionEvent(log)?.type === "FAILED" ? "failed" : "complete";
+/** Terminal outcome is explicit chart data. Names and the event that entered a terminal are irrelevant. */
+export function terminalStateForFinalMachine(state: MachineState, _log: readonly DurableLogRecord[] = []): RunTerminalState {
+	return state.projection.activeLeaves.some((leaf) => {
+		const node = nodeAt(state.ast, leaf);
+		return node?.kind === "final" && node.outcome === "failed";
+	}) ? "failed" : "complete";
 }
 
-export function finalMachineFailureMessage(state: MachineState, log: readonly DurableLogRecord[]): string | undefined {
-	const failed = latestFailedCompletion(log);
+export function finalMachineFailureMessage(state: MachineState, log: readonly DurableLogRecord[] = []): string | undefined {
+	const failedLeaves = state.projection.activeLeaves.filter((leaf) => {
+		const node = nodeAt(state.ast, leaf);
+		return node?.kind === "final" && node.outcome === "failed";
+	});
+	if (failedLeaves.length === 0) return undefined;
+	const failed = failedCompletionEnteringActiveTerminal(state, log, new Set(failedLeaves));
 	if (failed !== undefined && "error" in failed.event && failed.event.error !== undefined) {
 		return describeEventError(failed.event.error);
 	}
-	const failedLeaf = state.projection.activeLeaves.find((leaf) => isFailureFinalLeaf(state, leaf));
-	return failedLeaf === undefined ? undefined : `chart reached failed final state '${failedLeaf}'`;
+	return `chart reached failed terminal state '${failedLeaves[0]}'`;
 }
 
-export function isFailureStatePath(path: string): boolean {
-	const segment = path.split(".").at(-1) ?? path;
-	const templateSegment = segment.split("#")[0] ?? segment;
-	return ["failed", "failure", "error"].includes(templateSegment.toLowerCase());
-}
-
-function isFailureFinalLeaf(state: MachineState, leaf: string): boolean {
-	const node = nodeAt(state.ast, leaf);
-	return node?.kind === "final" && (node.id.toLowerCase() === "failed" || isFailureStatePath(leaf));
+/**
+ * Associate an error only with the FAILED fact that actually entered the final
+ * failed leaf. An older recovered failure may remain in the log after the chart
+ * routes through recovery and later reaches a different failed terminal.
+ */
+function failedCompletionEnteringActiveTerminal(
+	state: MachineState,
+	log: readonly DurableLogRecord[],
+	activeFailedLeaves: ReadonlySet<string>,
+) {
+	const projection = createBranchProjection(state.ast);
+	const enteredBy = new Map<string, Extract<DurableLogRecord, { type: "state_action"; kind: "complete" }>>();
+	for (const record of log) {
+		const before = new Set(projection.activeLeaves);
+		projectBranch(projection, state.ast, [record]);
+		for (const leaf of projection.activeLeaves) {
+			if (before.has(leaf)) continue;
+			const node = nodeAt(state.ast, leaf);
+			if (node?.kind !== "final" || node.outcome !== "failed") continue;
+			if (record.type === "state_action" && record.kind === "complete" && record.event.type === "FAILED") {
+				enteredBy.set(leaf, record);
+			} else {
+				enteredBy.delete(leaf);
+			}
+		}
+	}
+	let latest: Extract<DurableLogRecord, { type: "state_action"; kind: "complete" }> | undefined;
+	for (const leaf of activeFailedLeaves) {
+		const candidate = enteredBy.get(leaf);
+		if (candidate !== undefined && (latest === undefined || candidate.seqId > latest.seqId)) latest = candidate;
+	}
+	return latest;
 }
 
 function describeEventError(error: unknown): string {
-	// Chart FAILED events may carry structured JSON errors; keep that payload visible in
-	// status/TUI output instead of collapsing plain objects to "[object Object]".
 	if (typeof error === "string") return error;
 	try {
 		return JSON.stringify(error) ?? String(error);
 	} catch {
 		return String(error);
 	}
-}
-
-function latestCompletionEvent(log: readonly DurableLogRecord[]) {
-	for (let index = log.length - 1; index >= 0; index--) {
-		const record = log[index];
-		if (record?.type === "state_action" && record.kind === "complete") return record.event;
-	}
-	return undefined;
-}
-
-function latestFailedCompletion(log: readonly DurableLogRecord[]) {
-	for (let index = log.length - 1; index >= 0; index--) {
-		const record = log[index];
-		if (record?.type === "state_action" && record.kind === "complete" && record.event.type === "FAILED") return record;
-	}
-	return undefined;
 }
