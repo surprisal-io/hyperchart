@@ -45,7 +45,7 @@ hypercharts/<name>/
 └── scripts/
 ```
 
-Bundle agent definitions override project and user definitions. Bundle extensions export default Pi registration functions and load with Hyperchart. Resolve scripts relative to `chart.ts`.
+Bundle agent definitions override project and user definitions. Bundle extensions export default Pi registration functions and load with Hyperchart. Resolve scripts relative to the working directory (CWD).
 
 Agent definitions can declare a symbolic `role` (model tier) and `toolset` (tool list) in frontmatter instead of a concrete `model`/`tools`. Both are mapped to concrete values in `settings.json` under the charts directories (`.pi/hypercharts/settings.json` project scope, `<projectRoot>/.hypercharts/settings.json` shared scope, `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/settings.json` user scope; stronger scopes win per key, and a shared file may namespace mappings per host, e.g. `{ "pi": { "roles": ... }, "claude": { ... } }`): `{ "roles": { "reviewer": "anthropic/claude-opus-4-8" }, "toolsets": { "reading": ["read", "grep"] } }`. Resolution per invocation: chart `model`/`tools` override → configured role/toolset → frontmatter `model`/`tools` (fallback for an unconfigured name) → default model. An unconfigured role/toolset with no fallback (and no chart override) fails the action with an error — declare a fallback or configure the mapping before running.
 
@@ -53,11 +53,11 @@ Use `find`/`ls` only as fallback:
 
 ```bash
 project_root="$PWD"
-while [ "$project_root" != "/" ] && [ ! -d "$project_root/.pi" ]; do
+while [ "$project_root" != "/" ] && [ ! -d "$project_root/.pi" ] && [ ! -d "$project_root/.hypercharts" ]; do
   project_root="$(dirname "$project_root")"
 done
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-find "$project_root/.pi/hypercharts" "$agent_dir/hypercharts" \
+find "$project_root/.pi/hypercharts" "$project_root/.hypercharts" "$agent_dir/hypercharts" \
   -type f \( -name '*.chart.ts' -o -name '*.ts' \) \
   ! -path '*/runs/*' ! -path '*/node_modules/*' ! -path '*/hypercharts/.*/*' 2>/dev/null | sort
 ```

@@ -165,6 +165,7 @@ Loads and normalizes a chart without dispatching workflow actions.
   action: "inspect";
   chartPath: string;
   exportName?: string;
+  verbose?: boolean;
 }
 ```
 
@@ -172,6 +173,7 @@ Loads and normalizes a chart without dispatching workflow actions.
 |---|---|
 | `chartPath` | Chart name under `.pi/hypercharts` or a module path. |
 | `exportName` | Named export; default is `default`. |
+| `verbose` | Return the full inspection object instead of the compact digest (large — includes chart source and schemas). |
 
 Result `details` is `HyperchartInspectResult`.
 
@@ -181,6 +183,8 @@ Result `details` is `HyperchartInspectResult`.
   "chartPath": ".pi/hypercharts/review.chart.ts"
 }
 ```
+
+By default, the response uses a compact digest; set `verbose: true` for the full inspection object.
 
 Loading still executes module-level TypeScript. Do not inspect untrusted modules without reviewing their top-level code.
 
@@ -274,8 +278,11 @@ The extension type-checks the chart, normalizes it, creates or loads run metadat
 {
   action: "run_inspect";
   runDir: string;
+  verbose?: boolean;
 }
 ```
+
+Set `verbose: true` to return the full inspection object instead of the compact digest (large — includes chart source, schemas, and transcripts).
 
 Loads a run id or directory belonging to the current working directory and returns `HyperchartRunInfo` in `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
 
@@ -293,17 +300,30 @@ Use this tool before resume, replay override, rewind, or recovery after a crash.
 ```ts
 {
   action: "view";
-  runDir: string;
+  runDir?: string;
+  chartPath?: string;
   open?: boolean;
 }
 ```
 
-Starts or reuses the Pi process's localhost inspector server, registers the selected run, and returns:
+Use exactly one of `runDir` or `chartPath`; they are mutually exclusive. Starts or reuses the Pi process's localhost inspector server, registers the selected run when viewing a run, or loads a static chart view when `chartPath` is provided.
+
+When viewing a run, returns:
 
 ```ts
 {
   runId: string;
   runDir: string;
+  url: string;
+}
+```
+
+For a static chart view, result details contain:
+
+```ts
+{
+  chartId: string;
+  chartPath: string;
   url: string;
 }
 ```
@@ -319,6 +339,14 @@ Starts or reuses the Pi process's localhost inspector server, registers the sele
 ```
 
 ### `action: "stop"`
+
+```ts
+{
+  action: "stop";
+  runDir: string;
+  all?: boolean;
+}
+```
 
 Stop one run or every active run owned by current working directory. Exactly one of `runDir` or `all: true` required.
 

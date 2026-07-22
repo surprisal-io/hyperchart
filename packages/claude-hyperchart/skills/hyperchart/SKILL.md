@@ -74,7 +74,7 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
 4. Resume with `hyperchart_run` and `runDir`. Create a different run with `chartPath` and no `runDir`.
 5. If a failure was durably recorded (the log ends in a FAILED completion), plain resume replays back into the failed state. Recover with `hyperchart_rewind`: stop the run, rewind to before the failing record (`state` or `seqId`), then resume. Rewind backs up the log, status, and downstream sessions under `rewind-backups/` before truncating.
-5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
+6. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
 ## Safety rules
 

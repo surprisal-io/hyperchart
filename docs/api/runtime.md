@@ -403,6 +403,7 @@ type RunMeta = {
   workDir: string;
   chartId: string;
   createdAt: string;
+  originSessionId?: string;
 };
 ```
 

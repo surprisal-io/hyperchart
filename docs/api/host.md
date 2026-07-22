@@ -124,6 +124,7 @@ interface HyperchartStateInfo {
   type?: HyperchartStateType;
   initial?: boolean;
   agent?: string;
+  agentDescription?: string;
   definitionSource?: string;
   status: HyperchartStateStatus;
   startedAt?: number;
@@ -485,18 +486,29 @@ Returns `undefined` for unrecognized input.
 ```ts
 type HyperchartRuntimeSessionProgressInfo = {
   actionUid: ActionUID;
+  visit?: number;
   actionKey?: string;
   actionName?: string;
+  role?: string;
   status?: string;
   startedAt?: number;
   lastActivityAt?: number;
   completedAt?: number;
   sessionFile?: string;
   model?: string;
+  thinking?: string;
+  toolset?: string;
+  tools?: string[];
   turnCount?: number;
   toolCount?: number;
   tokenCount?: number;
+  currentTool?: string;
+  currentToolArgs?: string;
+  currentText?: string;
+  currentReasoning?: string;
+  lastMessage?: string;
   error?: string;
+  messages?: HyperchartSessionMessageInfo[];
 };
 
 type HyperchartRuntimeSessionProgressFile = {
@@ -564,5 +576,8 @@ HyperchartVisitInvocationInfo, HyperchartVisitInfo,
 hyperchartRunFromInfo, hyperchartRunFromInspectResult,
 hyperchartRunFromRuntime, hyperchartRunFromToolDetails,
 HyperchartRunFromInspectOptions, HyperchartRunFromRuntimeOptions,
-HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo
+HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo,
+summarizeHyperchartProgress, summarizeChartInspect, summarizeRunInspect,
+ChartInspectStateSummary, ChartInspectSummary, RunInspectStateSummary,
+RunInspectSummary
 ```

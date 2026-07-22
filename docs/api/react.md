@@ -18,8 +18,8 @@ React is part of `@surprisal/pi-hyperchart`; there is no third package.
 
 The React entry point expects peer dependencies compatible with:
 
-- React 19;
-- React DOM 19;
+- React 18 or 19;
+- React DOM 18 or 19;
 - `@xyflow/react` 12;
 - ELK.js 0.11;
 - `react-syntax-highlighter` 16.
@@ -72,6 +72,7 @@ Historical `HyperchartRunInfo` values are treated as immutable snapshots. While 
 interface HyperchartInspectorSidePanelProps {
   run: HyperchartRunInfo;
   selectedStateId?: string | null;
+  onClearSelection?: () => void;
   onOpenScope?: (stateId: string) => void;
   onSteerSession?: (
     actionKey: string,

@@ -13,8 +13,8 @@ This is the canonical reference for the three published packages. Task guides ex
 | `@surprisal/hyperchart/inspect` and `/sessions` | [Hosting API](hosting.md) |
 | `@surprisal/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
 | `@surprisal/claude-hyperchart` and the Claude Code plugin surfaces | [Claude Code plugin](../claude-code.md) |
-| `@surprisal/hyperchart/react` and `/react/styles.css` | [React API](react.md) |
-| Both packages' `/package.json` subpaths | Package metadata (`name`, version, exports, engines, and manifest fields) |
+| `@surprisal/hyperchart/react`, `/react/styles.css`, `@surprisal/pi-hyperchart/react`, and `/react/styles.css` | [React API](react.md) |
+| All packages' `/package.json` subpaths | Package metadata (`name`, version, exports, engines, and manifest fields) |
 
 ## Stability boundary
 
@@ -30,6 +30,8 @@ The supported package entry points are:
 @surprisal/pi-hyperchart
 @surprisal/pi-hyperchart/command
 @surprisal/pi-hyperchart/pi-host
+@surprisal/pi-hyperchart/react
+@surprisal/pi-hyperchart/react/styles.css
 @surprisal/hyperchart/react
 @surprisal/hyperchart/react/styles.css
 @surprisal/pi-hyperchart/package.json

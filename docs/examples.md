@@ -27,7 +27,7 @@ Expected result:
 
 - terminal run status `complete`;
 - `hello.txt` created in the project;
-- one run directory under `.pi/hypercharts/runs/`;
+- one run directory under `~/.pi/agent/hypercharts/runs/` (or `$PI_CODING_AGENT_DIR/hypercharts/runs/` if set);
 - an `args` record followed by action invocation/completion facts in `log.jsonl`.
 
 Read [Run your first chart](quickstart.md) for inspection and troubleshooting.
@@ -37,7 +37,7 @@ Read [Run your first chart](quickstart.md) for inspection and troubleshooting.
 [`examples/api/review.chart.ts`](../examples/api/review.chart.ts) is a compact API example. It shows:
 
 - typed `Args`, `Results`, and transition inputs;
-- a reviewer agent returning structured output;
+- a user action for structured approval/review;
 - routing through named events;
 - passing accepted data into another state;
 - looping from fix back to review.

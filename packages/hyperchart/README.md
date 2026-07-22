@@ -42,6 +42,8 @@ A script with one successful transition may select it implicitly on exit code `0
 | `@surprisal/hyperchart/react` | optional React inspector and run surfaces |
 | `@surprisal/hyperchart/react/styles.css` | required inspector stylesheet |
 | `@surprisal/hyperchart/package.json` | package metadata |
+| `@surprisal/hyperchart/inspect` | run inspection, inspector server, and session transcripts |
+| `@surprisal/hyperchart/sessions` | session progress, steering, and run status |
 
 The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`. In the React inspector, agent cards show declared role/toolset metadata and resolved model/tool configuration, while a selected run state's `Runtime` section owns its live-session controls and actual launch-plan summary.
 

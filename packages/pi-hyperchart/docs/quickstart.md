@@ -71,6 +71,7 @@ The tool call is equivalent to:
 
 ```json
 {
+  "action": "inspect",
   "chartPath": ".pi/hypercharts/hello.chart.ts"
 }
 ```
@@ -114,7 +115,7 @@ Open a specific run directly in the browser inspector:
 A run directory lives under:
 
 ```text
-.pi/hypercharts/runs/<run-id>/
+${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 ```
 
 The files to know first are:

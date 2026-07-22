@@ -20,10 +20,11 @@ The machine does not call an agent provider, spawn a process, write a log file, 
 
 ## Machine output
 
-The machine returns either:
+The machine returns one of:
 
 - `MachineOutputEffect` — append records, invoke an action, validate, start a timer, reject/resume, or cancel work;
-- `MachineOutputFinal` — the root chart is complete.
+- `MachineOutputFinal` — the root chart is complete;
+- `MachineOutputError` — the machine reports a protocol or consistency error (e.g. a missing transition, a validation with no pending action) and the runtime throws.
 
 Effect interpreters live in the runtime. This boundary keeps transition semantics testable without Pi.
 

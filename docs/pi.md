@@ -178,7 +178,7 @@ Load a chart module and return its static inspector model without starting a run
 }
 ```
 
-`chartPath` is required. `exportName` is optional.
+`chartPath` is required. `exportName` is optional. `verbose` is optional; when `true`, it returns the full inspection object, including chart source and schemas, instead of the compact digest.
 
 The result contains source, contracts, topology, transitions, schemas, and definition issues. It contains no run status, visits, usage, session failures, or artifacts from a concrete run.
 
@@ -219,11 +219,16 @@ Load a concrete run and return the runtime-enriched inspector model.
 }
 ```
 
+| Parameter | Required | Meaning |
+|---|---:|---|
+| `runDir` | yes | existing run directory/id |
+| `verbose` | no | when `true`, return the full inspection object, including chart source, schemas, and transcripts |
+
 The overlay includes run status, runtime issues, visits, resolved invocations, map generations, validation attempts, artifacts, usage, session failures, and replay findings. Historical tool results remain historical snapshots; rerun the tool to read new facts.
 
 ### `hyperchart` with `action: "view"`
 
-Open the localhost browser inspector and return its tokenized URL:
+Open the localhost browser inspector and return its tokenized URL. Pass exactly one of `runDir` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run.
 
 ```json
 {
@@ -232,7 +237,13 @@ Open the localhost browser inspector and return its tokenized URL:
 }
 ```
 
-Set `"open": false` to start the inspector and return its URL without opening the system browser. The run must belong to the current working directory. The returned inspector supports the same live polling and session steering as `/hyperchart view`.
+Alternatively, open a static chart inspector without a run:
+
+```json
+{ "action": "view", "chartPath": ".pi/hypercharts/review.chart.ts" }
+```
+
+Set `"open": false` to start the inspector and return its URL without opening the system browser. For a run, the run must belong to the current working directory. The returned inspector supports the same live polling and session steering as `/hyperchart view`.
 
 ### `hyperchart` with `action: "stop"`
 
@@ -272,7 +283,7 @@ Exactly one target is required:
 Other parameters:
 
 | Parameter | Default | Meaning |
-|---|---:|---|
+|---|---|---|
 | `mode` | `before` | cut before or after the matching record |
 | `cleanupSessions` | `true` | move only removed visits' session directories/progress into the backup; retain earlier visits of the same action and truncate backed-up legacy transcripts shared across the cut |
 | `cleanupArtifacts` | `false` | best-effort backup and removal of downstream declared artifact files |

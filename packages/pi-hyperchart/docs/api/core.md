@@ -32,6 +32,7 @@ type ParsedChart =
       source: ChartSource;
       cst: ChartCst;
       ast: ChartAst;
+      schemaRegistry: SchemaRegistry;
       diagnostics: readonly [];
     }
   | {
@@ -192,6 +193,7 @@ type HyperchartInspectResult = {
 |---|---|---|
 | `id` | `string` | Absolute state path. |
 | `kind` | `"agent" \| "user" \| "script" \| "map" \| "parallel" \| "compound" \| "region" \| "final"` | Normalized display kind. |
+| `description` | `string?` | Agent description from host agent defaults. |
 | `initial` | `boolean?` | State selected by the chart root or an enclosing compound, region, or map `initial` declaration. |
 | `definitionSource` | `string?` | Generated DSL for this state. |
 | `agent` | `string?` | Agent definition name. |
@@ -227,7 +229,7 @@ type HyperchartInspectEnv = { name: string; type: string; value?: string; schema
 type HyperchartInspectBranch = { id: string; agent?: string; task?: string };
 
 type HyperchartInspectGuard =
-  | { kind: "script"; command: string; args?: string[] }
+  | { kind: "script"; command: string; args?: string[]; env?: HyperchartInspectEnv[]; artifacts?: HyperchartInspectArtifact[]; reply?: JsonSchema }
   | { kind: "tsImport"; module: string; export: string };
 
 type HyperchartInspectOnReenter =

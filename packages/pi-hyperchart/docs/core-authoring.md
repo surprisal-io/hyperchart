@@ -78,14 +78,14 @@ The `chart()` returned by `refs()` checks that declared replies, artifacts, maps
 
 ```ts
 arg("task")                         // run argument
-result("review")                   // full accepted result
+result("review")                    // full accepted result
 result("review", "notes")          // dot-path selection
 input("notes")                     // transition input in the current visit
 artifactOf("render")               // path to one declared artifact
 artifactOf("render", { artifact: "html" })
 joinArtifactOf("chapters.author")  // one artifact path per map instance
 key("chapters")                    // current map key
-item("chapters", "title")          // current map item selection
+item("chapters", "title")         // current map item selection
 event("payload.id")                // current event payload selection
 visit("review")                    // visit number
 ```
@@ -97,7 +97,7 @@ Refs are data. They are resolved immediately before an action is dispatched; the
 Use `t` when text contains refs:
 
 ```ts
-t`Review ${arg("task")} using ${artifactOf("prepare")}`
+t`Review ${arg("task")}`
 ```
 
 Use `json()` when a value must be serialized as JSON rather than interpolated as a string:
@@ -236,8 +236,7 @@ transitions: {
   FIX: {
     target: "repair",
     input: {
-      notes: event("output.notes"),
-      attempt: visit("review"),
+      notes: event("notes"),
     },
   },
 }
@@ -250,10 +249,9 @@ repair: {
   kind: "state",
   input: {
     notes: z.string(),
-    attempt: z.number(),
   },
   action: agent("fixer", {
-    task: t`Attempt ${input("attempt")}: ${input("notes")}`,
+    task: t`Attempt ${visit("review")}: ${input("notes")}`,
   }),
   transitions: { FIXED: "review" },
 }

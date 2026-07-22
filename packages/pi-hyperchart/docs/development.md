@@ -1,6 +1,6 @@
 # Development and release
 
-This repository is an npm workspace with two publishable packages and shared tests, examples, Storybook, documentation, and formal models.
+This repository is an npm workspace with three publishable packages and shared tests, examples, Storybook, documentation, and formal models.
 
 ## Requirements
 
@@ -23,6 +23,13 @@ packages/
 │   ├── src/core/
 │   ├── src/runtime/
 │   └── src/host/
+├── claude-hyperchart/
+│   ├── src/
+│   │   ├── mcp/
+│   │   └── claude/
+│   ├── bin/
+│   ├── hooks/
+│   └── skills/
 └── pi-hyperchart/
     ├── extensions/
     ├── skills/
@@ -86,7 +93,7 @@ React changes need a story that shows the affected state. Test both light and da
 
 TUI stories live under `Hyperchart/TUI`. They render the real compact `RunWidget` and selection-only `RunHistoryOverlay` through xterm.js; detailed run inspection belongs exclusively to the React browser inspector. The widget must use the shared path-aware percentage estimator rather than graph-node counts. Its stories include both a single active state and eight concurrent map instances at 60, 80, and 120 columns. The development server keeps a live Node-side component instance so keyboard input exercises the actual component state machine, while the static Storybook build contains deterministic initial/preset frames. The production picker materializes the real `deck-director` chart, durable JSONL records, and `sessions/progress.json` into a temporary run directory. Keep browser stories free of Node-only imports; fixture loading and TUI instances belong in the Storybook Vite plugin.
 
-The Pi package build also bundles the standalone inspector client into `dist/inspector-web/`. If browser inspector behavior or React dependencies change, run the full package build and verify both `client.js` and `styles.css` are present.
+The core package build bundles the standalone inspector client into `packages/hyperchart/dist/inspector-web/`. If browser inspector behavior or React dependencies change, run the full package build and verify both `client.js` and `styles.css` are present.
 
 The README inspector image must be captured from a deterministic Storybook fixture, not assembled as a mockup.
 
@@ -148,7 +155,7 @@ Documentation is part of the change.
 | package exports/dependencies | root README, affected package README, matching page under `docs/api/` |
 | visible product identity | README assets and their surrounding alt text/copy |
 
-Do not rewrite or abbreviate the manual inside package READMEs or the skill. Package READMEs own installation and entry-point routing. The skill owns agent procedure and safety rules, uses `hyperchart_*` tools directly, and links to the version-matched documentation bundled in the Pi package.
+Do not rewrite or abbreviate the manual inside package READMEs or the skill. Package READMEs own installation and entry-point routing. The Pi skill uses the consolidated `hyperchart` tool with action parameters; the Claude skill uses individual `hyperchart_*` MCP tools. Both skills call tools directly rather than routing through slash commands.
 
 The repository-root `docs/`, `examples/`, and referenced documentation assets are canonical. `packages/pi-hyperchart/docs/`, `examples/`, and `assets/` are generated mirrors shipped for offline agent use. After editing a canonical file, synchronize the mirror:
 

@@ -16,9 +16,10 @@ The core package owns:
 - pure machine and projection;
 - durable record contract and replay explanation;
 - generic runtime, log, script, guard, artifact, and schema components;
-- canonical host/inspector models.
+- canonical host/inspector models;
+- React inspector, launch dialog, run strip, and stylesheet.
 
-It has no dependency on Pi or React.
+Its runtime core (machine, projection, durable log, execution loop) has no dependency on Pi or React; the package also ships an optional React inspector subpath (`./react`) with optional peer dependencies on React, `react-dom`, `@xyflow/react`, `elkjs`, and `react-syntax-highlighter`.
 
 ### `@surprisal/pi-hyperchart`
 
@@ -30,8 +31,7 @@ The Pi package owns:
 - Pi agent executor and session progress;
 - `/hyperchart` and the consolidated agent tool;
 - terminal views;
-- React inspector, launch dialog, run strip, and stylesheet;
-- bundled Hyperchart skill.
+- React integration surfaces (re-exports core inspector, launch dialog, and run strip; copies core's built stylesheet for the `.` export).
 
 It depends on the exact matching core version. This avoids loading two semantic implementations into one run.
 

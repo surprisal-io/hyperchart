@@ -14,7 +14,7 @@ Requires Node.js 22.19+ and a working Claude Code login: the detached runner inh
 
 ## Tools
 
-The bundled MCP server exposes seven tools. Claude picks them up through the `hyperchart` skill; in conversation you normally just describe what you want.
+The bundled MCP server exposes eight tools. Claude picks them up through the `hyperchart` skill; in conversation you normally just describe what you want.
 
 | Task | Tool |
 |---|---|
@@ -33,14 +33,14 @@ The bundled MCP server exposes seven tools. Claude picks them up through the `hy
 
 | What | Where |
 |---|---|
-| Project charts | `<projectRoot>/.claude/hypercharts/` (project root = nearest ancestor with `.claude` or `.agents`) |
+| Project charts | `<projectRoot>/.claude/hypercharts/` (project root = nearest ancestor with `.claude`, `.hypercharts`, or `.agents`) |
 | User charts | `${CLAUDE_CONFIG_DIR:-~/.claude}/hypercharts/` |
 | Run directories | `${HYPERCHART_RUNS_ROOT:-${CLAUDE_CONFIG_DIR:-~/.claude}/hypercharts/runs}` |
 | Agent definitions | `<chartDir>/agents`, `<projectRoot>/.claude/agents`, `<projectRoot>/.agents`, `~/.agents`, `~/.claude/agents` |
 
 Agent definitions use the same markdown + frontmatter format as the Pi host (`name`, `description`, `role`, `toolset`, `model`, `thinking`, `tools`, `systemPromptMode`; body = system prompt), so charts that ship agents next to the chart file are portable between hosts. Model ids are passed to the Claude Agent SDK verbatim (for example `claude-sonnet-5`, `claude-opus-4-8`); `thinking` levels map onto the SDK's effort control.
 
-A `role` in frontmatter names a symbolic model tier and a `toolset` a symbolic tool list, both resolved through `settings.json` in the charts directories (`<projectRoot>/.claude/hypercharts/settings.json` and `~/.claude/hypercharts/settings.json`, project entries winning per key): `{ "roles": { "reviewer": "opus" }, "toolsets": { "reading": ["Read", "Grep"] } }`. Because each host maps these names in its own settings, a chart declaring them is portable even though model ids and tool names differ between hosts. An unconfigured role falls back to the frontmatter `model`, and an unconfigured toolset to the frontmatter `tools`; with no fallback declared (and no chart-level override) the action fails with an error instead of silently running on defaults. See [Core authoring](core-authoring.md) for the resolution order.
+A `role` in frontmatter names a symbolic model tier and a `toolset` a symbolic tool list, both resolved through `settings.json` in the charts directories (`~/.claude/hypercharts/settings.json`, `<projectRoot>/.hypercharts/settings.json`, and `<projectRoot>/.claude/hypercharts/settings.json`; later entries win per key): `{ "roles": { "reviewer": "opus" }, "toolsets": { "reading": ["Read", "Grep"] } }`. Because each host maps these names in its own settings, a chart declaring them is portable even though model ids and tool names differ between hosts. An unconfigured role falls back to the frontmatter `model`, and an unconfigured toolset to the frontmatter `tools`; with no fallback declared (and no chart-level override) the action fails with an error instead of silently running on defaults. See [Core authoring](core-authoring.md) for the resolution order.
 
 ## How agent sessions run
 
