@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import {
+	hasTerminalNotificationReceipt,
+	readTerminalNotificationRequest,
+} from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { closeRunInspectorServer } from "../packages/hyperchart/src/inspect/inspector_server.js";
@@ -30,7 +34,7 @@ afterEach(async () => {
 	await closeRunInspectorServer();
 });
 
-function makeWorld(): {
+function makeWorld(sessionId?: string): {
 	cwd: string;
 	runsRoot: string;
 	tools: Map<string, HyperchartMcpTool>;
@@ -55,7 +59,7 @@ export default chart({ kind: "chart", id: "simple", initial: "done", states: { d
 `,
 	);
 	const tools = new Map(
-		createHyperchartMcpTools({ cwd, runsRoot, openBrowser: () => undefined }).map((tool) => [tool.name, tool]),
+		createHyperchartMcpTools({ cwd, runsRoot, ...(sessionId === undefined ? {} : { sessionId }), openBrowser: () => undefined }).map((tool) => [tool.name, tool]),
 	);
 	return { cwd, runsRoot, tools, chartPath, chartsDir, userChartsDir };
 }
@@ -94,6 +98,40 @@ describe("hyperchart MCP tools", () => {
 		expect(runDigest.runId).toBe(run.runId);
 		expect(runDigest.status).toBe("completed");
 		expect(runDigest.states.every((state: object) => !("definitionSource" in state))).toBe(true);
+	}, 30_000);
+
+	it("owns runs by the injected session and leases wait delivery without pre-confirming", async () => {
+		const { tools, runsRoot, cwd } = makeWorld("session-a");
+		const first = await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true });
+		expect(text(first)).toContain("completed successfully");
+		const [runId] = readdirSync(runsRoot);
+		if (runId === undefined) throw new Error("expected run");
+		const runDir = join(runsRoot, runId);
+		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
+		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-a")).toBe(false);
+
+		const second = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ runDir: runId, wait: true })));
+		expect(second.notification).toContain("confirmed or in progress");
+
+		const foreignTools = new Map(createHyperchartMcpTools({ cwd, runsRoot, sessionId: "session-b" }).map((tool) => [tool.name, tool]));
+		const foreign = JSON.parse(text(await foreignTools.get("hyperchart_run")!.handler({ runDir: runId, wait: true })));
+		expect(foreign.limitation).toContain("not owned");
+		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-b")).toBe(false);
+	}, 30_000);
+
+	it("publishes the actual FAILED error before matching failed status", async () => {
+		const { tools, chartsDir } = makeWorld();
+		writeFileSync(join(chartsDir, "failure.chart.ts"), `import { chart, failed, script } from "@surprisal/hyperchart";
+export default chart({ kind: "chart", id: "failure", initial: "work", states: {
+	work: { kind: "state", action: script("node", ["-e", "console.error('specific boom'); process.exit(9)"]), transitions: { FAILED: "failed" } },
+	failed: failed(),
+} });
+`);
+		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "failure", wait: true })));
+		expect(run.status).toMatchObject({ state: "failed", error: expect.stringContaining("specific boom") });
+		const request = readTerminalNotificationRequest(run.runDir);
+		expect(request?.payload).toMatchObject({ outcome: "failed", error: expect.stringContaining("specific boom") });
+		expect(request?.payload.prompt).toContain("specific boom");
 	}, 30_000);
 
 	it("marks finals entered through a container's onDone as done", async () => {
@@ -198,13 +236,17 @@ export default chart({
 		);
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "steps", wait: true })));
 		expect(run.status.state).toBe("complete");
+		const originalRequestId = readTerminalNotificationRequest(run.runDir)?.requestId;
 
 		const rewound = JSON.parse(text(await tools.get("hyperchart_rewind")!.handler({ runDir: run.runId, state: "work" })));
 		expect(rewound.removedRecords).toBeGreaterThan(0);
 		expect(rewound.backupDir).toContain("rewind-backups");
+		expect(existsSync(join(run.runDir, "terminal-notification"))).toBe(false);
+		expect(existsSync(join(rewound.backupDir, "terminal-notification", "request.json"))).toBe(true);
 
 		const resumed = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ runDir: run.runId, wait: true })));
 		expect(resumed.status.state).toBe("complete");
+		expect(readTerminalNotificationRequest(run.runDir)?.requestId).not.toBe(originalRequestId);
 	}, 30_000);
 
 	it("lists charts, runs a chart to completion, and inspects the run", async () => {

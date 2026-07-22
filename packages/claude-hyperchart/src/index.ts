@@ -19,3 +19,5 @@ export {
 } from "./claude/claude_agent_executor.js";
 export type { ClaudeExecutorOptions, QueryFn } from "./claude/claude_agent_executor.js";
 export { main as runClaudeHyperchartRunner } from "./claude/hyperchart_runner.js";
+export { emitPendingClaudeTerminalNotifications, pendingOwnedClaudeTerminalRequests } from "./monitor.js";
+export type { ClaudeTerminalMonitorOptions, OwnedClaudeTerminalRequest } from "./monitor.js";

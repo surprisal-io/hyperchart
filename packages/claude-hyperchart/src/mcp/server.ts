@@ -8,7 +8,8 @@ const require = createRequire(import.meta.url);
 export async function main(): Promise<void> {
 	const { version } = require("../../package.json") as { version: string };
 	const server = new McpServer({ name: "hyperchart", version });
-	for (const definition of createHyperchartMcpTools({ cwd: process.cwd() })) {
+	const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
+	for (const definition of createHyperchartMcpTools({ cwd: process.cwd(), ...(sessionId === undefined ? {} : { sessionId }) })) {
 		server.registerTool(
 			definition.name,
 			{ description: definition.description, inputSchema: definition.inputSchema },

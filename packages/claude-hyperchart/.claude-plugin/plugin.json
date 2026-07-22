@@ -9,5 +9,15 @@
 			"args": ["${CLAUDE_PLUGIN_ROOT}/bin/hyperchart-mcp.mjs"]
 		}
 	},
+	"experimental": {
+		"monitors": [
+			{
+				"name": "hyperchart-terminal",
+				"command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/hyperchart-monitor.mjs\"",
+				"description": "Hyperchart terminal run updates",
+				"when": "always"
+			}
+		]
+	},
 	"hooks": "./hooks/hooks.json"
 }

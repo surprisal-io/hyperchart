@@ -2,11 +2,10 @@ import { closeSync, existsSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import type { HyperchartRunnerConfig } from "@surprisal/hyperchart/runtime";
+import { recoverStaleRunTerminalNotification, type HyperchartRunnerConfig } from "@surprisal/hyperchart/runtime";
 import {
 	isRunLive,
 	isTerminalRunState,
-	patchRunStatus,
 	readRunStatus,
 	type HyperchartRunStatus,
 } from "@surprisal/hyperchart/sessions";
@@ -46,7 +45,7 @@ export function spawnDetachedRunner(config: HyperchartRunnerConfig): number {
 	}
 }
 
-/** Resolves when the run reaches a terminal status; marks it failed if the heartbeat is lost. */
+/** Resolves when the run reaches terminal status, recovering a dead runner through the durable outbox helper. */
 export function watchRun(runDir: string): Promise<HyperchartRunStatus> {
 	return new Promise((resolveDone) => {
 		const timer = setInterval(() => {
@@ -58,13 +57,12 @@ export function watchRun(runDir: string): Promise<HyperchartRunStatus> {
 				return;
 			}
 			if (!isRunLive(status) && Date.now() - status.updatedAt > 20_000) {
-				const failed = patchRunStatus(runDir, {
-					state: "failed",
-					error: "runner heartbeat lost",
-					exitCode: 1,
-				});
-				clearInterval(timer);
-				resolveDone(failed);
+				recoverStaleRunTerminalNotification(runDir);
+				const recovered = readRunStatus(runDir);
+				if (recovered !== undefined && isTerminalRunState(recovered.state)) {
+					clearInterval(timer);
+					resolveDone(recovered);
+				}
 			}
 		}, 1_000);
 		timer.unref();

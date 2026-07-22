@@ -4,10 +4,12 @@ import { z } from "zod";
 import { inspectChartAst, parseChartModuleSync } from "@surprisal/hyperchart";
 import {
 	assertChartPreflight,
+	claimTerminalNotificationReceipt,
 	createRunDir,
 	listHyperchartFiles,
 	loadHostSettings,
 	loadRunMeta,
+	readDeliverableTerminalNotificationRequest,
 	rewindHyperchartRun,
 	saveRunMeta,
 	type HyperchartRunnerConfig,
@@ -32,6 +34,8 @@ export type HyperchartMcpDeps = {
 	/** Working directory of the Claude session the MCP server belongs to. */
 	cwd: string;
 	runsRoot?: string;
+	/** Owning Claude Code session, captured once by the MCP server. */
+	sessionId?: string;
 	/** Test seam: replaces opening the system browser for hyperchart_view. */
 	openBrowser?: (url: string) => void | Promise<void>;
 };
@@ -127,7 +131,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		{
 			name: "hyperchart_run",
 			description:
-				"Start a chart as a detached background run, or resume an existing run directory. Returns the run id and directory.",
+				"Start a chart as a detached background run, or resume an existing run directory. Terminal updates are delivered automatically by the Hyperchart plugin monitor; Claude must not start Bash/Monitor polling watchers. wait=true blocks only this tool call's current task and returns the same terminal prompt directly.",
 			inputSchema: {
 				chartPath: z.string().optional(),
 				runDir: z.string().optional().describe("Existing run id or directory to resume"),
@@ -135,7 +139,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				exportName: z.string().optional(),
 				ignoreReplayWarnings: z.boolean().optional(),
 				defaultModel: z.string().optional(),
-				wait: z.boolean().optional().describe("Block until the run reaches a terminal status"),
+				wait: z.boolean().optional().describe("Block only this current task until terminal status; do not start polling watchers"),
 				...cwdField,
 			},
 			handler: async (args) => {
@@ -171,13 +175,14 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						workDir,
 						chartId: parsed.ast.id,
 						createdAt: new Date().toISOString(),
+						...(deps.sessionId === undefined ? {} : { originSessionId: deps.sessionId }),
 					});
 				}
 				mkdirSync(resolve(runDir, "sessions"), { recursive: true });
 				const runId = basename(runDir);
 				const existingStatus = readRunStatus(runDir);
 				if (isRunLive(existingStatus)) {
-					if (args.wait === true) return ok({ runId, runDir, chartId: parsed.ast.id, status: await watchRun(runDir) });
+					if (args.wait === true) return waitedRunResult(runDir, meta ?? loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status: await watchRun(runDir) });
 					return ok({ runId, runDir, chartId: parsed.ast.id, attached: true, status: existingStatus });
 				}
 
@@ -216,9 +221,18 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, state: "running", pid, heartbeatAt: Date.now() });
 				if (args.wait === true) {
 					const status = await watchRun(runDir);
-					return ok({ runId, runDir, chartId: parsed.ast.id, status });
+					return waitedRunResult(runDir, loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status });
 				}
-				return ok({ runId, runDir, chartId: parsed.ast.id, pid });
+				return ok({
+					runId,
+					runDir,
+					chartId: parsed.ast.id,
+					pid,
+					updates: "Terminal updates are automatic; do not start Bash/Monitor polling watchers.",
+					...(deps.sessionId === undefined
+						? { limitation: "CLAUDE_CODE_SESSION_ID is unavailable, so automatic terminal notification ownership cannot be established." }
+						: {}),
+				});
 			},
 		},
 		{
@@ -373,6 +387,24 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 		},
 	];
+}
+
+function waitedRunResult(runDir: string, meta: RunMeta, sessionId: string | undefined, value: Record<string, unknown>): ToolResult {
+	if (sessionId === undefined) {
+		return ok({
+			...value,
+			limitation: "CLAUDE_CODE_SESSION_ID is unavailable; wait=true cannot claim a per-session receipt and automatic routing is disabled.",
+		});
+	}
+	if (meta.originSessionId !== sessionId) {
+		return ok({ ...value, limitation: "This run is not owned by the current Claude session; its terminal prompt was not receipted here." });
+	}
+	const request = readDeliverableTerminalNotificationRequest(runDir);
+	if (request === undefined) return ok(value);
+	if (!claimTerminalNotificationReceipt(runDir, "claude", sessionId)) {
+		return ok({ ...value, notification: "Terminal prompt delivery is already confirmed or in progress for this Claude session." });
+	}
+	return { content: [{ type: "text", text: request.payload.prompt }] };
 }
 
 function ok(value: unknown): ToolResult {
