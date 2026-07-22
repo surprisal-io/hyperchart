@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeChartConfig, start, z } from "../packages/hyperchart/src/index.js";
-import { chart, final, script, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { chart, final, failed, script, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
@@ -55,7 +55,7 @@ function scriptChart(action: ReturnType<typeof script>): ChartAst {
 				run: { kind: "state", action, transitions: { DONE: "done", OTHER: "other", FAILED: "failed" } },
 				done: final(),
 				other: final(),
-				failed: final(),
+				failed: failed(),
 			},
 		}),
 	);
@@ -162,7 +162,7 @@ process.stdin.on("end", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -210,7 +210,7 @@ process.stdin.on("end", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);

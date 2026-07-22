@@ -25,8 +25,16 @@ export function chart(input: ChartCst): ChartCst {
 
 export const createChart = chart;
 
-export function final(): FinalStateCst {
-	return { kind: "final" };
+export type TerminalOptions = Omit<FinalStateCst, "kind" | "outcome">;
+
+/** A successful terminal state. final() with no options remains supported. */
+export function final(options: TerminalOptions = {}): FinalStateCst {
+	return { kind: "final", outcome: "complete", ...options };
+}
+
+/** An explicitly failed terminal state. Terminal names and incoming event names do not imply failure. */
+export function failed(options: TerminalOptions = {}): FinalStateCst {
+	return { kind: "final", outcome: "failed", ...options };
 }
 
 export function compound<const O extends Omit<CompoundStateCst, "kind">>(options: O): { kind: "compound" } & O {

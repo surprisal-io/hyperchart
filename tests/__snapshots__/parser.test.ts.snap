@@ -40,10 +40,12 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
     "done": {
       "id": "done",
       "kind": "final",
+      "outcome": "complete",
     },
     "failed": {
       "id": "failed",
       "kind": "final",
+      "outcome": "failed",
     },
     "implement": {
       "action": {

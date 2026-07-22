@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, compound, final, json, map, normalizeChartConfig, parallel, t, tsImport, z } from "../packages/hyperchart/src/index.js";
+import { agent, compound, final, failed, json, map, normalizeChartConfig, parallel, t, tsImport, z } from "../packages/hyperchart/src/index.js";
 import { arg, chart, event, input, item, key, result } from "../packages/hyperchart/src/core/dsl.js";
 import { loop, start } from "../packages/hyperchart/src/core/execution_loop.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../packages/hyperchart/src/index.js";
@@ -617,7 +617,7 @@ describe("replay gauntlet", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);

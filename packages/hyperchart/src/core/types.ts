@@ -274,8 +274,19 @@ export type ActionStateCst = {
 	retries?: number;
 };
 
+export type TerminalNotificationCst = {
+	/** Optional text appended after the host's standard terminal message. */
+	prompt?: Templatable;
+	/** Declared artifacts to surface by authoritative path only (contents are never inlined). */
+	artifacts?: readonly (ArtifactOfCst | JoinArtifactOfCst)[];
+	/** Render scope for input()/map-local refs; defaults to the final state's path. */
+	scope?: StatePath;
+};
+
 export type FinalStateCst = {
 	kind: "final";
+	outcome?: "complete" | "failed";
+	notify?: TerminalNotificationCst;
 };
 
 // A container of nested states. Entering it drills down the initial chain to a leaf. Its
@@ -387,10 +398,18 @@ export type ActionStateAst = Readonly<{
 	retries?: number;
 }>;
 
+export type TerminalNotificationAst = Readonly<{
+	prompt?: TemplateAst;
+	artifacts?: readonly (ArtifactOfAst | JoinArtifactOfAst)[];
+	scope?: StatePath;
+}>;
+
 export type FinalStateAst = Readonly<{
 	kind: "final";
 	id: StateId;
 	parent?: StatePath;
+	outcome: "complete" | "failed";
+	notify?: TerminalNotificationAst;
 }>;
 
 // Every compound completes: it must contain a direct final child and exit through onDone. There

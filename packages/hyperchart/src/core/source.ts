@@ -74,7 +74,16 @@ function statesDsl(ast: ChartAst, parent: StatePath | undefined): string {
 function stateDsl(ast: ChartAst, path: StatePath): string {
 	const state = ast.states[path];
 	if (state === undefined) return "undefined";
-	if (state.kind === "final") return "final()";
+	if (state.kind === "final") {
+		const factory = state.outcome === "failed" ? "failed" : "final";
+		if (state.notify === undefined) return `${factory}()`;
+		const notifyEntries: [string, string | undefined][] = [];
+		if (state.notify.prompt !== undefined) notifyEntries.push(["prompt", templateDsl(state.notify.prompt)]);
+		if (state.notify.artifacts !== undefined) notifyEntries.push(["artifacts", arrayDsl(state.notify.artifacts.map(readDsl))]);
+		if (state.notify.scope !== undefined) notifyEntries.push(["scope", stringDsl(state.notify.scope)]);
+		const notify = objectDsl(notifyEntries);
+		return `${factory}(${objectDsl([["notify", notify]])})`;
+	}
 	if (state.kind === "state") {
 		return objectDsl([
 			["kind", stringDsl("state")],

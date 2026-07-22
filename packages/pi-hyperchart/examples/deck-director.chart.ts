@@ -14,7 +14,7 @@
 // key()/item() are the instance's args, and joinArtifactOf() fans the instances' artifacts back
 // in — one file per instance for agents, a JSON array of paths for scripts.
 
-import { agent, artifact, final, json, map, refs, script, t, z } from "@surprisal/hyperchart";
+import { agent, artifact, final, failed, json, map, refs, script, t, z } from "@surprisal/hyperchart";
 
 // TS-first, one source, one file: shapes are zod values (z re-exported by the library — charts
 // need no extra dependency) passed DIRECTLY into reply/artifact declarations. The TS types are
@@ -264,6 +264,6 @@ Your work item: ${json(item("chapters"))}`,
 		},
 
 		done: final(),
-		failed: final(),
+		failed: failed(),
 	},
 });

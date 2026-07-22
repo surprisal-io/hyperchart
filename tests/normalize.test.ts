@@ -4,6 +4,7 @@ import {
 	agent,
 	artifact,
 	compound,
+	failed,
 	final,
 	map,
 	normalizeChartConfig,
@@ -31,7 +32,7 @@ describe("normalizeChartConfig", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -41,6 +42,92 @@ describe("normalizeChartConfig", () => {
 		expect(result.ast.states.start?.kind).toBe("state");
 		expect(Object.isFrozen(result.ast)).toBe(true);
 		expect(Object.isFrozen(result.ast.states)).toBe(true);
+	});
+
+	it("normalizes explicit terminal outcomes and defaults raw finals to complete", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "terminal-outcomes",
+			initial: "done",
+			states: { done: final(), failed: failed(), raw: { kind: "final" } },
+		}));
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) throw new Error("expected valid chart");
+		expect(parsed.ast.states.done).toMatchObject({ kind: "final", outcome: "complete" });
+		expect(parsed.ast.states.failed).toMatchObject({ kind: "final", outcome: "failed" });
+		expect(parsed.ast.states.raw).toMatchObject({ kind: "final", outcome: "complete" });
+
+		const invalid = normalizeChartConfig({
+			id: "invalid-terminal-outcome",
+			initial: "done",
+			states: { done: { kind: "final", outcome: "success" } as never },
+		});
+		expect(invalid.ok).toBe(false);
+		expect(invalid.diagnostics.map((diagnostic) => diagnostic.code)).toContain("INVALID_FINAL_OUTCOME");
+	});
+
+	it("normalizes terminal notifications with an explicit render scope", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "terminal-notify-scope",
+			initial: "prepare",
+			states: {
+				prepare: { kind: "state", action: agent("prepare"), transitions: { READY: { target: "work", input: { topic: event("topic") } } } },
+				work: { kind: "state", input: { topic: z.string() }, action: agent("work"), transitions: { DONE: "done" } },
+				done: final({ notify: { scope: "work", prompt: t`Publish ${input("topic")}` } }),
+			},
+		}));
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) throw new Error("expected valid chart");
+		expect(parsed.ast.states.done).toMatchObject({
+			kind: "final",
+			notify: { scope: "work", prompt: { kind: "template", refs: [{ kind: "input", name: "topic" }] } },
+		});
+	});
+
+	it("rejects malformed terminal notifications and invalid artifact references", () => {
+		const malformed = normalizeChartConfig({
+			id: "malformed-notify",
+			initial: "done",
+			states: { done: { kind: "final", notify: "bad" } as never },
+		});
+		expect(malformed.diagnostics.map((diagnostic) => diagnostic.code)).toContain("INVALID_TERMINAL_NOTIFICATION");
+
+		const invalid = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "invalid-notify",
+			initial: "work",
+			states: {
+				work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+				done: final({ notify: {
+					scope: "missing",
+					prompt: {} as never,
+					artifacts: [artifactOf("work"), { kind: "not-an-artifact" } as never],
+				} }),
+			},
+		}));
+		const codes = invalid.diagnostics.map((diagnostic) => diagnostic.code);
+		expect(codes).toEqual(expect.arrayContaining([
+			"INVALID_TEMPLATE",
+			"UNKNOWN_NOTIFICATION_SCOPE",
+			"UNKNOWN_FILE_SOURCE",
+			"INVALID_TERMINAL_NOTIFICATION",
+		]));
+	});
+
+	it("applies dominance checks to terminal prompt and artifact reads", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "terminal-dominance",
+			initial: "start",
+			states: {
+				start: { kind: "state", action: agent("start"), transitions: { SKIP: "done", PRODUCE: "produce" } },
+				produce: { kind: "state", action: agent("produce", { artifacts: { report: artifact("report.txt") } }), transitions: { DONE: "done" } },
+				done: final({ notify: { prompt: t`Result ${result("produce")}`, artifacts: [artifactOf("produce")] } }),
+			},
+		}));
+		expect(parsed.ok).toBe(false);
+		expect(parsed.diagnostics.filter((diagnostic) => diagnostic.code === "NON_DOMINATED_REF")).toHaveLength(2);
 	});
 
 	it("normalizes validate with a default onReject of resume", () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { agent, chart, final, script } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, artifact, artifactOf, chart, failed, final, result, script, t } from "../packages/hyperchart/src/core/dsl.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
 import { hyperchartSource } from "../packages/hyperchart/src/core/source.js";
 
@@ -29,6 +29,25 @@ describe("hyperchart source", () => {
 		const source = sourceForScript();
 		expect(source).toMatch(/script\("echo", \[\], \{\s+env:/);
 		expect(source).toContain('FOO: "bar"');
+	});
+
+	it("prints complete and failed terminals with notification options", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "terminal-source",
+			initial: "work",
+			states: {
+				work: { kind: "state", action: agent("worker", { artifacts: { report: artifact("report.txt") } }), transitions: { DONE: "done", FAILED: "failed" } },
+				done: final(),
+				failed: failed({ notify: { prompt: t`Failure ${result("work")}`, artifacts: [artifactOf("work", { artifact: "report" })], scope: "work" } }),
+			},
+		}));
+		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain("done: final()");
+		expect(source).toContain("failed: failed({");
+		expect(source).toContain('scope: "work"');
+		expect(source).toContain('artifactOf("work", {');
 	});
 
 	it("preserves common JSON Schema constraints in generated Zod definitions", () => {

@@ -5,7 +5,7 @@ import {
 	chart,
 	compound,
 	event,
-	final,
+	final, failed,
 	input,
 	json,
 	map,
@@ -134,7 +134,7 @@ function reviewerRegion(agentName: string, task: string): ReturnType<typeof comp
 		states: {
 			review: { kind: "state", action: agent(agentName, { task }), transitions: { DONE: "done", FAILED: "failed" } },
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		},
 	});
 }
@@ -161,11 +161,11 @@ const mapReviewChart = panelChart("inspector-map-review", "script-contracts", {
 				transitions: { DONE: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		},
 	}),
 	"parallel-review": final(),
-	failed: final(),
+	failed: failed(),
 });
 
 type StoryLogBuilder = {
@@ -407,7 +407,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				transitions: { DONE: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: null,
@@ -475,7 +475,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				transitions: { DONE: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: "worker",
@@ -498,7 +498,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				transitions: { DONE: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: "session-worker",
@@ -621,7 +621,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				transitions: { RENDERED: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: "render",
@@ -727,7 +727,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				transitions: { PASS: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: "validation-rejected",
@@ -760,7 +760,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				transitions: { PASS: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: "coverage-review",

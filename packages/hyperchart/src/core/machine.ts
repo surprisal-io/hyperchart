@@ -821,7 +821,7 @@ function dueSpawns(state: MachineState): RecordAppend[] {
 // text, so a restarted machine hands the agent an identical call. This is the effect boundary —
 // the last moment the engine holds the value — so the parameter contract is enforced here: a ref
 // into a missing arg/result and a non-primitive value without a json() mark both fail loud.
-function renderTemplate(state: MachineState, template: TemplateAst, stateId: string): string {
+export function renderTemplate(state: MachineState, template: TemplateAst, stateId: string): string {
 	const parts: string[] = [template.strings[0] ?? ""];
 	template.refs.forEach((ref, index) => {
 		parts.push(renderValue(resolveRef(state, ref, stateId), ref, stateId));
@@ -860,7 +860,7 @@ function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: str
 // path and shape can never drift from what the producer was told to write. Normalize guarantees
 // the reference resolves to exactly one artifact; a miss here means the chart changed under a
 // live log — fail loud.
-function renderRead(
+export function renderRead(
 	state: MachineState,
 	read: TemplateAst | ArtifactOfAst,
 	stateId: string,
@@ -891,7 +891,7 @@ function renderRead(
 // A fan-in read over a map: one artifact per spawned instance, in spawn-fact key order. The
 // producer's declared path renders in each instance's scope — key()/item() and result() refs in
 // it resolve exactly as they did for the producer itself.
-function renderJoin(state: MachineState, read: JoinArtifactOfAst, stateId: string): RenderedArtifact[] {
+export function renderJoin(state: MachineState, read: JoinArtifactOfAst, stateId: string): RenderedArtifact[] {
 	const container = enclosingMapPath(state.ast, read.state, stateId);
 	// A top-level map has one shared spawn fact. A nested map has one spawn fact per enclosing
 	// parent instance (for example `chapters#intro.visuals`). Re-scope the template container to

@@ -7,7 +7,7 @@ import {
 	chart,
 	contract,
 	explainReplay,
-	final,
+	final, failed,
 	script,
 	z,
 	normalizeChartConfig,
@@ -54,7 +54,7 @@ function scriptConfig(reply?: z.ZodType, artifacts?: Record<string, string | Ret
 				transitions: { DONE: "done", FAILED: "failed" },
 			},
 			done: final(),
-			failed: final(),
+			failed: failed(),
 		},
 	});
 }

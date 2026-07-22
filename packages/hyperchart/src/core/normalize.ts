@@ -31,6 +31,7 @@ import type {
 	StateId,
 	StatePath,
 	TemplateAst,
+	TerminalNotificationAst,
 	TransitionAst,
 	UserActionAst,
 } from "./types.js";
@@ -176,10 +177,17 @@ function collectState(
 				diagnostic("INVALID_FINAL_STATE", "Final state must not define an action.", `${pointer}/action`, source),
 			);
 		}
+		const outcome = input.outcome === "failed" ? "failed" : "complete";
+		if (input.outcome !== undefined && input.outcome !== "complete" && input.outcome !== "failed") {
+			diagnostics.push(diagnostic("INVALID_FINAL_OUTCOME", "Final outcome must be 'complete' or 'failed'.", `${pointer}/outcome`, source));
+		}
+		const notify = toTerminalNotification(input.notify, `${pointer}/notify`, diagnostics, source);
 		states[path] = deepFreeze({
 			kind: "final",
 			id: localId,
 			...parent,
+			outcome,
+			...(notify === undefined ? {} : { notify }),
 		} satisfies FinalStateAst);
 		return;
 	}
@@ -464,6 +472,31 @@ export function declaredArtifactsForState(
 	return Object.keys(merged).length === 0 ? undefined : merged;
 }
 
+function validateTerminalArtifactRef(
+	states: Record<StatePath, StateAst>,
+	terminalPath: StatePath,
+	read: ArtifactOfAst | JoinArtifactOfAst,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	if (read.kind === "joinArtifactOf" && !insideMap(states, read.state)) {
+		diagnostics.push(diagnostic("INVALID_MAP_REF", `joinArtifactOf in terminal '${terminalPath}' references '${read.state}', which is not inside a map.`, pointer, source));
+	}
+	const producer = states[read.state];
+	const artifacts = producer?.kind === "state" ? declaredArtifactsForState(producer) : undefined;
+	if (artifacts === undefined || Object.keys(artifacts).length === 0) {
+		diagnostics.push(diagnostic("UNKNOWN_FILE_SOURCE", `artifactOf in terminal '${terminalPath}' references '${read.state}', which declares no artifacts.`, pointer, source));
+		return;
+	}
+	if (read.artifact !== undefined && !Object.prototype.hasOwnProperty.call(artifacts, read.artifact)) {
+		diagnostics.push(diagnostic("UNKNOWN_ARTIFACT", `artifactOf in terminal '${terminalPath}': '${read.state}' declares no artifact '${read.artifact}'.`, pointer, source));
+	}
+	if (read.artifact === undefined && Object.keys(artifacts).length > 1) {
+		diagnostics.push(diagnostic("AMBIGUOUS_ARTIFACT", `artifactOf in terminal '${terminalPath}': '${read.state}' declares several artifacts — name one.`, pointer, source));
+	}
+}
+
 // Every target — transition, after, onDone, container initial — resolves among the siblings of
 // the level where it is declared; there is no path syntax in authoring. Completeness rules
 // (final child, onDone presence) live in collectState; here only the targets are checked.
@@ -473,8 +506,22 @@ function validateTargets(
 	source: ChartSource,
 ): void {
 	for (const [path, node] of Object.entries(states)) {
-		if (node.kind === "final") continue;
 		const pointer = statePointer(path);
+		if (node.kind === "final") {
+			const notify = node.notify;
+			if (notify !== undefined) {
+				const scope = notify.scope ?? path;
+				if (!(scope in states)) {
+					diagnostics.push(diagnostic("UNKNOWN_NOTIFICATION_SCOPE", `Terminal notification in '${path}' has unknown scope '${scope}'.`, `${pointer}/notify/scope`, source));
+				} else if (notify.prompt !== undefined) {
+					validateTemplateRefs(states, scope, notify.prompt, `${pointer}/notify/prompt`, diagnostics, source);
+				}
+				for (const [index, read] of (notify.artifacts ?? []).entries()) {
+					validateTerminalArtifactRef(states, path, read, `${pointer}/notify/artifacts/${index}`, diagnostics, source);
+				}
+			}
+			continue;
+		}
 		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			const target = transition.target;
@@ -870,6 +917,15 @@ function validateDominatedRefs(
 
 	for (const [path, node] of Object.entries(states)) {
 		const pointer = statePointer(path);
+		if (node.kind === "final") {
+			for (const ref of node.notify?.prompt?.refs ?? []) {
+				if (ref.kind === "result") check(ref.state, path, `${pointer}/notify/prompt`, "result()");
+			}
+			for (const [index, read] of (node.notify?.artifacts ?? []).entries()) {
+				check(read.state, path, `${pointer}/notify/artifacts/${index}`, "artifactOf()");
+			}
+			continue;
+		}
 		if (node.kind === "state") {
 			for (const template of actionTemplates(node.action)) {
 				for (const ref of template.refs) {
@@ -1244,6 +1300,49 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 			(read): read is TemplateAst => read.kind === "template",
 		),
 	];
+}
+
+function toTerminalNotification(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): TerminalNotificationAst | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify must be an object.", path, source));
+		return undefined;
+	}
+	const prompt = toTemplate(input.prompt, `${path}/prompt`, diagnostics, source);
+	let artifacts: (ArtifactOfAst | JoinArtifactOfAst)[] | undefined;
+	if (input.artifacts !== undefined) {
+		if (!Array.isArray(input.artifacts)) {
+			diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify.artifacts must be an array of artifactOf()/joinArtifactOf() references.", `${path}/artifacts`, source));
+		} else {
+			artifacts = [];
+			for (const [index, item] of input.artifacts.entries()) {
+				const pointer = `${path}/artifacts/${index}`;
+				const ref = isRecord(item) && item.kind === "artifactOf"
+					? toArtifactOf(item, pointer, diagnostics, source)
+					: isRecord(item) && item.kind === "joinArtifactOf"
+						? toJoinArtifactOf(item, pointer, diagnostics, source)
+						: undefined;
+				if (ref === undefined && !(isRecord(item) && (item.kind === "artifactOf" || item.kind === "joinArtifactOf"))) {
+					diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify artifacts must use artifactOf() or joinArtifactOf().", pointer, source));
+				}
+				if (ref !== undefined) artifacts.push(ref);
+			}
+		}
+	}
+	const scope = typeof input.scope === "string" && input.scope.length > 0 ? input.scope : undefined;
+	if (input.scope !== undefined && scope === undefined) {
+		diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify.scope must be a non-empty state path.", `${path}/scope`, source));
+	}
+	return {
+		...(prompt === undefined ? {} : { prompt }),
+		...(artifacts === undefined ? {} : { artifacts }),
+		...(scope === undefined ? {} : { scope }),
+	};
 }
 
 function toTemplate(

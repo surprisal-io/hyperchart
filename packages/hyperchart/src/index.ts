@@ -48,6 +48,8 @@ export type {
 	TemplateAst,
 	TemplateCst,
 	Templatable,
+	TerminalNotificationAst,
+	TerminalNotificationCst,
 	GuardOutcome,
 	GuardRef,
 	GuardRefAst,
@@ -60,6 +62,7 @@ export type {
 	UserActionAst,
 	UserActionCst,
 } from "./core/types.js";
+export type { TerminalOptions } from "./core/dsl.js";
 
 export {
 	chart,
@@ -67,6 +70,7 @@ export {
 	compound,
 	artifact,
 	event,
+	failed,
 	final,
 	input,
 	json,

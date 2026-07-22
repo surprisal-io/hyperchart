@@ -3,7 +3,7 @@ import {
 	agent,
 	artifact,
 	compound,
-	final,
+	final, failed,
 	json,
 	map,
 	normalizeChartConfig,
@@ -122,7 +122,7 @@ function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartA
 					transitions: { DONE: "done", FAILED: "failed" },
 				},
 				done: final(),
-				failed: final(),
+				failed: failed(),
 			},
 		}),
 	);
@@ -1060,7 +1060,7 @@ describe("execution loop", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);

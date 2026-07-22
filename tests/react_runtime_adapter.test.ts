@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, arg, chart, compound, event, final, input, map, parallel, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, arg, chart, compound, event, final, failed, input, map, parallel, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
@@ -104,7 +104,7 @@ describe("React runtime adapter", () => {
 				states: {
 					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -883,7 +883,7 @@ describe("React runtime adapter", () => {
 						onDone: "done",
 					}),
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -977,7 +977,7 @@ describe("React runtime adapter", () => {
 				states: {
 					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -1026,7 +1026,7 @@ describe("React runtime adapter", () => {
 				initial: "work",
 				states: {
 					work: { kind: "state", action: agent("worker"), transitions: { FAILED: "failed" } },
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -1075,7 +1075,7 @@ describe("React runtime adapter", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -1159,7 +1159,7 @@ describe("React runtime adapter", () => {
 						transitions: { DONE: "done", FAILED: "failed" },
 					},
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);
@@ -1256,7 +1256,7 @@ describe("React runtime adapter", () => {
 						states: {
 							work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
 							done: final(),
-							failed: final(),
+							failed: failed(),
 						},
 					}),
 					done: final(),
@@ -1641,7 +1641,7 @@ describe("React runtime adapter", () => {
 				states: {
 					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
 					done: final(),
-					failed: final(),
+					failed: failed(),
 				},
 			}),
 		);

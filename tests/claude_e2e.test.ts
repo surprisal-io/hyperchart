@@ -41,7 +41,7 @@ export default chart({
 			transitions: { DONE: "done", FAILED: "failed" },
 		},
 		done: final(),
-		failed: final(),
+		failed: failed(),
 	},
 });
 `,

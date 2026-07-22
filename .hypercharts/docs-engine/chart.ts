@@ -1,6 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { agent, artifact, final, json, map, refs, resume, script, t, z } from "@surprisal/hyperchart";
+import { agent, artifact, final, failed, json, map, refs, resume, script, t, z } from "@surprisal/hyperchart";
 
 // docs-engine: keeps the canonical documentation (docs/, including
 // docs/skills/) truthful against the code, then regenerates the packaged
@@ -302,6 +302,6 @@ export default chart({
 		},
 
 		done: final(),
-		failed: final(),
+		failed: failed(),
 	},
 });
