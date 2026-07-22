@@ -2,7 +2,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readSessionProgress, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
+import {
+	readSessionProgress,
+	sessionProgressKey,
+	updateSessionProgress,
+} from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 
 const tempDirs: string[] = [];
 
@@ -70,5 +74,40 @@ describe("session progress", () => {
 		expect(restarted?.model).toBeUndefined();
 		expect(restarted?.toolset).toBeUndefined();
 		expect(restarted?.tools).toBeUndefined();
+	});
+
+	it("keeps one independent session record for every durable visit", async () => {
+		const dir = await makeTempDir();
+		const actionUid = { chart: "chart", state: "work", action: "agent" };
+		const firstEffect = "chart:work:agent:1:2";
+		const secondEffect = "chart:work:agent:2:9";
+
+		updateSessionProgress(
+			dir,
+			actionUid,
+			{ actionName: "worker", status: "completed", sessionFile: "visit-1.jsonl", startedAt: 100 },
+			firstEffect,
+		);
+		updateSessionProgress(
+			dir,
+			actionUid,
+			{ actionName: "worker", status: "running", sessionFile: "visit-2.jsonl", startedAt: 200 },
+			secondEffect,
+		);
+
+		const progress = readSessionProgress(dir);
+		expect(sessionProgressKey(actionUid, firstEffect)).toBe("chart:work:agent:visit:1");
+		expect(progress.sessions["chart:work:agent:visit:1"]).toMatchObject({
+			actionKey: "chart:work:agent",
+			visit: 1,
+			status: "completed",
+			sessionFile: "visit-1.jsonl",
+		});
+		expect(progress.sessions["chart:work:agent:visit:2"]).toMatchObject({
+			actionKey: "chart:work:agent",
+			visit: 2,
+			status: "running",
+			sessionFile: "visit-2.jsonl",
+		});
 	});
 });

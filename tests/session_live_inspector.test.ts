@@ -46,6 +46,26 @@ describe("live inspector sessions", () => {
 		]);
 	});
 
+	it("can retain a full Pi transcript for per-visit segmentation", () => {
+		const sessions = tempSessions();
+		const file = join(sessions, "long-session.jsonl");
+		writeFileSync(
+			file,
+			Array.from({ length: 130 }, (_, index) =>
+				JSON.stringify({
+					type: "message",
+					id: `u${index}`,
+					timestamp: new Date(1_700_000_000_000 + index).toISOString(),
+					message: { role: "user", content: `message ${index}` },
+				}),
+			).join("\n"),
+		);
+
+		expect(readSessionTranscript(sessions, file)).toHaveLength(120);
+		expect(readSessionTranscript(sessions, file)?.[0]?.id).toBe("u10");
+		expect(readSessionTranscript(sessions, file, { limit: false })).toHaveLength(130);
+	});
+
 	it("atomically queues and delivers steering to the matching runner", async () => {
 		const sessions = tempSessions();
 		const delivered: string[] = [];

@@ -79,7 +79,13 @@ export function AgentSessionDialog({
 									<span className={`h-1.5 w-1.5 rounded-full ${session.status === "running" || session.status === "starting" ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
 									{session.status}
 								</span>
+								{session.role !== undefined && <span>role {session.role}</span>}
 								{session.model && <span>{session.model}</span>}
+								{session.thinking !== undefined && <span>think {session.thinking}</span>}
+								{session.toolset !== undefined && <span>toolset {session.toolset}</span>}
+								{session.tools !== undefined && (
+									<span title={session.tools.join(", ")}>{session.tools.length} enabled tools</span>
+								)}
 								{session.turnCount !== undefined && <span>{session.turnCount} turns</span>}
 								{session.toolCount !== undefined && <span>{session.toolCount} tools</span>}
 								{session.tokenCount !== undefined && <span>{session.tokenCount.toLocaleString()} tokens</span>}

@@ -10,14 +10,44 @@ const state: HyperchartStateInfo = {
 	status: "running",
 	agent: "report-engine-research-scout",
 	startedAt: 1_700_000_000_000,
-	visits: 1,
+	visits: 2,
 	visitHistory: [
 		{
 			visit: 1,
+			invokeSeqId: 7,
+			startedAt: 1_699_999_900_000,
+			endedAt: 1_699_999_960_000,
+			status: "done",
+			completedEvent: "RESEARCHED",
+			invocation: { kind: "agent", task: "Research the initial regional escalation risk." },
+			session: {
+				actionKey: "odyssey:research.deep-research#regional-risk.scout:agent",
+				status: "completed",
+				startedAt: 1_699_999_900_000,
+				model: "deepseek/deepseek-v4-pro",
+				turnCount: 2,
+				toolCount: 3,
+				messages: [{ id: "old-a1", role: "assistant", text: "Initial visit completed." }],
+			},
+		},
+		{
+			visit: 2,
 			invokeSeqId: 12,
 			startedAt: 1_700_000_000_000,
 			status: "running",
 			invocation: { kind: "agent", task: "Research the regional escalation risk." },
+			session: {
+				actionKey: "odyssey:research.deep-research#regional-risk.scout:agent",
+				status: "running",
+				startedAt: 1_700_000_000_000,
+				lastActivityAt: 1_700_000_040_000,
+				model: "openai-codex/gpt-5.6-luna",
+				thinking: "xhigh",
+				turnCount: 3,
+				toolCount: 5,
+				tokenCount: 8_412,
+				messages: [{ id: "a1", role: "assistant", text: "Current visit is still running." }],
+			},
 		},
 	],
 	session: {
@@ -121,6 +151,18 @@ export const LiveAgentSession: Story = {
 		await userEvent.click(canvas.getByRole("button", { name: "View session" }));
 		await expect(canvas.getByRole("dialog")).toBeVisible();
 		await expect(canvas.getByText("@report-engine-research-scout session")).toBeVisible();
+	},
+};
+
+export const SessionPerVisit: Story = {
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		await userEvent.click(canvas.getByRole("button", { name: "View session for visit 1" }));
+		await expect(canvas.getByRole("dialog")).toBeVisible();
+		await expect(canvas.getByText("Initial visit completed.")).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: "Close agent session" }));
+		await userEvent.click(canvas.getByRole("button", { name: "View session for visit 2" }));
+		await expect(canvas.getByText("Current visit is still running.")).toBeVisible();
 	},
 };
 

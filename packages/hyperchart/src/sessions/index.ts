@@ -1,6 +1,7 @@
 export {
 	actionUidKey,
 	readSessionProgress,
+	sessionProgressKey,
 	sessionProgressPath,
 	updateSessionProgress,
 } from "../runtime/generic/session_progress.js";

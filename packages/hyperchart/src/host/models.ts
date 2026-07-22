@@ -176,6 +176,8 @@ export interface HyperchartVisitInfo {
 	inputs?: Record<string, unknown>;
 	mapItem?: { key: string; value?: unknown };
 	invocation: HyperchartVisitInvocationInfo;
+	/** Agent session associated with this durable visit, when the action is an agent. */
+	session?: HyperchartAgentSessionInfo;
 }
 
 export interface HyperchartSessionMessageInfo {

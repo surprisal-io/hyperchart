@@ -163,7 +163,7 @@ Exactly one of `state`, `seqId`, or `to` is required.
 
 Defaults:
 
-- `cleanupSessions: true` moves downstream session directories/progress into the rewind backup;
+- `cleanupSessions: true` moves only sessions belonging to removed durable visits into the rewind backup; earlier retained visits of the same action keep their progress and transcript directories, while legacy transcripts shared across a retained/resumed boundary are backed up and truncated at the first removed invocation;
 - `cleanupArtifacts: false` leaves artifact files in place.
 
 Artifact cleanup is best effort because paths may be dynamic or shared. Even when enabled, it cannot reverse external services or untracked files.

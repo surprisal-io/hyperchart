@@ -274,7 +274,7 @@ Other parameters:
 | Parameter | Default | Meaning |
 |---|---:|---|
 | `mode` | `before` | cut before or after the matching record |
-| `cleanupSessions` | `true` | move downstream session directories/progress into the backup |
+| `cleanupSessions` | `true` | move only removed visits' session directories/progress into the backup; retain earlier visits of the same action and truncate backed-up legacy transcripts shared across the cut |
 | `cleanupArtifacts` | `false` | best-effort backup and removal of downstream declared artifact files |
 | `start` | `false` | start the rewound run immediately |
 | `ignoreReplayWarnings` | `false` | when starting, allow stale/skipped records explicitly |

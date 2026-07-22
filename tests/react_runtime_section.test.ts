@@ -72,6 +72,51 @@ describe("Runtime inspector section", () => {
 		expect(agentMarkup).not.toContain("View session");
 	});
 
+	it("renders a session control for every durable visit while keeping the latest-session card", () => {
+		const firstSession = {
+			actionKey: "chart:work:agent",
+			status: "completed",
+			startedAt: 1000,
+			model: "provider/first-model",
+		};
+		const secondSession = {
+			actionKey: "chart:work:agent",
+			status: "running",
+			startedAt: 2000,
+			model: "provider/second-model",
+		};
+		const state: HyperchartStateInfo = {
+			...runtimeState,
+			agent: "worker",
+			visits: 2,
+			session: secondSession,
+			visitHistory: [
+				{
+					visit: 1,
+					invokeSeqId: 2,
+					startedAt: 1000,
+					endedAt: 1500,
+					status: "done",
+					invocation: { kind: "agent", task: "First task" },
+					session: firstSession,
+				},
+				{
+					visit: 2,
+					invokeSeqId: 5,
+					startedAt: 2000,
+					status: "running",
+					invocation: { kind: "agent", task: "Second task" },
+					session: secondSession,
+				},
+			],
+		};
+
+		const markup = renderToStaticMarkup(createElement(RuntimeSection, { state }));
+		expect(markup).toContain("Agent session");
+		expect(markup).toContain('aria-label="View session for visit 1"');
+		expect(markup).toContain('aria-label="View session for visit 2"');
+	});
+
 	it("includes materialized map agents in the selected map scope", () => {
 		const map: HyperchartStateInfo = { id: "workers", type: "map", status: "done" };
 		const worker: HyperchartStateInfo = {

@@ -1,16 +1,18 @@
 import { readFileSync } from "node:fs";
 import type { HyperchartSessionMessageInfo } from "@surprisal/hyperchart/host";
 import {
-	MAX_TRANSCRIPT_MESSAGES,
 	combineToolLifecycle,
+	limitTranscriptMessages,
 	resolveContainedSessionFile,
 	truncateTranscriptText,
+	type SessionTranscriptReadOptions,
 } from "@surprisal/hyperchart/inspect";
 
 /** Parses Pi's session JSONL format into display transcript messages. */
 export function readSessionTranscript(
 	sessionsDir: string,
 	sessionFile: string | undefined,
+	options: SessionTranscriptReadOptions = {},
 ): HyperchartSessionMessageInfo[] | undefined {
 	if (sessionFile === undefined) return undefined;
 	const file = resolveContainedSessionFile(sessionsDir, sessionFile);
@@ -28,7 +30,7 @@ export function readSessionTranscript(
 			}
 			messages.push(...messagesFromEntry(entry));
 		}
-		return combineToolLifecycle(messages).slice(-MAX_TRANSCRIPT_MESSAGES);
+		return limitTranscriptMessages(combineToolLifecycle(messages), options);
 	} catch {
 		return undefined;
 	}

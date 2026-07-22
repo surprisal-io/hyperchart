@@ -1,7 +1,8 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
-import { actionUidDirName, actionUidKey } from "../../core/action_uid.js";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { actionUidDirName, actionUidKey, sanitizeSegment } from "../../core/action_uid.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
+import type { ActionUID } from "../../core/types.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
 import { instancePathFor, nearestInstance, nodeAt, stripLastKey, templatePath } from "../../core/paths.js";
 import { createBranchProjection, projectBranch, type BranchProjection } from "../../core/projection.js";
@@ -78,7 +79,9 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	const artifactCleanup = opts.cleanupArtifacts
 		? cleanupDownstreamArtifacts({ ast: parsed.ast, records, cutIndex, workDir: meta.workDir, backupDir })
 		: { removed: 0, warnings: [] as string[] };
-	const sessionsRemoved = opts.cleanupSessions ? cleanupDownstreamSessions(opts.runDir, removed, backupDir) : 0;
+	const sessionsRemoved = opts.cleanupSessions
+		? cleanupDownstreamSessions(opts.runDir, kept, removed, backupDir)
+		: 0;
 
 	writeDurableLogSync(logPath, kept);
 	patchRunStatus(opts.runDir, {
@@ -180,29 +183,158 @@ function backupIfExists(path: string, backupDir: string, name: string): void {
 	copyFileSync(path, resolve(backupDir, name));
 }
 
-function cleanupDownstreamSessions(runDir: string, removed: readonly DurableLogRecord[], backupDir: string): number {
+function cleanupDownstreamSessions(
+	runDir: string,
+	kept: readonly DurableLogRecord[],
+	removed: readonly DurableLogRecord[],
+	backupDir: string,
+): number {
 	const sessionsDir = resolve(runDir, "sessions");
 	mkdirSync(sessionsDir, { recursive: true });
 	const progress = readSessionProgress(sessionsDir);
-	const keys = new Set(removed.flatMap((record) => (record.type === "state_action" ? [actionUidKey(record.actionUid)] : [])));
+	const retainedVisits = invocationCounts(kept);
+	const removedVisits = removedInvocationVisits(removed, retainedVisits);
+	const sharedTranscriptCutoffs = new Map<string, number>();
 	let removedEntries = 0;
-	for (const key of keys) {
-		if (progress.sessions[key] !== undefined) {
-			delete progress.sessions[key];
-			removedEntries++;
+	for (const [progressKey, session] of Object.entries(progress.sessions)) {
+		const actionKey = session.actionKey ?? actionUidKey(session.actionUid);
+		const visits = removedVisits.get(actionKey);
+		if (visits === undefined) continue;
+		const visit = session.visit ?? Math.max(...visits.keys());
+		const cutoff = session.visit === undefined ? Math.min(...visits.values()) : visits.get(visit);
+		if (cutoff === undefined) continue;
+		const sessionFile = session.sessionFile === undefined
+			? undefined
+			: containedSessionFile(sessionsDir, session.sessionFile);
+		if (sessionFile !== undefined) {
+			const removedVisitDir = resolve(
+				sessionsDir,
+				actionUidDirName(session.actionUid),
+				sanitizeSegment(`${actionKey}:${visit}`),
+			);
+			if (!isWithin(removedVisitDir, sessionFile)) {
+				const previousCutoff = sharedTranscriptCutoffs.get(sessionFile);
+				sharedTranscriptCutoffs.set(sessionFile, previousCutoff === undefined ? cutoff : Math.min(previousCutoff, cutoff));
+			}
 		}
+		delete progress.sessions[progressKey];
+		removedEntries++;
 	}
 	progress.updatedAt = Date.now();
 	writeFileSync(sessionProgressPath(sessionsDir), `${JSON.stringify(progress, null, 2)}\n`, "utf8");
 	const backupSessionsDir = resolve(backupDir, "sessions");
-	for (const record of removed) {
-		if (record.type !== "state_action") continue;
-		const actionDir = resolve(sessionsDir, actionUidDirName(record.actionUid));
+	for (const [sessionFile, cutoff] of sharedTranscriptCutoffs) {
+		truncateSharedTranscript(sessionFile, cutoff, sessionsDir, backupSessionsDir);
+	}
+	for (const [actionKey, visits] of removedVisits) {
+		const actionUid = actionUidForKey(removed, actionKey);
+		if (actionUid === undefined) continue;
+		const actionDir = resolve(sessionsDir, actionUidDirName(actionUid));
 		if (!existsSync(actionDir)) continue;
-		mkdirSync(backupSessionsDir, { recursive: true });
-		movePath(actionDir, resolve(backupSessionsDir, basename(actionDir)));
+		for (const visit of visits.keys()) {
+			const visitDir = resolve(actionDir, sanitizeSegment(`${actionKey}:${visit}`));
+			if (!existsSync(visitDir)) continue;
+			const backupActionDir = resolve(backupSessionsDir, basename(actionDir));
+			mkdirSync(backupActionDir, { recursive: true });
+			movePath(visitDir, resolve(backupActionDir, basename(visitDir)));
+		}
 	}
 	return removedEntries;
+}
+
+function invocationCounts(records: readonly DurableLogRecord[]): Map<string, number> {
+	const counts = new Map<string, number>();
+	for (const record of records) {
+		if (record.type !== "state_action" || record.kind !== "invoke") continue;
+		const key = actionUidKey(record.actionUid);
+		counts.set(key, (counts.get(key) ?? 0) + 1);
+	}
+	return counts;
+}
+
+function removedInvocationVisits(
+	removed: readonly DurableLogRecord[],
+	retainedVisits: ReadonlyMap<string, number>,
+): Map<string, Map<number, number>> {
+	const counts = new Map(retainedVisits);
+	const visits = new Map<string, Map<number, number>>();
+	for (const record of removed) {
+		if (record.type !== "state_action" || record.kind !== "invoke") continue;
+		const key = actionUidKey(record.actionUid);
+		const visit = (counts.get(key) ?? 0) + 1;
+		counts.set(key, visit);
+		const removedForAction = visits.get(key) ?? new Map<number, number>();
+		removedForAction.set(visit, record.timestamp);
+		visits.set(key, removedForAction);
+	}
+	return visits;
+}
+
+function actionUidForKey(records: readonly DurableLogRecord[], key: string): ActionUID | undefined {
+	for (const record of records) {
+		if (record.type === "state_action" && actionUidKey(record.actionUid) === key) return record.actionUid;
+	}
+	return undefined;
+}
+
+function containedSessionFile(sessionsDir: string, sessionFile: string): string | undefined {
+	try {
+		const root = realpathSync(sessionsDir);
+		const file = realpathSync(sessionFile);
+		return isWithin(root, file) ? file : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function isWithin(root: string, path: string): boolean {
+	const fromRoot = relative(resolve(root), resolve(path));
+	return fromRoot === "" || (!fromRoot.startsWith("..") && !isAbsolute(fromRoot));
+}
+
+function truncateSharedTranscript(
+	sessionFile: string,
+	cutoff: number,
+	sessionsDir: string,
+	backupSessionsDir: string,
+): void {
+	const lines = readFileSync(sessionFile, "utf8").split(/\r?\n/);
+	const kept: string[] = [];
+	let reachedCutoff = false;
+	for (const line of lines) {
+		if (line.length === 0) continue;
+		const timestamp = transcriptRecordTimestamp(line);
+		if (timestamp !== undefined && timestamp >= cutoff) reachedCutoff = true;
+		if (!reachedCutoff) kept.push(line);
+	}
+	if (!reachedCutoff) return;
+	const backupPath = resolve(backupSessionsDir, relative(realpathSync(sessionsDir), resolve(sessionFile)));
+	mkdirSync(dirname(backupPath), { recursive: true });
+	copyFileSync(sessionFile, backupPath);
+	writeFileSync(sessionFile, kept.length === 0 ? "" : `${kept.join("\n")}\n`, "utf8");
+}
+
+function transcriptRecordTimestamp(line: string): number | undefined {
+	let record: unknown;
+	try {
+		record = JSON.parse(line);
+	} catch {
+		return undefined;
+	}
+	if (!isRecord(record) || record.hyperchartTranscript === 1 || record.type === "session") return undefined;
+	const nested = isRecord(record.message) ? record.message.timestamp : undefined;
+	return timestampValue(record.timestamp) ?? timestampValue(nested);
+}
+
+function timestampValue(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value !== "string") return undefined;
+	const parsed = Date.parse(value);
+	return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function cleanupDownstreamArtifacts(opts: {

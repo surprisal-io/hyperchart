@@ -10,6 +10,8 @@ export type HyperchartSessionStatus = "starting" | "running" | "completed" | "fa
 export type HyperchartSessionProgress = {
 	actionKey: string;
 	actionUid: ActionUID;
+	/** Durable state visit this session belongs to. Absent in legacy progress files. */
+	visit?: number;
 	actionName: string;
 	status: HyperchartSessionStatus;
 	startedAt: number;
@@ -64,11 +66,24 @@ type SessionProgressPatch = {
 		| undefined;
 };
 
-export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID, patch: SessionProgressPatch): void {
+export function sessionProgressKey(actionUid: ActionUID, effectId?: string): string {
 	const actionKey = actionUidKey(actionUid);
+	const visit = visitFromEffectId(actionKey, effectId);
+	return visit === undefined ? actionKey : `${actionKey}:visit:${visit}`;
+}
+
+export function updateSessionProgress(
+	sessionsDir: string,
+	actionUid: ActionUID,
+	patch: SessionProgressPatch,
+	effectId?: string,
+): void {
+	const actionKey = actionUidKey(actionUid);
+	const visit = visitFromEffectId(actionKey, effectId);
+	const progressKey = sessionProgressKey(actionUid, effectId);
 	const file = readSessionProgress(sessionsDir);
 	const now = Date.now();
-	const previous = file.sessions[actionKey];
+	const previous = file.sessions[progressKey];
 	const completedAt = valueFor("completedAt", patch, previous);
 	const sessionFile = valueFor("sessionFile", patch, previous);
 	const role = valueFor("role", patch, previous);
@@ -87,6 +102,7 @@ export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID,
 	const next: HyperchartSessionProgress = {
 		actionKey,
 		actionUid,
+		...(visit === undefined ? {} : { visit }),
 		actionName: valueFor("actionName", patch, previous) ?? actionUid.action,
 		status: valueFor("status", patch, previous) ?? "starting",
 		startedAt: valueFor("startedAt", patch, previous) ?? now,
@@ -109,7 +125,7 @@ export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID,
 		...(lastMessage === undefined ? {} : { lastMessage }),
 		...(error === undefined ? {} : { error }),
 	};
-	file.sessions[actionKey] = next;
+	file.sessions[progressKey] = next;
 	file.updatedAt = now;
 	writeFileSync(sessionProgressPath(sessionsDir), `${JSON.stringify(file, null, 2)}\n`, "utf8");
 }
@@ -126,8 +142,11 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 		const status = parseStatus(entry.status);
 		if (status === undefined) continue;
 		out[key] = {
-			actionKey: typeof entry.actionKey === "string" ? entry.actionKey : key,
+			actionKey: typeof entry.actionKey === "string" ? entry.actionKey : actionUidKey(entry.actionUid),
 			actionUid: entry.actionUid,
+			...(typeof entry.visit === "number" && Number.isInteger(entry.visit) && entry.visit > 0
+				? { visit: entry.visit }
+				: {}),
 			actionName: typeof entry.actionName === "string" ? entry.actionName : entry.actionUid.action,
 			status,
 			startedAt: typeof entry.startedAt === "number" ? entry.startedAt : 0,
@@ -152,6 +171,12 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 		};
 	}
 	return out;
+}
+
+function visitFromEffectId(actionKey: string, effectId: string | undefined): number | undefined {
+	if (effectId === undefined || !effectId.startsWith(`${actionKey}:`)) return undefined;
+	const visit = Number(effectId.slice(actionKey.length + 1).split(":", 1)[0]);
+	return Number.isInteger(visit) && visit > 0 ? visit : undefined;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -205,6 +230,7 @@ export function createThrottledProgressWriter(
 	sessionsDir: string,
 	actionUid: ActionUID,
 	actionName: string,
+	effectId?: string,
 ): StreamingProgressWriter {
 	let currentText = "";
 	let currentReasoning = "";
@@ -217,12 +243,17 @@ export function createThrottledProgressWriter(
 	const publish = () => {
 		clearTimer();
 		lastWrite = Date.now();
-		updateSessionProgress(sessionsDir, actionUid, {
-			actionName,
-			status: "running",
-			currentText: currentText.length === 0 ? undefined : currentText.slice(-32_000),
-			currentReasoning: currentReasoning.length === 0 ? undefined : currentReasoning.slice(-32_000),
-		});
+		updateSessionProgress(
+			sessionsDir,
+			actionUid,
+			{
+				actionName,
+				status: "running",
+				currentText: currentText.length === 0 ? undefined : currentText.slice(-32_000),
+				currentReasoning: currentReasoning.length === 0 ? undefined : currentReasoning.slice(-32_000),
+			},
+			effectId,
+		);
 	};
 	const schedule = () => {
 		const wait = 250 - (Date.now() - lastWrite);
