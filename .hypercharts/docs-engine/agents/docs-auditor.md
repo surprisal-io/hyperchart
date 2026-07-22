@@ -1,7 +1,7 @@
 ---
 name: docs-auditor
 description: Audits one canonical documentation unit against the hyperchart source tree and tool registries, producing a structured findings artifact.
-toolset: authoring
+toolset: auditing
 role: reviewer
 thinking: high
 systemPromptMode: replace
