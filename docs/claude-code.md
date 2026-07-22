@@ -48,7 +48,7 @@ Each agent action becomes one SDK `query()` session in the run's working directo
 
 ## Inspector
 
-`hyperchart_view` registers the run with a localhost inspector server (it lives inside the long-running MCP server process) and returns a tokenized URL: chart graph with runtime overlay, per-state details, live agent transcripts, and a steering composer.
+`hyperchart_view` registers the run with a localhost inspector server (it lives inside the long-running MCP server process) and returns a tokenized URL: chart graph with runtime overlay, per-state details, live agent transcripts, and a steering composer. Agent cards show declared role/toolset names and their resolved model/tool allowlists. Concrete runs resolve against their persisted `runner.config.json`; session progress records the actual launch plan.
 
 Remote setups are configured through environment variables — set them in the `env` block of Claude Code's `settings.json` so the MCP server and runners inherit them:
 

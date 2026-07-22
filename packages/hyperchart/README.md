@@ -39,11 +39,13 @@ A script with one successful transition may select it implicitly on exit code `0
 | `@surprisal/hyperchart` | DSL, types, parsing, inspection, machine, projection, replay |
 | `@surprisal/hyperchart/runtime` | generic runtime, log stores, scripts, guards, artifacts |
 | `@surprisal/hyperchart/host` | canonical chart/run models and adapters |
+| `@surprisal/hyperchart/react` | optional React inspector and run surfaces |
+| `@surprisal/hyperchart/react/styles.css` | required inspector stylesheet |
 | `@surprisal/hyperchart/package.json` | package metadata |
 
-The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`.
+The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`. In the React inspector, agent cards show declared role/toolset metadata and resolved model/tool configuration, while a selected run state's `Runtime` section owns its live-session controls and actual launch-plan summary.
 
-This package has no Pi or React dependency.
+The core package has no Pi dependency. React integrations use the optional peer dependencies declared by the package.
 
 ## Documentation
 

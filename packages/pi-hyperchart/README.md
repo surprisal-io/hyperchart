@@ -26,14 +26,19 @@ Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 /hyperchart run name --wait   # synchronous
 ```
 
-The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Active agent cards include a live session window with transcript/current-tool polling and steering.
+The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Agent cards show declared role/toolset names and their resolved model/tool allowlists; the selected state's run-specific `Runtime` section shows the actual launch plan plus transcript/current-tool polling and steering.
 
-## Pi tools
+## Pi agent tool
 
-- `hyperchart` with `action: "inspect"`
-- `hyperchart` with `action: "run"`
-- `hyperchart` with `action: "run_inspect"`
-- `hyperchart` with `action: "rewind"`
+The consolidated `hyperchart` tool supports:
+
+- `action: "list"`
+- `action: "inspect"`
+- `action: "run"`
+- `action: "run_inspect"`
+- `action: "view"` — open the localhost inspector and return its URL; pass `open: false` to return the URL only
+- `action: "stop"`
+- `action: "rewind"`
 
 ## Application entry points
 

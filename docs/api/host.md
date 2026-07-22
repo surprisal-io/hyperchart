@@ -128,8 +128,12 @@ interface HyperchartStateInfo {
   status: HyperchartStateStatus;
   startedAt?: number;
   endedAt?: number;
+  role?: string;
   model?: string;
+  resolvedModel?: string;
   thinking?: string;
+  toolset?: string;
+  resolvedTools?: string[];
   agentDefinitionUnavailable?: boolean;
   usage?: HyperchartUsageInfo;
   reads?: string[];
@@ -182,6 +186,8 @@ interface HyperchartStateInfo {
 }
 ```
 
+For agent states, `role` and `toolset` preserve the symbolic names from the definition. `model` and `tools` retain concrete chart overrides or definition fallbacks; `resolvedModel` and `resolvedTools` carry the effective host mapping. Run-directory inspection resolves against the mappings persisted in that run's `runner.config.json`, not mutable current settings. If that snapshot exists but is invalid, inspection omits resolved fields rather than reinterpreting history through current settings. An absent `resolvedTools` means the host default tool configuration applies or the historical mapping is unavailable; it does not mean every installed tool is enabled.
+
 `initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `waiting` means the state is active but its map instance is held behind a `concurrency` gate; no invoke, visit, or agent session exists until a slot is admitted. `stale` is historical completion outside the current traversal or map generation. It is not pending work. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
 
 ## Live agent sessions
@@ -192,8 +198,11 @@ interface HyperchartAgentSessionInfo {
   status: string;
   startedAt?: number;
   lastActivityAt?: number;
+  role?: string;
   model?: string;
   thinking?: string;
+  toolset?: string;
+  tools?: string[];
   turnCount?: number;
   toolCount?: number;
   tokenCount?: number;
@@ -220,7 +229,7 @@ interface HyperchartSessionMessageInfo {
 }
 ```
 
-`session` is an optional, immutable live snapshot supplied by a host adapter. `actionKey` identifies the running action for steering. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. Hosts may bound or omit historical messages while preserving current activity fields.
+`session` is an optional, immutable live snapshot supplied by a host adapter. `actionKey` identifies the running action for steering. `role`, `toolset`, `model`, and `tools` record the concrete session plan used at launch when the host persists those fields. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. Hosts may bound or omit historical messages while preserving current activity fields.
 
 ## Visits
 

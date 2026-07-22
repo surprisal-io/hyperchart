@@ -77,7 +77,7 @@ Run `/hyperchart` with no arguments to open the minimal run picker for the curre
 Over SSH, set `HYPERCHART_INSPECTOR_PORT` to a fixed port and forward it (`ssh -L <port>:127.0.0.1:<port>`); the inspector then skips opening a server-side browser and the printed URL works through the tunnel. A fixed port serves one process — when another session already holds it, the inspector falls back to an ephemeral port and the printed URL carries the actual port. Alternatively `HYPERCHART_INSPECTOR_HOST=0.0.0.0` binds all interfaces and advertises the machine's LAN address in inspector URLs — the per-run URL token is the only access control in that mode, so use it on trusted networks only.
 
 
-For active agent states, the inspector shows `View session` on the agent card. The session window polls the persisted Pi transcript, completed reasoning blocks, current tool activity, and throttled live text/reasoning deltas alongside the run. Its composer sends a steering message to the runner through a run-scoped local queue; Pi delivers it after the agent's current tool call. Steering is available only while the runner and matching agent session are active.
+For active agent states, the selected state's run-specific `Runtime` section expands automatically and shows `View session`. Agent cards show definition metadata plus declared `role`/`toolset` and their resolved model/tool allowlist; they never embed session controls. The session window polls the persisted Pi transcript, completed reasoning blocks, current tool activity, and throttled live text/reasoning deltas alongside the run. Its composer sends a steering message to the runner through a run-scoped local queue; Pi delivers it after the agent's current tool call. Steering is available only while the runner and matching agent session are active.
 
 ```text
 /hyperchart
@@ -156,7 +156,7 @@ Delete recursively removes the run directory, including its durable log, status,
 
 ## Agent tool
 
-The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `rewind`, or `stop`. The slash command remains the direct human interface.
+The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, or `stop`. The slash command remains the direct human interface.
 
 ### `hyperchart` with `action: "list"`
 
@@ -220,6 +220,19 @@ Load a concrete run and return the runtime-enriched inspector model.
 ```
 
 The overlay includes run status, runtime issues, visits, resolved invocations, map generations, validation attempts, artifacts, usage, session failures, and replay findings. Historical tool results remain historical snapshots; rerun the tool to read new facts.
+
+### `hyperchart` with `action: "view"`
+
+Open the localhost browser inspector and return its tokenized URL:
+
+```json
+{
+  "action": "view",
+  "runDir": "review-20260711-142500"
+}
+```
+
+Set `"open": false` to start the inspector and return its URL without opening the system browser. The run must belong to the current working directory. The returned inspector supports the same live polling and session steering as `/hyperchart view`.
 
 ### `hyperchart` with `action: "stop"`
 
@@ -296,7 +309,7 @@ agent("reviewer", { task: "Review the change." })
 
 The Pi adapter checks bundle `agents/` first, then resolves project and user agent-definition directories using Pi's normal rules. The definition supplies system prompt, model, thinking level, and tool defaults. Chart-level values may override invocation settings.
 
-A definition can declare a symbolic `role` instead of a concrete model and a symbolic `toolset` instead of a tool list; both map to concrete values in `settings.json` under `<projectRoot>/.pi/hypercharts/` or `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/` (project entries win per key), e.g. `{ "roles": { "reviewer": "anthropic/claude-opus-4-8" }, "toolsets": { "reading": ["read", "grep"] } }`. An unconfigured name falls back to the definition's `model`/`tools`; with no fallback declared the action fails with an error. See [Core authoring](core-authoring.md#model-roles) for the resolution order.
+A definition can declare a symbolic `role` instead of a concrete model and a symbolic `toolset` instead of a tool list; both map to concrete values in `settings.json` under `<projectRoot>/.pi/hypercharts/` or `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/` (project entries win per key), e.g. `{ "roles": { "reviewer": "anthropic/claude-opus-4-8" }, "toolsets": { "reading": ["read", "grep"] } }`. An unconfigured name falls back to the definition's `model`/`tools`; with no fallback declared the action fails with an error. The inspector shows both symbolic names and resolved values. For a concrete run it uses the role/toolset mappings persisted in `runner.config.json`, while `Runtime` reports the session plan actually launched. An absent explicit tool list is labelled as the host default, never as “all tools allowed.” See [Core authoring](core-authoring.md#model-roles) for the resolution order.
 
 If the concrete definition cannot be loaded, inspection reports `agentDefinitionUnavailable`, and execution refuses to run that state.
 
