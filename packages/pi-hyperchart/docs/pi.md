@@ -100,7 +100,9 @@ Options:
 | `--wait` | wait synchronously until the run reaches a terminal status |
 | `--ignore-replay-warnings` | continue despite stale or skipped replay records |
 
-Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. On startup or session resume, Pi restores widgets only for non-terminal runs created by that exact Pi session; terminal runs and older runs without ownership metadata remain available through run history but do not appear as active widgets. Add `--wait` when the command should remain blocked until completion.
+Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. On startup or session resume, Pi restores widgets only for non-terminal runs created by that exact Pi session; terminal runs and older runs without ownership metadata remain available through run history but do not appear as active widgets.
+
+When an owned background run reaches matching `complete`/`failed` status, Pi injects its terminal prompt as a model-facing follow-up into the exact originating session and working directory. Pi sends before confirming the request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery. Add `--wait` when the command should remain blocked; the waited result uses the same recoverable delivery lease to arbitrate with asynchronous delivery. Do not start a polling watcher.
 
 ```text
 /hyperchart run review --args '{"pullRequest":42}'
@@ -206,7 +208,12 @@ Start or resume a run.
 | `wait` | no | wait for terminal status before returning |
 | `ignoreReplayWarnings` | no | explicitly continue despite stale/skipped replay records |
 
-When `wait` is false or omitted, the tool returns after startup with `final: false`. When `wait` is true, it returns the terminal status and runtime-enriched inspector model.
+When `wait` is false or omitted, tool returns after startup with `final: false`, then injects terminal prompt into exact originating Pi session.
+When `wait` is true, tool waits for terminal status, acquires same per-session recoverable delivery lease, and returns terminal prompt, persisted status, and runtime-enriched inspector model directly.
+Delivery uses at-least-once semantics.
+Durable request IDs and recoverable claims prevent permanent suppression after crash.
+Host may redeliver same request after crash between delivery and confirmation.
+Treat each `requestId` idempotently.
 
 ### `hyperchart` with `action: "run_inspect"`
 

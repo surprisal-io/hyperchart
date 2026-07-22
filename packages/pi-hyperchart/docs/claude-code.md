@@ -27,7 +27,9 @@ The bundled MCP server exposes eight tools. Claude picks them up through the `hy
 | Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
 | Open the browser inspector and return its URL | `hyperchart_view` |
 
-`hyperchart_run` is asynchronous by default: the runner is a detached process that survives the Claude session. Pass `wait: true` only when the current task must block until a terminal status.
+`hyperchart_run` is asynchronous by default: the runner is a detached process that survives the Claude session. The plugin's always-on `hyperchart-terminal` monitor scans immediately and periodically for terminal requests owned by the exact Claude session and working directory. Each request is emitted as one physical stdout line and confirmed only after stdout accepts it; embedded prompt newlines remain escaped in the JSON notification. Delivery waits for `status.json` to match the request outcome, and stale dead runs are recovered through the same durable outbox operation used by waited calls.
+
+Claude provides no acknowledgement that the host consumed a monitor stdout line, so automatic terminal delivery is at least once. A stale delivery claim is retried after its lease: a crash before the write cannot permanently lose the prompt, while a crash after the write but before confirmation may duplicate it. Pass `wait: true` only when the current task must block until terminal status; the waited call and monitor arbitrate through the same recoverable claim. Do not start Bash or Monitor polling watchers.
 
 ## Locations
 
@@ -63,4 +65,4 @@ Remote setups are configured through environment variables — set them in the `
 
 ## Not yet included
 
-Rewind tooling from the Claude host, marketplace packaging, model-id mapping between hosts, and cross-host run interop (Pi and Claude use separate run roots).
+Marketplace packaging, model-id mapping between hosts, and cross-host run interop (Pi and Claude use separate run roots).

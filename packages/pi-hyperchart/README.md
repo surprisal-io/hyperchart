@@ -28,6 +28,13 @@ Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 
 The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Agent cards show declared role/toolset names and their resolved model/tool allowlists; the selected state's run-specific `Runtime` section shows the actual launch plan plus transcript/current-tool polling and steering.
 
+Asynchronous runs inject terminal prompt into exact originating Pi session/workDir.
+`--wait`/`wait: true` waits for terminal status, acquires same per-session recoverable delivery lease, and returns prompt directly.
+Delivery uses at-least-once semantics.
+Durable request IDs and recoverable claims prevent permanent suppression after crash.
+Host may redeliver same request after crash between delivery and confirmation.
+Treat each `requestId` idempotently.
+
 ## Pi agent tool
 
 The consolidated `hyperchart` tool supports:

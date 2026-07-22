@@ -108,6 +108,23 @@ t`Items: ${json(result("plan", "items"))}`
 
 Hyperchart recognizes only DSL interpolation tokens. Text that happens to contain `${...}` is not evaluated as JavaScript.
 
+## Terminal states and notifications
+
+Use `final()` for a successful top-level terminal and `failed()` for a failed one. Outcome is explicit metadata; names such as `failed` and incoming `FAILED` events do not classify a terminal.
+
+```ts
+done: final({
+  notify: {
+    scope: "publish",
+    prompt: t`Published ${result("publish", "title")}`,
+    artifacts: [artifactOf("publish", { artifact: "report" })],
+  },
+}),
+failed: failed(),
+```
+
+The optional prompt is appended to the standard host message. Artifact contents are not inlined; hosts receive authoritative absolute paths. `scope` lets the prompt resolve refs from an existing state scope and never adds input storage to the final itself. Result and artifact sources must dominate the terminal.
+
 ## Action states
 
 An action state dispatches one action and waits for an event.

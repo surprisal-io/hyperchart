@@ -58,8 +58,13 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 
 1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available. Inspect tools return a compact digest by default; pass `verbose: true` only when you need chart source, schemas, or transcripts.
 2. Call `hyperchart_run` with `chartPath` and `args`.
-3. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory; the run continues in the background.
-4. Inspect the concrete result with `hyperchart_run_inspect` before reporting completion.
+3. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory; the run continues in the background and the plugin monitor delivers its terminal prompt to this exact originating Claude session. Never start Bash/Monitor polling watchers.
+4. Inspect concrete result with `hyperchart_run_inspect` before reporting completion.
+   Waited delivery acquires monitor's same per-session recoverable lease and returns terminal prompt directly.
+   Delivery uses at-least-once semantics.
+   Durable request IDs and recoverable claims prevent permanent suppression after crash.
+   Host may redeliver same request after crash between delivery and confirmation.
+   Treat each `requestId` idempotently.
 
 ## Watch and steer a run
 

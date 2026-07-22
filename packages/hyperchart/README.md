@@ -30,7 +30,7 @@ export default chart({
 });
 ```
 
-A script with one successful transition may select it implicitly on exit code `0`.
+A script with one successful transition may select it implicitly on exit code `0`. Top-level `final()` and `failed()` terminals explicitly select `complete` or `failed` run outcome; optional terminal notifications can append a scoped prompt and authoritative paths for declared artifacts. Runner/host delivery uses a persist-once outbox and per-session receipts.
 
 ## Entry points
 

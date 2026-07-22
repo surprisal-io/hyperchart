@@ -97,7 +97,7 @@ This catches different failures at the right boundary:
 - Durable files make inspection, recovery, replay analysis, and manual verification easier than large prompt/result payloads.
 
 ```ts
-import { agent, artifact, final, refs, t, z } from "@surprisal/hyperchart";
+import { agent, artifact, failed, final, refs, t, z } from "@surprisal/hyperchart";
 
 const Report = z.object({
   title: z.string(),
@@ -148,7 +148,7 @@ export default chart({
       transitions: { DONE: "done", FAILED: "failed" },
     },
     done: final(),
-    failed: final(),
+    failed: failed(),
   },
 });
 ```
@@ -160,8 +160,13 @@ After editing this pattern, call `hyperchart` with `action: "inspect"`; do not r
 1. Inspect the chart first with `hyperchart` with `action: "inspect"`. The compact digest is the default; `verbose: true` returns the full object.
 2. Verify every named agent definition is available.
 3. Call `hyperchart({ action: "run", chartPath, args })`.
-4. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory.
-5. Inspect the concrete result with `hyperchart` with `action: "run_inspect"` before reporting completion.
+4. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory; Pi injects the owned run's terminal prompt into that exact originating session automatically. Do not start a polling watcher.
+5. Inspect concrete result with `hyperchart` with `action: "run_inspect"` before reporting completion.
+   Waited call waits for terminal status, acquires same per-session recoverable delivery lease, and returns prompt directly.
+   Delivery uses at-least-once semantics.
+   Durable request IDs and recoverable claims prevent permanent suppression after crash.
+   Host may redeliver same request after crash between delivery and confirmation.
+   Treat each `requestId` idempotently.
 
 ## View a run
 

@@ -131,6 +131,8 @@ The Pi package adds files that are useful but not semantic history:
 | File | Meaning |
 |---|---|
 | `status.json` | pid, heartbeat, process state, terminal error, timestamps |
+| `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-generation UUID, written before terminal status |
+| `terminal-notification/receipts/*.json` | recoverable per-host/session delivery leases and confirmed receipts |
 | `sessions/progress.json` | optional agent progress summaries |
 | agent session files | host conversation state and usage |
 
@@ -149,6 +151,8 @@ A run may have a valid log and a stale process status. Conversely, a process can
 - artifact, guard, schema, and terminal-outcome helpers.
 
 The generic runtime receives a host `AgentExecutor`. It owns effect interpretation and log mechanics; the host owns actual agent transport and session lifecycle.
+
+Terminal notification metadata is a runner/host outbox protocol, not a durable machine transition or log fact. Delivery waits until `status.json` matches the request outcome. Rewind moves the complete outbox and receipts into its backup before replay resumes.
 
 ## Agent executor contract
 

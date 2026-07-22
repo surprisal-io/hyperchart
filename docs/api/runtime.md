@@ -14,7 +14,6 @@ import {
   createAgentDefaultsResolver,
   createRunDir,
   finalMachineFailureMessage,
-  isFailureStatePath,
   loadRunMeta,
   resolveAgentDefaults,
   resolveArtifactValue,
@@ -440,7 +439,7 @@ function terminalStateForFinalMachine(
 ): RunTerminalState;
 ```
 
-Returns `failed` if an active final leaf is named as a failure state or the latest completion event is `FAILED`; otherwise returns `complete`.
+Returns `failed` when any active terminal leaf has `outcome: "failed"`; otherwise returns `complete`. This includes failed leaves in completed parallel regions. Terminal names and incoming event types do not infer run outcome.
 
 ### `finalMachineFailureMessage()`
 
@@ -451,15 +450,23 @@ function finalMachineFailureMessage(
 ): string | undefined;
 ```
 
-Returns the latest `FAILED` error payload when present, otherwise describes the reached failure final state.
+After an explicitly failed terminal establishes the outcome, returns the error from the `FAILED` completion that actually entered that active failed terminal (structured payloads are JSON-stringified), otherwise describes the reached failed terminal. It returns `undefined` for complete terminals and does not reuse errors from earlier recovered `FAILED` events.
 
-### `isFailureStatePath()`
+## Terminal notification outbox
 
-```ts
-function isFailureStatePath(path: string): boolean;
-```
+The runner persists `terminal-notification/request.json` before changing `status.json` to `complete` or `failed`. A request is deliverable only when its payload outcome exactly matches terminal status. Every newly created outbox request has a fresh UUID; normal resume/replay reuses the existing request, while rewind removes it so an identical terminal outcome is delivered as a new generation.
 
-Checks whether the final template segment, ignoring a map key, is `failed`, `failure`, or `error` case-insensitively.
+Delivery uses a recoverable per-host/session claim and a separate confirmed receipt. Pi sends first, then confirms; if confirmation is interrupted, the persisted Pi custom message `requestId` supplies the acknowledgement during recovery. Claude's monitor writes one JSON notification per physical stdout line, then confirms. Claude exposes no host acknowledgement after stdout, so delivery is **at least once**: a crash after the line is written but before confirmation can cause a duplicate after the stale claim lease expires. A crash before stdout never permanently suppresses delivery.
+
+Key helpers are:
+
+- `persistTerminalNotificationRequest()` — persist once and fail on a divergent replay payload;
+- `readDeliverableTerminalNotificationRequest()` — require matching terminal status;
+- `claimTerminalNotificationReceipt()` / `markTerminalNotificationReceipt()` / `hasTerminalNotificationReceipt()` — leased per-session delivery arbitration and confirmation;
+- `recoverStaleRunTerminalNotification()` — fail a stale dead runner, preserving an already-written outbox and its error;
+- `removeTerminalNotificationOutbox()` — cleanup used by rewind.
+
+Notification artifact entries are authoritative absolute paths under `workDir`; file contents are never copied into the prompt.
 
 ## Complete export inventory
 
@@ -475,6 +482,11 @@ ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue
 runGuard, checkSchema, checkSchemaAsync
 createRunDir, loadRunMeta, saveRunMeta, RunMeta
-terminalStateForFinalMachine, finalMachineFailureMessage,
-isFailureStatePath, RunTerminalState
+terminalStateForFinalMachine, finalMachineFailureMessage, RunTerminalState
+persistTerminalNotificationRequest, readTerminalNotificationRequest,
+readDeliverableTerminalNotificationRequest, recoverStaleRunTerminalNotification,
+claimTerminalNotificationReceipt, markTerminalNotificationReceipt,
+hasTerminalNotificationReceipt, removeTerminalNotificationReceipt,
+removeTerminalNotificationOutbox, TerminalNotificationPayload,
+TerminalNotificationRequest, TerminalNotificationReceipt
 ```

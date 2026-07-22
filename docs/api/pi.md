@@ -213,7 +213,7 @@ Rules:
 - `wait` defaults to `false`.
 - `ignoreReplayWarnings` defaults to `false` and only bypasses stale/skipped replay warnings; it is not a structural repair.
 
-Without `wait`, result details contain:
+Without `wait`, result details contain the startup result below. The owned terminal request is later injected as a model-facing follow-up only into the originating session/workDir and is receipted by request id.
 
 ```ts
 {
@@ -247,8 +247,11 @@ With `wait: true`, details contain the terminal persisted status plus the final 
     replayWarnings?: string[];
   };
   inspector: HyperchartRunInfo;
+  notification?: TerminalNotificationRequest;
 }
 ```
+
+The result text is the terminal prompt when this call claims delivery. If a matching receipt already exists, the call returns terminal status without duplicating the prompt. Pi recovery also checks persisted `hyperchart-terminal` custom messages by request id before re-sending.
 
 Start example:
 

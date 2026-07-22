@@ -5,7 +5,14 @@ Claude Code plugin for [Hyperchart](https://github.com/surprisal-io/hyperchart):
 ## What you get
 
 - **`hyperchart_*` MCP tools** — `list`, `inspect`, `run`, `run_inspect`, `rewind`, `steer`, `stop`, `view` — exposed to Claude by a bundled stdio MCP server.
-- **Detached background runs** — a chart run is a separate runner process that survives the Claude session; state is durable in the run directory.
+- **Detached background runs** — chart runner survives Claude session.
+  Run directory stores durable state.
+  Always-on plugin monitor routes terminal prompt to exact originating Claude session/workDir.
+  `wait: true` waits for terminal status, acquires same per-session recoverable delivery lease, and returns prompt directly.
+  Delivery uses at-least-once semantics.
+  Durable request IDs and recoverable claims prevent permanent suppression after crash.
+  Host may redeliver same request after crash between delivery and confirmation.
+  Treat each `requestId` idempotently.
 - **Agent actions as Claude sessions** — each chart agent runs through `@anthropic-ai/claude-agent-sdk` `query()` headless (permission checks bypassed inside the chart's working directory; the chart's guards and validators are the control surface). Model ids from agent definitions are passed to the SDK verbatim.
 - **Live inspector** — `hyperchart_view` returns a tokenized localhost URL with the chart graph, per-state details, declared and resolved role/toolset configuration, live agent transcripts, and a steering composer. Pass `chartPath` for a static view of a chart definition (no run required; reloads on refresh).
 - **SessionStart hook** — live runs for the current directory are surfaced as context when a Claude session starts.
@@ -56,7 +63,7 @@ Under SSH the plugin does not try to open a server-side browser; `hyperchart_vie
 
 ## Run layout
 
-Each run directory contains `meta.json`, `status.json` (heartbeat + terminal state), `log.jsonl` (the durable event log), `runner.config.json`, runner stdout/stderr logs, and `sessions/` with per-action session progress, neutral JSONL transcripts, and the steering queue.
+Each run directory contains `meta.json`, `status.json` (heartbeat + terminal state), `log.jsonl` (the durable event log), `terminal-notification/` (persist-once request plus per-session receipts), `runner.config.json`, runner stdout/stderr logs, and `sessions/` with per-action session progress, neutral JSONL transcripts, and the steering queue.
 
 ## Testing
 

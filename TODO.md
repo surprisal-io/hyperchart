@@ -73,12 +73,6 @@ STRATEGY_VALID   → semantic gate
 
 Investigate a first-class mechanism for guards to access authoritative dynamic runtime values without trusting agent-returned paths or requiring a technical state. Preserve durable artifact version history: a fixed `strategy.json` overwritten during rework is not an acceptable substitute.
 
-## Let final states notify the parent session
-
-Add a first-class way for final states to send a message back to the parent/main session. The notification should support a configurable prompt and references or attachments to selected workflow artifacts, so a completed workflow can proactively surface its result instead of requiring the parent session to poll for it.
-
-Define how this interacts with durability and replay: the notification must be represented as an explicit, idempotent effect and must not be emitted again accidentally during recovery or replay.
-
 ## Complete the `user` action implementation
 
 The `user` action is currently only partially implemented and does not yet provide a coherent end-to-end interaction model. Define its intended semantics and finish the runtime, host-adapter, persistence/recovery, inspection, and UI behavior required to make it a fully supported action type.

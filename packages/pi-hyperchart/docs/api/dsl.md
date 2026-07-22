@@ -9,6 +9,7 @@ import {
   chart,
   compound,
   event,
+  failed,
   final,
   input,
   json,
@@ -30,7 +31,7 @@ Use `refs()` for arguments, results, artifacts, map items, and transition inputs
 ## Minimal chart
 
 ```ts
-import { artifact, chart, final, script } from "@surprisal/hyperchart";
+import { artifact, chart, failed, final, script } from "@surprisal/hyperchart";
 
 export default chart({
   kind: "chart",
@@ -45,7 +46,7 @@ export default chart({
       transitions: { DONE: "done", FAILED: "failed" },
     },
     done: final(),
-    failed: final(),
+    failed: failed(),
   },
 });
 ```
@@ -82,15 +83,32 @@ type ChartCst = {
 
 State ids use letters, digits, `_`, and `-`. `.`, `#`, and `:` are reserved for paths, map instances, and effect identities.
 
-### `final()`
+### `final()` and `failed()`
 
 ```ts
-function final(): FinalStateCst;
+function final(options?: TerminalOptions): FinalStateCst;
+function failed(options?: TerminalOptions): FinalStateCst;
 
-type FinalStateCst = { kind: "final" };
+type TerminalOptions = {
+  notify?: {
+    prompt?: Templatable;
+    artifacts?: readonly (ArtifactOfCst | JoinArtifactOfCst)[];
+    scope?: StatePath;
+  };
+};
+
+type FinalStateCst = {
+  kind: "final";
+  outcome?: "complete" | "failed";
+  notify?: TerminalOptions["notify"];
+};
 ```
 
-Marks a terminal leaf. A top-level final completes the chart. A direct final child completes a compound or map instance; a final inside a parallel region marks that region complete.
+Both constructors mark terminal leaves. `final()` records a `complete` run outcome; `failed()` records `failed`. State names and incoming event names never infer failure. Raw `{ kind: "final" }` remains valid and normalizes to `complete`.
+
+A top-level terminal ends the chart. A direct terminal child completes a compound or map instance; a terminal inside a parallel region marks that region complete. The final machine outcome considers all active terminal leaves, including completed parallel regions: if any active leaf is failed, the run fails.
+
+`notify.prompt` is appended to the host's standard terminal message. `notify.artifacts` accepts only declared `artifactOf()`/`joinArtifactOf()` references and surfaces authoritative absolute paths; contents are not inlined. `notify.scope` selects the existing action/map scope used to resolve `input()`, `key()`, and `item()` references and defaults to the terminal path. It does not add inputs to final-state projection. Result and artifact reads must dominate the reached terminal, exactly like action reads.
 
 ## `refs()`
 
@@ -649,7 +667,7 @@ const definition = chart({
       transitions: { DONE: "done", FAILED: "failed" },
     },
     done: final(),
-    failed: final(),
+    failed: failed(),
   },
 });
 ```
