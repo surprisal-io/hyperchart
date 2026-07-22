@@ -40,6 +40,29 @@ describe("hypercharts host settings", () => {
 		});
 	});
 
+	it("prefers the requested host section over flat keys within one file", async () => {
+		const shared = await makeChartsDir({
+			roles: { reviewer: "flat/model" },
+			toolsets: { reading: ["flat"] },
+			pi: { roles: { reviewer: "pi/model" }, toolsets: { reading: ["read"] } },
+			claude: { roles: { reviewer: "claude/model", extra: "claude/extra" } },
+		});
+
+		expect(loadHostSettings([shared], "pi")).toEqual({
+			modelRoles: { reviewer: "pi/model" },
+			toolsets: { reading: ["read"] },
+		});
+		expect(loadHostSettings([shared], "claude")).toEqual({
+			modelRoles: { reviewer: "claude/model", extra: "claude/extra" },
+			toolsets: { reading: ["flat"] },
+		});
+		expect(loadHostSettings([shared])).toEqual({
+			modelRoles: { reviewer: "flat/model" },
+			toolsets: { reading: ["flat"] },
+		});
+		expect(() => loadHostSettings([shared], "other")).not.toThrow();
+	});
+
 	it("treats missing files and settings without sections as empty", async () => {
 		const empty = await makeChartsDir();
 		const noSections = await makeChartsDir({ other: true });

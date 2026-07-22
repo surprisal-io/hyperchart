@@ -15,9 +15,13 @@ export type ChartInspectStateSummary = {
 	kind: HyperchartInspectState["kind"];
 	initial?: boolean;
 	agent?: string;
+	role?: string;
 	model?: string;
+	resolvedModel?: string;
 	thinking?: string;
+	toolset?: string;
 	tools?: readonly string[];
+	resolvedTools?: readonly string[];
 	agentDefinitionUnavailable?: boolean;
 	description?: string;
 	task?: string;
@@ -63,9 +67,13 @@ function summarizeInspectState(state: HyperchartInspectState): ChartInspectState
 		kind: state.kind,
 		...(state.initial === true ? { initial: true } : {}),
 		...(state.agent === undefined ? {} : { agent: state.agent }),
+		...(state.role === undefined ? {} : { role: state.role }),
 		...(state.model === undefined ? {} : { model: state.model }),
+		...(state.resolvedModel === undefined ? {} : { resolvedModel: state.resolvedModel }),
 		...(state.thinking === undefined ? {} : { thinking: state.thinking }),
+		...(state.toolset === undefined ? {} : { toolset: state.toolset }),
 		...(state.tools === undefined ? {} : { tools: state.tools }),
+		...(state.resolvedTools === undefined ? {} : { resolvedTools: state.resolvedTools }),
 		...(state.agentDefinitionUnavailable === true ? { agentDefinitionUnavailable: true } : {}),
 		...(state.description === undefined ? {} : { description: state.description }),
 		...(state.task === undefined ? {} : { task: truncate(state.task) }),
@@ -97,7 +105,11 @@ export type RunInspectStateSummary = {
 	type?: HyperchartStateInfo["type"];
 	status: HyperchartStateInfo["status"];
 	agent?: string;
+	role?: string;
 	model?: string;
+	resolvedModel?: string;
+	toolset?: string;
+	resolvedTools?: string[];
 	completedEvent?: string;
 	attempts?: number;
 	validationAttempts?: number;
@@ -107,7 +119,11 @@ export type RunInspectStateSummary = {
 	artifacts?: string[];
 	session?: {
 		status: string;
+		role?: string;
 		model?: string;
+		thinking?: string;
+		toolset?: string;
+		tools?: string[];
 		turnCount?: number;
 		toolCount?: number;
 		tokenCount?: number;
@@ -173,7 +189,11 @@ function summarizeRunState(state: HyperchartStateInfo): RunInspectStateSummary {
 		...(state.type === undefined ? {} : { type: state.type }),
 		status: state.status,
 		...(state.agent === undefined ? {} : { agent: state.agent }),
+		...(state.role === undefined ? {} : { role: state.role }),
 		...(state.model === undefined ? {} : { model: state.model }),
+		...(state.resolvedModel === undefined ? {} : { resolvedModel: state.resolvedModel }),
+		...(state.toolset === undefined ? {} : { toolset: state.toolset }),
+		...(state.resolvedTools === undefined ? {} : { resolvedTools: state.resolvedTools }),
 		...(state.completedEvent === undefined ? {} : { completedEvent: state.completedEvent }),
 		...(state.attempts === undefined ? {} : { attempts: state.attempts }),
 		...(state.validationAttempts === undefined ? {} : { validationAttempts: state.validationAttempts }),
@@ -186,7 +206,11 @@ function summarizeRunState(state: HyperchartStateInfo): RunInspectStateSummary {
 			: {
 					session: {
 						status: session.status,
+						...(session.role === undefined ? {} : { role: session.role }),
 						...(session.model === undefined ? {} : { model: session.model }),
+						...(session.thinking === undefined ? {} : { thinking: session.thinking }),
+						...(session.toolset === undefined ? {} : { toolset: session.toolset }),
+						...(session.tools === undefined ? {} : { tools: session.tools }),
 						...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
 						...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
 						...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),

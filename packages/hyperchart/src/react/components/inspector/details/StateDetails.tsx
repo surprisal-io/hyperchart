@@ -191,7 +191,6 @@ export function StateDetails({
 								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
-								{...(onSteerSession === undefined ? {} : { onSteerSession })}
 							/>
 						))}
 					</div>
@@ -291,7 +290,10 @@ export function StateDetails({
 
 			<IssuesSection issues={state.issues} />
 
-			<RuntimeSection state={state} />
+			<RuntimeSection
+				state={state}
+				{...(onSteerSession === undefined ? {} : { onSteerSession })}
+			/>
 
 			{isScriptState && (
 				<Section title="Arguments" icon={CodeBracketSquareIcon} defaultOpen={false}>

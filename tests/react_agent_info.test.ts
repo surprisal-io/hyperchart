@@ -19,6 +19,47 @@ describe("Agent inspector details", () => {
 		expect(markup).toContain("Finds visual callouts against the transcript.");
 	});
 
+	it("renders symbolic role and toolset with their resolved runtime configuration", () => {
+		const state: HyperchartStateInfo = {
+			id: "research",
+			type: "agent",
+			status: "running",
+			agent: "research-scout",
+			role: "worker",
+			model: "openai/fallback",
+			resolvedModel: "deepseek/deepseek-v4-pro",
+			thinking: "xhigh",
+			toolset: "researching",
+			tools: ["read"],
+			resolvedTools: ["read", "web_search", "browser", "finish"],
+		};
+
+		const markup = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
+
+		expect(markup).toContain("role worker");
+		expect(markup).toContain("deepseek/deepseek-v4-pro");
+		expect(markup).toContain("toolset researching");
+		expect(markup).toContain("web_search");
+		expect(markup).toContain("browser");
+		expect(markup).toContain("finish");
+		expect(markup).not.toContain("openai/fallback");
+		expect(markup).not.toContain("all tools allowed");
+	});
+
+	it("labels an unconstrained definition as using host defaults instead of all tools", () => {
+		const state: HyperchartStateInfo = {
+			id: "delegate",
+			type: "agent",
+			status: "pending",
+			agent: "delegate",
+		};
+
+		const markup = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
+
+		expect(markup).toContain("host default tools");
+		expect(markup).not.toContain("all tools allowed");
+	});
+
 	it("warns when the referenced agent definition cannot be loaded", () => {
 		const state: HyperchartStateInfo = {
 			id: "analyze",

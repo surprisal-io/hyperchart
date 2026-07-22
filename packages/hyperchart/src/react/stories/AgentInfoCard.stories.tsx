@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { fn } from "storybook/test";
 import { AgentInfoCard } from "../components/inspector/details/AgentInfoCard.js";
 import type { HyperchartStateInfo } from "../types.js";
 
@@ -9,18 +8,16 @@ const state: HyperchartStateInfo = {
 	status: "running",
 	agent: "report-engine-research-scout",
 	agentDescription: "Fast structured web research worker for Report Engine Hypercharts. Handles initial-angle scans, evidence collection, and source synthesis.",
-	model: "openai-codex/gpt-5.6-luna",
+	role: "worker",
+	model: "openai-codex/gpt-5.6-sol",
+	resolvedModel: "deepseek/deepseek-v4-pro",
 	thinking: "xhigh",
-	tools: ["read", "write"],
+	toolset: "researching",
+	tools: ["read"],
+	resolvedTools: ["read", "write", "web_search", "web_search_brave", "browser", "finish"],
 	reads: ["research.assemble-evidence", "plan.narrative-strategy"],
 	artifacts: [{ name: "research-brief" }],
 	replySchema: { schema: { type: "object" } },
-	session: {
-		actionKey: "report-engine:research-planner:agent",
-		status: "running",
-		turnCount: 3,
-		toolCount: 5,
-	},
 };
 
 const meta = {
@@ -30,14 +27,13 @@ const meta = {
 		layout: "centered",
 		docs: {
 			description: {
-				component: "Agent metadata card with a stable, non-overlapping live-session action.",
+				component: "Static agent metadata card. Run-specific session controls live in the inspector Runtime section.",
 			},
 		},
 	},
 	args: {
 		state,
 		allStates: [state],
-		onSteerSession: fn(),
 	},
 	decorators: [
 		(Story) => (
@@ -51,4 +47,4 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const LongMetadata: Story = {};
+export const ResolvedRoleAndToolset: Story = {};

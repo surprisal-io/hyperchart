@@ -1,11 +1,8 @@
-import { useState } from "react";
-import { CommandLineIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo } from "../../../types.js";
 import { hasInterpolation } from "../helpers/interpolation.js";
 import { schemaLabel } from "../helpers/schema.js";
 import { PathChip } from "./PathChip.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
-import { AgentSessionDialog } from "./AgentSessionDialog.js";
 
 export function AgentInfoCard({
 	state,
@@ -13,56 +10,57 @@ export function AgentInfoCard({
 	onHighlightInput,
 	onHighlightReply,
 	onHighlightRef,
-	onSteerSession,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
 	onHighlightInput?: (name: string) => void;
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
-	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 }) {
-	const [sessionOpen, setSessionOpen] = useState(false);
+	const effectiveModel = state.resolvedModel ?? state.model;
+	const effectiveTools = state.resolvedTools ?? state.tools;
+	const modelTitle = state.role === undefined
+		? effectiveModel
+		: effectiveModel === undefined
+			? `Role ${state.role} is not resolved`
+			: `Role ${state.role} resolves to ${effectiveModel}`;
 	return (
 		<div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2">
-			<div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
-				<div className="flex min-w-0 flex-wrap items-center gap-1.5">
-					<span
-						className="max-w-full truncate rounded border border-blue-500/35 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-blue-text)]"
-						title={`@${state.agent}`}
-					>
-						@{state.agent}
+			<div className="flex min-w-0 flex-wrap items-center gap-1.5">
+				<span
+					className="max-w-full truncate rounded border border-blue-500/35 bg-blue-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-blue-text)]"
+					title={`@${state.agent}`}
+				>
+					@{state.agent}
+				</span>
+				{state.role && (
+					<span className="rounded border border-violet-500/30 bg-violet-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-purple-text)]">
+						role {state.role}
 					</span>
-					{state.model && (
-						<span className="max-w-full truncate rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]" title={state.model}>
-							{state.model}
-						</span>
-					)}
-					{state.thinking && (
-						<span className="rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
-							think {state.thinking}
-						</span>
-					)}
-					{state.artifacts?.length ? (
-						<span className="rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-purple-text)]">
-							{state.artifacts.length} artifacts
-						</span>
-					) : null}
-					{state.replySchema && (
-						<span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-green-text)]">
-							reply {schemaLabel(state.replySchema)}
-						</span>
-					)}
-				</div>
-				{state.session && (
-					<button
-						type="button"
-						onClick={() => setSessionOpen(true)}
-						className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-cyan-text)] hover:bg-cyan-500/15"
-					>
-						<span className={`h-1.5 w-1.5 rounded-full ${state.session.status === "running" || state.session.status === "starting" ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
-						<CommandLineIcon className="h-3 w-3" aria-hidden="true" /> View session
-					</button>
+				)}
+				{effectiveModel !== undefined ? (
+					<span className="max-w-full truncate rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]" title={modelTitle}>
+						{effectiveModel}
+					</span>
+				) : state.role !== undefined ? (
+					<span className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-amber-text)]">
+						model unresolved
+					</span>
+				) : null}
+				{state.thinking && (
+					<span className="rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
+						think {state.thinking}
+					</span>
+				)}
+				{state.artifacts?.length ? (
+					<span className="rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-purple-text)]">
+						{state.artifacts.length} artifacts
+					</span>
+				) : null}
+				{state.replySchema && (
+					<span className="rounded border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-green-text)]">
+						reply {schemaLabel(state.replySchema)}
+					</span>
 				)}
 			</div>
 			{state.agentDescription ? (
@@ -78,18 +76,29 @@ export function AgentInfoCard({
 				</div>
 			) : null}
 			<div className="mt-2">
-				<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">tools</div>
+				<div className="mb-1 flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+					<span>tools</span>
+					{state.toolset !== undefined && (
+						<span className="rounded border border-violet-500/25 bg-violet-500/10 px-1 py-0.5 font-mono normal-case tracking-normal text-[var(--hc-purple-text)]">
+							toolset {state.toolset}
+						</span>
+					)}
+				</div>
 				<div className="flex flex-wrap gap-1">
 					{state.agentDefinitionUnavailable === true ? (
 						<span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-amber-text)]">
 							unavailable
 						</span>
-					) : state.tools === undefined ? (
-						<span className="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-green-text)]">
-							all tools allowed
+					) : effectiveTools === undefined && state.toolset !== undefined ? (
+						<span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-amber-text)]">
+							toolset unresolved
 						</span>
-					) : state.tools.length > 0 ? (
-						state.tools.map((tool) => (
+					) : effectiveTools === undefined ? (
+						<span className="rounded border border-[var(--border-secondary)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">
+							host default tools
+						</span>
+					) : effectiveTools.length > 0 ? (
+						effectiveTools.map((tool) => (
 							<span
 								key={tool}
 								className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-tertiary)]"
@@ -126,16 +135,6 @@ export function AgentInfoCard({
 					</div>
 				</div>
 			) : null}
-			{sessionOpen && state.session && (
-				<AgentSessionDialog
-					agentName={state.agent ?? state.id}
-					session={state.session}
-					onClose={() => setSessionOpen(false)}
-					{...(onSteerSession === undefined
-						? {}
-						: { onSteer: (message: string) => onSteerSession(state.session!.actionKey, message) })}
-				/>
-			)}
 		</div>
 	);
 }

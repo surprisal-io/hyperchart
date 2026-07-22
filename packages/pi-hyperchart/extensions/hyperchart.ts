@@ -44,6 +44,7 @@ import {
 import {
 	getHyperchartRunsRoot,
 	getProjectHyperchartsDir,
+	getSharedHyperchartsDir,
 	listHyperchartFiles,
 	listProjectHypercharts,
 	resolveHyperchartPath,
@@ -68,7 +69,7 @@ import {
 	type RunHistoryItem,
 } from "../src/tui/components.js";
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
-import { summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
+import { hyperchartRunFromInspectResult, summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
 import { closeRunInspectorServer, openRunInspector } from "@surprisal/hyperchart/inspect";
 
@@ -318,9 +319,10 @@ function registerBundleExtensions(pi: ExtensionAPI, cwd: string): void {
 
 function discoverBundleDirs(cwd: string): string[] {
 	const projectRoot = getProjectHyperchartsDir(cwd);
+	const sharedRoot = getSharedHyperchartsDir(cwd);
 	const userRoot = resolve(getAgentDir(), "hypercharts");
 	const byName = new Map<string, string>();
-	for (const root of [userRoot, projectRoot]) {
+	for (const root of [userRoot, ...(sharedRoot === undefined ? [] : [sharedRoot]), projectRoot]) {
 		if (!existsSync(root)) continue;
 		for (const entry of readdirSync(root, { withFileTypes: true })) {
 			if (entry.name.startsWith(".") || entry.name === "runs" || entry.name === "node_modules") continue;
@@ -347,13 +349,14 @@ function bundleExtensionEntries(extensionsDir: string): string[] {
 const hyperchartTool = defineTool({
 	name: "hyperchart",
 	label: "Hyperchart",
-	description: "List, inspect, run, inspect runs, and rewind durable Hyperchart workflows.",
+	description: "List, inspect, run, inspect or view runs, stop, and rewind durable Hyperchart workflows.",
 	parameters: Type.Object({
 		action: Type.Union([
 			Type.Literal("list"),
 			Type.Literal("inspect"),
 			Type.Literal("run"),
 			Type.Literal("run_inspect"),
+			Type.Literal("view"),
 			Type.Literal("rewind"),
 			Type.Literal("stop"),
 		]),
@@ -362,6 +365,7 @@ const hyperchartTool = defineTool({
 		runDir: Type.Optional(Type.String()),
 		exportName: Type.Optional(Type.String()),
 		wait: Type.Optional(Type.Boolean()),
+		open: Type.Optional(Type.Boolean()),
 		ignoreReplayWarnings: Type.Optional(Type.Boolean()),
 		state: Type.Optional(Type.String()),
 		seqId: Type.Optional(Type.Number()),
@@ -387,6 +391,18 @@ const hyperchartTool = defineTool({
 			if (params.runDir === undefined) throw new Error("hyperchart action=run_inspect requires runDir");
 			return hyperchartRunInspectTool.execute(toolCallId, { runDir: params.runDir, verbose: params.verbose }, signal, onUpdate, ctx);
 		}
+		if (params.action === "view") {
+			if ((params.runDir === undefined) === (params.chartPath === undefined)) {
+				throw new Error("hyperchart action=view requires exactly one of runDir or chartPath");
+			}
+			return hyperchartViewTool.execute(
+				toolCallId,
+				{ runDir: params.runDir, chartPath: params.chartPath, open: params.open },
+				signal,
+				onUpdate,
+				ctx,
+			);
+		}
 		if (params.action === "stop") return stopHyperchartRuns(params, ctx);
 		if (params.runDir === undefined) throw new Error("hyperchart action=rewind requires runDir");
 		return hyperchartRewindTool.execute(toolCallId, params, signal, onUpdate, ctx);
@@ -395,10 +411,12 @@ const hyperchartTool = defineTool({
 
 function listHypercharts(cwd: string) {
 	const projectRoot = getProjectHyperchartsDir(cwd);
+	const sharedRoot = getSharedHyperchartsDir(cwd);
 	const userRoot = resolve(getAgentDir(), "hypercharts");
-	const byName = new Map<string, { name: string; scope: "user" | "project"; path: string }>();
+	const byName = new Map<string, { name: string; scope: "user" | "shared" | "project"; path: string }>();
 	for (const [scope, root, files] of [
 		["user", userRoot, listHyperchartFiles(userRoot)],
+		...(sharedRoot === undefined ? [] : ([["shared", sharedRoot, listHyperchartFiles(sharedRoot)]] as const)),
 		["project", projectRoot, listProjectHypercharts(cwd).map((file) => resolve(projectRoot, file))],
 	] as const) {
 		for (const path of files) {
@@ -486,7 +504,12 @@ const hyperchartInspectTool = defineTool({
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
-		const agentDefaults = createAgentDefaultsResolver(ctx.cwd, getAgentDir(), chartPath);
+		const agentDefaults = createAgentDefaultsResolver(
+		ctx.cwd,
+		getAgentDir(),
+		chartPath,
+		ctx.model === undefined ? {} : { defaultModel: `${ctx.model.provider}/${ctx.model.id}` },
+	);
 		const result = inspectChartModuleSync(
 			chartPath,
 			{
@@ -528,6 +551,54 @@ const hyperchartRunInspectTool = defineTool({
 				},
 			],
 			details: payload,
+		};
+	},
+});
+
+const hyperchartViewTool = defineTool({
+	name: "hyperchart_view",
+	label: "View Hyperchart Run",
+	description:
+		"Open the localhost browser inspector and return its URL. Pass runDir for a run, or chartPath for a static view of a chart definition (reloads the chart on refresh).",
+	parameters: Type.Object({
+		runDir: Type.Optional(Type.String({ description: "Run id or run directory to view" })),
+		chartPath: Type.Optional(Type.String({ description: "Chart name or path to view statically (no run required)" })),
+		open: Type.Optional(Type.Boolean({ description: "Set false to return the URL without opening a browser" })),
+	}),
+	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		if ((params.runDir === undefined) === (params.chartPath === undefined)) {
+			throw new Error("hyperchart_view requires exactly one of runDir or chartPath");
+		}
+		if (params.chartPath !== undefined) {
+			const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
+			const agentDefaults = createAgentDefaultsResolver(ctx.cwd, getAgentDir(), chartPath);
+			const loadChart = () =>
+				hyperchartRunFromInspectResult(inspectChartModuleSync(chartPath, { agentDefaults }), { cwd: ctx.cwd });
+			const chartId = loadChart().chartName;
+			const { url } = await openRunInspector({
+				runId: `chart:${chartId}`,
+				loadRun: async () => loadChart(),
+				...(params.open === false ? { openBrowser: () => undefined } : {}),
+			});
+			return {
+				content: [{ type: "text", text: `Opened Hyperchart inspector for chart ${chartId}: ${url}` }],
+				details: { chartId, chartPath, url },
+			};
+		}
+		if (params.runDir === undefined) throw new Error("hyperchart_view requires runDir when chartPath is omitted");
+		const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
+		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx);
+		const { url } = await openRunInspector({
+			runId: inspector.runId,
+			loadRun: () => inspectRunForCurrentWorkDir(runDir, ctx),
+			steerSession: (actionKey, message) => {
+				queueSessionSteering(join(runDir, "sessions"), actionKey, message);
+			},
+			...(params.open === false ? { openBrowser: () => undefined } : {}),
+		});
+		return {
+			content: [{ type: "text", text: `Opened Hyperchart inspector for ${inspector.runId}: ${url}` }],
+			details: { runId: inspector.runId, runDir, url },
 		};
 	},
 });
@@ -806,10 +877,15 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		error: undefined,
 		exitCode: undefined,
 	});
-	const { modelRoles, toolsets } = loadHostSettings([
-		resolve(getAgentDir(), "hypercharts"),
-		getProjectHyperchartsDir(workDir),
-	]);
+	const sharedChartsDir = getSharedHyperchartsDir(workDir);
+	const { modelRoles, toolsets } = loadHostSettings(
+		[
+			resolve(getAgentDir(), "hypercharts"),
+			...(sharedChartsDir === undefined ? [] : [sharedChartsDir]),
+			getProjectHyperchartsDir(workDir),
+		],
+		"pi",
+	);
 	const config: HyperchartRunnerConfig = {
 		runId,
 		runDir: actualRunDir,

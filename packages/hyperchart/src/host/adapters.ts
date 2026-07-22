@@ -127,8 +127,11 @@ export type HyperchartRuntimeSessionProgressInfo = {
 	lastActivityAt?: number;
 	completedAt?: number;
 	sessionFile?: string;
+	role?: string;
 	model?: string;
 	thinking?: string;
+	toolset?: string;
+	tools?: string[];
 	turnCount?: number;
 	toolCount?: number;
 	tokenCount?: number;
@@ -213,9 +216,13 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 		...(state.kind === "final" ? { final: true } : {}),
 		...(state.agent === undefined ? {} : { agent: state.agent }),
 		...(state.description === undefined ? {} : { agentDescription: state.description }),
+		...(state.role === undefined ? {} : { role: state.role }),
 		...(state.model === undefined ? {} : { model: state.model }),
+		...(state.resolvedModel === undefined ? {} : { resolvedModel: state.resolvedModel }),
 		...(state.thinking === undefined ? {} : { thinking: state.thinking }),
+		...(state.toolset === undefined ? {} : { toolset: state.toolset }),
 		...(state.tools === undefined ? {} : { tools: [...state.tools] }),
+		...(state.resolvedTools === undefined ? {} : { resolvedTools: [...state.resolvedTools] }),
 		...(state.agentDefinitionUnavailable === true ? { agentDefinitionUnavailable: true } : {}),
 		...(state.task === undefined ? {} : { taskPreview: previewText(state.task), taskPrompt: state.task }),
 		...(state.command === undefined ? {} : { commandPreview: state.command }),
@@ -892,8 +899,11 @@ function appendSessionFacts(
 			status: session.status ?? "unknown",
 			...(session.startedAt === undefined ? {} : { startedAt: session.startedAt }),
 			...(session.lastActivityAt === undefined ? {} : { lastActivityAt: session.lastActivityAt }),
+			...(session.role === undefined ? {} : { role: session.role }),
 			...(session.model === undefined ? {} : { model: session.model }),
 			...(session.thinking === undefined ? {} : { thinking: session.thinking }),
+			...(session.toolset === undefined ? {} : { toolset: session.toolset }),
+			...(session.tools === undefined ? {} : { tools: [...session.tools] }),
 			...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
 			...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
 			...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),
@@ -935,7 +945,10 @@ function compactSessionPayload(session: HyperchartRuntimeSessionProgressInfo): R
 		status: session.status,
 		...(session.actionName === undefined ? {} : { actionName: session.actionName }),
 		...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
+		...(session.role === undefined ? {} : { role: session.role }),
 		...(session.model === undefined ? {} : { model: session.model }),
+		...(session.toolset === undefined ? {} : { toolset: session.toolset }),
+		...(session.tools === undefined ? {} : { tools: session.tools }),
 		...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
 		...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
 		...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),

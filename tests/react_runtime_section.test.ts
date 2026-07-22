@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
+import { AgentInfoCard } from "../packages/hyperchart/src/react/components/inspector/details/AgentInfoCard.js";
 import { MapResolvedInputList } from "../packages/hyperchart/src/react/components/inspector/details/MapResolvedInputList.js";
 import { MapVisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/MapVisitHistory.js";
 import { RuntimeSection } from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
@@ -34,6 +35,41 @@ describe("Runtime inspector section", () => {
 		expect(markup).toContain('aria-expanded="false"');
 		expect(markup).not.toContain("Visit history");
 		expect(markup).not.toContain("Resolved runtime task");
+	});
+
+	it("owns the run-specific live session instead of the static agent card", () => {
+		const state: HyperchartStateInfo = {
+			...runtimeState,
+			agent: "worker",
+			session: {
+				actionKey: "chart:work:agent",
+				status: "running",
+				role: "worker",
+				model: "provider/model",
+				thinking: "xhigh",
+				toolset: "researching",
+				tools: ["read", "browser", "finish"],
+				turnCount: 3,
+				toolCount: 5,
+			},
+		};
+		const runtimeMarkup = renderToStaticMarkup(createElement(RuntimeSection, { state }));
+		expect(runtimeMarkup).toContain('aria-expanded="true"');
+		expect(runtimeMarkup).toContain("Agent session");
+		expect(runtimeMarkup).toContain("View session");
+		expect(runtimeMarkup).toContain("role worker");
+		expect(runtimeMarkup).toContain("provider/model");
+		expect(runtimeMarkup).toContain("think xhigh");
+		expect(runtimeMarkup).toContain("toolset researching");
+		expect(runtimeMarkup).toContain("3 enabled tools");
+		expect(runtimeMarkup).toContain("3 turns");
+		expect(runtimeMarkup).toContain("5 tools");
+
+		const agentMarkup = renderToStaticMarkup(
+			createElement(AgentInfoCard, { state, allStates: [state] }),
+		);
+		expect(agentMarkup).toContain("@worker");
+		expect(agentMarkup).not.toContain("View session");
 	});
 
 	it("includes materialized map agents in the selected map scope", () => {

@@ -262,9 +262,17 @@ describe("ClaudeAgentExecutor", () => {
 		await executor.dispose();
 	});
 
-	it("recovers a captured finish from the transcript without a new session", async () => {
+	it("recovers a captured finish and its launch plan from the transcript without a new session", async () => {
 		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
+		writeFileSync(
+			join(agentsDir, "worker.md"),
+			"---\nname: worker\nrole: worker\nmodel: claude-fallback\nthinking: medium\ntoolset: reading\ntools: Bash\n---\nDo the assigned work.\n",
+		);
 		const target = effect();
+		const resolution = {
+			modelRoles: { worker: "claude-configured" },
+			toolsets: { reading: ["Read"] },
+		};
 		const fakeFirst = fakeQuery([
 			async (_prompt, finish) => {
 				await finish({ event: "DONE" });
@@ -281,9 +289,18 @@ describe("ClaudeAgentExecutor", () => {
 			sessionsDir,
 			definitionDirs: [agentsDir],
 			queryFn: fakeFirst.queryFn,
+			...resolution,
 		});
 		await startAndAwait(first, target);
 		await first.dispose();
+		const firstProgress = Object.values(readSessionProgress(sessionsDir).sessions)[0];
+		expect(firstProgress).toMatchObject({
+			role: "worker",
+			model: "claude-test-model",
+			thinking: "medium",
+			toolset: "reading",
+			tools: ["Read", "finish"],
+		});
 
 		// A restarted process must accept the already-captured finish without prompting again.
 		const fakeSecond = fakeQuery([]);
@@ -292,10 +309,19 @@ describe("ClaudeAgentExecutor", () => {
 			sessionsDir,
 			definitionDirs: [agentsDir],
 			queryFn: fakeSecond.queryFn,
+			...resolution,
 		});
 		const event = await startAndAwait(second, target);
 		expect(event).toEqual({ type: "DONE" });
 		expect(fakeSecond.prompts).toHaveLength(0);
+		const recoveredProgress = Object.values(readSessionProgress(sessionsDir).sessions)[0];
+		expect(recoveredProgress).toMatchObject({
+			role: "worker",
+			model: "claude-test-model",
+			thinking: "medium",
+			toolset: "reading",
+			tools: ["Read", "finish"],
+		});
 		await second.dispose();
 	});
 });

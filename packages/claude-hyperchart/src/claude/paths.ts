@@ -22,11 +22,14 @@ export function claudeUserChartsDir(): string {
 	return join(claudeConfigDir(), HYPERCHARTS_DIR_NAME);
 }
 
+export const SHARED_HYPERCHARTS_DIR_NAME = ".hypercharts";
+
 export function claudeHostPaths(): HostPaths {
 	return createHostPaths({
 		configDirName: CLAUDE_CONFIG_DIR_NAME,
 		runsRoot: claudeRunsRoot(),
 		userChartsDir: claudeUserChartsDir(),
+		sharedChartsDirName: SHARED_HYPERCHARTS_DIR_NAME,
 		projectMarkers: [".agents"],
 	});
 }

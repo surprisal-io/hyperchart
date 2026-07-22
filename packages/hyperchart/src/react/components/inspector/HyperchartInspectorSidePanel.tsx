@@ -75,6 +75,7 @@ export function HyperchartInspectorSidePanel({
 						</button>
 					)}
 					<StateDetails
+						key={`${run.runId}:${selectedState.id}`}
 						state={selectedState}
 						allStates={run.states}
 						{...(effectiveDefinitionSource === undefined ? {} : { definitionSource: effectiveDefinitionSource })}

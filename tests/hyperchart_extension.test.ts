@@ -391,6 +391,64 @@ describe("hyperchart extension", () => {
 		expect(notifications).toContainEqual({ message: `Run ${runId}: ${runDir}`, type: "info" });
 	});
 
+	it("opens the browser inspector through the consolidated agent tool", async () => {
+		const runId = "tool-view-run";
+		const runDir = createRun(runId, projectDir, writeChart("tool-view"));
+		const tool = registeredTool("hyperchart");
+		const { ctx } = commandContext(projectDir);
+
+		const result = await tool.execute(
+			"tool-call",
+			{ action: "view", runDir: runId, open: false },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
+		const details = result.details as { runId: string; runDir: string; url: string };
+
+		expect(details).toMatchObject({ runId, runDir });
+		const inspectorUrl = new URL(details.url);
+		expect(inspectorUrl.protocol).toBe("http:");
+		expect(inspectorUrl.pathname).toMatch(/^\/runs\/[A-Za-z0-9_-]+$/);
+		const response = await fetch(inspectorUrl);
+		expect(response.status).toBe(200);
+		expect(await response.text()).toContain("<title>Hyperchart Inspector</title>");
+
+		const token = inspectorUrl.pathname.slice("/runs/".length);
+		const runResponse = await fetch(new URL(`/api/runs/${token}`, inspectorUrl));
+		expect(runResponse.status).toBe(200);
+		expect((await runResponse.json()) as { run: { runId: string } }).toMatchObject({ run: { runId } });
+
+		const steerResponse = await fetch(new URL(`/api/runs/${token}/steer`, inspectorUrl), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ actionKey: "work::agent", message: "Focus on primary sources" }),
+		});
+		expect(steerResponse.status).toBe(202);
+		const steeringFiles = readdirSync(join(runDir, "sessions", "steering"));
+		expect(steeringFiles).toHaveLength(1);
+		expect(JSON.parse(readFileSync(join(runDir, "sessions", "steering", steeringFiles[0]!), "utf8"))).toMatchObject({
+			actionKey: "work::agent",
+			message: "Focus on primary sources",
+		});
+	});
+
+	it("rejects a foreign-workdir run through the view agent action", async () => {
+		const runDir = createRun("foreign-tool-view", otherProjectDir, writeChart("foreign-tool-view"));
+		const tool = registeredTool("hyperchart");
+		const { ctx } = commandContext(projectDir);
+
+		await expect(
+			tool.execute(
+				"tool-call",
+				{ action: "view", runDir, open: false },
+				new AbortController().signal,
+				() => undefined,
+				ctx,
+			),
+		).rejects.toThrow("belongs to another working directory or is missing metadata");
+	});
+
 	it("returns a runtime-enriched inspector model for concrete run dirs", async () => {
 		const runId = "runtime-inspect-run";
 		const runDir = createRun(runId, projectDir, writeChart("runtime-inspect"));

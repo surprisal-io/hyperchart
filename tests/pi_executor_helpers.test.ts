@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
 import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
 import type { AgentActionAst, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
-import { loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
+import { createAgentDefaultsResolver, loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
 import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
 import {
@@ -84,6 +84,42 @@ describe("agent definitions", () => {
 			toolset: "reading",
 			model: "anthropic/claude",
 			tools: ["read", "grep"],
+		});
+	});
+
+	it("resolves symbolic role and toolset for static Pi inspection", async () => {
+		const project = await makeTempDir();
+		const agentDir = await makeTempDir();
+		const chartDir = join(project, ".pi", "hypercharts", "review");
+		await mkdir(join(chartDir, "agents"), { recursive: true });
+		await writeFile(
+			join(chartDir, "agents", "critic.md"),
+			"---\nrole: reviewer\ntoolset: reading\nmodel: anthropic/fallback\ntools: bash\n---\nCritic prompt\n",
+			"utf8",
+		);
+		await mkdir(join(project, ".hypercharts"), { recursive: true });
+		await writeFile(
+			join(project, ".hypercharts", "settings.json"),
+			JSON.stringify({
+				roles: { reviewer: "shared/fallback" },
+				toolsets: { reading: ["read"] },
+				pi: {
+					roles: { reviewer: "anthropic/claude-opus" },
+					toolsets: { reading: ["read", "grep"] },
+				},
+			}),
+			"utf8",
+		);
+
+		const defaults = createAgentDefaultsResolver(project, agentDir, join(chartDir, "chart.ts"))("critic");
+
+		expect(defaults).toMatchObject({
+			role: "reviewer",
+			model: "anthropic/fallback",
+			resolvedModel: "anthropic/claude-opus",
+			toolset: "reading",
+			tools: ["bash"],
+			resolvedTools: ["read", "grep", "finish"],
 		});
 	});
 

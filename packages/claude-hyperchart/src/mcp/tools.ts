@@ -13,7 +13,7 @@ import {
 	type HyperchartRunnerConfig,
 	type RunMeta,
 } from "@surprisal/hyperchart/runtime";
-import { summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
+import { hyperchartRunFromInspectResult, summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromRunDir } from "@surprisal/hyperchart/inspect";
 import { openRunInspector } from "@surprisal/hyperchart/inspect";
 import {
@@ -70,12 +70,14 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const cwd = cwdOf(args);
 				const paths = claudeHostPaths();
 				const projectChartsDir = paths.getProjectHyperchartsDir(cwd);
+				const sharedChartsDir = paths.getSharedHyperchartsDir(cwd);
 				const userChartsDir = claudeUserChartsDir();
-				// User scope first so a project chart with the same name wins, matching
-				// resolveChartPath's candidate order.
-				const chartsByName = new Map<string, { name: string; scope: "user" | "project"; chartPath: string }>();
+				// Weakest scope first so a stronger chart with the same name wins,
+				// matching resolveChartPath's candidate order.
+				const chartsByName = new Map<string, { name: string; scope: "user" | "shared" | "project"; chartPath: string }>();
 				for (const [scope, root] of [
 					["user", userChartsDir],
+					...(sharedChartsDir === undefined ? [] : ([["shared", sharedChartsDir]] as const)),
 					["project", projectChartsDir],
 				] as const) {
 					for (const chartPath of listHyperchartFiles(root)) {
@@ -187,10 +189,16 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					error: undefined,
 					exitCode: undefined,
 				});
-				const { modelRoles, toolsets } = loadHostSettings([
-					claudeUserChartsDir(),
-					claudeHostPaths().getProjectHyperchartsDir(workDir),
-				]);
+				const hostPaths = claudeHostPaths();
+				const sharedChartsDir = hostPaths.getSharedHyperchartsDir(workDir);
+				const { modelRoles, toolsets } = loadHostSettings(
+					[
+						claudeUserChartsDir(),
+						...(sharedChartsDir === undefined ? [] : [sharedChartsDir]),
+						hostPaths.getProjectHyperchartsDir(workDir),
+					],
+					"claude",
+				);
 				const config: HyperchartRunnerConfig = {
 					runId,
 					runDir,
@@ -313,14 +321,42 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		},
 		{
 			name: "hyperchart_view",
-			description: "Open the localhost browser inspector for a run and return its URL.",
+			description:
+				"Open the localhost browser inspector and return its URL. Pass runDir for a live/finished run, or chartPath for a static view of a chart definition (reloads the chart on refresh).",
 			inputSchema: {
-				runDir: z.string(),
+				runDir: z.string().optional(),
+				chartPath: z.string().optional().describe("Chart name or path to view statically (no run required)"),
 				open: z.boolean().optional().describe("Set false to return the URL without opening a browser"),
 				...cwdField,
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
+				if ((typeof args.runDir === "string") === (typeof args.chartPath === "string")) {
+					return fail("hyperchart_view requires exactly one of runDir or chartPath");
+				}
+				const openBrowser =
+					args.open === false
+						? { openBrowser: () => undefined }
+						: deps.openBrowser === undefined
+							? {}
+							: { openBrowser: deps.openBrowser };
+				if (typeof args.chartPath === "string") {
+					const chartPath = claudeHostPaths().resolveChartPath(args.chartPath, cwd);
+					await assertChartPreflight(chartPath);
+					const agentDefaults = createClaudeAgentDefaultsResolver(cwd, chartPath);
+					const loadChart = () => {
+						const parsed = parseChartModuleSync(chartPath);
+						if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+						return hyperchartRunFromInspectResult(inspectChartAst(parsed.ast, { chartPath, agentDefaults }), { cwd });
+					};
+					const chartId = loadChart().chartName;
+					const { url } = await openRunInspector({
+						runId: `chart:${chartId}`,
+						loadRun: async () => loadChart(),
+						...openBrowser,
+					});
+					return ok({ url, chartId, chartPath });
+				}
 				const runDir = resolveRunDirArg(args.runDir as string, cwd);
 				const meta = loadRunMeta(runDir);
 				const sessionsDir = resolve(runDir, "sessions");
@@ -331,11 +367,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					steerSession: (actionKey, message) => {
 						queueSessionSteering(sessionsDir, actionKey, message);
 					},
-					...(args.open === false
-						? { openBrowser: () => undefined }
-						: deps.openBrowser === undefined
-							? {}
-							: { openBrowser: deps.openBrowser }),
+					...openBrowser,
 				});
 				return ok({ url });
 			},

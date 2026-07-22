@@ -196,8 +196,11 @@ export interface HyperchartAgentSessionInfo {
 	status: string;
 	startedAt?: number;
 	lastActivityAt?: number;
+	role?: string;
 	model?: string;
 	thinking?: string;
+	toolset?: string;
+	tools?: string[];
 	turnCount?: number;
 	toolCount?: number;
 	tokenCount?: number;
@@ -220,8 +223,12 @@ export interface HyperchartStateInfo {
 	status: HyperchartStateStatus;
 	startedAt?: number;
 	endedAt?: number;
+	role?: string;
 	model?: string;
+	resolvedModel?: string;
 	thinking?: string;
+	toolset?: string;
+	resolvedTools?: string[];
 	agentDefinitionUnavailable?: boolean;
 	usage?: HyperchartUsageInfo;
 	reads?: string[];

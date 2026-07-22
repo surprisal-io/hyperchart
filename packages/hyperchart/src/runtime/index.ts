@@ -55,9 +55,10 @@ export {
 	listAgentFiles,
 	loadAgentDefinition,
 	parseAgentFile,
+	resolveAgentDefaults,
 	uniqueExistingDirs,
 } from "./generic/agent_definitions.js";
-export type { AgentDefinition, ThinkingLevel } from "./generic/agent_definitions.js";
+export type { AgentDefinition, AgentDefinitionResolution, ThinkingLevel } from "./generic/agent_definitions.js";
 export { parseSimpleFrontmatter } from "./generic/frontmatter.js";
 export type { FrontmatterParser, ParsedFrontmatter } from "./generic/frontmatter.js";
 export {

@@ -16,8 +16,11 @@ export type HyperchartSessionProgress = {
 	lastActivityAt: number;
 	completedAt?: number;
 	sessionFile?: string;
+	role?: string;
 	model?: string;
 	thinking?: string;
+	toolset?: string;
+	tools?: string[];
 	turnCount: number;
 	toolCount: number;
 	tokenCount?: number;
@@ -68,8 +71,11 @@ export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID,
 	const previous = file.sessions[actionKey];
 	const completedAt = valueFor("completedAt", patch, previous);
 	const sessionFile = valueFor("sessionFile", patch, previous);
+	const role = valueFor("role", patch, previous);
 	const model = valueFor("model", patch, previous);
 	const thinking = valueFor("thinking", patch, previous);
+	const toolset = valueFor("toolset", patch, previous);
+	const tools = valueFor("tools", patch, previous);
 	const tokenCount = valueFor("tokenCount", patch, previous);
 	const currentTool = valueFor("currentTool", patch, previous);
 	const currentToolArgs = valueFor("currentToolArgs", patch, previous);
@@ -90,8 +96,11 @@ export function updateSessionProgress(sessionsDir: string, actionUid: ActionUID,
 		...(tokenCount === undefined ? {} : { tokenCount }),
 		...(completedAt === undefined ? {} : { completedAt }),
 		...(sessionFile === undefined ? {} : { sessionFile }),
+		...(role === undefined ? {} : { role }),
 		...(model === undefined ? {} : { model }),
 		...(thinking === undefined ? {} : { thinking }),
+		...(toolset === undefined ? {} : { toolset }),
+		...(tools === undefined ? {} : { tools }),
 		...(currentTool === undefined ? {} : { currentTool }),
 		...(currentToolArgs === undefined ? {} : { currentToolArgs }),
 		...(currentToolStartedAt === undefined ? {} : { currentToolStartedAt }),
@@ -125,8 +134,11 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 			lastActivityAt: typeof entry.lastActivityAt === "number" ? entry.lastActivityAt : 0,
 			...(typeof entry.completedAt === "number" ? { completedAt: entry.completedAt } : {}),
 			...(typeof entry.sessionFile === "string" ? { sessionFile: entry.sessionFile } : {}),
+			...(typeof entry.role === "string" ? { role: entry.role } : {}),
 			...(typeof entry.model === "string" ? { model: entry.model } : {}),
 			...(typeof entry.thinking === "string" ? { thinking: entry.thinking } : {}),
+			...(typeof entry.toolset === "string" ? { toolset: entry.toolset } : {}),
+			...(isStringArray(entry.tools) ? { tools: entry.tools } : {}),
 			turnCount: typeof entry.turnCount === "number" ? entry.turnCount : 0,
 			toolCount: typeof entry.toolCount === "number" ? entry.toolCount : 0,
 			...(typeof entry.tokenCount === "number" ? { tokenCount: entry.tokenCount } : {}),
@@ -140,6 +152,10 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 		};
 	}
 	return out;
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function parseStatus(value: unknown): HyperchartSessionStatus | undefined {
