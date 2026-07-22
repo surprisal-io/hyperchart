@@ -75,6 +75,8 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	backupIfExists(logPath, backupDir, "log.jsonl");
 	backupIfExists(resolve(opts.runDir, "status.json"), backupDir, "status.json");
 	backupIfExists(sessionProgressPath(resolve(opts.runDir, "sessions")), backupDir, "sessions-progress.json");
+	const terminalNotificationsDir = resolve(opts.runDir, "terminal-notification");
+	if (existsSync(terminalNotificationsDir)) renameSync(terminalNotificationsDir, resolve(backupDir, "terminal-notification"));
 
 	const artifactCleanup = opts.cleanupArtifacts
 		? cleanupDownstreamArtifacts({ ast: parsed.ast, records, cutIndex, workDir: meta.workDir, backupDir })

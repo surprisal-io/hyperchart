@@ -10,12 +10,30 @@ export { JsonlLogStore, MemoryLogStore } from "./generic/log_store.js";
 export type { LogStore } from "./generic/log_store.js";
 export { createRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
 export type { RunMeta } from "./generic/run_dir.js";
-export {
-	finalMachineFailureMessage,
-	isFailureStatePath,
-	terminalStateForFinalMachine,
-} from "./generic/run_outcome.js";
+export { finalMachineFailureMessage, isFailureStatePath, terminalStateForFinalMachine } from "./generic/run_outcome.js";
 export type { RunTerminalState } from "./generic/run_outcome.js";
+export {
+	TERMINAL_NOTIFICATION_DIR,
+	TERMINAL_NOTIFICATION_REQUEST,
+	claimTerminalNotificationReceipt,
+	defaultFailedTerminalNotificationPayload,
+	hasTerminalNotificationReceipt,
+	markTerminalNotificationReceipt,
+	persistTerminalNotificationRequest,
+	readDeliverableTerminalNotificationRequest,
+	readTerminalNotificationRequest,
+	recoverStaleRunTerminalNotification,
+	removeTerminalNotificationOutbox,
+	removeTerminalNotificationReceipt,
+	renderTerminalNotificationPayload,
+	terminalNotificationReceiptPath,
+	terminalNotificationRequestPath,
+} from "./generic/terminal_notifications.js";
+export type {
+	TerminalNotificationPayload,
+	TerminalNotificationReceipt,
+	TerminalNotificationRequest,
+} from "./generic/terminal_notifications.js";
 export { SchemaRegistry } from "../core/schema_registry.js";
 export type { SchemaRegistryLike } from "../core/schema_registry.js";
 export { checkSchema, checkSchemaAsync } from "./generic/schema.js";

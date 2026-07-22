@@ -9,6 +9,11 @@ import { ChartRuntime } from "./chart_runtime.js";
 import { JsonlLogStore } from "./log_store.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
+import {
+	defaultFailedTerminalNotificationPayload,
+	persistTerminalNotificationRequest,
+	renderTerminalNotificationPayload,
+} from "./terminal_notifications.js";
 import { watchSessionSteering } from "./session_steering.js";
 import { assertChartPreflight } from "./chart_typecheck.js";
 import type { AgentExecutor } from "./agent_executor.js";
@@ -164,6 +169,16 @@ export async function runHyperchartRunner(
 			const log = await logStore.readAll();
 			const terminalState = terminalStateForFinalMachine(finalState, log);
 			const error = terminalState === "failed" ? finalMachineFailureMessage(finalState, log) : undefined;
+			persistTerminalNotificationRequest(
+				config.runDir,
+				renderTerminalNotificationPayload(finalState, {
+					runId: config.runId,
+					runDir: config.runDir,
+					workDir: config.workDir,
+					outcome: terminalState,
+					...(error === undefined ? {} : { error }),
+				}),
+			);
 			patchRunStatus(config.runDir, {
 				runId: config.runId,
 				chartId: parsed.ast.id,
@@ -177,13 +192,27 @@ export async function runHyperchartRunner(
 		}
 	} catch (error) {
 		if (!stopping) {
+			const message = error instanceof Error ? error.message : String(error);
+			try {
+				persistTerminalNotificationRequest(
+					config.runDir,
+					defaultFailedTerminalNotificationPayload({
+						runId: config.runId,
+						runDir: config.runDir,
+						chartId: config.chartId,
+						error: message,
+					}),
+				);
+			} catch (notificationError) {
+				console.error(notificationError);
+			}
 			patchRunStatus(config.runDir, {
 				runId: config.runId,
 				state: "failed",
 				pid: process.pid,
 				heartbeatAt: Date.now(),
 				exitCode: 1,
-				error: error instanceof Error ? error.message : String(error),
+				error: message,
 			});
 			process.exitCode = 1;
 		}
