@@ -24,6 +24,10 @@ describe("session progress", () => {
 		updateSessionProgress(dir, actionUid, {
 			actionName: "reviewer",
 			status: "running",
+			role: "reviewer",
+			model: "provider/model",
+			toolset: "reading",
+			tools: ["read", "finish"],
 			turnCount: 1,
 			currentTool: "read",
 			currentToolArgs: '{"path":"src/index.ts"}',
@@ -41,6 +45,10 @@ describe("session progress", () => {
 		expect(progress).toMatchObject({
 			actionName: "reviewer",
 			status: "running",
+			role: "reviewer",
+			model: "provider/model",
+			toolset: "reading",
+			tools: ["read", "finish"],
 			turnCount: 1,
 			toolCount: 1,
 			tokenCount: 1234,
@@ -48,5 +56,19 @@ describe("session progress", () => {
 		expect(progress?.currentTool).toBeUndefined();
 		expect(progress?.currentToolArgs).toBeUndefined();
 		expect(progress?.currentToolStartedAt).toBeUndefined();
+
+		updateSessionProgress(dir, actionUid, {
+			status: "starting",
+			role: undefined,
+			model: undefined,
+			thinking: undefined,
+			toolset: undefined,
+			tools: undefined,
+		});
+		const restarted = readSessionProgress(dir).sessions["chart:review.correctness.scan:agent"];
+		expect(restarted?.role).toBeUndefined();
+		expect(restarted?.model).toBeUndefined();
+		expect(restarted?.toolset).toBeUndefined();
+		expect(restarted?.tools).toBeUndefined();
 	});
 });

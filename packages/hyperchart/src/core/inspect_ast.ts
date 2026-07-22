@@ -18,9 +18,13 @@ import type {
 
 export type HyperchartInspectAgentDefaults = {
 	description?: string;
+	role?: string;
 	model?: string;
+	resolvedModel?: string;
 	thinking?: string;
+	toolset?: string;
 	tools?: readonly string[];
+	resolvedTools?: readonly string[];
 	agentDefinitionUnavailable?: boolean;
 };
 
@@ -103,9 +107,13 @@ export type HyperchartInspectState = {
 	guard?: HyperchartInspectGuard;
 	onReject?: OnReject;
 	description?: string;
+	role?: string;
 	model?: string;
+	resolvedModel?: string;
 	thinking?: string;
+	toolset?: string;
 	tools?: readonly string[];
+	resolvedTools?: readonly string[];
 	agentDefinitionUnavailable?: boolean;
 	over?: string;
 	overSchema?: JsonSchema;
@@ -230,18 +238,28 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 		const task = templatePreview(action.task);
 		const defaults = options.agentDefaults?.(action.name);
 		const description = defaults?.description;
+		const role = defaults?.role;
 		const model = action.model ?? defaults?.model;
+		const resolvedModel = action.model ?? defaults?.resolvedModel ?? (defaults?.role === undefined ? model : undefined);
 		const thinking = action.thinking ?? defaults?.thinking;
+		const toolset = defaults?.toolset;
 		const tools = action.tools ?? defaults?.tools;
+		const resolvedTools = action.tools === undefined
+			? (defaults?.resolvedTools ?? (tools === undefined || defaults?.toolset !== undefined ? undefined : withFinishTool(tools)))
+			: withFinishTool(action.tools);
 		return {
 			...base,
 			kind: "agent",
 			agent: action.name,
 			...(description === undefined ? {} : { description }),
 			...(task === undefined ? {} : { task }),
+			...(role === undefined ? {} : { role }),
 			...(model === undefined ? {} : { model }),
+			...(resolvedModel === undefined ? {} : { resolvedModel }),
 			...(thinking === undefined ? {} : { thinking }),
+			...(toolset === undefined ? {} : { toolset }),
 			...(tools === undefined ? {} : { tools }),
+			...(resolvedTools === undefined ? {} : { resolvedTools }),
 			...(defaults?.agentDefinitionUnavailable === true ? { agentDefinitionUnavailable: true } : {}),
 		};
 	}
@@ -256,6 +274,10 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 	}
 	const task = templatePreview(action.prompt);
 	return { ...base, kind: "user", ...(task === undefined ? {} : { task }) };
+}
+
+function withFinishTool(tools: readonly string[]): string[] {
+	return [...new Set([...tools, "finish"])];
 }
 
 function guardInfo(guard: GuardRefAst, ast: ChartAst, statePath: string): HyperchartInspectGuard {

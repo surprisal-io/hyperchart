@@ -9,7 +9,7 @@ import {
 	claudeHostPaths,
 	claudeRunsRoot,
 } from "../packages/claude-hyperchart/src/claude/paths.js";
-import { resolveClaudeSubagentDefinitionDirs } from "../packages/claude-hyperchart/src/claude/agent_definitions.js";
+import { createClaudeAgentDefaultsResolver, resolveClaudeSubagentDefinitionDirs } from "../packages/claude-hyperchart/src/claude/agent_definitions.js";
 import { createNeutralTranscriptWriter } from "../packages/claude-hyperchart/src/claude/transcript_writer.js";
 import { readNeutralSessionTranscript } from "../packages/hyperchart/src/inspect/session_transcript.js";
 
@@ -80,6 +80,38 @@ describe("claude host scaffold", () => {
 			join(project, ".agents"),
 		]);
 		expect(dirs).toContain(join(root, "user-claude", "agents"));
+	});
+
+	it("resolves shared host-section role and toolset settings for Claude inspection", () => {
+		const root = tempRoot();
+		process.env.CLAUDE_CONFIG_DIR = join(root, "user-claude");
+		const project = join(root, "project");
+		const chartDir = join(project, ".hypercharts", "review");
+		mkdirSync(join(chartDir, "agents"), { recursive: true });
+		writeFileSync(
+			join(chartDir, "agents", "critic.md"),
+			"---\nrole: reviewer\ntoolset: reading\n---\nReview prompt\n",
+		);
+		writeFileSync(
+			join(project, ".hypercharts", "settings.json"),
+			JSON.stringify({
+				roles: { reviewer: "shared/fallback" },
+				toolsets: { reading: ["Read"] },
+				claude: {
+					roles: { reviewer: "claude-opus-4-8" },
+					toolsets: { reading: ["Read", "Grep"] },
+				},
+			}),
+		);
+
+		const defaults = createClaudeAgentDefaultsResolver(project, join(chartDir, "chart.ts"))("critic");
+
+		expect(defaults).toMatchObject({
+			role: "reviewer",
+			resolvedModel: "claude-opus-4-8",
+			toolset: "reading",
+			resolvedTools: ["Read", "Grep", "finish"],
+		});
 	});
 
 	it("parses the same definition file identically through the core and Pi loaders", () => {

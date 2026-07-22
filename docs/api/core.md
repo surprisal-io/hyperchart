@@ -143,7 +143,7 @@ function inspectChartAst(
 ): HyperchartInspectResult;
 ```
 
-Produces a serializable, UI-oriented view of normalized chart data. `agentDefaults` can overlay host model, thinking, and tool defaults without changing the chart AST.
+Produces a serializable, UI-oriented view of normalized chart data. `agentDefaults` can overlay host agent metadata, symbolic role/toolset names, resolved model/tools, thinking, and fallbacks without changing the chart AST.
 
 ### `inspectChartModuleSync()`
 
@@ -165,9 +165,14 @@ type InspectChartModuleOptions = {
 };
 
 type HyperchartInspectAgentDefaults = {
+  description?: string;
+  role?: string;
   model?: string;
+  resolvedModel?: string;
   thinking?: string;
+  toolset?: string;
   tools?: readonly string[];
+  resolvedTools?: readonly string[];
   agentDefinitionUnavailable?: boolean;
 };
 
@@ -201,7 +206,10 @@ type HyperchartInspectResult = {
 | `reply` | `JsonSchema?` | Normalized completion-output schema. |
 | `guard` | `HyperchartInspectGuard?` | Validation guard. |
 | `onReject` | `"resume" \| "restart"` | Validation rejection policy. |
-| `model` / `thinking` / `tools` | optional | Effective agent settings. |
+| `role` / `toolset` | `string?` | Symbolic names declared by the agent definition. |
+| `model` / `tools` | optional | Concrete chart override or definition fallback before symbolic resolution. |
+| `resolvedModel` / `resolvedTools` | optional | Effective host configuration after role/toolset resolution; explicit tool allowlists include the injected `finish` protocol tool. |
+| `thinking` | `string?` | Effective thinking level. |
 | `agentDefinitionUnavailable` | `boolean?` | Host could not resolve the named agent. |
 | `over` / `overSchema` | optional | Map source preview and schema. |
 | `concurrency` | `number?` | Map invocation limit. |

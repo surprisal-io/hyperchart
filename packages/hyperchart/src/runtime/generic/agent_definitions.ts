@@ -5,6 +5,12 @@ import { parseSimpleFrontmatter, type FrontmatterParser } from "./frontmatter.js
 
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
+export type AgentDefinitionResolution = {
+	defaultModel?: string;
+	modelRoles?: Readonly<Record<string, string>>;
+	toolsets?: Readonly<Record<string, readonly string[]>>;
+};
+
 export type AgentDefinition = {
 	name: string;
 	description?: string;
@@ -58,6 +64,7 @@ export function loadAgentDefinition(
 export function createAgentDefaultsResolver(
 	dirs: string[],
 	parse: FrontmatterParser = parseSimpleFrontmatter,
+	resolution: AgentDefinitionResolution = {},
 ): (agentName: string) => HyperchartInspectAgentDefaults {
 	const cache = new Map<string, HyperchartInspectAgentDefaults>();
 	return (agentName) => {
@@ -66,17 +73,41 @@ export function createAgentDefaultsResolver(
 		let defaults: HyperchartInspectAgentDefaults;
 		try {
 			const definition = loadAgentDefinition(agentName, dirs, parse);
-			defaults = {
+			defaults = resolveAgentDefaults({
 				...(definition.description === undefined ? {} : { description: definition.description }),
+				...(definition.role === undefined ? {} : { role: definition.role }),
 				...(definition.model === undefined ? {} : { model: definition.model }),
 				...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
+				...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
 				...(definition.tools === undefined ? {} : { tools: definition.tools }),
-			};
+			}, resolution);
 		} catch {
 			defaults = { agentDefinitionUnavailable: true };
 		}
 		cache.set(agentName, defaults);
 		return defaults;
+	};
+}
+
+export function resolveAgentDefaults(
+	defaults: HyperchartInspectAgentDefaults,
+	resolution: AgentDefinitionResolution,
+): HyperchartInspectAgentDefaults {
+	if (defaults.agentDefinitionUnavailable === true) return defaults;
+	const roleModel = defaults.role === undefined ? undefined : resolution.modelRoles?.[defaults.role];
+	const resolvedModel = defaults.role === undefined
+		? (defaults.model ?? resolution.defaultModel)
+		: (roleModel ?? defaults.model);
+	const toolsetTools = defaults.toolset === undefined ? undefined : resolution.toolsets?.[defaults.toolset];
+	const configuredTools = defaults.toolset === undefined ? defaults.tools : (toolsetTools ?? defaults.tools);
+	const resolvedTools = configuredTools === undefined ? undefined : [...new Set([...configuredTools, "finish"])];
+	const declared = { ...defaults };
+	delete declared.resolvedModel;
+	delete declared.resolvedTools;
+	return {
+		...declared,
+		...(resolvedModel === undefined ? {} : { resolvedModel }),
+		...(resolvedTools === undefined ? {} : { resolvedTools }),
 	};
 }
 

@@ -8,7 +8,7 @@ The complete API reference is split by public entry point.
 - [Core API](api/core.md) — normalization, parsing, inspection, AST, projection, machine, durable records, replay, execution loop, and async utilities.
 - [Runtime API](api/runtime.md) — runtime and agent contracts, log stores, script execution, guards, schemas, artifacts, run directories, and terminal outcomes.
 - [Host API](api/host.md) — discovery contract, canonical chart/run/state models, visit history, issues, and static/runtime adapters.
-- [Pi API](api/pi.md) — command bridge, Pi host adapter, all four agent tools, parameters, results, and errors.
+- [Pi API](api/pi.md) — command bridge, Pi host adapter, all consolidated-tool actions, parameters, results, and errors.
 - [React API](api/react.md) — components, props, providers, graph/display helpers, models, peers, and stylesheet contract.
 
 The [API index](api/README.md) lists every supported package entry point and the stability boundary.
@@ -30,7 +30,7 @@ The [API index](api/README.md) lists every supported package entry point and the
 └── rewind-backups/
 ```
 
-Only `meta.json`, `log.jsonl`, and the run directory itself are fundamental. Status, runner logs, session progress, and rewind backups appear when the corresponding host/runtime behavior is used.
+Only `meta.json`, `log.jsonl`, and the run directory itself are fundamental. Status, runner logs, session progress, and rewind backups appear when the corresponding host/runtime behavior is used. `runner.config.json` snapshots the host's role/model and toolset/tool mappings for that run; `sessions/progress.json` may additionally record each launched session's declared role/toolset and actual model/tool allowlist.
 
 Artifacts may live anywhere inside the run working directory according to the chart declaration; they are not required to live under `<run-dir>`.
 

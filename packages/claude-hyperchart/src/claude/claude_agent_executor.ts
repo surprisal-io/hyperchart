@@ -40,7 +40,7 @@ import {
 } from "@surprisal/hyperchart/runtime";
 import { readNeutralSessionTranscript } from "@surprisal/hyperchart/inspect";
 import type { HyperchartSessionMessageInfo } from "@surprisal/hyperchart/host";
-import { createThrottledProgressWriter, updateSessionProgress } from "@surprisal/hyperchart/sessions";
+import { createThrottledProgressWriter, readSessionProgress, updateSessionProgress } from "@surprisal/hyperchart/sessions";
 import { createNeutralTranscriptWriter, type NeutralTranscriptWriter } from "./transcript_writer.js";
 import { resolveClaudeSubagentDefinitionDirs } from "./agent_definitions.js";
 
@@ -178,10 +178,16 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		generation: number,
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
+		const previousProgress = readSessionProgress(this.options.sessionsDir).sessions[key];
 		updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
 			actionName: effect.action.name,
 			status: "starting",
 			startedAt: Date.now(),
+			role: undefined,
+			model: undefined,
+			thinking: undefined,
+			toolset: undefined,
+			tools: undefined,
 			currentTool: undefined,
 			currentToolArgs: undefined,
 			currentToolStartedAt: undefined,
@@ -215,6 +221,21 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 					status: "completed",
 					completedAt: Date.now(),
 					sessionFile: restored.path,
+					...((previousProgress?.role ?? definition.role) === undefined
+						? {}
+						: { role: previousProgress?.role ?? definition.role }),
+					...((previousProgress?.model ?? plan.modelRef) === undefined
+						? {}
+						: { model: previousProgress?.model ?? plan.modelRef }),
+					...((previousProgress?.thinking ?? plan.thinkingLevel) === undefined
+						? {}
+						: { thinking: previousProgress?.thinking ?? plan.thinkingLevel }),
+					...((previousProgress?.toolset ?? definition.toolset) === undefined
+						? {}
+						: { toolset: previousProgress?.toolset ?? definition.toolset }),
+					...((previousProgress?.tools ?? plan.tools) === undefined
+						? {}
+						: { tools: previousProgress?.tools ?? plan.tools }),
 				});
 				// The finish already happened in a previous process; only artifact validation remains.
 				await runAcceptanceLoop({
@@ -516,7 +537,10 @@ class ClaudeSession {
 			status: "running",
 			model,
 			sessionFile: this.writer.path,
+			...(this.options.definition.role === undefined ? {} : { role: this.options.definition.role }),
 			...(this.options.plan.thinkingLevel === undefined ? {} : { thinking: this.options.plan.thinkingLevel }),
+			...(this.options.definition.toolset === undefined ? {} : { toolset: this.options.definition.toolset }),
+			...(this.options.plan.tools === undefined ? {} : { tools: this.options.plan.tools }),
 		});
 	}
 

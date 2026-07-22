@@ -432,7 +432,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "agent",
 		title: "Rich agent",
-		description: "Agent card, short prompt that fits without Open full, runtime facts, transitions, and visits.",
+		description: "Definition-only agent card, short prompt, and run-specific live session inside Runtime alongside visits.",
 		chart: panelChart("inspector-rich-agent", "rich-agent", {
 			"rich-agent": {
 				kind: "state",

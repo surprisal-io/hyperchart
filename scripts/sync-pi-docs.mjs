@@ -16,6 +16,8 @@ const mappings = [
 	["docs", "packages/pi-hyperchart/docs"],
 	["examples", "packages/pi-hyperchart/examples"],
 	["assets/readme/architecture.svg", "packages/pi-hyperchart/assets/readme/architecture.svg"],
+	["docs/skills/pi.md", "packages/pi-hyperchart/skills/hyperchart/SKILL.md"],
+	["docs/skills/claude.md", "packages/claude-hyperchart/skills/hyperchart/SKILL.md"],
 ];
 
 if (check) {

@@ -84,6 +84,94 @@ describe("run inspection transcript seam", () => {
 		expect(state?.session?.messages?.[0]).toEqual({ id: "u1", role: "user", text: "hi" });
 	});
 
+	it("uses the run's persisted role and toolset mappings for resolved agent configuration", async () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-run-config-"));
+		roots.push(root);
+		const chartPath = join(root, "configured.chart.ts");
+		writeFileSync(
+			chartPath,
+			`import { agent, chart, final } from "@surprisal/hyperchart";
+export default chart({ kind: "chart", id: "configured", initial: "work", states: {
+  work: { kind: "state", action: agent("worker", { task: "work" }), transitions: { DONE: "done" } },
+  done: final(),
+} });
+`,
+		);
+		const runDir = join(root, "run");
+		mkdirSync(join(runDir, "sessions"), { recursive: true });
+		saveRunMeta(runDir, { chartPath, workDir: root, chartId: "configured", createdAt: new Date().toISOString() });
+		writeFileSync(
+			join(runDir, "runner.config.json"),
+			JSON.stringify({
+				runId: "configured-run",
+				runDir,
+				chartPath,
+				chartId: "configured",
+				workDir: root,
+				defaultModel: "openai/default",
+				modelRoles: { worker: "deepseek/worker" },
+				toolsets: { researching: ["read", "browser"] },
+			}),
+		);
+		const actionUid = { chart: "configured", state: "work", action: "agent" };
+		updateSessionProgress(join(runDir, "sessions"), actionUid, {
+			actionName: "worker",
+			status: "running",
+			role: "worker",
+			model: "deepseek/worker",
+			toolset: "researching",
+			tools: ["read", "browser", "finish"],
+		});
+
+		const run = await hyperchartRunFromRunDir(runDir, {
+			agentDefaults: () => ({
+				role: "worker",
+				model: "anthropic/fallback",
+				resolvedModel: "stale/current-setting",
+				toolset: "researching",
+				tools: ["bash"],
+				resolvedTools: ["stale-tool", "finish"],
+			}),
+		});
+		const state = run.states.find((candidate) => candidate.id === "work");
+
+		expect(state).toMatchObject({
+			role: "worker",
+			model: "anthropic/fallback",
+			resolvedModel: "deepseek/worker",
+			toolset: "researching",
+			tools: ["bash"],
+			resolvedTools: ["read", "browser", "finish"],
+			session: {
+				role: "worker",
+				model: "deepseek/worker",
+				toolset: "researching",
+				tools: ["read", "browser", "finish"],
+			},
+		});
+
+		writeFileSync(join(runDir, "runner.config.json"), "{ invalid json");
+		const invalidSnapshot = await hyperchartRunFromRunDir(runDir, {
+			agentDefaults: () => ({
+				role: "worker",
+				model: "anthropic/fallback",
+				resolvedModel: "mutable/current-setting",
+				toolset: "researching",
+				tools: ["bash"],
+				resolvedTools: ["mutable-tool", "finish"],
+			}),
+		});
+		const invalidState = invalidSnapshot.states.find((candidate) => candidate.id === "work");
+		expect(invalidState).toMatchObject({
+			role: "worker",
+			model: "anthropic/fallback",
+			toolset: "researching",
+			tools: ["bash"],
+		});
+		expect(invalidState?.resolvedModel).toBeUndefined();
+		expect(invalidState?.resolvedTools).toBeUndefined();
+	});
+
 	it("rejects session files outside the sessions directory", () => {
 		const { runDir } = makeRunDir();
 		const sessionsDir = join(runDir, "sessions");

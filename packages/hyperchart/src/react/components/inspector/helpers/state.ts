@@ -241,7 +241,8 @@ export function stateHasRuntimeDetails(state: HyperchartStateInfo): boolean {
 		state.visitHistory !== undefined ||
 		state.subProgress !== undefined ||
 		state.mapConfig?.items !== undefined ||
-		Boolean(state.usage)
+		Boolean(state.usage) ||
+		state.session !== undefined
 	);
 }
 

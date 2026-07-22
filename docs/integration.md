@@ -151,7 +151,7 @@ export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {
 }
 ```
 
-Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The inspector renders concurrency-gated map states and items as `waiting`; they do not expose a session until the runtime admits and invokes them. When a run snapshot includes `state.session`, agent cards expose a live-session dialog. Provide `onSteerSession` to enable its composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
+Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The inspector renders concurrency-gated map states and items as `waiting`; they do not expose a session until the runtime admits and invokes them. Agent cards render declared `role`/`toolset` plus `resolvedModel`/`resolvedTools` from the host snapshot, but no session controls. When a concrete run snapshot includes `state.session`, the selected state's `Runtime` section exposes the live-session dialog and expands automatically while the session is live. Provide `onSteerSession` to enable the dialog composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
 
 ## Public React components
 

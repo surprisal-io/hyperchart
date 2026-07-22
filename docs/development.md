@@ -228,7 +228,7 @@ make release-resume \
 
 The resume target repeats the release gate and runs only the Pi dry-run and publish commands. Both publish targets deliberately avoid creating or pushing a git tag.
 
-After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and all four tools. Create the release/tag only after registry verification.
+After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and every consolidated-tool action. Create the release/tag only after registry verification.
 
 Do not publish from a workspace whose package manifests or lockfile still refer to a temporary local dependency.
 

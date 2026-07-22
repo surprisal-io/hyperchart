@@ -15,18 +15,23 @@ export type HyperchartHostSettings = {
  * order: later directories win per key (pass user scope first, project scope
  * last). A missing file contributes nothing; a malformed one fails loudly so
  * a typo never silently drops a mapping.
+ *
+ * A settings file carries flat `roles`/`toolsets` plus optional per-host
+ * sections keyed by host name (e.g. `"pi": { "roles": ... }`); when `host` is
+ * given, its section overrides the flat keys within the same file. Host
+ * sections let one shared charts directory map roles for every host at once.
  */
-export function loadHostSettings(chartsDirs: readonly string[]): HyperchartHostSettings {
+export function loadHostSettings(chartsDirs: readonly string[], host?: string): HyperchartHostSettings {
 	const settings: HyperchartHostSettings = { modelRoles: {}, toolsets: {} };
 	for (const dir of chartsDirs) {
-		const parsed = readSettingsFile(join(dir, SETTINGS_FILE_NAME));
+		const parsed = readSettingsFile(join(dir, SETTINGS_FILE_NAME), host);
 		Object.assign(settings.modelRoles, parsed.modelRoles);
 		Object.assign(settings.toolsets, parsed.toolsets);
 	}
 	return settings;
 }
 
-function readSettingsFile(path: string): HyperchartHostSettings {
+function readSettingsFile(path: string, host?: string): HyperchartHostSettings {
 	let content: string;
 	try {
 		content = readFileSync(path, "utf8");
@@ -42,7 +47,14 @@ function readSettingsFile(path: string): HyperchartHostSettings {
 		);
 	}
 	if (!isRecord(parsed)) throw new Error(`Invalid hypercharts settings at ${path}: expected a JSON object`);
-	return { modelRoles: parseRoles(parsed.roles, path), toolsets: parseToolsets(parsed.toolsets, path) };
+	const settings = { modelRoles: parseRoles(parsed.roles, path), toolsets: parseToolsets(parsed.toolsets, path) };
+	const section = host === undefined ? undefined : parsed[host];
+	if (section !== undefined) {
+		if (!isRecord(section)) throw new Error(`Invalid hypercharts settings at ${path}: '${host}' must be an object`);
+		Object.assign(settings.modelRoles, parseRoles(section.roles, path));
+		Object.assign(settings.toolsets, parseToolsets(section.toolsets, path));
+	}
+	return settings;
 }
 
 function parseRoles(value: unknown, path: string): Record<string, string> {

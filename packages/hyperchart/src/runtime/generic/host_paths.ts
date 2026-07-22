@@ -11,12 +11,16 @@ export type HostPathsConfig = {
 	runsRoot: string;
 	/** Optional user-level charts directory searched after project charts. */
 	userChartsDir?: string;
+	/** Optional host-neutral charts directory name under the project root (e.g. ".hypercharts"), shared by all hosts and searched between project and user charts. */
+	sharedChartsDirName?: string;
 	/** Extra directory names that mark a project root in addition to configDirName. */
 	projectMarkers?: readonly string[];
 };
 
 export type HostPaths = {
 	getProjectHyperchartsDir(cwd: string): string;
+	/** Host-neutral shared charts dir under the project root, or undefined when the host does not configure one. */
+	getSharedHyperchartsDir(cwd: string): string | undefined;
 	getRunsRoot(): string;
 	resolveRunDir(spec: string, cwd: string): string;
 	resolveChartPath(spec: string, cwd: string): string;
@@ -25,19 +29,35 @@ export type HostPaths = {
 };
 
 export function createHostPaths(config: HostPathsConfig): HostPaths {
-	const markers = [config.configDirName, ...(config.projectMarkers ?? [])];
+	const markers = [
+		config.configDirName,
+		...(config.sharedChartsDirName === undefined ? [] : [config.sharedChartsDirName]),
+		...(config.projectMarkers ?? []),
+	];
 	const findProjectRoot = (cwd: string): string | undefined => findNearestProjectRoot(cwd, markers);
 	const getProjectHyperchartsDir = (cwd: string): string =>
 		join(findProjectRoot(cwd) ?? cwd, config.configDirName, HYPERCHARTS_DIR_NAME);
+	const getSharedHyperchartsDir = (cwd: string): string | undefined =>
+		config.sharedChartsDirName === undefined
+			? undefined
+			: join(findProjectRoot(cwd) ?? cwd, config.sharedChartsDirName);
 	return {
 		getProjectHyperchartsDir,
+		getSharedHyperchartsDir,
 		getRunsRoot: () => config.runsRoot,
 		resolveRunDir(spec, cwd) {
 			if (isPathLike(spec)) return resolve(cwd, spec);
 			return join(config.runsRoot, spec);
 		},
 		resolveChartPath(spec, cwd) {
-			const candidates = chartPathCandidates(spec, cwd, getProjectHyperchartsDir(cwd), config.userChartsDir);
+			const candidates = chartPathCandidates(
+				spec,
+				cwd,
+				[getProjectHyperchartsDir(cwd), getSharedHyperchartsDir(cwd)].filter(
+					(dir): dir is string => dir !== undefined,
+				),
+				config.userChartsDir,
+			);
 			const found = candidates.find((candidate) => isFile(candidate));
 			if (found !== undefined) return found;
 			throw new Error(
@@ -61,11 +81,13 @@ export function listHyperchartFiles(root: string): string[] {
 		.sort();
 }
 
-function chartPathCandidates(spec: string, cwd: string, projectChartsDir: string, userChartsDir?: string): string[] {
+function chartPathCandidates(spec: string, cwd: string, projectChartsDirs: readonly string[], userChartsDir?: string): string[] {
 	const variants = chartNameVariants(spec);
 	const candidates: string[] = [];
 	if (!isAbsolute(spec) && !spec.startsWith(".")) {
-		for (const variant of variants) candidates.push(resolve(projectChartsDir, variant));
+		for (const projectChartsDir of projectChartsDirs) {
+			for (const variant of variants) candidates.push(resolve(projectChartsDir, variant));
+		}
 		if (userChartsDir !== undefined) {
 			for (const variant of variants) candidates.push(resolve(userChartsDir, variant));
 		}

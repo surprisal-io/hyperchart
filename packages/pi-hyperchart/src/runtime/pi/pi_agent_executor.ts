@@ -203,6 +203,11 @@ export class PiAgentExecutor implements AgentExecutor {
 			actionName: effect.action.name,
 			status: "starting",
 			startedAt: Date.now(),
+			role: undefined,
+			model: undefined,
+			thinking: undefined,
+			toolset: undefined,
+			tools: undefined,
 			currentTool: undefined,
 			currentToolArgs: undefined,
 			currentToolStartedAt: undefined,
@@ -294,8 +299,11 @@ export class PiAgentExecutor implements AgentExecutor {
 			actionName: definition.name,
 			status: "running",
 			...(sessionFile === undefined ? {} : { sessionFile }),
+			...(definition.role === undefined ? {} : { role: definition.role }),
 			...(plan.modelRef === undefined ? {} : { model: plan.modelRef }),
 			...(plan.thinkingLevel === undefined ? {} : { thinking: plan.thinkingLevel }),
+			...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
+			...(plan.tools === undefined ? {} : { tools: plan.tools }),
 		});
 		return session;
 	}

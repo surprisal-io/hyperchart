@@ -6,10 +6,13 @@ import type { HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/inter
 import {
 	createAgentDefaultsResolver as createDefaultsResolverForDirs,
 	loadAgentDefinition as loadAgentDefinitionGeneric,
+	loadHostSettings,
 	uniqueExistingDirs,
 	type AgentDefinition,
+	type AgentDefinitionResolution,
 	type ThinkingLevel,
 } from "@surprisal/hyperchart/runtime";
+import { getProjectHyperchartsDir, getSharedHyperchartsDir } from "./paths.js";
 
 export type { AgentDefinition, ThinkingLevel };
 
@@ -35,8 +38,26 @@ export function createAgentDefaultsResolver(
 	cwd: string,
 	agentDir: string = getAgentDir(),
 	chartPath?: string,
+	resolution: AgentDefinitionResolution = {},
 ): (agentName: string) => HyperchartInspectAgentDefaults {
-	return createDefaultsResolverForDirs(resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath), parsePiFrontmatter);
+	const sharedChartsDir = getSharedHyperchartsDir(cwd);
+	const settings = loadHostSettings(
+		[
+			join(agentDir, "hypercharts"),
+			...(sharedChartsDir === undefined ? [] : [sharedChartsDir]),
+			getProjectHyperchartsDir(cwd),
+		],
+		"pi",
+	);
+	return createDefaultsResolverForDirs(
+		resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath),
+		parsePiFrontmatter,
+		{
+			...(resolution.defaultModel === undefined ? {} : { defaultModel: resolution.defaultModel }),
+			modelRoles: resolution.modelRoles ?? settings.modelRoles,
+			toolsets: resolution.toolsets ?? settings.toolsets,
+		},
+	);
 }
 
 function projectAgentDirs(cwd: string): string[] {

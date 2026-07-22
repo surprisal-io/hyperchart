@@ -28,7 +28,7 @@ The Pi package owns:
 - chart, run, and agent-definition discovery;
 - detached runner and heartbeat/status files;
 - Pi agent executor and session progress;
-- `/hyperchart` and four agent tools;
+- `/hyperchart` and the consolidated agent tool;
 - terminal views;
 - React inspector, launch dialog, run strip, and stylesheet;
 - bundled Hyperchart skill.

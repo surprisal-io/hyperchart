@@ -7,7 +7,7 @@ Claude Code plugin for [Hyperchart](https://github.com/surprisal-io/hyperchart):
 - **`hyperchart_*` MCP tools** — `list`, `inspect`, `run`, `run_inspect`, `steer`, `stop`, `view` — exposed to Claude by a bundled stdio MCP server.
 - **Detached background runs** — a chart run is a separate runner process that survives the Claude session; state is durable in the run directory.
 - **Agent actions as Claude sessions** — each chart agent runs through `@anthropic-ai/claude-agent-sdk` `query()` headless (permission checks bypassed inside the chart's working directory; the chart's guards and validators are the control surface). Model ids from agent definitions are passed to the SDK verbatim.
-- **Live inspector** — `hyperchart_view` returns a tokenized localhost URL with the chart graph, per-state details, live agent transcripts, and a steering composer.
+- **Live inspector** — `hyperchart_view` returns a tokenized localhost URL with the chart graph, per-state details, declared and resolved role/toolset configuration, live agent transcripts, and a steering composer.
 - **SessionStart hook** — live runs for the current directory are surfaced as context when a Claude session starts.
 
 ## Install

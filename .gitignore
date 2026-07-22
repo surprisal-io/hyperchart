@@ -7,6 +7,7 @@ tla/.cache/
 
 .pi/hypercharts/runs/
 .pi/hypercharts/artifacts/
+.hypercharts/settings.json
 .pi-subagents/
 tla/MCTrace*
 tla/trace/sample-run.jsonl

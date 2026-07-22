@@ -11,15 +11,18 @@ import {
   checkArtifactFile,
   checkSchema,
   checkSchemaAsync,
+  createAgentDefaultsResolver,
   createRunDir,
   finalMachineFailureMessage,
   isFailureStatePath,
   loadRunMeta,
+  resolveAgentDefaults,
   resolveArtifactValue,
   runGuard,
   saveRunMeta,
   serializeEnvValue,
   terminalStateForFinalMachine,
+  type AgentDefinitionResolution,
   type AgentExecutor,
   type GuardContext,
   type RenderedGuardInvocation,
@@ -121,6 +124,31 @@ interface AgentExecutor {
 | `dispose` | Release sessions, processes, and other resources owned by the executor. |
 
 The executor must not append Hyperchart durable facts directly. It reports chart events; the machine decides what becomes durable.
+
+## Agent definition inspection
+
+```ts
+type AgentDefinitionResolution = {
+  defaultModel?: string;
+  modelRoles?: Readonly<Record<string, string>>;
+  toolsets?: Readonly<Record<string, readonly string[]>>;
+};
+
+function createAgentDefaultsResolver(
+  dirs: string[],
+  parse?: FrontmatterParser,
+  resolution?: AgentDefinitionResolution,
+): (agentName: string) => HyperchartInspectAgentDefaults;
+
+function resolveAgentDefaults(
+  defaults: HyperchartInspectAgentDefaults,
+  resolution: AgentDefinitionResolution,
+): HyperchartInspectAgentDefaults;
+```
+
+`createAgentDefaultsResolver()` loads markdown definitions, preserves declared `role`/`toolset` plus model/tool fallbacks, and computes `resolvedModel`/`resolvedTools` from the supplied host mappings. Explicit resolved tool lists include the injected `finish` protocol tool. `resolveAgentDefaults()` reapplies another immutable mapping snapshot, which run-directory inspection uses for `runner.config.json` settings.
+
+These helpers describe inspection configuration. Runtime launch strictness and chart-level override precedence remain owned by `buildSessionPlan()`.
 
 ## Log stores
 
@@ -437,6 +465,8 @@ Checks whether the final template segment, ignoring a map key, is `failed`, `fai
 ```text
 Runtime
 AgentExecutor, EmitCompletion
+AgentDefinition, AgentDefinitionResolution, ThinkingLevel,
+createAgentDefaultsResolver, resolveAgentDefaults, loadAgentDefinition, parseAgentFile
 RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry, SchemaRegistryLike
 ChartRuntime, ChartRuntimeOptions
 LogStore, JsonlLogStore, MemoryLogStore

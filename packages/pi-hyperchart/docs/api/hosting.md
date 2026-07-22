@@ -6,7 +6,7 @@
 
 | Export | Purpose |
 |---|---|
-| `hyperchartRunFromRunDir(runDir, options?)` | Build a `HyperchartRunInfo` from a run directory: meta, parsed chart, durable log, status, session progress, and transcripts. `options.readTranscript` plugs in a host transcript format; `options.agentDefaults` resolves agent definition defaults for static display. |
+| `hyperchartRunFromRunDir(runDir, options?)` | Build a `HyperchartRunInfo` from a run directory: meta, parsed chart, durable log, status, session progress, and transcripts. `options.readTranscript` plugs in a host transcript format; `options.agentDefaults` supplies declared agent metadata. When valid `runner.config.json` exists, its persisted role/model and toolset/tool mappings override mutable current settings for `resolvedModel`/`resolvedTools`; an invalid snapshot leaves those resolved fields absent rather than silently using current settings. |
 | `readNeutralSessionTranscript(sessionsDir, sessionFile)` | Default transcript reader: header-tagged JSONL of pre-flattened `HyperchartSessionMessageInfo` records. |
 | `resolveContainedSessionFile(sessionsDir, sessionFile)` | Realpath containment guard shared by transcript readers. |
 | `combineToolLifecycle(messages)` / `truncateTranscriptText(value)` | Shared transcript shaping: fold tool call + result into one lifecycle entry; cap displayed text. |

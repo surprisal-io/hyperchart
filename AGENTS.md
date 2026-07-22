@@ -51,6 +51,20 @@ agent workflow changes, and Storybook/README visual assets when users can see
 the change. Do not duplicate the full manual into package READMEs or the skill;
 keep those focused and link to canonical docs.
 
+`docs/` is the single source of truth, and that includes the agent skills:
+`docs/skills/pi.md` and `docs/skills/claude.md` are the canonical skill texts.
+The packaged copies (`packages/*/skills/hyperchart/SKILL.md` and
+`packages/pi-hyperchart/docs/`) are generated — never edit them directly; edit
+the canon and run `npm run sync:pi-docs` to regenerate (`--check` verifies).
+
+After changing runtime behavior, tool surfaces, or documentation, offer the
+user a run of the `docs-engine` chart (`.hypercharts/docs-engine`, a
+host-neutral shared chart visible to both Pi and Claude Code). Suggest it —
+do not start it yourself. `args: {mode: "audit"}` audits every canonical unit
+against the code and writes `artifacts/docs-engine/drift-report.json` without
+touching files; `{mode: "fix"}` additionally patches the canonical units from
+confirmed findings and re-syncs the packages.
+
 The change-to-document map and release checklist live in
 [`docs/development.md`](docs/development.md). Tests must accompany behavioral
 changes; UI changes require an appropriate Storybook story and refreshed visual

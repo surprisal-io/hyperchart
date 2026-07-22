@@ -10,7 +10,7 @@ import type {
 import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
 import type { HyperchartInfo, HyperchartRunInfo } from "@surprisal/hyperchart/host";
 import { loadRunMeta } from "@surprisal/hyperchart/runtime";
-import { getHyperchartRunsRoot, getProjectHyperchartsDir, listProjectHypercharts } from "./paths.js";
+import { getHyperchartRunsRoot, getProjectHyperchartsDir, getSharedHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { hyperchartRunFromRunDir } from "./run_inspect.js";
 import { isRunLive, readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
@@ -72,13 +72,18 @@ async function readHypercharts(
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 ): Promise<HyperchartInfo[]> {
 	const projectRoot = getProjectHyperchartsDir(cwd);
+	const sharedRoot = getSharedHyperchartsDir(cwd);
 	const userRoot = join(agentDir, "hypercharts");
 	const projectFiles = listProjectHypercharts(cwd).map((path) => join(projectRoot, path));
+	const sharedFiles = sharedRoot === undefined ? [] : await listChartFiles(sharedRoot);
 	const userFiles = await listChartFiles(userRoot);
 	const byName = new Map<string, HyperchartInfo>();
 
+	// The shared host-neutral dir surfaces as project scope in the dashboard;
+	// a same-named chart in the host-specific project dir still wins.
 	for (const [scope, files, root] of [
 		["user", userFiles, userRoot],
+		["project", sharedFiles, sharedRoot ?? projectRoot],
 		["project", projectFiles, projectRoot],
 	] as const) {
 		for (const source of files) {

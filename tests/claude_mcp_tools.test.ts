@@ -138,6 +138,48 @@ export default chart({
 		expect(statusOf("wrap.fan")).toBe("done");
 	}, 30_000);
 
+	it("discovers charts and host-sectioned settings from the shared .hypercharts dir", async () => {
+		const { tools, cwd } = makeWorld();
+		const sharedDir = join(cwd, ".hypercharts");
+		mkdirSync(sharedDir, { recursive: true });
+		writeFileSync(
+			join(sharedDir, "common.chart.ts"),
+			`import { chart, final } from "@surprisal/hyperchart";
+export default chart({ kind: "chart", id: "common", initial: "done", states: { done: final() } });
+`,
+		);
+		writeFileSync(
+			join(sharedDir, "settings.json"),
+			JSON.stringify({
+				pi: { roles: { reviewer: "pi/model" } },
+				claude: { roles: { reviewer: "claude-haiku-4-5" }, toolsets: { reading: ["Read"] } },
+			}),
+		);
+
+		const listed = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
+		expect(listed.charts).toEqual(
+			expect.arrayContaining([
+				{ name: "common", scope: "shared", chartPath: join(sharedDir, "common.chart.ts") },
+				expect.objectContaining({ name: "simple", scope: "project" }),
+			]),
+		);
+
+		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "common", wait: true })));
+		expect(run.status.state).toBe("complete");
+		const config = JSON.parse(readFileSync(join(run.runDir, "runner.config.json"), "utf8"));
+		expect(config.modelRoles).toEqual({ reviewer: "claude-haiku-4-5" });
+		expect(config.toolsets).toEqual({ reading: ["Read"] });
+	}, 30_000);
+
+	it("opens a static chart view without a run", async () => {
+		const { tools } = makeWorld();
+		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ chartPath: "simple", open: false })));
+		expect(viewed.chartId).toBe("simple");
+		expect(viewed.url).toContain("/runs/");
+		const both = await tools.get("hyperchart_view")!.handler({});
+		expect(both.isError).toBe(true);
+	});
+
 	it("rewinds a completed run and replays it to completion", async () => {
 		const { tools, chartsDir } = makeWorld();
 		writeFileSync(

@@ -184,6 +184,8 @@ Toolsets live in the same `settings.json`, in the host's tool vocabulary (tool n
 
 Resolution order per invocation: chart `tools` override → configured toolset → definition `tools`. Same strictness as roles: an unconfigured toolset with no fallback `tools` (and no chart override) fails the action with an error.
 
+Inspection preserves both layers: `role`/`toolset` are the declared symbolic names, while `resolvedModel`/`resolvedTools` are the effective host mapping. Static inspection uses current host settings. Concrete run inspection uses the mappings captured in that run's `runner.config.json`; live session progress records the actual model and explicit tool allowlist used at launch. If no tool list or toolset is declared, the host default tool configuration applies — this is not equivalent to allowing every installed tool.
+
 ### Script actions
 
 ```ts

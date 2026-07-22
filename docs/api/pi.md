@@ -1,6 +1,6 @@
 # Pi API
 
-`@surprisal/pi-hyperchart` publishes an in-process command bridge, a Pi host adapter, four agent tools, and the extension itself.
+`@surprisal/pi-hyperchart` publishes an in-process command bridge, a Pi host adapter, one consolidated agent tool, and the extension itself.
 
 ## Entry points
 
@@ -76,7 +76,7 @@ if (!handled) {
 }
 ```
 
-This bridge is for other Pi extensions. Integrated React hosts may send `steer <run-id> <action-key> <message>` when handling `onSteerSession`; the extension validates ownership and live-session status before queueing. Agents should use the `hyperchart_*` tools instead of constructing command strings.
+This bridge is for other Pi extensions. Integrated React hosts may send `steer <run-id> <action-key> <message>` when handling `onSteerSession`; the extension validates ownership and live-session status before queueing. Agents should use the consolidated `hyperchart` tool instead of constructing command strings.
 
 ## Pi host adapter
 
@@ -132,7 +132,7 @@ Singleton created with default options.
 
 ## Agent tool
 
-The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `rewind`, or `stop`. The schema is not a JavaScript export.
+The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, or `stop`. The schema is not a JavaScript export.
 
 ### `action: "list"`
 
@@ -277,7 +277,7 @@ The extension type-checks the chart, normalizes it, creates or loads run metadat
 }
 ```
 
-Loads a run id or directory belonging to the current working directory and returns `HyperchartRunInfo` in `details`.
+Loads a run id or directory belonging to the current working directory and returns `HyperchartRunInfo` in `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
 
 ```json
 {
@@ -287,6 +287,36 @@ Loads a run id or directory belonging to the current working directory and retur
 ```
 
 Use this tool before resume, replay override, rewind, or recovery after a crash.
+
+### `action: "view"`
+
+```ts
+{
+  action: "view";
+  runDir: string;
+  open?: boolean;
+}
+```
+
+Starts or reuses the Pi process's localhost inspector server, registers the selected run, and returns:
+
+```ts
+{
+  runId: string;
+  runDir: string;
+  url: string;
+}
+```
+
+`runDir` must identify a run belonging to the current working directory. `open` defaults to `true`; set it to `false` to return the URL without opening the system browser. The inspector polls current run/session data and its composer writes to the same run-scoped steering queue as the human command.
+
+```json
+{
+  "action": "view",
+  "runDir": "review-20260711-180000",
+  "open": false
+}
+```
 
 ### `action: "stop"`
 
@@ -396,4 +426,4 @@ These are process lifecycle states. Canonical host models use `running`, `comple
 
 ## Human command
 
-The extension also registers `/hyperchart` for interactive users. It is documented in [Pi extension](../pi.md#commands). Do not duplicate command syntax in agent skills; agents already receive the four tool schemas.
+The extension also registers `/hyperchart` for interactive users. It is documented in [Pi extension](../pi.md#hyperchart). Do not duplicate command syntax in agent skills; agents already receive the consolidated tool schema.
