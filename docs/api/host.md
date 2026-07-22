@@ -229,7 +229,7 @@ interface HyperchartSessionMessageInfo {
 }
 ```
 
-`session` is an optional, immutable live snapshot supplied by a host adapter. `actionKey` identifies the running action for steering. `role`, `toolset`, `model`, and `tools` record the concrete session plan used at launch when the host persists those fields. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. Hosts may bound or omit historical messages while preserving current activity fields.
+`session` is an optional, immutable latest-session snapshot supplied by a host adapter; each `HyperchartVisitInfo` may additionally carry the session associated with that durable visit. `actionKey` identifies the running action for steering. `role`, `toolset`, `model`, and `tools` record the concrete session plan used at launch when the host persists those fields. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. Hosts may bound or omit historical messages while preserving current activity fields.
 
 ## Visits
 
@@ -246,6 +246,7 @@ interface HyperchartVisitInfo {
   inputs?: Record<string, unknown>;
   mapItem?: { key: string; value?: unknown };
   invocation: HyperchartVisitInvocationInfo;
+  session?: HyperchartAgentSessionInfo;
 }
 
 type HyperchartVisitInvocationInfo =
@@ -272,7 +273,7 @@ interface HyperchartRenderedArtifactInfo {
 }
 ```
 
-Visit histories are append-only views derived from durable records. Updating a run snapshot must not rewrite previously returned snapshot objects.
+Visit histories are append-only views derived from durable records. Session progress records that include a durable `visit` number are joined to the matching entry. Run-directory inspection also reconstructs older per-action progress files from the persisted per-visit invocation directories; when several visits resumed one transcript, timestamped messages are segmented by each visit's durable start/end range. Updating a run snapshot must not rewrite previously returned snapshot objects.
 
 ## Transitions, inputs, refs, and schemas
 

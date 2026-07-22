@@ -2,10 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { hyperchartRunFromRunDir } from "../packages/hyperchart/src/inspect/run_inspect.js";
 import {
+	limitTranscriptMessages,
 	readNeutralSessionTranscript,
 	resolveContainedSessionFile,
 } from "../packages/hyperchart/src/inspect/session_transcript.js";
@@ -82,6 +84,99 @@ describe("run inspection transcript seam", () => {
 		const run = await hyperchartRunFromRunDir(runDir);
 		const state = run.states.find((candidate) => candidate.id === "done");
 		expect(state?.session?.messages?.[0]).toEqual({ id: "u1", role: "user", text: "hi" });
+	});
+
+	it("can read a full neutral transcript for visit segmentation while keeping the compact default", () => {
+		const { runDir } = makeRunDir();
+		const sessionsDir = join(runDir, "sessions");
+		const file = join(sessionsDir, "long-neutral.jsonl");
+		writeFileSync(
+			file,
+			[
+				JSON.stringify({ hyperchartTranscript: 1, sessionId: "long", createdAt: 1 }),
+				...Array.from({ length: 130 }, (_, index) =>
+					JSON.stringify({ id: `m${index}`, role: "assistant", text: `message ${index}`, timestamp: index }),
+				),
+			].join("\n"),
+		);
+
+		expect(readNeutralSessionTranscript(sessionsDir, file)).toHaveLength(120);
+		expect(readNeutralSessionTranscript(sessionsDir, file)?.[0]?.id).toBe("m10");
+		expect(readNeutralSessionTranscript(sessionsDir, file, { limit: false })).toHaveLength(130);
+	});
+
+	it("reconstructs every legacy visit session from persisted invocation directories", async () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-visit-sessions-"));
+		roots.push(root);
+		const chartPath = join(root, "visits.chart.ts");
+		writeFileSync(
+			chartPath,
+			`import { agent, chart, final } from "@surprisal/hyperchart";
+export default chart({ kind: "chart", id: "visits", initial: "work", states: {
+  work: { kind: "state", action: agent("worker", { task: "work" }), transitions: { AGAIN: "work", DONE: "done" } },
+  done: final(),
+} });
+`,
+		);
+		const runDir = join(root, "run");
+		const sessionsDir = join(runDir, "sessions");
+		mkdirSync(sessionsDir, { recursive: true });
+		saveRunMeta(runDir, { chartPath, workDir: root, chartId: "visits", createdAt: new Date().toISOString() });
+		const actionUid = { chart: "visits", state: "work", action: "agent" };
+		const definition = { kind: "agent", uid: actionUid, name: "worker", task: "work" };
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			[
+				{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1000 },
+				{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 1, seqId: 2, timestamp: 2000 },
+				{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 2, seqId: 3, timestamp: 3000 },
+				{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 3, seqId: 4, timestamp: 4000 },
+				{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 4, seqId: 5, timestamp: 5000 },
+				{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 5, seqId: 6, timestamp: 6000 },
+			].map((record) => JSON.stringify(record)).join("\n") + "\n",
+		);
+		const actionDir = join(sessionsDir, actionUidDirName(actionUid));
+		const firstFile = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:1`), "first.jsonl");
+		// Visits 2 and 3 resume the first session, so their own invocation directories have no transcript.
+		const thirdVisitDir = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:3`));
+		mkdirSync(join(firstFile, ".."), { recursive: true });
+		mkdirSync(thirdVisitDir, { recursive: true });
+		writeFileSync(firstFile, "{}\n");
+		// Legacy progress files retain only the latest action session and have no visit field.
+		updateSessionProgress(sessionsDir, actionUid, {
+			actionName: "worker",
+			status: "running",
+			// A stale row must not suppress recovery from the real visit directory, even when it claims newer activity.
+			sessionFile: join(sessionsDir, "missing.jsonl"),
+			lastActivityAt: Number.MAX_SAFE_INTEGER,
+		});
+
+		const run = await hyperchartRunFromRunDir(runDir, {
+			readTranscript: (_sessionsDir, sessionFile) => {
+				if (sessionFile === firstFile) return [
+					{ id: "first", role: "assistant", text: "first visit", timestamp: 2500 },
+					{ id: "boundary", role: "assistant", text: "second visit boundary", timestamp: 4000 },
+					{ id: "resumed", role: "assistant", text: "resumed visit", timestamp: 4500 },
+					{ id: "third", role: "assistant", text: "third visit", timestamp: 6500 },
+				];
+				return undefined;
+			},
+		});
+		const state = run.states.find((state) => state.id === "work");
+		const visits = state?.visitHistory;
+		expect(visits?.[0]?.session?.messages).toEqual([
+			{ id: "first", role: "assistant", text: "first visit", timestamp: 2500 },
+		]);
+		expect(visits?.[1]?.session?.messages).toEqual([
+			{ id: "boundary", role: "assistant", text: "second visit boundary", timestamp: 4000 },
+			{ id: "resumed", role: "assistant", text: "resumed visit", timestamp: 4500 },
+		]);
+		expect(visits?.[2]?.session?.messages).toEqual([
+			{ id: "third", role: "assistant", text: "third visit", timestamp: 6500 },
+		]);
+		expect(state?.session?.messages).toEqual([
+			{ id: "third", role: "assistant", text: "third visit", timestamp: 6500 },
+		]);
 	});
 
 	it("uses the run's persisted role and toolset mappings for resolved agent configuration", async () => {
@@ -170,6 +265,17 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 		});
 		expect(invalidState?.resolvedModel).toBeUndefined();
 		expect(invalidState?.resolvedTools).toBeUndefined();
+	});
+
+	it("handles explicit transcript limits without treating zero as unlimited", () => {
+		const messages = [
+			{ id: "1", role: "user" as const, text: "first" },
+			{ id: "2", role: "assistant" as const, text: "second" },
+		];
+		expect(limitTranscriptMessages(messages, { limit: 0 })).toEqual([]);
+		expect(limitTranscriptMessages(messages, { limit: 1 })).toEqual([messages[1]]);
+		expect(() => limitTranscriptMessages(messages, { limit: Number.POSITIVE_INFINITY })).toThrow(RangeError);
+		expect(() => limitTranscriptMessages(messages, { limit: -1 })).toThrow(RangeError);
 	});
 
 	it("rejects session files outside the sessions directory", () => {

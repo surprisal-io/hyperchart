@@ -40,7 +40,12 @@ import {
 } from "@surprisal/hyperchart/runtime";
 import { readNeutralSessionTranscript } from "@surprisal/hyperchart/inspect";
 import type { HyperchartSessionMessageInfo } from "@surprisal/hyperchart/host";
-import { createThrottledProgressWriter, readSessionProgress, updateSessionProgress } from "@surprisal/hyperchart/sessions";
+import {
+	createThrottledProgressWriter,
+	readSessionProgress,
+	sessionProgressKey,
+	updateSessionProgress,
+} from "@surprisal/hyperchart/sessions";
 import { createNeutralTranscriptWriter, type NeutralTranscriptWriter } from "./transcript_writer.js";
 import { resolveClaudeSubagentDefinitionDirs } from "./agent_definitions.js";
 
@@ -105,7 +110,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			},
 			generation,
 		).catch((error: unknown) => {
-			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect.actionUid, errorMessage(error));
+			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
@@ -133,7 +138,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
 				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
 		void this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
-			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
@@ -152,7 +157,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		const live = this.live.get(key);
 		if (live === undefined) return;
 		this.live.delete(key);
-		updateSessionProgress(this.options.sessionsDir, actionUid, { status: "cancelled", completedAt: Date.now() });
+		this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
 		live.session.abort();
 	}
 
@@ -160,7 +165,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		await Promise.all(
 			[...this.live.entries()].map(async ([key, live]) => {
 				this.generations.markCancelled(key, live.generation);
-				updateSessionProgress(this.options.sessionsDir, live.effect.actionUid, {
+				this.updateProgress(live.effect, {
 					status: "cancelled",
 					completedAt: Date.now(),
 				});
@@ -178,8 +183,10 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		generation: number,
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
-		const previousProgress = readSessionProgress(this.options.sessionsDir).sessions[key];
-		updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+		const previousProgress = readSessionProgress(this.options.sessionsDir).sessions[
+			sessionProgressKey(effect.actionUid, effect.id)
+		];
+		this.updateProgress(effect, {
 			actionName: effect.action.name,
 			status: "starting",
 			startedAt: Date.now(),
@@ -216,7 +223,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			const validated = await captured;
 			if (validated !== undefined) {
 				sink.captured = validated;
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					actionName: definition.name,
 					status: "completed",
 					completedAt: Date.now(),
@@ -301,7 +308,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			session.end();
 			await session.settled().catch(() => undefined);
 			if (!this.generations.isCancelled(key, generation)) {
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					status: sink.captured === undefined ? "failed" : "completed",
 					completedAt: Date.now(),
 					currentTool: undefined,
@@ -314,8 +321,12 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		}
 	}
 
-	private markProgressFailed(actionUid: ActionUID, error: string): void {
-		updateSessionProgress(this.options.sessionsDir, actionUid, { status: "failed", error, completedAt: Date.now() });
+	private updateProgress(effect: AgentEffect, patch: Parameters<typeof updateSessionProgress>[2]): void {
+		updateSessionProgress(this.options.sessionsDir, effect.actionUid, patch, effect.id);
+	}
+
+	private markProgressFailed(effect: AgentEffect, error: string): void {
+		this.updateProgress(effect, { status: "failed", error, completedAt: Date.now() });
 	}
 
 	private safeEmit(key: string, generation: number, emit: EmitCompletion, event: ChartEvent): void {
@@ -364,6 +375,7 @@ class ClaudeSession {
 			options.sessionsDir,
 			options.effect.actionUid,
 			options.definition.name,
+			options.effect.id,
 		);
 	}
 
@@ -532,7 +544,7 @@ class ClaudeSession {
 			this.writer = createNeutralTranscriptWriter(join(this.options.sessionDir, `${sessionId}.jsonl`), sessionId);
 			for (const record of this.pendingRecords.splice(0)) this.writer.append(record);
 		}
-		updateSessionProgress(this.options.sessionsDir, this.options.effect.actionUid, {
+		this.updateProgress({
 			actionName: this.options.definition.name,
 			status: "running",
 			model,
@@ -555,7 +567,7 @@ class ClaudeSession {
 				this.lastAssistant = block.text;
 				this.appendRecord({ role: "assistant", text: block.text });
 				const preview = previewText(block.text);
-				updateSessionProgress(this.options.sessionsDir, this.options.effect.actionUid, {
+				this.updateProgress({
 					actionName: this.options.definition.name,
 					status: "running",
 					currentText: undefined,
@@ -574,7 +586,7 @@ class ClaudeSession {
 					toolInput: stringifyToolInput(block.input),
 					toolStatus: "running",
 				});
-				updateSessionProgress(this.options.sessionsDir, this.options.effect.actionUid, {
+				this.updateProgress({
 					actionName: this.options.definition.name,
 					status: "running",
 					toolCount: this.toolCount,
@@ -605,7 +617,7 @@ class ClaudeSession {
 			});
 		}
 		if (sawToolResult) {
-			updateSessionProgress(this.options.sessionsDir, this.options.effect.actionUid, {
+			this.updateProgress({
 				actionName: this.options.definition.name,
 				status: "running",
 				currentTool: undefined,
@@ -624,7 +636,7 @@ class ClaudeSession {
 			this.resolveTurn(error);
 			return;
 		}
-		updateSessionProgress(this.options.sessionsDir, this.options.effect.actionUid, {
+		this.updateProgress({
 			actionName: this.options.definition.name,
 			status: "running",
 			turnCount: this.turnCount,
@@ -634,6 +646,15 @@ class ClaudeSession {
 			...(error === undefined ? {} : { error }),
 		});
 		this.resolveTurn(error);
+	}
+
+	private updateProgress(patch: Parameters<typeof updateSessionProgress>[2]): void {
+		updateSessionProgress(
+			this.options.sessionsDir,
+			this.options.effect.actionUid,
+			patch,
+			this.options.effect.id,
+		);
 	}
 
 	private resolveTurn(error: string | undefined): void {

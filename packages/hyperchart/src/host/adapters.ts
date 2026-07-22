@@ -121,6 +121,7 @@ type RuntimeStatusInfo = {
 export type HyperchartRuntimeSessionProgressInfo = {
 	actionUid: ActionUID;
 	actionKey?: string;
+	visit?: number;
 	actionName?: string;
 	status?: string;
 	startedAt?: number;
@@ -891,32 +892,135 @@ function appendSessionFacts(
 	progress: HyperchartRuntimeSessionProgressFile | undefined,
 ): void {
 	if (progress === undefined) return;
+	const sessionsByState = new Map<StatePath, HyperchartAgentSessionInfo[]>();
 	for (const session of Object.values(progress.sessions)) {
 		const stateId = session.actionUid.state;
 		const facts = map.get(stateId) ?? {};
-		facts.session = {
-			actionKey: session.actionKey ?? actionUidKey(session.actionUid),
-			status: session.status ?? "unknown",
-			...(session.startedAt === undefined ? {} : { startedAt: session.startedAt }),
-			...(session.lastActivityAt === undefined ? {} : { lastActivityAt: session.lastActivityAt }),
-			...(session.role === undefined ? {} : { role: session.role }),
-			...(session.model === undefined ? {} : { model: session.model }),
-			...(session.thinking === undefined ? {} : { thinking: session.thinking }),
-			...(session.toolset === undefined ? {} : { toolset: session.toolset }),
-			...(session.tools === undefined ? {} : { tools: [...session.tools] }),
-			...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
-			...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
-			...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),
-			...(session.currentTool === undefined ? {} : { currentTool: session.currentTool }),
-			...(session.currentToolArgs === undefined ? {} : { currentToolArgs: session.currentToolArgs }),
-			...(session.currentText === undefined ? {} : { currentText: session.currentText }),
-			...(session.currentReasoning === undefined ? {} : { currentReasoning: session.currentReasoning }),
-			...(session.lastMessage === undefined ? {} : { lastMessage: session.lastMessage }),
-			...(session.error === undefined ? {} : { error: session.error }),
-			...(session.messages === undefined ? {} : { messages: session.messages }),
-		};
+		const info = runtimeSessionInfo(session);
+		const candidates = sessionsByState.get(stateId) ?? [];
+		candidates.push(info);
+		sessionsByState.set(stateId, candidates);
+		if (facts.session === undefined || sessionActivity(info) >= sessionActivity(facts.session)) {
+			facts.session = limitSessionMessages(info);
+		}
+		const visit = session.visit === undefined
+			? facts.visitHistory?.at(-1)
+			: facts.visitHistory?.find((candidate) => candidate.visit === session.visit);
+		if (visit !== undefined && (visit.session === undefined || sessionActivity(info) >= sessionActivity(visit.session))) {
+			visit.session = info;
+		}
 		map.set(stateId, facts);
 	}
+	for (const [stateId, candidates] of sessionsByState) {
+		const facts = map.get(stateId);
+		const visits = facts?.visitHistory;
+		if (visits === undefined) continue;
+		visits.forEach((visit, index) => {
+			const nextVisitStartedAt = visits[index + 1]?.startedAt;
+			const exact = visit.session;
+			const exactMessages = exact === undefined ? [] : visitMessages(exact, visit, nextVisitStartedAt);
+			const fallback = exactMessages.length > 0
+				? undefined
+				: candidates.find(
+					(candidate) => candidate !== exact && visitMessages(candidate, visit, nextVisitStartedAt).length > 0,
+				);
+			const source = fallback === undefined
+				? exact
+				: exact === undefined
+					? fallback
+					: { ...fallback, ...exact, messages: fallback.messages ?? [] };
+			if (source !== undefined) {
+				visit.session = sessionForVisit(source, visit, exact !== undefined, nextVisitStartedAt);
+			}
+		});
+		const latestVisitSession = [...visits].reverse().find((visit) => visit.session !== undefined)?.session;
+		if (facts !== undefined && latestVisitSession !== undefined) {
+			facts.session = limitSessionMessages(latestVisitSession);
+		}
+	}
+}
+
+function runtimeSessionInfo(session: HyperchartRuntimeSessionProgressInfo): HyperchartAgentSessionInfo {
+	return {
+		actionKey: session.actionKey ?? actionUidKey(session.actionUid),
+		status: session.status ?? "unknown",
+		...(session.startedAt === undefined ? {} : { startedAt: session.startedAt }),
+		...(session.lastActivityAt === undefined ? {} : { lastActivityAt: session.lastActivityAt }),
+		...(session.role === undefined ? {} : { role: session.role }),
+		...(session.model === undefined ? {} : { model: session.model }),
+		...(session.thinking === undefined ? {} : { thinking: session.thinking }),
+		...(session.toolset === undefined ? {} : { toolset: session.toolset }),
+		...(session.tools === undefined ? {} : { tools: [...session.tools] }),
+		...(session.turnCount === undefined ? {} : { turnCount: session.turnCount }),
+		...(session.toolCount === undefined ? {} : { toolCount: session.toolCount }),
+		...(session.tokenCount === undefined ? {} : { tokenCount: session.tokenCount }),
+		...(session.currentTool === undefined ? {} : { currentTool: session.currentTool }),
+		...(session.currentToolArgs === undefined ? {} : { currentToolArgs: session.currentToolArgs }),
+		...(session.currentText === undefined ? {} : { currentText: session.currentText }),
+		...(session.currentReasoning === undefined ? {} : { currentReasoning: session.currentReasoning }),
+		...(session.lastMessage === undefined ? {} : { lastMessage: session.lastMessage }),
+		...(session.error === undefined ? {} : { error: session.error }),
+		...(session.messages === undefined ? {} : { messages: session.messages }),
+	};
+}
+
+function sessionActivity(session: HyperchartAgentSessionInfo): number {
+	return session.lastActivityAt ?? session.startedAt ?? 0;
+}
+
+function sessionForVisit(
+	session: HyperchartAgentSessionInfo,
+	visit: HyperchartVisitInfo,
+	exact: boolean,
+	nextVisitStartedAt: number | undefined,
+): HyperchartAgentSessionInfo {
+	const messages = visitMessages(session, visit, nextVisitStartedAt);
+	const sessionMessages = (messages.length > 0 ? messages : exact ? session.messages : undefined)?.slice(-120);
+	const historical = visit.status !== "running";
+	return {
+		...(historical ? withoutCurrentSessionActivity(session) : session),
+		status: historical
+			? visit.status === "failed"
+				? "failed"
+				: visit.status === "cancelled"
+					? "cancelled"
+					: "completed"
+			: session.status,
+		startedAt: visit.startedAt,
+		...(visit.endedAt === undefined ? {} : { lastActivityAt: visit.endedAt }),
+		...(sessionMessages === undefined ? {} : { messages: sessionMessages }),
+	};
+}
+
+function limitSessionMessages(session: HyperchartAgentSessionInfo): HyperchartAgentSessionInfo {
+	return session.messages === undefined ? session : { ...session, messages: session.messages.slice(-120) };
+}
+
+function withoutCurrentSessionActivity(session: HyperchartAgentSessionInfo): HyperchartAgentSessionInfo {
+	const historical = { ...session };
+	delete historical.currentTool;
+	delete historical.currentToolArgs;
+	delete historical.currentText;
+	delete historical.currentReasoning;
+	return historical;
+}
+
+function visitMessages(
+	session: HyperchartAgentSessionInfo,
+	visit: HyperchartVisitInfo,
+	nextVisitStartedAt: number | undefined,
+): HyperchartSessionMessageInfo[] {
+	const messages = session.messages ?? [];
+	const timestamped = messages.filter(
+		(message): message is HyperchartSessionMessageInfo & { timestamp: number } => typeof message.timestamp === "number",
+	);
+	if (timestamped.length === 0) return [];
+	const end = nextVisitStartedAt ?? visit.endedAt ?? Number.POSITIVE_INFINITY;
+	return timestamped.filter(
+		(message) =>
+			message.timestamp >= visit.startedAt &&
+			(nextVisitStartedAt === undefined ? message.timestamp <= end : message.timestamp < end),
+	);
 }
 
 function appendSessionIssues(
@@ -943,6 +1047,7 @@ function appendSessionIssues(
 function compactSessionPayload(session: HyperchartRuntimeSessionProgressInfo): Record<string, unknown> {
 	return {
 		status: session.status,
+		...(session.visit === undefined ? {} : { visit: session.visit }),
 		...(session.actionName === undefined ? {} : { actionName: session.actionName }),
 		...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
 		...(session.role === undefined ? {} : { role: session.role }),

@@ -427,9 +427,30 @@ describe("React runtime adapter", () => {
 			},
 			{ type: "state_action", kind: "invoke", actionUid: uid, definition, ...baseRecord(4) },
 		];
-		const work = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records).states.find(
-			(state) => state.id === "work",
-		);
+		const work = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records, {
+			sessionProgress: {
+				sessions: {
+					visit1: {
+						actionUid: uid,
+						actionKey: "visit-history:work:agent",
+						visit: 1,
+						status: "completed",
+						startedAt: 2000,
+						lastActivityAt: 3000,
+						model: "provider/first-model",
+					},
+					visit2: {
+						actionUid: uid,
+						actionKey: "visit-history:work:agent",
+						visit: 2,
+						status: "running",
+						startedAt: 4000,
+						lastActivityAt: 4500,
+						model: "provider/second-model",
+					},
+				},
+			},
+		}).states.find((state) => state.id === "work");
 		expect(work?.visits).toBe(2);
 		expect(work?.visitHistory).toMatchObject([
 			{
@@ -439,6 +460,7 @@ describe("React runtime adapter", () => {
 				completedEvent: "AGAIN",
 				inputs: { feedback: "initial" },
 				invocation: { kind: "agent", task: "Topic runtime; feedback initial" },
+				session: { status: "completed", model: "provider/first-model" },
 			},
 			{
 				visit: 2,
@@ -446,8 +468,10 @@ describe("React runtime adapter", () => {
 				status: "running",
 				inputs: { feedback: "second" },
 				invocation: { kind: "agent", task: "Topic runtime; feedback second" },
+				session: { status: "running", model: "provider/second-model" },
 			},
 		]);
+		expect(work?.session).toMatchObject({ status: "running", model: "provider/second-model" });
 	});
 
 	it("marks downstream completions stale after a state is revisited", () => {

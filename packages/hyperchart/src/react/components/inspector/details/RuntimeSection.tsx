@@ -115,7 +115,13 @@ export function RuntimeSection({
 						usage: {formatHyperchartUsage(state.usage) ?? JSON.stringify(state.usage)}
 					</div>
 				)}
-				{state.visitHistory !== undefined && <VisitHistory visits={state.visitHistory} />}
+				{state.visitHistory !== undefined && (
+					<VisitHistory
+						visits={state.visitHistory}
+						{...(state.agent === undefined ? {} : { agentName: state.agent })}
+						{...(onSteerSession === undefined ? {} : { onSteerSession })}
+					/>
+				)}
 				{state.type === "map" && state.mapConfig?.visitHistory !== undefined && (
 					<MapVisitHistory
 						visits={state.mapConfig.visitHistory}

@@ -6,9 +6,10 @@ import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
+import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
 import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
-import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
+import { readSessionProgress, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import {
 	closeRunInspectorServer,
 	openRunInspector,
@@ -565,6 +566,89 @@ describe("hyperchart extension", () => {
 		expect(lines.map((line) => JSON.parse(line) as { seqId: number }).map((record) => record.seqId)).toEqual([1]);
 		expect(result.details).toMatchObject({ removedRecords: 2, cutSeqId: 2 });
 		expect(existsSync(join(runDir, "rewind-backups"))).toBe(true);
+	});
+
+	it("rewind session cleanup preserves retained visits of the same action", async () => {
+		const chartPath = join(tempDir, "repeated-visits.mjs");
+		writeFileSync(
+			chartPath,
+			`export default {
+	kind: "chart", id: "demo", initial: "work",
+	states: {
+		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { AGAIN: "work", DONE: "done" } },
+		done: { kind: "final" }
+	}
+};\n`,
+		);
+		const runDir = createRun("rewind-visits", projectDir, chartPath);
+		mkdirSync(runDir, { recursive: true });
+		const actionUid = { chart: "demo", state: "work", action: "agent" };
+		const definition = { kind: "agent", uid: actionUid, name: "worker" };
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			[
+				{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 },
+				{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 1, seqId: 2, timestamp: 2 },
+				{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 2, seqId: 3, timestamp: 3 },
+				{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 3, seqId: 4, timestamp: 4 },
+				{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 4, seqId: 5, timestamp: 5 },
+				{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 5, seqId: 6, timestamp: 6 },
+				{ type: "state_action", kind: "complete", actionUid, event: { type: "DONE" }, parentId: 6, seqId: 7, timestamp: 7 },
+			].map((record) => JSON.stringify(record)).join("\n") + "\n",
+		);
+		const sessionsDir = join(runDir, "sessions");
+		const actionDir = join(sessionsDir, actionUidDirName(actionUid));
+		const firstVisitDir = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:1`));
+		const secondVisitDir = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:2`));
+		const thirdVisitDir = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:3`));
+		const sharedSessionFile = join(firstVisitDir, "shared.jsonl");
+		mkdirSync(firstVisitDir, { recursive: true });
+		mkdirSync(secondVisitDir, { recursive: true });
+		mkdirSync(thirdVisitDir, { recursive: true });
+		writeFileSync(
+			sharedSessionFile,
+			[
+				{ type: "session", id: "shared", timestamp: "1970-01-01T00:00:00.001Z" },
+				{ type: "message", timestamp: "1970-01-01T00:00:00.002Z", message: { role: "assistant", content: "retained visit" } },
+				{ type: "message", timestamp: "1970-01-01T00:00:00.004Z", message: { role: "assistant", content: "removed visit two" } },
+				{ type: "message", timestamp: "1970-01-01T00:00:00.006Z", message: { role: "assistant", content: "removed visit three" } },
+			].map((record) => JSON.stringify(record)).join("\n") + "\n",
+		);
+		writeFileSync(join(secondVisitDir, "visit.marker"), "removed");
+		writeFileSync(join(thirdVisitDir, "visit.marker"), "removed");
+		updateSessionProgress(
+			sessionsDir,
+			actionUid,
+			{ actionName: "worker", status: "completed", sessionFile: sharedSessionFile },
+			"demo:work:agent:1:2",
+		);
+		// Legacy progress has no visit and represents the latest resumed session, whose transcript spans both removed visits.
+		updateSessionProgress(
+			sessionsDir,
+			actionUid,
+			{ actionName: "worker", status: "completed", sessionFile: sharedSessionFile },
+		);
+
+		const tool = registeredTool("hyperchart");
+		const { ctx } = commandContext(projectDir);
+		const result = await tool.execute(
+			"tool-call",
+			{ action: "rewind", runDir, seqId: 4, mode: "before", cleanupSessions: true, cleanupArtifacts: false },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
+
+		const progress = readSessionProgress(sessionsDir);
+		expect(progress.sessions["demo:work:agent:visit:1"]).toBeDefined();
+		expect(progress.sessions["demo:work:agent"]).toBeUndefined();
+		expect(existsSync(firstVisitDir)).toBe(true);
+		expect(existsSync(secondVisitDir)).toBe(false);
+		expect(existsSync(thirdVisitDir)).toBe(false);
+		expect(readFileSync(sharedSessionFile, "utf8")).toContain("retained visit");
+		expect(readFileSync(sharedSessionFile, "utf8")).not.toContain("removed visit two");
+		expect(readFileSync(sharedSessionFile, "utf8")).not.toContain("removed visit three");
+		expect(result.details).toMatchObject({ cleanup: { sessionsRemoved: 1 } });
 	});
 });
 

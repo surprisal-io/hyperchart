@@ -9,9 +9,15 @@ export const MAX_TRANSCRIPT_TEXT_LENGTH = 16_000;
  * Reads the display transcript for one agent session file. Hosts plug their own
  * reader into run inspection; the neutral JSONL format below is the default.
  */
+export type SessionTranscriptReadOptions = {
+	/** Maximum newest messages to return. `false` preserves the full transcript for per-visit segmentation. */
+	limit?: number | false;
+};
+
 export type SessionTranscriptReader = (
 	sessionsDir: string,
 	sessionFile: string | undefined,
+	options?: SessionTranscriptReadOptions,
 ) => HyperchartSessionMessageInfo[] | undefined;
 
 /** Containment guard shared by transcript readers: only files inside sessionsDir are readable. */
@@ -83,6 +89,7 @@ export type NeutralTranscriptHeader = {
 export function readNeutralSessionTranscript(
 	sessionsDir: string,
 	sessionFile: string | undefined,
+	options: SessionTranscriptReadOptions = {},
 ): HyperchartSessionMessageInfo[] | undefined {
 	if (sessionFile === undefined) return undefined;
 	const file = resolveContainedSessionFile(sessionsDir, sessionFile);
@@ -103,10 +110,21 @@ export function readNeutralSessionTranscript(
 			const message = normalizeNeutralRecord(entry);
 			if (message !== undefined) messages.push(message);
 		}
-		return combineToolLifecycle(messages).slice(-MAX_TRANSCRIPT_MESSAGES);
+		return limitTranscriptMessages(combineToolLifecycle(messages), options);
 	} catch {
 		return undefined;
 	}
+}
+
+export function limitTranscriptMessages(
+	messages: HyperchartSessionMessageInfo[],
+	options: SessionTranscriptReadOptions = {},
+): HyperchartSessionMessageInfo[] {
+	const limit = options.limit === undefined ? MAX_TRANSCRIPT_MESSAGES : options.limit;
+	if (limit === false) return messages;
+	if (!Number.isFinite(limit) || limit < 0) throw new RangeError("Transcript message limit must be a finite non-negative number or false");
+	const count = Math.floor(limit);
+	return count === 0 ? [] : messages.slice(-count);
 }
 
 function isNeutralHeaderLine(line: string | undefined): boolean {

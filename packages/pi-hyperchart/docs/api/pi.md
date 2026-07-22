@@ -356,7 +356,7 @@ Exactly one of `state`, `seqId`, or `to` is required.
 | Parameter | Default | Meaning |
 |---|---:|---|
 | `mode` | `before` | Keep records before or through the matched record. `to: "compatible"` always cuts before the first incompatible record. |
-| `cleanupSessions` | `true` | Remove downstream session progress and move downstream session directories into the backup. |
+| `cleanupSessions` | `true` | Remove session progress/directories only for durable visits removed by the cut; retained earlier visits of the same action stay active, and a legacy transcript shared with a removed resumed visit is backed up and truncated at that visit's invocation. |
 | `cleanupArtifacts` | `false` | Best-effort backup and removal of downstream declared artifact files. |
 | `start` | `false` | Start the rewound run after truncation. |
 | `ignoreReplayWarnings` | `false` | Applied only when `start` is true. |

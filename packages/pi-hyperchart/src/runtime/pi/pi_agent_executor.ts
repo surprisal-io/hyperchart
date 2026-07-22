@@ -96,7 +96,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			},
 			generation,
 		).catch((error: unknown) => {
-			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect.actionUid, errorMessage(error));
+			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
@@ -126,7 +126,7 @@ export class PiAgentExecutor implements AgentExecutor {
 					{ forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) },
 					generation,
 				).catch((error: unknown) => {
-					if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+					if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect, errorMessage(error));
 					this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 				});
 				return;
@@ -140,7 +140,7 @@ export class PiAgentExecutor implements AgentExecutor {
 				{ forceNewSession: false, resumePrompt: buildRejectPrompt(effect) },
 				generation,
 			).catch((error: unknown) => {
-				if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+				if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect, errorMessage(error));
 				this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 			});
 			return;
@@ -152,7 +152,7 @@ export class PiAgentExecutor implements AgentExecutor {
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
 				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
 		void this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
-			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect.actionUid, errorMessage(error));
+			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 		});
 	}
@@ -172,7 +172,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		if (live === undefined) return;
 		this.live.delete(key);
 		live.unsubscribeProgress?.();
-		updateSessionProgress(this.options.sessionsDir, actionUid, { status: "cancelled", completedAt: Date.now() });
+		this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
 		void live.session.abort().finally(() => live.session.dispose());
 	}
 
@@ -181,7 +181,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			[...this.live.entries()].map(async ([key, live]) => {
 				this.generations.markCancelled(key, live.generation);
 				live.unsubscribeProgress?.();
-				updateSessionProgress(this.options.sessionsDir, live.effect.actionUid, {
+				this.updateProgress(live.effect, {
 					status: "cancelled",
 					completedAt: Date.now(),
 				});
@@ -199,7 +199,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		generation: number,
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
-		updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+		this.updateProgress(effect, {
 			actionName: effect.action.name,
 			status: "starting",
 			startedAt: Date.now(),
@@ -295,7 +295,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			sessionManager,
 		});
 		const sessionFile = session.sessionManager.getSessionFile();
-		updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+		this.updateProgress(effect, {
 			actionName: definition.name,
 			status: "running",
 			...(sessionFile === undefined ? {} : { sessionFile }),
@@ -336,13 +336,13 @@ export class PiAgentExecutor implements AgentExecutor {
 		let turnCount = 0;
 		let toolCount = 0;
 		let tokenCount = 0;
-		const stream = createThrottledProgressWriter(this.options.sessionsDir, effect.actionUid, definition.name);
+		const stream = createThrottledProgressWriter(this.options.sessionsDir, effect.actionUid, definition.name, effect.id);
 		const clearStreamFields = { currentText: undefined, currentReasoning: undefined };
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "turn_start") {
 				turnCount++;
 				stream.reset();
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					actionName: definition.name,
 					status: "running",
 					turnCount,
@@ -359,7 +359,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			}
 			if (event.type === "tool_execution_start") {
 				toolCount++;
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					actionName: definition.name,
 					status: "running",
 					toolCount,
@@ -370,7 +370,7 @@ export class PiAgentExecutor implements AgentExecutor {
 				return;
 			}
 			if (event.type === "tool_execution_end") {
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					actionName: definition.name,
 					status: "running",
 					toolCount,
@@ -384,7 +384,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			if (event.type === "message_end") {
 				tokenCount += usageTokens(event.message);
 				stream.reset();
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					actionName: definition.name,
 					status: "running",
 					...clearStreamFields,
@@ -395,7 +395,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			}
 			if (event.type === "agent_end") {
 				stream.reset();
-				updateSessionProgress(this.options.sessionsDir, effect.actionUid, {
+				this.updateProgress(effect, {
 					actionName: definition.name,
 					status: event.willRetry ? "running" : "completed",
 					completedAt: event.willRetry ? undefined : Date.now(),
@@ -412,8 +412,12 @@ export class PiAgentExecutor implements AgentExecutor {
 		};
 	}
 
-	private markProgressFailed(actionUid: ActionUID, error: string): void {
-		updateSessionProgress(this.options.sessionsDir, actionUid, { status: "failed", error, completedAt: Date.now() });
+	private updateProgress(effect: AgentEffect, patch: Parameters<typeof updateSessionProgress>[2]): void {
+		updateSessionProgress(this.options.sessionsDir, effect.actionUid, patch, effect.id);
+	}
+
+	private markProgressFailed(effect: AgentEffect, error: string): void {
+		this.updateProgress(effect, { status: "failed", error, completedAt: Date.now() });
 	}
 
 	private safeEmit(key: string, generation: number, emit: EmitCompletion, event: ChartEvent): void {
