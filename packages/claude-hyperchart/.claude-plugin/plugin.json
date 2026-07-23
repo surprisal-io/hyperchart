@@ -12,9 +12,9 @@
 	"experimental": {
 		"monitors": [
 			{
-				"name": "hyperchart-terminal",
+				"name": "hyperchart-notifications",
 				"command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/hyperchart-monitor.mjs\"",
-				"description": "Hyperchart terminal run updates",
+				"description": "Hyperchart terminal updates and owned user-input gates",
 				"when": "always"
 			}
 		]

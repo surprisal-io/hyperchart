@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { emitPendingClaudeTerminalNotifications } from "../dist/monitor.js";
+import { emitPendingClaudeNotifications } from "../dist/monitor.js";
 
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const options = {
@@ -13,7 +13,7 @@ const intervalMs = positiveInteger(process.env.HYPERCHART_MONITOR_INTERVAL_MS) ?
 
 function scan() {
 	try {
-		emitPendingClaudeTerminalNotifications(options);
+		emitPendingClaudeNotifications(options);
 	} catch (error) {
 		// stdout is reserved for one-line Claude monitor notifications.
 		process.stderr.write(`[hyperchart-monitor] ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);

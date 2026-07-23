@@ -1,19 +1,27 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { basename, relative, resolve } from "node:path";
+import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, relative, resolve } from "node:path";
 import { z } from "zod";
 import { inspectChartAst, parseChartModuleSync } from "@surprisal/hyperchart";
 import {
+	USER_INTERACTION_WAIT_LEASE_MS,
+	acquireActiveUserInteraction,
 	assertChartPreflight,
 	claimTerminalNotificationReceipt,
+	claimUserInteractionReceipt,
 	createRunDir,
 	listHyperchartFiles,
 	loadHostSettings,
 	loadRunMeta,
 	readDeliverableTerminalNotificationRequest,
+	readUserInteractionClose,
+	readUserInteractionResponse,
 	rewindHyperchartRun,
 	saveRunMeta,
+	validateAndPersistUserInteractionResponse,
 	type HyperchartRunnerConfig,
+	type OwnedUserInteraction,
 	type RunMeta,
+	type UserInteractionOwner,
 } from "@surprisal/hyperchart/runtime";
 import { hyperchartRunFromInspectResult, summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromRunDir } from "@surprisal/hyperchart/inspect";
@@ -28,6 +36,11 @@ import {
 } from "@surprisal/hyperchart/sessions";
 import { claudeHostPaths, claudeRunsRoot, claudeUserChartsDir } from "../claude/paths.js";
 import { createClaudeAgentDefaultsResolver } from "../claude/agent_definitions.js";
+import {
+	claudeUserInteractionDetails,
+	claudeUserInteractionInstruction,
+	ownedClaudeUserInteractionSummary,
+} from "../monitor.js";
 import { spawnDetachedRunner, watchRun } from "./spawn_runner.js";
 
 export type HyperchartMcpDeps = {
@@ -59,6 +72,9 @@ const cwdField = {
 export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcpTool[] {
 	const runsRoot = () => deps.runsRoot ?? claudeRunsRoot();
 	const cwdOf = (args: Record<string, unknown>) => (typeof args.cwd === "string" ? args.cwd : deps.cwd);
+	const interactionOwner = (cwd: string): UserInteractionOwner | undefined => deps.sessionId === undefined
+		? undefined
+		: { runsRoot: runsRoot(), host: "claude", sessionId: deps.sessionId, workDir: cwd };
 	const resolveRunDirArg = (spec: string, cwd: string) => {
 		if (spec.includes("/") || spec.includes("\\") || spec.startsWith(".")) return resolve(cwd, spec);
 		return resolve(runsRoot(), spec);
@@ -131,7 +147,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		{
 			name: "hyperchart_run",
 			description:
-				"Start a chart as a detached background run, or resume an existing run directory. Terminal updates are delivered automatically by the Hyperchart plugin monitor; Claude must not start Bash/Monitor polling watchers. wait=true blocks only this tool call's current task and returns the same terminal prompt directly.",
+				"Start a chart as a detached background run, or resume an existing run directory. Updates are delivered automatically by the Hyperchart plugin monitor; Claude must not start Bash/Monitor polling watchers. wait=true returns at either terminal status or the session arbiter's active user-input gate.",
 			inputSchema: {
 				chartPath: z.string().optional(),
 				runDir: z.string().optional().describe("Existing run id or directory to resume"),
@@ -139,7 +155,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				exportName: z.string().optional(),
 				ignoreReplayWarnings: z.boolean().optional(),
 				defaultModel: z.string().optional(),
-				wait: z.boolean().optional().describe("Block only this current task until terminal status; do not start polling watchers"),
+				wait: z.boolean().optional().describe("Block only this current task until terminal status or an owned active user gate; do not start polling watchers"),
 				...cwdField,
 			},
 			handler: async (args) => {
@@ -182,7 +198,11 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const runId = basename(runDir);
 				const existingStatus = readRunStatus(runDir);
 				if (isRunLive(existingStatus)) {
-					if (args.wait === true) return waitedRunResult(runDir, meta ?? loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status: await watchRun(runDir) });
+					if (args.wait === true) {
+						const boundary = await watchClaudeRunBoundary(runDir, interactionOwner(cwd));
+						if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, runDir, chartId: parsed.ast.id });
+						return waitedRunResult(runDir, meta ?? loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status: boundary.status });
+					}
 					return ok({ runId, runDir, chartId: parsed.ast.id, attached: true, status: existingStatus });
 				}
 
@@ -220,8 +240,9 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const pid = spawnDetachedRunner(config);
 				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, state: "running", pid, heartbeatAt: Date.now() });
 				if (args.wait === true) {
-					const status = await watchRun(runDir);
-					return waitedRunResult(runDir, loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status });
+					const boundary = await watchClaudeRunBoundary(runDir, interactionOwner(cwd));
+					if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, runDir, chartId: parsed.ast.id });
+					return waitedRunResult(runDir, loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status: boundary.status });
 				}
 				return ok({
 					runId,
@@ -233,6 +254,70 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						? { limitation: "CLAUDE_CODE_SESSION_ID is unavailable, so automatic terminal notification ownership cannot be established." }
 						: {}),
 				});
+			},
+		},
+		{
+			name: "hyperchart_respond",
+			description:
+				"Commit the real result of native AskUserQuestion to the exact active Hyperchart user gate. Never call this with an inferred or model-authored answer.",
+			inputSchema: {
+				runId: z.string().min(1),
+				seqId: z.number().int().positive(),
+				event: z.string().min(1),
+				output: z.unknown().optional(),
+				...cwdField,
+			},
+			handler: async (args) => {
+				try {
+					const cwd = cwdOf(args);
+					const owner = interactionOwner(cwd);
+					if (owner === undefined) return fail("CLAUDE_CODE_SESSION_ID is unavailable; user interaction ownership cannot be established");
+					const runId = args.runId as string;
+					const seqId = args.seqId as number;
+					if (args.event === "FAILED") return fail("FAILED is reserved and cannot be returned by a user");
+					const event = {
+						type: args.event as string,
+						...(args.output === undefined ? {} : { output: args.output }),
+					};
+					const runDir = resolve(runsRoot(), runId);
+					if (basename(runId) !== runId || dirname(canonicalPath(runDir)) !== canonicalPath(runsRoot())) {
+						return fail(`Run coordinate '${runId}' is not a run id under the configured runs root`);
+					}
+					const meta = loadRunMeta(runDir);
+					if (meta.originSessionId !== owner.sessionId) return fail(`Run '${runId}' is not owned by this session`);
+					if (canonicalPath(meta.workDir) !== canonicalPath(cwd)) return fail(`Run '${runId}' belongs to another working directory`);
+
+					// Identical retries are mailbox operations and remain valid even if the chart
+					// source was subsequently moved or made unparsable. The shared helper still
+					// enforces exact owner/cwd before its idempotent return.
+					const hasResolution = readUserInteractionResponse(runDir, seqId) !== undefined ||
+						readUserInteractionClose(runDir, seqId) !== undefined;
+					if (hasResolution) {
+						const committed = await validateAndPersistUserInteractionResponse({ runDir, runId, seqId, event, owner });
+						return ok({ runId, seqId, event, committed: true, idempotent: committed.idempotent });
+					}
+					const active = acquireActiveUserInteraction(owner);
+					if (active === undefined || active.request.runId !== runId || active.request.seqId !== seqId) {
+						return fail(`User interaction (${runId}, ${seqId}) is not the active gate`);
+					}
+
+					const parsed = parseChartModuleSync(
+						meta.chartPath,
+						meta.exportName === undefined ? {} : { exportName: meta.exportName },
+					);
+					if (!parsed.ok) return fail(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+					const committed = await validateAndPersistUserInteractionResponse({
+						runDir,
+						runId,
+						seqId,
+						event,
+						schemaRegistry: parsed.schemaRegistry,
+						owner,
+					});
+					return ok({ runId, seqId, event, committed: true, idempotent: committed.idempotent });
+				} catch (error) {
+					return fail(error instanceof Error ? error.message : String(error));
+				}
 			},
 		},
 		{
@@ -251,7 +336,15 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const run = await hyperchartRunFromRunDir(runDir, {
 					agentDefaults: createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath),
 				});
-				return ok(args.verbose === true ? run : summarizeRunInspect(run));
+				const inspected = args.verbose === true ? run : summarizeRunInspect(run);
+				return ok({
+					...inspected,
+					userInteractions: ownedClaudeUserInteractionSummary({
+						runsRoot: runsRoot(),
+						cwd,
+						...(deps.sessionId === undefined ? {} : { sessionId: deps.sessionId }),
+					}),
+				});
 			},
 		},
 		{
@@ -389,6 +482,72 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 	];
 }
 
+type ClaudeRunBoundary =
+	| { kind: "terminal"; status: Awaited<ReturnType<typeof watchRun>> }
+	| { kind: "user"; interaction: OwnedUserInteraction };
+
+function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | undefined): Promise<ClaudeRunBoundary> {
+	if (owner === undefined) return watchRun(runDir).then((status) => ({ kind: "terminal" as const, status }));
+	return new Promise((resolveBoundary, rejectBoundary) => {
+		let settled = false;
+		const finish = (boundary: ClaudeRunBoundary) => {
+			if (settled) return;
+			settled = true;
+			clearInterval(timer);
+			resolveBoundary(boundary);
+		};
+		const inspectInteraction = () => {
+			try {
+				const active = acquireActiveUserInteraction(owner);
+				if (active === undefined) return;
+				if (active.presentation === "pending") {
+					// Pin only. The MCP tool result has not yet been delivered, so confirmation
+					// here would make a crash in the return window suppress recovery.
+					claimUserInteractionReceipt(active.runDir, active.request.seqId, "claude", owner.sessionId, {
+						source: "wait",
+						leaseMs: USER_INTERACTION_WAIT_LEASE_MS,
+					});
+				}
+				const current = acquireActiveUserInteraction(owner);
+				if (current === undefined || interactionCoordinateKey(current) !== interactionCoordinateKey(active)) return;
+				finish({ kind: "user", interaction: current });
+			} catch {
+				// Isolate malformed/concurrently-created mailboxes and keep watching.
+			}
+		};
+		const timer = setInterval(inspectInteraction, 100);
+		timer.unref();
+		watchRun(runDir).then(
+			(status) => finish({ kind: "terminal", status }),
+			(error) => {
+				if (settled) return;
+				settled = true;
+				clearInterval(timer);
+				rejectBoundary(error);
+			},
+		);
+		inspectInteraction();
+	});
+}
+
+function interactionCoordinateKey(interaction: OwnedUserInteraction): string {
+	return `${interaction.request.runId}\0${interaction.request.seqId}`;
+}
+
+function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRun: { runId: string; runDir: string; chartId: string }): ToolResult {
+	return ok({
+		boundary: "user",
+		final: false,
+		runId: interaction.request.runId,
+		runDir: interaction.runDir,
+		chartId: interaction.request.actionUid.chart,
+		interaction: claudeUserInteractionDetails(interaction),
+		instruction: claudeUserInteractionInstruction(interaction),
+		waitedRun,
+		presentation: interaction.presentation === "confirmed" ? "confirmed-recovery" : "claimed-not-confirmed",
+	});
+}
+
 function waitedRunResult(runDir: string, meta: RunMeta, sessionId: string | undefined, value: Record<string, unknown>): ToolResult {
 	if (sessionId === undefined) {
 		return ok({
@@ -455,6 +614,15 @@ function stopRunDirectory(runDir: string, cwd: string): { runId: string; runDir:
 	if (pid === undefined) patchRunStatus(runDir, { state: "stopped", exitCode: 0, error: "runner was not live" });
 	else process.kill(pid, "SIGTERM");
 	return { runId: basename(runDir), runDir, ...(pid === undefined ? {} : { pid }) };
+}
+
+function canonicalPath(path: string): string {
+	const absolute = resolve(path);
+	try {
+		return realpathSync.native(absolute);
+	} catch {
+		return absolute;
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

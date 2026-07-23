@@ -3,7 +3,13 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emitPendingClaudeTerminalNotifications, pendingOwnedClaudeTerminalRequests } from "../packages/claude-hyperchart/src/monitor.js";
+import {
+	emitPendingClaudeNotifications,
+	emitPendingClaudeTerminalNotifications,
+	emitPendingClaudeUserInteraction,
+	ownedClaudeUserInteractionSummary,
+	pendingOwnedClaudeTerminalRequests,
+} from "../packages/claude-hyperchart/src/monitor.js";
 import { watchRun } from "../packages/claude-hyperchart/src/mcp/spawn_runner.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
@@ -12,6 +18,12 @@ import {
 	hasTerminalNotificationReceipt,
 	persistTerminalNotificationRequest,
 } from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
+import {
+	claimUserInteractionReceipt,
+	closeUserInteraction,
+	hasUserInteractionReceipt,
+	persistUserInteractionRequest,
+} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -53,6 +65,38 @@ function createRequest(
 		artifacts: [],
 	});
 	patchRunStatus(runDir, { runId: name, chartId: "chart", state: status, ...(status === "running" ? { heartbeatAt: Date.now() } : {}) });
+	return runDir;
+}
+
+function createUserGate(
+	runsRoot: string,
+	cwd: string,
+	runId: string,
+	seqId: number,
+	sessionId = "session-a",
+	options: readonly string[] = ["Approve", "Reject"],
+) {
+	const runDir = join(runsRoot, runId);
+	saveRunMeta(runDir, {
+		chartPath: join(cwd, "chart.ts"),
+		workDir: cwd,
+		chartId: "chart",
+		createdAt: new Date().toISOString(),
+		originSessionId: sessionId,
+	});
+	patchRunStatus(runDir, { runId, chartId: "chart", state: "running", pid: process.pid, heartbeatAt: Date.now() });
+	persistUserInteractionRequest(runDir, {
+		runId,
+		seqId,
+		actionUid: { chart: "chart", state: "review", action: "user" },
+		prompt: `Review ${runId}?`,
+		options,
+		events: ["APPROVED", "REJECTED", "FAILED"],
+		reply: {
+			kind: "jsonSchema",
+			schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false },
+		},
+	});
 	return runDir;
 }
 
@@ -112,6 +156,77 @@ describe("Claude terminal monitor", () => {
 		expect(pendingOwnedClaudeTerminalRequests({ runsRoot, cwd, sessionId: "session-a" })).toHaveLength(1);
 	});
 
+	it("emits only the arbiter's active owned gate with the AskUserQuestion protocol", () => {
+		const { runsRoot, cwd, root } = world();
+		createUserGate(runsRoot, cwd, "run-b", 1);
+		const activeDir = createUserGate(runsRoot, cwd, "run-a", 2);
+		createUserGate(runsRoot, cwd, "foreign-session", 1, "session-b");
+		createUserGate(runsRoot, join(root, "other"), "foreign-cwd", 1);
+		const lines: string[] = [];
+
+		expect(emitPendingClaudeUserInteraction({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).not.toContain("\n");
+		const emitted = JSON.parse(lines[0]!);
+		expect(emitted).toMatchObject({
+			customType: "hyperchart-user-request",
+			runId: "run-a",
+			seqId: 2,
+			details: { runId: "run-a", seqId: 2, options: ["Approve", "Reject"] },
+		});
+		expect(emitted.effectId).toBeUndefined();
+		expect(emitted.requestId).toBeUndefined();
+		expect(emitted.content).toContain("AskUserQuestion once for this delivery attempt");
+		expect(emitted.content).toContain("Never infer");
+		expect(emitted.content).toContain("hyperchart_respond");
+		expect(hasUserInteractionReceipt(activeDir, 2, "claude", "session-a")).toBe(true);
+		expect(emitPendingClaudeUserInteraction({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(0);
+
+		const summary = ownedClaudeUserInteractionSummary({ runsRoot, cwd, sessionId: "session-a" });
+		expect(summary.active).toMatchObject({ runId: "run-a", seqId: 2, presentation: "confirmed" });
+		expect(summary.queued.map((gate) => [gate.runId, gate.seqId])).toEqual([["run-b", 1]]);
+		closeUserInteraction(activeDir, { runId: "run-a", seqId: 2 }, "test");
+		expect(ownedClaudeUserInteractionSummary({ runsRoot, cwd, sessionId: "session-a" }).active).toMatchObject({ runId: "run-b", seqId: 1 });
+	});
+
+	it("suppresses a waited gate during its delivery lease and recovers it after expiry", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(100_000);
+		const { runsRoot, cwd } = world();
+		const runDir = createUserGate(runsRoot, cwd, "waited-gate", 1);
+		expect(claimUserInteractionReceipt(runDir, 1, "claude", "session-a", {
+			now: 1,
+			leaseMs: 100_000,
+			source: "wait",
+		})).toBe(true);
+		const lines: string[] = [];
+		expect(emitPendingClaudeUserInteraction({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(0);
+		expect(lines).toEqual([]);
+
+		vi.setSystemTime(100_002);
+		expect(emitPendingClaudeUserInteraction({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(JSON.parse(lines[0]!).details).toMatchObject({ runId: "waited-gate", seqId: 1 });
+	});
+
+	it("keeps a failed user-gate stdout write recoverable after its claim lease", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(100_000);
+		const { runsRoot, cwd } = world();
+		const runDir = createUserGate(runsRoot, cwd, "write-failed-gate", 1, "session-a", []);
+		expect(() => emitPendingClaudeUserInteraction({
+			runsRoot,
+			cwd,
+			sessionId: "session-a",
+			writeLine: () => { throw new Error("stdout closed"); },
+		})).toThrow("stdout closed");
+		expect(hasUserInteractionReceipt(runDir, 1, "claude", "session-a")).toBe(false);
+		vi.setSystemTime(131_000);
+		const lines: string[] = [];
+		expect(emitPendingClaudeNotifications({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(JSON.parse(lines[0]!).content).toContain("free-text question");
+		expect(hasUserInteractionReceipt(runDir, 1, "claude", "session-a")).toBe(true);
+	});
+
 	it("the dead-run watcher preserves a request written before the status crash", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(100_000);
@@ -167,9 +282,10 @@ describe("Claude terminal monitor", () => {
 	it("registers an always-on persistent plugin monitor", () => {
 		const plugin = JSON.parse(readFileSync("packages/claude-hyperchart/.claude-plugin/plugin.json", "utf8"));
 		expect(plugin.experimental.monitors).toEqual([
-			expect.objectContaining({ name: "hyperchart-terminal", when: "always" }),
+			expect.objectContaining({ name: "hyperchart-notifications", when: "always" }),
 		]);
 		const executable = readFileSync("packages/claude-hyperchart/bin/hyperchart-monitor.mjs", "utf8");
+		expect(executable).toContain("emitPendingClaudeNotifications(options)");
 		expect(executable).toContain("scan();");
 		expect(executable).toContain("setInterval(scan, intervalMs)");
 	});
