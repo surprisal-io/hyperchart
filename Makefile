@@ -44,7 +44,7 @@ release-gate: _require-version
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
 	npm run check
 	npm run build-storybook
-	npm audit --omit=dev
+	@node scripts/check-release-audit.mjs
 
 release-dry-run: _require-version
 	@node scripts/set-release-version.mjs --check '$(VERSION)'

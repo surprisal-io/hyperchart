@@ -31,8 +31,8 @@
 		"sync:pi-docs": "node scripts/sync-pi-docs.mjs"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-coding-agent": "^0.80.10",
-		"@earendil-works/pi-tui": "^0.80.10",
+		"@earendil-works/pi-coding-agent": "^0.81.1",
+		"@earendil-works/pi-tui": "^0.81.1",
 		"@storybook/react-vite": "^10.1.7",
 		"@tailwindcss/vite": "^4.3.2",
 		"@types/node": "22.19.19",
