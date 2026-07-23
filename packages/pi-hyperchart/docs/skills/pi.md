@@ -17,6 +17,7 @@ Use the consolidated `hyperchart` tool directly. `/hyperchart` is a human-facing
 | List project and user chart definitions | `hyperchart` with `action: "list"` |
 | Validate and inspect a chart definition | `hyperchart` with `action: "inspect"` |
 | Start a chart or resume an existing run | `hyperchart` with `action: "run"` |
+| Commit the user's answer to an active gate | `hyperchart` with `action: "respond"` |
 | Inspect durable state for one run | `hyperchart` with `action: "run_inspect"` |
 | Open the browser inspector for a run | `hyperchart` with `action: "view"` |
 | Stop one or all active runs | `hyperchart` with `action: "stop"` |
@@ -160,13 +161,29 @@ After editing this pattern, call `hyperchart` with `action: "inspect"`; do not r
 1. Inspect the chart first with `hyperchart` with `action: "inspect"`. The compact digest is the default; `verbose: true` returns the full object.
 2. Verify every named agent definition is available.
 3. Call `hyperchart({ action: "run", chartPath, args })`.
-4. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory; Pi injects the owned run's terminal prompt into that exact originating session automatically. Do not start a polling watcher.
-5. Inspect concrete result with `hyperchart` with `action: "run_inspect"` before reporting completion.
-   Waited call waits for terminal status, acquires same per-session recoverable delivery lease, and returns prompt directly.
-   Delivery uses at-least-once semantics.
-   Durable request IDs and recoverable claims prevent permanent suppression after crash.
-   Host may redeliver same request after crash between delivery and confirmation.
-   Treat each `requestId` idempotently.
+4. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; Pi routes owned gates and the terminal prompt to that exact originating session/canonical working directory. Do not start a polling watcher.
+5. A waited call can return terminal status **or** `boundary: "user"` for the globally active owned gate, possibly from another run that sorts earlier. Handle the gate before waiting again.
+6. Inspect concrete result with `hyperchart` with `action: "run_inspect"` before reporting completion.
+
+## Answer a user gate
+
+Pi may first deliver hidden steering asking you to finish the current safe action/tool batch and yield. Do not answer the gate, continue unrelated work, or call a tool based only on that steering. On idle, Pi displays the real question without triggering another model turn.
+
+The user's next ordinary prompt is the answer. Hidden context supplies the exact `(runId, seqId)`, rendered question, allowed events, and reply contract. Translate only that real input, then immediately call:
+
+```json
+{
+  "action": "respond",
+  "runId": "<exact run id>",
+  "seqId": 14,
+  "event": "<allowed non-FAILED event>",
+  "output": "<only when required by the reply contract>"
+}
+```
+
+Do not infer consent, invent content, expose or ask for an `effectId`/`requestId`, or continue the workflow until the durable commit succeeds. The host rejects a queued, stale, closed, wrong-session, wrong-cwd, unsupported, or schema-invalid answer. Fix a validation error using the same user input when possible; otherwise ask the user for the missing data. Repeating the identical response is idempotent; never replace it with a divergent answer.
+
+Multiple gates are serialized across parallel/map branches and owned runs by lexical `runId`, then numeric `seqId`. Presentation can repeat during recovery, but the same unanswered coordinate is not a new question. If an ordinary prompt arrives without gate-binding context, do not guess that it answers a gate.
 
 ## View a run
 
@@ -188,14 +205,14 @@ Read [Recovery and safety](../../docs/safety.md), then:
 
 1. Inspect the run and confirm it is stopped.
 2. Choose exactly one target: `state`, `seqId`, or `to: "compatible"`.
-3. Explain which durable facts will be removed and that external effects will not be undone.
+3. Explain which durable facts will be removed, that the complete user-interaction mailbox moves into the rewind backup, and that external effects will not be undone.
 4. Call `hyperchart` with `action: "rewind"`. Keep `cleanupArtifacts: false` unless the user explicitly requests best-effort artifact cleanup.
 5. Inspect the rewound run again before starting it.
 
 ## Safety rules
 
 - Chart modules are executable TypeScript. Loading one can execute top-level code even when no workflow action is dispatched.
-- Never edit `log.jsonl` manually.
+- Never edit `log.jsonl` or `user-interactions/` mailbox files manually.
 - Never rewind a live run.
 - Never treat a missing agent definition as an unrestricted default.
 - Stop, rewind, replay, and deletion do not undo arbitrary external effects.

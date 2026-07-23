@@ -14,22 +14,29 @@ Requires Node.js 22.19+ and a working Claude Code login: the detached runner inh
 
 ## Tools
 
-The bundled MCP server exposes eight tools. Claude picks them up through the `hyperchart` skill; in conversation you normally just describe what you want.
+The bundled MCP server exposes nine tools. Claude picks them up through the `hyperchart` skill; in conversation you normally just describe what you want.
 
 | Task | Tool |
 |---|---|
 | List chart definitions and this directory's runs | `hyperchart_list` |
 | Validate and inspect a chart definition | `hyperchart_inspect` |
 | Start a chart or resume an existing run | `hyperchart_run` |
+| Commit a real `AskUserQuestion` answer | `hyperchart_respond` |
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Queue a steering message for a live agent session | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
 | Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
 | Open the browser inspector and return its URL | `hyperchart_view` |
 
-`hyperchart_run` is asynchronous by default: the runner is a detached process that survives the Claude session. The plugin's always-on `hyperchart-terminal` monitor scans immediately and periodically for terminal requests owned by the exact Claude session and working directory. Each request is emitted as one physical stdout line and confirmed only after stdout accepts it; embedded prompt newlines remain escaped in the JSON notification. Delivery waits for `status.json` to match the request outcome, and stale dead runs are recovered through the same durable outbox operation used by waited calls.
+`hyperchart_run` is asynchronous by default: the runner is a detached process that survives the Claude session. The plugin's always-on monitor scans immediately and periodically for both terminal requests and durable `user()` gates owned by the exact Claude session and canonical working directory. Each notification is emitted as one physical stdout line and confirmed only after stdout accepts it; embedded prompt newlines remain escaped in JSON. Terminal delivery waits for `status.json` to match the request outcome, and stale dead runs are recovered through the same durable outbox operation used by waited calls.
 
-Claude provides no acknowledgement that the host consumed a monitor stdout line, so automatic terminal delivery is at least once. A stale delivery claim is retried after its lease: a crash before the write cannot permanently lose the prompt, while a crash after the write but before confirmation may duplicate it. Pass `wait: true` only when the current task must block until terminal status; the waited call and monitor arbitrate through the same recoverable claim. Do not start Bash or Monitor polling watchers.
+Every user branch persists its mailbox request immediately, while the shared arbiter exposes one gate across all owned runs: lexical `runId`, then numeric `seqId`. A presented gate stays pinned until answer or close, so parallel/map branches continue without presenting competing questions. The public coordinate is only `(runId, seqId)`; no runtime `effectId` or extra gate `requestId` is exposed.
+
+When a `hyperchart-user-request` arrives, Claude must finish the current safe action, start no unrelated work, then call native `AskUserQuestion` once for that delivery attempt. It must never infer or fabricate the answer. Immediately after the human responds, Claude calls `hyperchart_respond` with `{ runId, seqId, event, output? }` and waits for the durable commit before continuing. If recovery repeats the same unanswered gate and no question remains in flight, invoke `AskUserQuestion` again; never open concurrent duplicate questions.
+
+The response tool enforces the exact owner/cwd and active coordinate, an allowed non-`FAILED` event, and the optional reply schema. An identical retry is idempotent; a divergent answer conflicts. Stale, closed, queued, wrong-session, and wrong-cwd replies are rejected.
+
+Claude provides no acknowledgement that the host consumed a monitor stdout line, so automatic presentation is at least once. A stale monitor claim can retry the same gate; session-start recovery also surfaces a pinned unanswered gate before queued ones. Pass `wait: true` only when the current task must block: the call participates in the same cross-run arbiter and returns either the waited run's terminal status or the globally active gate, which may belong to another owned run. A waited gate uses a longer delivery lease so the normal monitor does not duplicate it while `AskUserQuestion` is normally open; if that waited delivery stalls or crashes past the lease, the monitor may redeliver the same pinned coordinate for recovery. Do not start Bash or Monitor polling watchers.
 
 ## Locations
 
@@ -43,6 +50,12 @@ Claude provides no acknowledgement that the host consumed a monitor stdout line,
 Agent definitions use the same markdown + frontmatter format as the Pi host (`name`, `description`, `role`, `toolset`, `model`, `thinking`, `tools`, `systemPromptMode`; body = system prompt), so charts that ship agents next to the chart file are portable between hosts. Model ids are passed to the Claude Agent SDK verbatim (for example `claude-sonnet-5`, `claude-opus-4-8`); `thinking` levels map onto the SDK's effort control.
 
 A `role` in frontmatter names a symbolic model tier and a `toolset` a symbolic tool list, both resolved through `settings.json` in the charts directories (`~/.claude/hypercharts/settings.json`, `<projectRoot>/.hypercharts/settings.json`, and `<projectRoot>/.claude/hypercharts/settings.json`; later entries win per key): `{ "roles": { "reviewer": "opus" }, "toolsets": { "reading": ["Read", "Grep"] } }`. Because each host maps these names in its own settings, a chart declaring them is portable even though model ids and tool names differ between hosts. An unconfigured role falls back to the frontmatter `model`, and an unconfigured toolset to the frontmatter `tools`; with no fallback declared (and no chart-level override) the action fails with an error instead of silently running on defaults. See [Core authoring](core-authoring.md) for the resolution order.
+
+## Durable user-gate layout and recovery
+
+A gate lives at `<runDir>/user-interactions/<seqId>/`: persist-once `request.json`, mutually exclusive response-or-close `resolution.json`, and host presentation `receipts/`. Stopping or disposing the detached runner preserves an unanswered request so resume can reuse it; machine cancellation closes an abandoned phase. Rewind moves the complete mailbox into its backup before replay, preventing old answers or receipts from matching reused sequence ids.
+
+The SessionStart hook scans the same exact session/cwd ownership scope and recovers the pinned gate before queued gates. If no interactive host is available, the request remains durably inspectable and the run can be stopped/resumed; operators should not edit mailbox files manually.
 
 ## How agent sessions run
 

@@ -451,7 +451,7 @@ function user(options: {
 }): UserActionCst;
 ```
 
-Declares a host-mediated user action. The current Pi and generic executors do not implement user actions; author them only for a host that provides a user-effect interpreter.
+Declares a durable host-mediated input gate. `prompt` is rendered when the action phase begins, and `options` supplies the choices shown by the host. Allowed response events still come from the action's reachable transitions; when options represent routing choices, use the transition event names as in the example below. `FAILED` is reserved and cannot be a user option or human response.
 
 ```ts
 action: user({
@@ -459,9 +459,22 @@ action: user({
   options: ["APPROVED", "BLOCK"],
   reply: z.object({ feedback: z.string().optional() }),
 }),
+transitions: {
+  APPROVED: "publish",
+  BLOCK: "revise",
+  FAILED: "failed",
+},
 ```
 
-`FAILED` is reserved and cannot be a user option.
+Each reached user phase receives a durable numeric `seqId`. The public coordinate is exactly `(runId, seqId)`; internal runtime callback ids are not part of the response contract. A host presents one owned gate at a time and commits an explicit envelope:
+
+```json
+{"runId":"review-20260723-120000","seqId":14,"event":"BLOCK","output":{"feedback":"Clarify the risks."}}
+```
+
+The event must be an allowed non-`FAILED` event, and `output` must satisfy `reply` when a schema is declared. An invalid claim is rejected without consuming the gate so the human can retry. An identical committed retry is idempotent; a different retry conflicts. Timeouts and cancellation still participate in normal machine ordering: whichever completion wins closes the phase, and later duplicate responses cannot resume it.
+
+The detached runner remains alive while waiting, and only the branch containing the gate blocks. Other `parallel` regions and admitted `map` instances continue. Pi and Claude Code implement this protocol; a custom host can use the generic file-backed user executor and mailbox APIs.
 
 ## Transitions and inputs
 

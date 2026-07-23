@@ -16,6 +16,7 @@ Hypercharts are durable, typed statechart workflows. Each agent action of a char
 | List chart definitions and this directory's runs | `hyperchart_list` |
 | Validate and inspect a chart definition | `hyperchart_inspect` |
 | Start a chart or resume an existing run | `hyperchart_run` |
+| Commit the real `AskUserQuestion` answer | `hyperchart_respond` |
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Steer a live agent session of a run | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
@@ -58,13 +59,22 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 
 1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available. Inspect tools return a compact digest by default; pass `verbose: true` only when you need chart source, schemas, or transcripts.
 2. Call `hyperchart_run` with `chartPath` and `args`.
-3. Use `wait: true` only when the current task must block until terminal status. Otherwise retain the returned run id and directory; the run continues in the background and the plugin monitor delivers its terminal prompt to this exact originating Claude session. Never start Bash/Monitor polling watchers.
-4. Inspect concrete result with `hyperchart_run_inspect` before reporting completion.
-   Waited delivery acquires monitor's same per-session recoverable lease and returns terminal prompt directly.
-   Delivery uses at-least-once semantics.
-   Durable request IDs and recoverable claims prevent permanent suppression after crash.
-   Host may redeliver same request after crash between delivery and confirmation.
-   Treat each `requestId` idempotently.
+3. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; the monitor routes owned user gates and the terminal prompt to this exact originating Claude session/canonical working directory. Never start Bash/Monitor polling watchers.
+4. A waited call can return terminal status **or** `boundary: "user"` for the globally active owned gate, possibly from another run that sorts earlier. Handle the gate before waiting again.
+5. Inspect concrete result with `hyperchart_run_inspect` before reporting completion.
+
+## Answer a user gate
+
+A `hyperchart-user-request`, waited user boundary, or SessionStart recovery context provides the exact `(runId, seqId)`, rendered question, authored options, allowed events, and optional reply contract. The monitor may arrive while you are busy: finish the current safe action/tool batch, start no unrelated work, and then:
+
+1. If the same gate already has a native question in flight, do not open a concurrent duplicate. Otherwise call native `AskUserQuestion` once for this delivery attempt, mapping authored options when present and preserving a free-text/Other path when needed.
+2. Never infer, fabricate, summarize away, or supply the human answer yourself.
+3. Immediately after the human answers, call `hyperchart_respond` with `{ runId, seqId, event, output? }`, choosing an allowed non-`FAILED` event and satisfying the reply contract.
+4. Do not continue the workflow until `hyperchart_respond` confirms the durable commit.
+
+The public gate identity is only `(runId, seqId)`; never invent or disclose an `effectId` or separate `requestId`. The host rejects queued, stale, closed, wrong-session, wrong-cwd, unsupported, schema-invalid, and conflicting answers. An identical retry is idempotent. Presentation is at least once: if session recovery repeats an unanswered coordinate and no `AskUserQuestion` remains in flight, ask it again; a repeated coordinate is recovery, not permission to answer it from memory.
+
+Multiple gates from parallel/map branches and separate owned runs are serialized by lexical `runId`, then numeric `seqId`. Only the gate's branch waits; do not assume the runner as a whole is paused.
 
 ## Watch and steer a run
 

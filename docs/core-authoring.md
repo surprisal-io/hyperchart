@@ -232,11 +232,14 @@ A script completes as follows:
 ```ts
 user({
   prompt: "Approve the release?",
-  reply: z.object({ approved: z.boolean() }),
+  options: ["APPROVED", "BLOCK"],
+  reply: z.object({ note: z.string().optional() }),
 })
 ```
 
-User actions are part of the host-neutral DSL. The current Pi executor does not yet implement them. A chart containing one can be inspected but will fail if execution reaches it in Pi.
+A user action is a durable host-neutral input gate. Its allowed events come from reachable non-`FAILED` transitions; `options` supplies host-visible choices and normally uses those event names. The host shows the rendered prompt to the real user and commits the chosen event plus optional schema-validated output. The public gate coordinate is `(runId, seqId)`.
+
+A gate suspends only its own branch: the detached runner stays alive and other `parallel` regions or admitted `map` instances continue. Across all owned runs in the same host session and canonical working directory, presentation is serialized by lexical `runId`, then numeric `seqId`. Pi collects the next ordinary user prompt after presenting the gate; Claude Code uses native `AskUserQuestion`. Identical response retries are safe, while divergent retries conflict.
 
 ## Events and transitions
 

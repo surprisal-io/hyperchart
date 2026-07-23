@@ -25,12 +25,17 @@ The [API index](api/README.md) lists every supported package entry point and the
 ├── runner.config.json
 ├── runner.stdout.log
 ├── runner.stderr.log
+├── user-interactions/
+│   └── <seqId>/
+│       ├── request.json
+│       ├── resolution.json
+│       └── receipts/
 ├── sessions/
 │   └── progress.json
 └── rewind-backups/
 ```
 
-Only `meta.json`, `log.jsonl`, and the run directory itself are fundamental. Status, runner logs, session progress, and rewind backups appear when the corresponding host/runtime behavior is used. `runner.config.json` snapshots the host's role/model and toolset/tool mappings for that run; `sessions/progress.json` may additionally record each launched session's declared role/toolset and actual model/tool allowlist.
+Only `meta.json`, `log.jsonl`, and the run directory itself are fundamental. Status, runner logs, user-interaction mailboxes, session progress, and rewind backups appear when the corresponding host/runtime behavior is used. `runner.config.json` snapshots the host's role/model and toolset/tool mappings for that run; `sessions/progress.json` may additionally record each launched session's declared role/toolset and actual model/tool allowlist. A user interaction's external identity is only `(runId, seqId)`; `resolution.json` is mutually exclusive response-or-close state, and receipts record host delivery rather than a second gate id.
 
 Artifacts may live anywhere inside the run working directory according to the chart declaration; they are not required to live under `<run-dir>`.
 
@@ -50,7 +55,7 @@ These `status.json` values are different from canonical host run statuses and pe
 
 ## Current limitations
 
-- Pi and the generic runtime do not implement `user` actions.
+- Interactive delivery requires a supported owning host session (currently Pi or Claude Code); otherwise open gates remain inspectable and resumable through their file mailbox.
 - Rewind cannot reverse external effects.
 - Artifact cleanup during rewind is best effort.
 - General agent-session identity for partial map/parallel re-entry is not defined.

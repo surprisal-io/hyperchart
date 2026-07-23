@@ -97,12 +97,16 @@ Options:
 | `--args <json>` | run arguments object |
 | `--run-dir <run-id-or-path>` | existing run to resume, or explicit destination directory |
 | `--export <name>` | named chart export instead of the default export |
-| `--wait` | wait synchronously until the run reaches a terminal status |
+| `--wait` | wait until terminal status or the session's globally active user gate |
 | `--ignore-replay-warnings` | continue despite stale or skipped replay records |
 
 Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. On startup or session resume, Pi restores widgets only for non-terminal runs created by that exact Pi session; terminal runs and older runs without ownership metadata remain available through run history but do not appear as active widgets.
 
-When an owned background run reaches matching `complete`/`failed` status, Pi injects its terminal prompt as a model-facing follow-up into the exact originating session and working directory. Pi sends before confirming the request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery. Add `--wait` when the command should remain blocked; the waited result uses the same recoverable delivery lease to arbitrate with asynchronous delivery. Do not start a polling watcher.
+When an owned background run reaches matching `complete`/`failed` status, Pi injects its terminal prompt as a model-facing follow-up into the exact originating session and working directory. Pi sends before confirming the terminal request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery.
+
+A durable `user()` action is routed through the same exact session/canonical-cwd ownership boundary. Every branch persists its gate immediately, while Pi presents only one across all owned runs in lexical `runId`, then numeric `seqId` order. If Pi is busy, a hidden steering message asks it to finish the current safe action/tool batch and yield; on idle or `agent_settled`, Pi rechecks and displays the question without triggering a model turn. The user's next ordinary prompt is bound to that gate and the model must immediately translate it into an explicit `action: "respond"` call instead of answering the gate itself. Only that branch waits; the detached runner and other parallel/map branches continue.
+
+Add `--wait` when the command should remain blocked; the waited call uses the same arbiter and returns either terminal status or the globally active user gate, even when that gate belongs to a different owned run. Do not start a polling watcher.
 
 ```text
 /hyperchart run review --args '{"pullRequest":42}'
@@ -158,7 +162,7 @@ Delete recursively removes the run directory, including its durable log, status,
 
 ## Agent tool
 
-The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, or `stop`. The slash command remains the direct human interface.
+The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, `stop`, or `respond`. The slash command remains the direct human interface.
 
 ### `hyperchart` with `action: "list"`
 
@@ -205,15 +209,27 @@ Start or resume a run.
 | `args` | no | run arguments object |
 | `runDir` | no | existing run directory/id or destination directory |
 | `exportName` | no | named export |
-| `wait` | no | wait for terminal status before returning |
+| `wait` | no | wait for terminal status or the shared active user gate before returning |
 | `ignoreReplayWarnings` | no | explicitly continue despite stale/skipped replay records |
 
-When `wait` is false or omitted, tool returns after startup with `final: false`, then injects terminal prompt into exact originating Pi session.
-When `wait` is true, tool waits for terminal status, acquires same per-session recoverable delivery lease, and returns terminal prompt, persisted status, and runtime-enriched inspector model directly.
-Delivery uses at-least-once semantics.
-Durable request IDs and recoverable claims prevent permanent suppression after crash.
-Host may redeliver same request after crash between delivery and confirmation.
-Treat each `requestId` idempotently.
+When `wait` is false or omitted, the tool returns after startup with `final: false`; owned user gates and the eventual terminal prompt are delivered asynchronously to the exact originating Pi session and canonical working directory.
+When `wait` is true, the tool participates in the same cross-run arbiter and returns terminal details or a `boundary: "user"` with the active interaction and original `waitedRun` coordinate. User-gate identity is exactly `(runId, seqId)`. Presentation is at least once across recovery; response persistence is idempotent.
+
+### `hyperchart` with `action: "respond"`
+
+After Pi displays a gate, the user's next normal prompt is treated as the answer. Pi injects hidden context requiring an immediate explicit call:
+
+```json
+{
+  "action": "respond",
+  "runId": "review-20260723-120000",
+  "seqId": 14,
+  "event": "APPROVED",
+  "output": { "note": "Ship it." }
+}
+```
+
+`event` must be one of the gate's allowed non-`FAILED` events and `output` must satisfy its reply contract when present. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate `requestId`.
 
 ### `hyperchart` with `action: "run_inspect"`
 
@@ -297,7 +313,7 @@ Other parameters:
 | `start` | `false` | start the rewound run immediately |
 | `ignoreReplayWarnings` | `false` | when starting, allow stale/skipped records explicitly |
 
-A live run cannot be rewound. Read [Recovery and safety](safety.md#rewind-a-run) before using this tool.
+A live run cannot be rewound. The operation moves the complete `user-interactions/` mailbox into its timestamped backup, so replay cannot consume an answer or receipt from before the cut. Read [Recovery and safety](safety.md#rewind-a-run) before using this tool.
 
 ## Run files
 
@@ -312,6 +328,7 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 | `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
 | `log.jsonl` | core runtime | ordered semantic facts |
 | `status.json` | Pi runner | process state, pid, heartbeat, exit, error |
+| `user-interactions/<seqId>/` | runner + host | durable request, immutable response-or-close resolution, and presentation receipts |
 | `sessions/` | Pi executor | agent sessions and progress |
 | `rewind-backups/` | rewind tool | timestamped copies of truncated state |
 

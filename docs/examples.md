@@ -42,9 +42,9 @@ Read [Run your first chart](quickstart.md) for inspection and troubleshooting.
 - passing accepted data into another state;
 - looping from fix back to review.
 
-Before using it, define every named agent in your Pi configuration. The file also reaches a `user()` action; the current Pi executor does not implement user actions. Replace that state with an agent/script action or provide a host executor that implements the user effect.
+Before using it, define every named agent in your Pi configuration. The file also reaches a durable `user()` gate: Pi presents the request to the originating session, treats the user's next ordinary prompt as the answer, and resumes the selected transition after the explicit response is committed.
 
-Use this file to study authoring, not as the first installation test.
+Use this file to study authoring and the interactive gate flow, not as the first non-interactive installation test.
 
 ## Deck Director chart
 

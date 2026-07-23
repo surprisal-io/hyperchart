@@ -5,6 +5,7 @@ Import the generic runtime from `@surprisal/hyperchart/runtime`:
 ```ts
 import {
   ChartRuntime,
+  FileUserExecutor,
   JsonlLogStore,
   MemoryLogStore,
   ScriptRunner,
@@ -23,6 +24,7 @@ import {
   terminalStateForFinalMachine,
   type AgentDefinitionResolution,
   type AgentExecutor,
+  type UserExecutor,
   type GuardContext,
   type RenderedGuardInvocation,
   type RenderedArtifact,
@@ -64,6 +66,7 @@ type ChartRuntimeOptions = {
   ast: ChartAst;
   logStore: LogStore;
   agentExecutor: AgentExecutor;
+  userExecutor?: UserExecutor;
   workDir: string;
   chartDir: string;
   schemaRegistry?: SchemaRegistryLike;
@@ -79,9 +82,10 @@ type ChartRuntimeOptions = {
 - TypeScript and script guards;
 - timers and cancellation;
 - validation rejection dispatch;
-- a pluggable agent executor.
+- a pluggable agent executor;
+- a pluggable user executor for durable host-mediated input.
 
-It does not implement user actions. A `user` effect calls `onWarn` and remains unresolved.
+Detached runners provide `FileUserExecutor`. A custom in-process runtime that can reach `user()` must also provide a `UserExecutor`; without one, `ChartRuntime` throws when the user effect is dispatched rather than inventing an answer.
 
 ```ts
 import { loop } from "@surprisal/hyperchart";
@@ -101,6 +105,29 @@ try {
   await runtime.dispose();
 }
 ```
+
+## `UserExecutor` and `FileUserExecutor`
+
+```ts
+interface UserExecutor {
+  start(effect: UserEffect, emit: EmitCompletion): void;
+  reject(effect: RejectedEffect, emit: EmitCompletion): void;
+  cancel(actionUid: ActionUID): void;
+  dispose(): Promise<void>;
+}
+
+new FileUserExecutor({
+  runId,
+  runDir,
+  pollMs?: number,
+  schemaRegistry?: SchemaRegistryLike,
+  onWarn?: (message: string) => void,
+});
+```
+
+`FileUserExecutor` is the durable rendezvous used by detached runners. `start()` persists or reuses `user-interactions/<seqId>/request.json`, polls for a response resolution, validates it, and emits the resulting chart event exactly once to the normal action-completion path. `reject()` creates the next durable phase with its own `seqId` and rejection metadata. Its referenced poll interval keeps the runner alive even when every active branch is waiting for human input; other parallel/map work remains runnable.
+
+`cancel()` writes a close resolution for a phase abandoned by the machine, so a timeout or competing completion cannot be answered later. `dispose()` stops local polling but deliberately preserves open requests: an operator stop and later resume reuses the mailbox. Restart also consumes a response that was persisted before its completion reached `log.jsonl`.
 
 ## `AgentExecutor`
 
@@ -452,6 +479,25 @@ function finalMachineFailureMessage(
 
 After an explicitly failed terminal establishes the outcome, returns the error from the `FAILED` completion that actually entered that active failed terminal (structured payloads are JSON-stringified), otherwise describes the reached failed terminal. It returns `undefined` for complete terminals and does not reuse errors from earlier recovered `FAILED` events.
 
+## User-interaction mailbox
+
+Each user phase is stored under its run directory:
+
+```text
+user-interactions/<seqId>/
+├── request.json
+├── resolution.json
+└── receipts/
+```
+
+`request.json` is versioned and persist-once. It contains the public `(runId, seqId)` coordinate, rendered prompt, allowed events/options, optional reply contract, machine action identity, and rejection metadata. Runtime `effectId` values never cross this boundary, and there is no second request/gate identifier. Hosts accept `{ runId, seqId, event: "APPROVED", output? }`; `resolution.json` stores that as an atomically published immutable union with a normalized chart event `{ type, output? }`, or stores a close marker. Response and close therefore race for one winner. Malformed, mismatched, or foreign files are isolated and do not become active requests.
+
+Host scans require an exact `originSessionId` and canonical `workDir`. All open requests are persisted immediately, but one presentation boundary is selected across the runs root for each `host + session + workDir`. A confirmed or claimed live request stays pinned; otherwise selection is lexical `runId`, then numeric `seqId`. This serializes simultaneous gates from parallel/map branches and separate runs without blocking their execution.
+
+`validateAndPersistUserInteractionResponse()` requires the exact active `(runId, seqId)`, an allowed non-`FAILED` event, and schema-valid output when a reply contract exists. Identical retries return idempotently; divergent responses conflict. Receipt claims and confirmations provide recoverable, at-least-once presentation without making presentation itself a semantic log fact; internal `.published` sidecars make immutable receipt publication order stable for cross-process arbitration. Key helpers include `persistUserInteractionRequest()`, `scanOpenUserInteractions()`, `scanOwnedOpenUserInteractions()`, `acquireActiveUserInteraction()`, `claimUserInteractionReceipt()`, `markUserInteractionReceipt()`, `validateAndPersistUserInteractionResponse()`, and `closeUserInteraction()`.
+
+Rewind moves the entire `user-interactions/` directory into the rewind backup before replay. Reused sequence numbers can therefore never consume a pre-rewind answer or receipt. With no interactive host available, operators can still inspect the request files; stopping the runner preserves them, and resuming recreates polling without asking the machine to guess.
+
 ## Terminal notification outbox
 
 The runner persists `terminal-notification/request.json` before changing `status.json` to `complete` or `failed`. A request is deliverable only when its payload outcome exactly matches terminal status. Every newly created outbox request has a fresh UUID; normal resume/replay reuses the existing request, while rewind removes it so an identical terminal outcome is delivered as a new generation.
@@ -473,10 +519,29 @@ Notification artifact entries are authoritative absolute paths under `workDir`; 
 ```text
 Runtime
 AgentExecutor, EmitCompletion
+UserExecutor, FileUserExecutor, FileUserExecutorOptions
 AgentDefinition, AgentDefinitionResolution, ThinkingLevel,
 createAgentDefaultsResolver, resolveAgentDefaults, loadAgentDefinition, parseAgentFile
 RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry, SchemaRegistryLike
 ChartRuntime, ChartRuntimeOptions
+USER_INTERACTIONS_DIR, USER_INTERACTION_ARBITER_DIR,
+USER_INTERACTION_CLAIM_LEASE_MS, USER_INTERACTION_WAIT_LEASE_MS,
+USER_INTERACTION_REQUEST,
+USER_INTERACTION_RESOLUTION, USER_INTERACTION_RESPONSE, USER_INTERACTION_CLOSE,
+UserInteractionCoordinate, UserInteractionOwner, UserInteractionRequest,
+UserInteractionResponse, UserInteractionClose, UserInteractionResolution,
+UserInteractionReceipt, UserInteractionArbiterRecord, OwnedUserInteraction,
+PersistUserInteractionRequestInput, PersistUserInteractionResponseOptions,
+userInteractionDir, userInteractionRequestPath, userInteractionResolutionPath,
+userInteractionResponsePath, userInteractionClosePath, userInteractionReceiptPath,
+userInteractionArbiterPath, persistUserInteractionRequest,
+readUserInteractionRequest, readOpenUserInteractionRequest,
+readUserInteractionResponse, readUserInteractionClose, readUserInteractionResolution,
+scanOpenUserInteractions, scanOwnedOpenUserInteractions, acquireActiveUserInteraction,
+readActiveUserInteraction, releaseActiveUserInteraction,
+claimUserInteractionReceipt, markUserInteractionReceipt, hasUserInteractionReceipt,
+readUserInteractionReceipt, removeUserInteractionReceipt, validateUserInteractionEvent,
+validateAndPersistUserInteractionResponse, closeUserInteraction
 LogStore, JsonlLogStore, MemoryLogStore
 ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue

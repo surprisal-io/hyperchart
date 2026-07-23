@@ -132,7 +132,7 @@ Singleton created with default options.
 
 ## Agent tool
 
-The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, or `stop`. The schema is not a JavaScript export.
+The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, `stop`, or `respond`. The schema is not a JavaScript export.
 
 ### `action: "list"`
 
@@ -225,7 +225,9 @@ Without `wait`, result details contain the startup result below. The owned termi
 }
 ```
 
-With `wait: true`, details contain the terminal persisted status plus the final inspector model:
+With `wait: true`, the tool participates in the same session/workDir presentation arbiter as background scans. It returns whichever boundary occurs first: terminal status for the waited run, or the globally active owned user gate (which can belong to another run that sorts earlier).
+
+Terminal details contain the persisted status plus the final inspector model:
 
 ```ts
 {
@@ -251,7 +253,11 @@ With `wait: true`, details contain the terminal persisted status plus the final 
 }
 ```
 
-The result text is the terminal prompt when this call claims delivery. If a matching receipt already exists, the call returns terminal status without duplicating the prompt. Pi recovery also checks persisted `hyperchart-terminal` custom messages by request id before re-sending.
+A user boundary has `boundary: "user"`, `final: false`, `interaction: { runId, seqId, prompt, allowedEvents, options, reply?, rejection? }`, and `waitedRun` identifying the run whose wait was interrupted. Its result text is the real rendered question. The public gate identity is only `(runId, seqId)`; it has no `requestId` or runtime `effectId`.
+
+A terminal result text is the terminal prompt when this call claims delivery. If a matching terminal receipt already exists, the call returns terminal status without duplicating that prompt. Pi recovery also checks persisted `hyperchart-terminal` custom messages by terminal request id before re-sending.
+
+For a background gate, Pi scans only requests owned by the exact session and canonical cwd. While the agent is busy, it sends a hidden `hyperchart-yield` steering message and lets the current safe action/tool batch finish. On idle or `agent_settled`, it rechecks the shared arbiter and displays the active request once without `triggerTurn`. State is `pending → yielding → awaiting-user → answered/closed`; reload/session-start recovery reconstructs it from mailbox receipts. Simultaneous requests remain queued in lexical `runId`, then numeric `seqId` order.
 
 Start example:
 
@@ -296,7 +302,35 @@ Loads a run id or directory belonging to the current working directory and retur
 }
 ```
 
-Use this tool before resume, replay override, rewind, or recovery after a crash.
+Use this tool before resume, replay override, rewind, or recovery after a crash. Open user requests remain visible through persisted run state/mailbox inspection even when no interactive session can present them.
+
+### `action: "respond"`
+
+Commits the real user's answer to the exact active gate:
+
+```ts
+{
+  action: "respond";
+  runId: string;
+  seqId: number;
+  event: string;
+  output?: unknown;
+}
+```
+
+Pi normally creates this call from the user's next ordinary prompt after the visible gate. The extension injects hidden context instructing the model to translate that prompt into one allowed event and optional output, then call `respond` immediately; the model must not answer or infer consent itself.
+
+The host requires the exact originating Pi session and canonical working directory, the exact globally active `(runId, seqId)`, a non-`FAILED` allowed event, and schema-valid output when declared. A byte-for-byte equivalent semantic retry is idempotent; a different answer for the same phase conflicts. Closed, stale, queued, foreign-session, and foreign-cwd coordinates are rejected.
+
+```json
+{
+  "action": "respond",
+  "runId": "review-20260723-120000",
+  "seqId": 14,
+  "event": "BLOCK",
+  "output": { "feedback": "Clarify the risks." }
+}
+```
 
 ### `action: "view"`
 
@@ -435,7 +469,7 @@ Result details:
 }
 ```
 
-The tool rejects live runs, foreign-working-directory runs, targets matching no record, and cuts that would remove zero records.
+The tool rejects live runs, foreign-working-directory runs, targets matching no record, and cuts that would remove zero records. Rewind moves the whole `user-interactions/` mailbox into the backup, so replay cannot consume answers or receipts from before the cut even when a `seqId` is reused.
 
 Rewind does not undo arbitrary external effects. Its backups are inside the run directory; copy important evidence elsewhere before deleting the run.
 
