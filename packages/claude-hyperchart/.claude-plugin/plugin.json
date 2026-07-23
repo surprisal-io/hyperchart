@@ -1,6 +1,6 @@
 {
 	"name": "hyperchart",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "Durable, typed statechart workflows whose agent actions run as Claude sessions, with a live browser inspector and steering",
 	"author": { "name": "surprisal" },
 	"mcpServers": {
