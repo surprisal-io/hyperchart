@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
@@ -13,6 +13,12 @@ import {
 	persistTerminalNotificationRequest,
 	removeTerminalNotificationOutbox,
 } from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
+import {
+	closeUserInteraction,
+	hasUserInteractionReceipt,
+	persistUserInteractionRequest,
+	readUserInteractionResponse,
+} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { readSessionProgress, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import {
@@ -59,6 +65,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+	vi.useRealTimers();
 	await closeRunInspectorServer();
 	process.chdir(previousCwd);
 	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
@@ -307,6 +314,295 @@ describe("hyperchart extension", () => {
 
 		await sessionStart?.({ reason: "resume" }, context);
 		expect(sent.map((message) => message.details.requestId)).toEqual([newRequest.requestId]);
+	});
+
+	it("steers once while busy, then presents the same gate once after settling", async () => {
+		vi.useFakeTimers();
+		const runDir = createUserGate("busy-gate", 4);
+		const harness = lifecycleHarness(projectDir, false);
+		try {
+			await harness.sessionStart();
+			expect(harness.sent).toHaveLength(1);
+			expect(harness.sent[0]).toMatchObject({
+				message: {
+					customType: "hyperchart-yield",
+					display: false,
+					details: { runId: "busy-gate", seqId: 4 },
+				},
+				options: { deliverAs: "steer" },
+			});
+			expect(harness.sent[0]?.options).not.toHaveProperty("triggerTurn");
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(harness.sent).toHaveLength(1);
+
+			harness.setIdle(true);
+			await harness.agentSettled();
+			expect(harness.sent).toHaveLength(2);
+			expect(harness.sent[1]).toMatchObject({
+				message: {
+					customType: "hyperchart-user-request",
+					display: true,
+					details: { runId: "busy-gate", seqId: 4 },
+				},
+				options: { deliverAs: "followUp" },
+			});
+			expect(harness.sent[1]?.options).not.toHaveProperty("triggerTurn");
+			expect(hasUserInteractionReceipt(runDir, 4, "pi", "session-a")).toBe(true);
+			await vi.advanceTimersByTimeAsync(3_000);
+			expect(harness.sent).toHaveLength(2);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("recovers a persisted visible gate without resending and binds the next real prompt", async () => {
+		const runDir = createUserGate("recovered-gate", 2);
+		const harness = lifecycleHarness(projectDir, true);
+		harness.setEntries([{
+			type: "custom_message",
+			customType: "hyperchart-user-request",
+			content: "persisted",
+			display: true,
+			details: { runId: "recovered-gate", seqId: 2 },
+		}]);
+		try {
+			await harness.sessionStart("resume");
+			expect(harness.sent).toHaveLength(0);
+			expect(hasUserInteractionReceipt(runDir, 2, "pi", "session-a")).toBe(true);
+
+			const injected = await harness.beforeAgentStart("Yes, approve it with a short note");
+			expect(injected).toMatchObject({
+				message: {
+					customType: "hyperchart-user-response-context",
+					display: false,
+					details: { runId: "recovered-gate", seqId: 2 },
+				},
+			});
+			expect(JSON.stringify(injected)).toContain("just-submitted prompt");
+			expect(JSON.stringify(injected)).toContain('action=\\"respond\\"');
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("does not let a pre-rewind session message acknowledge a recreated coordinate", async () => {
+		const runDir = createUserGate("rewound-gate", 1);
+		const harness = lifecycleHarness(projectDir, true);
+		harness.setEntries([{
+			type: "custom_message",
+			timestamp: "1970-01-01T00:00:00.000Z",
+			customType: "hyperchart-user-request",
+			content: "old presentation",
+			display: true,
+			details: { runId: "rewound-gate", seqId: 1 },
+		}]);
+		try {
+			await harness.sessionStart("resume");
+			expect(harness.sent).toHaveLength(1);
+			expect(harness.sent[0]?.message.details).toMatchObject({ runId: "rewound-gate", seqId: 1 });
+			expect(hasUserInteractionReceipt(runDir, 1, "pi", "session-a")).toBe(true);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("serializes owned gates and promotes only after an explicit validated response", async () => {
+		const runB = createUserGate("run-b", 1);
+		const runA2 = createUserGate("run-a", 2);
+		persistUserInteractionRequest(runA2, {
+			runId: "run-a",
+			seqId: 1,
+			actionUid: { chart: "demo", state: "ask-first", action: "user" },
+			prompt: "First question?",
+			options: ["APPROVED"],
+			events: ["APPROVED", "FAILED"],
+		});
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			expect(harness.sent.map(({ message }) => {
+				const details = message.details as { runId: string; seqId: number };
+				return { runId: details.runId, seqId: details.seqId };
+			})).toEqual([{ runId: "run-a", seqId: 1 }]);
+
+			const first = await harness.tool.execute(
+				"respond-1",
+				{ action: "respond", runId: "run-a", seqId: 1, event: "APPROVED" },
+				new AbortController().signal,
+				() => undefined,
+				harness.ctx,
+			);
+			expect(first.details).toMatchObject({ committed: true, idempotent: false, runId: "run-a", seqId: 1 });
+			expect(readUserInteractionResponse(runA2, 1)?.event).toEqual({ type: "APPROVED" });
+			expect(harness.sent.at(-1)?.message.details).toMatchObject({ runId: "run-a", seqId: 2 });
+
+			const identical = await harness.tool.execute(
+				"respond-retry",
+				{ action: "respond", runId: "run-a", seqId: 1, event: "APPROVED" },
+				new AbortController().signal,
+				() => undefined,
+				harness.ctx,
+			);
+			expect(identical.details).toMatchObject({ committed: true, idempotent: true });
+			await expect(harness.tool.execute(
+				"respond-conflict",
+				{ action: "respond", runId: "run-a", seqId: 1, event: "REJECTED" },
+				new AbortController().signal,
+				() => undefined,
+				harness.ctx,
+			)).rejects.toThrow(/Conflicting response/);
+			expect(readUserInteractionResponse(runB, 1)).toBeUndefined();
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("isolates foreign, closed, and malformed gates while inspecting active versus queued", async () => {
+		const activeDir = createUserGate("owned-a", 1);
+		createUserGate("owned-b", 1);
+		createUserGate("foreign-session-gate", 1, { sessionId: "session-b" });
+		createUserGate("foreign-workdir-gate", 1, { workDir: otherProjectDir });
+		const closedDir = createUserGate("closed-gate", 1);
+		closeUserInteraction(closedDir, { runId: "closed-gate", seqId: 1 }, "test");
+		const malformedDir = createRun("malformed-gate", projectDir, writeUserChart("malformed-gate"), "session-a");
+		patchRunStatus(malformedDir, {
+			runId: "malformed-gate", chartId: "demo", state: "running", pid: process.pid, heartbeatAt: Date.now(),
+		});
+		mkdirSync(join(malformedDir, "user-interactions", "1"), { recursive: true });
+		writeFileSync(join(malformedDir, "user-interactions", "1", "request.json"), "{broken\n");
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			expect(harness.sent).toHaveLength(1);
+			expect(harness.sent[0]?.message.details).toMatchObject({ runId: "owned-a", seqId: 1 });
+			expect(hasUserInteractionReceipt(activeDir, 1, "pi", "session-a")).toBe(true);
+
+			const inspected = await harness.tool.execute(
+				"inspect-gates",
+				{ action: "run_inspect", runDir: "owned-a" },
+				new AbortController().signal,
+				() => undefined,
+				harness.ctx,
+			);
+			expect(inspected.details).toMatchObject({
+				userInteractions: {
+					active: { runId: "owned-a", seqId: 1, presentation: "confirmed" },
+					queued: [expect.objectContaining({ runId: "owned-b", seqId: 1 })],
+				},
+			});
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("rejects foreign, stale, reserved, unsupported, and schema-invalid responses", async () => {
+		const schema = {
+			type: "object",
+			properties: { note: { type: "string" } },
+			required: ["note"],
+			additionalProperties: false,
+		};
+		const runDir = createUserGate("validated-gate", 1, { events: ["APPROVED", "FAILED"], reply: schema });
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			for (const [event, output, pattern] of [
+				["FAILED", undefined, /FAILED is reserved/],
+				["OTHER", undefined, /not allowed/],
+				["APPROVED", { wrong: true }, /reply schema/],
+			] as const) {
+				await expect(harness.tool.execute(
+					"respond-invalid",
+					{ action: "respond", runId: "validated-gate", seqId: 1, event, ...(output === undefined ? {} : { output }) },
+					new AbortController().signal,
+					() => undefined,
+					harness.ctx,
+				)).rejects.toThrow(pattern);
+			}
+			closeUserInteraction(runDir, { runId: "validated-gate", seqId: 1 }, "test");
+			await expect(harness.tool.execute(
+				"respond-stale",
+				{ action: "respond", runId: "validated-gate", seqId: 1, event: "APPROVED", output: { note: "yes" } },
+				new AbortController().signal,
+				() => undefined,
+				harness.ctx,
+			)).rejects.toThrow(/stale or closed/);
+		} finally {
+			await harness.shutdown();
+		}
+
+		const foreign = createUserGate("foreign-gate", 1, { sessionId: "session-b" });
+		const foreignWorkDir = createUserGate("foreign-workdir-response", 1, { workDir: otherProjectDir });
+		const foreignHarness = lifecycleHarness(projectDir, true);
+		try {
+			await expect(foreignHarness.tool.execute(
+				"respond-foreign",
+				{ action: "respond", runId: "foreign-gate", seqId: 1, event: "APPROVED" },
+				new AbortController().signal,
+				() => undefined,
+				foreignHarness.ctx,
+			)).rejects.toThrow(/not owned/);
+			await expect(foreignHarness.tool.execute(
+				"respond-foreign-cwd",
+				{ action: "respond", runId: "foreign-workdir-response", seqId: 1, event: "APPROVED" },
+				new AbortController().signal,
+				() => undefined,
+				foreignHarness.ctx,
+			)).rejects.toThrow(/another working directory/);
+			expect(readUserInteractionResponse(foreign, 1)).toBeUndefined();
+			expect(readUserInteractionResponse(foreignWorkDir, 1)).toBeUndefined();
+		} finally {
+			await foreignHarness.shutdown();
+		}
+	});
+
+	it("returns a shared user boundary from wait=true and commits respond without hanging", async () => {
+		const chartPath = writeUserChart("waited-user-gate");
+		const tool = registeredTool("hyperchart");
+		const { ctx } = commandContext(projectDir);
+		const waited = await tool.execute(
+			"waited-run",
+			{ action: "run", chartPath, wait: true },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
+		const boundary = waited.details as {
+			boundary: string;
+			final: boolean;
+			runId: string;
+			runDir: string;
+			interaction: { runId: string; seqId: number };
+		};
+		expect(boundary).toMatchObject({
+			boundary: "user",
+			final: false,
+			interaction: { runId: boundary.runId },
+		});
+		// The waited result pins but does not confirm presentation before the tool result
+		// is durably delivered; the settled scanner confirms the visible request later.
+		expect(hasUserInteractionReceipt(boundary.runDir, boundary.interaction.seqId, "pi", "session-a")).toBe(false);
+
+		await tool.execute(
+			"waited-response",
+			{
+				action: "respond",
+				runId: boundary.runId,
+				seqId: boundary.interaction.seqId,
+				event: "APPROVED",
+			},
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
+		expect(readUserInteractionResponse(boundary.runDir, boundary.interaction.seqId)?.event).toEqual({ type: "APPROVED" });
+		await tool.execute(
+			"stop-waited-run",
+			{ action: "stop", runDir: boundary.runId },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
 	});
 
 	it("lists project and user charts with project precedence", async () => {
@@ -820,6 +1116,97 @@ describe("hyperchart extension", () => {
 		expect(result.details).toMatchObject({ cleanup: { sessionsRemoved: 1 } });
 	});
 });
+
+type LifecycleHarness = {
+	ctx: ExtensionCommandContext;
+	tool: HyperchartTool;
+	sent: Array<{ message: Record<string, unknown>; options?: Record<string, unknown> }>;
+	setIdle: (idle: boolean) => void;
+	setEntries: (entries: unknown[]) => void;
+	sessionStart: (reason?: string) => Promise<void>;
+	agentSettled: () => Promise<void>;
+	beforeAgentStart: (prompt: string) => Promise<unknown>;
+	shutdown: () => Promise<void>;
+};
+
+function lifecycleHarness(cwd: string, initiallyIdle: boolean): LifecycleHarness {
+	const handlers = new Map<string, (...args: any[]) => any>();
+	const tools: HyperchartTool[] = [];
+	const sent: LifecycleHarness["sent"] = [];
+	let idle = initiallyIdle;
+	let entries: unknown[] = [];
+	const base = commandContext(cwd).ctx;
+	const ctx = {
+		...base,
+		isIdle: () => idle,
+		sessionManager: {
+			getSessionId: () => "session-a",
+			getEntries: () => entries,
+		},
+	} as unknown as ExtensionCommandContext;
+	const pi = {
+		registerCommand: () => {},
+		registerTool: (tool: HyperchartTool) => tools.push(tool),
+		on: (event: string, handler: (...args: any[]) => any) => handlers.set(event, handler),
+		sendMessage: (message: Record<string, unknown>, options?: Record<string, unknown>) => {
+			sent.push({ message, ...(options === undefined ? {} : { options }) });
+		},
+		events: { on: () => {}, emit: () => {} },
+	} as unknown as ExtensionAPI;
+	register(pi);
+	const tool = tools.find((candidate) => candidate.name === "hyperchart");
+	if (tool === undefined) throw new Error("hyperchart tool was not registered");
+	return {
+		ctx,
+		tool,
+		sent,
+		setIdle: (value) => { idle = value; },
+		setEntries: (value) => { entries = value; },
+		sessionStart: async (reason = "startup") => { await handlers.get("session_start")?.({ reason }, ctx); },
+		agentSettled: async () => { await handlers.get("agent_settled")?.({ type: "agent_settled" }, ctx); },
+		beforeAgentStart: async (prompt) => handlers.get("before_agent_start")?.({ type: "before_agent_start", prompt }, ctx),
+		shutdown: async () => { await handlers.get("session_shutdown")?.({ type: "session_shutdown" }, ctx); },
+	};
+}
+
+function createUserGate(
+	runId: string,
+	seqId: number,
+	options: { workDir?: string; sessionId?: string; chartPath?: string; events?: string[]; reply?: Record<string, unknown> } = {},
+): string {
+	const workDir = options.workDir ?? projectDir;
+	const chartPath = options.chartPath ?? writeUserChart(`gate-${runId}-${seqId}`);
+	const runDir = createRun(runId, workDir, chartPath, options.sessionId ?? "session-a");
+	patchRunStatus(runDir, {
+		runId,
+		chartId: "demo",
+		state: "running",
+		pid: process.pid,
+		heartbeatAt: Date.now(),
+	});
+	persistUserInteractionRequest(runDir, {
+		runId,
+		seqId,
+		actionUid: { chart: "demo", state: "ask", action: "user" },
+		prompt: `Question ${runId}/${seqId}?`,
+		options: ["APPROVED", "REJECTED"],
+		events: options.events ?? ["APPROVED", "REJECTED", "FAILED"],
+		...(options.reply === undefined ? {} : { reply: { kind: "jsonSchema" as const, schema: options.reply } }),
+	});
+	return runDir;
+}
+
+function writeUserChart(name: string): string {
+	const chartPath = join(tempDir, `${name}.mjs`);
+	writeFileSync(chartPath, `export default {
+	kind: "chart", id: "demo", initial: "ask",
+	states: {
+		ask: { kind: "state", action: { kind: "user", prompt: "Approve?", options: ["APPROVED", "REJECTED"] }, transitions: { APPROVED: "done", REJECTED: "done" } },
+		done: { kind: "final" }
+	}
+};\n`);
+	return chartPath;
+}
 
 function registeredCommand(): HyperchartCommand {
 	let command: HyperchartCommand | undefined;
