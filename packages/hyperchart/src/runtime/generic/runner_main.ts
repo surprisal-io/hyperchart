@@ -6,6 +6,7 @@ import { explainReplay, type ReplayExplanation } from "../../core/replay_check.j
 import type { ChartAst } from "../../core/types.js";
 import type { SchemaRegistry } from "../../core/schema_registry.js";
 import { ChartRuntime } from "./chart_runtime.js";
+import { FileUserExecutor } from "./user_executor.js";
 import { JsonlLogStore } from "./log_store.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
@@ -154,11 +155,18 @@ export async function runHyperchartRunner(
 			schemaRegistry: parsed.schemaRegistry,
 			sessionsDir,
 		});
+		const userExecutor = new FileUserExecutor({
+			runId: config.runId,
+			runDir: config.runDir,
+			schemaRegistry: parsed.schemaRegistry,
+			onWarn: (message) => console.warn(message),
+		});
 		stopSteering = watchSessionSteering(sessionsDir, (request) => executor.steer(request.actionKey, request.message));
 		runtime = new ChartRuntime({
 			ast: parsed.ast,
 			logStore,
 			agentExecutor: executor,
+			userExecutor,
 			workDir: config.workDir,
 			chartDir: dirname(config.chartPath),
 			schemaRegistry: parsed.schemaRegistry,

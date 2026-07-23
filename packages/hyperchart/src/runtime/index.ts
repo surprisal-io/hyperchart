@@ -1,5 +1,56 @@
 export type { Runtime } from "./runtime.js";
 export type { AgentExecutor, EmitCompletion } from "./generic/agent_executor.js";
+export { FileUserExecutor } from "./generic/user_executor.js";
+export type { FileUserExecutorOptions, UserExecutor } from "./generic/user_executor.js";
+export {
+	USER_INTERACTIONS_DIR,
+	USER_INTERACTION_ARBITER_DIR,
+	USER_INTERACTION_CLAIM_LEASE_MS,
+	USER_INTERACTION_WAIT_LEASE_MS,
+	USER_INTERACTION_CLOSE,
+	USER_INTERACTION_REQUEST,
+	USER_INTERACTION_RESOLUTION,
+	USER_INTERACTION_RESPONSE,
+	acquireActiveUserInteraction,
+	claimUserInteractionReceipt,
+	closeUserInteraction,
+	hasUserInteractionReceipt,
+	markUserInteractionReceipt,
+	persistUserInteractionRequest,
+	readActiveUserInteraction,
+	readOpenUserInteractionRequest,
+	readUserInteractionClose,
+	readUserInteractionReceipt,
+	readUserInteractionRequest,
+	readUserInteractionResolution,
+	readUserInteractionResponse,
+	releaseActiveUserInteraction,
+	removeUserInteractionReceipt,
+	scanOpenUserInteractions,
+	scanOwnedOpenUserInteractions,
+	userInteractionArbiterPath,
+	userInteractionClosePath,
+	userInteractionDir,
+	userInteractionReceiptPath,
+	userInteractionRequestPath,
+	userInteractionResolutionPath,
+	userInteractionResponsePath,
+	validateAndPersistUserInteractionResponse,
+	validateUserInteractionEvent,
+} from "./generic/user_interactions.js";
+export type {
+	OwnedUserInteraction,
+	PersistUserInteractionRequestInput,
+	PersistUserInteractionResponseOptions,
+	UserInteractionArbiterRecord,
+	UserInteractionClose,
+	UserInteractionCoordinate,
+	UserInteractionOwner,
+	UserInteractionReceipt,
+	UserInteractionRequest,
+	UserInteractionResolution,
+	UserInteractionResponse,
+} from "./generic/user_interactions.js";
 export { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./generic/artifacts.js";
 export type { RenderedArtifact } from "../core/machine.js";
 export { ChartRuntime } from "./generic/chart_runtime.js";

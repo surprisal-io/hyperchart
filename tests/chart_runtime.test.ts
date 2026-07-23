@@ -1,12 +1,18 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeChartConfig, start } from "../packages/hyperchart/src/index.js";
-import { agent, arg, chart, final, map } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, arg, chart, final, map, user } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
+import {
+	readUserInteractionRequest,
+	validateAndPersistUserInteractionResponse,
+} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
+import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];
@@ -35,6 +41,20 @@ function linearChart(): ChartAst {
 			initial: "work",
 			states: {
 				work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+				done: final(),
+			},
+		}),
+	);
+}
+
+function userChart(): ChartAst {
+	return make(
+		chart({
+			kind: "chart",
+			id: "runtime-user",
+			initial: "ask",
+			states: {
+				ask: { kind: "state", action: user({ prompt: "Approve?", options: ["APPROVED"] }), transitions: { APPROVED: "done" } },
 				done: final(),
 			},
 		}),
@@ -85,6 +105,14 @@ function fanoutChart(): ChartAst {
 
 function invokeRecords(log: readonly DurableLogRecord[]) {
 	return log.filter((record) => record.type === "state_action" && record.kind === "invoke");
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+	const started = Date.now();
+	while (!predicate()) {
+		if (Date.now() - started > timeoutMs) throw new Error("timed out waiting for condition");
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
 }
 
 async function withTimeout<T>(promise: Promise<T>): Promise<T> {
@@ -138,6 +166,51 @@ describe("ChartRuntime", () => {
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(executor.starts.map((effect) => effect.actionUid.state).sort()).toEqual(["fanout#0.work", "fanout#1.work"]);
+	});
+
+	it("preserves a pending user gate on dispose and consumes its response after restart", async () => {
+		const ast = userChart();
+		const root = await makeTempDir();
+		const runDir = join(root, "run");
+		await mkdir(runDir);
+		patchRunStatus(runDir, { runId: "run", chartId: ast.id, state: "running", pid: process.pid, heartbeatAt: Date.now() });
+		const logStore = new JsonlLogStore(join(runDir, "log.jsonl"));
+		const firstUserExecutor = new FileUserExecutor({ runId: "run", runDir, pollMs: 5 });
+		const firstRuntime = new ChartRuntime({
+			ast,
+			logStore,
+			agentExecutor: new FakeAgentExecutor(),
+			userExecutor: firstUserExecutor,
+			workDir: root,
+			chartDir: root,
+		});
+		const firstRun = start(firstRuntime).catch(() => undefined);
+		await waitUntil(() => readUserInteractionRequest(runDir, 1) !== undefined);
+
+		await firstRuntime.dispose();
+		await firstRun;
+		expect(readUserInteractionRequest(runDir, 1)).toBeDefined();
+		await validateAndPersistUserInteractionResponse({
+			runDir,
+			runId: "run",
+			seqId: 1,
+			event: { type: "APPROVED" },
+		});
+
+		const secondRuntime = new ChartRuntime({
+			ast,
+			logStore,
+			agentExecutor: new FakeAgentExecutor(),
+			userExecutor: new FileUserExecutor({ runId: "run", runDir, pollMs: 5 }),
+			workDir: root,
+			chartDir: root,
+		});
+		const state = await withTimeout(start(secondRuntime));
+		await secondRuntime.dispose();
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(invokeRecords(await logStore.readAll())).toHaveLength(1);
+		expect((await logStore.readAll()).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(1);
 	});
 
 	it("fires timers and cancels the timed-out action", async () => {

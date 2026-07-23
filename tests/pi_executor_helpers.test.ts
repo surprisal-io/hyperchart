@@ -343,6 +343,7 @@ describe("pi executor helpers", () => {
 		const rejected: RejectedEffect = {
 			kind: "rejected",
 			id: "chart:work:worker:1:2",
+			seqId: 2,
 			actionUid: invocation.actionUid,
 			event: { type: "DONE" },
 			onReject: "resume",

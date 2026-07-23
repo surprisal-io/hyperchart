@@ -77,6 +77,10 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	backupIfExists(sessionProgressPath(resolve(opts.runDir, "sessions")), backupDir, "sessions-progress.json");
 	const terminalNotificationsDir = resolve(opts.runDir, "terminal-notification");
 	if (existsSync(terminalNotificationsDir)) renameSync(terminalNotificationsDir, resolve(backupDir, "terminal-notification"));
+	// Interaction seqIds can be reused after truncation. Isolate the whole old mailbox so
+	// replay cannot consume a pre-rewind answer, close marker, or presentation receipt.
+	const userInteractionsDir = resolve(opts.runDir, "user-interactions");
+	if (existsSync(userInteractionsDir)) renameSync(userInteractionsDir, resolve(backupDir, "user-interactions"));
 
 	const artifactCleanup = opts.cleanupArtifacts
 		? cleanupDownstreamArtifacts({ ast: parsed.ast, records, cutIndex, workDir: meta.workDir, backupDir })

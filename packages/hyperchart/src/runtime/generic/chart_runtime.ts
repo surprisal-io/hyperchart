@@ -7,6 +7,7 @@ import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { AgentExecutor } from "./agent_executor.js";
+import type { UserExecutor } from "./user_executor.js";
 import type { LogStore } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
@@ -15,6 +16,8 @@ export type ChartRuntimeOptions = {
 	ast: ChartAst;
 	logStore: LogStore;
 	agentExecutor: AgentExecutor;
+	/** Required only when this runtime may execute user actions; detached runners always provide it. */
+	userExecutor?: UserExecutor;
 	workDir: string;
 	chartDir: string;
 	schemaRegistry?: SchemaRegistryLike;
@@ -89,10 +92,16 @@ export class ChartRuntime implements Runtime {
 				}
 				case "cancel":
 					this.options.agentExecutor.cancel(effect.actionUid);
+					this.options.userExecutor?.cancel(effect.actionUid);
 					this.scripts.cancel(effect.actionUid);
 					break;
 				case "user":
-					this.onWarn("user actions are not supported by this runtime yet");
+					if (this.options.userExecutor === undefined) {
+						throw new Error("ChartRuntime requires a userExecutor to execute user actions");
+					}
+					this.options.userExecutor.start(effect, (event) => {
+						this.queue.send({ kind: "user", effectId: effect.id, event });
+					});
 					break;
 			}
 		}
@@ -117,6 +126,7 @@ export class ChartRuntime implements Runtime {
 		this.timers.clear();
 		await this.scripts.dispose();
 		await this.options.agentExecutor.dispose();
+		await this.options.userExecutor?.dispose();
 		this.queue.close();
 	}
 
@@ -157,7 +167,24 @@ export class ChartRuntime implements Runtime {
 				);
 			return;
 		}
-		this.onWarn("user actions are not supported by this runtime yet");
+		if (state.action.kind === "user") {
+			if (this.options.userExecutor === undefined) {
+				this.queue.send({
+					kind: "user",
+					effectId: effect.id,
+					event: toFailedEvent("ChartRuntime requires a userExecutor to retry user actions"),
+				});
+				return;
+			}
+			try {
+				this.options.userExecutor.reject(effect, (event) => {
+					this.queue.send({ kind: "user", effectId: effect.id, event });
+				});
+			} catch (error) {
+				this.queue.send({ kind: "user", effectId: effect.id, event: toFailedEvent(error) });
+			}
+			return;
+		}
 	}
 }
 

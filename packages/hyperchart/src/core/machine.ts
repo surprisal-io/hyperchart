@@ -93,9 +93,13 @@ export type AgentEffect = Readonly<{
 export type UserEffect = Readonly<{
 	kind: "user";
 	id: EffectId;
+	/** Durable record that caused this user phase; public gate identity is (runId, seqId). */
+	seqId: number;
 	actionUid: ActionUID;
 	action: UserActionAst;
 	prompt: string;
+	events: readonly string[];
+	reply?: SchemaAst;
 }>;
 
 // A command to execute: same completion contract as an agent (events + reply for the parsed
@@ -145,6 +149,8 @@ export type ValidateEffect = Readonly<{
 export type RejectedEffect = Readonly<{
 	kind: "rejected";
 	id: EffectId;
+	/** Durable rejected-validation fact that caused this retry phase. */
+	seqId: number;
 	actionUid: ActionUID;
 	event: ChartEvent;
 	onReject: OnReject;
@@ -369,7 +375,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	const id = pendingEffectId(pending);
 	switch (pending.phase) {
 		case "running":
-			return actionInvocationForAction(state, pending.actionUid, node.action, id);
+			return actionInvocationForAction(state, pending.actionUid, node.action, id, pending.seqId);
 		case "validating": {
 			if (node.validate === undefined) {
 				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without a validator`);
@@ -392,6 +398,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 			return {
 				kind: "rejected",
 				id,
+				seqId: pending.seqId,
 				actionUid: pending.actionUid,
 				event: pending.event,
 				onReject: node.onReject ?? "resume",
@@ -402,6 +409,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 					pending.actionUid,
 					node.action,
 					actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
+					pending.invokeSeqId,
 				),
 			};
 	}
@@ -421,6 +429,7 @@ export function renderPendingActionInvocation(
 		pending.actionUid,
 		node.action,
 		actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
+		pending.seqId,
 	);
 }
 
@@ -429,6 +438,7 @@ function actionInvocationForAction(
 	actionUid: ActionUID,
 	action: ActionStateAst["action"],
 	id: EffectId,
+	seqId: number,
 ): ActionEffect {
 	switch (action.kind) {
 		case "agent":
@@ -436,7 +446,7 @@ function actionInvocationForAction(
 		case "script":
 			return scriptInvocationForAction(state, actionUid, action, id);
 		case "user":
-			return userInvocationForAction(state, actionUid, action, id);
+			return userInvocationForAction(state, actionUid, action, id, seqId);
 	}
 }
 
@@ -544,13 +554,17 @@ function userInvocationForAction(
 	actionUid: ActionUID,
 	action: UserActionAst,
 	id: EffectId,
+	seqId: number,
 ): UserEffect {
 	return {
 		kind: "user",
 		id,
+		seqId,
 		actionUid,
 		action,
 		prompt: renderTemplate(state, action.prompt, actionUid.state),
+		events: allowedEvents(state.ast, actionUid.state),
+		...(action.reply === undefined ? {} : { reply: action.reply }),
 	};
 }
 
@@ -604,7 +618,8 @@ function sameActionUid(left: ActionUID, right: ActionUID): boolean {
 export function stepMachine(state: MachineState, event: MachineEvent): MachineOutput {
 	switch (event.kind) {
 		case "agent":
-		case "script": {
+		case "script":
+		case "user": {
 			const pending = findPendingAction(state, event.effectId);
 			if (pending === null) {
 				// The action is no longer pending — it lost a race (e.g. its timer fired first).
@@ -683,9 +698,6 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 		}
 		case "start":
 			// Nothing to apply: the derivation in createMachineOutput starts whatever is due.
-			break;
-		case "user":
-			// User actions are not implemented yet; the event is accepted but ignored.
 			break;
 		case "durable_records_added": {
 			// The projection reports what an exit dropped while its session was alive — e.g. one

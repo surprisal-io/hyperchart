@@ -11,6 +11,7 @@ import {
 	resume,
 	script,
 	t,
+	user,
 	tsImport,
 	z,
 } from "../packages/hyperchart/src/index.js";
@@ -103,6 +104,27 @@ function semanticDownstreamAst(): ChartAst {
 		}),
 	);
 	if (!result.ok) throw new Error("test chart should be valid");
+	return result.ast;
+}
+
+function userAst(validate = false): ChartAst {
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: validate ? "validated-user-chart" : "user-chart",
+			initial: "ask",
+			states: {
+				ask: {
+					kind: "state",
+					action: user({ prompt: "Approve?", options: ["APPROVED"] }),
+					...(validate ? { validate: tsImport("./checks.js", "approved") } : {}),
+					transitions: { APPROVED: "done" },
+				},
+				done: final(),
+			},
+		}),
+	);
+	if (!result.ok) throw new Error("user chart should be valid");
 	return result.ast;
 }
 
@@ -383,6 +405,97 @@ describe("execution loop", () => {
 		expect(sequence).toEqual(["agent", "durable_records"]);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.pendingActions).toEqual([]);
+	});
+
+	it("routes a user reply through the normal durable completion path", async () => {
+		const ast = userAst();
+		const uid = actionUid(ast, "ask");
+		const events: MachineEvent[] = [];
+		let userEffect: Extract<Effect, { kind: "user" }> | undefined;
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "user") {
+						userEffect = effect;
+						events.push({ kind: "user", effectId: effect.id, event: { type: "APPROVED" } });
+					} else if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(userEffect).toEqual(expect.objectContaining({
+			kind: "user",
+			seqId: 1,
+			prompt: "Approve?",
+			events: ["APPROVED"],
+		}));
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(runtime.effectBatches.flat().find((effect) => effect.kind === "durable_records" && effect.records.some((record) => record.type === "state_action" && record.kind === "complete"))).toBeDefined();
+	});
+
+	it("rejects an unsupported user event through the shared machine defense", async () => {
+		const ast = userAst();
+		const uid = actionUid(ast, "ask");
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "user") events.push({ kind: "user", effectId: effect.id, event: { type: "NOPE" } });
+				}
+			},
+		});
+
+		await expect(loop(runtime)).rejects.toThrow("No transition found for event type NOPE");
+	});
+
+	it("gives each validation-retry user gate the rejected fact seqId", async () => {
+		const ast = userAst(true);
+		const uid = actionUid(ast, "ask");
+		const events: MachineEvent[] = [];
+		const userSeqIds: number[] = [];
+		let validationRound = 0;
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					switch (effect.kind) {
+						case "user":
+							userSeqIds.push(effect.seqId);
+							events.push({ kind: "user", effectId: effect.id, event: { type: "APPROVED" } });
+							break;
+						case "validate":
+							validationRound++;
+							events.push({ kind: "validated", effectId: effect.id, outcome: validationRound === 1 ? { ok: false, reason: "not yet" } : true });
+							break;
+						case "rejected":
+							expect(effect.seqId).toBe(3);
+							expect(effect.invocation.kind === "user" ? effect.invocation.seqId : undefined).toBe(1);
+							events.push({ kind: "user", effectId: effect.id, event: { type: "APPROVED" } });
+							userSeqIds.push(effect.seqId);
+							break;
+						case "durable_records":
+							events.push(durableRecordsAdded(effect.records, effect.id));
+							break;
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+		expect(userSeqIds).toEqual([1, 3]);
+		expect(state.projection.activeLeaves).toEqual(["done"]);
 	});
 
 	it("runs two agent states in sequence, machine invoking each action itself", async () => {
@@ -1473,6 +1586,56 @@ describe("execution loop", () => {
 				record.type === "state_action" ? `${record.kind}:${record.actionUid.state}` : record.type,
 			),
 		).toEqual(["timer_fired:work", "invoke:escalated", "complete:escalated"]);
+	});
+
+	it("ignores late duplicate user replies after the timer wins", async () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "timed-user-chart",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: user({ prompt: "Approve?", options: ["APPROVED"] }),
+					after: { delayMs: 500, target: "escalated" },
+					transitions: { APPROVED: "done" },
+				},
+				escalated: { kind: "state", action: agent("escalation-handler"), transitions: { HANDLED: "done" } },
+				done: final(),
+			},
+		}));
+		if (!parsed.ok) throw new Error("timed user chart should be valid");
+		const ast = parsed.ast;
+		const uid = actionUid(ast, "work");
+		const events: MachineEvent[] = [];
+		let userEffectId = "";
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "user") userEffectId = effect.id;
+					if (effect.kind === "agent" && effect.actionUid.state === "escalated") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "HANDLED" } });
+					}
+					if (effect.kind === "timer") events.push({ kind: "timer", effectId: effect.id });
+					if (effect.kind === "cancel") {
+						events.push({ kind: "user", effectId: userEffectId, event: { type: "APPROVED" } });
+						events.push({ kind: "user", effectId: userEffectId, event: { type: "APPROVED" } });
+					}
+					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		const records = runtime.effectBatches
+			.flat()
+			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
+		expect(records.map((record) => record.type === "state_action" ? `${record.kind}:${record.actionUid.state}` : record.type))
+			.toEqual(["timer_fired:work", "invoke:escalated", "complete:escalated"]);
 	});
 
 	it("replays a timer expiry without waiting", async () => {
