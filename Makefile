@@ -4,6 +4,7 @@ VERSION ?=
 NPM_TAG ?= latest
 NPM_ACCESS ?= public
 CORE_PACKAGE := @surprisal/hyperchart
+CLAUDE_PACKAGE := @surprisal/claude-hyperchart
 PI_PACKAGE := @surprisal/pi-hyperchart
 
 .PHONY: help release-prepare release-dry-run release-publish release-resume release release-gate _require-version _release-clean _confirm-publish _confirm-resume _assert-unpublished
@@ -15,9 +16,9 @@ help:
 	  '      Update versions and run every release gate.' \
 	  '  git add ... && git commit -m "release: 0.2.0"' \
 	  '  make release-publish VERSION=0.2.0 CONFIRM=publish-0.2.0' \
-	  '      Publish core, then publish Pi.' \
+	  '      Publish core, then Claude, then Pi.' \
 	  '  make release-resume VERSION=0.2.0 CONFIRM=resume-0.2.0' \
-	  '      Publish only Pi after an interrupted release.' \
+	  '      Publish the not-yet-published Claude and Pi packages after an interrupted release.' \
 	  '' \
 	  'Optional: NPM_TAG=next NPM_ACCESS=public'
 
@@ -30,6 +31,7 @@ _release-clean:
 
 _assert-unpublished:
 	@if npm view '$(CORE_PACKAGE)@$(VERSION)' version >/dev/null 2>&1; then echo '$(CORE_PACKAGE)@$(VERSION) already exists' >&2; exit 2; fi
+	@if npm view '$(CLAUDE_PACKAGE)@$(VERSION)' version >/dev/null 2>&1; then echo '$(CLAUDE_PACKAGE)@$(VERSION) already exists' >&2; exit 2; fi
 	@if npm view '$(PI_PACKAGE)@$(VERSION)' version >/dev/null 2>&1; then echo '$(PI_PACKAGE)@$(VERSION) already exists' >&2; exit 2; fi
 
 _confirm-publish:
@@ -47,6 +49,7 @@ release-gate: _require-version
 release-dry-run: _require-version
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
 	npm publish --dry-run --workspace '$(CORE_PACKAGE)'
+	npm publish --dry-run --workspace '$(CLAUDE_PACKAGE)'
 	npm publish --dry-run --workspace '$(PI_PACKAGE)'
 
 release-prepare: _require-version _release-clean _assert-unpublished
@@ -62,15 +65,23 @@ release-publish: _require-version _release-clean _confirm-publish
 	@$(MAKE) release-gate VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
 	@$(MAKE) release-dry-run VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
 	npm publish --workspace '$(CORE_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
+	npm publish --workspace '$(CLAUDE_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
 	npm publish --workspace '$(PI_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
-	@printf '\nPublished %s and %s at %s with tag %s. Create the git tag only after final installation verification.\n' '$(CORE_PACKAGE)' '$(PI_PACKAGE)' '$(VERSION)' '$(NPM_TAG)'
+	@printf '\nPublished %s, %s, and %s at %s with tag %s. Create the git tag only after final installation verification.\n' '$(CORE_PACKAGE)' '$(CLAUDE_PACKAGE)' '$(PI_PACKAGE)' '$(VERSION)' '$(NPM_TAG)'
 
 release-resume: _require-version _release-clean _confirm-resume
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
 	@npm whoami >/dev/null
 	@$(MAKE) release-gate VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
-	npm publish --dry-run --workspace '$(PI_PACKAGE)'
-	npm publish --workspace '$(PI_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
-	@printf '\nPublished %s at %s with tag %s. Create the git tag only after final installation verification.\n' '$(PI_PACKAGE)' '$(VERSION)' '$(NPM_TAG)'
+	@if npm view '$(CORE_PACKAGE)@$(VERSION)' version >/dev/null 2>&1; then true; else echo '$(CORE_PACKAGE)@$(VERSION) is not published; run release-publish instead' >&2; exit 2; fi
+	@for pkg in '$(CLAUDE_PACKAGE)' '$(PI_PACKAGE)'; do \
+	  if npm view "$$pkg@$(VERSION)" version >/dev/null 2>&1; then \
+	    echo "$$pkg@$(VERSION) is already published; skipping"; \
+	  else \
+	    npm publish --dry-run --workspace "$$pkg" && \
+	    npm publish --workspace "$$pkg" --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)' || exit 2; \
+	  fi; \
+	done
+	@printf '\nResumed release %s with tag %s. Create the git tag only after final installation verification.\n' '$(VERSION)' '$(NPM_TAG)'
 
 release: release-publish

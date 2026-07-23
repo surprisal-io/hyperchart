@@ -13,8 +13,11 @@ if (!version || !isValidVersion(version)) {
 const rootManifest = readJson("package.json");
 const coreManifest = readJson("packages/hyperchart/package.json");
 const piManifest = readJson("packages/pi-hyperchart/package.json");
+const claudeManifest = readJson("packages/claude-hyperchart/package.json");
+const pluginManifest = readJson("packages/claude-hyperchart/.claude-plugin/plugin.json");
 const lockfile = readJson("package-lock.json");
 const coreDependency = piManifest.dependencies?.[coreManifest.name];
+const claudeCoreDependency = claudeManifest.dependencies?.[coreManifest.name];
 
 if (check) {
 	const mismatches = [];
@@ -22,6 +25,9 @@ if (check) {
 	assertEqual("core package version", coreManifest.version, version, mismatches);
 	assertEqual("Pi package version", piManifest.version, version, mismatches);
 	assertEqual("Pi core dependency", coreDependency, version, mismatches);
+	assertEqual("Claude package version", claudeManifest.version, version, mismatches);
+	assertEqual("Claude core dependency", claudeCoreDependency, version, mismatches);
+	assertEqual("Claude plugin manifest version", pluginManifest.version, version, mismatches);
 	assertEqual("lockfile version", lockfile.version, version, mismatches);
 	assertEqual("lockfile workspace version", lockfile.packages?.[""]?.version, version, mismatches);
 	assertEqual("lockfile core version", lockfile.packages?.["packages/hyperchart"]?.version, version, mismatches);
@@ -29,6 +35,18 @@ if (check) {
 	assertEqual(
 		"lockfile Pi core dependency",
 		lockfile.packages?.["packages/pi-hyperchart"]?.dependencies?.[coreManifest.name],
+		version,
+		mismatches,
+	);
+	assertEqual(
+		"lockfile Claude version",
+		lockfile.packages?.["packages/claude-hyperchart"]?.version,
+		version,
+		mismatches,
+	);
+	assertEqual(
+		"lockfile Claude core dependency",
+		lockfile.packages?.["packages/claude-hyperchart"]?.dependencies?.[coreManifest.name],
 		version,
 		mismatches,
 	);
@@ -40,13 +58,22 @@ if (check) {
 	process.exit(0);
 }
 
-const currentVersions = new Set([rootManifest.version, coreManifest.version, piManifest.version]);
+const currentVersions = new Set([
+	rootManifest.version,
+	coreManifest.version,
+	piManifest.version,
+	claudeManifest.version,
+	pluginManifest.version,
+]);
 if (currentVersions.size !== 1) {
 	throw new Error(`Current package versions differ: ${[...currentVersions].join(", ")}`);
 }
 const current = rootManifest.version;
 if (coreDependency !== current) {
 	throw new Error(`Pi package pins core ${coreDependency}; expected current version ${current}`);
+}
+if (claudeCoreDependency !== current) {
+	throw new Error(`Claude package pins core ${claudeCoreDependency}; expected current version ${current}`);
 }
 if (current === version) throw new Error(`Version is already ${version}`);
 
@@ -55,6 +82,8 @@ lockfile.packages[""].version = version;
 lockfile.packages["packages/hyperchart"].version = version;
 lockfile.packages["packages/pi-hyperchart"].version = version;
 lockfile.packages["packages/pi-hyperchart"].dependencies[coreManifest.name] = version;
+lockfile.packages["packages/claude-hyperchart"].version = version;
+lockfile.packages["packages/claude-hyperchart"].dependencies[coreManifest.name] = version;
 
 replaceExact("package.json", `"version": "${current}"`, `"version": "${version}"`);
 replaceExact(
@@ -71,6 +100,21 @@ replaceExact(
 	"packages/pi-hyperchart/package.json",
 	`"${coreManifest.name}": "${current}"`,
 	`"${coreManifest.name}": "${version}"`,
+);
+replaceExact(
+	"packages/claude-hyperchart/package.json",
+	`"version": "${current}"`,
+	`"version": "${version}"`,
+);
+replaceExact(
+	"packages/claude-hyperchart/package.json",
+	`"${coreManifest.name}": "${current}"`,
+	`"${coreManifest.name}": "${version}"`,
+);
+replaceExact(
+	"packages/claude-hyperchart/.claude-plugin/plugin.json",
+	`"version": "${current}"`,
+	`"version": "${version}"`,
 );
 writeJson("package-lock.json", lockfile);
 replaceExact("README.md", `experimental version ${current}`, `experimental version ${version}`);
