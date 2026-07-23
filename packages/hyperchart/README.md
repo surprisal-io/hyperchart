@@ -57,4 +57,4 @@ The core package has no Pi dependency. React integrations use the optional peer 
 - [Complete API reference](https://github.com/surprisal-io/hyperchart/tree/main/docs/api)
 - [DSL reference and examples](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/dsl.md)
 
-MIT · experimental `0.2.0`
+MIT · experimental `0.3.0`
