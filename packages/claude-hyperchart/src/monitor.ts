@@ -17,6 +17,7 @@ import {
 	type TerminalNotificationRequest,
 	type UserInteractionOwner,
 } from "@surprisal/hyperchart/runtime";
+import { serializeModelEnvelope, summarizeUserGate } from "@surprisal/hyperchart/host";
 
 export type ClaudeMonitorOptions = {
 	runsRoot: string;
@@ -77,31 +78,22 @@ export function ownedClaudeUserInteractionSummary(options: ClaudeMonitorOptions)
 }
 
 export function claudeUserInteractionDetails(interaction: OwnedUserInteraction) {
-	return {
-		version: 1 as const,
-		runId: interaction.request.runId,
-		seqId: interaction.request.seqId,
-		prompt: interaction.request.prompt,
-		options: interaction.request.options,
-		allowedEvents: interaction.request.events.filter((event) => event !== "FAILED"),
-		...(interaction.request.reply === undefined ? {} : { reply: interaction.request.reply }),
-		...(interaction.request.rejection === undefined ? {} : { rejection: interaction.request.rejection }),
-	};
+	return summarizeUserGate(interaction.request);
 }
 
 export function claudeUserInteractionInstruction(interaction: OwnedUserInteraction): string {
 	const details = claudeUserInteractionDetails(interaction);
 	return [
 		`Hyperchart is waiting for real user input at (${details.runId}, ${details.seqId}).`,
-		`Question: ${details.prompt}`,
+		`Question preview: ${details.promptPreview.text}`,
 		details.options.length === 0
 			? "This is a free-text question: use AskUserQuestion with an appropriate free-text/Other path and preserve the user's actual answer."
-			: `Map these authored options to AskUserQuestion choices: ${details.options.join(", ")}.`,
+			: `Map these authored options to AskUserQuestion choices (label => exact value): ${details.options.map((option) => `${JSON.stringify(option.label.text)} => ${JSON.stringify(option.value)}`).join(", ")}.`,
 		`Allowed response events: ${details.allowedEvents.join(", ")}.`,
-		details.reply === undefined ? undefined : `Reply contract: ${JSON.stringify(details.reply)}.`,
+		details.outputRequired ? `Structured output is required. Bounded shape hint: ${JSON.stringify(details.outputHint)}.` : undefined,
 		"Finish the current safe action first and start no unrelated work.",
 		"Then call native AskUserQuestion once for this delivery attempt. If the same gate already has an in-flight question, do not open a concurrent duplicate; after interrupted-session recovery, ask it again. Never infer, fabricate, or supply the answer yourself.",
-		`Immediately after the human answers, call hyperchart_respond with runId=${JSON.stringify(details.runId)}, seqId=${details.seqId}, one allowed event, and output when the reply contract requires it.`,
+		`Immediately after the human answers, call hyperchart_respond with runId=${JSON.stringify(details.runId)}, seqId=${details.seqId}, one allowed event, and output when required by the bounded shape hint.`,
 		"Do not continue the workflow until hyperchart_respond confirms the durable commit. Repeated delivery of this same (runId, seqId) is recovery, not a second question.",
 	].filter((line): line is string => line !== undefined).join("\n");
 }
@@ -123,11 +115,23 @@ export function emitPendingClaudeTerminalNotifications(options: ClaudeMonitorOpt
 	const writeLine = options.writeLine ?? ((line: string) => { writeSync(process.stdout.fd, `${line}\n`); });
 	let delivered = 0;
 	for (const pending of pendingOwnedClaudeTerminalRequests(options)) {
-		if (!claimTerminalNotificationReceipt(pending.runDir, "claude", options.sessionId)) continue;
+		if (!claimTerminalNotificationReceipt(pending.runDir, pending.request.requestId, "claude", options.sessionId)) continue;
+		if (readDeliverableTerminalNotificationRequest(pending.runDir)?.requestId !== pending.request.requestId) continue;
 		// Confirm only after stdout accepts the line. A crash between write and confirmation
 		// intentionally permits at-least-once redelivery.
-		writeLine(JSON.stringify({ customType: "hyperchart-terminal", requestId: pending.request.requestId, content: pending.request.payload.prompt, details: pending.request }));
-		markTerminalNotificationReceipt(pending.runDir, "claude", options.sessionId);
+		writeLine(serializeMonitorEnvelope({
+			customType: "hyperchart-terminal",
+			requestId: pending.request.requestId,
+			content: `Hyperchart run ${pending.request.payload.runId} (${pending.request.payload.chartId}) reached ${pending.request.payload.outcome}. Open hyperchart_view for full results.`,
+			details: {
+				requestId: pending.request.requestId,
+				runId: pending.request.payload.runId,
+				runDir: pending.request.payload.runDir,
+				chartId: pending.request.payload.chartId,
+				outcome: pending.request.payload.outcome,
+			},
+		}));
+		markTerminalNotificationReceipt(pending.runDir, pending.request.requestId, "claude", options.sessionId);
 		delivered++;
 	}
 	return delivered;
@@ -159,7 +163,18 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 	const current = activeOwnedClaudeUserInteraction(options);
 	if (current === undefined || interactionKey(current) !== interactionKey(active)) return 0;
 	const writeLine = options.writeLine ?? ((line: string) => { writeSync(process.stdout.fd, `${line}\n`); });
-	writeLine(JSON.stringify(claudeUserInteractionNotification(current)));
+	let notification: ClaudeMonitorEnvelope;
+	try {
+		notification = claudeUserInteractionNotification(current);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		notification = {
+			customType: "hyperchart-boundary-error",
+			content: `Hyperchart cannot safely deliver this user gate through the model boundary. ${reason}`,
+			details: { error: "user-gate-summary-unavailable", seqId: current.request.seqId },
+		};
+	}
+	writeLine(serializeMonitorEnvelope(notification));
 	markUserInteractionReceipt(current.runDir, current.request.seqId, "claude", options.sessionId);
 	return 1;
 }
@@ -167,6 +182,24 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 /** Combined persistent-monitor scan for terminal notifications and the one active user gate. */
 export function emitPendingClaudeNotifications(options: ClaudeMonitorOptions): number {
 	return emitPendingClaudeTerminalNotifications(options) + emitPendingClaudeUserInteraction(options);
+}
+
+type ClaudeMonitorEnvelope = {
+	customType: string;
+	content: string;
+	requestId?: string;
+	runId?: string;
+	seqId?: number;
+	details: Record<string, unknown>;
+};
+
+function serializeMonitorEnvelope(value: ClaudeMonitorEnvelope): string {
+	return serializeModelEnvelope(value, ({ digest, originalBytes, maxBytes }) => ({
+		customType: "hyperchart-boundary-error",
+		requestId: digest,
+		content: `Hyperchart notification exceeded the model boundary (${digest}). Open hyperchart_view.`,
+		details: { requestId: digest, runId: "unavailable", runDir: "unavailable", chartId: "unavailable", outcome: "failed", error: "model-envelope-too-large", digest, originalBytes, maxBytes },
+	}) as ClaudeMonitorEnvelope);
 }
 
 function interactionKey(interaction: OwnedUserInteraction): string {

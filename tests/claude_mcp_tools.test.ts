@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import {
 	hasTerminalNotificationReceipt,
@@ -22,6 +23,8 @@ import {
 	createHyperchartMcpTools,
 	type HyperchartMcpTool,
 } from "../packages/claude-hyperchart/src/mcp/tools.js";
+import type { ReplySchemaSummary } from "../packages/hyperchart/src/host/summarize.js";
+import { answerFromReplySummary } from "./reply_summary_helpers.js";
 
 const roots: string[] = [];
 let previousClaudeConfigDir: string | undefined;
@@ -75,11 +78,35 @@ function text(result: { content: Array<{ text: string }> }): string {
 	return result.content[0]?.text ?? "";
 }
 
+function largeRepresentableGateSchema(): Record<string, unknown> {
+	return {
+		type: "object",
+		properties: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field${index}`, { type: "string", pattern: "a".repeat(250) }])),
+		required: Array.from({ length: 20 }, (_, index) => `field${index}`),
+		additionalProperties: false,
+	};
+}
+
+function complexGateSchema(): Record<string, unknown> {
+	return z.toJSONSchema(z.object({
+		decision: z.enum(["approve", "reject"]),
+		review: z.object({
+			note: z.string().min(3).max(12).regex(/^[a-z]+$/),
+			priority: z.number().int().min(1).max(5).default(2),
+			optionalNote: z.string().optional(),
+		}),
+		findings: z.array(z.object({
+			kind: z.literal("finding"),
+			value: z.union([z.literal("ok"), z.number().int().min(1)]),
+		})).min(1).max(2),
+	}));
+}
+
 function createUserGate(
 	world: Pick<ReturnType<typeof makeWorld>, "runsRoot" | "cwd" | "chartPath">,
 	runId: string,
 	seqId: number,
-	options: { sessionId?: string; workDir?: string; events?: string[] } = {},
+	options: { sessionId?: string; workDir?: string; events?: string[]; gateOptions?: string[]; prompt?: string; reply?: Record<string, unknown> } = {},
 ) {
 	const runDir = join(world.runsRoot, runId);
 	const workDir = options.workDir ?? world.cwd;
@@ -95,12 +122,12 @@ function createUserGate(
 		runId,
 		seqId,
 		actionUid: { chart: "simple", state: "review", action: "user" },
-		prompt: `Approve ${runId}?`,
-		options: ["yes", "no"],
+		prompt: options.prompt ?? `Approve ${runId}?`,
+		options: options.gateOptions ?? ["yes", "no"],
 		events: options.events ?? ["APPROVED", "REJECTED", "FAILED"],
 		reply: {
 			kind: "jsonSchema",
-			schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false },
+			schema: options.reply ?? { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false },
 		},
 	});
 	return runDir;
@@ -122,35 +149,75 @@ describe("hyperchart MCP tools", () => {
 		]);
 	});
 
-	it("returns compact inspect digests by default and full objects with verbose", async () => {
+	it("always returns compact inspect digests and rejects the former verbose escape hatch", async () => {
 		const { tools } = makeWorld();
 		const digest = JSON.parse(text(await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple" })));
 		expect(digest.chartId).toBe("simple");
 		expect(digest.definitionSource).toBeUndefined();
-		expect(digest.states.every((state: object) => !("definitionSource" in state))).toBe(true);
+		expect(digest.stateDigests.every((state: object) => !("definitionSource" in state))).toBe(true);
 
-		const full = JSON.parse(text(await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple", verbose: true })));
-		expect(full.definitionSource).toContain("chart(");
+		const verbose = await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple", verbose: true });
+		expect(verbose.isError).toBe(true);
+		expect(text(verbose)).toContain("hyperchart_view");
 
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true })));
+		expect(run).not.toHaveProperty("inspector");
+		expect(run).not.toHaveProperty("notification");
 		const runDigest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ runDir: run.runId })));
 		expect(runDigest.runId).toBe(run.runId);
 		expect(runDigest.status).toBe("completed");
-		expect(runDigest.states.every((state: object) => !("definitionSource" in state))).toBe(true);
+		expect(runDigest.stateDigests.every((state: object) => !("definitionSource" in state))).toBe(true);
 	}, 30_000);
+
+	it("returns only bounded startup coordinates for wait=false", async () => {
+		const { tools } = makeWorld();
+		const started = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: false })));
+		expect(started).toMatchObject({ chartId: "simple", runId: expect.any(String), runDir: expect.stringMatching(/^\//) });
+		expect(started).not.toHaveProperty("inspector");
+		expect(started).not.toHaveProperty("states");
+		expect(started).not.toHaveProperty("messages");
+		await tools.get("hyperchart_run")!.handler({ runDir: started.runId, wait: true });
+	}, 30_000);
+
+	it("never loads transcripts into run inspection tool responses", async () => {
+		const { tools, runsRoot, cwd, chartPath } = makeWorld();
+		const runDir = join(runsRoot, "verbose-run");
+		const sessionsDir = join(runDir, "sessions");
+		mkdirSync(sessionsDir, { recursive: true });
+		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		const actionUid = { chart: "simple", state: "done", action: "agent" };
+		const transcriptFile = join(sessionsDir, "verbose.jsonl");
+		writeFileSync(transcriptFile, [
+			JSON.stringify({ hyperchartTranscript: 1, sessionId: "verbose-session", createdAt: 1 }),
+			JSON.stringify({ id: "assistant-1", role: "assistant", text: "verbose transcript" }),
+		].join("\n") + "\n");
+		updateSessionProgress(sessionsDir, actionUid, {
+			actionName: "worker",
+			status: "completed",
+			sessionFile: transcriptFile,
+		});
+
+		const compact = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ runDir: "verbose-run" })));
+		const rejected = await tools.get("hyperchart_run_inspect")!.handler({ runDir: "verbose-run", verbose: true });
+		expect(JSON.stringify(compact)).not.toContain("verbose transcript");
+		expect(rejected.isError).toBe(true);
+		expect(text(rejected)).toContain("hyperchart_view");
+	});
 
 	it("owns runs by the injected session and leases wait delivery without pre-confirming", async () => {
 		const { tools, runsRoot, cwd } = makeWorld("session-a");
 		const first = await tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true });
-		expect(text(first)).toContain("completed successfully");
+		expect(JSON.parse(text(first))).toMatchObject({ boundary: "terminal", final: true, status: { state: "complete" } });
 		const [runId] = readdirSync(runsRoot);
 		if (runId === undefined) throw new Error("expected run");
 		const runDir = join(runsRoot, runId);
 		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
 		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-a")).toBe(false);
+		const firstRequestId = readTerminalNotificationRequest(runDir)!.requestId;
 
 		const second = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ runDir: runId, wait: true })));
-		expect(second.notification).toContain("confirmed or in progress");
+		expect(second.deliveryNotice).toContain("terminal boundary");
+		expect(readTerminalNotificationRequest(runDir)!.requestId).not.toBe(firstRequestId);
 
 		const foreignTools = new Map(createHyperchartMcpTools({ cwd, runsRoot, sessionId: "session-b" }).map((tool) => [tool.name, tool]));
 		const foreign = JSON.parse(text(await foreignTools.get("hyperchart_run")!.handler({ runDir: runId, wait: true })));
@@ -160,7 +227,7 @@ describe("hyperchart MCP tools", () => {
 
 	it("returns the global active user boundary from wait=true without pre-confirming delivery", async () => {
 		const world = makeWorld("session-a");
-		const activeDir = createUserGate(world, "000-active-gate", 4);
+		const activeDir = createUserGate(world, "000-active-gate", 4, { reply: complexGateSchema() });
 		const result = JSON.parse(text(await world.tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true })));
 		expect(result).toMatchObject({
 			boundary: "user",
@@ -173,8 +240,81 @@ describe("hyperchart MCP tools", () => {
 		expect(result.waitedRun.runId).not.toBe(result.runId);
 		expect(result.instruction).toContain("AskUserQuestion once for this delivery attempt");
 		expect(result.instruction).toContain("hyperchart_respond");
+		expect(result.interaction).toMatchObject({
+			outputRequired: true,
+			outputHint: { types: ["object"], fields: expect.arrayContaining([
+				expect.objectContaining({ name: "decision", value: expect.objectContaining({ allowedValueJson: ['"approve"', '"reject"'] }) }),
+				expect.objectContaining({ name: "review", value: expect.objectContaining({ fields: expect.any(Array) }) }),
+				expect.objectContaining({ name: "findings", value: expect.objectContaining({ element: expect.any(Object) }) }),
+			]) },
+		});
+		expect(result.interaction).not.toHaveProperty("reply");
+		expect(result.interaction).not.toHaveProperty("schema");
 		expect(hasUserInteractionReceipt(activeDir, 4, "claude", "session-a")).toBe(false);
-		closeUserInteraction(activeDir, { runId: "000-active-gate", seqId: 4 }, "test cleanup");
+
+		// A user-like structured answer can be translated using only the delivered summary.
+		const output = answerFromReplySummary(result.interaction.outputHint as ReplySchemaSummary);
+		const response = JSON.parse(text(await world.tools.get("hyperchart_respond")!.handler({
+			runId: result.interaction.runId,
+			seqId: result.interaction.seqId,
+			event: result.interaction.allowedEvents[0],
+			output,
+		})));
+		expect(response).toMatchObject({ committed: true, event: "APPROVED" });
+		expect(readUserInteractionResponse(activeDir, 4)?.event).toEqual({ type: "APPROVED", output });
+	}, 30_000);
+
+	it("round-trips long gate identities through the bounded summary and respond tool", async () => {
+		const world = makeWorld("session-a");
+		const runId = `long-${"r".repeat(180)}`;
+		const event = `APPROVED_${"e".repeat(180)}`;
+		const option = `Choice ${"o".repeat(180)}`;
+		const runDir = createUserGate(world, runId, 1, { events: [event, "FAILED"], gateOptions: [option] });
+		const boundary = JSON.parse(text(await world.tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true })));
+
+		expect(boundary.interaction.runId).toBe(runId);
+		expect(boundary.interaction.allowedEvents).toEqual([event]);
+		expect(boundary.interaction.options).toEqual([{
+			label: { text: `${option.slice(0, 159)}…`, originalChars: option.length, omittedChars: option.length - 159 },
+			value: option,
+		}]);
+		expect(JSON.stringify(boundary.interaction)).not.toContain(`${runId.slice(0, 159)}…`);
+		expect(JSON.stringify(boundary.interaction)).not.toContain(`${event.slice(0, 159)}…`);
+
+		const response = JSON.parse(text(await world.tools.get("hyperchart_respond")!.handler({
+			runId: boundary.interaction.runId,
+			seqId: boundary.interaction.seqId,
+			event: boundary.interaction.allowedEvents[0],
+			output: { note: boundary.interaction.options[0].value },
+		})));
+		expect(response).toMatchObject({ committed: true, event });
+		expect(readUserInteractionResponse(runDir, 1)?.event).toEqual({ type: event, output: { note: option } });
+	}, 30_000);
+
+	it("routes an oversized gate identity to the browser inspector instead of emitting a partial gate", async () => {
+		const world = makeWorld("session-a");
+		createUserGate(world, "unsafe-identity", 1, { events: ["e".repeat(2_001)] });
+		const result = await world.tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true });
+		expect(result.isError).toBe(true);
+		expect(text(result)).toMatch(/identity.*cannot be truncated.*browser inspector/i);
+		expect(text(result)).not.toContain("…");
+	}, 30_000);
+
+	it("bounds an oversized envelope through the actual Claude MCP handler", async () => {
+		const world = makeWorld("session-a");
+		for (let index = 0; index < 21; index++) createUserGate(world, `overflow-${String(index).padStart(2, "0")}`, 1, { reply: largeRepresentableGateSchema() });
+		const result = await world.tools.get("hyperchart_run_inspect")!.handler({ runDir: "overflow-00" });
+		const payload = JSON.parse(text(result));
+		expect(payload).toMatchObject({ error: "model-envelope-too-large", digest: expect.stringMatching(/^fnv1a32:/), maxBytes: 64 * 1024 });
+		expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(64 * 1024);
+	}, 30_000);
+
+	it("fails closed through the Claude MCP handler when a gate contract cannot be summarized", async () => {
+		const world = makeWorld("session-a");
+		createUserGate(world, "unrepresentable", 1, { reply: { type: "string", enum: Array.from({ length: 41 }, (_, index) => `value-${index}`) } });
+		const result = await world.tools.get("hyperchart_run")!.handler({ chartPath: "simple", wait: true });
+		expect(result.isError).toBe(true);
+		expect(text(result)).toMatch(/cannot safely deliver.*browser inspector/i);
 	}, 30_000);
 
 	it("validates, commits, retries, and isolates hyperchart_respond at the exact active owner", async () => {
@@ -280,8 +420,8 @@ export default chart({
 		expect(run.status.state).toBe("complete");
 		const digest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ runDir: run.runId })));
 		const statusOf = (id: string) =>
-			digest.states.find((state: { id: string }) => state.id === id)?.status ??
-			(digest.pendingStates.includes(id) ? "pending" : undefined);
+			digest.stateDigests.find((state: { id: string }) => state.id === id)?.status ??
+			(digest.pendingStateIds.includes(id) ? "pending" : undefined);
 		expect(statusOf("wrap.done")).toBe("done");
 		expect(statusOf("wrap")).toBe("done");
 		expect(statusOf("wrap.fan")).toBe("done");
@@ -323,8 +463,7 @@ export default chart({ kind: "chart", id: "common", initial: "done", states: { d
 	it("opens a static chart view without a run", async () => {
 		const { tools } = makeWorld();
 		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ chartPath: "simple", open: false })));
-		expect(viewed.chartId).toBe("simple");
-		expect(viewed.url).toContain("/runs/");
+		expect(viewed).toEqual({ url: expect.stringContaining("/runs/") });
 		const both = await tools.get("hyperchart_view")!.handler({});
 		expect(both.isError).toBe(true);
 	});
@@ -377,7 +516,7 @@ export default chart({
 
 		const runInfo = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ runDir: run.runId })));
 		expect(runInfo.runId).toBe(run.runId);
-		expect(runInfo.states.some((state: { id: string }) => state.id === "done")).toBe(true);
+		expect(runInfo.stateDigests.some((state: { id: string }) => state.id === "done")).toBe(true);
 
 		const relisted = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
 		expect(relisted.runs).toHaveLength(1);
@@ -455,18 +594,35 @@ export default chart({
 		expect(status.state).toBe("stopped");
 	});
 
-	it("opens the browser inspector and returns a tokenized URL", async () => {
+	it("opens the browser inspector with full transcript details and returns a tokenized URL", async () => {
 		const { tools, runsRoot, cwd, chartPath } = makeWorld();
 		const runDir = join(runsRoot, "view-run");
-		mkdirSync(join(runDir, "sessions"), { recursive: true });
+		const sessionsDir = join(runDir, "sessions");
+		mkdirSync(sessionsDir, { recursive: true });
 		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		const actionUid = { chart: "simple", state: "done", action: "agent" };
+		const transcriptFile = join(sessionsDir, "view-run.jsonl");
+		writeFileSync(transcriptFile, [
+			JSON.stringify({ hyperchartTranscript: 1, sessionId: "view-session", createdAt: 1 }),
+			JSON.stringify({ id: "assistant-1", role: "assistant", text: "inspector transcript" }),
+		].join("\n") + "\n");
+		updateSessionProgress(sessionsDir, actionUid, {
+			actionName: "worker",
+			status: "running",
+			sessionFile: transcriptFile,
+		});
 
 		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ runDir: "view-run", open: false })));
 		expect(viewed.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/runs\/[A-Za-z0-9_-]+$/);
 		const response = await fetch(viewed.url.replace("/runs/", "/api/runs/"));
 		expect(response.status).toBe(200);
-		const payload = (await response.json()) as { run: { runId: string } };
+		const payload = (await response.json()) as {
+			run: { runId: string; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
+		};
 		expect(payload.run.runId).toBe("view-run");
+		expect(payload.run.states.find((state) => state.id === "done")?.session?.messages).toEqual([
+			{ id: "assistant-1", role: "assistant", text: "inspector transcript" },
+		]);
 
 		// The inspector's steering endpoint must land in the run's file queue.
 		const steer = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/steer`, {
