@@ -220,13 +220,13 @@ if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !
 if (typeof inspect.hyperchartRunFromRunDir !== "function" || typeof inspect.openRunInspector !== "function") throw new Error("inspect exports missing");
 if (typeof sessions.updateSessionProgress !== "function" || typeof sessions.queueSessionSteering !== "function") throw new Error("sessions exports missing");
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");
-if (typeof piHost.createPiHyperchartHost !== "function") throw new Error("Pi host exports missing");
+if (typeof piHost.createPiHyperchartHost !== "function" || typeof piHost.piHyperchartHost?.readChartSnapshot !== "function" || typeof piHost.piHyperchartHost?.readRunSnapshot !== "function") throw new Error("Pi host exports missing");
 if (typeof coreReact.HyperchartInspectorDialog !== "function") throw new Error("core React exports missing");
 if (typeof claudeHost.resolveClaudeSubagentDefinitionDirs !== "function") throw new Error("Claude host exports missing");
 if (typeof react.HyperchartInspectorDialog !== "function") throw new Error("React exports missing");
-writeFileSync("external.chart.ts", \`import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "external-smoke", initial: "done", states: { done: final() } });\n\`);
+writeFileSync("external.chart.ts", \`import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "external-smoke", args: { topic: { description: "Subject", default: "Hyperchart" } }, initial: "done", states: { done: final() } });\n\`);
 const inspected = core.inspectChartModuleSync(resolve("external.chart.ts"));
-if (inspected.chartId !== "external-smoke") throw new Error("packed sync chart inspection failed");
+if (inspected.chartId !== "external-smoke" || inspected.args?.topic?.default !== "Hyperchart") throw new Error("packed sync chart inspection failed");
 const require = createRequire(import.meta.url);
 const piRoot = dirname(require.resolve("@surprisal/pi-hyperchart/package.json"));
 const extension = await createJiti(import.meta.url, { interopDefault: true }).import(join(piRoot, "extensions/hyperchart.ts"));
@@ -241,6 +241,8 @@ if (typeof extension !== "function" && typeof extension.default !== "function") 
 import type {
   ArtifactCst,
   ArtifactOfCst,
+  ChartArgumentAst,
+  ChartArgumentCst,
   JoinArtifactOfCst,
   MachineOutputError,
   MachineStartEvent,
@@ -250,16 +252,36 @@ import type {
   RenderedArtifact,
 } from "@surprisal/hyperchart";
 import type { GuardContext, Runtime, SchemaCheck } from "@surprisal/hyperchart/runtime";
-import type { HyperchartHostAdapter } from "@surprisal/hyperchart/host";
-import type { HyperchartInspectorDialogProps } from "@surprisal/pi-hyperchart/react";
-const { chart } = refs<Record<string, never>, Record<never, never>>();
-export const definition = chart({ kind: "chart", id: "smoke", initial: "done", states: { done: final() } });
+import type {
+  HyperchartHostAdapter,
+  HyperchartLaunchArgumentInfo,
+  HyperchartRunSummaryInfo,
+  HyperchartSummaryInfo,
+} from "@surprisal/hyperchart/host";
+import type { HyperchartInspectorDialogProps, HyperchartRunStripProps } from "@surprisal/pi-hyperchart/react";
+const { chart } = refs<{ topic: string }, Record<never, never>>();
+export const definition = chart({ kind: "chart", id: "smoke", args: { topic: { description: "Subject", default: "Hyperchart" } }, initial: "done", states: { done: final() } });
+declare const chartSummaries: HyperchartSummaryInfo[];
+export const runStripProps: HyperchartRunStripProps = {
+  hypercharts: chartSummaries,
+  runs: [],
+  onOpenDefinition(summary) {
+    const optionalStateCount: number | undefined = summary.stateCount;
+    void optionalStateCount;
+  },
+};
 export type SmokeTypes =
   | Runtime
   | HyperchartHostAdapter
+  | HyperchartLaunchArgumentInfo
+  | HyperchartSummaryInfo
+  | HyperchartRunSummaryInfo
   | HyperchartInspectorDialogProps
+  | HyperchartRunStripProps
   | ArtifactCst
   | ArtifactOfCst
+  | ChartArgumentAst
+  | ChartArgumentCst
   | JoinArtifactOfCst
   | MachineOutputError
   | MachineStartEvent
