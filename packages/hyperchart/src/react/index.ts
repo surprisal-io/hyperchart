@@ -8,7 +8,7 @@ export {
 } from "./HyperchartInspectorDialog.js";
 export type { HyperchartInspectorDialogProps, HyperchartInspectorSidePanelProps } from "./HyperchartInspectorDialog.js";
 export { HyperchartRunStrip } from "./HyperchartRunStrip.js";
-export type { HyperchartRunStripProps } from "./HyperchartRunStrip.js";
+export type { HyperchartRunStripInfo, HyperchartRunStripProps } from "./HyperchartRunStrip.js";
 export { HyperchartToolSummary } from "./HyperchartToolSummary.js";
 export type { HyperchartToolSummaryProps } from "./HyperchartToolSummary.js";
 export { HyperchartLaunchDialog } from "./HyperchartLaunchDialog.js";

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
@@ -35,7 +35,7 @@ export default chart({ kind: "chart", id: "seam", initial: "done", states: { don
 }
 
 describe("run inspection transcript seam", () => {
-	it("uses an injected transcript reader for session messages", async () => {
+	it("omits transcript payloads by default and loads them only when explicitly requested", async () => {
 		const { runDir } = makeRunDir();
 		const sessionsDir = join(runDir, "sessions");
 		const actionUid = { chart: "seam", state: "done", action: "agent" };
@@ -44,13 +44,18 @@ describe("run inspection transcript seam", () => {
 			status: "running",
 			sessionFile: join(sessionsDir, "whatever.jsonl"),
 		});
+		const readTranscript = vi.fn(() => [{ id: "m1", role: "assistant" as const, text: "injected" }]);
 
-		const run = await hyperchartRunFromRunDir(runDir, {
-			readTranscript: () => [{ id: "m1", role: "assistant", text: "injected" }],
-		});
+		const compact = await hyperchartRunFromRunDir(runDir, { readTranscript });
+		const compactState = compact.states.find((candidate) => candidate.id === "done");
+		expect(compactState?.session).toMatchObject({ actionKey: "seam:done:agent", status: "running" });
+		expect(compactState?.session?.messages).toBeUndefined();
+		expect(readTranscript).not.toHaveBeenCalled();
 
-		const state = run.states.find((candidate) => candidate.id === "done");
-		expect(state?.session?.messages).toEqual([{ id: "m1", role: "assistant", text: "injected" }]);
+		const full = await hyperchartRunFromRunDir(runDir, { readTranscript, includeTranscripts: true });
+		const fullState = full.states.find((candidate) => candidate.id === "done");
+		expect(fullState?.session?.messages).toEqual([{ id: "m1", role: "assistant", text: "injected" }]);
+		expect(readTranscript).toHaveBeenCalled();
 	});
 
 	it("reads the neutral JSONL format by default and ignores unknown formats", async () => {
@@ -81,7 +86,7 @@ describe("run inspection transcript seam", () => {
 			status: "running",
 			sessionFile: neutralFile,
 		});
-		const run = await hyperchartRunFromRunDir(runDir);
+		const run = await hyperchartRunFromRunDir(runDir, { includeTranscripts: true });
 		const state = run.states.find((candidate) => candidate.id === "done");
 		expect(state?.session?.messages?.[0]).toEqual({ id: "u1", role: "user", text: "hi" });
 	});
@@ -152,6 +157,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		});
 
 		const run = await hyperchartRunFromRunDir(runDir, {
+			includeTranscripts: true,
 			readTranscript: (_sessionsDir, sessionFile) => {
 				if (sessionFile === firstFile) return [
 					{ id: "first", role: "assistant", text: "first visit", timestamp: 2500 },

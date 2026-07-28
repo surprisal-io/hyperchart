@@ -11,7 +11,7 @@ import { StatusPill } from "./components/ui/StatusPill.js";
 import { useHyperchartTheme } from "./support/theme-context.js";
 import { MoreHyperchartsDialog } from "./components/run-strip/MoreHyperchartsDialog.js";
 import { runSortTime } from "./components/run-strip/runSortTime.js";
-import type { HyperchartInfo, HyperchartRunInfo } from "./types.js";
+import type { HyperchartRunInfo, HyperchartRunSummaryInfo, HyperchartSummaryInfo } from "./types.js";
 import {
 	formatHyperchartTime,
 	formatHyperchartUsage,
@@ -21,13 +21,15 @@ import {
 	hyperchartRunLabel,
 } from "./hyperchart-display.js";
 
+export type HyperchartRunStripInfo = HyperchartRunInfo | HyperchartRunSummaryInfo;
+
 export interface HyperchartRunStripProps {
-	hypercharts: HyperchartInfo[];
-	runs: HyperchartRunInfo[];
+	hypercharts: HyperchartSummaryInfo[];
+	runs: HyperchartRunStripInfo[];
 	selectedRunId?: string | null;
 	onSelectRun?: (runId: string | null) => void;
 	onRun?: (chartName: string) => void;
-	onOpenDefinition?: (flow: HyperchartInfo) => void;
+	onOpenDefinition?: (flow: HyperchartSummaryInfo) => void;
 	onResume?: (runId: string) => void;
 	onAbort?: () => void;
 	onOpenInspector?: (runId?: string | null) => void;
@@ -71,8 +73,18 @@ const MemoizedHyperchartRunStrip = memo(function MemoizedHyperchartRunStrip({
 
 	if (!run) return null;
 
-	const progress = summarizeHyperchartProgress(run);
-	const running = runningHyperchartStates(run);
+	const progress = "states" in run
+		? summarizeHyperchartProgress(run)
+		: run.progressDone !== undefined && run.progressTotal !== undefined && run.progressPercent !== undefined
+			? { pct: run.progressPercent }
+			: undefined;
+	const running = "states" in run
+		? runningHyperchartStates(run)
+		: run.activeState === undefined
+			? []
+			: [{ id: run.activeState }];
+	const runningCount = "states" in run ? running.length : (run.activeStateCount ?? running.length);
+	const hiddenRunningCount = Math.max(0, runningCount - Math.min(3, running.length));
 	const usage = formatHyperchartUsage(run.totalUsage);
 	const selectRun = (runId: string) => {
 		onSelectRun?.(runId);
@@ -109,8 +121,15 @@ const MemoizedHyperchartRunStrip = memo(function MemoizedHyperchartRunStrip({
 								</span>
 							)}
 						</div>
-						{run && (
-							<div className="mt-1 h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden">
+						{progress !== undefined && (
+							<div
+								className="mt-1 h-1.5 bg-[var(--bg-tertiary)] rounded-full overflow-hidden"
+								role="progressbar"
+								aria-label="Run progress"
+								aria-valuemin={0}
+								aria-valuemax={100}
+								aria-valuenow={progress.pct}
+							>
 								<div
 									className="h-full bg-[var(--accent-blue)] rounded-full transition-all"
 									style={{ width: `${progress.pct}%` }}
@@ -157,7 +176,7 @@ const MemoizedHyperchartRunStrip = memo(function MemoizedHyperchartRunStrip({
 									.slice(0, 3)
 									.map((state) => state.id)
 									.join(", ")}
-								{running.length > 3 ? ` +${running.length - 3}` : ""}
+								{hiddenRunningCount > 0 ? ` +${hiddenRunningCount}` : ""}
 							</span>
 						) : (
 							<span>last update: {formatHyperchartTime(run.updatedAt)}</span>

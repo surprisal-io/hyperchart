@@ -1,7 +1,7 @@
 import { useId, useRef } from "react";
 import { PlayIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { formatHyperchartTime, hyperchartRunLabel } from "../../hyperchart-display.js";
-import type { HyperchartInfo, HyperchartRunInfo } from "../../types.js";
+import type { HyperchartRunInfo, HyperchartRunSummaryInfo, HyperchartSummaryInfo } from "../../types.js";
 import { DialogPortal } from "../../support/DialogPortal.js";
 import { useHyperchartTheme } from "../../support/theme-context.js";
 import { useModalDialog } from "../../support/useModalDialog.js";
@@ -15,12 +15,12 @@ export function MoreHyperchartsDialog({
 	onOpenDefinition,
 	onClose,
 }: {
-	hypercharts: HyperchartInfo[];
-	runs: HyperchartRunInfo[];
+	hypercharts: HyperchartSummaryInfo[];
+	runs: Array<HyperchartRunInfo | HyperchartRunSummaryInfo>;
 	selectedRunId?: string;
 	onSelectRun: (runId: string) => void;
 	onRun?: (chartName: string) => void;
-	onOpenDefinition?: (flow: HyperchartInfo) => void;
+	onOpenDefinition?: (flow: HyperchartSummaryInfo) => void;
 	onClose: () => void;
 }) {
 	const { resolved } = useHyperchartTheme();

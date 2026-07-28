@@ -24,7 +24,9 @@ export type HyperchartRunFromRunDirOptions = {
 	records?: readonly DurableLogRecord[];
 	agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined;
 	now?: number;
-	/** Host-specific session transcript reader; defaults to the neutral JSONL format. */
+	/** Load and attach transcript message payloads. Defaults to false for compact snapshots. */
+	includeTranscripts?: boolean;
+	/** Host-specific session transcript reader; defaults to the neutral JSONL format when transcripts are included. */
 	readTranscript?: SessionTranscriptReader;
 };
 
@@ -54,7 +56,9 @@ export async function hyperchartRunFromRunDir(
 		return messages;
 	};
 	const rawSessionProgress = readSessionProgress(sessionsDir);
-	const sessionProgress = sessionProgressWithVisitTranscripts(sessionsDir, records, rawSessionProgress, readFullTranscript);
+	const sessionProgress = options.includeTranscripts === true
+		? sessionProgressWithVisitTranscripts(sessionsDir, records, rawSessionProgress, readFullTranscript)
+		: rawSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
 	return hyperchartRunFromRuntime(inspect, ast, records, {
 		runId: status?.runId ?? basename(absoluteRunDir),

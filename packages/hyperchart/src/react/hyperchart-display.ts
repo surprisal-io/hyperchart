@@ -94,10 +94,10 @@ export function formatHyperchartUsage(usage?: HyperchartUsageInfo): string | nul
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-export function hyperchartChartName(run: HyperchartRunInfo): string {
+export function hyperchartChartName(run: Pick<HyperchartRunInfo, "chartName">): string {
 	return run.chartName;
 }
 
-export function hyperchartRunLabel(run: HyperchartRunInfo): string {
+export function hyperchartRunLabel(run: Pick<HyperchartRunInfo, "chartName" | "status">): string {
 	return `${hyperchartChartName(run)} · ${run.status}`;
 }
