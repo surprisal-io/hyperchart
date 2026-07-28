@@ -7,6 +7,7 @@ import type {
 	InputRef,
 	JoinArtifactOfAst,
 	JsonSchema,
+	JsonValue,
 	OnReenterAst,
 	SchemaAst,
 	StateActionAst,
@@ -62,9 +63,29 @@ function chartDsl(ast: ChartAst): string {
 	return objectDsl([
 		["kind", stringDsl("chart")],
 		["id", stringDsl(ast.id)],
+		[
+			"args",
+			ast.args === undefined
+				? undefined
+				: objectDsl(Object.entries(ast.args).map(([name, metadata]) => [
+						name,
+						objectDsl([
+							["description", metadata.description === undefined ? undefined : stringDsl(metadata.description)],
+							["default", metadata.default === undefined ? undefined : jsonValueDsl(metadata.default)],
+						]),
+					])),
+		],
 		["initial", stringDsl(ast.initial)],
 		["states", statesDsl(ast, undefined)],
 	]);
+}
+
+function jsonValueDsl(value: JsonValue): string {
+	if (value === null) return "null";
+	if (typeof value === "string") return stringDsl(value);
+	if (typeof value === "number" || typeof value === "boolean") return String(value);
+	if (Array.isArray(value)) return arrayDsl(value.map(jsonValueDsl));
+	return objectDsl(Object.entries(value).map(([key, child]) => [key, jsonValueDsl(child)]));
 }
 
 function statesDsl(ast: ChartAst, parent: StatePath | undefined): string {

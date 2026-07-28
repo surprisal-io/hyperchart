@@ -46,6 +46,10 @@ describe("examples", () => {
 		expect(result.ast.states.research?.kind).toBe("map");
 		expect(result.ast.states["research.scout"]?.kind).toBe("state");
 		expect(result.ast.states["chapters.author"]?.kind).toBe("state");
+		expect(result.ast.args?.topic).toEqual({
+			description: "Subject or question for the report",
+			default: "Google I/O 2026 announcements",
+		});
 	});
 
 	it("zod shapes convert to plain JSON Schema in the AST", () => {

@@ -7,9 +7,11 @@ import type {
 	ActionUID,
 	AgentActionAst,
 	AuthoringDiagnostic,
+	ChartArgumentAst,
 	ChartAst,
 	ChartCst,
 	ChartSource,
+	JsonValue,
 	ArtifactAst,
 	CompoundStateAst,
 	EventBindingAst,
@@ -95,6 +97,7 @@ function toChartAst(
 	}
 
 	const chartId = typeof id === "string" ? id : "";
+	const args = toChartArguments(input.args, diagnostics, source);
 	const states: Record<StatePath, StateAst> = {};
 	for (const [stateId, stateInput] of Object.entries(input.states)) {
 		collectState(
@@ -129,9 +132,101 @@ function toChartAst(
 	return deepFreeze({
 		kind: "chart",
 		id: chartId,
+		...(args === undefined ? {} : { args }),
 		initial: typeof initial === "string" ? initial : "",
 		states,
 	});
+}
+
+function toChartArguments(
+	input: unknown,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): Record<string, ChartArgumentAst> | undefined {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(diagnostic("INVALID_CHART_ARGS", "Chart args metadata must be an object.", "/args", source));
+		return undefined;
+	}
+	const args: Record<string, ChartArgumentAst> = {};
+	for (const [name, raw] of Object.entries(input)) {
+		const pointer = `/args/${escapePointer(name)}`;
+		if (name.length === 0) {
+			diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument names must be non-empty.", pointer, source));
+			continue;
+		}
+		if (!isRecord(raw)) {
+			diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' metadata must be an object.`, pointer, source));
+			continue;
+		}
+		for (const field of Object.keys(raw)) {
+			if (field !== "description" && field !== "default") {
+				diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' has unknown metadata field '${field}'.`, `${pointer}/${escapePointer(field)}`, source));
+			}
+		}
+		let description: string | undefined;
+		if (raw.description !== undefined) {
+			if (typeof raw.description !== "string") {
+				diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' description must be a string.`, `${pointer}/description`, source));
+			} else {
+				description = raw.description;
+			}
+		}
+		let defaultValue: JsonValue | undefined;
+		const hasDefault = Object.hasOwn(raw, "default");
+		if (hasDefault) defaultValue = toJsonValue(raw.default, `${pointer}/default`, diagnostics, source, new WeakSet());
+		args[name] = {
+			...(description === undefined ? {} : { description }),
+			...(!hasDefault || defaultValue === undefined ? {} : { default: defaultValue }),
+		};
+	}
+	return args;
+}
+
+function toJsonValue(
+	value: unknown,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	ancestors: WeakSet<object>,
+): JsonValue | undefined {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+	if (typeof value === "number") {
+		if (Number.isFinite(value)) return value;
+		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must contain only finite JSON numbers.", pointer, source));
+		return undefined;
+	}
+	if (typeof value !== "object") {
+		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must be JSON-serializable data.", pointer, source));
+		return undefined;
+	}
+	if (ancestors.has(value)) {
+		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must not contain circular references.", pointer, source));
+		return undefined;
+	}
+	ancestors.add(value);
+	if (Array.isArray(value)) {
+		const result: JsonValue[] = [];
+		for (let index = 0; index < value.length; index++) {
+			const item = toJsonValue(value[index], `${pointer}/${index}`, diagnostics, source, ancestors);
+			if (item !== undefined) result.push(item);
+		}
+		ancestors.delete(value);
+		return result;
+	}
+	const prototype = Object.getPrototypeOf(value);
+	if (prototype !== Object.prototype && prototype !== null) {
+		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must contain only plain JSON objects.", pointer, source));
+		ancestors.delete(value);
+		return undefined;
+	}
+	const result: Record<string, JsonValue> = {};
+	for (const [key, child] of Object.entries(value)) {
+		const item = toJsonValue(child, `${pointer}/${escapePointer(key)}`, diagnostics, source, ancestors);
+		if (item !== undefined) result[key] = item;
+	}
+	ancestors.delete(value);
+	return result;
 }
 
 // Builds the node at its absolute path and recurses into compound children — the AST stays a

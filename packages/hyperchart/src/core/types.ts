@@ -13,6 +13,18 @@ export type ActionUID = Readonly<{
 export type EventType = string;
 export type ReservedSystemEventType = "FAILED";
 export type JsonSchema = Record<string, unknown>;
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+/** Serializable, display-only metadata for one run argument. */
+export type ChartArgumentCst = {
+	/** Human-readable guidance for launch UIs. */
+	description?: string;
+	/** Suggested launch value; hosts may let the user edit or omit it. */
+	default?: JsonValue;
+};
+
+export type ChartArgumentAst = Readonly<ChartArgumentCst>;
 
 export type ChartSource = {
 	path?: string;
@@ -335,6 +347,8 @@ export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst | Paral
 export type ChartCst = {
 	kind: "chart";
 	id: string;
+	/** Optional serializable metadata for host launch forms; not runtime validation. */
+	args?: Record<string, ChartArgumentCst>;
 	initial: StateId;
 	states: Record<StateId, StateCst>;
 };
@@ -469,6 +483,7 @@ export type StateAst =
 export type ChartAst = Readonly<{
 	kind: "chart";
 	id: string;
+	args?: Readonly<Record<string, ChartArgumentAst>>;
 	initial: StateId;
 	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).
 	states: Readonly<Record<StatePath, StateAst>>;

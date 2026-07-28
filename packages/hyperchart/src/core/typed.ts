@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { ArtifactOfCst, ChartCst, EventBindingCst, JoinArtifactOfCst, InputRef } from "./types.js";
+import type { ArtifactOfCst, ChartArgumentCst, ChartCst, EventBindingCst, JoinArtifactOfCst, InputRef } from "./types.js";
 
 // Dot-paths a result() selector may take into a value of type T. Free-form objects
 // (Record<string, unknown>) admit any tail; arrays and primitives end the path.
@@ -129,7 +129,19 @@ type Mutual<Declared, Actual, Message extends string> = [Declared] extends [Actu
 		: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } }
 	: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } };
 
-type VerifyDecl<C, Results, Files, Maps, Inputs> = Mutual<
+type ArgumentMetadataFor<Args> = Partial<{
+	[K in keyof Args & string]: Omit<ChartArgumentCst, "default"> & { default?: Args[K] };
+}>;
+
+type VerifyArguments<C, Args> = C extends { args: infer Actual }
+	? Actual extends ArgumentMetadataFor<Args>
+		? Exclude<keyof Actual, keyof Args> extends never
+			? unknown
+			: { "chart argument metadata names an unknown Args key": { chartDeclares: Actual; registryDeclares: Args } }
+		: { "chart argument metadata is out of sync with the Args registry": { chartDeclares: Actual; registryDeclares: Args } }
+	: unknown;
+
+type VerifyDecl<C, Args, Results, Files, Maps, Inputs> = VerifyArguments<C, Args> & Mutual<
 	Results,
 	ResultsOf<C>,
 	"results registry is out of sync with the chart"
@@ -150,7 +162,7 @@ type InputValue<Inputs, K extends string> = {
 type Refs<Args, Results, Files, Maps, Inputs> = {
 	// The checking chart constructor: accepts only a literal whose declared replies/artifacts
 	// match the registry the refs were built from — the registry cannot drift from the chart.
-	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Results, Files, Maps, Inputs>) => C;
+	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Args, Results, Files, Maps, Inputs>) => C;
 	arg: <K extends keyof Args & string>(name: K) => InputRef<Args[K]>;
 	event: (path?: string) => EventBindingCst;
 	visit: (state?: string) => InputRef<number>;

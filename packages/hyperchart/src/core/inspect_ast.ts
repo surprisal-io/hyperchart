@@ -2,6 +2,7 @@ import { hyperchartSource } from "./source.js";
 import type {
 	ArtifactAst,
 	ArtifactOfAst,
+	ChartArgumentAst,
 	ChartAst,
 	EventBindingAst,
 	GuardRefAst,
@@ -126,6 +127,7 @@ export type HyperchartInspectState = {
 
 export type HyperchartInspectResult = {
 	chartId: string;
+	args?: Readonly<Record<string, ChartArgumentAst>>;
 	chartPath?: string;
 	exportName?: string;
 	definitionSource?: string;
@@ -139,6 +141,7 @@ export function inspectChartAst(
 ): HyperchartInspectResult {
 	return {
 		chartId: ast.id,
+		...(ast.args === undefined ? {} : { args: ast.args }),
 		...(options.chartPath === undefined ? {} : { chartPath: options.chartPath }),
 		...(options.exportName === undefined ? {} : { exportName: options.exportName }),
 		definitionSource: hyperchartSource(ast, null),

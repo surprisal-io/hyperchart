@@ -65,7 +65,8 @@ export function hyperchartRunFromInfo(
 		cwd: options.cwd ?? "",
 		createdAt: updatedAt,
 		updatedAt,
-		args: info.args ?? {},
+		...(info.args === undefined ? {} : { launchArgs: info.args }),
+		args: {},
 		states: info.states,
 		stateCount: info.stateCount,
 	};
@@ -87,6 +88,7 @@ export function hyperchartRunFromInspectResult(
 		cwd: options.cwd ?? "",
 		createdAt: options.createdAt ?? now,
 		updatedAt: options.updatedAt ?? now,
+		...(result.args === undefined ? {} : { launchArgs: result.args }),
 		args: options.args ?? {},
 		states,
 		stateCount: states.length,

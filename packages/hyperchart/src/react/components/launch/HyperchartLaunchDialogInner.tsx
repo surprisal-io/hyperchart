@@ -41,7 +41,7 @@ export function HyperchartLaunchDialogInner({
 		args && Object.keys(args).length > 0
 			? JSON.stringify(
 					Object.fromEntries(
-						Object.entries(args).map(([key, spec]) => [key, (spec as { default?: unknown })?.default ?? ""]),
+						Object.entries(args).map(([key, spec]) => [key, Object.hasOwn(spec, "default") ? spec.default : ""]),
 					),
 					null,
 					2,

@@ -1,10 +1,16 @@
+import type { ChartArgumentAst } from "../core/types.js";
+
+/** Canonical serializable metadata consumed by host launch forms. */
+export type HyperchartLaunchArgumentInfo = ChartArgumentAst;
+
 export interface HyperchartInfo {
 	name: string;
 	description: string;
 	scope: "user" | "project";
 	source?: string;
 	definitionSource?: string;
-	args?: Record<string, unknown>;
+	/** Launch-form metadata. Runtime argument values live on HyperchartRunInfo.args. */
+	args?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
 	states?: HyperchartStateInfo[];
 	stateCount: number;
 	updatedAt?: number;
@@ -285,6 +291,9 @@ export interface HyperchartRunInfo {
 	updatedAt: number;
 	pid?: number;
 	detached?: boolean;
+	/** Definition-owned launch metadata, when declared by the chart. */
+	launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
+	/** Concrete values used by this run (empty for static inspection). */
 	args: Record<string, unknown>;
 	states: HyperchartStateInfo[];
 	stateCount: number;

@@ -102,6 +102,13 @@ const { arg, result, artifactOf, joinArtifactOf, key, item, chart } = refs<
 export default chart({
 	kind: "chart",
 	id: "deck-director",
+	args: {
+		topic: { description: "Subject or question for the report", default: "Google I/O 2026 announcements" },
+		audience: { description: "Primary readers", default: "executives" },
+		goal: { description: "Decision or outcome the report should support", default: "Explain the most important changes" },
+		style: { description: "Desired editorial and visual style", default: "analytical" },
+		constraints: { description: "Additional scope or sourcing constraints", default: "Use primary sources where possible" },
+	},
 	initial: "plan",
 	states: {
 		// taskflow: report-plan — decides buckets, thresholds, angles.

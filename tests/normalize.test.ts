@@ -17,6 +17,62 @@ import {
 import { arg, artifactOf, chart, event, input, item, key, result, resume, visit } from "../packages/hyperchart/src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
+	it("normalizes serializable chart argument metadata into the frozen AST", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "launch-args",
+				args: {
+					topic: { description: "Subject to research", default: "Hyperchart" },
+					options: { description: "Optional structured settings", default: { depth: 2, tags: ["dsl"] } },
+				},
+				initial: "done",
+				states: { done: final() },
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected valid chart");
+		expect(result.ast.args).toEqual({
+			topic: { description: "Subject to research", default: "Hyperchart" },
+			options: { description: "Optional structured settings", default: { depth: 2, tags: ["dsl"] } },
+		});
+		expect(Object.isFrozen(result.ast.args)).toBe(true);
+		expect(JSON.parse(JSON.stringify(result.ast.args))).toEqual(result.ast.args);
+	});
+
+	it("diagnoses malformed or non-serializable chart argument metadata", () => {
+		const result = normalizeChartConfig({
+			kind: "chart",
+			id: "invalid-launch-args",
+			args: {
+				"": {},
+				badSpec: "not metadata",
+				badDescription: { description: 42 },
+				badDefault: { default: { callback: () => undefined } },
+				badSchema: { default: z.string() },
+			},
+			initial: "done",
+			states: { done: final() },
+		});
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+			"INVALID_CHART_ARGUMENT",
+			"INVALID_CHART_ARGUMENT",
+			"INVALID_CHART_ARGUMENT",
+			"INVALID_CHART_ARGUMENT",
+			"INVALID_CHART_ARGUMENT",
+		]);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.path)).toEqual([
+			"/args/",
+			"/args/badSpec",
+			"/args/badDescription/description",
+			"/args/badDefault/default/callback",
+			"/args/badSchema/default",
+		]);
+	});
+
 	it("normalizes a valid chart into a frozen AST", () => {
 		const result = normalizeChartConfig(
 			chart({

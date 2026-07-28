@@ -38,8 +38,8 @@ export const Basic: Story = {
 	args: {
 		description: "Build an interactive narrative report from sourced evidence.",
 		args: {
-			topic: { default: "Google I/O 2026 announcements" },
-			audience: { default: "executives" },
+			topic: { description: "Subject or question for the report", default: "Google I/O 2026 announcements" },
+			audience: { description: "Primary readers", default: "executives" },
 		},
 		onOpenGraph: fn(),
 	},

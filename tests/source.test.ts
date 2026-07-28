@@ -25,6 +25,22 @@ function sourceForScript() {
 }
 
 describe("hyperchart source", () => {
+	it("prints chart argument metadata in generated definition source", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "argument-source",
+			args: { topic: { description: "Research subject", default: "Hyperchart" } },
+			initial: "done",
+			states: { done: final() },
+		}));
+		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain("args: {");
+		expect(source).toContain('description: "Research subject"');
+		expect(source).toContain('default: "Hyperchart"');
+	});
+
 	it("keeps the positional args slot when script options exist without args", () => {
 		const source = sourceForScript();
 		expect(source).toMatch(/script\("echo", \[\], \{\s+env:/);

@@ -60,6 +60,30 @@ describe("typed refs (TS-first)", () => {
 		arg("topicc");
 	});
 
+	it("checks declared launch argument metadata against the Args registry", () => {
+		const typed = refs<{ topic: string; limit: number }, Record<string, never>>();
+		const body = {
+			kind: "chart",
+			id: "typed-launch-args",
+			args: {
+				topic: { description: "Research subject", default: "Hyperchart" },
+				limit: { default: 3 },
+			},
+			initial: "done",
+			states: { done: final() },
+		} as const;
+		expect(typed.chart(body).args).toEqual(body.args);
+		expect(typed.chart({ ...body, args: { topic: {} } }).args).toEqual({ topic: {} });
+		expect(typed.chart({ ...body, args: {} }).args).toEqual({});
+
+		// @ts-expect-error metadata default does not match the typed argument value
+		typed.chart({ ...body, args: { topic: { default: 42 } } });
+		// @ts-expect-error metadata names an argument absent from the Args registry
+		typed.chart({ ...body, args: { typo: { default: "x" } } });
+		// @ts-expect-error metadata mixes a registered argument with an unknown key
+		typed.chart({ ...body, args: { topic: { default: "valid" }, toppic: { default: "typo" } } });
+	});
+
 	it("the refs-provided chart() pins the registry to the definition", () => {
 		const Reply = z.object({ dir: z.string() });
 		const body = {
