@@ -13,5 +13,28 @@ export type {
 	HyperchartRuntimeSessionProgressInfo,
 } from "./adapters.js";
 export { summarizeHyperchartProgress } from "./run_progress.js";
-export { summarizeChartInspect, summarizeRunInspect } from "./summarize.js";
-export type { ChartInspectStateSummary, ChartInspectSummary, RunInspectStateSummary, RunInspectSummary } from "./summarize.js";
+export {
+	MAX_TOOL_PAYLOAD_BYTES,
+	assertToolPayloadSafe,
+	boundedModelEnvelope,
+	serializeModelEnvelope,
+	serializeToolPayload,
+	ReplyContractSummaryError,
+	summarizeChartInspect,
+	summarizeReplyContract,
+	summarizeRunInspect,
+	summarizeUserGate,
+} from "./summarize.js";
+export type {
+	ChartInspectStateSummary,
+	ChartInspectSummary,
+	DisplayStringSummary,
+	RunInspectStateSummary,
+	ReplyContractSummary,
+	ReplySchemaConstraints,
+	ReplySchemaSummary,
+	RunInspectSummary,
+	SafeToolPayload,
+	UserGateOptionSummary,
+	UserGateSummary,
+} from "./summarize.js";
