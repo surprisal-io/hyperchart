@@ -9,6 +9,8 @@ export type HyperchartRunStatus = {
 	runDir: string;
 	chartId: string;
 	state: HyperchartRunState;
+	/** Opaque identity of the runner launch that owns this process status. */
+	attemptId?: string;
 	pid?: number;
 	startedAt: number;
 	updatedAt: number;
@@ -53,12 +55,14 @@ export function patchRunStatus(runDir: string, patch: RunStatusPatch): Hyperchar
 	const exitCode = valueFor("exitCode", patch, previous);
 	const error = valueFor("error", patch, previous);
 	const replayWarnings = valueFor("replayWarnings", patch, previous);
+	const attemptId = valueFor("attemptId", patch, previous);
 	const next: HyperchartRunStatus = {
 		version: 1,
 		runId: valueFor("runId", patch, previous) ?? "unknown",
 		runDir,
 		chartId: valueFor("chartId", patch, previous) ?? "unknown",
 		state: valueFor("state", patch, previous) ?? "starting",
+		...(attemptId === undefined ? {} : { attemptId }),
 		startedAt: previous?.startedAt ?? now,
 		updatedAt: now,
 		...(pid === undefined ? {} : { pid }),
@@ -113,6 +117,7 @@ function normalizeStatus(value: unknown, fallbackRunDir: string): HyperchartRunS
 		runDir: typeof value.runDir === "string" ? value.runDir : fallbackRunDir,
 		chartId: value.chartId,
 		state,
+		...(typeof value.attemptId === "string" ? { attemptId: value.attemptId } : {}),
 		startedAt: typeof value.startedAt === "number" ? value.startedAt : 0,
 		updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,
 		...(typeof value.pid === "number" ? { pid: value.pid } : {}),

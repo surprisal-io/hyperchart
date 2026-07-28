@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { start } from "../../core/execution_loop.js";
@@ -11,6 +12,7 @@ import { JsonlLogStore } from "./log_store.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
 import {
+	archiveTerminalNotificationGeneration,
 	defaultFailedTerminalNotificationPayload,
 	persistTerminalNotificationRequest,
 	renderTerminalNotificationPayload,
@@ -26,6 +28,8 @@ export type HyperchartRunnerConfig = {
 	chartId: string;
 	exportName?: string;
 	workDir: string;
+	/** Opaque identity shared by host admission, status, and this attempt's outbox. */
+	attemptId?: string;
 	args?: Record<string, unknown>;
 	defaultModel?: string;
 	/** Role name -> model ref (in the host's model format) applied to agent definitions declaring `role`. */
@@ -65,6 +69,7 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 		chartPath: value.chartPath,
 		chartId: value.chartId,
 		workDir: value.workDir,
+		...(typeof value.attemptId === "string" ? { attemptId: value.attemptId } : {}),
 		...(typeof value.agentDir === "string" ? { agentDir: value.agentDir } : {}),
 		...(typeof value.exportName === "string" ? { exportName: value.exportName } : {}),
 		...(isRecord(value.args) ? { args: value.args } : {}),
@@ -91,10 +96,12 @@ export async function runHyperchartRunner(
 
 	process.chdir(config.workDir);
 	mkdirSync(join(config.runDir, "sessions"), { recursive: true });
+	const attemptId = config.attemptId ?? randomUUID();
 	patchRunStatus(config.runDir, {
 		runId: config.runId,
 		chartId: config.chartId,
 		state: "starting",
+		attemptId,
 		pid: process.pid,
 		heartbeatAt: Date.now(),
 		error: undefined,
@@ -121,6 +128,11 @@ export async function runHyperchartRunner(
 	heartbeat.unref();
 
 	try {
+		// A terminal request belongs to the runner attempt that produced it. Retire it
+		// only after status is non-terminal, then let this attempt publish its own
+		// result. This preserves the old receipt while allowing failed recovery to
+		// resume and later complete successfully.
+		archiveTerminalNotificationGeneration(config.runDir);
 		await assertChartPreflight(config.chartPath);
 		const parsed = parseChartModuleSync(
 			config.chartPath,

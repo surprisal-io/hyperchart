@@ -65,7 +65,9 @@ export { finalMachineFailureMessage, terminalStateForFinalMachine } from "./gene
 export type { RunTerminalState } from "./generic/run_outcome.js";
 export {
 	TERMINAL_NOTIFICATION_DIR,
+	TERMINAL_NOTIFICATION_HISTORY_DIR,
 	TERMINAL_NOTIFICATION_REQUEST,
+	archiveTerminalNotificationGeneration,
 	claimTerminalNotificationReceipt,
 	defaultFailedTerminalNotificationPayload,
 	hasTerminalNotificationReceipt,

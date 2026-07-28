@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { agent, artifact, chart, failed, final, t, z } from "../packages/hyperchart/src/index.js";
 import { artifactOf, event, input, result } from "../packages/hyperchart/src/core/dsl.js";
@@ -11,14 +11,17 @@ import { createBranchProjection, projectBranch } from "../packages/hyperchart/sr
 import type { ChartAst, StateActionAst } from "../packages/hyperchart/src/core/types.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import {
+	archiveTerminalNotificationGeneration,
 	claimTerminalNotificationReceipt,
 	hasTerminalNotificationReceipt,
 	markTerminalNotificationReceipt,
 	persistTerminalNotificationRequest,
 	readDeliverableTerminalNotificationRequest,
+	readTerminalNotificationRequest,
 	recoverStaleRunTerminalNotification,
 	removeTerminalNotificationOutbox,
 	renderTerminalNotificationPayload,
+	terminalNotificationReceiptPath,
 	terminalNotificationRequestPath,
 } from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
 
@@ -107,8 +110,60 @@ describe("terminal notification outbox", () => {
 		expect(readDeliverableTerminalNotificationRequest(runDir)?.requestId).toBe(first.requestId);
 
 		expect(hasTerminalNotificationReceipt(runDir, "pi", "session")).toBe(false);
-		const receipt = markTerminalNotificationReceipt(runDir, "pi", "session");
-		expect(markTerminalNotificationReceipt(runDir, "pi", "session")).toEqual(receipt);
+		const receipt = markTerminalNotificationReceipt(runDir, first.requestId, "pi", "session");
+		expect(markTerminalNotificationReceipt(runDir, first.requestId, "pi", "session")).toEqual(receipt);
+		expect(hasTerminalNotificationReceipt(runDir, "pi", "session")).toBe(true);
+	});
+
+	it("archives a failed attempt before a resumed attempt publishes success", () => {
+		const runDir = join(tempRoot(), "run");
+		mkdirSync(runDir);
+		const failed = persistTerminalNotificationRequest(runDir, {
+			runId: "run", runDir, chartId: "chart", outcome: "failed", prompt: "first attempt failed", artifacts: [], error: "stale provenance",
+		});
+		markTerminalNotificationReceipt(runDir, failed.requestId, "pi", "session");
+		patchRunStatus(runDir, { runId: "run", chartId: "chart", state: "starting" });
+
+		const archiveDir = archiveTerminalNotificationGeneration(runDir);
+		expect(archiveDir).toBeDefined();
+		expect(readTerminalNotificationRequest(runDir)).toBeUndefined();
+		expect(JSON.parse(readFileSync(join(archiveDir!, "request.json"), "utf8"))).toEqual(failed);
+		const receiptRelativePath = relative(join(runDir, "terminal-notification"), terminalNotificationReceiptPath(runDir, failed.requestId, "pi", "session"));
+		expect(existsSync(join(archiveDir!, receiptRelativePath))).toBe(true);
+
+		const complete = persistTerminalNotificationRequest(runDir, {
+			runId: "run", runDir, chartId: "chart", outcome: "complete", prompt: "resumed attempt completed", artifacts: [],
+		});
+		expect(complete.requestId).not.toBe(failed.requestId);
+		patchRunStatus(runDir, { state: "complete" });
+		expect(readDeliverableTerminalNotificationRequest(runDir)?.requestId).toBe(complete.requestId);
+	});
+
+	it("never claims or confirms a cached request after its generation is replaced", () => {
+		const runDir = join(tempRoot(), "run");
+		mkdirSync(runDir);
+		const oldRequest = persistTerminalNotificationRequest(runDir, {
+			runId: "run", runDir, chartId: "chart", outcome: "failed", prompt: "old failure", artifacts: [], error: "old failure",
+		});
+		patchRunStatus(runDir, { runId: "run", chartId: "chart", state: "starting" });
+		archiveTerminalNotificationGeneration(runDir);
+		const newRequest = persistTerminalNotificationRequest(runDir, {
+			runId: "run", runDir, chartId: "chart", outcome: "complete", prompt: "new success", artifacts: [],
+		});
+		patchRunStatus(runDir, { state: "complete" });
+
+		expect(claimTerminalNotificationReceipt(runDir, oldRequest.requestId, "pi", "session")).toBe(false);
+		expect(() => markTerminalNotificationReceipt(runDir, oldRequest.requestId, "pi", "session")).toThrow(/no longer active/);
+		expect(claimTerminalNotificationReceipt(runDir, newRequest.requestId, "pi", "session")).toBe(true);
+		expect(hasTerminalNotificationReceipt(runDir, "pi", "session")).toBe(false);
+		markTerminalNotificationReceipt(runDir, newRequest.requestId, "pi", "session");
+		expect(hasTerminalNotificationReceipt(runDir, "pi", "session")).toBe(true);
+
+		const stalePath = terminalNotificationReceiptPath(runDir, oldRequest.requestId, "pi", "session");
+		mkdirSync(dirname(stalePath), { recursive: true });
+		writeFileSync(stalePath, `${JSON.stringify({
+			version: 1, requestId: oldRequest.requestId, host: "pi", sessionId: "session", state: "confirmed", deliveredAt: new Date().toISOString(),
+		})}\n`);
 		expect(hasTerminalNotificationReceipt(runDir, "pi", "session")).toBe(true);
 	});
 
@@ -133,16 +188,16 @@ describe("terminal notification outbox", () => {
 	it("reclaims an unconfirmed delivery after its lease but never reclaims a confirmation", () => {
 		const runDir = join(tempRoot(), "run");
 		mkdirSync(runDir);
-		persistTerminalNotificationRequest(runDir, {
+		const request = persistTerminalNotificationRequest(runDir, {
 			runId: "run", runDir, chartId: "chart", outcome: "complete", prompt: "done", artifacts: [],
 		});
-		expect(claimTerminalNotificationReceipt(runDir, "claude", "session", { now: 1_000, leaseMs: 100 })).toBe(true);
+		expect(claimTerminalNotificationReceipt(runDir, request.requestId, "claude", "session", { now: 1_000, leaseMs: 100 })).toBe(true);
 		expect(hasTerminalNotificationReceipt(runDir, "claude", "session")).toBe(false);
-		expect(claimTerminalNotificationReceipt(runDir, "claude", "session", { now: 1_050, leaseMs: 100 })).toBe(false);
-		expect(claimTerminalNotificationReceipt(runDir, "claude", "session", { now: 1_101, leaseMs: 100 })).toBe(true);
-		markTerminalNotificationReceipt(runDir, "claude", "session");
+		expect(claimTerminalNotificationReceipt(runDir, request.requestId, "claude", "session", { now: 1_050, leaseMs: 100 })).toBe(false);
+		expect(claimTerminalNotificationReceipt(runDir, request.requestId, "claude", "session", { now: 1_101, leaseMs: 100 })).toBe(true);
+		markTerminalNotificationReceipt(runDir, request.requestId, "claude", "session");
 		expect(hasTerminalNotificationReceipt(runDir, "claude", "session")).toBe(true);
-		expect(claimTerminalNotificationReceipt(runDir, "claude", "session", { now: 10_000, leaseMs: 100 })).toBe(false);
+		expect(claimTerminalNotificationReceipt(runDir, request.requestId, "claude", "session", { now: 10_000, leaseMs: 100 })).toBe(false);
 	});
 
 	it("recovers a stale dead run by writing the failed request before terminal status", () => {
@@ -163,9 +218,16 @@ describe("terminal notification outbox", () => {
 		expect(readDeliverableTerminalNotificationRequest(runDir)?.requestId).toBe(request?.requestId);
 	});
 
-	it("preserves an outbox written before a hard crash and terminalizes status to its outcome", () => {
+	it("preserves a same-attempt outbox written before a hard crash and terminalizes status to its outcome", () => {
 		const runDir = join(tempRoot(), "run");
 		mkdirSync(runDir);
+		patchRunStatus(runDir, {
+			runId: "run",
+			chartId: "chart",
+			state: "running",
+			pid: 999_999_999,
+			heartbeatAt: 1,
+		});
 		const request = persistTerminalNotificationRequest(runDir, {
 			runId: "run",
 			runDir,
@@ -174,17 +236,33 @@ describe("terminal notification outbox", () => {
 			prompt: "completed before status write",
 			artifacts: [],
 		});
-		patchRunStatus(runDir, {
-			runId: "run",
-			chartId: "chart",
-			state: "running",
-			pid: 999_999_999,
-			heartbeatAt: 1,
-		});
 
 		expect(recoverStaleRunTerminalNotification(runDir, 20_000)?.requestId).toBe(request.requestId);
 		expect(readRunStatus(runDir)).toMatchObject({ state: "complete", exitCode: 0 });
 		expect(readDeliverableTerminalNotificationRequest(runDir)?.requestId).toBe(request.requestId);
+	});
+
+	it("fails a dead resumed attempt instead of inheriting its predecessor before archival", () => {
+		const runDir = join(tempRoot(), "run");
+		mkdirSync(runDir);
+		patchRunStatus(runDir, { runId: "run", chartId: "chart", state: "complete", attemptId: "attempt-old" });
+		const previous = persistTerminalNotificationRequest(runDir, {
+			runId: "run", runDir, chartId: "chart", outcome: "complete", prompt: "previous success", artifacts: [],
+		});
+		patchRunStatus(runDir, {
+			state: "starting",
+			attemptId: "attempt-new",
+			pid: 999_999_999,
+			heartbeatAt: 1,
+			error: "resumed runner died before archival",
+		});
+
+		const recovered = recoverStaleRunTerminalNotification(runDir, 20_000);
+		expect(recovered?.requestId).not.toBe(previous.requestId);
+		expect(recovered?.attemptId).toBe("attempt-new");
+		expect(recovered?.payload).toMatchObject({ outcome: "failed", error: "resumed runner died before archival" });
+		expect(readRunStatus(runDir)).toMatchObject({ state: "failed", attemptId: "attempt-new", exitCode: 1 });
+		expect(readDeliverableTerminalNotificationRequest(runDir)?.requestId).toBe(recovered?.requestId);
 	});
 
 	it("preserves explicit failed outcomes independently of final names", () => {

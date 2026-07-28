@@ -23,6 +23,7 @@ describe("run status", () => {
 			runId: "run",
 			chartId: "chart",
 			state: "failed",
+			attemptId: "attempt-a",
 			error: "boom",
 			exitCode: 1,
 			heartbeatAt: 100,
@@ -30,9 +31,12 @@ describe("run status", () => {
 		patchRunStatus(dir, { state: "running", error: undefined, exitCode: undefined, heartbeatAt: Date.now() });
 
 		const status = readRunStatus(dir);
-		expect(status).toMatchObject({ runId: "run", chartId: "chart", state: "running" });
+		expect(status).toMatchObject({ runId: "run", chartId: "chart", state: "running", attemptId: "attempt-a" });
 		expect(status?.error).toBeUndefined();
 		expect(status?.exitCode).toBeUndefined();
 		expect(isRunLive(status)).toBe(true);
+
+		patchRunStatus(dir, { state: "starting", attemptId: "attempt-b" });
+		expect(readRunStatus(dir)).toMatchObject({ state: "starting", attemptId: "attempt-b" });
 	});
 });

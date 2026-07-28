@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { MachineState } from "../../core/machine.js";
 import { renderJoin, renderRead, renderTemplate } from "../../core/machine.js";
 import { nodeAt } from "../../core/paths.js";
@@ -8,6 +8,7 @@ import type { RunTerminalState } from "./run_outcome.js";
 import { isRunLive, patchRunStatus, readRunStatus } from "./run_status.js";
 
 export const TERMINAL_NOTIFICATION_DIR = "terminal-notification";
+export const TERMINAL_NOTIFICATION_HISTORY_DIR = "terminal-notification-history";
 export const TERMINAL_NOTIFICATION_REQUEST = "request.json";
 
 export type TerminalNotificationPayload = Readonly<{
@@ -25,6 +26,8 @@ export type TerminalNotificationRequest = Readonly<{
 	version: 1;
 	requestId: string;
 	createdAt: string;
+	/** Runner attempt that produced this request; absent only on legacy outboxes. */
+	attemptId?: string;
 	payload: TerminalNotificationPayload;
 }>;
 
@@ -118,7 +121,13 @@ export function recoverStaleRunTerminalNotification(
 		return undefined;
 	}
 	let request = readTerminalNotificationRequest(runDir);
-	if (request === undefined) {
+	const belongsToCurrentAttempt = status.attemptId === undefined
+		? request !== undefined // Legacy status/outbox pairs retain their original request-wins behavior.
+		: request?.attemptId === status.attemptId;
+	if (!belongsToCurrentAttempt) {
+		// The host may have durably opened this attempt before the runner got far
+		// enough to archive the previous outbox. Never let that older outcome win.
+		if (request !== undefined) archiveTerminalNotificationGeneration(runDir);
 		const error = status.error ?? "runner exited before recording a terminal status";
 		request = persistTerminalNotificationRequest(
 			runDir,
@@ -130,6 +139,7 @@ export function recoverStaleRunTerminalNotification(
 			}),
 		);
 	}
+	if (request === undefined) throw new Error(`Failed to recover terminal notification request for ${runDir}`);
 	patchRunStatus(runDir, {
 		state: request.payload.outcome,
 		pid: undefined,
@@ -140,6 +150,23 @@ export function recoverStaleRunTerminalNotification(
 			: undefined,
 	});
 	return request;
+}
+
+/**
+ * Retire the previous attempt's complete outbox before a resumed runner can
+ * publish a new terminal result. The status must become non-terminal first so
+ * hosts cannot begin a new delivery while the directory is being archived.
+ */
+export function archiveTerminalNotificationGeneration(runDir: string): string | undefined {
+	const request = readTerminalNotificationRequest(runDir);
+	if (request === undefined) return undefined;
+	const historyDir = join(runDir, TERMINAL_NOTIFICATION_HISTORY_DIR);
+	mkdirSync(historyDir, { recursive: true });
+	const createdAt = request.createdAt.replace(/[^\dA-Za-z.-]/g, "-");
+	const requestKey = createHash("sha256").update(request.requestId).digest("hex").slice(0, 16);
+	const archiveDir = join(historyDir, `${createdAt}-${requestKey}`);
+	renameSync(join(runDir, TERMINAL_NOTIFICATION_DIR), archiveDir);
+	return archiveDir;
 }
 
 /** Persist-once outbox write. Existing identical payloads are reused; divergent terminal replay fails loud. */
@@ -153,6 +180,7 @@ export function persistTerminalNotificationRequest(runDir: string, payload: Term
 		return existing;
 	}
 	mkdirSync(join(runDir, TERMINAL_NOTIFICATION_DIR), { recursive: true });
+	const attemptId = readRunStatus(runDir)?.attemptId;
 	const request: TerminalNotificationRequest = {
 		version: 1,
 		// Identity belongs to this outbox generation, not its payload. Rewind removes the
@@ -160,6 +188,7 @@ export function persistTerminalNotificationRequest(runDir: string, payload: Term
 		// distinguish from the pre-rewind delivery.
 		requestId: randomUUID(),
 		createdAt: new Date().toISOString(),
+		...(attemptId === undefined ? {} : { attemptId }),
 		payload,
 	};
 	atomicWriteJson(path, request);
@@ -176,15 +205,22 @@ export function readTerminalNotificationRequest(runDir: string): TerminalNotific
 	return value;
 }
 
-export function terminalNotificationReceiptPath(runDir: string, host: string, sessionId: string): string {
-	const key = createHash("sha256").update(`${host}\0${sessionId}`).digest("hex");
-	return join(runDir, TERMINAL_NOTIFICATION_DIR, "receipts", `${key}.json`);
+export function terminalNotificationReceiptPath(runDir: string, requestId: string, host: string, sessionId: string): string {
+	const generationKey = createHash("sha256").update(requestId).digest("hex");
+	const ownerKey = createHash("sha256").update(`${host}\0${sessionId}`).digest("hex");
+	return join(runDir, TERMINAL_NOTIFICATION_DIR, "receipts", generationKey, `${ownerKey}.json`);
+}
+
+function legacyTerminalNotificationReceiptPath(runDir: string, host: string, sessionId: string): string {
+	const ownerKey = createHash("sha256").update(`${host}\0${sessionId}`).digest("hex");
+	return join(runDir, TERMINAL_NOTIFICATION_DIR, "receipts", `${ownerKey}.json`);
 }
 
 export function hasTerminalNotificationReceipt(runDir: string, host: string, sessionId: string): boolean {
 	const request = readTerminalNotificationRequest(runDir);
 	if (request === undefined) return false;
-	const receipt = readReceipt(terminalNotificationReceiptPath(runDir, host, sessionId));
+	const receipt = readReceipt(terminalNotificationReceiptPath(runDir, request.requestId, host, sessionId))
+		?? readReceipt(legacyTerminalNotificationReceiptPath(runDir, host, sessionId));
 	return receipt !== undefined &&
 		receipt.requestId === request.requestId &&
 		receipt.host === host &&
@@ -201,13 +237,17 @@ export function hasTerminalNotificationReceipt(runDir: string, host: string, ses
  */
 export function claimTerminalNotificationReceipt(
 	runDir: string,
+	requestId: string,
 	host: string,
 	sessionId: string,
 	options: { now?: number; leaseMs?: number } = {},
 ): boolean {
 	const request = readTerminalNotificationRequest(runDir);
-	if (request === undefined) throw new Error(`No terminal notification request exists for ${runDir}`);
-	const path = terminalNotificationReceiptPath(runDir, host, sessionId);
+	if (request === undefined || request.requestId !== requestId) return false;
+	const legacy = readReceipt(legacyTerminalNotificationReceiptPath(runDir, host, sessionId));
+	if (legacy?.requestId === requestId && legacy.host === host && legacy.sessionId === sessionId &&
+		(legacy.state === "confirmed" || (legacy.state === undefined && typeof legacy.deliveredAt === "string"))) return false;
+	const path = terminalNotificationReceiptPath(runDir, requestId, host, sessionId);
 	const now = options.now ?? Date.now();
 	const leaseMs = options.leaseMs ?? TERMINAL_NOTIFICATION_CLAIM_LEASE_MS;
 	const claim: TerminalNotificationReceipt = {
@@ -218,7 +258,7 @@ export function claimTerminalNotificationReceipt(
 		state: "claimed",
 		claimedAt: new Date(now).toISOString(),
 	};
-	mkdirSync(join(runDir, TERMINAL_NOTIFICATION_DIR, "receipts"), { recursive: true });
+	mkdirSync(dirname(path), { recursive: true });
 	for (let attempt = 0; attempt < 3; attempt++) {
 		try {
 			writeFileSync(path, `${JSON.stringify(claim, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
@@ -239,6 +279,19 @@ export function claimTerminalNotificationReceipt(
 			if (isNodeError(error) && error.code === "ENOENT") continue;
 			throw error;
 		}
+		const displacedReceipt = readReceipt(displaced);
+		if (stableJson(displacedReceipt) !== stableJson(existing)) {
+			// The receipt changed after our stale read (most importantly, it may now
+			// be confirmed). Restore it only if no concurrent writer already won.
+			try {
+				linkSync(displaced, path);
+			} catch (error) {
+				if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+			} finally {
+				rmSync(displaced, { force: true });
+			}
+			return false;
+		}
 		try {
 			writeFileSync(path, `${JSON.stringify(claim, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
 			return true;
@@ -253,11 +306,13 @@ export function claimTerminalNotificationReceipt(
 }
 
 /** Confirm only after the host-facing delivery operation succeeds. */
-export function markTerminalNotificationReceipt(runDir: string, host: string, sessionId: string): TerminalNotificationReceipt {
+export function markTerminalNotificationReceipt(runDir: string, requestId: string, host: string, sessionId: string): TerminalNotificationReceipt {
 	const request = readTerminalNotificationRequest(runDir);
-	if (request === undefined) throw new Error(`No terminal notification request exists for ${runDir}`);
-	const path = terminalNotificationReceiptPath(runDir, host, sessionId);
-	const existing = readReceipt(path);
+	if (request === undefined || request.requestId !== requestId) {
+		throw new Error(`Terminal notification generation '${requestId}' is no longer active for ${runDir}`);
+	}
+	const path = terminalNotificationReceiptPath(runDir, requestId, host, sessionId);
+	const existing = readReceipt(path) ?? readReceipt(legacyTerminalNotificationReceiptPath(runDir, host, sessionId));
 	if (existing !== undefined && existing.requestId === request.requestId && existing.host === host && existing.sessionId === sessionId && existing.state === "confirmed") {
 		return existing as TerminalNotificationReceipt;
 	}
@@ -269,13 +324,14 @@ export function markTerminalNotificationReceipt(runDir: string, host: string, se
 		state: "confirmed",
 		deliveredAt: new Date().toISOString(),
 	};
-	mkdirSync(join(runDir, TERMINAL_NOTIFICATION_DIR, "receipts"), { recursive: true });
+	mkdirSync(dirname(path), { recursive: true });
 	atomicWriteJson(path, receipt);
 	return receipt;
 }
 
-export function removeTerminalNotificationReceipt(runDir: string, host: string, sessionId: string): void {
-	rmSync(terminalNotificationReceiptPath(runDir, host, sessionId), { force: true });
+export function removeTerminalNotificationReceipt(runDir: string, requestId: string, host: string, sessionId: string): void {
+	rmSync(terminalNotificationReceiptPath(runDir, requestId, host, sessionId), { force: true });
+	rmSync(legacyTerminalNotificationReceiptPath(runDir, host, sessionId), { force: true });
 }
 
 export function removeTerminalNotificationOutbox(runDir: string): void {
