@@ -1,6 +1,7 @@
-import { readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
+import * as ts from "typescript";
 import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect";
 import type {
 	HyperchartHostAdapter,
@@ -8,7 +9,7 @@ import type {
 	HyperchartSnapshotOptions,
 } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
-import type { HyperchartInfo, HyperchartRunInfo } from "@surprisal/hyperchart/host";
+import type { HyperchartInfo, HyperchartRunInfo, HyperchartRunSummaryInfo, HyperchartSummaryInfo } from "@surprisal/hyperchart/host";
 import { loadRunMeta } from "@surprisal/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, getSharedHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
@@ -27,14 +28,25 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 
 	return {
 		readSessionSnapshot: (cwd, snapshotOptions = {}) =>
-			readSessionSnapshot(
+			readSessionSnapshot(resolve(cwd), agentDir, snapshotOptions, failedRunMetaFingerprints),
+		readChartSnapshot: async (cwd, chartName) => {
+			const resolvedCwd = resolve(cwd);
+			const chart = (await discoverHypercharts(resolvedCwd, agentDir)).find((candidate) => candidate.name === chartName);
+			if (chart === undefined) return undefined;
+			return readChart(chart.source, chart.root, chart.scope, resolvedCwd, agentDir, options.agentDefaults);
+		},
+		readRunSnapshot: async (cwd, runId) => {
+			if (basename(runId) !== runId) return undefined;
+			return readRun(
+				join(getHyperchartRunsRoot(agentDir), runId),
 				resolve(cwd),
 				agentDir,
-				snapshotOptions,
+				true,
 				options.agentDefaults,
 				failedRunMetaFingerprints,
 				failedRunInspectionFingerprints,
-			),
+			);
+		},
 	};
 }
 
@@ -48,51 +60,160 @@ async function readSessionSnapshot(
 	cwd: string,
 	agentDir: string,
 	options: HyperchartSnapshotOptions,
-	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
-	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartSessionSnapshot> {
 	const [hypercharts, runs] = await Promise.all([
-		readHypercharts(cwd, agentDir, agentDefaults),
-		readRuns(
-			cwd,
-			agentDir,
-			options.runLimit ?? 50,
-			agentDefaults,
-			failedRunMetaFingerprints,
-			failedRunInspectionFingerprints,
-		),
+		readHypercharts(cwd, agentDir),
+		readRuns(cwd, agentDir, options.runLimit ?? 50, failedRunMetaFingerprints),
 	]);
 	return { hypercharts, runs };
 }
 
-async function readHypercharts(
-	cwd: string,
-	agentDir: string,
-	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
-): Promise<HyperchartInfo[]> {
+async function readHypercharts(cwd: string, agentDir: string): Promise<HyperchartSummaryInfo[]> {
+	return (await discoverHypercharts(cwd, agentDir)).map(({ root: _root, ...summary }) => summary);
+}
+
+type DiscoveredHyperchart = HyperchartSummaryInfo & {
+	source: string;
+	root: string;
+};
+
+async function discoverHypercharts(cwd: string, agentDir: string): Promise<DiscoveredHyperchart[]> {
 	const projectRoot = getProjectHyperchartsDir(cwd);
 	const sharedRoot = getSharedHyperchartsDir(cwd);
 	const userRoot = join(agentDir, "hypercharts");
 	const projectFiles = listProjectHypercharts(cwd).map((path) => join(projectRoot, path));
 	const sharedFiles = sharedRoot === undefined ? [] : await listChartFiles(sharedRoot);
 	const userFiles = await listChartFiles(userRoot);
-	const byName = new Map<string, HyperchartInfo>();
+	const byName = new Map<string, DiscoveredHyperchart>();
 
-	// The shared host-neutral dir surfaces as project scope in the dashboard;
-	// a same-named chart in the host-specific project dir still wins.
+	// Weakest scope first: shared shadows user and host-specific project shadows both.
 	for (const [scope, files, root] of [
 		["user", userFiles, userRoot],
 		["project", sharedFiles, sharedRoot ?? projectRoot],
 		["project", projectFiles, projectRoot],
 	] as const) {
 		for (const source of files) {
-			const info = await readChart(source, root, scope, cwd, agentDir, agentDefaults);
-			if (info) byName.set(info.name, info);
+			const summary = await discoverChart(source, root, scope);
+			if (summary !== undefined) byName.set(summary.name, summary);
 		}
 	}
 
 	return [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function discoverChart(
+	source: string,
+	root: string,
+	scope: HyperchartInfo["scope"],
+): Promise<DiscoveredHyperchart | undefined> {
+	try {
+		const [file, text] = await Promise.all([stat(source), readFile(source, "utf8")]);
+		const literal = inspectLiteralChartModule(text, source);
+		return {
+			name: literal?.name ?? chartNameFor(source, root),
+			description: relative(root, source).replaceAll("\\", "/"),
+			scope,
+			source: resolve(source),
+			root,
+			...(literal?.stateCount === undefined ? {} : { stateCount: literal.stateCount }),
+			updatedAt: file.mtimeMs,
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+function inspectLiteralChartModule(text: string, source: string): { name?: string; stateCount?: number } | undefined {
+	const sourceFile = ts.createSourceFile(source, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+	const exported = sourceFile.statements.find(
+		(statement): statement is ts.ExportAssignment => ts.isExportAssignment(statement) && !statement.isExportEquals,
+	);
+	if (exported === undefined) return undefined;
+	const definition = literalObject(exported.expression, sourceFile);
+	if (definition === undefined) return undefined;
+	const id = propertyInitializer(definition, "id");
+	const states = propertyInitializer(definition, "states");
+	const name = id !== undefined && (ts.isStringLiteral(id) || ts.isNoSubstitutionTemplateLiteral(id)) ? id.text : undefined;
+	const stateCount = states === undefined ? undefined : countLiteralStates(states, sourceFile);
+	return {
+		...(name === undefined ? {} : { name }),
+		...(stateCount === undefined ? {} : { stateCount }),
+	};
+}
+
+function literalObject(expression: ts.Expression, sourceFile: ts.SourceFile): ts.ObjectLiteralExpression | undefined {
+	const unwrapped = unwrapExpression(expression);
+	if (ts.isObjectLiteralExpression(unwrapped)) return unwrapped;
+	if (ts.isCallExpression(unwrapped)) {
+		const argument = unwrapped.arguments[0];
+		return argument === undefined ? undefined : literalObject(argument, sourceFile);
+	}
+	if (ts.isIdentifier(unwrapped)) {
+		for (const statement of sourceFile.statements) {
+			if (!ts.isVariableStatement(statement)) continue;
+			for (const declaration of statement.declarationList.declarations) {
+				if (ts.isIdentifier(declaration.name) && declaration.name.text === unwrapped.text && declaration.initializer !== undefined) {
+					return literalObject(declaration.initializer, sourceFile);
+				}
+			}
+		}
+	}
+	return undefined;
+}
+
+function unwrapExpression(expression: ts.Expression): ts.Expression {
+	let current = expression;
+	while (
+		ts.isParenthesizedExpression(current) ||
+		ts.isAsExpression(current) ||
+		ts.isSatisfiesExpression(current) ||
+		ts.isNonNullExpression(current)
+	) {
+		current = current.expression;
+	}
+	return current;
+}
+
+function propertyInitializer(object: ts.ObjectLiteralExpression, name: string): ts.Expression | undefined {
+	let initializer: ts.Expression | undefined;
+	for (const property of object.properties) {
+		if (ts.isSpreadAssignment(property)) {
+			// A later spread may replace an earlier literal field, so it is no longer statically known.
+			initializer = undefined;
+			continue;
+		}
+		if (!ts.isPropertyAssignment(property)) continue;
+		const propertyName = property.name;
+		if (
+			(ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName) || ts.isNumericLiteral(propertyName)) &&
+			propertyName.text === name
+		) initializer = unwrapExpression(property.initializer);
+	}
+	return initializer;
+}
+
+function countLiteralStates(expression: ts.Expression, sourceFile: ts.SourceFile): number | undefined {
+	const states = literalObject(expression, sourceFile);
+	if (states === undefined || states.properties.some((property) => !ts.isPropertyAssignment(property))) return undefined;
+	let count = states.properties.length;
+	for (const property of states.properties) {
+		if (!ts.isPropertyAssignment(property)) return undefined;
+		const state = literalObject(property.initializer, sourceFile);
+		if (state === undefined) continue;
+		const children = propertyInitializer(state, "states");
+		if (children === undefined) continue;
+		const childCount = countLiteralStates(children, sourceFile);
+		if (childCount === undefined) return undefined;
+		count += childCount;
+	}
+	return count;
+}
+
+function chartNameFor(source: string, root: string): string {
+	const rel = relative(root, source).replaceAll("\\", "/");
+	if (rel !== "chart.ts" && rel.endsWith("/chart.ts")) return rel.slice(0, -"/chart.ts".length);
+	return rel.replace(/(?:\.chart)?\.ts$/, "");
 }
 
 async function readChart(
@@ -114,7 +235,8 @@ async function readChart(
 			description: rel,
 			scope,
 			source: resolve(source),
-			...(run.definitionSource === undefined ? {} : { definitionSource: run.definitionSource }),
+			...(inspect.definitionSource === undefined ? {} : { definitionSource: inspect.definitionSource }),
+			...(inspect.args === undefined ? {} : { args: inspect.args }),
 			states: run.states,
 			stateCount: run.stateCount,
 			updatedAt: file.mtimeMs,
@@ -128,10 +250,8 @@ async function readRuns(
 	cwd: string,
 	agentDir: string,
 	limit: number,
-	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
-	failedRunInspectionFingerprints: Map<string, string>,
-): Promise<HyperchartRunInfo[]> {
+): Promise<HyperchartRunSummaryInfo[]> {
 	const root = getHyperchartRunsRoot(agentDir);
 	let entries;
 	try {
@@ -143,27 +263,53 @@ async function readRuns(
 	const runs = await Promise.all(
 		entries
 			.filter((entry) => entry.isDirectory())
-			.map((entry) =>
-				readRun(
-					join(root, entry.name),
-					cwd,
-					agentDir,
-					agentDefaults,
-					failedRunMetaFingerprints,
-					failedRunInspectionFingerprints,
-				),
-			),
+			.map((entry) => readRunSummary(join(root, entry.name), cwd, failedRunMetaFingerprints)),
 	);
 	return runs
-		.filter((run): run is HyperchartRunInfo => run !== undefined)
+		.filter((run): run is HyperchartRunSummaryInfo => run !== undefined)
 		.sort((left, right) => right.updatedAt - left.updatedAt)
 		.slice(0, Math.max(0, limit));
+}
+
+async function readRunSummary(
+	runDir: string,
+	cwd: string,
+	failedRunMetaFingerprints: Map<string, string>,
+): Promise<HyperchartRunSummaryInfo | undefined> {
+	const metaFingerprint = await fileFingerprint(join(runDir, "meta.json"));
+	if (failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
+	let meta;
+	try {
+		meta = loadRunMeta(runDir);
+		failedRunMetaFingerprints.delete(runDir);
+	} catch (error) {
+		failedRunMetaFingerprints.set(runDir, metaFingerprint);
+		console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
+		return undefined;
+	}
+	if (resolve(meta.workDir) !== cwd) return undefined;
+	const persistedStatus = readRunStatus(runDir);
+	const metaCreatedAt = Date.parse(meta.createdAt);
+	const createdAt = persistedStatus?.startedAt ?? (Number.isFinite(metaCreatedAt) ? metaCreatedAt : 0);
+	const updatedAt = persistedStatus?.updatedAt ?? await runUpdatedAt(runDir, createdAt);
+	return {
+		runId: persistedStatus?.runId ?? basename(runDir),
+		chartName: persistedStatus?.chartId ?? meta.chartId,
+		...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
+		status: summaryRunStatus(persistedStatus),
+		cwd: resolve(meta.workDir),
+		createdAt: createdAt || updatedAt,
+		updatedAt,
+		...(persistedStatus?.pid === undefined ? {} : { pid: persistedStatus.pid }),
+		...(persistedStatus?.state === "stopped" ? { detached: true } : {}),
+	};
 }
 
 async function readRun(
 	runDir: string,
 	cwd: string,
 	agentDir: string,
+	includeTranscripts: boolean,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
 	failedRunMetaFingerprints: Map<string, string>,
 	failedRunInspectionFingerprints: Map<string, string>,
@@ -184,6 +330,7 @@ async function readRun(
 		const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir, meta.chartPath);
 		const run = await hyperchartRunFromRunDir(runDir, {
 			meta,
+			includeTranscripts,
 			agentDefaults: resolvedAgentDefaults,
 		});
 		failedRunInspectionFingerprints.delete(runDir);
@@ -219,6 +366,18 @@ async function readRun(
 				source: "status",
 			}],
 		};
+	}
+}
+
+function summaryRunStatus(status: HyperchartRunStatus | undefined): HyperchartRunInfo["status"] {
+	switch (status?.state) {
+		case "complete": return "completed";
+		case "failed": return "failed";
+		case "stopped":
+		case "stopping": return "paused";
+		case "starting":
+		case "running": return "running";
+		default: return "blocked";
 	}
 }
 

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
@@ -46,6 +47,7 @@ import {
 	markUserInteractionReceipt,
 	readDeliverableTerminalNotificationRequest,
 	readUserInteractionResponse,
+	removeTerminalNotificationReceipt,
 	recoverStaleRunTerminalNotification,
 	rewindHyperchartRun,
 	saveRunMeta,
@@ -84,7 +86,13 @@ import {
 	type RunHistoryItem,
 } from "../src/tui/components.js";
 import { buildRunView, type RunView } from "../src/tui/run_view.js";
-import { hyperchartRunFromInspectResult, summarizeChartInspect, summarizeRunInspect } from "@surprisal/hyperchart/host";
+import {
+	boundedModelEnvelope,
+	hyperchartRunFromInspectResult,
+	summarizeChartInspect,
+	summarizeRunInspect,
+	summarizeUserGate,
+} from "@surprisal/hyperchart/host";
 import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
 import { closeRunInspectorServer, openRunInspector } from "@surprisal/hyperchart/inspect";
 
@@ -365,27 +373,32 @@ class PiUserInteractionCoordinator {
 		return this.scanning;
 	}
 
-	beforeAgentStart(userPrompt: string) {
+	beforeAgentStart(_userPrompt: string) {
 		const ctx = this.currentContext();
 		if (ctx === undefined) return undefined;
 		const active = acquireActiveUserInteraction(interactionOwner(ctx));
 		if (active === undefined || active.presentation !== "confirmed") return undefined;
 		this.state = { key: interactionKey(active), phase: "awaiting-user" };
-		const details = interactionDetails(active);
+		let details: ReturnType<typeof compactPiUserInteraction>;
+		try {
+			details = compactPiUserInteraction(active);
+		} catch (error) {
+			return { message: undeliverablePiGateMessage(active, error) };
+		}
 		return {
-			message: {
+			message: boundedPiMessage({
 				customType: "hyperchart-user-response-context",
 				content: [
 					`The user's just-submitted prompt is their answer to Hyperchart interaction (${details.runId}, ${details.seqId}).`,
-					`Question: ${details.prompt}`,
+					`Question preview: ${details.promptPreview.text}`,
 					`Allowed events: ${details.allowedEvents.join(", ")}`,
-					details.reply === undefined ? undefined : `Reply contract: ${JSON.stringify(details.reply)}`,
-					`Translate the real user input ${JSON.stringify(userPrompt)} into one allowed event and optional output, then immediately call hyperchart with action=\"respond\", runId=${JSON.stringify(details.runId)}, seqId=${details.seqId}, event, and output when required.`,
+					details.outputRequired ? `Structured output is required. Bounded shape hint: ${JSON.stringify(details.outputHint)}.` : undefined,
+					`Translate the current user prompt into one allowed event and optional output, then immediately call hyperchart with action=\"respond\", runId=${JSON.stringify(details.runId)}, seqId=${details.seqId}, event, and output when required.`,
 					"Do not answer the gate yourself, infer consent without this user input, or continue unrelated work before the response is committed.",
 				].filter((line): line is string => line !== undefined).join("\n"),
 				display: false,
-				details,
-			},
+				details: safeToolDetails(details),
+			}),
 		};
 	}
 
@@ -399,6 +412,15 @@ class PiUserInteractionCoordinator {
 		}
 		const key = interactionKey(active);
 		if (this.state.key !== key) this.state = { key, phase: "pending" };
+
+		try {
+			compactPiUserInteraction(active);
+		} catch (error) {
+			this.pi.sendMessage(undeliverablePiGateMessage(active, error), { deliverAs: "followUp" });
+			markUserInteractionReceipt(active.runDir, active.request.seqId, "pi", ctx.sessionManager.getSessionId());
+			this.state = { key, phase: "awaiting-user" };
+			return;
+		}
 
 		if (piSessionContainsUserInteraction(ctx, "hyperchart-user-request", active)) {
 			markUserInteractionReceipt(active.runDir, active.request.seqId, "pi", ctx.sessionManager.getSessionId());
@@ -423,12 +445,12 @@ class PiUserInteractionCoordinator {
 				ctx.sessionManager.getSessionId(),
 			)) return;
 			if (!this.isStillActive(ctx, key)) return;
-			this.pi.sendMessage({
+			this.pi.sendMessage(boundedPiMessage({
 				customType: "hyperchart-yield",
 				content: `Hyperchart reached user interaction (${active.request.runId}, ${active.request.seqId}). Finish the current safe action/tool batch, do not answer it yourself, and yield so the real user can respond.`,
 				display: false,
-				details: interactionDetails(active),
-			}, { deliverAs: "steer" });
+				details: safeToolDetails(compactPiUserInteraction(active)),
+			}), { deliverAs: "steer" });
 			this.state = { key, phase: "yielding" };
 			return;
 		}
@@ -440,12 +462,12 @@ class PiUserInteractionCoordinator {
 			ctx.sessionManager.getSessionId(),
 		)) return;
 		if (!this.isStillActive(ctx, key)) return;
-		this.pi.sendMessage({
+		this.pi.sendMessage(boundedPiMessage({
 			customType: "hyperchart-user-request",
-			content: formatUserInteraction(active),
+			content: formatCompactUserInteraction(active),
 			display: true,
-			details: interactionDetails(active),
-		}, { deliverAs: "followUp" });
+			details: safeToolDetails(compactPiUserInteraction(active)),
+		}), { deliverAs: "followUp" });
 		markUserInteractionReceipt(active.runDir, active.request.seqId, "pi", ctx.sessionManager.getSessionId());
 		this.state = { key, phase: "awaiting-user" };
 	}
@@ -510,6 +532,50 @@ function interactionDetails(active: OwnedUserInteraction) {
 		...(active.request.reply === undefined ? {} : { reply: active.request.reply }),
 		...(active.request.rejection === undefined ? {} : { rejection: active.request.rejection }),
 	};
+}
+
+function compactPiUserInteraction(active: OwnedUserInteraction) {
+	return summarizeUserGate(active.request);
+}
+
+function undeliverablePiGateMessage(active: OwnedUserInteraction, error: unknown) {
+	const reason = truncateToolText(error instanceof Error ? error.message : String(error), 1_000);
+	return boundedPiMessage({
+		customType: "hyperchart-boundary-error",
+		content: `Hyperchart cannot safely deliver this user interaction through the Pi model boundary. ${reason}`,
+		display: true,
+		details: { error: "user-gate-summary-unavailable", seqId: active.request.seqId },
+	});
+}
+
+function compactPiUserInteractions(summary: ReturnType<typeof inspectOwnedUserInteractions>) {
+	const compact = (entry: NonNullable<typeof summary.active>) => ({
+		...summarizeUserGate({
+			runId: entry.runId,
+			seqId: entry.seqId,
+			prompt: entry.prompt,
+			options: entry.options,
+			events: entry.allowedEvents,
+			...(entry.reply === undefined ? {} : { reply: entry.reply }),
+		}),
+		presentation: entry.presentation,
+	});
+	return {
+		...(summary.active === undefined ? {} : { active: compact(summary.active) }),
+		queued: summary.queued.slice(0, 20).map(compact),
+		...(summary.queued.length <= 20 ? {} : { omittedQueuedCount: summary.queued.length - 20 }),
+	};
+}
+
+function formatCompactUserInteraction(active: OwnedUserInteraction): string {
+	const details = compactPiUserInteraction(active);
+	return [
+		`Hyperchart needs your input for (${details.runId}, ${details.seqId}).`,
+		`Question preview: ${details.promptPreview.text}`,
+		details.options.length === 0 ? undefined : `Options (label => exact value): ${details.options.map((option) => `${JSON.stringify(option.label.text)} => ${JSON.stringify(option.value)}`).join(", ")}`,
+		`Allowed events: ${details.allowedEvents.join(", ")}`,
+		details.outputRequired ? `Structured output is required. Shape hint: ${JSON.stringify(details.outputHint)}.` : undefined,
+	].filter((line): line is string => line !== undefined).join("\n");
 }
 
 function formatUserInteraction(active: OwnedUserInteraction): string {
@@ -636,11 +702,14 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		cleanupArtifacts: Type.Optional(Type.Boolean()),
 		start: Type.Optional(Type.Boolean()),
 		all: Type.Optional(Type.Boolean()),
-		verbose: Type.Optional(Type.Boolean()),
+		verbose: Type.Optional(Type.Boolean({ description: "Deprecated and rejected; use action=view for full browser inspection" })),
 	}),
 	async execute(toolCallId, params, signal, onUpdate, ctx) {
+		try {
+			return boundedPiToolResult(await (async () => {
 		if (params.action === "list") return listHypercharts(ctx.cwd);
 		if (params.action === "inspect") {
+			if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
 			if (params.chartPath === undefined) throw new Error("hyperchart action=inspect requires chartPath");
 			return hyperchartInspectTool.execute(toolCallId, { chartPath: params.chartPath, exportName: params.exportName, verbose: params.verbose }, signal, onUpdate, ctx);
 		}
@@ -649,6 +718,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 			return createHyperchartRunTool(delivery).execute(toolCallId, params, signal, onUpdate, ctx);
 		}
 		if (params.action === "run_inspect") {
+			if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
 			if (params.runDir === undefined) throw new Error("hyperchart action=run_inspect requires runDir");
 			return hyperchartRunInspectTool.execute(toolCallId, { runDir: params.runDir, verbose: params.verbose }, signal, onUpdate, ctx);
 		}
@@ -668,6 +738,11 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		if (params.action === "respond") return respondToUserInteraction(params, ctx, delivery.interactions);
 		if (params.runDir === undefined) throw new Error("hyperchart action=rewind requires runDir");
 		return hyperchartRewindTool.execute(toolCallId, params, signal, onUpdate, ctx);
+			})());
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new Error(truncateToolText(message, 2_000));
+		}
 	},
 	});
 }
@@ -735,7 +810,66 @@ function userInteractionRespondResult(runId: string, seqId: number, event: { typ
 				? `Hyperchart interaction (${runId}, ${seqId}) was already committed with the identical response.`
 				: `Committed Hyperchart interaction (${runId}, ${seqId}) as ${event.type}.`,
 		}],
-		details: { runId, seqId, event, committed: true, idempotent },
+		details: safeToolDetails({ runId, seqId, event: event.type, committed: true, idempotent }),
+	};
+}
+
+function compactPiRewindResult(result: Awaited<ReturnType<typeof rewindHyperchartRun>>) {
+	return {
+		runId: result.runId,
+		runDir: result.runDir,
+		chartId: result.chartId,
+		targetLabel: truncateToolText(result.targetLabel, 400),
+		backupDir: result.backupDir,
+		keptRecords: result.keptRecords,
+		removedRecords: result.removedRecords,
+		...(result.cutSeqId === undefined ? {} : { cutSeqId: result.cutSeqId }),
+		removedByState: result.removedByState.slice(0, 40).map((entry) => ({ state: truncateToolText(entry.state), records: entry.records })),
+		...(result.removedByState.length <= 40 ? {} : { omittedRemovedByStateCount: result.removedByState.length - 40 }),
+		cleanup: {
+			sessionsRemoved: result.cleanup.sessionsRemoved,
+			artifactFilesRemoved: result.cleanup.artifactFilesRemoved,
+			artifactWarningCount: result.cleanup.artifactWarnings.length,
+			artifactWarnings: result.cleanup.artifactWarnings.slice(0, 20).map((warning) => truncateToolText(warning, 400)),
+			...(result.cleanup.artifactWarnings.length <= 20 ? {} : { omittedArtifactWarningCount: result.cleanup.artifactWarnings.length - 20 }),
+		},
+	};
+}
+
+function safeToolDetails<T>(details: T): T {
+	return boundedModelEnvelope(details, ({ digest, originalBytes, maxBytes }) => ({
+		error: "model-envelope-too-large", digest, originalBytes, maxBytes,
+	}) as T);
+}
+
+function boundedPiToolResult<T>(result: T): T {
+	return boundedModelEnvelope(result, ({ digest, originalBytes, maxBytes }) => ({
+		content: [{ type: "text", text: `Hyperchart response exceeded the model boundary (${digest}). Open hyperchart view.` }],
+		details: { error: "model-envelope-too-large", digest, originalBytes, maxBytes },
+	}) as T);
+}
+
+function boundedPiMessage<T extends { customType: string; content: string; display: boolean; details: unknown }>(message: T): T {
+	return boundedModelEnvelope(message, ({ digest, originalBytes, maxBytes }) => ({
+		customType: "hyperchart-boundary-error",
+		content: `Hyperchart notification exceeded the model boundary (${digest}). Open hyperchart view.`,
+		display: false,
+		details: { error: "model-envelope-too-large", digest, originalBytes, maxBytes },
+	}) as T);
+}
+
+function truncateToolText(value: string, max = 160): string {
+	return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
+function compactPiRunStatus(status: HyperchartRunStatus) {
+	return {
+		state: status.state,
+		...(status.pid === undefined ? {} : { pid: status.pid }),
+		...(status.updatedAt === undefined ? {} : { updatedAt: status.updatedAt }),
+		...(status.exitCode === undefined ? {} : { exitCode: status.exitCode }),
+		...(status.error === undefined ? {} : { errorPreview: truncateToolText(status.error, 400) }),
+		...(status.replayWarnings === undefined ? {} : { replayWarningCount: status.replayWarnings.length }),
 	};
 }
 
@@ -757,16 +891,22 @@ function listHypercharts(cwd: string) {
 			byName.set(name, { name, scope, path: resolve(path) });
 		}
 	}
-	const charts = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+	const allCharts = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+	const charts = allCharts.slice(0, 40).map((chart) => ({
+		name: truncateToolText(chart.name),
+		scope: chart.scope,
+		path: truncateToolText(chart.path, 1_000),
+	}));
+	const omittedChartCount = allCharts.length - charts.length;
 	const text = charts.length === 0
 		? "No Hyperchart definitions found"
 		: [
-			`Found ${charts.length} Hyperchart definition${charts.length === 1 ? "" : "s"}:`,
-			...charts.map((chart) => `- ${chart.name} [${chart.scope}] ${chart.path}`),
+			`Found ${allCharts.length} Hyperchart definition${allCharts.length === 1 ? "" : "s"}${omittedChartCount === 0 ? "" : ` (showing ${charts.length})`}:`,
+			...charts.map((chart) => `- ${chart.name} [${chart.scope}]`),
 		].join("\n");
 	return {
 		content: [{ type: "text" as const, text }],
-		details: { charts },
+		details: safeToolDetails({ charts, ...(omittedChartCount === 0 ? {} : { omittedChartCount }) }),
 	};
 }
 
@@ -803,43 +943,54 @@ function createHyperchartRunTool(delivery: PiTerminalDelivery) {
 		if (params.wait === true) {
 			const boundary = await waitForPiRunBoundary(result, ctx);
 			if (boundary.kind === "user") {
-				const inspector = await inspectRunForCurrentWorkDir(boundary.interaction.runDir, ctx);
+				const details = safeToolDetails({
+					runId: boundary.interaction.request.runId,
+					runDir: boundary.interaction.runDir,
+					chartId: boundary.interaction.request.actionUid.chart,
+					boundary: "user",
+					final: false,
+					interaction: compactPiUserInteraction(boundary.interaction),
+					waitedRun: { runId: result.runId, runDir: result.runDir, chartId: result.chartId },
+				});
 				return {
-					content: [{ type: "text", text: formatUserInteraction(boundary.interaction) }],
-					details: {
-						runId: boundary.interaction.request.runId,
-						runDir: boundary.interaction.runDir,
-						chartId: boundary.interaction.request.actionUid.chart,
-						boundary: "user",
-						final: false,
-						interaction: interactionDetails(boundary.interaction),
-						waitedRun: { runId: result.runId, runDir: result.runDir, chartId: result.chartId },
-						inspector,
-					},
+					content: [{ type: "text", text: `Hyperchart is waiting for user input at (${details.runId}, ${details.interaction.seqId}); use the bounded preview and output hint to respond.` }],
+					details,
 				};
 			}
-			const inspector = await inspectRunForCurrentWorkDir(result.runDir, ctx);
-			const notification = receiptWaitedPiTerminalNotification(result.runDir, ctx);
+			receiptWaitedPiTerminalNotification(result.runDir, ctx);
+			const details = safeToolDetails({
+				runId: result.runId,
+				runDir: result.runDir,
+				chartId: result.chartId,
+				boundary: "terminal",
+				final: true,
+				status: compactPiRunStatus(boundary.status),
+			});
 			return {
-				content: [{ type: "text", text: notification?.payload.prompt ?? `Hyperchart run ${result.runId} ${boundary.status.state} (${result.runDir})` }],
-				details: { runId: result.runId, runDir: result.runDir, chartId: result.chartId, status: boundary.status, inspector, notification },
+				content: [{ type: "text", text: `Hyperchart run ${result.runId} reached ${boundary.status.state} (${result.runDir}). Open hyperchart view for full results.` }],
+				details,
 			};
 		}
-		const inspector = await inspectRunForCurrentWorkDir(result.runDir, ctx);
+		const details = safeToolDetails({ runId: result.runId, runDir: result.runDir, chartId: result.chartId, final: false, status: "started" });
 		return {
 			content: [{ type: "text", text: `Started hyperchart run ${result.runId} (${result.runDir})` }],
-			details: { runId: result.runId, runDir: result.runDir, chartId: result.chartId, final: false, inspector },
+			details,
 		};
 	},
 	});
 }
 
-async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContext, ast?: ChartAst) {
+async function inspectRunForCurrentWorkDir(
+	runDir: string,
+	ctx: HyperchartContext,
+	options: { ast?: ChartAst; includeTranscripts?: boolean } = {},
+) {
 	const meta = loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
 	if (meta === undefined) throw new Error(`Run '${basename(runDir)}' belongs to another working directory or is missing metadata`);
 	return hyperchartRunFromRunDir(runDir, {
 		meta,
-		...(ast === undefined ? {} : { ast }),
+		...(options.ast === undefined ? {} : { ast: options.ast }),
+		includeTranscripts: options.includeTranscripts === true,
 		agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir(), meta.chartPath),
 	});
 }
@@ -847,11 +998,11 @@ async function inspectRunForCurrentWorkDir(runDir: string, ctx: HyperchartContex
 const hyperchartInspectTool = defineTool({
 	name: "hyperchart_inspect",
 	label: "Inspect Hyperchart",
-	description: "Parse a Hyperchart chart module and return its static state graph without starting a run.",
+	description: "Validate a Hyperchart chart module and return only a bounded digest; use hyperchart view for full inspection.",
 	parameters: Type.Object({
 		chartPath: Type.String({ description: "Hyperchart name in .pi/hypercharts, or a chart module path" }),
 		exportName: Type.Optional(Type.String({ description: "Named export to inspect" })),
-		verbose: Type.Optional(Type.Boolean({ description: "Return the full inspection object instead of the compact digest (large - includes chart source and schemas)" })),
+		verbose: Type.Optional(Type.Boolean({ description: "Deprecated and rejected; use hyperchart view" })),
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
@@ -868,12 +1019,13 @@ const hyperchartInspectTool = defineTool({
 				agentDefaults,
 			},
 		);
-		const payload = params.verbose === true ? result : summarizeChartInspect(result);
+		if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
+		const payload = safeToolDetails(summarizeChartInspect(result));
 		return {
 			content: [
 				{
 					type: "text",
-					text: `Inspected hyperchart ${result.chartId}: ${result.states.length} states (${result.chartPath}). No run was started.\n${JSON.stringify(payload, null, 2)}`,
+					text: `Inspected hyperchart ${result.chartId}: ${result.states.length} states (${result.chartPath}). Returned a bounded digest; no run was started.`,
 				},
 			],
 			details: payload,
@@ -884,23 +1036,22 @@ const hyperchartInspectTool = defineTool({
 const hyperchartRunInspectTool = defineTool({
 	name: "hyperchart_run_inspect",
 	label: "Inspect Hyperchart Run",
-	description: "Load a concrete Hyperchart run directory and return the runtime-enriched inspector model.",
+	description: "Load a concrete Hyperchart run and return only a bounded status/activity digest; use hyperchart view for full inspection.",
 	parameters: Type.Object({
 		runDir: Type.String({ description: "Run id or run directory to inspect" }),
-		verbose: Type.Optional(Type.Boolean({ description: "Return the full inspection object instead of the compact digest (large - includes chart source, schemas, and transcripts)" })),
+		verbose: Type.Optional(Type.Boolean({ description: "Deprecated and rejected; use hyperchart view" })),
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
 		const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
-		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx);
+		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx, { includeTranscripts: false });
 		const issueCount = (inspector.issues?.length ?? 0) + inspector.states.reduce((count, state) => count + (state.issues?.length ?? 0), 0);
-		const inspectedPayload = params.verbose === true ? inspector : summarizeRunInspect(inspector);
-		const userInteractions = inspectOwnedUserInteractions(ctx);
-		const payload = { ...inspectedPayload, userInteractions };
+		const payload = safeToolDetails({ ...summarizeRunInspect(inspector), userInteractions: compactPiUserInteractions(inspectOwnedUserInteractions(ctx)) });
 		return {
 			content: [
 				{
 					type: "text",
-					text: `Inspected hyperchart run ${inspector.runId}: ${inspector.stateCount} states, ${issueCount} issue${issueCount === 1 ? "" : "s"} (${runDir}).\n${JSON.stringify(payload, null, 2)}`,
+					text: `Inspected hyperchart run ${inspector.runId}: ${inspector.stateCount} states, ${issueCount} issue${issueCount === 1 ? "" : "s"} (${runDir}). Returned a bounded digest; use hyperchart view for full details.`,
 				},
 			],
 			details: payload,
@@ -935,7 +1086,7 @@ const hyperchartViewTool = defineTool({
 			});
 			return {
 				content: [{ type: "text", text: `Opened Hyperchart inspector for chart ${chartId}: ${url}` }],
-				details: { chartId, chartPath, url },
+				details: safeToolDetails({ url }),
 			};
 		}
 		if (params.runDir === undefined) throw new Error("hyperchart_view requires runDir when chartPath is omitted");
@@ -943,7 +1094,7 @@ const hyperchartViewTool = defineTool({
 		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx);
 		const { url } = await openRunInspector({
 			runId: inspector.runId,
-			loadRun: () => inspectRunForCurrentWorkDir(runDir, ctx),
+			loadRun: () => inspectRunForCurrentWorkDir(runDir, ctx, { includeTranscripts: true }),
 			steerSession: (actionKey, message) => {
 				queueSessionSteering(join(runDir, "sessions"), actionKey, message);
 			},
@@ -951,7 +1102,7 @@ const hyperchartViewTool = defineTool({
 		});
 		return {
 			content: [{ type: "text", text: `Opened Hyperchart inspector for ${inspector.runId}: ${url}` }],
-			details: { runId: inspector.runId, runDir, url },
+			details: safeToolDetails({ url }),
 		};
 	},
 });
@@ -992,12 +1143,12 @@ const hyperchartRewindTool = defineTool({
 			);
 			return {
 				content: [{ type: "text", text: `Rewound ${result.runId} to ${result.targetLabel} and started replay (${started.runDir})` }],
-				details: { ...result, started: { runId: started.runId, runDir: started.runDir, chartId: started.chartId } },
+				details: safeToolDetails({ ...compactPiRewindResult(result), started: { runId: started.runId, runDir: started.runDir, chartId: started.chartId } }),
 			};
 		}
 		return {
 			content: [{ type: "text", text: `Rewound ${result.runId} to ${result.targetLabel}. Resume with hyperchart action=run runDir=${result.runDir}` }],
-			details: result,
+			details: safeToolDetails(compactPiRewindResult(result)),
 		};
 	},
 });
@@ -1240,10 +1391,12 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		return { runId, runDir: actualRunDir, chartId: parsed.ast.id, done };
 	}
 
+	const attemptId = randomUUID();
 	patchRunStatus(actualRunDir, {
 		runId,
 		chartId: parsed.ast.id,
 		state: "starting",
+		attemptId,
 		heartbeatAt: Date.now(),
 		error: undefined,
 		exitCode: undefined,
@@ -1263,6 +1416,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		chartPath,
 		chartId: parsed.ast.id,
 		workDir,
+		attemptId,
 		agentDir: getAgentDir(),
 		...(exportName === undefined ? {} : { exportName }),
 		...(opts.args === undefined ? {} : { args: opts.args }),
@@ -1318,21 +1472,34 @@ function deliverPendingPiTerminalNotification(pi: ExtensionAPI, ctx: HyperchartC
 	// The Pi session log is the host acknowledgement. It must be checked even when
 	// the filesystem confirmation is missing (for example, a crash after sendMessage).
 	if (piSessionContainsTerminalRequest(ctx, request.requestId)) {
-		markTerminalNotificationReceipt(runDir, "pi", sessionId);
+		markTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId);
 		return false;
 	}
-	pi.sendMessage(
-		{
-			customType: "hyperchart-terminal",
-			content: request.payload.prompt,
-			display: true,
-			details: request,
-		},
-		{ deliverAs: "followUp", triggerTurn: true },
-	);
+	if (!claimTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId)) return false;
+	if (readDeliverableTerminalNotificationRequest(runDir)?.requestId !== request.requestId) return false;
+	try {
+		pi.sendMessage(
+			boundedPiMessage({
+				customType: "hyperchart-terminal",
+				content: `Hyperchart run ${request.payload.runId} (${request.payload.chartId}) reached ${request.payload.outcome}. Open hyperchart view for full results.`,
+				display: true,
+				details: safeToolDetails({
+					requestId: request.requestId,
+					runId: request.payload.runId,
+					runDir: request.payload.runDir,
+					chartId: request.payload.chartId,
+					outcome: request.payload.outcome,
+				}),
+			}),
+			{ deliverAs: "followUp", triggerTurn: true },
+		);
+	} catch (error) {
+		removeTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId);
+		throw error;
+	}
 	// Never confirm before Pi accepts/persists the custom message: a crash before
 	// send remains recoverable, while a crash here is deduplicated by the session log.
-	markTerminalNotificationReceipt(runDir, "pi", sessionId);
+	markTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId);
 	return true;
 }
 
@@ -1404,7 +1571,7 @@ function receiptWaitedPiTerminalNotification(runDir: string, ctx: HyperchartCont
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return undefined;
 	const request = readDeliverableTerminalNotificationRequest(runDir);
-	if (request === undefined || !claimTerminalNotificationReceipt(runDir, "pi", sessionId)) return undefined;
+	if (request === undefined || !claimTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId)) return undefined;
 	return request;
 }
 
@@ -1492,14 +1659,23 @@ function stopHyperchartRuns(
 		? activeRunDirsForWorkDir(ctx.cwd)
 		: [resolveHyperchartRunDir(params.runDir as string, ctx.cwd)];
 	const stopped = targets.map((runDir) => stopRunDirectory(runDir, ctx));
+	const stoppedDigest = stopped.slice(0, 20).map((run) => ({
+		runId: truncateToolText(run.runId),
+		runDir: truncateToolText(run.runDir, 1_000),
+		...(run.pid === undefined ? {} : { pid: run.pid }),
+	}));
 	return {
 		content: [{
 			type: "text" as const,
 			text: stopped.length === 0
 				? "No active Hyperchart runs found"
-				: `Stopping ${stopped.length} Hyperchart run${stopped.length === 1 ? "" : "s"}:\n${stopped.map((run) => `- ${run.runId}${run.pid === undefined ? " (marked stopped)" : ` (pid ${run.pid})`}`).join("\n")}`,
+				: `Stopping ${stopped.length} Hyperchart run${stopped.length === 1 ? "" : "s"}${stopped.length > stoppedDigest.length ? ` (showing ${stoppedDigest.length})` : ""}:\n${stoppedDigest.map((run) => `- ${run.runId}${run.pid === undefined ? " (marked stopped)" : ` (pid ${run.pid})`}`).join("\n")}`,
 		}],
-		details: { stopped },
+		details: safeToolDetails({
+			stoppedCount: stopped.length,
+			stopped: stoppedDigest,
+			...(stopped.length <= stoppedDigest.length ? {} : { omittedStoppedCount: stopped.length - stoppedDigest.length }),
+		}),
 	};
 }
 
@@ -1582,7 +1758,7 @@ async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 	const { url } = await openRunInspector({
 		runId: run.runId,
 		// The snapshot's parsed AST avoids a synchronous chart-module re-parse on every poll.
-		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, run.ast),
+		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, { ast: run.ast, includeTranscripts: true }),
 		steerSession: (actionKey, message) => {
 			queueSessionSteering(join(run.runDir, "sessions"), actionKey, message);
 		},

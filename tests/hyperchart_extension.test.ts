@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
@@ -25,6 +26,8 @@ import {
 	closeRunInspectorServer,
 	openRunInspector,
 } from "../packages/hyperchart/src/inspect/inspector_server.js";
+import type { ReplySchemaSummary } from "../packages/hyperchart/src/host/summarize.js";
+import { answerFromReplySummary } from "./reply_summary_helpers.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
@@ -88,10 +91,39 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			commandContext(projectDir).ctx,
 		);
-		const runDir = (result.details as { runDir: string }).runDir;
+		const details = result.details as { runDir: string; inspector?: unknown; notification?: unknown };
+		const runDir = details.runDir;
 
+		expect(details.inspector).toBeUndefined();
+		expect(details.notification).toBeUndefined();
 		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
 	});
+
+	it("returns only bounded startup coordinates for wait=false and rejects verbose static inspection", async () => {
+		const chartPath = join(tempDir, "bounded-start.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "bounded-start", initial: "done", states: { done: { kind: "final" } } };\n`);
+		const tool = registeredTool("hyperchart");
+		const ctx = commandContext(projectDir).ctx;
+		const started = await tool.execute(
+			"start-bounded",
+			{ action: "run", chartPath, wait: false },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		);
+		const details = started.details as Record<string, unknown> & { runDir: string };
+		expect(details).toMatchObject({ chartId: "bounded-start", runId: expect.any(String), runDir: expect.stringMatching(/^\//), final: false });
+		expect(details).not.toHaveProperty("inspector");
+		expect(details).not.toHaveProperty("states");
+		await tool.execute("finish-bounded", { action: "run", runDir: details.runDir, wait: true }, new AbortController().signal, () => undefined, ctx);
+		await expect(tool.execute(
+			"verbose-static",
+			{ action: "inspect", chartPath, verbose: true },
+			new AbortController().signal,
+			() => undefined,
+			ctx,
+		)).rejects.toThrow(/hyperchart view/);
+	}, 30_000);
 
 	it("passes merged model roles and toolsets from settings into the runner config", async () => {
 		mkdirSync(join(agentDir, "hypercharts"), { recursive: true });
@@ -556,6 +588,143 @@ describe("hyperchart extension", () => {
 		}
 	});
 
+	it("delivers a bounded structured gate summary that is sufficient for a valid response", async () => {
+		const runDir = createUserGate("structured-summary", 1, {
+			events: ["APPROVED", "FAILED"],
+			reply: complexGateSchema(),
+		});
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			const details = harness.sent[0]?.message.details as {
+				runId: string; seqId: number; allowedEvents: string[]; outputRequired: boolean; outputHint?: ReplySchemaSummary;
+			};
+			expect(details).toMatchObject({
+				runId: "structured-summary", seqId: 1, allowedEvents: ["APPROVED"], outputRequired: true,
+				outputHint: { types: ["object"], fields: expect.arrayContaining([
+					expect.objectContaining({ name: "decision", value: expect.objectContaining({ allowedValueJson: ['"approve"', '"reject"'] }) }),
+					expect.objectContaining({ name: "review", value: expect.objectContaining({ fields: expect.any(Array) }) }),
+					expect.objectContaining({ name: "findings", value: expect.objectContaining({ element: expect.any(Object) }) }),
+				]) },
+			});
+			expect(details).not.toHaveProperty("reply");
+			expect(details).not.toHaveProperty("schema");
+			const output = answerFromReplySummary(details.outputHint!);
+			await harness.tool.execute("respond-summary", {
+				action: "respond", runId: details.runId, seqId: details.seqId, event: details.allowedEvents[0], output,
+			}, new AbortController().signal, () => undefined, harness.ctx);
+			expect(readUserInteractionResponse(runDir, 1)?.event).toEqual({ type: "APPROVED", output });
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("round-trips long gate identities through Pi lifecycle delivery and respond", async () => {
+		const runId = `long-${"r".repeat(180)}`;
+		const event = `APPROVED_${"e".repeat(180)}`;
+		const option = `Choice ${"o".repeat(180)}`;
+		const runDir = createUserGate(runId, 1, {
+			events: [event, "FAILED"],
+			gateOptions: [option],
+			reply: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false },
+		});
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			const message = harness.sent[0]?.message;
+			expect(message).toMatchObject({ customType: "hyperchart-user-request" });
+			const details = message?.details as {
+				runId: string;
+				seqId: number;
+				allowedEvents: string[];
+				options: Array<{ label: { text: string; originalChars: number; omittedChars: number }; value: string }>;
+			};
+			expect(details.runId).toBe(runId);
+			expect(details.allowedEvents).toEqual([event]);
+			expect(details.options).toEqual([{
+				label: { text: `${option.slice(0, 159)}…`, originalChars: option.length, omittedChars: option.length - 159 },
+				value: option,
+			}]);
+			expect(JSON.stringify(details)).not.toContain(`${runId.slice(0, 159)}…`);
+			expect(JSON.stringify(details)).not.toContain(`${event.slice(0, 159)}…`);
+
+			const output = { note: details.options[0]!.value };
+			const response = await harness.tool.execute("respond-long-identities", {
+				action: "respond",
+				runId: details.runId,
+				seqId: details.seqId,
+				event: details.allowedEvents[0],
+				output,
+			}, new AbortController().signal, () => undefined, harness.ctx);
+			expect(response.details).toMatchObject({ committed: true, runId, seqId: 1, event });
+			expect(readUserInteractionResponse(runDir, 1)).toMatchObject({
+				runId,
+				seqId: 1,
+				event: { type: event, output: { note: option } },
+			});
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("fails closed through Pi delivery for an oversized gate identity", async () => {
+		createUserGate("unsafe-identity", 1, { events: ["e".repeat(2_001)] });
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			expect(harness.sent[0]?.message).toMatchObject({
+				customType: "hyperchart-boundary-error",
+				details: { error: "user-gate-summary-unavailable" },
+			});
+			expect(harness.sent[0]?.message.content).toMatch(/identity.*cannot be truncated.*browser inspector/i);
+			expect(harness.sent[0]?.message.content).not.toContain("…");
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("bounds overflow through the actual Pi tool handler", async () => {
+		for (let index = 0; index < 21; index++) createUserGate(`tool-overflow-${String(index).padStart(2, "0")}`, 1, { reply: largeRepresentableGateSchema() });
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			const result = await harness.tool.execute("overflow", { action: "run_inspect", runDir: "tool-overflow-00" }, new AbortController().signal, () => undefined, harness.ctx);
+			expect(result.details).toMatchObject({ error: "model-envelope-too-large", digest: expect.stringMatching(/^fnv1a32:/), maxBytes: 64 * 1024 });
+			expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(64 * 1024);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("bounds overflow through the actual Pi custom-message handler", async () => {
+		const chartPath = writeChart("message-overflow");
+		const runDir = createRun("message-overflow", projectDir, chartPath, "session-a");
+		patchRunStatus(runDir, { runId: "message-overflow", chartId: "demo", state: "complete" });
+		persistTerminalNotificationRequest(runDir, {
+			runId: "x".repeat(100_000), runDir, chartId: "demo", outcome: "complete", prompt: "done", artifacts: [],
+		});
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			const message = harness.sent[0]?.message;
+			expect(message).toMatchObject({ customType: "hyperchart-boundary-error", details: { error: "model-envelope-too-large" } });
+			expect(Buffer.byteLength(JSON.stringify(message))).toBeLessThanOrEqual(64 * 1024);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
+	it("fails closed through Pi delivery when a gate contract cannot be summarized", async () => {
+		createUserGate("unrepresentable-summary", 1, { reply: { type: "string", enum: Array.from({ length: 41 }, (_, index) => `value-${index}`) } });
+		const harness = lifecycleHarness(projectDir, true);
+		try {
+			await harness.sessionStart();
+			expect(harness.sent[0]?.message).toMatchObject({ customType: "hyperchart-boundary-error", details: { error: "user-gate-summary-unavailable" } });
+			expect(harness.sent[0]?.message.content).toMatch(/browser inspector/i);
+		} finally {
+			await harness.shutdown();
+		}
+	});
+
 	it("returns a shared user boundary from wait=true and commits respond without hanging", async () => {
 		const chartPath = writeUserChart("waited-user-gate");
 		const tool = registeredTool("hyperchart");
@@ -622,8 +791,8 @@ describe("hyperchart extension", () => {
 
 		expect(text).toBe([
 			"Found 2 Hyperchart definitions:",
-			`- shared [project] ${join(projectCharts, "shared.chart.ts")}`,
-			`- user-only [user] ${join(userCharts, "user-only.chart.ts")}`,
+			"- shared [project]",
+			"- user-only [user]",
 		].join("\n"));
 		expect(charts).toEqual([
 			expect.objectContaining({ name: "shared", scope: "project" }),
@@ -799,9 +968,9 @@ describe("hyperchart extension", () => {
 		const { ctx } = commandContext(projectDir);
 
 		const result = await tool.execute("tool-call", { action: "inspect", chartPath }, new AbortController().signal, () => undefined, ctx);
-		const details = result.details as { states: Array<Record<string, unknown>> };
+		const details = result.details as { stateDigests: Array<Record<string, unknown>> };
 
-		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+		expect(details.stateDigests.find((state) => state.id === "work")).toMatchObject({
 			description: "Reviews implementation details",
 			model: "anthropic/claude-sonnet",
 			thinking: "high",
@@ -825,9 +994,9 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			commandContext(projectDir).ctx,
 		);
-		const details = result.details as { states: Array<Record<string, unknown>> };
+		const details = result.details as { stateDigests: Array<Record<string, unknown>> };
 
-		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+		expect(details.stateDigests.find((state) => state.id === "work")).toMatchObject({
 			agent: "worker",
 			description: "Bundle-local analyzer",
 		});
@@ -839,9 +1008,9 @@ describe("hyperchart extension", () => {
 		const { ctx } = commandContext(projectDir);
 
 		const result = await tool.execute("tool-call", { action: "inspect", chartPath }, new AbortController().signal, () => undefined, ctx);
-		const details = result.details as { states: Array<Record<string, unknown>> };
+		const details = result.details as { stateDigests: Array<Record<string, unknown>> };
 
-		expect(details.states.find((state) => state.id === "work")).toMatchObject({
+		expect(details.stateDigests.find((state) => state.id === "work")).toMatchObject({
 			agent: "worker",
 			agentDefinitionUnavailable: true,
 		});
@@ -857,9 +1026,21 @@ describe("hyperchart extension", () => {
 		expect(notifications).toContainEqual({ message: `Run ${runId}: ${runDir}`, type: "info" });
 	});
 
-	it("opens the browser inspector through the consolidated agent tool", async () => {
+	it("opens the browser inspector with full transcript details through the consolidated agent tool", async () => {
 		const runId = "tool-view-run";
 		const runDir = createRun(runId, projectDir, writeChart("tool-view"));
+		const actionUid = { chart: "demo", state: "work", action: "agent" };
+		writeFileSync(join(runDir, "log.jsonl"), [
+			{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 },
+			{ type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, timestamp: 2 },
+		].map((record) => JSON.stringify(record)).join("\n") + "\n");
+		const transcriptFile = join(runDir, "sessions", "tool-view.jsonl");
+		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", type: "message", message: { role: "assistant", content: "inspector transcript" } })}\n`);
+		updateSessionProgress(join(runDir, "sessions"), actionUid, {
+			actionName: "worker",
+			status: "running",
+			sessionFile: transcriptFile,
+		}, "demo:work:agent:1:2");
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
@@ -870,9 +1051,9 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			ctx,
 		);
-		const details = result.details as { runId: string; runDir: string; url: string };
+		const details = result.details as { url: string };
 
-		expect(details).toMatchObject({ runId, runDir });
+		expect(details).toEqual({ url: expect.any(String) });
 		const inspectorUrl = new URL(details.url);
 		expect(inspectorUrl.protocol).toBe("http:");
 		expect(inspectorUrl.pathname).toMatch(/^\/runs\/[A-Za-z0-9_-]+$/);
@@ -883,7 +1064,13 @@ describe("hyperchart extension", () => {
 		const token = inspectorUrl.pathname.slice("/runs/".length);
 		const runResponse = await fetch(new URL(`/api/runs/${token}`, inspectorUrl));
 		expect(runResponse.status).toBe(200);
-		expect((await runResponse.json()) as { run: { runId: string } }).toMatchObject({ run: { runId } });
+		const runPayload = (await runResponse.json()) as {
+			run: { runId: string; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
+		};
+		expect(runPayload).toMatchObject({ run: { runId } });
+		expect(runPayload.run.states.find((state) => state.id === "work")?.session?.messages).toEqual([
+			{ id: "assistant-1", role: "assistant", text: "inspector transcript" },
+		]);
 
 		const steerResponse = await fetch(new URL(`/api/runs/${token}/steer`, inspectorUrl), {
 			method: "POST",
@@ -931,17 +1118,27 @@ describe("hyperchart extension", () => {
 			"utf8",
 		);
 		patchRunStatus(runDir, { runId, chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] });
-		updateSessionProgress(join(runDir, "sessions"), uid, { actionName: "worker", status: "failed", error: "session failed", lastActivityAt: 4 });
+		const transcriptFile = join(runDir, "sessions", "runtime-inspect.jsonl");
+		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", type: "message", message: { role: "assistant", content: "verbose Pi transcript" } })}\n`);
+		updateSessionProgress(join(runDir, "sessions"), uid, {
+			actionName: "worker",
+			status: "failed",
+			error: "session failed",
+			lastActivityAt: 4,
+			sessionFile: transcriptFile,
+		});
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
 		const result = await tool.execute("tool-call", { action: "run_inspect", runDir: runId }, new AbortController().signal, () => undefined, ctx);
-		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; states: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }> };
+		await expect(tool.execute("tool-call-full", { action: "run_inspect", runDir: runId, verbose: true }, new AbortController().signal, () => undefined, ctx)).rejects.toThrow(/hyperchart view/);
+		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; stateDigests: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }> };
 
+		expect(JSON.stringify(details)).not.toContain("verbose Pi transcript");
 		expect(details.mode).toBe("run");
-		expect(details.args).toEqual({ topic: "wire runtime" });
+		expect(details.args).toBeUndefined();
 		expect(details.issues?.map((issue) => issue.kind)).toEqual(["run_failed", "replay_warning"]);
-		expect(details.states.find((state) => state.id === "work")?.issues).toEqual(
+		expect(details.stateDigests.find((state) => state.id === "work")?.issues).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ kind: "action_failed", message: "Script exited with code 2: nope" }),
 				expect.objectContaining({ kind: "session_failed", message: "session failed" }),
@@ -1169,10 +1366,34 @@ function lifecycleHarness(cwd: string, initiallyIdle: boolean): LifecycleHarness
 	};
 }
 
+function largeRepresentableGateSchema(): Record<string, unknown> {
+	return {
+		type: "object",
+		properties: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`field${index}`, { type: "string", pattern: "a".repeat(250) }])),
+		required: Array.from({ length: 20 }, (_, index) => `field${index}`),
+		additionalProperties: false,
+	};
+}
+
+function complexGateSchema(): Record<string, unknown> {
+	return z.toJSONSchema(z.object({
+		decision: z.enum(["approve", "reject"]),
+		review: z.object({
+			note: z.string().min(3).max(12).regex(/^[a-z]+$/),
+			priority: z.number().int().min(1).max(5).default(2),
+			optionalNote: z.string().optional(),
+		}),
+		findings: z.array(z.object({
+			kind: z.literal("finding"),
+			value: z.union([z.literal("ok"), z.number().int().min(1)]),
+		})).min(1).max(2),
+	}));
+}
+
 function createUserGate(
 	runId: string,
 	seqId: number,
-	options: { workDir?: string; sessionId?: string; chartPath?: string; events?: string[]; reply?: Record<string, unknown> } = {},
+	options: { workDir?: string; sessionId?: string; chartPath?: string; events?: string[]; gateOptions?: string[]; reply?: Record<string, unknown> } = {},
 ): string {
 	const workDir = options.workDir ?? projectDir;
 	const chartPath = options.chartPath ?? writeUserChart(`gate-${runId}-${seqId}`);
@@ -1189,7 +1410,7 @@ function createUserGate(
 		seqId,
 		actionUid: { chart: "demo", state: "ask", action: "user" },
 		prompt: `Question ${runId}/${seqId}?`,
-		options: ["APPROVED", "REJECTED"],
+		options: options.gateOptions ?? ["APPROVED", "REJECTED"],
 		events: options.events ?? ["APPROVED", "REJECTED", "FAILED"],
 		...(options.reply === undefined ? {} : { reply: { kind: "jsonSchema" as const, schema: options.reply } }),
 	});

@@ -7,6 +7,8 @@ describe("Pi host public surface", () => {
 	it("provides the harness-specific implementation separately", () => {
 		expect(typeof createPiHyperchartHost).toBe("function");
 		expect(typeof piHyperchartHost.readSessionSnapshot).toBe("function");
+		expect(typeof piHyperchartHost.readChartSnapshot).toBe("function");
+		expect(typeof piHyperchartHost.readRunSnapshot).toBe("function");
 	});
 
 	it("exports the implementation through pi-hyperchart/pi-host", () => {
