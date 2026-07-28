@@ -20,6 +20,9 @@ const { chart, arg } = refs<
 export default chart({
   kind: "chart",
   id: "review",
+  args: {
+    task: { description: "Work item to review", default: "Review the current change" },
+  },
   initial: "review",
   states: {
     review: {
@@ -47,6 +50,8 @@ Every chart has:
 - optional run-argument schema metadata.
 
 State names are local inside the authoring tree. Normalization assigns absolute paths such as `review` or `pipeline.verify`.
+
+Chart-level `args` is optional launch-form metadata. Each entry has an optional human-readable `description` and JSON `default`. It stays serializable through normalized inspection and does not validate or automatically inject runtime values; hosts present it when launching, while the supplied values become the durable run arguments. A `refs<Args>()` chart checks every declared metadata key and default type against `Args`, rejecting unknown keys even when they appear beside valid keys. Metadata may remain a subset of `Args` or be empty.
 
 ## Use typed refs
 

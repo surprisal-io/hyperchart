@@ -179,6 +179,7 @@ type HyperchartInspectAgentDefaults = {
 
 type HyperchartInspectResult = {
   chartId: string;
+  args?: Readonly<Record<string, ChartArgumentAst>>;
   chartPath?: string;
   exportName?: string;
   definitionSource?: string;
@@ -186,6 +187,8 @@ type HyperchartInspectResult = {
   states: HyperchartInspectState[];
 };
 ```
+
+`args` is the normalized, serializable chart-level launch metadata. It is omitted for charts that do not declare metadata. It contains only descriptions and JSON defaults—never Zod values, validation functions, or other executable module exports.
 
 `HyperchartInspectState` fields:
 
@@ -272,6 +275,7 @@ Renders every state into a map keyed by absolute state path.
 type ChartAst = Readonly<{
   kind: "chart";
   id: string;
+  args?: Readonly<Record<string, ChartArgumentAst>>;
   initial: string;
   states: Readonly<Record<StatePath, StateAst>>;
 }>;
@@ -283,6 +287,7 @@ Public AST exports:
 
 | Type | Important fields |
 |---|---|
+| `ChartArgumentAst` | optional serializable `description` and JSON `default` used by launch UIs |
 | `ActionStateAst` | `id`, `parent?`, `action`, `input?`, `transitions`, `after?`, `validate?`, `onReject?`, `onReenter?`, `retries?` |
 | `FinalStateAst` | `id`, `parent?`, `kind: "final"` |
 | `CompoundStateAst` | `id`, `parent?`, `initial`, `transitions`, `onDone` |
@@ -673,11 +678,11 @@ The root entry point exports these type names:
 ```text
 ActionEvent, ActionUID, ActionStateAst, ActionStateCst, AfterCst,
 AgentActionAst, AgentActionCst, ArtifactAst, ArtifactCst,
-ArtifactOfAst, ArtifactOfCst, AuthoringDiagnostic, ChartAst,
-ChartCst, ChartEvent, ChartSource,
+ArtifactOfAst, ArtifactOfCst, AuthoringDiagnostic, ChartArgumentAst,
+ChartArgumentCst, ChartAst, ChartCst, ChartEvent, ChartSource,
 CompoundStateAst, CompoundStateCst, EventBindingAst, EventBindingCst,
 EventType, FinalStateAst, FinalStateCst, InputRef, JoinArtifactOfAst,
-JoinArtifactOfCst, JsonSchema, MapStateAst, MapStateCst,
+JoinArtifactOfCst, JsonPrimitive, JsonSchema, JsonValue, MapStateAst, MapStateCst,
 RuntimeContract, RuntimeContractMetadata, SchemaAst, SchemaCst,
 SchemaRegistryLike, ParallelStateAst, ParallelStateCst,
 ParsedChart, RegionStateAst, ReservedSystemEventType, ScriptActionAst,

@@ -66,9 +66,20 @@ Returns the same chart object. It adds no runtime behavior; use it when you do n
 The `chart()` returned by `refs()` has the same runtime behavior and additionally checks registry consistency at compile time.
 
 ```ts
+type JsonValue =
+  | string | number | boolean | null
+  | readonly JsonValue[]
+  | { readonly [key: string]: JsonValue };
+
+type ChartArgumentCst = {
+  description?: string;
+  default?: JsonValue;
+};
+
 type ChartCst = {
   kind: "chart";
   id: string;
+  args?: Record<string, ChartArgumentCst>;
   initial: string;
   states: Record<string, StateCst>;
 };
@@ -78,10 +89,22 @@ type ChartCst = {
 |---|---:|---|
 | `kind` | yes | Must be `"chart"`. |
 | `id` | yes | Non-empty durable chart identifier. |
+| `args` | no | Serializable metadata for host launch forms, keyed by run argument name. |
 | `initial` | yes | Local id of the first top-level state. |
 | `states` | yes | Top-level state table. |
 
 State ids use letters, digits, `_`, and `-`. `.`, `#`, and `:` are reserved for paths, map instances, and effect identities.
+
+`args` is an explicit display contract, not an executable schema or an implicit module export. `description` is a host-visible hint and `default` is a suggested launch value. Defaults must be finite JSON data; functions, Zod schemas, class instances, `undefined`, circular values, and non-finite numbers are rejected during normalization. Hyperchart does not inject these defaults into a run: the host shows or submits them, and the concrete values supplied at launch become the durable `args` fact.
+
+```ts
+args: {
+  topic: { description: "Subject to research", default: "Hyperchart" },
+  depth: { description: "Number of research passes", default: 2 },
+},
+```
+
+The `chart()` returned by `refs<Args>()` additionally checks metadata names and default value types against `Args`. Every declared key must exist in `Args`, including when valid keys and a typo are mixed in the same object. Metadata may describe a subset of typed arguments, and an empty metadata object is valid; charts without metadata remain unchanged.
 
 ### `final()` and `failed()`
 
@@ -781,6 +804,8 @@ Normalization converts Zod to plain JSON Schema in the AST. Runtime validation u
 |---|---|
 | `INVALID_CHART_KIND` | Root `kind` is not `"chart"`. |
 | `INVALID_CHART_ID` | Chart id is missing or empty. |
+| `INVALID_CHART_ARGS` | Chart argument metadata is not an object. |
+| `INVALID_CHART_ARGUMENT` | An argument name, metadata field, description, or default is invalid/non-serializable. |
 | `INVALID_STATE_ID` | State id uses a reserved character. |
 | `UNKNOWN_INITIAL_STATE` | `initial` does not name a child. |
 | `MISSING_ACTION` | An action state has no action. |
@@ -818,9 +843,11 @@ Authoring types:
 
 ```text
 ActionStateCst, AgentActionCst, ArtifactCst, ArtifactOfCst, AfterCst,
-ChartCst, CompoundStateCst, EventBindingCst, FinalStateCst, InputRef,
+ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst,
+EventBindingCst, FinalStateCst, InputRef,
 JoinArtifactOfCst, MapStateCst, OnReject, OnReenterCst,
 ParallelStateCst, SchemaCst, ScriptActionCst, StateActionCst, StateCst,
 TemplateCst, Templatable, TransitionCst, TransitionMapCst,
-UserActionCst, GuardOutcome, GuardRef, InputsOf, Paths, ValueAt
+UserActionCst, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
+Paths, ValueAt
 ```

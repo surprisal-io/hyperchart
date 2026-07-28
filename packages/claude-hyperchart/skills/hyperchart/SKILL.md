@@ -57,7 +57,7 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 
 ## Start a run
 
-1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available. Inspect tools return a compact digest by default; pass `verbose: true` only when you need chart source, schemas, or transcripts.
+1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available. Inspect tools always return bounded digests. Never pass `verbose: true`; it is rejected. Use `hyperchart_view` for full source, schemas, states, visits, or transcripts.
 2. Call `hyperchart_run` with `chartPath` and `args`.
 3. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; the monitor routes owned user gates and the terminal prompt to this exact originating Claude session/canonical working directory. Never start Bash/Monitor polling watchers.
 4. A waited call can return terminal status **or** `boundary: "user"` for the globally active owned gate, possibly from another run that sorts earlier. Handle the gate before waiting again.
@@ -65,7 +65,7 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 
 ## Answer a user gate
 
-A `hyperchart-user-request`, waited user boundary, or SessionStart recovery context provides the exact `(runId, seqId)`, rendered question, authored options, allowed events, and optional reply contract. The monitor may arrive while you are busy: finish the current safe action/tool batch, start no unrelated work, and then:
+A `hyperchart-user-request`, waited user boundary, or SessionStart recovery context provides the exact `(runId, seqId)`, a bounded question preview, authored options with bounded display labels separated from exact values, exact allowed events, and an optional recursively bounded non-executable output contract. Display strings include `originalChars`/`omittedChars`; never copy an ellipsized label in place of an option `value`, event, or coordinate. Read `types`/`nullable`, JSON-decode `literalJson`, `allowedValueJson`, and `defaultJson`, recurse through required/optional `fields`, `element`/`tupleItems`, and `alternatives`, and obey `additionalProperties` and `constraints`. It never includes the full prompt or raw reply schema. If Claude reports that the gate cannot be represented safely, do not guess or submit a partial identity/shape; direct the user to the browser inspector/user interaction. The monitor may arrive while you are busy: finish the current safe action/tool batch, start no unrelated work, and then:
 
 1. If the same gate already has a native question in flight, do not open a concurrent duplicate. Otherwise call native `AskUserQuestion` once for this delivery attempt, mapping authored options when present and preserving a free-text/Other path when needed.
 2. Never infer, fabricate, summarize away, or supply the human answer yourself.
@@ -78,7 +78,7 @@ Multiple gates from parallel/map branches and separate owned runs are serialized
 
 ## Watch and steer a run
 
-- `hyperchart_view` opens the browser inspector: live chart graph, declared role/toolset names with resolved model/tool allowlists, per-state details, and live agent session transcripts with a steering composer.
+- `hyperchart_view` returns exactly `{ url }` and opens the browser inspector: live chart graph, declared role/toolset names with resolved model/tool allowlists, per-state details, and live agent session transcripts with a steering composer. It is the only full inspection surface; tool responses never copy definitions, schemas, runtime snapshots, visit histories, or transcripts into Claude session logs.
 - `hyperchart_run_inspect` shows each session's `actionKey`, status, and current activity.
 - `hyperchart_steer` queues a message for a `starting`/`running` session; the runner delivers it into the live Claude session after its current tool call.
 

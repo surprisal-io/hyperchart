@@ -53,16 +53,56 @@ function HyperchartInspectorDialog(
 The dialog owns run selection, graph navigation, state detail selection, responsive layout, and nested full-content dialogs. The selected state's run-specific `Runtime` section keeps a latest-session card from `state.session` and adds an independent `View session` control to every `visitHistory` entry that has its own `visit.session`; live latest sessions expand `Runtime` by default. This preserves every visit's transcript instead of making repeated visits point at the newest session. Agent cards show declared definition metadata (`role`, `toolset`, fallbacks) and resolved host configuration (`resolvedModel`, `resolvedTools`) but no session controls, so reusing one agent across states or runs cannot make its operational transcript look like static configuration. `View session` opens a compact transcript with its role/model/thinking/toolset/tool launch plan, completed reasoning, throttled live reasoning/text, and current-tool activity. Completed reasoning and tool/read entries start collapsed with a two-line preview and an ellipsis when content is hidden; user and assistant messages stay fully visible, as do currently streaming blocks. Each tool call and its result render as one lifecycle card with loading, complete, or error status. The session dialog grows with its transcript up to its viewport cap rather than reserving a fixed empty height; once assistant text or a tool starts, the preceding live reasoning becomes a normal collapsible reasoning block. Supplying `onSteerSession` enables its steering composer; the host must deliver the message to the matching live session. Historical sessions remain read-only because their status is not live. The component does not fetch data or mutate runs itself. The exported component is memoized; hosts should preserve `runs` and callback references when a poll produces no semantic change so shallow equality can skip the inspector subtree.
 
 ```tsx
-<HyperchartInspectorDialog
-  runs={snapshot.runs}
-  selectedRunId={selectedRunId}
-  onSelectRun={setSelectedRunId}
-  onClose={() => setOpen(false)}
-  onResume={(runId) => resumeRun(runId)}
-  portal={(children) => createPortal(children, document.body)}
-  theme={{ resolved: "light" }}
-/>
+import { useEffect, useState } from "react";
+import type {
+  HyperchartHostAdapter,
+  HyperchartRunInfo,
+} from "@surprisal/hyperchart/host";
+
+function RunInspector({
+  host,
+  cwd,
+  selectedRunId,
+  onClose,
+}: {
+  host: HyperchartHostAdapter;
+  cwd: string;
+  selectedRunId: string | null; // non-null only while the inspector is open
+  onClose: () => void;
+}) {
+  const [inspectorRun, setInspectorRun] =
+    useState<HyperchartRunInfo>();
+
+  useEffect(() => {
+    setInspectorRun(undefined);
+    if (selectedRunId === null) return;
+
+    let cancelled = false;
+    void host.readRunSnapshot(cwd, selectedRunId).then((run) => {
+      if (!cancelled) setInspectorRun(run);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [host, cwd, selectedRunId]);
+
+  if (selectedRunId === null || inspectorRun === undefined) return null;
+  return (
+    <HyperchartInspectorDialog
+      runs={[inspectorRun]}
+      selectedRunId={selectedRunId}
+      onClose={() => {
+        setInspectorRun(undefined);
+        onClose();
+      }}
+      portal={(children) => createPortal(children, document.body)}
+      theme={{ resolved: "light" }}
+    />
+  );
+}
 ```
+
+Keep the full `HyperchartRunInfo` in inspector-local state as above. Do not pass `readSessionSnapshot().runs` summaries to the inspector; load the full run only after it opens and discard it on close.
 
 Historical `HyperchartRunInfo` values are treated as immutable snapshots. While the modal inspector is open, the public stylesheet pauses CSS animations in sibling application roots under `body`; visible animations inside the inspector continue normally.
 
@@ -108,12 +148,12 @@ Renders a read-only, auto-laid-out React Flow graph. The default class is `h-72`
 
 ```tsx
 interface HyperchartRunStripProps {
-  hypercharts: HyperchartInfo[];
-  runs: HyperchartRunInfo[];
+  hypercharts: HyperchartSummaryInfo[];
+  runs: Array<HyperchartRunInfo | HyperchartRunSummaryInfo>;
   selectedRunId?: string | null;
   onSelectRun?: (runId: string | null) => void;
   onRun?: (chartName: string) => void;
-  onOpenDefinition?: (chart: HyperchartInfo) => void;
+  onOpenDefinition?: (chart: HyperchartSummaryInfo) => void;
   onResume?: (runId: string) => void;
   onAbort?: () => void;
   onOpenInspector?: (runId?: string | null) => void;
@@ -124,7 +164,9 @@ function HyperchartRunStrip(
 ): React.ReactElement | null;
 ```
 
-Shows the selected or running run, progress, usage, active states, up to five recent runs, and a dialog for additional runs/definitions. Returns `null` when no run is available. The component is memoized and follows the same immutable-array and stable-callback reference contract as the inspector.
+Shows the selected or running run, available progress/usage/active-state metadata, up to five recent runs, and a dialog for additional runs/definitions. Pass `readSessionSnapshot().hypercharts` directly: the strip and its More dialog type chart entries as canonical `HyperchartSummaryInfo`, including summaries whose optional `stateCount` is absent. Full `HyperchartInfo` values remain structurally assignable, but the callbacks expose only the summary contract.
+
+It accepts lightweight `HyperchartRunSummaryInfo` values directly, including metadata-only summaries where graph-derived fields are absent, so dashboard session state does not need a full graph/runtime snapshot. Summary progress is rendered only when `progressDone`, `progressTotal`, and `progressPercent` are all present; omitted or partial metadata hides the bar rather than implying 0%. Independently known status and active-state labels remain visible. Fetch a separate `HyperchartRunInfo` only when opening the inspector. Returns `null` when no run is available. The component is memoized and follows the same immutable-array and stable-callback reference contract as the inspector.
 
 ## `HyperchartToolSummary`
 
@@ -151,7 +193,7 @@ Adapts `hyperchart_*` tool details through `hyperchartRunFromToolDetails()`, fal
 interface HyperchartLaunchDialogProps {
   chartName: string;
   description?: string;
-  args?: Record<string, unknown>;
+  args?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
   submitLabel?: string;
   placeholder?: string;
   onSubmit: (argsText: string) => void;
@@ -165,7 +207,21 @@ function HyperchartLaunchDialog(
 ): React.ReactElement;
 ```
 
-Collects JSON argument text and returns the raw text through `onSubmit`; the host owns parsing, validation, and execution.
+Collects JSON argument text and returns the raw text through `onSubmit`; the host owns parsing, validation, and execution. Each `args` entry may contain a serializable `description` and JSON `default`. The current JSON editor uses defaults to build its placeholder; custom host forms may also render descriptions. Do not pass concrete `HyperchartRunInfo.args` here.
+
+Load metadata only when launch opens:
+
+```tsx
+const definition = await host.readChartSnapshot(cwd, chartName);
+<HyperchartLaunchDialog
+  chartName={chartName}
+  args={definition?.args}
+  onSubmit={launch}
+  onCancel={close}
+/>;
+```
+
+This is the minimal dashboard integration: no CST parsing or chart-module export convention is required.
 
 ## Portals
 
@@ -302,7 +358,7 @@ function hyperchartChartName(run: HyperchartRunInfo): string;
 function hyperchartRunLabel(run: HyperchartRunInfo): string;
 ```
 
-Time formatters return `—` for missing/zero timestamps and use host locale. Progress combines completed visits on actual run path with shortest remaining transition path from current state to any final state. Reaching any final outcome forces `pct: 100`, including failure finals. Inspector and run strip render progress bar without `done/total states` counters. Usage displays total tokens and cost when positive.
+Time formatters return `—` for missing/zero timestamps and use host locale. Progress for a full run combines completed visits on the actual run path with the shortest remaining transition path from the current state to any final state. Reaching any final outcome forces `pct: 100`, including failure finals. For lightweight run summaries, the run strip renders progress only when `progressDone`, `progressTotal`, and `progressPercent` are all authoritative and present; partial or omitted progress metadata renders no bar or counts. Inspector and run strip render progress bars without `done/total states` counters. Usage displays total tokens and cost when positive.
 
 ## Data adapters and model types
 
@@ -315,7 +371,7 @@ hyperchartRunFromRuntime
 hyperchartRunFromToolDetails
 ```
 
-It also re-exports every type from `@surprisal/hyperchart/host`, including `HyperchartInfo`, `HyperchartRunInfo`, and `HyperchartStateInfo`. See [Host API](host.md).
+It also re-exports every type from `@surprisal/hyperchart/host`, including `HyperchartInfo`, `HyperchartSummaryInfo`, `HyperchartLaunchArgumentInfo`, `HyperchartRunInfo`, `HyperchartRunSummaryInfo`, and `HyperchartStateInfo`. See [Host API](host.md).
 
 ## Complete React export inventory
 
@@ -324,7 +380,7 @@ HyperchartInspectorDialog, HyperchartInspectorDialogProps
 HyperchartInspectorSidePanel, HyperchartInspectorSidePanelProps
 HyperchartGraphPreview, buildGraph
 immediateMapScopeId, visibleStateIdsForScope
-HyperchartRunStrip, HyperchartRunStripProps
+HyperchartRunStrip, HyperchartRunStripInfo, HyperchartRunStripProps
 HyperchartToolSummary, HyperchartToolSummaryProps
 HyperchartLaunchDialog, HyperchartLaunchDialogProps
 HyperchartPortalProvider, HyperchartPortalRenderer

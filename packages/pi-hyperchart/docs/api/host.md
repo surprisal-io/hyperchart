@@ -21,6 +21,14 @@ interface HyperchartHostAdapter {
     cwd: string,
     options?: HyperchartSnapshotOptions,
   ): Promise<HyperchartSessionSnapshot>;
+  readChartSnapshot(
+    cwd: string,
+    chartName: string,
+  ): Promise<HyperchartInfo | undefined>;
+  readRunSnapshot(
+    cwd: string,
+    runId: string,
+  ): Promise<HyperchartRunInfo | undefined>;
 }
 
 interface HyperchartSnapshotOptions {
@@ -28,34 +36,77 @@ interface HyperchartSnapshotOptions {
 }
 
 interface HyperchartSessionSnapshot {
-  hypercharts: HyperchartInfo[];
-  runs: HyperchartRunInfo[];
+  hypercharts: HyperchartSummaryInfo[];
+  runs: HyperchartRunSummaryInfo[];
 }
 ```
 
-A host implementation discovers chart definitions and runs belonging to `cwd`. It should return immutable snapshots: consumers may retain older values while a later read is in progress.
+A host implementation discovers chart definitions and runs belonging to `cwd`. `readSessionSnapshot` is a lightweight list API: it returns only source/definition metadata and scalar run/status metadata. It never returns chart graphs, runtime state arrays, visit histories, prompts, schemas, or transcripts, so a host may retain it in a dashboard session. The Pi adapter does not evaluate chart modules or replay runs for this periodic read; it extracts literal chart ids and state counts from source when possible and omits graph-derived fields otherwise.
+
+`readChartSnapshot` is the on-demand full-definition API. Call it when a user opens a definition or launch dialog; unlike the summary, it includes static states, generated definition source, and declared launch argument metadata. The Pi adapter resolves only the selected discovery entry, with host-specific project charts taking precedence over shared project charts and user charts, then evaluates that one module. `readRunSnapshot` is the separate full-run inspector API. Call it only after the user opens an inspector, keep the returned `HyperchartRunInfo` in inspector-local state, and discard it when the inspector closes.
 
 ```ts
 const snapshot = await host.readSessionSnapshot(process.cwd(), { runLimit: 20 });
+const definition = await host.readChartSnapshot(process.cwd(), selectedChartName);
+const inspectorRun = await host.readRunSnapshot(process.cwd(), selectedRunId);
 ```
+
+## Session summary models
+
+```ts
+interface HyperchartSummaryInfo {
+  name: string;
+  description: string;
+  scope: "user" | "project";
+  source?: string;
+  stateCount?: number;
+  updatedAt?: number;
+}
+
+interface HyperchartRunSummaryInfo {
+  runId: string;
+  chartName: string;
+  originSessionId?: string;
+  status: HyperchartRunStatus;
+  cwd: string;
+  createdAt: number;
+  updatedAt: number;
+  pid?: number;
+  detached?: boolean;
+  stateCount?: number;
+  progressDone?: number;
+  progressTotal?: number;
+  progressPercent?: number;
+  activeState?: string;
+  activeStateCount?: number;
+  totalUsage?: HyperchartUsageInfo;
+}
+```
+
+The definition summary is an explicit metadata whitelist rather than a projection of `HyperchartInfo`, so future fields do not enter dashboard snapshots automatically. These summaries contain no `args` or `states` property. A literal default-export chart can provide `name` from its `id` and `stateCount` from its literal state tree without evaluation; otherwise discovery uses the relative module name and omits `stateCount`. Run summaries likewise exclude chart/runtime expansions. Their graph-derived count, progress, active-state, and usage fields are optional and are omitted by the Pi periodic snapshot because computing them would require module evaluation and replay. A host may include them only when it already has authoritative lightweight data. Progress UI is authoritative only when `progressDone`, `progressTotal`, and `progressPercent` are all present; consumers must not interpret omitted or partial fields as zero progress. A dashboard must not reconstruct or cache a full run model in its durable/session snapshot. When supplied, `activeState` and `activeStateCount` describe only states whose status is `running`; concurrency-gated `waiting` map states do not appear as running.
 
 ## Definition model
 
 ```ts
+type HyperchartLaunchArgumentInfo = {
+  description?: string;
+  default?: JsonValue;
+};
+
 interface HyperchartInfo {
   name: string;
   description: string;
   scope: "user" | "project";
   source?: string;
   definitionSource?: string;
-  args?: Record<string, unknown>;
+  args?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
   states?: HyperchartStateInfo[];
   stateCount: number;
   updatedAt?: number;
 }
 ```
 
-`states` may be omitted when discovery found metadata without a usable definition. `source` is normally an absolute chart-module path.
+`states` may be omitted when discovery found metadata without a usable definition. `source` is normally an absolute chart-module path. `args` is definition-owned launch metadata, not concrete run values. It is safe for browser JSON and contains no schemas or executable validators.
 
 ## Run model
 
@@ -82,6 +133,7 @@ interface HyperchartRunInfo {
   updatedAt: number;
   pid?: number;
   detached?: boolean;
+  launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
   args: Record<string, unknown>;
   states: HyperchartStateInfo[];
   stateCount: number;
@@ -91,7 +143,7 @@ interface HyperchartRunInfo {
 }
 ```
 
-`originSessionId` identifies the harness session that created a run when the host can provide it. Consumers may use exact matching for per-session views; absence means ownership is unknown.
+`originSessionId` identifies the harness session that created a run when the host can provide it. Consumers may use exact matching for per-session views; absence means ownership is unknown. `launchArgs` carries the chart's display metadata through static and runtime full models; `args` remains the concrete argument values supplied to that run. Static inspection has empty concrete `args` unless the adapter caller explicitly supplies values.
 
 `mode: "static"` represents a definition with no durable run overlay. `mode: "run"` represents a concrete run.
 
@@ -230,7 +282,7 @@ interface HyperchartSessionMessageInfo {
 }
 ```
 
-`session` is an optional, immutable latest-session snapshot supplied by a host adapter; each `HyperchartVisitInfo` may additionally carry the session associated with that durable visit. `actionKey` identifies the running action for steering. `role`, `toolset`, `model`, and `tools` record the concrete session plan used at launch when the host persists those fields. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. Hosts may bound or omit historical messages while preserving current activity fields.
+`session` is an optional, immutable latest-session snapshot supplied by a host adapter; each `HyperchartVisitInfo` may additionally carry the session associated with that durable visit. `actionKey` identifies the running action for steering. `role`, `toolset`, `model`, and `tools` record the concrete session plan used at launch when the host persists those fields. Messages are display-oriented transcript entries; `reasoning` carries completed Pi thinking blocks, while `currentReasoning` and `currentText` carry throttled streaming deltas for a live view. Tool calls and matching tool results share one `tool` entry keyed by `toolCallId`; `toolStatus` moves from `running` to `completed` or `error` instead of producing two cards. `HyperchartAgentSessionInfo` exists only in full run models returned by the inspector path. Lightweight `readSessionSnapshot` results contain no session objects or messages. Hosts may additionally bound historical messages in full inspector models.
 
 ## Visits
 
@@ -462,7 +514,8 @@ Converts normalized static inspection into canonical host models. Defaults:
 - `status`: `paused`;
 - `cwd`: empty string;
 - timestamps: current time;
-- args: empty object.
+- args: empty object;
+- launchArgs: `result.args` when chart metadata was declared.
 
 ### `hyperchartRunFromToolDetails()`
 
@@ -558,11 +611,14 @@ This is the canonical static-plus-runtime adapter. It:
 
 It does not read files itself. The host supplies already-loaded status and session-progress data.
 
+The model-boundary helpers use a shared positive wire-field allowlist rather than attempting to enumerate unsafe names. `boundedModelEnvelope()` validates the complete constructed envelope and substitutes a caller-shaped deterministic digest error only when its final UTF-8 JSON exceeds 64 KiB; unknown fields and non-JSON values fail closed. `summarizeUserGate()` exposes only a bounded prompt preview, authored options, exact allowed events, and a non-executable recursive reply summary. Response coordinates and identities (`runId`, `seqId`, allowed event names, and option values) are never truncated: they round-trip exactly within dedicated per-field/collection and 48 KiB gate-summary budgets, otherwise delivery fails closed and directs the operator to the browser inspector. Options separate a possibly truncated human `label` from the exact `value`; every retained display string is `{ text, originalChars, omittedChars }`, including untruncated strings with `omittedChars: 0`. The summary carries JSON types and nullability, JSON-encoded enum/literal/default values, recursive required/optional object fields and additional-property policy, array/tuple/contains schemas, union alternatives, and supported string/numeric/array/object constraints. It never returns the normalized or executable schema. Reply summaries have independent depth, node, collection, string/default, and byte caps. A collection-cap error identifies the collection and exact omitted count; because omitting a response identity, validation branch, or field would make the contract unusable, gate delivery fails closed instead of returning a partial summary. The finite JSON type set is not sliced, and the former capped `itemTypes` projection no longer exists. Browser inspector payloads deliberately bypass this model-only boundary.
+
 ## Complete export inventory
 
 ```text
-HyperchartHostAdapter, HyperchartSessionSnapshot, HyperchartSnapshotOptions
-HyperchartInfo, HyperchartRunInfo, HyperchartRunStatus,
+HyperchartHostAdapter, HyperchartSessionSnapshot, HyperchartSnapshotOptions,
+HyperchartSummaryInfo, HyperchartRunSummaryInfo,
+HyperchartInfo, HyperchartLaunchArgumentInfo, HyperchartRunInfo, HyperchartRunStatus,
 HyperchartStateInfo, HyperchartStateStatus, HyperchartStateType,
 HyperchartAgentSessionInfo, HyperchartSessionMessageInfo,
 HyperchartUsageInfo, HyperchartRetryInfo, HyperchartTransitionInfo,
@@ -578,6 +634,11 @@ hyperchartRunFromRuntime, hyperchartRunFromToolDetails,
 HyperchartRunFromInspectOptions, HyperchartRunFromRuntimeOptions,
 HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo,
 summarizeHyperchartProgress, summarizeChartInspect, summarizeRunInspect,
+summarizeReplyContract, summarizeUserGate, assertToolPayloadSafe,
+boundedModelEnvelope, serializeModelEnvelope, serializeToolPayload,
+MAX_TOOL_PAYLOAD_BYTES, SafeToolPayload, ReplyContractSummary,
+ReplySchemaSummary, ReplySchemaConstraints, ReplyContractSummaryError,
+DisplayStringSummary, UserGateOptionSummary, UserGateSummary,
 ChartInspectStateSummary, ChartInspectSummary, RunInspectStateSummary,
 RunInspectSummary
 ```

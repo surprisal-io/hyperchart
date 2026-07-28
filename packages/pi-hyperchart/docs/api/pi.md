@@ -165,6 +165,7 @@ Loads and normalizes a chart without dispatching workflow actions.
   action: "inspect";
   chartPath: string;
   exportName?: string;
+  /** Deprecated: true is rejected; use action: "view". */
   verbose?: boolean;
 }
 ```
@@ -173,9 +174,9 @@ Loads and normalizes a chart without dispatching workflow actions.
 |---|---|
 | `chartPath` | Chart name under `.pi/hypercharts` or a module path. |
 | `exportName` | Named export; default is `default`. |
-| `verbose` | Return the full inspection object instead of the compact digest (large — includes chart source and schemas). |
+| `verbose` | Deprecated. `true` is rejected; use `action: "view"` for full browser inspection. |
 
-Result `details` is `HyperchartInspectResult`.
+Result `details` is a bounded `ChartInspectSummary`, never `HyperchartInspectResult`.
 
 ```json
 {
@@ -184,7 +185,7 @@ Result `details` is `HyperchartInspectResult`.
 }
 ```
 
-By default, the response uses a compact digest; set `verbose: true` for the full inspection object.
+The response is always a capped digest. Full source, schemas, and static state definitions are available only through the browser inspector and never enter Pi session JSONL.
 
 Loading still executes module-level TypeScript. Do not inspect untrusted modules without reviewing their top-level code.
 
@@ -213,7 +214,7 @@ Rules:
 - `wait` defaults to `false`.
 - `ignoreReplayWarnings` defaults to `false` and only bypasses stale/skipped replay warnings; it is not a structural repair.
 
-Without `wait`, result details contain the startup result below. The owned terminal request is later injected as a model-facing follow-up only into the originating session/workDir and is receipted by request id.
+Without `wait`, result details contain only the bounded startup result below. The owned terminal boundary is later injected as a compact model-facing follow-up only into the originating session/workDir and is receipted by request id; its durable full prompt payload is not copied into session JSONL.
 
 ```ts
 {
@@ -221,41 +222,35 @@ Without `wait`, result details contain the startup result below. The owned termi
   runDir: string;
   chartId: string;
   final: false;
-  inspector: HyperchartRunInfo;
+  status: "started";
 }
 ```
 
 With `wait: true`, the tool participates in the same session/workDir presentation arbiter as background scans. It returns whichever boundary occurs first: terminal status for the waited run, or the globally active owned user gate (which can belong to another run that sorts earlier).
 
-Terminal details contain the persisted status plus the final inspector model:
+Terminal details contain compact status and identifiers only:
 
 ```ts
 {
   runId: string;
   runDir: string;
   chartId: string;
+  boundary: "terminal";
+  final: true;
   status: {
-    version: 1;
-    runId: string;
-    runDir: string;
-    chartId: string;
     state: "starting" | "running" | "complete" | "failed" | "stopping" | "stopped";
     pid?: number;
-    startedAt: number;
-    updatedAt: number;
-    heartbeatAt?: number;
+    updatedAt?: number;
     exitCode?: number;
-    error?: string;
-    replayWarnings?: string[];
+    errorPreview?: string;
+    replayWarningCount?: number;
   };
-  inspector: HyperchartRunInfo;
-  notification?: TerminalNotificationRequest;
 }
 ```
 
-A user boundary has `boundary: "user"`, `final: false`, `interaction: { runId, seqId, prompt, allowedEvents, options, reply?, rejection? }`, and `waitedRun` identifying the run whose wait was interrupted. Its result text is the real rendered question. The public gate identity is only `(runId, seqId)`; it has no `requestId` or runtime `effectId`.
+A user boundary has `boundary: "user"`, `final: false`, `interaction: { version, runId, seqId, promptPreview, options, allowedEvents, outputRequired, outputHint? }`, and `waitedRun` identifying the run whose wait was interrupted. `promptPreview` is `{ text, originalChars, omittedChars }`; each option is `{ label: { text, originalChars, omittedChars }, value }`, separating bounded human display text from the exact authored value. `runId`, `seqId`, every `value`, and every allowed event name are exact and are never ellipsized or dropped. `outputHint` is a recursively bounded, non-executable contract: types/nullability; JSON-encoded enum, literal, and default values; recursively required/optional object fields and additional-property policy; array elements/tuples; union alternatives; and supported validation bounds, pattern, and format. It never contains the normalized or executable schema. The same summary is used by visible/hidden gate delivery and is sufficient to translate structured user input into `respond`. If an identity, depth, node, collection, exact-value, gate-summary, or envelope limit would make that impossible, delivery fails closed with an instruction to use the browser inspector rather than exposing a partial gate. The public gate identity is only `(runId, seqId)`; it has no runtime `effectId`.
 
-A terminal result text is the terminal prompt when this call claims delivery. If a matching terminal receipt already exists, the call returns terminal status without duplicating that prompt. Pi recovery also checks persisted `hyperchart-terminal` custom messages by terminal request id before re-sending.
+A terminal result text is a compact boundary notice directing the operator to `view`; it never copies the durable terminal prompt or inspector snapshot. Pi recovery checks persisted `hyperchart-terminal` custom messages by request id before re-sending the same compact notice.
 
 For a background gate, Pi scans only requests owned by the exact session and canonical cwd. While the agent is busy, it sends a hidden `hyperchart-yield` steering message and lets the current safe action/tool batch finish. On idle or `agent_settled`, it rechecks the shared arbiter and displays the active request once without `triggerTurn`. State is `pending → yielding → awaiting-user → answered/closed`; reload/session-start recovery reconstructs it from mailbox receipts. Simultaneous requests remain queued in lexical `runId`, then numeric `seqId` order.
 
@@ -287,13 +282,12 @@ The extension type-checks the chart, normalizes it, creates or loads run metadat
 {
   action: "run_inspect";
   runDir: string;
+  /** Deprecated: true is rejected; use action: "view". */
   verbose?: boolean;
 }
 ```
 
-Set `verbose: true` to return the full inspection object instead of the compact digest (large — includes chart source, schemas, and transcripts).
-
-Loads a run id or directory belonging to the current working directory and returns `HyperchartRunInfo` in `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
+The tool always returns a bounded `RunInspectSummary`; `verbose: true` is rejected. Its collections use digest names such as `stateDigests`, `pendingStateIds`, and `sessionDigest`, and every capped collection carries its corresponding omission count. Full runtime states, visit histories, schemas, and transcripts are fetched only by the browser inspector and never returned in tool `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
 
 ```json
 {
@@ -345,24 +339,10 @@ The host requires the exact originating Pi session and canonical working directo
 
 Use exactly one of `runDir` or `chartPath`; they are mutually exclusive. Starts or reuses the Pi process's localhost inspector server, registers the selected run when viewing a run, or loads a static chart view when `chartPath` is provided.
 
-When viewing a run, returns:
+For both run and static views, result details are exactly URL-only:
 
 ```ts
-{
-  runId: string;
-  runDir: string;
-  url: string;
-}
-```
-
-For a static chart view, result details contain:
-
-```ts
-{
-  chartId: string;
-  chartPath: string;
-  url: string;
-}
+{ url: string }
 ```
 
 `runDir` must identify a run belonging to the current working directory. `open` defaults to `true`; set it to `false` to return the URL without opening the system browser. The inspector polls current run/session data and its composer writes to the same run-scoped steering queue as the human command.

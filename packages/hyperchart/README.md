@@ -18,6 +18,9 @@ import { chart, final, script } from "@surprisal/hyperchart";
 export default chart({
   kind: "chart",
   id: "hello",
+  args: {
+    message: { description: "Text to print", default: "hello" },
+  },
   initial: "run",
   states: {
     run: {
@@ -30,7 +33,7 @@ export default chart({
 });
 ```
 
-A script with one successful transition may select it implicitly on exit code `0`. Top-level `final()` and `failed()` terminals explicitly select `complete` or `failed` run outcome; optional terminal notifications can append a scoped prompt and authoritative paths for declared artifacts. Runner/host delivery uses a persist-once outbox and per-session receipts.
+Optional chart-level `args` metadata gives hosts serializable descriptions and JSON defaults for on-demand launch forms; it is inspection metadata, not executable validation or automatic runtime input. `refs<Args>().chart()` accepts subset or empty metadata and rejects every key outside `Args`, including typos mixed with valid keys. A script with one successful transition may select it implicitly on exit code `0`. Top-level `final()` and `failed()` terminals explicitly select `complete` or `failed` run outcome; optional terminal notifications can append a scoped prompt and authoritative paths for declared artifacts. Runner/host delivery uses a persist-once outbox and per-session receipts.
 
 ## Entry points
 
@@ -45,7 +48,7 @@ A script with one successful transition may select it implicitly on exit code `0
 | `@surprisal/hyperchart/inspect` | run inspection, inspector server, and session transcripts |
 | `@surprisal/hyperchart/sessions` | session progress, steering, and run status |
 
-The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`. In the React inspector, agent cards show declared role/toolset metadata and resolved model/tool configuration, while a selected run state's `Runtime` section owns its live-session controls and actual launch-plan summary.
+The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`. In the React inspector, agent cards show declared role/toolset metadata and resolved model/tool configuration, while a selected run state's `Runtime` section owns its live-session controls and actual launch-plan summary. `HyperchartRunStrip` accepts the lightweight chart/run summaries from `readSessionSnapshot()` directly and hides progress when its three summary progress fields are omitted or incomplete.
 
 The core package has no Pi dependency. React integrations use the optional peer dependencies declared by the package.
 

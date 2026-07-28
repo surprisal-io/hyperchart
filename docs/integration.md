@@ -19,12 +19,13 @@ Import canonical models from:
 import type {
   HyperchartInfo,
   HyperchartRunInfo,
+  HyperchartRunSummaryInfo,
   HyperchartSessionSnapshot,
   HyperchartHostAdapter,
 } from "@surprisal/hyperchart/host";
 ```
 
-`HyperchartInfo` describes a discovered chart. `HyperchartRunInfo` combines static chart information with optional runtime overlays. Its optional `originSessionId` lets harnesses isolate runs by creating session. UI components consume these models instead of reading `log.jsonl` directly.
+`HyperchartInfo` describes a full discovered chart model, including optional serializable launch argument metadata. `HyperchartRunInfo` combines static chart information with optional runtime overlays and keeps that definition metadata in `launchArgs`, separate from concrete run `args`. `HyperchartRunSummaryInfo` is the graph-free scalar list/card model returned in `HyperchartSessionSnapshot`. Its optional `originSessionId` lets harnesses isolate runs by creating session. UI components consume these models instead of reading `log.jsonl` directly.
 
 The boundary is intentional:
 
@@ -35,11 +36,13 @@ The boundary is intentional:
 
 ## Implement a host adapter
 
-A host adapter has one method:
+A host adapter separates lightweight session lists from full inspector loads:
 
 ```ts
 import type {
   HyperchartHostAdapter,
+  HyperchartInfo,
+  HyperchartRunInfo,
   HyperchartSessionSnapshot,
 } from "@surprisal/hyperchart/host";
 
@@ -48,9 +51,23 @@ export class MyHyperchartHost implements HyperchartHostAdapter {
     cwd: string,
     options?: { runLimit?: number },
   ): Promise<HyperchartSessionSnapshot> {
-    const hypercharts = await discoverCharts(cwd);
-    const runs = await readRuns(cwd, options?.runLimit);
+    const hypercharts = await discoverChartSummaries(cwd);
+    const runs = await readRunSummaries(cwd, options?.runLimit);
     return { hypercharts, runs };
+  }
+
+  async readChartSnapshot(
+    cwd: string,
+    chartName: string,
+  ): Promise<HyperchartInfo | undefined> {
+    return readFullDefinitionForLaunch(cwd, chartName);
+  }
+
+  async readRunSnapshot(
+    cwd: string,
+    runId: string,
+  ): Promise<HyperchartRunInfo | undefined> {
+    return readFullRunForInspector(cwd, runId);
   }
 }
 ```
@@ -79,6 +96,8 @@ const snapshot = await piHyperchartHost.readSessionSnapshot(process.cwd(), {
 });
 ```
 
+`readSessionSnapshot` is intentionally summary-only: it contains no chart launch `args`, chart `states`, runtime state arrays, visit histories, prompts, schemas, session objects, or transcript messages. The Pi adapter statically scans source metadata and reads persisted run metadata/status without evaluating chart modules, constructing graphs, or replaying logs. Literal ids and state counts are included when they are statically visible; graph-derived definition/run fields are omitted when they are not. When launch or definition inspection opens, call `readChartSnapshot(cwd, chartName)` and pass its `args` directly to `HyperchartLaunchDialog`; only that selected module is inspected, using project-over-shared-over-user precedence. When a full embedded run inspector opens, call `readRunSnapshot(cwd, runId)`. Keep either full model scoped to its open UI and discard it on close.
+
 Use `createPiHyperchartHost()` when you need explicit configuration or an isolated instance. Use `piHyperchartHost` for normal process-wide access.
 
 ## Adapt existing data
@@ -94,7 +113,7 @@ import {
 } from "@surprisal/hyperchart/host";
 ```
 
-Use the adapter matching the data you actually have. Do not fabricate runtime fields for a static inspect result.
+Use the adapter matching the data you actually have. Do not fabricate runtime fields for a static inspect result. `hyperchartRunFromInspectResult()` copies chart metadata to `launchArgs` while leaving concrete `args` empty unless the caller supplies them.
 
 ## Install the React UI
 
@@ -118,38 +137,32 @@ import "@surprisal/hyperchart/react/styles.css";
 
 Do not import component files or React Flow CSS separately. `styles.css` contains the complete public stylesheet contract, including scoped React Flow styles.
 
-## Render a run strip and inspector
+## Render a run strip from the session snapshot
 
 ```tsx
-import { useState } from "react";
-import {
-  HyperchartInspectorDialog,
-  HyperchartRunStrip,
-} from "@surprisal/hyperchart/react";
-import type { HyperchartRunInfo } from "@surprisal/hyperchart/host";
+import { HyperchartRunStrip } from "@surprisal/hyperchart/react";
+import type { HyperchartSessionSnapshot } from "@surprisal/hyperchart/host";
 
-export function WorkflowView({ runs }: { runs: HyperchartRunInfo[] }) {
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-
+export function WorkflowStrip({
+  snapshot,
+  openInspector,
+}: {
+  snapshot: HyperchartSessionSnapshot;
+  openInspector: (runId: string) => void;
+}) {
   return (
-    <>
-      <HyperchartRunStrip
-        hypercharts={[]}
-        runs={runs}
-        onSelectRun={setSelectedRunId}
-      />
-      {selectedRunId !== null && (
-        <HyperchartInspectorDialog
-          runs={runs}
-          selectedRunId={selectedRunId}
-          onSelectRun={setSelectedRunId}
-          onClose={() => setSelectedRunId(null)}
-        />
-      )}
-    </>
+    <HyperchartRunStrip
+      hypercharts={snapshot.hypercharts}
+      runs={snapshot.runs}
+      onOpenInspector={(runId) => {
+        if (runId !== null && runId !== undefined) openInspector(runId);
+      }}
+    />
   );
 }
 ```
+
+Pass the canonical summary arrays directly; `HyperchartSummaryInfo.stateCount` and all run progress fields may be absent. The strip hides progress unless `progressDone`, `progressTotal`, and `progressPercent` are all present, while preserving independently known status and running-state labels. When `openInspector` runs, call `readRunSnapshot(cwd, runId)` and give that full result to `HyperchartInspectorDialog`; do not pass the summary run to the inspector.
 
 Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The inspector renders concurrency-gated map states and items as `waiting`; they do not expose a session until the runtime admits and invokes them. Agent cards render declared `role`/`toolset` plus `resolvedModel`/`resolvedTools` from the host snapshot, but no session controls. When a concrete run snapshot includes `state.session`, the selected state's `Runtime` section exposes the live-session dialog and expands automatically while the session is live. Provide `onSteerSession` to enable the dialog composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
 
@@ -216,7 +229,7 @@ Practical rules:
 
 The inspector bounds large prompts, command text, JSON, schemas, and definitions before syntax rendering. Truncated content shows `Open full`; the full value is mounted only after the user opens the dialog.
 
-Hosts should pass complete canonical data. Do not pre-truncate fields unless the transport itself requires a limit, because the inspector owns display truncation and full-content access.
+For an open inspector, hosts should request and pass complete canonical data through `readRunSnapshot` (or `hyperchartRunFromRunDir(..., { includeTranscripts: true })` inside a host adapter). Do not pre-truncate fields unless the transport itself requires a limit, because the inspector owns display truncation and full-content access. Routine background/session snapshots must use only the summary list API and must not retain any full run model.
 
 ## Accessibility and responsive behavior
 

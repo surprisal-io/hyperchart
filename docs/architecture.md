@@ -146,7 +146,7 @@ Canonical inspection has two layers.
 
 **Runtime overlay:** process status, visits, resolved invocations/inputs, map generations, usage, sessions, validation attempts, artifacts, and replay issues.
 
-Adapters produce canonical models. React components do not parse raw logs or rediscover agent definitions independently.
+Adapters produce canonical models. React components do not parse raw logs or rediscover agent definitions independently. Routine host/dashboard session snapshots contain only definition metadata and scalar run/status/progress summaries—never chart graphs, runtime state arrays, visit histories, prompts, schemas, session objects, or transcripts. A user-initiated inspector load requests the full run model on demand, keeps it inspector-local, and discards it when the inspector closes.
 
 ## Formal model
 

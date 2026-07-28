@@ -102,7 +102,7 @@ Options:
 
 Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. On startup or session resume, Pi restores widgets only for non-terminal runs created by that exact Pi session; terminal runs and older runs without ownership metadata remain available through run history but do not appear as active widgets.
 
-When an owned background run reaches matching `complete`/`failed` status, Pi injects its terminal prompt as a model-facing follow-up into the exact originating session and working directory. Pi sends before confirming the terminal request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery.
+When an owned background run reaches matching `complete`/`failed` status, Pi injects a compact terminal notice as a model-facing follow-up into the exact originating session and working directory; the durable terminal prompt stays out of the session log. Pi sends before confirming the terminal request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery.
 
 A durable `user()` action is routed through the same exact session/canonical-cwd ownership boundary. Every branch persists its gate immediately, while Pi presents only one across all owned runs in lexical `runId`, then numeric `seqId` order. If Pi is busy, a hidden steering message asks it to finish the current safe action/tool batch and yield; on idle or `agent_settled`, Pi rechecks and displays the question without triggering a model turn. The user's next ordinary prompt is bound to that gate and the model must immediately translate it into an explicit `action: "respond"` call instead of answering the gate itself. Only that branch waits; the detached runner and other parallel/map branches continue.
 
@@ -184,9 +184,9 @@ Load a chart module and return its static inspector model without starting a run
 }
 ```
 
-`chartPath` is required. `exportName` is optional. `verbose` is optional; when `true`, it returns the full inspection object, including chart source and schemas, instead of the compact digest.
+`chartPath` is required and `exportName` is optional. The tool always returns a bounded digest of identity, topology, agent availability, and diagnostics. The deprecated `verbose: true` form is rejected; use `action: "view"` for full source, contracts, schemas, and state definitions.
 
-The result contains source, contracts, topology, transitions, schemas, and definition issues. It contains no run status, visits, usage, session failures, or artifacts from a concrete run.
+Full chart definitions never enter Pi tool results or session JSONL. Loading still executes the selected module's top-level TypeScript, but the complete inspection model is retained only behind the browser inspector's on-demand HTTP surface.
 
 > The tool loads executable TypeScript. It does not dispatch chart actions, but top-level code in the module can run with your permissions.
 
@@ -212,8 +212,8 @@ Start or resume a run.
 | `wait` | no | wait for terminal status or the shared active user gate before returning |
 | `ignoreReplayWarnings` | no | explicitly continue despite stale/skipped replay records |
 
-When `wait` is false or omitted, the tool returns after startup with `final: false`; owned user gates and the eventual terminal prompt are delivered asynchronously to the exact originating Pi session and canonical working directory.
-When `wait` is true, the tool participates in the same cross-run arbiter and returns terminal details or a `boundary: "user"` with the active interaction and original `waitedRun` coordinate. User-gate identity is exactly `(runId, seqId)`. Presentation is at least once across recovery; response persistence is idempotent.
+When `wait` is false or omitted, the tool returns after startup with `final: false`, chart/run ids, the absolute run directory, and compact status only. Owned user gates and eventual terminal boundaries are delivered asynchronously to the exact originating Pi session and canonical working directory.
+When `wait` is true, the tool participates in the same cross-run arbiter and returns a compact terminal status or a `boundary: "user"` with a bounded prompt preview, options whose bounded labels are separate from exact values, exact allowed events, a non-executable structured-output hint, and the original `waitedRun` coordinate. Every display string includes `originalChars` and `omittedChars`. Response coordinates and identities are never ellipsized; an unsafe identity or total gate envelope fails closed and routes completion to the browser inspector. It never embeds a run inspector model, terminal prompt payload, transcript, full prompt, or raw reply schema. User-gate identity is exactly `(runId, seqId)`. Presentation is at least once across recovery; response persistence is idempotent.
 
 ### `hyperchart` with `action: "respond"`
 
@@ -229,7 +229,7 @@ After Pi displays a gate, the user's next normal prompt is treated as the answer
 }
 ```
 
-`event` must be one of the gate's allowed non-`FAILED` events and `output` must satisfy its reply contract when present. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate `requestId`.
+`event` must be one of the gate's exact allowed non-`FAILED` events and `output` must satisfy its reply contract when present. Copy `runId`, `seqId`, event names, and option values exactly; only display labels/previews may be shortened, and their metadata states the original and omitted character counts. The delivered non-executable summary recursively covers allowed values, nested required/optional fields, arrays, alternatives, defaults, nullability, and supported constraints. If an identity or the contract cannot be represented within its field/collection/depth/node/value/byte caps, Pi fails delivery closed and directs the operator to the browser inspector instead of showing a partial gate. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate `requestId`.
 
 ### `hyperchart` with `action: "run_inspect"`
 
@@ -245,13 +245,13 @@ Load a concrete run and return the runtime-enriched inspector model.
 | Parameter | Required | Meaning |
 |---|---:|---|
 | `runDir` | yes | existing run directory/id |
-| `verbose` | no | when `true`, return the full inspection object, including chart source, schemas, and transcripts |
+| `verbose` | no | deprecated; `true` is rejected with a direction to `hyperchart view` |
 
-The overlay includes run status, runtime issues, visits, resolved invocations, map generations, validation attempts, artifacts, usage, session failures, and replay findings. Historical tool results remain historical snapshots; rerun the tool to read new facts.
+The result is always a bounded digest: run identity/status, capped state activity, concise issues, session counters/current-activity previews, and artifact paths. Full runtime states, visits, invocations, map histories, schemas, and transcripts never enter tool results or session JSONL; they are available only through `view`.
 
 ### `hyperchart` with `action: "view"`
 
-Open the localhost browser inspector and return its tokenized URL. Pass exactly one of `runDir` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run.
+Open the localhost browser inspector and return exactly `{ "url": string }`. Pass exactly one of `runDir` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run.
 
 ```json
 {
@@ -266,7 +266,7 @@ Alternatively, open a static chart inspector without a run:
 { "action": "view", "chartPath": ".pi/hypercharts/review.chart.ts" }
 ```
 
-Set `"open": false` to start the inspector and return its URL without opening the system browser. For a run, the run must belong to the current working directory. The returned inspector supports the same live polling and session steering as `/hyperchart view`.
+Set `"open": false` to start the inspector and return its URL without opening the system browser. For a run, the run must belong to the current working directory. `view` returns exactly `{ "url": string }`; complete data is fetched on demand by the browser and does not enter the host session JSONL. The inspector supports the same live polling and session steering as `/hyperchart view`.
 
 ### `hyperchart` with `action: "stop"`
 

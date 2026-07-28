@@ -4,7 +4,7 @@ Claude Code plugin for [Hyperchart](https://github.com/surprisal-io/hyperchart):
 
 ## What you get
 
-- **`hyperchart_*` MCP tools** — `list`, `inspect`, `run`, `respond`, `run_inspect`, `rewind`, `steer`, `stop`, `view` — exposed to Claude by a bundled stdio MCP server.
+- **`hyperchart_*` MCP tools** — `list`, `inspect`, `run`, `respond`, `run_inspect`, `rewind`, `steer`, `stop`, `view` — exposed to Claude by a bundled stdio MCP server. Every response is bounded: full definitions, schemas, runtime snapshots, visit histories, and transcripts never enter Claude session logs. Deprecated `verbose: true` inspection calls are rejected; `view` is the sole full inspection surface.
 - **Detached background runs** — chart runner survives Claude session.
   Run directory stores durable state.
   Always-on plugin monitor routes terminal prompts and durable user gates to the exact originating Claude session/canonical workDir.
@@ -12,8 +12,8 @@ Claude Code plugin for [Hyperchart](https://github.com/surprisal-io/hyperchart):
   Delivery/presentation uses at-least-once recovery semantics.
   A user gate is identified only by `(runId, seqId)`; identical response retries are idempotent and divergent answers conflict.
 - **Agent actions as Claude sessions** — each chart agent runs through `@anthropic-ai/claude-agent-sdk` `query()` headless (permission checks bypassed inside the chart's working directory; the chart's guards and validators are the control surface). Model ids from agent definitions are passed to the SDK verbatim.
-- **Live inspector** — `hyperchart_view` returns a tokenized localhost URL with the chart graph, per-state details, declared and resolved role/toolset configuration, live agent transcripts, and a steering composer. Pass `chartPath` for a static view of a chart definition (no run required; reloads on refresh).
-- **Durable human input** — the monitor directs Claude to native `AskUserQuestion` once per delivery attempt, then Claude immediately commits the real answer with `hyperchart_respond`. One gate is presented across parallel/map branches and owned runs in lexical `runId`, then numeric `seqId` order; other branches keep running.
+- **Live inspector** — `hyperchart_view` returns exactly `{ "url": string }` with a tokenized localhost URL; the browser fetches the chart graph, per-state details, declared and resolved role/toolset configuration, live agent transcripts, and steering composer on demand. Pass `chartPath` for a static view of a chart definition (no run required; reloads on refresh).
+- **Durable human input** — the monitor directs Claude to native `AskUserQuestion` once per delivery attempt, then Claude immediately commits the real answer with `hyperchart_respond`. Response coordinates, event names, and option values remain exact; bounded display labels report original/omitted characters. Structured gates carry a bounded recursive, non-executable output contract; if any identity or contract cannot remain sufficient within its caps, delivery fails closed and directs the operator to the browser inspector. One gate is presented across parallel/map branches and owned runs in lexical `runId`, then numeric `seqId` order; other branches keep running.
 - **SessionStart hook** — live runs and the pinned unanswered gate for the current directory are surfaced as context when a Claude session starts.
 
 ## Install

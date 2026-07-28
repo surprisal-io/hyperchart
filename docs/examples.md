@@ -6,7 +6,7 @@ Each example has different prerequisites. Start with the script-only chart; the 
 |---|---:|---|---|
 | [`examples/quickstart.chart.ts`](../examples/quickstart.chart.ts) | yes | Node.js, Pi package | script action, implicit successful event, declared artifact, final state |
 | [`examples/api/review.chart.ts`](../examples/api/review.chart.ts) | no | project agent definitions; Pi user-action support for the approval state | typed refs, agent replies, transition input, validation/review loop |
-| [`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) | no | named Deck Director agents, scripts under `bin/`, project schemas/artifact conventions | large map/parallel pipeline, fan-in, validation, deadlines, artifacts |
+| [`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) | no | named Deck Director agents, scripts under `bin/`, project schemas/artifact conventions | launch argument metadata, large map/parallel pipeline, fan-in, validation, deadlines, artifacts |
 
 ## Portable smoke test
 
@@ -50,6 +50,7 @@ Use this file to study authoring and the interactive gate flow, not as the first
 
 [`examples/deck-director.chart.ts`](../examples/deck-director.chart.ts) is a large reference chart extracted from a project-specific workflow. It demonstrates:
 
+- serializable launch argument descriptions and defaults for its typed `Args`;
 - planning followed by data-driven research fan-out;
 - pinned map items and bounded `concurrency`;
 - `joinArtifactOf()` fan-in;

@@ -28,8 +28,8 @@ Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 
 The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Agent cards show declared role/toolset names and their resolved model/tool allowlists; the selected state's run-specific `Runtime` section shows the actual launch plan plus transcript/current-tool polling and steering.
 
-Asynchronous runs inject terminal prompt into exact originating Pi session/workDir.
-`--wait`/`wait: true` waits for terminal status, acquires same per-session recoverable delivery lease, and returns prompt directly.
+Asynchronous runs inject only a compact terminal boundary notice into the exact originating Pi session/workDir.
+`--wait`/`wait: true` waits for terminal status or a user boundary and returns bounded identifiers/status only. Gate response identities remain exact; bounded prompt/option labels carry original/omitted character counts and are separate from exact option values. Structured user gates carry a bounded recursive, non-executable output contract; if any identity or contract cannot remain sufficient within its caps, delivery fails closed and directs the operator to the browser inspector.
 Delivery uses at-least-once semantics.
 Durable request IDs and recoverable claims prevent permanent suppression after crash.
 Host may redeliver same request after crash between delivery and confirmation.
@@ -37,7 +37,9 @@ Treat each `requestId` idempotently.
 
 ## Pi agent tool
 
-The consolidated `hyperchart` tool supports:
+The consolidated `hyperchart` tool supports bounded responses only. Full definitions, schemas, runtime snapshots, visit histories, and transcripts never enter Pi tool results/session JSONL; `action: "view"` is the sole full inspection surface and returns exactly `{ "url": string }`. Deprecated `verbose: true` inspection calls are rejected.
+
+Supported actions:
 
 - `action: "list"`
 - `action: "inspect"`
@@ -53,7 +55,7 @@ The consolidated `hyperchart` tool supports:
 |---|---|
 | `@surprisal/pi-hyperchart` | same in-process command API as `/command` |
 | `@surprisal/pi-hyperchart/command` | in-process `/hyperchart` request event |
-| `@surprisal/pi-hyperchart/pi-host` | Pi chart/run host adapter; exposes originating Pi session for new runs |
+| `@surprisal/pi-hyperchart/pi-host` | Pi host adapter: summary-only session lists plus on-demand full chart definitions (including launch metadata) and inspector runs; exposes originating Pi session for new runs |
 | `@surprisal/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
 | `@surprisal/pi-hyperchart/react/styles.css` | required React stylesheet |
 | `@surprisal/pi-hyperchart/package.json` | package metadata and Pi manifest |

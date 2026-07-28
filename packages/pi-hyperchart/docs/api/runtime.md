@@ -500,15 +500,16 @@ Rewind moves the entire `user-interactions/` directory into the rewind backup be
 
 ## Terminal notification outbox
 
-The runner persists `terminal-notification/request.json` before changing `status.json` to `complete` or `failed`. A request is deliverable only when its payload outcome exactly matches terminal status. Every newly created outbox request has a fresh UUID; normal resume/replay reuses the existing request, while rewind removes it so an identical terminal outcome is delivered as a new generation.
+The runner persists `terminal-notification/request.json` before changing `status.json` to `complete` or `failed`. A request is deliverable only when its payload outcome exactly matches terminal status. Every newly created outbox request has a fresh UUID and records the host-generated runner-attempt identity from `status.json`. When a stopped or terminal run is started again, status opens a fresh attempt identity before the runner moves the previous outbox (including receipts) under `terminal-notification-history/`; the new attempt can then publish and deliver its own outcome without conflicting with an earlier failure. If the runner dies before that archival step, stale recovery detects the attempt mismatch, archives the predecessor, and publishes failure for the current attempt instead of inheriting the old outcome. Rewind instead moves the active outbox into the rewind backup.
 
-Delivery uses a recoverable per-host/session claim and a separate confirmed receipt. Pi sends first, then confirms; if confirmation is interrupted, the persisted Pi custom message `requestId` supplies the acknowledgement during recovery. Claude's monitor writes one JSON notification per physical stdout line, then confirms. Claude exposes no host acknowledgement after stdout, so delivery is **at least once**: a crash after the line is written but before confirmation can cause a duplicate after the stale claim lease expires. A crash before stdout never permanently suppresses delivery.
+Delivery uses a recoverable per-host/session claim and a separate confirmed receipt under a request-hashed generation directory. Claims and confirmations require the caller's observed `requestId`; a host holding an archived generation can neither claim, overwrite a replacement's receipt, nor accidentally confirm it. Pi sends first, then confirms; if confirmation is interrupted, the persisted Pi custom message `requestId` supplies the acknowledgement during recovery. Claude's monitor writes one JSON notification per physical stdout line, then confirms. Claude exposes no host acknowledgement after stdout, so delivery is **at least once**: a crash after the line is written but before confirmation can cause a duplicate after the stale claim lease expires. A crash before stdout never permanently suppresses delivery.
 
 Key helpers are:
 
-- `persistTerminalNotificationRequest()` — persist once and fail on a divergent replay payload;
+- `archiveTerminalNotificationGeneration()` — retire a previous attempt's outbox after status becomes non-terminal;
+- `persistTerminalNotificationRequest()` — persist once and fail on a divergent payload within one runner attempt;
 - `readDeliverableTerminalNotificationRequest()` — require matching terminal status;
-- `claimTerminalNotificationReceipt()` / `markTerminalNotificationReceipt()` / `hasTerminalNotificationReceipt()` — leased per-session delivery arbitration and confirmation;
+- `claimTerminalNotificationReceipt()` / `markTerminalNotificationReceipt()` / `hasTerminalNotificationReceipt()` — request-id-fenced, leased per-session delivery arbitration and confirmation;
 - `recoverStaleRunTerminalNotification()` — fail a stale dead runner, preserving an already-written outbox and its error;
 - `removeTerminalNotificationOutbox()` — cleanup used by rewind.
 
@@ -548,7 +549,8 @@ checkArtifactFile, resolveArtifactValue, serializeEnvValue
 runGuard, checkSchema, checkSchemaAsync
 createRunDir, loadRunMeta, saveRunMeta, RunMeta
 terminalStateForFinalMachine, finalMachineFailureMessage, RunTerminalState
-persistTerminalNotificationRequest, readTerminalNotificationRequest,
+archiveTerminalNotificationGeneration, persistTerminalNotificationRequest,
+readTerminalNotificationRequest,
 readDeliverableTerminalNotificationRequest, recoverStaleRunTerminalNotification,
 claimTerminalNotificationReceipt, markTerminalNotificationReceipt,
 hasTerminalNotificationReceipt, removeTerminalNotificationReceipt,

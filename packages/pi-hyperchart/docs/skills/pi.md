@@ -83,7 +83,7 @@ These files ship inside the Pi package. Prefer them over network documentation s
 1. Read the existing `.chart.ts` file, the bundled [DSL reference](../../docs/api/dsl.md), and nearby chart examples.
 2. Keep control flow explicit in the chart. Agents and scripts return events and data; they do not choose hidden next states.
 3. Prefer `refs()` plus Zod-backed replies, inputs, and artifacts. Use transition inputs for visit-local handoff and artifacts for file deliverables.
-4. Call `hyperchart` with `action: "inspect"` after every structural change. Inspect actions return a compact digest by default; pass `verbose: true` only when the full object (chart source, schemas, transcripts) is required.
+4. Call `hyperchart` with `action: "inspect"` after every structural change. Inspect actions always return a bounded digest. Never request `verbose: true`; it is rejected. Use `action: "view"` for full source, schemas, states, visits, or transcripts.
 5. Resolve all diagnostics and unavailable agent definitions before starting a real run.
 6. Do not start the chart unless the user asked to execute it.
 
@@ -158,7 +158,7 @@ After editing this pattern, call `hyperchart` with `action: "inspect"`; do not r
 
 ## Start a run
 
-1. Inspect the chart first with `hyperchart` with `action: "inspect"`. The compact digest is the default; `verbose: true` returns the full object.
+1. Inspect the chart first with `hyperchart` with `action: "inspect"`. The result is always a bounded digest; full inspection is browser-only through `action: "view"`.
 2. Verify every named agent definition is available.
 3. Call `hyperchart({ action: "run", chartPath, args })`.
 4. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; Pi routes owned gates and the terminal prompt to that exact originating session/canonical working directory. Do not start a polling watcher.
@@ -169,7 +169,7 @@ After editing this pattern, call `hyperchart` with `action: "inspect"`; do not r
 
 Pi may first deliver hidden steering asking you to finish the current safe action/tool batch and yield. Do not answer the gate, continue unrelated work, or call a tool based only on that steering. On idle, Pi displays the real question without triggering another model turn.
 
-The user's next ordinary prompt is the answer. Hidden context supplies the exact `(runId, seqId)`, rendered question, allowed events, and reply contract. Translate only that real input, then immediately call:
+The user's next ordinary prompt is the answer. Hidden context supplies the exact `(runId, seqId)`, a bounded question preview, options with bounded display labels separated from exact values, exact allowed events, and a recursively bounded non-executable output contract. Display strings include `originalChars`/`omittedChars`; never copy an ellipsized label in place of an option `value`, event, or coordinate. Read `types`/`nullable`, JSON-decode `literalJson`, `allowedValueJson`, and `defaultJson`, recurse through required/optional `fields`, `element`/`tupleItems`, and `alternatives`, and obey `additionalProperties` and `constraints`. It never supplies the full prompt or raw reply schema. If Pi reports that the gate cannot be represented safely, do not guess or submit a partial identity/shape; direct the user to the browser inspector/user interaction. Translate only real user input, then immediately call:
 
 ```json
 {
@@ -187,7 +187,7 @@ Multiple gates are serialized across parallel/map branches and owned runs by lex
 
 ## View a run
 
-Call `hyperchart({ action: "view", runDir })` to open the localhost browser inspector and receive its URL. Pass `open: false` when only the URL should be returned. The inspector shows the live graph, declared role/toolset names with resolved model/tool allowlists, per-state runtime details, session transcripts, and steering controls for the selected run.
+Call `hyperchart({ action: "view", runDir })` to open the localhost browser inspector and receive exactly `{ url }`. Pass `open: false` when only the URL should be returned. The inspector shows the live graph, declared role/toolset names with resolved model/tool allowlists, per-state runtime details, session transcripts, and steering controls for the selected run. This is the only full inspection surface: tool responses are capped digests and never place definitions, schemas, runtime snapshots, visit histories, or transcripts into session logs.
 
 ## Resume a run
 

@@ -130,9 +130,10 @@ The Pi package adds files that are useful but not semantic history:
 
 | File | Meaning |
 |---|---|
-| `status.json` | pid, heartbeat, process state, terminal error, timestamps |
-| `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-generation UUID, written before terminal status |
-| `terminal-notification/receipts/*.json` | recoverable per-host/session terminal-delivery leases and confirmed receipts |
+| `status.json` | pid, heartbeat, process state, opaque runner-attempt identity, terminal error, timestamps |
+| `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-attempt UUID, written before terminal status |
+| `terminal-notification/receipts/<request-hash>/*.json` | generation-isolated, recoverable per-host/session terminal-delivery leases and confirmed receipts |
+| `terminal-notification-history/<generation>/` | complete outboxes archived when a terminal run starts another attempt; prior requests and receipts remain auditable but are no longer deliverable |
 | `user-interactions/<seqId>/request.json` | persist-once rendered user gate identified externally only by `(runId, seqId)` |
 | `user-interactions/<seqId>/resolution.json` | immutable response-or-close winner; a committed response contains the validated chart event |
 | `user-interactions/<seqId>/receipts/*.json` | per-host/session claims and presentation confirmations; never a second gate identity |
@@ -156,7 +157,7 @@ A run may have a valid log and a stale process status. Conversely, a process can
 
 The generic runtime receives a host `AgentExecutor`. It owns effect interpretation and log mechanics; the host owns actual agent transport and session lifecycle.
 
-Terminal notification metadata is a runner/host outbox protocol, not a durable machine transition or log fact. Delivery waits until `status.json` matches the request outcome. User interactions are a second file-backed rendezvous: the runner persists every open request immediately and remains alive while waiting, but only the containing branch blocks. Hosts select one owned request across parallel/map branches and runs by lexical `runId`, then numeric `seqId`, pinning it until response or close. Exact `originSessionId + canonical workDir` checks prevent another session or checkout from answering it.
+Terminal notification metadata is a runner/host outbox protocol, not a durable machine transition or log fact. Delivery waits until `status.json` matches the request outcome. Each host launch opens a fresh opaque runner-attempt identity, and terminal requests record that identity. A new runner attempt archives any prior attempt's complete outbox, so a recovered run may publish a different eventual outcome without rewriting the old request; stale recovery also rejects a predecessor request if the process dies before archival. Receipt claims and confirmations are fenced by the caller's observed request UUID, preventing an in-flight old generation from confirming and suppressing its replacement. User interactions are a second file-backed rendezvous: the runner persists every open request immediately and remains alive while waiting, but only the containing branch blocks. Hosts select one owned request across parallel/map branches and runs by lexical `runId`, then numeric `seqId`, pinning it until response or close. Exact `originSessionId + canonical workDir` checks prevent another session or checkout from answering it.
 
 A host validates the exact active coordinate, non-`FAILED` allowed event, and optional reply schema before atomically publishing a resolution. Identical responses are idempotent; divergent ones conflict. Machine cancellation closes an abandoned phase, while executor disposal on operator stop preserves it for resume. Rewind moves both the complete terminal outbox and the complete `user-interactions/` mailbox into its backup before replay resumes, preventing pre-rewind answers or receipts from matching reused sequence ids.
 
