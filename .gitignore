@@ -12,3 +12,4 @@ tla/.cache/
 tla/MCTrace*
 tla/trace/sample-run.jsonl
 artifacts
+tla/
