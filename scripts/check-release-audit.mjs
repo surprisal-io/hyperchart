@@ -14,6 +14,10 @@ const accepted = new Map([
 		"GHSA-j3f2-48v5-ccww",
 		"protobufjs 7.6.4 (.proto parsing DoS); locked by @earendil-works/pi-coding-agent's npm-shrinkwrap.json",
 	],
+	[
+		"GHSA-mh99-v99m-4gvg",
+		"brace-expansion 5.0.7 (expansion OOM DoS); locked by @earendil-works/pi-coding-agent's npm-shrinkwrap.json, including upstream 0.83.0",
+	],
 ]);
 
 let output;
