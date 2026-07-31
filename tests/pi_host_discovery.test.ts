@@ -280,14 +280,18 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const child = spawnSync(process.execPath, ["--import", registerUrl, "--input-type=module", "-e", script], {
 			cwd: projectDir,
 			encoding: "utf8",
+			// A cold Jiti + host bundle import can exceed Vitest's 5s default when the
+			// full release gate runs many test files concurrently.
+			timeout: 15_000,
 		});
 
+		expect(child.error, child.stderr).toBeUndefined();
 		expect(child.status, child.stderr).toBe(0);
 		expect(JSON.parse(child.stdout)).toEqual([
 			expect.objectContaining({ runId: "generated-run", chartName: "generated", status: "completed" }),
 		]);
 		expect(JSON.parse(child.stdout)[0]).not.toHaveProperty("stateCount");
-	});
+	}, 20_000);
 
 	it("loads matching runs through the runtime-backed adapter and isolates malformed runs", async () => {
 		const projectDir = await tempDir("hyperchart-project-");
