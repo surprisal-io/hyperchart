@@ -15,6 +15,10 @@
 
 The package also registers `extensions/hyperchart.ts` and `skills/hyperchart/` through its Pi manifest. Those files are discovered by Pi; they are not JavaScript import entry points.
 
+Pi host libraries remain optional peers supplied through Pi's in-process extension aliases. Before spawning a detached runner, the extension resolves the active Pi package root and records allowlisted absolute entries for `@earendil-works/pi-coding-agent` and `typebox` in `runner.config.json`. The child bootstrap installs those entries as Jiti aliases before loading runner TypeScript, ensuring the child executes the same Pi host code rather than a separately installed peer.
+
+This requires a filesystem-backed Node.js Pi installation. Compiled Bun Pi binaries expose host modules virtually rather than as importable files and are not currently supported for detached runners.
+
 ## Command bridge
 
 ```ts

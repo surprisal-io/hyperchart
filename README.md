@@ -33,6 +33,8 @@ Install the complete Pi integration, including the extension, tools, inspector, 
 pi install npm:@surprisal/pi-hyperchart
 ```
 
+Pi supplies its host libraries to the extension in-process. On filesystem-backed Node.js installations, Hyperchart passes absolute module entries from that active Pi installation into each detached child bootstrap, so the runner uses the same Pi code instead of resolving or installing a second copy. Compiled Bun Pi binaries do not expose those embedded modules as files and are not currently supported for detached runners.
+
 For durable production runs, pin both packages to the same exact version.
 
 ### From a local checkout

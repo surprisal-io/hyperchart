@@ -15,7 +15,7 @@ Start Pi after the install, or restart an existing Pi process. The package decla
 - `extensions/hyperchart.ts`;
 - `skills/hyperchart/`.
 
-It requires Node.js 22.19 or newer and the exact matching version of `@surprisal/hyperchart`.
+It requires Node.js 22.19 or newer and the exact matching version of `@surprisal/hyperchart`. Pi host libraries remain optional peers supplied by Pi's extension loader. On filesystem-backed Node.js installations, detached runners receive absolute module entries from the active Pi process and therefore use that same Pi installation rather than a separately resolved copy. Compiled Bun Pi binaries do not expose their embedded host modules as files and are not currently supported for detached runners.
 
 ## Start a chart
 
