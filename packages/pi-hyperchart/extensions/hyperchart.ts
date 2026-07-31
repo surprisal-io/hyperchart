@@ -21,6 +21,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	getAgentDir,
+	getPackageDir,
 } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -1418,6 +1419,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		workDir,
 		attemptId,
 		agentDir: getAgentDir(),
+		piModules: resolvePiRunnerModules(),
 		...(exportName === undefined ? {} : { exportName }),
 		...(opts.args === undefined ? {} : { args: opts.args }),
 		...(opts.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
@@ -1586,6 +1588,35 @@ async function recoverPiTerminalNotifications(pi: ExtensionAPI, ctx: HyperchartC
 			// prevent recovery of other runs owned by this session.
 		}
 	}
+}
+
+function resolvePiRunnerModules(): HyperchartRunnerConfig["piModules"] {
+	const packageDir = getPackageDir();
+	const packageJsonPath = join(packageDir, "package.json");
+	const manifest = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+		main?: unknown;
+		exports?: { "."?: string | { import?: unknown } };
+	};
+	const rootExport =
+		typeof manifest.exports?.["."] === "string"
+			? manifest.exports["."]
+			: typeof manifest.exports?.["."]?.import === "string"
+				? manifest.exports["."].import
+				: typeof manifest.main === "string"
+					? manifest.main
+					: undefined;
+	if (rootExport === undefined) {
+		throw new Error(`Active Pi package has no importable root export: ${packageJsonPath}`);
+	}
+	const codingAgent = resolve(packageDir, rootExport);
+	const hostRequire = createRequire(pathToFileURL(packageJsonPath));
+	const typebox = hostRequire.resolve("typebox");
+	for (const [name, path] of Object.entries({ codingAgent, typebox })) {
+		if (!isAbsolute(path) || !existsSync(path)) {
+			throw new Error(`Active Pi ${name} module is not available to detached runners: ${path}`);
+		}
+	}
+	return { codingAgent, typebox };
 }
 
 function spawnRunner(config: HyperchartRunnerConfig): number {

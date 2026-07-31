@@ -104,6 +104,7 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 		chartId: "demo",
 		workDir,
 		agentDir,
+		piModules: { codingAgent: "/unused", typebox: "/unused" },
 		...(opts.ignoreReplayWarnings ? { ignoreReplayWarnings: true } : {}),
 	};
 	const configPath = join(runDir, "runner.config.json");

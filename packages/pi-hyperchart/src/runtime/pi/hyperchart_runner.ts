@@ -8,7 +8,16 @@ import {
 import { resolvePiSubagentDefinitionDirs } from "./agent_definitions.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
 
-export type HyperchartRunnerConfig = GenericRunnerConfig & { agentDir: string };
+export type PiRunnerModules = {
+	codingAgent: string;
+	typebox: string;
+};
+
+export type HyperchartRunnerConfig = GenericRunnerConfig & {
+	agentDir: string;
+	/** Exact modules supplied by the active Pi host for the detached runner bootstrap. */
+	piModules: PiRunnerModules;
+};
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
 	const configPath = argv[0];

@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { getPackageDir, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -154,6 +154,9 @@ describe("hyperchart extension", () => {
 
 		expect(config.modelRoles).toEqual({ reviewer: "project/model", scout: "user/scout" });
 		expect(config.toolsets).toEqual({ reading: ["read"] });
+		expect(config.piModules.codingAgent.startsWith(getPackageDir())).toBe(true);
+		expect(existsSync(config.piModules.codingAgent)).toBe(true);
+		expect(existsSync(config.piModules.typebox)).toBe(true);
 	});
 
 	it("restores widgets only for non-terminal runs owned by the current pi session", async () => {
