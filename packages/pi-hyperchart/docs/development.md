@@ -201,12 +201,13 @@ make release-prepare VERSION=0.2.0
 
 This command:
 
-1. rejects a version that already exists for either package;
-2. updates the workspace, core, and Pi versions;
-3. updates the exact Pi → core dependency and `package-lock.json` entries;
-4. updates version labels in the root and package READMEs;
-5. synchronizes the documentation bundled in the Pi package;
-6. runs `npm run check`, the Storybook build, the production dependency audit, and both publish dry-runs.
+1. rejects a version that already exists for any published package;
+2. verifies that the corresponding `v<version>` tag is absent or already points at the current `HEAD`;
+3. updates the workspace and package versions;
+4. updates exact host → core dependencies and `package-lock.json` entries;
+5. updates version labels in the root and package READMEs;
+6. synchronizes the documentation bundled in the Pi package;
+7. runs `npm run check`, the Storybook build, the production dependency audit, and all publish dry-runs.
 
 Review and commit the resulting version change. Publish only from that clean commit:
 
@@ -223,7 +224,7 @@ make release-prepare VERSION=0.2.0-rc.1 NPM_TAG=next
 make release-publish VERSION=0.2.0-rc.1 NPM_TAG=next CONFIRM=publish-0.2.0-rc.1
 ```
 
-`release-publish` repeats all gates and dry-runs, verifies npm authentication, then runs the two publish commands in dependency order: `@surprisal/hyperchart` first and `@surprisal/pi-hyperchart` immediately afterward. It does not poll npm registry visibility.
+`release-publish` repeats all gates and dry-runs, verifies npm authentication, then publishes core, Claude, and Pi packages in dependency order. After every npm publish succeeds, it creates the annotated git tag `v<version>` on the current release commit and pushes it to `origin`. Set `RELEASE_REMOTE=<remote>` to use another remote. It does not poll npm registry visibility.
 
 If the process is interrupted after npm prints `+ @surprisal/hyperchart@<version>` but before Pi is published, do not rerun the core publish. Publish only the Pi package with:
 
@@ -233,9 +234,9 @@ make release-resume \
   CONFIRM=resume-0.2.0
 ```
 
-The resume target repeats the release gate and runs only the Pi dry-run and publish commands. Both publish targets deliberately avoid creating or pushing a git tag.
+The resume target repeats the release gate, skips packages already present in npm, publishes the missing packages, and then creates or pushes the same annotated tag. Tagging is idempotent: rerunning resume accepts an existing local or remote tag only when it resolves to the current release commit, and fails on a conflicting tag.
 
-After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and every consolidated-tool action. Create the release/tag only after registry verification.
+After publication, install the Pi package in a clean Pi environment and verify one extension, one `hyperchart` skill, `/hyperchart`, and every consolidated-tool action.
 
 Do not publish from a workspace whose package manifests or lockfile still refer to a temporary local dependency.
 
@@ -250,4 +251,5 @@ Do not publish from a workspace whose package manifests or lockfile still refer 
 - [ ] Pi discovers the packed extension and skill.
 - [ ] production dependency audit is clean or findings are documented.
 - [ ] package versions and core dependency are exact and matching.
+- [ ] annotated tag `v<version>` exists on the release commit in the configured release remote.
 - [ ] user docs, package READMEs, skill references, examples, and visuals reflect the release.

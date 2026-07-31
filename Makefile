@@ -3,11 +3,12 @@ SHELL := /bin/bash
 VERSION ?=
 NPM_TAG ?= latest
 NPM_ACCESS ?= public
+RELEASE_REMOTE ?= origin
 CORE_PACKAGE := @surprisal/hyperchart
 CLAUDE_PACKAGE := @surprisal/claude-hyperchart
 PI_PACKAGE := @surprisal/pi-hyperchart
 
-.PHONY: help release-prepare release-dry-run release-publish release-resume release release-gate _require-version _release-clean _confirm-publish _confirm-resume _assert-unpublished
+.PHONY: help release-prepare release-dry-run release-publish release-resume release release-gate _require-version _release-clean _confirm-publish _confirm-resume _assert-unpublished _check-release-tag _tag-release
 
 help:
 	@printf '%s\n' \
@@ -16,11 +17,11 @@ help:
 	  '      Update versions and run every release gate.' \
 	  '  git add ... && git commit -m "release: 0.2.0"' \
 	  '  make release-publish VERSION=0.2.0 CONFIRM=publish-0.2.0' \
-	  '      Publish core, then Claude, then Pi.' \
+	  '      Publish core, then Claude, then Pi; create and push annotated tag v0.2.0.' \
 	  '  make release-resume VERSION=0.2.0 CONFIRM=resume-0.2.0' \
-	  '      Publish the not-yet-published Claude and Pi packages after an interrupted release.' \
+	  '      Publish missing packages, then create/push the same release tag idempotently.' \
 	  '' \
-	  'Optional: NPM_TAG=next NPM_ACCESS=public'
+	  'Optional: NPM_TAG=next NPM_ACCESS=public RELEASE_REMOTE=origin'
 
 _require-version:
 	@if [[ -z "$(VERSION)" ]]; then echo 'VERSION is required, for example VERSION=0.2.0' >&2; exit 2; fi
@@ -40,6 +41,12 @@ _confirm-publish:
 _confirm-resume:
 	@if [[ "$(CONFIRM)" != "resume-$(VERSION)" ]]; then echo 'Resuming requires CONFIRM=resume-$(VERSION)' >&2; exit 2; fi
 
+_check-release-tag:
+	@RELEASE_REMOTE='$(RELEASE_REMOTE)' node scripts/tag-release.mjs --check '$(VERSION)'
+
+_tag-release:
+	@RELEASE_REMOTE='$(RELEASE_REMOTE)' node scripts/tag-release.mjs '$(VERSION)'
+
 release-gate: _require-version
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
 	npm run check
@@ -52,14 +59,14 @@ release-dry-run: _require-version
 	npm publish --dry-run --workspace '$(CLAUDE_PACKAGE)'
 	npm publish --dry-run --workspace '$(PI_PACKAGE)'
 
-release-prepare: _require-version _release-clean _assert-unpublished
+release-prepare: _require-version _release-clean _assert-unpublished _check-release-tag
 	@node scripts/set-release-version.mjs '$(VERSION)'
 	npm run sync:pi-docs
 	@$(MAKE) release-gate VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
 	@$(MAKE) release-dry-run VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
 	@printf '\nVersion %s is prepared. Review and commit the release changes, then run:\n  make release-publish VERSION=%s CONFIRM=publish-%s NPM_TAG=%s\n' '$(VERSION)' '$(VERSION)' '$(VERSION)' '$(NPM_TAG)'
 
-release-publish: _require-version _release-clean _confirm-publish
+release-publish: _require-version _release-clean _confirm-publish _check-release-tag
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
 	@npm whoami >/dev/null
 	@$(MAKE) release-gate VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
@@ -67,9 +74,10 @@ release-publish: _require-version _release-clean _confirm-publish
 	npm publish --workspace '$(CORE_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
 	npm publish --workspace '$(CLAUDE_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
 	npm publish --workspace '$(PI_PACKAGE)' --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)'
-	@printf '\nPublished %s, %s, and %s at %s with tag %s. Create the git tag only after final installation verification.\n' '$(CORE_PACKAGE)' '$(CLAUDE_PACKAGE)' '$(PI_PACKAGE)' '$(VERSION)' '$(NPM_TAG)'
+	@$(MAKE) _tag-release VERSION='$(VERSION)' RELEASE_REMOTE='$(RELEASE_REMOTE)'
+	@printf '\nPublished %s, %s, and %s at %s with npm tag %s; pushed git tag v%s to %s.\n' '$(CORE_PACKAGE)' '$(CLAUDE_PACKAGE)' '$(PI_PACKAGE)' '$(VERSION)' '$(NPM_TAG)' '$(VERSION)' '$(RELEASE_REMOTE)'
 
-release-resume: _require-version _release-clean _confirm-resume
+release-resume: _require-version _release-clean _confirm-resume _check-release-tag
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
 	@npm whoami >/dev/null
 	@$(MAKE) release-gate VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
@@ -82,6 +90,7 @@ release-resume: _require-version _release-clean _confirm-resume
 	    npm publish --workspace "$$pkg" --access '$(NPM_ACCESS)' --tag '$(NPM_TAG)' || exit 2; \
 	  fi; \
 	done
-	@printf '\nResumed release %s with tag %s. Create the git tag only after final installation verification.\n' '$(VERSION)' '$(NPM_TAG)'
+	@$(MAKE) _tag-release VERSION='$(VERSION)' RELEASE_REMOTE='$(RELEASE_REMOTE)'
+	@printf '\nResumed release %s with npm tag %s; pushed git tag v%s to %s.\n' '$(VERSION)' '$(NPM_TAG)' '$(VERSION)' '$(RELEASE_REMOTE)'
 
 release: release-publish
