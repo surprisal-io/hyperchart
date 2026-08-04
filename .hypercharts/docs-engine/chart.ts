@@ -2,9 +2,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agent, artifact, final, failed, json, map, refs, resume, script, t, z } from "@surprisal/hyperchart";
 
-// docs-engine: keeps the canonical documentation (docs/, including
-// docs/skills/) truthful against the code, then regenerates the packaged
-// views. Modes: `audit` writes a drift report and stops; `fix` also patches
+// docs-engine: keeps the canonical documentation and skills (docs/ and
+// skills/) truthful against the code. Package resources are staged only by
+// prepack. Modes: `audit` writes a drift report and stops; `fix` also patches
 // the canonical units and re-syncs the packages.
 
 const chartDir = dirname(fileURLToPath(import.meta.url));

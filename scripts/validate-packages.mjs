@@ -16,11 +16,6 @@ const root = resolve(import.meta.dirname, "..");
 const temp = mkdtempSync(join(tmpdir(), "hyperchart-pack-"));
 
 try {
-	execFileSync(process.execPath, ["scripts/sync-pi-docs.mjs", "--check"], {
-		cwd: root,
-		stdio: "inherit",
-	});
-
 	const packageSpecs = [
 		{
 			dir: "packages/hyperchart",
@@ -146,12 +141,10 @@ function validateMarkdownLinks() {
 	for (const base of [
 		"README.md",
 		"docs",
+		"skills",
 		"packages/hyperchart/README.md",
 		"packages/pi-hyperchart/README.md",
-		"packages/pi-hyperchart/skills",
-		"packages/pi-hyperchart/docs",
 		"packages/claude-hyperchart/README.md",
-		"packages/claude-hyperchart/skills",
 	]) {
 		const path = resolve(root, base);
 		if (statSync(path).isDirectory()) walkMarkdown(path, markdown);
@@ -237,7 +230,7 @@ if (typeof extension !== "function" && typeof extension.default !== "function") 
 
 	writeFileSync(
 		resolve(consumer, "smoke.ts"),
-		`import { final, refs } from "@surprisal/hyperchart";
+		`import { actor, actorInput, call, final, message, protocol, receive, refs, reply, send, t, z } from "@surprisal/hyperchart";
 import type {
   ArtifactCst,
   ArtifactOfCst,
@@ -261,6 +254,26 @@ import type {
 import type { HyperchartInspectorDialogProps, HyperchartRunStripProps } from "@surprisal/pi-hyperchart/react";
 const { chart } = refs<{ topic: string }, Record<never, never>>();
 export const definition = chart({ kind: "chart", id: "smoke", args: { topic: { description: "Subject", default: "Hyperchart" } }, initial: "done", states: { done: final() } });
+const PackedProtocol = protocol({ READ: message({ input: z.object({ path: z.string() }), reply: z.object({ text: z.string() }) }) });
+const PackedActor = actor({
+  input: z.object({ root: z.string() }), protocol: PackedProtocol, initial: "idle",
+  states: {
+    idle: receive({ on: { READ: "answer" } }),
+    answer: reply({ target: "idle", output: { text: "ok" } }),
+  },
+});
+const packedDeclaration = PackedActor({ root: "src" });
+export const actorDefinition = {
+  kind: "chart" as const, id: "packed-actor", actors: { reader: packedDeclaration }, initial: "read",
+  states: { read: call({ to: packedDeclaration, event: "READ", input: { path: "a" }, target: "done" }), done: final() },
+};
+send({ to: packedDeclaration, event: "READ", input: { path: "a" }, target: "done" });
+// @ts-expect-error packed phantom protocol rejects a wrong message input
+send({ to: packedDeclaration, event: "READ", input: { nope: "a" }, target: "done" });
+// @ts-expect-error packed actor verifier rejects a receive workflow with no reachable reply
+actor({ input: z.object({ root: z.string() }), protocol: PackedProtocol, initial: "idle", states: { idle: receive({ on: { READ: "loop" } }), loop: { kind: "state", action: { kind: "agent", name: "reader" }, transitions: { DONE: "loop" } } } });
+// @ts-expect-error packed actor verifier preserves actor-input selector checks
+actor({ input: z.object({ root: z.string() }), protocol: PackedProtocol, initial: "idle", states: { idle: receive({ on: { READ: "work" } }), work: { kind: "state", action: { kind: "agent", name: "reader", task: t\`\${actorInput("missing")}\` }, transitions: { DONE: "answer" } }, answer: reply({ target: "idle", output: { text: "ok" } }) } });
 declare const chartSummaries: HyperchartSummaryInfo[];
 export const runStripProps: HyperchartRunStripProps = {
   hypercharts: chartSummaries,

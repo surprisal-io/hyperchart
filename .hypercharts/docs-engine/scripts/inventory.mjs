@@ -6,7 +6,7 @@ import { emit } from "./doc-checks.mjs";
 // registries straight from the tool definition sources, so guards check docs
 // against what the code actually registers.
 
-const DOC_ROOTS = ["docs"];
+const DOC_ROOTS = ["docs", "skills"];
 const EXTRA_UNITS = [
 	"README.md",
 	"packages/hyperchart/README.md",
