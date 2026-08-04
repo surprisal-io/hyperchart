@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, arg, chart, compound, event, final, failed, input, map, parallel, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
@@ -7,6 +7,7 @@ import { templatePath } from "../packages/hyperchart/src/core/paths.js";
 import type { ChartAst, ChartCst, StatePath } from "../packages/hyperchart/src/core/types.js";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import {
+	actorTargetForInspectorState,
 	hyperchartRunFromInspectResult,
 	hyperchartRunFromRuntime,
 	hyperchartRunFromToolDetails,
@@ -31,6 +32,12 @@ function baseRecord(seqId: number, timestamp = seqId * 1000) {
 }
 
 describe("React runtime adapter", () => {
+	it("resolves descendant actor messages through lexical map ancestry", () => {
+		expect(actorTargetForInspectorState("projects#a.nested.send", "projects.@editor", [
+			{ declarationPath: "projects.@editor", ownerPath: "projects#b", occurrencePath: "projects#b.@editor", logicalPath: "projects#b.@editor", generation: 1, input: {}, status: "idle", currentState: "idle", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
+			{ declarationPath: "projects.@editor", ownerPath: "projects#a", occurrencePath: "projects#a.@editor~2", logicalPath: "projects#a.@editor", generation: 2, input: {}, status: "busy", currentState: "apply", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
+		])).toBe("projects#a.@editor");
+	});
 	it("keeps static inspect mode static", () => {
 		const chartAst = ast(
 			chart({
@@ -49,6 +56,45 @@ describe("React runtime adapter", () => {
 		expect(run.states.find((state) => state.id === "work")?.validationAttempts).toBeUndefined();
 		expect(run.issues).toBeUndefined();
 		expect(run.states.find((state) => state.id === "work")?.issues).toBeUndefined();
+	});
+
+	it("carries configured actor placement input and keeps resolved occurrence input distinct", () => {
+		const Ping = protocol({ PING: message({ input: z.object({}).strict() }) });
+		const Worker = actor({
+			input: z.object({ file: z.string() }).strict(),
+			protocol: Ping,
+			initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const worker = Worker({ file: "configured.ts" });
+		const chartAst = ast(chart({
+			kind: "chart",
+			id: "actor-input-adapter",
+			actors: { worker },
+			initial: "done",
+			states: { done: final() },
+		}));
+		const declaration = chartAst.actors["@worker"];
+		if (declaration === undefined) throw new Error("missing actor declaration");
+		const inspect = inspectChartAst(chartAst);
+		const staticRun = hyperchartRunFromInspectResult(inspect);
+		expect(staticRun.actorDeclarations?.[0]?.inputValue).toEqual({ file: "configured.ts" });
+
+		const runtimeRun = hyperchartRunFromRuntime(inspect, chartAst, [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			{
+				type: "actor_created",
+				declaration: "@worker",
+				logicalOccurrence: "@worker",
+				occurrence: "@worker",
+				generation: 1,
+				input: { file: "resolved.ts" },
+				definition: declaration,
+				...baseRecord(2),
+			},
+		]);
+		expect(runtimeRun.actorDeclarations?.[0]?.inputValue).toEqual({ file: "configured.ts" });
+		expect(runtimeRun.actorOccurrences?.[0]?.input).toEqual({ file: "resolved.ts" });
 	});
 
 	it("marks initial states at the chart root and inside compound scopes", () => {
@@ -102,7 +148,7 @@ describe("React runtime adapter", () => {
 				id: "simple",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
+					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
 					done: final(),
 					failed: failed(),
 				},
@@ -879,7 +925,7 @@ describe("React runtime adapter", () => {
 								},
 							}),
 						},
-						transitions: { FAILED: "failed" },
+						transitions: {},
 						onDone: "done",
 					}),
 					done: final(),
@@ -905,17 +951,15 @@ describe("React runtime adapter", () => {
 				definition: (fanAst.states["fan.right.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(3),
 			},
-			{
-				type: "state_action",
-				kind: "complete",
-				actionUid: rightUid,
-				event: { type: "FAILED", error: "stop" },
-				...baseRecord(4),
-			},
+			{ type: "failure_intent", origin: "fan.right.work", error: "stop", ...baseRecord(4) },
+			{ type: "cancellation", kind: "requested", requestId: "cancel-left", target: { kind: "action", actionUid: leftUid, phase: "running" }, ...baseRecord(5) },
+			{ type: "cancellation", kind: "acknowledged", requestId: "cancel-left", target: { kind: "action", actionUid: leftUid, phase: "running" }, ...baseRecord(6) },
+			{ type: "cancellation", kind: "requested", requestId: "cancel-right", target: { kind: "action", actionUid: rightUid, phase: "running" }, ...baseRecord(7) },
+			{ type: "cancellation", kind: "acknowledged", requestId: "cancel-right", target: { kind: "action", actionUid: rightUid, phase: "running" }, ...baseRecord(8) },
 		]);
 		expect(fanRun.states.find((state) => state.id === "fan.left.work")?.visitHistory?.[0]).toMatchObject({
 			status: "cancelled",
-			endedAt: 4000,
+			endedAt: 6000,
 			endedReason: "scope_exit",
 		});
 		expect(fanRun.states.find((state) => state.id === "fan.right.work")?.visitHistory?.[0]).toMatchObject({
@@ -975,7 +1019,7 @@ describe("React runtime adapter", () => {
 				id: "failed-action",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
+					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
 					done: final(),
 					failed: failed(),
 				},
@@ -992,10 +1036,9 @@ describe("React runtime adapter", () => {
 				...baseRecord(2),
 			},
 			{
-				type: "state_action",
-				kind: "complete",
-				actionUid: uid,
-				event: { type: "FAILED", error: "boom" },
+					type: "failure_intent",
+				origin: "work",
+				error: "boom",
 				...baseRecord(3),
 			},
 		];
@@ -1015,7 +1058,7 @@ describe("React runtime adapter", () => {
 				payload: "boom",
 			},
 		]);
-		expect(work?.transitions?.find((transition) => transition.event === "FAILED")?.taken).toBe(true);
+		expect(work?.transitions?.find((transition) => transition.event === "FAILED")).toBeUndefined();
 	});
 
 	it("keeps structured failed action payloads readable and inspectable", () => {
@@ -1025,7 +1068,7 @@ describe("React runtime adapter", () => {
 				id: "structured-failure",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { FAILED: "failed" } },
+					work: { kind: "state", action: agent("worker"), transitions: {} },
 					failed: failed(),
 				},
 			}),
@@ -1042,10 +1085,9 @@ describe("React runtime adapter", () => {
 				...baseRecord(2),
 			},
 			{
-				type: "state_action",
-				kind: "complete",
-				actionUid: uid,
-				event: { type: "FAILED", error: payload },
+				type: "failure_intent",
+				origin: "work",
+				error: payload,
 				...baseRecord(3),
 			},
 		];
@@ -1072,7 +1114,7 @@ describe("React runtime adapter", () => {
 						action: agent("worker"),
 						validate: tsImport("./check.js", "ok"),
 						retries: 2,
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done" },
 					},
 					done: final(),
 					failed: failed(),
@@ -1156,7 +1198,7 @@ describe("React runtime adapter", () => {
 						action: agent("worker"),
 						validate: tsImport("./check.js", "ok"),
 						retries: 0,
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done" },
 					},
 					done: final(),
 					failed: failed(),
@@ -1183,12 +1225,13 @@ describe("React runtime adapter", () => {
 				outcome: { ok: false, reason: "no" },
 				...baseRecord(4),
 			},
+			{ type: "failure_intent", origin: "work", error: "no", ...baseRecord(5) },
 		];
 		const work = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records).states.find(
 			(state) => state.id === "work",
 		);
-		expect(work).toMatchObject({ status: "failed", endedAt: 4000, completedEvent: "FAILED" });
-		expect(work?.transitions?.find((transition) => transition.event === "FAILED")?.taken).toBe(true);
+		expect(work).toMatchObject({ status: "failed", endedAt: 5000, completedEvent: "FAILED" });
+		expect(work?.transitions?.find((transition) => transition.event === "FAILED")).toBeUndefined();
 		expect(work?.transitions?.find((transition) => transition.event === "DONE")?.taken).toBeUndefined();
 	});
 
@@ -1229,8 +1272,8 @@ describe("React runtime adapter", () => {
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
-		expect(run.states.find((state) => state.id === "items#a.work")?.status).toBe("running");
-		expect(run.states.find((state) => state.id === "items#b.work")?.status).toBe("waiting");
+		expect(run.states.find((state) => state.id === "items#a.work")).toMatchObject({ status: "running", scopeParentId: "items#a" });
+		expect(run.states.find((state) => state.id === "items#b.work")).toMatchObject({ status: "waiting", scopeParentId: "items#b" });
 		expect(run.states.find((state) => state.id === "items#c.work")?.status).toBe("waiting");
 		expect(run.states.find((state) => state.id === "items#b.work")?.session).toBeUndefined();
 		const mapState = run.states.find((state) => state.id === "items");
@@ -1254,7 +1297,7 @@ describe("React runtime adapter", () => {
 						initial: "work",
 						onDone: "done",
 						states: {
-							work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
+							work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
 							done: final(),
 							failed: failed(),
 						},
@@ -1293,10 +1336,9 @@ describe("React runtime adapter", () => {
 				...baseRecord(6),
 			},
 			{
-				type: "state_action",
-				kind: "complete",
-				actionUid: uidC,
-				event: { type: "FAILED", error: "bad item" },
+				type: "failure_intent",
+				origin: "items#c.work",
+				error: "bad item",
 				...baseRecord(7),
 			},
 		];
@@ -1318,9 +1360,7 @@ describe("React runtime adapter", () => {
 		expect(itemBWorker).toMatchObject({ status: "running", mapKey: "b", mapItemLabel: "Beta" });
 		expect(itemBWorker?.transitions?.find((transition) => transition.event === "DONE")?.target).toBe("items#b.done");
 		expect(itemCWorker).toMatchObject({ status: "failed", mapKey: "c", mapItemLabel: "Gamma" });
-		expect(itemCWorker?.transitions?.find((transition) => transition.event === "FAILED")?.target).toBe(
-			"items#c.failed",
-		);
+		expect(itemCWorker?.transitions?.find((transition) => transition.event === "FAILED")).toBeUndefined();
 		expect(itemCWorker?.issues?.[0]).toMatchObject({ kind: "action_failed", message: "bad item" });
 		expect(mapState?.mapConfig?.items?.find((item) => item.key === "c")?.issueCount).toBe(1);
 	});
@@ -1478,6 +1518,68 @@ describe("React runtime adapter", () => {
 		expect(run.states.some((state) => state.id === "outer#a.inner.work")).toBe(false);
 		expect(worker).toMatchObject({ status: "running", mapKey: "x", mapItemLabel: "Nested" });
 		expect(worker?.transitions?.find((transition) => transition.event === "DONE")?.target).toBe("outer#a.inner#x.done");
+	});
+
+	it("keeps synthetic actor owners under the concrete nested map scope", () => {
+		const Ping = protocol({ PING: message({ input: z.object({}).strict() }) });
+		const Worker = actor({
+			input: z.object({}).strict(),
+			protocol: Ping,
+			initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const worker = Worker({});
+		const chartAst = ast(chart({
+			kind: "chart",
+			id: "nested-map-actor-owner",
+			args: { outer: {} },
+			initial: "outer",
+			states: {
+				outer: map({
+					over: arg("outer"),
+					initial: "inner",
+					onDone: "done",
+					states: {
+						inner: map({
+							over: item("inner"),
+							actors: { worker },
+							initial: "work",
+							onDone: "finished",
+							states: {
+								work: { kind: "state", action: agent("nested-worker"), transitions: { DONE: "done" } },
+								done: final(),
+							},
+						}),
+						finished: final(),
+					},
+				}),
+				done: final(),
+			},
+		}));
+		const declaration = chartAst.actors["outer.inner.@worker"];
+		if (declaration === undefined) throw new Error("missing nested actor declaration");
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: { outer: { a: { inner: { b: {} } } } }, ...baseRecord(1) },
+			{ type: "spawned", path: "outer", instances: { a: { inner: { b: {} } } }, ...baseRecord(2) },
+			{ type: "spawned", path: "outer#a.inner", instances: { b: {} }, ...baseRecord(3) },
+			{
+				type: "actor_created",
+				declaration: "outer.inner.@worker",
+				logicalOccurrence: "outer#a.inner#b.@worker",
+				occurrence: "outer#a.inner#b.@worker",
+				generation: 1,
+				owner: "outer#a.inner#b",
+				input: {},
+				definition: declaration,
+				...baseRecord(4),
+			},
+		];
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "outer#a.inner#b")).toMatchObject({
+			type: "compound",
+			scopeParentId: "outer#a.inner",
+		});
+		expect(run.states.find((state) => state.id === "outer#a.inner#b.@worker")?.scopeParentId).toBe("outer#a.inner#b");
 	});
 
 	it("rebases parallel branch scopes inside materialized map instances", () => {
@@ -1639,7 +1741,7 @@ describe("React runtime adapter", () => {
 				id: "session-failure",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
+					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
 					done: final(),
 					failed: failed(),
 				},

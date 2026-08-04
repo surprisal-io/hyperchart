@@ -18,7 +18,21 @@ export interface HyperchartInfo {
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
 export type HyperchartStateStatus = "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale";
-export type HyperchartStateType = "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
+export type HyperchartStateType =
+	| "agent"
+	| "user"
+	| "script"
+	| "send"
+	| "call"
+	| "actor-declaration"
+	| "actor-occurrence"
+	| "receive"
+	| "reply"
+	| "map"
+	| "parallel"
+	| "compound"
+	| "region"
+	| "final";
 
 export interface HyperchartUsageInfo {
 	input?: number;
@@ -92,10 +106,120 @@ export interface HyperchartSchemaInfo {
 	schema?: Record<string, unknown>;
 }
 
+export interface HyperchartActorReplyContractInfo {
+	kind: "void" | "single" | "named";
+	schema?: HyperchartSchemaInfo;
+	schemas?: Record<string, HyperchartSchemaInfo>;
+}
+
+export interface HyperchartActorMessageContractInfo {
+	event: string;
+	input: HyperchartSchemaInfo;
+	reply: HyperchartActorReplyContractInfo;
+}
+
+export interface HyperchartActorDeclarationInfo {
+	declarationPath: string;
+	ownerPath?: string;
+	definitionSource?: string;
+	inputSchema: HyperchartSchemaInfo;
+	/** Concrete configured placement value/expression; runtime occurrences expose their resolved input separately. */
+	inputValue: unknown;
+	protocol: HyperchartActorMessageContractInfo[];
+	initialReceive: string;
+}
+
+export type HyperchartActorMessageStatus = "queued" | "accepted" | "replied" | "settled" | "failed" | "cancelled";
+
+export interface HyperchartActorMessageInfo {
+	messageId: string;
+	actorOccurrencePath?: string;
+	actorLogicalPath?: string;
+	actorGeneration?: number;
+	event: string;
+	input?: unknown;
+	producerVisit: string;
+	callId?: string;
+	status: HyperchartActorMessageStatus;
+	receiveState?: string;
+	replyState?: string;
+	acceptedAt?: number;
+	repliedAt?: number;
+	replyEvent?: string;
+	replyOutput?: unknown;
+	replySchema?: HyperchartSchemaInfo;
+	validation?: "pending" | "valid" | "invalid";
+}
+
+export interface HyperchartActorSentMessageInfo {
+	messageId: string;
+	producerVisit: number;
+	batchIndex: number;
+	input?: unknown;
+	status: HyperchartActorMessageStatus;
+	/** Concrete durable actor instance that received this message. */
+	targetOccurrencePath: string;
+	targetLogicalPath: string;
+	targetGeneration: number;
+}
+
+export interface HyperchartActorMailboxInfo {
+	totalCount: number;
+	head?: HyperchartActorMessageInfo;
+	entries: HyperchartActorMessageInfo[];
+}
+
+export interface HyperchartActorMailboxInstanceInfo {
+	occurrencePath: string;
+	generation: number;
+	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
+	mailbox: HyperchartActorMailboxInfo;
+	messageHistory: HyperchartActorMessageInfo[];
+	currentMessage?: HyperchartActorMessageInfo;
+}
+
+export interface HyperchartActorInternalGenerationInfo {
+	occurrencePath: string;
+	logicalPath: string;
+	generation: number;
+	actorStatus: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
+	stateStatus: HyperchartStateStatus;
+	visitHistory?: HyperchartVisitInfo[];
+	actorMessageHistory?: HyperchartActorMessageInfo[];
+	actorMessages?: HyperchartActorSentMessageInfo[];
+}
+
+export interface HyperchartActorOccurrenceInfo {
+	declarationPath: string;
+	ownerPath?: string;
+	/** Durable concrete occurrence path for the latest generation. */
+	occurrencePath: string;
+	/** Stable logical placement path used by Inspector navigation. */
+	logicalPath?: string;
+	generation: number;
+	/** Durable actor generations projected through the standard visit-history model. */
+	generationHistory?: HyperchartVisitInfo[];
+	input: unknown;
+	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
+	currentState: string;
+	mailbox: HyperchartActorMailboxInfo;
+	/** Per-generation mailbox and processed-message histories, oldest generation first. */
+	mailboxInstances: HyperchartActorMailboxInstanceInfo[];
+	/** Settled messages from this logical actor placement across all generations. */
+	messageHistory?: HyperchartActorMessageInfo[];
+	currentMessage?: HyperchartActorMessageInfo;
+	pendingCaller?: { callId: string; state: string; waitReason: "enqueue" | "accept" | "reply" };
+	drain?: { queued: number; current: number; settled: number };
+	cancellation?: { requested: boolean; acknowledged: boolean };
+}
+
 export interface HyperchartArtifactInfo {
 	name: string;
 	path?: string;
 	schema?: HyperchartSchemaInfo;
+	/** Producer state when presented as a referenced read contract. */
+	sourceState?: string;
+	readKind?: "artifact" | "join";
 }
 
 export interface HyperchartEnvInfo {
@@ -133,6 +257,8 @@ export interface HyperchartRefInfo {
 	visit?: string[];
 	key?: string[];
 	item?: string[];
+	actorInput?: string[];
+	messageInput?: string[];
 }
 
 export interface HyperchartOnReenterInfo {
@@ -149,8 +275,11 @@ export interface HyperchartValidationInfo {
 
 export interface HyperchartRenderedArtifactInfo {
 	name?: string;
+	sourceState?: string;
+	readKind?: "artifact" | "join";
 	path: string;
 	select?: string;
+	schema?: HyperchartSchemaInfo;
 }
 
 export type HyperchartVisitInvocationInfo =
@@ -168,7 +297,8 @@ export type HyperchartVisitInvocationInfo =
 			env?: Record<string, unknown>;
 			artifacts?: HyperchartRenderedArtifactInfo[];
 	  }
-	| { kind: "user"; prompt: string };
+	| { kind: "user"; prompt: string }
+	| { kind: "actor" };
 
 export interface HyperchartVisitInfo {
 	visit: number;
@@ -223,6 +353,18 @@ export interface HyperchartAgentSessionInfo {
 
 export interface HyperchartStateInfo {
 	id: string;
+	/** Inspector-only lexical hierarchy. Unlike id parsing, this also supports synthetic occurrence nodes. */
+	scopeParentId?: string;
+	/** Durable machine state represented by a synthetic inspector node. */
+	runtimeStatePath?: string;
+	actorInternal?: {
+		declarationPath: string;
+		localState: string;
+		occurrencePath?: string;
+		logicalOccurrencePath?: string;
+		generation?: number;
+		generations?: HyperchartActorInternalGenerationInfo[];
+	};
 	type?: HyperchartStateType;
 	initial?: boolean;
 	agent?: string;
@@ -240,6 +382,7 @@ export interface HyperchartStateInfo {
 	agentDefinitionUnavailable?: boolean;
 	usage?: HyperchartUsageInfo;
 	reads?: string[];
+	readArtifacts?: HyperchartArtifactInfo[];
 	completedEvent?: string;
 	transitions?: HyperchartTransitionInfo[];
 	inputs?: HyperchartInputInfo[];
@@ -276,6 +419,21 @@ export interface HyperchartStateInfo {
 	visitHistory?: HyperchartVisitInfo[];
 	issues?: HyperchartIssueInfo[];
 	session?: HyperchartAgentSessionInfo;
+	actorDeclaration?: HyperchartActorDeclarationInfo;
+	actorOccurrence?: HyperchartActorOccurrenceInfo;
+	/** Durable messages accepted or replied through this exact actor-internal state. */
+	actorMessageHistory?: HyperchartActorMessageInfo[];
+	finalConfig?: {
+		outcome: "complete" | "failed";
+		notify?: { prompt?: string; artifacts?: HyperchartArtifactInfo[]; scope?: string };
+	};
+	actorMessageLink?: {
+		kind: "send" | "call" | "reply";
+		to: string;
+		event?: string;
+		pending?: boolean;
+		messages?: HyperchartActorSentMessageInfo[];
+	};
 }
 
 export interface HyperchartRunInfo {
@@ -297,6 +455,8 @@ export interface HyperchartRunInfo {
 	args: Record<string, unknown>;
 	states: HyperchartStateInfo[];
 	stateCount: number;
+	actorDeclarations?: HyperchartActorDeclarationInfo[];
+	actorOccurrences?: HyperchartActorOccurrenceInfo[];
 	finalOutput?: string;
 	totalUsage?: HyperchartUsageInfo;
 	issues?: HyperchartIssueInfo[];

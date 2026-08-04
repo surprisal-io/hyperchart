@@ -140,6 +140,8 @@ interface HyperchartRunInfo {
   finalOutput?: string;
   totalUsage?: HyperchartUsageInfo;
   issues?: HyperchartIssueInfo[];
+  actorDeclarations?: HyperchartActorDeclarationInfo[];
+  actorOccurrences?: HyperchartActorOccurrenceInfo[];
 }
 ```
 
@@ -163,6 +165,12 @@ type HyperchartStateType =
   | "agent"
   | "user"
   | "script"
+  | "send"
+  | "call"
+  | "actor-declaration"
+  | "actor-occurrence"
+  | "receive"
+  | "reply"
   | "map"
   | "parallel"
   | "compound"
@@ -173,6 +181,9 @@ type HyperchartStateType =
 ```ts
 interface HyperchartStateInfo {
   id: string;
+  scopeParentId?: string;
+  runtimeStatePath?: string;
+  actorInternal?: { declarationPath: string; localState: string; occurrencePath?: string };
   type?: HyperchartStateType;
   initial?: boolean;
   agent?: string;
@@ -190,6 +201,7 @@ interface HyperchartStateInfo {
   agentDefinitionUnavailable?: boolean;
   usage?: HyperchartUsageInfo;
   reads?: string[];
+  readArtifacts?: HyperchartArtifactInfo[];
   completedEvent?: string;
   transitions?: HyperchartTransitionInfo[];
   inputs?: HyperchartInputInfo[];
@@ -197,6 +209,14 @@ interface HyperchartStateInfo {
   refs?: HyperchartRefInfo;
   join?: "all" | "any";
   final?: boolean;
+  finalConfig?: {
+    outcome: "complete" | "failed";
+    notify?: {
+      prompt?: string;
+      artifacts?: HyperchartArtifactInfo[];
+      scope?: string;
+    };
+  };
   taskPreview?: string;
   taskPrompt?: string;
   commandPreview?: string;
@@ -236,12 +256,17 @@ interface HyperchartStateInfo {
   visitHistory?: HyperchartVisitInfo[];
   issues?: HyperchartIssueInfo[];
   session?: HyperchartAgentSessionInfo;
+  actorMessageLink?: { kind: "send" | "call"; to: string; event: string };
+  actorDeclaration?: HyperchartActorDeclarationInfo;
+  actorOccurrence?: HyperchartActorOccurrenceInfo;
 }
 ```
 
+The Inspector presents one actor node per concrete placement, keyed by its logical path (for example `@editor` or `projects#a.@editor`). A runtime node combines its static definition with projected runtime values; a placement without an occurrence remains a definition-only actor node. Opening it shows materialized internal states when runtime data exists and template internal states otherwise. The host model and durable projection still keep declarations and occurrences distinct; occurrence-internal state nodes carry their concrete durable `runtimeStatePath`.
+
 For agent states, `role` and `toolset` preserve the symbolic names from the definition. `model` and `tools` retain concrete chart overrides or definition fallbacks; `resolvedModel` and `resolvedTools` carry the effective host mapping. Run-directory inspection resolves against the mappings persisted in that run's `runner.config.json`, not mutable current settings. If that snapshot exists but is invalid, inspection omits resolved fields rather than reinterpreting history through current settings. An absent `resolvedTools` means the host default tool configuration applies or the historical mapping is unavailable; it does not mean every installed tool is enabled.
 
-`initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `waiting` means the state is active but its map instance is held behind a `concurrency` gate; no invoke, visit, or agent session exists until a slot is admitted. `stale` is historical completion outside the current traversal or map generation. It is not pending work. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
+`initial` marks a state selected by the chart root or an enclosing compound, region, or map `initial` declaration. `waiting` means the state is active but its map instance is held behind a `concurrency` gate; no invoke, visit, or agent session exists until a slot is admitted. `stale` is historical completion outside the current traversal or map generation. It is not pending work. `finalConfig` preserves the normalized terminal outcome and optional notification prompt, artifact references, and render scope. Static inspection reports final states as `pending`; a runtime snapshot reports a final state as `done` only after the active configuration reaches it. Compound and region containers become `done` when their direct final child is reached, including after control has continued into a following container. Untaken descendants inside a completed compound, map instance, or parallel region also render `done`: scope completion makes those alternative branches unreachable without re-entry. Historical `stale` descendants convert to `done` after their enclosing scope completes and closes; `stale` remains visible only while re-entry can still make the historical/current distinction actionable.
 
 ## Live agent sessions
 
@@ -321,8 +346,10 @@ type HyperchartVisitInvocationInfo =
 
 interface HyperchartRenderedArtifactInfo {
   name?: string;
+  sourceState?: string; // producer for artifact-backed reads
   path: string;
   select?: string;
+  schema?: HyperchartSchemaInfo;
 }
 ```
 
@@ -369,6 +396,47 @@ interface HyperchartOnReenterInfo {
 }
 ```
 
+## Explicit actor inspection
+
+```ts
+interface HyperchartActorDeclarationInfo {
+  declarationPath: string;
+  ownerPath?: string;
+  inputSchema: HyperchartSchemaInfo;
+  inputValue: unknown; // configured placement value/expression
+  protocol: HyperchartActorMessageContractInfo[];
+  initialReceive: string;
+}
+
+interface HyperchartActorOccurrenceInfo {
+  declarationPath: string;
+  ownerPath?: string;
+  occurrencePath: string; // latest durable generation path
+  logicalPath?: string; // stable Inspector placement path
+  generation: number;
+  generationHistory?: HyperchartVisitInfo[];
+  // Each entry uses visit === actor generation and invocation.kind === "actor".
+  input: unknown;
+  status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
+  currentState: string;
+  mailbox: HyperchartActorMailboxInfo; // latest generation
+  mailboxInstances: Array<{
+    occurrencePath: string;
+    generation: number;
+    status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
+    mailbox: HyperchartActorMailboxInfo;
+    messageHistory: HyperchartActorMessageInfo[];
+    currentMessage?: HyperchartActorMessageInfo;
+  }>;
+  currentMessage?: HyperchartActorMessageInfo;
+  pendingCaller?: { callId: string; state: string; waitReason: "enqueue" | "accept" | "reply" };
+  drain?: { queued: number; current: number; settled: number };
+  cancellation?: { requested: boolean; acknowledged: boolean };
+}
+```
+
+`inputSchema` is the immutable actor input type, while `inputValue` is the declaration's configured placement value/expression. An occurrence's `input` is the actual resolved runtime value. `mailbox` is the latest generation's live FIFO view; `mailboxInstances` preserves every durable generation separately, including its current/queued messages and processed-message history. Mailbox entries preserve durable order and expose message id, producer visit, optional call id, receive/reply status, reply schema provenance, and validation status. Runtime messages projected onto `send` and `call` states also retain `targetOccurrencePath`, `targetLogicalPath`, and `targetGeneration`, so a message id is never mistaken for the concrete actor instance that received it. Materialized actor-internal states expose `actorInternal.generations`; each entry identifies its parent actor occurrence/generation and keeps that generation's action visits, receive/reply history, and internal send/call messages separate. Static declarations, concrete map-local occurrences, and each occurrence's ordinary internal state graph have distinct inspector ids.
+
 ## Artifacts and environment
 
 ```ts
@@ -376,6 +444,7 @@ interface HyperchartArtifactInfo {
   name: string;
   path?: string;
   schema?: HyperchartSchemaInfo;
+  sourceState?: string; // present for referenced read contracts
 }
 
 interface HyperchartEnvInfo {
