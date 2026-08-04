@@ -1,36 +1,38 @@
 import { useEffect } from "react";
 import {
+	ArchiveBoxIcon,
 	ArrowPathIcon,
 	ArrowTopRightOnSquareIcon,
+	BellIcon,
 	CodeBracketSquareIcon,
-	ShareIcon,
+	RectangleStackIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo } from "../../../types.js";
 import { agentStatesForSelection, stateConcurrencyLabel, stateDisplayName, stateKindMeta } from "../helpers/state.js";
 import {
+	artifactContractElementId,
 	inputTypeElementId,
-	refEntries,
-	refValueElementId,
 	replyFieldElementId,
 	replySectionElementId,
 	schemaLabel,
+	schemaTypeText,
 } from "../helpers/schema.js";
 import { StatusPill } from "../../ui/StatusPill.js";
 import { MapOverRefBlock } from "../prompt/MapOverRefBlock.js";
 import { PromptSection } from "../prompt/PromptSection.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
-import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { Section } from "../ui/Section.js";
 import { TypeBlock } from "../ui/TypeBlock.js";
+import { TypeTooltip } from "../ui/TypeTooltip.js";
 import { IssuesSection } from "../validation/IssuesSection.js";
 import { ValidationSection } from "../validation/ValidationSection.js";
 import { AgentInfoCard } from "./AgentInfoCard.js";
+import { ActorDetailsSection, ActorMailboxSection } from "./ActorDetailsSection.js";
 import { ContractsSection } from "./ContractsSection.js";
 import { DefinitionSection } from "./DefinitionSection.js";
 import { EnvTypeDisplay } from "./EnvTypeDisplay.js";
 import { RuntimeSection } from "./RuntimeSection.js";
-import { RefChips } from "./RefChips.js";
 import { TransitionsSection } from "./TransitionsSection.js";
 
 export function StateDetails({
@@ -38,10 +40,14 @@ export function StateDetails({
 	allStates,
 	definitionSource,
 	onOpenScope,
+	onNavigateToState,
 	canOpenScope,
 	highlightedReply = null,
+	highlightedArtifact = null,
 	revealedReplyStateIds = [],
+	revealedArtifactStateIds = [],
 	onHighlightReply,
+	onHighlightArtifact,
 	highlightedInputName = null,
 	onHighlightInput,
 	highlightedRefValue = null,
@@ -52,10 +58,14 @@ export function StateDetails({
 	allStates: HyperchartStateInfo[];
 	definitionSource?: string;
 	onOpenScope?: (stateId: string) => void;
+	onNavigateToState?: (stateId: string) => void;
 	canOpenScope?: boolean;
 	highlightedReply?: { stateId: string; path: string } | null;
+	highlightedArtifact?: { stateId: string; name: string } | null;
 	revealedReplyStateIds?: readonly string[];
+	revealedArtifactStateIds?: readonly string[];
 	onHighlightReply?: (stateId: string, path: string) => void;
+	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 	highlightedInputName?: string | null;
 	onHighlightInput?: (name: string) => void;
 	highlightedRefValue?: string | null;
@@ -66,6 +76,9 @@ export function StateDetails({
 	const DetailKindIcon = kind.Icon;
 	const concurrencyLabel = stateConcurrencyLabel(state);
 	const agentStates = agentStatesForSelection(state, allStates);
+	const finalDrainActors = state.type === "final" && (state.status === "waiting" || state.status === "running")
+		? allStates.filter((candidate) => candidate.actorOccurrence?.status === "closing" || candidate.actorOccurrence?.status === "draining")
+		: [];
 	useEffect(() => {
 		if (!highlightedReply) return;
 		let outerFrame = 0;
@@ -84,6 +97,20 @@ export function StateDetails({
 		};
 	}, [highlightedReply]);
 	useEffect(() => {
+		if (!highlightedArtifact) return;
+		let outerFrame = 0;
+		let innerFrame = 0;
+		outerFrame = requestAnimationFrame(() => {
+			innerFrame = requestAnimationFrame(() => {
+				document.getElementById(artifactContractElementId(highlightedArtifact.stateId, highlightedArtifact.name))?.scrollIntoView({ behavior: "smooth", block: "center" });
+			});
+		});
+		return () => {
+			cancelAnimationFrame(outerFrame);
+			cancelAnimationFrame(innerFrame);
+		};
+	}, [highlightedArtifact]);
+	useEffect(() => {
 		if (!highlightedInputName) return;
 		let outerFrame = 0;
 		let innerFrame = 0;
@@ -99,22 +126,6 @@ export function StateDetails({
 			cancelAnimationFrame(innerFrame);
 		};
 	}, [state.id, highlightedInputName]);
-	useEffect(() => {
-		if (!highlightedRefValue) return;
-		let outerFrame = 0;
-		let innerFrame = 0;
-		outerFrame = requestAnimationFrame(() => {
-			innerFrame = requestAnimationFrame(() => {
-				document
-					.getElementById(refValueElementId(state.id, highlightedRefValue))
-					?.scrollIntoView({ behavior: "smooth", block: "center" });
-			});
-		});
-		return () => {
-			cancelAnimationFrame(outerFrame);
-			cancelAnimationFrame(innerFrame);
-		};
-	}, [state.id, highlightedRefValue]);
 	const focusReplyField = (path: string) => {
 		onHighlightReply?.(state.id, path);
 	};
@@ -180,7 +191,85 @@ export function StateDetails({
 				</div>
 			</div>
 
-			{agentStates.length > 0 && (
+			{state.type === "final" && state.finalConfig !== undefined && (
+				<Section title="Final outcome" icon={BellIcon} defaultOpen>
+					<div className="flex flex-wrap items-center gap-2 text-[10px]">
+						<span className="text-[var(--text-muted)]">outcome</span>
+						<span className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${state.finalConfig.outcome === "failed" ? "border-red-500/35 bg-red-500/10 text-[var(--danger)]" : "border-emerald-500/35 bg-emerald-500/10 text-[var(--hc-green-text)]"}`}>
+							{state.finalConfig.outcome}
+						</span>
+						{state.finalConfig.notify?.scope !== undefined && (
+							<span className="font-mono text-[var(--text-muted)]">scope {state.finalConfig.notify.scope}</span>
+						)}
+					</div>
+					{state.finalConfig.notify?.prompt !== undefined && (
+						<div>
+							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">notification prompt</div>
+							<TemplateTextBlock
+								text={state.finalConfig.notify.prompt}
+								state={state}
+								allStates={allStates}
+								cssCollapse
+								wrapLongLines
+								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+							/>
+						</div>
+					)}
+					{state.finalConfig.notify?.artifacts?.length ? (
+						<div>
+							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">notification artifacts</div>
+							<div className="grid gap-1.5">
+								{state.finalConfig.notify.artifacts.map((artifact) => {
+									const joined = artifact.readKind === "join";
+									const ArtifactIcon = joined ? RectangleStackIcon : ArchiveBoxIcon;
+									const typeName = artifact.name.split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Artifact";
+									const type = `type ${typeName} = ${schemaTypeText(artifact.schema)};`;
+									const content = (
+										<>
+											<span className="flex w-max items-center gap-1 whitespace-nowrap font-mono text-[10px] text-[var(--hc-purple-text)]">
+												<TypeTooltip text={joined ? "joined artifacts" : "artifact"}><span data-hyperchart-tooltip-isolated className="inline-flex"><ArtifactIcon className="h-3 w-3" aria-hidden="true" /></span></TypeTooltip>
+												{artifact.sourceState ?? "artifact"} → {artifact.name}
+											</span>
+											{artifact.path !== undefined && <span className="w-max font-mono text-[9px] text-[var(--text-muted)]">{artifact.path}</span>}
+										</>
+									);
+									const card = artifact.sourceState !== undefined && onHighlightArtifact !== undefined
+										? <button type="button" onClick={() => onHighlightArtifact(artifact.sourceState!, artifact.name)} className="flex min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-left hover:bg-purple-500/10">{content}</button>
+										: <div className="flex min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5">{content}</div>;
+									return <TypeTooltip key={`${artifact.sourceState ?? ""}:${artifact.name}`} text={type}>{card}</TypeTooltip>;
+								})}
+							</div>
+						</div>
+					) : null}
+					{state.finalConfig.notify === undefined && <div className="text-[10px] text-[var(--text-muted)]">No terminal notification configured.</div>}
+				</Section>
+			)}
+
+			{finalDrainActors.length > 0 && (
+				<Section title={`Waiting for actors · ${finalDrainActors.length}`} icon={ArrowPathIcon} defaultOpen>
+					<div className="grid gap-1.5">
+						{finalDrainActors.map((actorState) => {
+							const actor = actorState.actorOccurrence!;
+							const content = (
+								<>
+									<span className="min-w-0 flex-1">
+										<span className="block truncate font-mono text-[var(--text-primary)]">{actor.logicalPath ?? actor.occurrencePath}</span>
+										<span className="block truncate text-[9px] text-[var(--text-muted)]">{actor.currentState} · {actor.currentMessage === undefined ? 0 : 1} current · {actor.mailbox.totalCount} queued</span>
+									</span>
+									{onNavigateToState !== undefined && <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+								</>
+							);
+							return onNavigateToState === undefined
+								? <div key={actorState.id} className="flex items-center rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-[10px] text-[var(--text-secondary)]">{content}</div>
+								: <button key={actorState.id} type="button" onClick={() => onNavigateToState(actorState.id)} className="flex items-center gap-2 rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-left text-[10px] text-[var(--hc-amber-text)] hover:bg-amber-500/10">{content}</button>;
+						})}
+					</div>
+				</Section>
+			)}
+
+			{agentStates.length > 0 && state.type !== "actor-declaration" && state.type !== "actor-occurrence" && (
 				<Section title={state.agent ? "Agent" : "Agents in scope"} icon={UserCircleIcon}>
 					<div className="space-y-2">
 						{agentStates.map((agentState) => (
@@ -191,6 +280,7 @@ export function StateDetails({
 								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+								{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 							/>
 						))}
 					</div>
@@ -284,25 +374,53 @@ export function StateDetails({
 				</Section>
 			)}
 
+			{state.actorInternal === undefined && <ActorDetailsSection state={state} />}
+
+			{state.actorDeclaration !== undefined && state.actorInternal === undefined && (
+				<>
+					<RuntimeSection
+						state={state}
+						allStates={allStates}
+						{...(onSteerSession === undefined ? {} : { onSteerSession })}
+						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
+					/>
+					<ActorMailboxSection state={state} />
+				</>
+			)}
+
 			<TransitionsSection state={state} allStates={allStates} onReplyFieldClick={focusReplyField} />
 
 			<ValidationSection state={state} />
 
 			<IssuesSection issues={state.issues} />
 
-			<RuntimeSection
-				state={state}
-				{...(onSteerSession === undefined ? {} : { onSteerSession })}
-			/>
+			{(state.actorDeclaration === undefined || state.actorInternal !== undefined) && (
+				<RuntimeSection
+					state={state}
+					allStates={allStates}
+					{...(onSteerSession === undefined ? {} : { onSteerSession })}
+					{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+					{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
+				/>
+			)}
 
 			{isScriptState && (
 				<Section title="Arguments" icon={CodeBracketSquareIcon} defaultOpen={false}>
 					{state.commandPreview && (
 						<div>
 							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">command</div>
-							<ExpandablePre collapsedLines={7} language="bash">
-								{state.commandPreview}
-							</ExpandablePre>
+							<TemplateTextBlock
+								text={state.commandPreview}
+								state={state}
+								allStates={allStates}
+								collapsedLines={7}
+								nowrap
+								language="bash"
+								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+							/>
 						</div>
 					)}
 					{state.env?.length ? (
@@ -323,9 +441,16 @@ export function StateDetails({
 										{env.value !== undefined && (
 											<div>
 												<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">value</div>
-												<code className="block overflow-x-auto whitespace-pre rounded bg-[var(--bg-code)] px-2 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
-													{env.value}
-												</code>
+												<TemplateTextBlock
+													text={env.value}
+													state={state}
+													allStates={allStates}
+													compact
+													nowrap
+													{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+													{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+													{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+												/>
 											</div>
 										)}
 									</div>
@@ -339,21 +464,20 @@ export function StateDetails({
 				</Section>
 			)}
 
-			<ContractsSection
-				state={state}
-				allStates={allStates}
-				highlightedReply={highlightedReply}
-				revealedReplyStateIds={revealedReplyStateIds}
-				{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
-				{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
-				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
-			/>
-
-			{refEntries(state.refs).length > 0 && (
-				<Section title="Refs" icon={ShareIcon} defaultOpen={false} forceOpen={highlightedRefValue !== null}>
-					<RefChips refs={state.refs} stateId={state.id} highlightedValue={highlightedRefValue} />
-				</Section>
+			{state.type !== "actor-declaration" && state.type !== "actor-occurrence" && (
+				<ContractsSection
+					state={state}
+					allStates={allStates}
+					highlightedReply={highlightedReply}
+					highlightedArtifact={highlightedArtifact}
+					revealedReplyStateIds={revealedReplyStateIds}
+					revealedArtifactStateIds={revealedArtifactStateIds}
+					{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+					{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+					{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+				/>
 			)}
+
 
 			{definitionSource && <DefinitionSection source={definitionSource} />}
 		</div>

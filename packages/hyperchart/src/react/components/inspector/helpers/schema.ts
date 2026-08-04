@@ -77,14 +77,6 @@ export function schemaToTs(value: unknown, depth = 0): string {
 	return "unknown";
 }
 
-export function schemaInfoToTs(schema: HyperchartStateInfo["replySchema"], name: string): string | undefined {
-	if (!schema) return undefined;
-	const alias = typeAliasName(name);
-	if (schema.schema) return `type ${alias} = ${schemaToTs(schema.schema, 0)};`;
-	if (schema.schemaName) return `type ${alias} = ${schema.schemaName};`;
-	return undefined;
-}
-
 function typeLinesForSchema(
 	value: unknown,
 	options: { stateId?: string; highlightedPath?: string | null; dataPath?: string },
@@ -175,15 +167,12 @@ export function schemaLabel(schema: HyperchartStateInfo["replySchema"]): string 
 	return title ?? type ?? "json schema";
 }
 
-export function refEntries(refs: HyperchartStateInfo["refs"]): Array<{ kind: string; values: string[] }> {
-	if (!refs) return [];
-	return Object.entries(refs).flatMap(([kind, values]) =>
-		Array.isArray(values) && values.length > 0 ? [{ kind, values }] : [],
-	);
-}
-
 export function safeDomId(value: string): string {
 	return value.replace(/[^A-Za-z0-9_-]+/g, "-");
+}
+
+export function artifactContractElementId(stateId: string, artifactName: string): string {
+	return `artifact-contract-${encodeURIComponent(stateId)}-${encodeURIComponent(artifactName)}`;
 }
 
 export function replySectionElementId(stateId: string): string {
@@ -196,10 +185,6 @@ export function replyFieldElementId(stateId: string, path: string): string {
 
 export function inputTypeElementId(stateId: string, name: string): string {
 	return `hc-input-type-${safeDomId(stateId)}-${safeDomId(name)}`;
-}
-
-export function refValueElementId(stateId: string, value: string): string {
-	return `hc-ref-value-${safeDomId(stateId)}-${safeDomId(value)}`;
 }
 
 export function schemaAtPath(

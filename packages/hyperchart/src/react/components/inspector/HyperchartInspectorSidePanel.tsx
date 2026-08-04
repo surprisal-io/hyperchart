@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { HyperchartRunInfo } from "../../types.js";
 import { useHyperchartTheme } from "../../support/theme-context.js";
-import { immediateMapScopeId } from "./helpers/scope.js";
+import { stateScopeParentId } from "./helpers/scope.js";
 import { RunOverview } from "./details/RunOverview.js";
 import { StateDetails } from "./details/StateDetails.js";
 
@@ -11,6 +11,7 @@ export interface HyperchartInspectorSidePanelProps {
 	selectedStateId?: string | null;
 	onClearSelection?: () => void;
 	onOpenScope?: (stateId: string) => void;
+	onNavigateToState?: (stateId: string) => void;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	className?: string;
 	definitionSource?: string;
@@ -21,6 +22,7 @@ export function HyperchartInspectorSidePanel({
 	selectedStateId = null,
 	onClearSelection,
 	onOpenScope,
+	onNavigateToState,
 	onSteerSession,
 	className = "",
 	definitionSource,
@@ -28,31 +30,36 @@ export function HyperchartInspectorSidePanel({
 	const { resolved } = useHyperchartTheme();
 	const selectedState = selectedStateId ? (run.states.find((state) => state.id === selectedStateId) ?? null) : null;
 	const [highlightedReply, setHighlightedReply] = useState<{ stateId: string; path: string } | null>(null);
+	const [highlightedArtifact, setHighlightedArtifact] = useState<{ stateId: string; name: string } | null>(null);
 	const [highlightedInputName, setHighlightedInputName] = useState<string | null>(null);
 	const [highlightedRefValue, setHighlightedRefValue] = useState<string | null>(null);
 	const [revealedReplyStateIds, setRevealedReplyStateIds] = useState<string[]>([]);
+	const [revealedArtifactStateIds, setRevealedArtifactStateIds] = useState<string[]>([]);
 	useEffect(() => {
 		void run.runId;
 		void selectedStateId;
 		setHighlightedReply(null);
+		setHighlightedArtifact(null);
 		setHighlightedInputName(null);
 		setHighlightedRefValue(null);
 		setRevealedReplyStateIds([]);
+		setRevealedArtifactStateIds([]);
 	}, [run.runId, selectedStateId]);
 	useEffect(() => {
-		if (highlightedReply === null && highlightedInputName === null && highlightedRefValue === null) return;
+		if (highlightedReply === null && highlightedArtifact === null && highlightedInputName === null && highlightedRefValue === null) return;
 		const timeout = window.setTimeout(() => {
 			setHighlightedReply(null);
+			setHighlightedArtifact(null);
 			setHighlightedInputName(null);
 			setHighlightedRefValue(null);
 		}, 5_000);
 		return () => window.clearTimeout(timeout);
-	}, [highlightedReply, highlightedInputName, highlightedRefValue]);
+	}, [highlightedReply, highlightedArtifact, highlightedInputName, highlightedRefValue]);
 	const scopeChildIds = useMemo(
-		() => new Set(run.states.map((state) => immediateMapScopeId(state.id)).filter((id): id is string => !!id)),
+		() => new Set(run.states.map(stateScopeParentId).filter((id): id is string => id !== undefined)),
 		[run],
 	);
-	const effectiveDefinitionSource = definitionSource ?? selectedState?.definitionSource ?? run.definitionSource;
+	const effectiveDefinitionSource = definitionSource ?? (selectedState === null ? run.definitionSource : selectedState.definitionSource);
 	const scopeProps = onOpenScope
 		? { onOpenScope, canOpenScope: selectedState ? scopeChildIds.has(selectedState.id) : false }
 		: {};
@@ -79,13 +86,24 @@ export function HyperchartInspectorSidePanel({
 						state={selectedState}
 						allStates={run.states}
 						{...(effectiveDefinitionSource === undefined ? {} : { definitionSource: effectiveDefinitionSource })}
+						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 						highlightedReply={highlightedReply}
+						highlightedArtifact={highlightedArtifact}
 						revealedReplyStateIds={revealedReplyStateIds}
+						revealedArtifactStateIds={revealedArtifactStateIds}
 						onHighlightReply={(stateId, path) => {
 							setHighlightedReply({ stateId, path });
 							setRevealedReplyStateIds((stateIds) =>
 								stateIds.includes(stateId) ? stateIds : [...stateIds, stateId],
 							);
+							setHighlightedArtifact(null);
+							setHighlightedInputName(null);
+							setHighlightedRefValue(null);
+						}}
+						onHighlightArtifact={(stateId, name) => {
+							setHighlightedArtifact({ stateId, name });
+							setRevealedArtifactStateIds((stateIds) => stateIds.includes(stateId) ? stateIds : [...stateIds, stateId]);
+							setHighlightedReply(null);
 							setHighlightedInputName(null);
 							setHighlightedRefValue(null);
 						}}
@@ -93,12 +111,14 @@ export function HyperchartInspectorSidePanel({
 						onHighlightInput={(name) => {
 							setHighlightedInputName(name);
 							setHighlightedReply(null);
+							setHighlightedArtifact(null);
 							setHighlightedRefValue(null);
 						}}
 						highlightedRefValue={highlightedRefValue}
 						onHighlightRef={(value) => {
 							setHighlightedRefValue(value);
 							setHighlightedReply(null);
+							setHighlightedArtifact(null);
 							setHighlightedInputName(null);
 						}}
 						{...scopeProps}

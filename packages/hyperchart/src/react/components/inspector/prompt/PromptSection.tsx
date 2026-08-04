@@ -24,6 +24,7 @@ export function PromptSection({
 				state={state}
 				allStates={allStates}
 				collapsedLines={12}
+				cssCollapse
 				{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 				{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}

@@ -3,6 +3,7 @@ import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models
 import {
 	hasInterpolation,
 	interpolationAction,
+	interpolationTokenClass,
 	isPromptInterpolationToken,
 } from "../packages/hyperchart/src/react/components/inspector/helpers/interpolation.js";
 
@@ -13,6 +14,16 @@ const sourceState: HyperchartStateInfo = {
 };
 
 describe("Inspector prompt interpolation", () => {
+	it("uses the same explicit inline geometry for clickable and informational tokens", () => {
+		const clickable = interpolationTokenClass("input", true);
+		const informational = interpolationTokenClass("visit", false);
+		for (const className of [clickable, informational]) {
+			expect(className).toContain("inline-flex");
+			expect(className).toContain("py-0.5");
+			expect(className).toContain("leading-[1.35]");
+		}
+	});
+
 	it("renders json-wrapped result references as source types instead of raw DSL", () => {
 		const screenshotState: HyperchartStateInfo = {
 			id: "screenshot-report",

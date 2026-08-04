@@ -23,11 +23,19 @@ export function TypeTooltip({ text, children }: { text: string; children: React.
 		setPosition({ left, top: above ? rect.top - 8 : rect.bottom + 8, above });
 	};
 	const hide = () => setPosition(null);
+	const targetsNestedTooltip = (target: EventTarget | null) => {
+		const isolated = target instanceof Element ? target.closest("[data-hyperchart-tooltip-isolated]") : null;
+		return isolated !== null && isolated !== ref.current;
+	};
 	const trigger = React.cloneElement(children, {
 		ref,
 		onPointerEnter: (event) => {
 			children.props.onPointerEnter?.(event);
-			show();
+			targetsNestedTooltip(event.target) ? hide() : show();
+		},
+		onPointerMove: (event) => {
+			children.props.onPointerMove?.(event);
+			targetsNestedTooltip(event.target) ? hide() : show();
 		},
 		onPointerLeave: (event) => {
 			children.props.onPointerLeave?.(event);
@@ -35,7 +43,7 @@ export function TypeTooltip({ text, children }: { text: string; children: React.
 		},
 		onFocus: (event) => {
 			children.props.onFocus?.(event);
-			show();
+			targetsNestedTooltip(event.target) ? hide() : show();
 		},
 		onBlur: (event) => {
 			children.props.onBlur?.(event);

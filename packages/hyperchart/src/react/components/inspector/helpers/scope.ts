@@ -8,6 +8,28 @@ export function immediateMapScopeId(stateId: string): string | undefined {
 	return dot === -1 ? undefined : stateId.slice(0, dot);
 }
 
+export function stateScopeParentId(state: HyperchartStateInfo): string | undefined {
+	return state.scopeParentId ?? immediateMapScopeId(state.id);
+}
+
+/** Scope stack required to reveal a concrete state in the graph. */
+export function scopeStackForState(states: readonly HyperchartStateInfo[], stateId: string): string[] {
+	const byId = new Map(states.map((state) => [state.id, state]));
+	const stack: string[] = [];
+	let cursor = byId.get(stateId);
+	const seen = new Set<string>();
+	while (cursor !== undefined) {
+		const parentId = stateScopeParentId(cursor);
+		if (parentId === undefined || seen.has(parentId)) break;
+		seen.add(parentId);
+		const parent = byId.get(parentId);
+		if (parent === undefined) break;
+		stack.unshift(parent.id);
+		cursor = parent;
+	}
+	return stack;
+}
+
 export function visibleStateIdsForScope(
 	states: HyperchartStateInfo[],
 	options: {
@@ -31,7 +53,7 @@ export function visibleStateIdsForScope(
 			if (!showPending && (state.status === "pending" || state.status === "stale")) continue;
 			if (!showSkipped && state.status === "skipped") continue;
 		}
-		const directScope = immediateMapScopeId(state.id);
+		const directScope = stateScopeParentId(state);
 		if (scopeId) {
 			if (directScope !== scopeId) continue;
 		} else if (!showMapWorkers && directScope !== undefined) {
@@ -46,7 +68,7 @@ export function effectiveDisplayType(
 	state: HyperchartStateInfo,
 	stateById: Map<string, HyperchartStateInfo>,
 ): HyperchartStateType | undefined {
-	const parent = immediateMapScopeId(state.id);
+	const parent = stateScopeParentId(state);
 	const parentState = parent ? stateById.get(parent) : undefined;
 	if (state.type === "compound" && parentState?.type === "parallel") return "region";
 	return state.type;
@@ -54,7 +76,7 @@ export function effectiveDisplayType(
 
 function directChildrenOf(state: HyperchartStateInfo, states: HyperchartStateInfo[]): HyperchartStateInfo[] {
 	return states.filter(
-		(candidate) => immediateMapScopeId(candidate.id) === state.id && !isImplicitFailedFinal(candidate),
+		(candidate) => stateScopeParentId(candidate) === state.id && !isImplicitFailedFinal(candidate),
 	);
 }
 

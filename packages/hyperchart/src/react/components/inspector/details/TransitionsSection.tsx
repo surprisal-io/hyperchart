@@ -47,11 +47,11 @@ export function TransitionsSection({
 							</div>
 							{inputEntries.length > 0 ? (
 								<div className="mt-2 space-y-2">
-									<div className="grid gap-1">
-										{inputEntries.map(([name]) => (
-											<TransitionInputRow key={name} transition={transition} name={name} allStates={allStates} />
-										))}
-									</div>
+									<TransitionInputRow
+										transition={transition}
+										names={inputEntries.map(([name]) => name)}
+										allStates={allStates}
+									/>
 									<TransitionBindingJson
 										state={state}
 										input={transition.input ?? {}}

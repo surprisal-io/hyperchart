@@ -1,12 +1,19 @@
 import React from "react";
 import { interpolationAction, isPromptInterpolationToken } from "../helpers/interpolation.js";
+import { createBufferedTextPreview } from "../helpers/textPreview.js";
 import type { InterpolatedTextProps } from "../types.js";
+import { CssExpandableBlock } from "../ui/CssExpandableBlock.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { InterpolationToken } from "./InterpolationToken.js";
+
+function compactTokenDisplay(token: string): string {
+	return `\${${token.trim()}}`;
+}
 
 function interpolatedParts(
 	text: string,
 	{ state, allStates, onHighlightInput, onHighlightReply, onHighlightRef }: Omit<InterpolatedTextProps, "text">,
+	compactTokens = false,
 ): React.ReactNode[] {
 	const parts: React.ReactNode[] = [];
 	const pattern = /\{([^{}]+)\}/g;
@@ -21,7 +28,8 @@ function interpolatedParts(
 				...(onHighlightReply === undefined ? {} : { onHighlightReply }),
 				...(onHighlightRef === undefined ? {} : { onHighlightRef }),
 			});
-			parts.push(<InterpolationToken key={`${token}:${match.index}`} token={token} action={action} />);
+			const display = compactTokens ? compactTokenDisplay(token) : undefined;
+			parts.push(<InterpolationToken key={`${token}:${match.index}`} token={token} action={action} inline={compactTokens} {...(display === undefined ? {} : { display })} />);
 		} else {
 			parts.push(match[0]);
 		}
@@ -40,7 +48,11 @@ export function InterpolatedTextBlock({
 	onHighlightReply,
 	onHighlightRef,
 	collapsedLines = 12,
-}: InterpolatedTextProps & { collapsedLines?: number }) {
+	nowrap = false,
+	compact = false,
+	cssCollapse = false,
+	maxPreviewCharacters,
+}: InterpolatedTextProps & { collapsedLines?: number; nowrap?: boolean; compact?: boolean; cssCollapse?: boolean; maxPreviewCharacters?: number }) {
 	const interpolationProps = {
 		state,
 		allStates,
@@ -48,12 +60,42 @@ export function InterpolatedTextBlock({
 		...(onHighlightReply === undefined ? {} : { onHighlightReply }),
 		...(onHighlightRef === undefined ? {} : { onHighlightRef }),
 	};
+	if (compact) {
+		return (
+			<div className="min-w-0 max-w-full overflow-x-auto rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-2 py-1.5 font-mono text-[10px] leading-relaxed text-[var(--text-secondary)] whitespace-pre [overflow-wrap:normal]">
+				<span className="inline-block w-max min-w-full">{interpolatedParts(text, interpolationProps, true)}</span>
+			</div>
+		);
+	}
+	if (cssCollapse) {
+		const preview = createBufferedTextPreview(text);
+		return (
+			<CssExpandableBlock
+				contentTruncated={preview.truncated}
+				previewText={preview.text}
+				fullText={text}
+				render={(value, full, closeFull) => {
+					const fullProps = closeFull === undefined ? interpolationProps : {
+						...interpolationProps,
+						...(onHighlightInput === undefined ? {} : { onHighlightInput: (name: string) => { closeFull(); onHighlightInput(name); } }),
+						...(onHighlightReply === undefined ? {} : { onHighlightReply: (stateId: string, path: string) => { closeFull(); onHighlightReply(stateId, path); } }),
+						...(onHighlightRef === undefined ? {} : { onHighlightRef: (value: string) => { closeFull(); onHighlightRef(value); } }),
+					};
+					return (
+						<div className={`min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] [overflow-wrap:anywhere] ${full ? "whitespace-pre-wrap" : "whitespace-normal"}`}>
+							{interpolatedParts(value, fullProps)}
+						</div>
+					);
+				}}
+			/>
+		);
+	}
 	return (
 		<ExpandablePre
 			collapsedLines={collapsedLines}
-			maxPreviewCharacters={Math.max(240, collapsedLines * 100)}
+			maxPreviewCharacters={maxPreviewCharacters ?? Math.max(240, collapsedLines * 100)}
 			renderContent={(visibleText) => (
-				<div className="min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] whitespace-pre-wrap [overflow-wrap:anywhere]">
+				<div className={`p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] ${nowrap ? "w-max min-w-full whitespace-pre [overflow-wrap:normal]" : "min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]"}`}>
 					{interpolatedParts(visibleText, interpolationProps)}
 				</div>
 			)}
