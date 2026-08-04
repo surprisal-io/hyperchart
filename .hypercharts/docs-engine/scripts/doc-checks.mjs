@@ -27,7 +27,7 @@ export function checkUnit(unit, registry) {
 		if (!existsSync(target)) violations.push(`${unit.path} has a broken relative link: ${match[1]}`);
 	}
 
-	if (unit.path.includes("docs/skills/")) {
+	if (unit.path.startsWith("skills/")) {
 		if (!text.startsWith("---\n")) violations.push(`${unit.path} must start with YAML frontmatter`);
 		if (text.length > SKILL_SIZE_LIMIT)
 			violations.push(`${unit.path} exceeds the skill size budget: ${text.length} > ${SKILL_SIZE_LIMIT} chars`);

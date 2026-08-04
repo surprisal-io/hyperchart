@@ -119,6 +119,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && node ../../scripts/copy-react-styles.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"prepack": "node ../../scripts/sync-pi-docs.mjs --check && npm run build"
+		"prepack": "npm run build && node ../../scripts/stage-package-resources.mjs stage pi",
+		"postpack": "node ../../scripts/stage-package-resources.mjs clean pi"
 	}
 }

@@ -61,7 +61,6 @@ release-dry-run: _require-version
 
 release-prepare: _require-version _release-clean _assert-unpublished _check-release-tag
 	@node scripts/set-release-version.mjs '$(VERSION)'
-	npm run sync:pi-docs
 	@$(MAKE) release-gate VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
 	@$(MAKE) release-dry-run VERSION='$(VERSION)' NPM_TAG='$(NPM_TAG)' NPM_ACCESS='$(NPM_ACCESS)'
 	@printf '\nVersion %s is prepared. Review and commit the release changes, then run:\n  make release-publish VERSION=%s CONFIRM=publish-%s NPM_TAG=%s\n' '$(VERSION)' '$(VERSION)' '$(VERSION)' '$(NPM_TAG)'

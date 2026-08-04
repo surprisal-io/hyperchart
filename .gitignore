@@ -3,13 +3,18 @@ dist/
 storybook-static/
 debug-storybook.log
 .DS_Store
-tla/.cache/
+tla/
 
 .pi/hypercharts/runs/
 .pi/hypercharts/artifacts/
 .hypercharts/settings.json
 .pi-subagents/
 tla/MCTrace*
-tla/trace/sample-run.jsonl
 artifacts
-tla/
+
+# Package-only resources staged by prepack and removed by postpack.
+/packages/pi-hyperchart/docs/
+/packages/pi-hyperchart/examples/
+/packages/pi-hyperchart/assets/
+/packages/pi-hyperchart/skills/
+/packages/claude-hyperchart/skills/

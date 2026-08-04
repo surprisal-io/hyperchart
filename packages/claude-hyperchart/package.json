@@ -56,6 +56,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"prepack": "npm run build"
+		"prepack": "npm run build && node ../../scripts/stage-package-resources.mjs stage claude",
+		"postpack": "node ../../scripts/stage-package-resources.mjs clean claude"
 	}
 }

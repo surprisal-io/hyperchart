@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import deckDirectorChart from "../packages/pi-hyperchart/examples/deck-director.chart.js";
+import deckDirectorChart from "../examples/deck-director.chart.js";
 import { normalizeChartConfig } from "@surprisal/hyperchart/internal/core/normalize";
 import { actionUidKey } from "@surprisal/hyperchart/internal/core/action_uid";
 import type { ActionUID, ChartAst, StateAst, StatePath } from "@surprisal/hyperchart/internal/core/types";
@@ -262,7 +262,7 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 	writeJsonl(join(runDir, "log.jsonl"), deckLog(ast, variant === "many-running" ? "many" : "single"));
 	writeFileSync(
 		join(runDir, "meta.json"),
-		`${JSON.stringify({ chartId: ast.id, chartPath: "packages/pi-hyperchart/examples/deck-director.chart.ts", workDir: "/Users/demo/Work/pi-hyperchart", createdAt: new Date(STORY_NOW - 720_000).toISOString() }, null, 2)}\n`,
+		`${JSON.stringify({ chartId: ast.id, chartPath: "examples/deck-director.chart.ts", workDir: "/Users/demo/Work/pi-hyperchart", createdAt: new Date(STORY_NOW - 720_000).toISOString() }, null, 2)}\n`,
 	);
 	writeFileSync(
 		join(runDir, "status.json"),
