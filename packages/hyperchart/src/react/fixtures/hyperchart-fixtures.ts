@@ -1,174 +1,236 @@
-import type { HyperchartRunInfo } from "../types.js";
+import { agent, chart, final, script, user } from "../../core/dsl.js";
+import type { DurableLogRecord } from "../../core/durable_events.js";
+import type { ChartCst } from "../../core/types.js";
+import { storyScenario } from "./story-scenario.js";
 
 const FIXTURE_NOW = Date.UTC(2026, 6, 7, 22, 45, 0);
-const now = FIXTURE_NOW;
+const STARTED_AT = FIXTURE_NOW - 900_000;
+const args = { topic: "Google I/O 2026: most important recent announcements", audience: "executives" };
 
-export const runningRun: HyperchartRunInfo = {
-	runId: "deck-director-20260707-224500",
-	chartName: "deck-director",
-	description: "Google I/O 2026 announcement narrative deck",
-	status: "running",
-	cwd: "/Users/demo/Work/pi-hyperchart",
-	createdAt: now - 900_000,
-	updatedAt: now - 8_000,
-	pid: 42420,
-	args: { topic: "Google I/O 2026: most important recent announcements", audience: "executives" },
-	stateCount: 13,
-	states: [
-		{
-			id: "research-plan",
-			type: "agent",
-			agent: "deck-source-scout",
-			status: "done",
-			model: "deepseek/deepseek-v4-pro",
-			taskPreview: "Create a report plan and source buckets.",
-			transitions: [{ event: "PLAN_READY", target: "source-research" }],
-			artifacts: [{ name: "plan", path: "artifacts/report-plan.json", schema: { schemaName: "ReportPlan" } }],
+/**
+ * The canonical Inspector/Dialog fixture. Every rendered state, edge, action definition,
+ * and static source block is adapted from this normalized chart rather than hand-authored
+ * as React view-model data.
+ */
+export const inspectorDialogChart: ChartCst = chart({
+	kind: "chart",
+	id: "deck-director",
+	args: {
+		topic: { description: "Research topic" },
+		audience: { description: "Report audience" },
+	},
+	initial: "research-plan",
+	states: {
+		"research-plan": {
+			kind: "state",
+			action: agent("deck-source-scout", { task: "Create a report plan and source buckets." }),
+			transitions: { DONE: "source-research" },
 		},
-		{
-			id: "source-research",
-			type: "parallel",
-			status: "done",
-			parallelConfig: {
-				count: 3,
-				branches: [
-					{ id: "official", agent: "deck-source-scout", taskPreview: "Official Google sources" },
-					{ id: "market", agent: "deck-source-scout", taskPreview: "Market/financial analysis" },
-					{ id: "developer", agent: "deck-source-scout", taskPreview: "Developer impact" },
-				],
-			},
-			transitions: [{ event: "RESEARCH_DONE", target: "coverage-review" }],
+		"source-research": {
+			kind: "state",
+			action: agent("deck-source-scout", { task: "Collect official, market, and developer evidence." }),
+			transitions: { DONE: "narrative-plan" },
 		},
-		{
-			id: "coverage-review",
-			type: "agent",
-			agent: "deck-beat-verifier",
-			status: "done",
-			taskPreview: "Validate source coverage and citation density.",
-			retry: { max: 2 },
-			transitions: [
-				{ event: "PASS", target: "narrative-plan" },
-				{ event: "BLOCK", target: "source-research" },
-			],
+		"narrative-plan": {
+			kind: "state",
+			action: agent("deck-narrative-synthesizer", { task: "Synthesize verified research into narrative beats." }),
+			transitions: { DONE: "visual-review" },
 		},
-		{
-			id: "narrative-plan",
-			type: "agent",
-			agent: "deck-narrative-synthesizer",
-			status: "done",
-			reads: ["research-plan", "source-research"],
-			taskPrompt: "Synthesize verified research into narrative beats with evidence refs.",
-			transitions: [{ event: "NARRATIVE_READY", target: "chapter-production" }],
+		"visual-review": {
+			kind: "state",
+			action: agent("deck-vision-scout", { task: "Check visual consistency, unsupported numbers, and data references." }),
+			transitions: { DONE: "approval" },
 		},
-		{
-			id: "chapter-production",
-			type: "map",
-			status: "running",
-			concurrency: 3,
-			mapConfig: {
-				over: "narrative-plan.chapters",
-				as: "chapter",
-				items: [
-					{
-						key: "sec-platform",
-						label: "Platform numbers",
-						status: "done",
-						summary: "Cloud, Gemini, Android, AI Overviews scale.",
-					},
-					{
-						key: "sec-products",
-						label: "Product announcements",
-						status: "running",
-						summary: "Gemini app, agents, Android XR.",
-					},
-					{
-						key: "sec-recommendations",
-						label: "Recommendations",
-						status: "pending",
-						summary: "What leaders should do next.",
-					},
-				],
-			},
-			subProgress: { done: 1, running: 1, failed: 0, total: 3 },
-			transitions: [{ event: "MAP_DONE", target: "visual-review" }],
+		approval: {
+			kind: "state",
+			action: user({ prompt: "Approve the verified report for rendering." }),
+			transitions: { APPROVED: "render-report" },
 		},
-		{
-			id: "chapter-production#sec-platform.write-copy",
-			type: "agent",
-			agent: "deck-chapter-author",
-			status: "done",
-			mapKey: "sec-platform",
-			reads: ["narrative-plan"],
-			visits: 1,
+		"render-report": {
+			kind: "state",
+			action: script("node", ["scripts/render-report.mjs", "--format", "html"]),
+			transitions: { DONE: "done" },
 		},
-		{
-			id: "chapter-production#sec-products.design-elements",
-			type: "agent",
-			agent: "deck-interaction-designer",
-			status: "running",
-			mapKey: "sec-products",
-			model: "openrouter/z-ai/glm-5.2",
-		},
-		{
-			id: "visual-review",
-			type: "agent",
-			agent: "deck-vision-scout",
-			status: "pending",
-			taskPreview: "Check visual consistency, unsupported numbers, and data refs.",
-			retry: { max: 1 },
-		},
-		{
-			id: "render-report",
-			type: "script",
-			status: "pending",
-			commandPreview: "python3 render_report.py",
-			artifacts: [{ name: "html", path: "dist/report.html" }],
-		},
-		{
-			id: "done",
-			type: "final",
-			status: "pending",
-			final: true,
-		},
-	],
-};
+		done: final(),
+	},
+});
 
-export const failedRun: HyperchartRunInfo = {
-	...runningRun,
-	runId: "deck-director-20260706-234626",
-	status: "failed",
-	updatedAt: now - 2_400_000,
-	states: runningRun.states.map((state) =>
-		state.id === "visual-review"
-			? {
-					...state,
-					status: "failed",
-				}
-			: state.id === "chapter-production"
-				? { ...state, status: "done", subProgress: { done: 3, running: 0, failed: 0, total: 3 } }
-				: state,
-	),
-};
+const inspectorDialogScenario = storyScenario(inspectorDialogChart, "storybook:inspector-dialog");
+export const inspectorDialogAst = inspectorDialogScenario.ast;
+export const inspectorDialogInspectResult = inspectorDialogScenario.inspect;
 
-const { pid: _runningPid, ...runningRunWithoutPid } = runningRun;
+function timestamp(seqId: number): number {
+	return STARTED_AT + seqId * 1_000;
+}
 
-export const inspectRun: HyperchartRunInfo = {
-	...runningRunWithoutPid,
-	runId: "inspect:deck-director",
-	status: "paused",
-	updatedAt: now,
-	states: runningRun.states.map((state) => {
-		const { subProgress, ...rest } = state;
+function actionRecord(
+	statePath: string,
+	kind: "invoke" | "complete",
+	seqId: number,
+	event?: string,
+): DurableLogRecord {
+	const state = inspectorDialogAst.states[statePath];
+	if (state?.kind !== "state") throw new Error(`expected action state at ${statePath}`);
+	const session = {
+		parentId: seqId === 1 ? null : seqId - 1,
+		seqId,
+		timestamp: timestamp(seqId),
+	};
+	if (kind === "invoke") {
 		return {
-			...rest,
-			status: state.final ? "done" : "pending",
-			...(state.type === "map"
-				? { subProgress: { done: 0, running: 0, failed: 0, total: 3 } }
-				: subProgress === undefined
-					? {}
-					: { subProgress }),
+			type: "state_action",
+			kind: "invoke",
+			actionUid: state.action.uid,
+			definition: state.action,
+			...session,
 		};
-	}),
+	}
+	if (event === undefined) throw new Error(`completion event is required for ${statePath}`);
+	return {
+		type: "state_action",
+		kind: "complete",
+		actionUid: state.action.uid,
+		event: { type: event },
+		...session,
+	};
+}
+
+const commonRecords: DurableLogRecord[] = [
+	{ type: "args", args, parentId: null, seqId: 1, timestamp: timestamp(1) },
+	actionRecord("research-plan", "invoke", 2),
+	actionRecord("research-plan", "complete", 3, "DONE"),
+	actionRecord("source-research", "invoke", 4),
+	actionRecord("source-research", "complete", 5, "DONE"),
+	actionRecord("narrative-plan", "invoke", 6),
+	actionRecord("narrative-plan", "complete", 7, "DONE"),
+];
+
+/** Durable facts for an active run currently executing visual-review. */
+export const runningRunRecords: DurableLogRecord[] = [
+	...commonRecords,
+	actionRecord("visual-review", "invoke", 8),
+];
+
+/** Durable prefix paused at an explicit user-input boundary. */
+export const blockedRunRecords: DurableLogRecord[] = [
+	...runningRunRecords,
+	actionRecord("visual-review", "complete", 9, "DONE"),
+	actionRecord("approval", "invoke", 10),
+];
+
+/** Complete production-shaped execution through the authored final state. */
+export const completedRunRecords: DurableLogRecord[] = [
+	...blockedRunRecords,
+	actionRecord("approval", "complete", 11, "APPROVED"),
+	actionRecord("render-report", "invoke", 12),
+	actionRecord("render-report", "complete", 13, "DONE"),
+];
+
+/** The same active history followed by production-shaped fail-fast intent and cancellation quiescence. */
+const visualReview = inspectorDialogAst.states["visual-review"];
+if (visualReview?.kind !== "state") throw new Error("expected visual-review action state");
+const visualReviewCancellationTarget = {
+	kind: "action" as const,
+	actionUid: visualReview.action.uid,
+	phase: "running" as const,
 };
+const visualReviewCancellationRequestId = "storybook:failure-cancel:visual-review";
+
+export const failedRunRecords: DurableLogRecord[] = [
+	...runningRunRecords,
+	{
+		type: "failure_intent",
+		origin: "visual-review",
+		error: "Visual validation rejected unsupported evidence.",
+		parentId: 8,
+		seqId: 9,
+		timestamp: timestamp(9),
+	},
+	{
+		type: "cancellation",
+		kind: "requested",
+		requestId: visualReviewCancellationRequestId,
+		target: visualReviewCancellationTarget,
+		parentId: 9,
+		seqId: 10,
+		timestamp: timestamp(10),
+	},
+	{
+		type: "cancellation",
+		kind: "acknowledged",
+		requestId: visualReviewCancellationRequestId,
+		target: visualReviewCancellationTarget,
+		parentId: 10,
+		seqId: 11,
+		timestamp: timestamp(11),
+	},
+];
+
+export const inspectRun = inspectorDialogScenario.staticRun({
+	runId: "inspect:deck-director",
+	cwd: "/Users/demo/Work/pi-hyperchart",
+	createdAt: FIXTURE_NOW,
+	updatedAt: FIXTURE_NOW,
+});
+
+export const runningRun = inspectorDialogScenario.runtimeRun(
+	runningRunRecords,
+	{
+		runId: "deck-director-20260707-224500",
+		status: {
+			runId: "deck-director-20260707-224500",
+			chartId: inspectorDialogAst.id,
+			state: "running",
+			pid: 42420,
+			startedAt: STARTED_AT,
+			updatedAt: timestamp(8),
+		},
+		cwd: "/Users/demo/Work/pi-hyperchart",
+		createdAt: STARTED_AT,
+		updatedAt: timestamp(8),
+		description: "Google I/O 2026 announcement narrative deck",
+	},
+);
+
+export const blockedRun = inspectorDialogScenario.runtimeRun(
+	blockedRunRecords,
+	{
+		runId: "deck-director-approval-blocked",
+		status: { runId: "deck-director-approval-blocked", chartId: inspectorDialogAst.id, state: "running", startedAt: STARTED_AT, updatedAt: timestamp(10) },
+		cwd: "/Users/demo/Work/pi-hyperchart",
+		createdAt: STARTED_AT,
+		updatedAt: timestamp(10),
+	},
+);
+
+export const completedRun = inspectorDialogScenario.runtimeRun(
+	completedRunRecords,
+	{
+		runId: "deck-director-completed",
+		status: { runId: "deck-director-completed", chartId: inspectorDialogAst.id, state: "complete", startedAt: STARTED_AT, updatedAt: timestamp(13) },
+		cwd: "/Users/demo/Work/pi-hyperchart",
+		createdAt: STARTED_AT,
+		updatedAt: timestamp(13),
+	},
+);
+
+export const failedRun = inspectorDialogScenario.runtimeRun(
+	failedRunRecords,
+	{
+		runId: "deck-director-20260706-234626",
+		status: {
+			runId: "deck-director-20260706-234626",
+			chartId: inspectorDialogAst.id,
+			state: "failed",
+			startedAt: STARTED_AT,
+			updatedAt: timestamp(11),
+		},
+		cwd: "/Users/demo/Work/pi-hyperchart",
+		createdAt: STARTED_AT,
+		updatedAt: timestamp(11),
+		description: "Google I/O 2026 announcement narrative deck",
+	},
+);
 
 export const allRuns = [runningRun, failedRun, inspectRun];
+export const allRunStripRuns = [runningRun, completedRun, blockedRun, failedRun, inspectRun];

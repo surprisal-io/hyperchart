@@ -3,7 +3,8 @@ import { BoardPage } from "./components/index.js";
 import { TuiTerminalPreview } from "./tui/TuiTerminalPreview.js";
 
 const meta = {
-	title: "Hyperchart/TUI/Examples/Minimal Run Picker",
+	title: "Hyperchart/TUI/Run Picker",
+	id: "hyperchart-tui-examples-minimal-run-picker",
 	component: TuiTerminalPreview,
 	parameters: {
 		layout: "fullscreen",

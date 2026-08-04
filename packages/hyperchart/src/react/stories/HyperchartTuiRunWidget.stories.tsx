@@ -4,7 +4,8 @@ import { BoardPage, BoardSection } from "./components/index.js";
 import { TuiTerminalPreview } from "./tui/TuiTerminalPreview.js";
 
 const meta = {
-	title: "Hyperchart/TUI/Components/Run Widget",
+	title: "Hyperchart/TUI/Run Widget",
+	id: "hyperchart-tui-components-run-widget",
 	component: TuiTerminalPreview,
 	parameters: {
 		layout: "fullscreen",
