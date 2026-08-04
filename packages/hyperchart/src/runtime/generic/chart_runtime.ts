@@ -3,6 +3,7 @@ import type { ChartAst, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { Effect, MachineEvent, RejectedEffect } from "../../core/machine.js";
+import { actorContextForState } from "../../core/actors.js";
 import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -11,6 +12,7 @@ import type { UserExecutor } from "./user_executor.js";
 import type { LogStore } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
+import { checkSchemaAsync } from "./schema.js";
 
 export type ChartRuntimeOptions = {
 	ast: ChartAst;
@@ -28,6 +30,9 @@ export type ChartRuntimeOptions = {
 export class ChartRuntime implements Runtime {
 	private readonly queue: AsyncQueue<MachineEvent> = createAsyncQueue<MachineEvent>();
 	private readonly timers = new Map<string, NodeJS.Timeout>();
+	private readonly cancelledActorEffects = new Set<string>();
+	private readonly actorEffectQuiescence = new Map<string, Promise<void>>();
+	private readonly cancellationAcknowledgements = new Map<string, Promise<void>>();
 	private readonly scripts: ScriptRunner;
 	private readonly now: () => number;
 	private readonly onWarn: (msg: string) => void;
@@ -47,6 +52,46 @@ export class ChartRuntime implements Runtime {
 				case "durable_records":
 					this.options.logStore.append(effect.records);
 					this.queue.send({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+					break;
+				case "actor_create":
+					this.trackActorEffect(effect.id, checkSchemaAsync(effect.declaration.input, effect.input, this.options.schemaRegistry).then((check) => {
+						if (this.cancelledActorEffects.has(effect.id)) return;
+						this.queue.send({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: "create",
+							ok: check.ok,
+							...(check.ok ? {} : { error: `Actor input does not match exact placement schema: ${check.errors.join("; ")}` }),
+						});
+					}));
+					break;
+				case "actor_enqueue":
+					this.trackActorEffect(effect.id, Promise.all(effect.messages.map((message) => checkSchemaAsync(effect.schema, message.input, this.options.schemaRegistry))).then((checks) => {
+						if (this.cancelledActorEffects.has(effect.id)) return;
+						const errors = checks.flatMap((check, index) => check.ok ? [] : check.errors.map((error) => `inputs[${index}]: ${error}`));
+						this.queue.send({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: "enqueue",
+							ok: errors.length === 0,
+							...(errors.length === 0 ? {} : { error: `Atomic actor batch validation failed: ${errors.join("; ")}` }),
+						});
+					}));
+					break;
+				case "actor_reply":
+					this.trackActorEffect(effect.id, (effect.schema === undefined
+						? Promise.resolve({ ok: true } as const)
+						: checkSchemaAsync(effect.schema, effect.output, this.options.schemaRegistry)
+					).then((check) => {
+						if (this.cancelledActorEffects.has(effect.id)) return;
+						this.queue.send({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: "reply",
+							ok: check.ok,
+							...(check.ok ? {} : { error: `Actor reply does not match exact protocol schema: ${check.errors.join("; ")}` }),
+						});
+					}));
 					break;
 				case "agent":
 					this.options.agentExecutor.start(effect, (event) => {
@@ -90,11 +135,38 @@ export class ChartRuntime implements Runtime {
 					this.timers.set(effect.id, timer);
 					break;
 				}
-				case "cancel":
-					this.options.agentExecutor.cancel(effect.actionUid);
-					this.options.userExecutor?.cancel(effect.actionUid);
-					this.scripts.cancel(effect.actionUid);
+				case "cancel": {
+					const quiescence: Promise<void>[] = [];
+					if (effect.actionUid !== undefined) {
+						quiescence.push(this.options.agentExecutor.cancel(effect.actionUid));
+						if (this.options.userExecutor !== undefined) quiescence.push(this.options.userExecutor.cancel(effect.actionUid));
+						quiescence.push(this.scripts.cancel(effect.actionUid));
+					}
+					if (effect.target?.kind === "actor_effect") {
+						this.cancelledActorEffects.add(effect.target.effectId);
+						const actorEffect = this.actorEffectQuiescence.get(effect.target.effectId);
+						if (actorEffect !== undefined) quiescence.push(actorEffect);
+					}
+					if (effect.requestId !== undefined && effect.target !== undefined) {
+						for (const timer of this.timers.values()) clearTimeout(timer);
+						this.timers.clear();
+						const existing = this.cancellationAcknowledgements.get(effect.requestId);
+						if (existing === undefined) {
+							const acknowledgement = Promise.all(quiescence).then(() => {
+								this.queue.send({
+									kind: "cancellation_acknowledged",
+									effectId: effect.id,
+									requestId: effect.requestId!,
+									target: effect.target!,
+								});
+							}).catch((error: unknown) => {
+								this.onWarn(`Cancellation ${effect.requestId} did not quiesce: ${errorMessage(error)}`);
+							});
+							this.cancellationAcknowledgements.set(effect.requestId, acknowledgement);
+						}
+					}
 					break;
+				}
 				case "user":
 					if (this.options.userExecutor === undefined) {
 						throw new Error("ChartRuntime requires a userExecutor to execute user actions");
@@ -105,6 +177,13 @@ export class ChartRuntime implements Runtime {
 					break;
 			}
 		}
+	}
+
+	private trackActorEffect(effectId: string, task: Promise<void>): void {
+		this.actorEffectQuiescence.set(effectId, task);
+		void task.finally(() => {
+			if (this.actorEffectQuiescence.get(effectId) === task) this.actorEffectQuiescence.delete(effectId);
+		});
 	}
 
 	eventsQueue(): AsyncIterable<MachineEvent> {
@@ -131,8 +210,10 @@ export class ChartRuntime implements Runtime {
 	}
 
 	private dispatchRejected(effect: RejectedEffect): void {
-		const state = nodeAt(this.options.ast, effect.actionUid.state);
-		if (state?.kind !== "state") {
+		const mainState = nodeAt(this.options.ast, effect.actionUid.state);
+		const actorState = actorContextForState(this.options.ast, effect.actionUid.state)?.node;
+		const state = mainState?.kind === "state" ? mainState : actorState?.kind === "state" ? actorState : undefined;
+		if (state === undefined) {
 			this.queue.send({
 				kind: "agent",
 				effectId: effect.id,

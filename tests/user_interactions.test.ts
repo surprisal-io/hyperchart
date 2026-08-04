@@ -307,7 +307,7 @@ describe("user interaction mailbox", () => {
 
 		const canceling = new FileUserExecutor({ runId: "run-a", runDir, pollMs: 1_000 });
 		canceling.start({ ...invocation, id: "private-effect-2", seqId: 2 }, () => undefined);
-		canceling.cancel(uid);
+		await canceling.cancel(uid);
 		expect(readUserInteractionClose(runDir, 2)?.reason).toBe("machine_abandoned");
 		await canceling.dispose();
 

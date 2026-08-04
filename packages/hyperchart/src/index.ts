@@ -1,6 +1,26 @@
 export type {
 	ActionEvent,
 	ActionUID,
+	ActorDeclarationAst,
+	ActorDefinitionCst,
+	ActorWorkflowStateAst,
+	ActorWorkflowStateCst,
+	AnyStaticActorDeclaration,
+	StaticActorDeclaration,
+	ProtocolAst,
+	ProtocolCst,
+	ProtocolMessageAst,
+	ProtocolMessageCst,
+	ReceiveStateAst,
+	ReceiveStateCst,
+	SendStateAst,
+	SendStateCst,
+	CallStateAst,
+	CallStateCst,
+	ReplyStateAst,
+	ReplyStateCst,
+	ValueAst,
+	ValueExpr,
 	ActionStateAst,
 	ActionStateCst,
 	AfterCst,
@@ -66,13 +86,36 @@ export type {
 	UserActionAst,
 	UserActionCst,
 } from "./core/types.js";
-export type { TerminalOptions } from "./core/dsl.js";
+export type {
+	TerminalOptions,
+	ActorTemplate,
+	MessageTypes,
+	MessageInput,
+	ReplyEvents,
+	ReplyOutput,
+	ReplyUnion,
+} from "./core/dsl.js";
 
 export {
 	chart,
+	actor,
+	protocol,
+	message,
+	receive,
+	send,
+	call,
+	reply,
+	actorInput,
+	messageInput,
 	agent,
 	compound,
 	artifact,
+	artifactOf,
+	joinArtifactOf,
+	arg,
+	result,
+	key,
+	item,
 	event,
 	failed,
 	final,
@@ -90,6 +133,7 @@ export {
 } from "./core/dsl.js";
 
 export { loop, start } from "./core/execution_loop.js";
+export type { Runtime } from "./runtime/runtime.js";
 // zod is part of the authoring surface (schema values in reply/artifact shapes): re-exported so
 // charts depend on one package only.
 export { z } from "zod";
@@ -120,6 +164,11 @@ export type {
 } from "./core/inspect.js";
 export type {
 	ActionEffect,
+	ActorEffect,
+	ActorCreateEffect,
+	ActorEnqueueEffect,
+	ActorReplyEffect,
+	ActorEffectMachineEvent,
 	AgentEffect,
 	AgentMachineEvent,
 	CancelEffect,
@@ -147,11 +196,26 @@ export type {
 	UserEffect,
 	UserMachineEvent,
 } from "./core/machine.js";
-export type { DurableLogRecord, StateActionInvokeLog } from "./core/durable_events.js";
+export type {
+	ActorLogRecord,
+	ActorMessageEnvelope,
+	DurableLogRecord,
+	StateActionInvokeLog,
+	FailureIntentLog,
+	CancellationRequestedLog,
+	CancellationAcknowledgedLog,
+} from "./core/durable_events.js";
 export { explainReplay } from "./core/replay_check.js";
 export type { ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord, ReplayStaleRecord } from "./core/replay_check.js";
 export { createBranchProjection, isFinalState, projectBranch } from "./core/projection.js";
-export type { BranchProjection, PendingAction, ProjectionSkippedRecord } from "./core/projection.js";
+export type {
+	BranchProjection,
+	PendingAction,
+	PendingActorCall,
+	ProjectedActorMessage,
+	ProjectedActorOccurrence,
+	ProjectionSkippedRecord,
+} from "./core/projection.js";
 export { createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";
 export type { AsyncQueue, MaybeAsyncIterable } from "./utils/index.js";

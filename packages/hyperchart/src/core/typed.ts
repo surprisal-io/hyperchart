@@ -41,7 +41,9 @@ export type ResultsOf<C> = C extends { states: infer S }
 				FlattenStates<S> extends infer E
 					? E extends [infer P extends string, { action: { reply: infer R } }]
 						? { [K in P]: InferSpec<R> }
-						: never
+						: E extends [infer P extends string, { kind: "call"; __result?: infer R }]
+							? { [K in P]: R }
+							: never
 					: never
 			> &
 				NonNullable<unknown> // intersection identity for the no-entries case

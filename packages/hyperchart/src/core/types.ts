@@ -46,6 +46,24 @@ export type AuthoringDiagnostic = {
 // (AST, log, hashes) while a zod instance never enters serialized data.
 export type SchemaCst = ZodType;
 
+/** A protocol message always has one input contract and exactly one reply shape. */
+export type ProtocolMessageCst =
+	| { input: SchemaCst; reply?: never; replies?: never }
+	| { input: SchemaCst; reply: SchemaCst; replies?: never }
+	| { input: SchemaCst; reply?: never; replies: Record<string, SchemaCst> };
+
+export type ProtocolCst = Readonly<Record<string, ProtocolMessageCst>>;
+
+export type ProtocolMessageAst = Readonly<{
+	input: SchemaAst;
+	reply:
+		| Readonly<{ kind: "void" }>
+		| Readonly<{ kind: "single"; schema: SchemaAst }>
+		| Readonly<{ kind: "named"; schemas: Readonly<Record<string, SchemaAst>> }>;
+}>;
+
+export type ProtocolAst = Readonly<Record<string, ProtocolMessageAst>>;
+
 export type SchemaAst = Readonly<{
 	kind: "jsonSchema";
 	schema: Readonly<JsonSchema>;
@@ -242,6 +260,15 @@ export type InputRef<V = unknown> = (
 			kind: "visit";
 			state?: StatePath;
 	  }
+	| {
+			kind: "actorInput";
+			path?: string;
+	  }
+	| {
+			kind: "messageInput";
+			message: string;
+			path?: string;
+	  }
 ) & {
 	// Set by json(): the value is embedded as JSON text. Without it the renderer admits only
 	// primitives — the runtime twin of the static rule enforced by t().
@@ -262,6 +289,23 @@ export type TemplateCst = {
 // Anywhere a template is accepted, a plain string is too (a template with no refs).
 export type Templatable = string | TemplateCst;
 
+/**
+ * Immutable data assembled at an effect boundary. InputRef leaves are resolved from durable
+ * facts; arrays/objects preserve their authored shape. Actor declarations are deliberately not
+ * part of this union, so a capability cannot be smuggled through runtime data.
+ */
+export type ValueExpr<T = unknown> =
+	| InputRef<T>
+	| (T extends JsonPrimitive ? T : JsonPrimitive)
+	| { readonly [key: string]: ValueExpr }
+	| readonly ValueExpr[];
+
+export type ValueAst =
+	| JsonPrimitive
+	| InputRef
+	| Readonly<{ readonly [key: string]: ValueAst }>
+	| readonly ValueAst[];
+
 export type TemplateAst = Readonly<{
 	kind: "template";
 	strings: readonly string[];
@@ -280,9 +324,9 @@ export type ActionStateCst = {
 	validate?: GuardRef;
 	onReject?: OnReject;
 	onReenter?: OnReenterCst;
-	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection is
-	// terminal — the claim turns into a FAILED transition (a FAILED route must exist, possibly on
-	// an ancestor) and the abandoned session is cancelled. Requires validate; omitted = unbounded.
+	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection
+	// records global failure intent and enters cancellation quiescence. Requires validate;
+	// omitted = unbounded.
 	retries?: number;
 };
 
@@ -305,7 +349,12 @@ export type FinalStateCst = {
 // transitions catch events its descendants leave unhandled (innermost-first); onDone is where the
 // chart goes when a direct final child is reached — required if it has one. All targets, here and
 // in children, resolve among the siblings of the level where they are declared.
-export type CompoundStateCst = {
+export type ActorOwnerCst = {
+	/** Static declarations owned by this lexical scope. There is intentionally no defineActors(). */
+	actors?: Record<string, AnyStaticActorDeclaration>;
+};
+
+export type CompoundStateCst = ActorOwnerCst & {
 	kind: "compound";
 	initial: StateId;
 	states: Record<StateId, StateCst>;
@@ -317,7 +366,7 @@ export type CompoundStateCst = {
 // inside a region marks that region complete (regions must not declare onDone); when every
 // region is complete the parallel exits through its own onDone. An event bubbling past a region
 // to the parallel (or above) exits all regions at once, abandoning their running actions.
-export type ParallelStateCst = {
+export type ParallelStateCst = ActorOwnerCst & {
 	kind: "parallel";
 	states: Record<StateId, StateCst>;
 	transitions?: TransitionMapCst;
@@ -329,7 +378,7 @@ export type ParallelStateCst = {
 // fact — the instance's input is frozen at birth (its future actor args). An instance completes
 // by reaching a final child; when all instances complete the map exits through onDone. The map's
 // own transitions catch what instances leave unhandled — exiting ALL instances (abort).
-export type MapStateCst = {
+export type MapStateCst = ActorOwnerCst & {
 	kind: "map";
 	input?: Record<string, SchemaCst>;
 	over: InputRef;
@@ -342,9 +391,77 @@ export type MapStateCst = {
 	onDone?: StateId;
 };
 
-export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst | ParallelStateCst | MapStateCst;
+export type ReceiveStateCst = {
+	kind: "receive";
+	on: Record<string, StateId>;
+};
 
-export type ChartCst = {
+export type SendStateCst = {
+	kind: "send";
+	to: AnyStaticActorDeclaration;
+	event: string;
+	target: StateId;
+	input?: ValueExpr;
+	inputs?: ValueExpr;
+};
+
+export type CallStateCst = {
+	kind: "call";
+	to: AnyStaticActorDeclaration;
+	event: string;
+	input: ValueExpr;
+	target?: StateId;
+	transitions?: TransitionMapCst;
+};
+
+export type ReplyStateCst = {
+	kind: "reply";
+	target: StateId;
+	event?: string;
+	output?: ValueExpr;
+};
+
+export type ActorWorkflowStateCst =
+	| ActionStateCst
+	| ReceiveStateCst
+	| SendStateCst
+	| CallStateCst
+	| ReplyStateCst;
+
+export type ActorDefinitionCst = {
+	kind: "actorTemplate";
+	input: SchemaCst;
+	protocol: ProtocolCst;
+	initial: StateId;
+	states: Record<StateId, ActorWorkflowStateCst>;
+};
+
+/** Runtime shape returned by actor template invocation; public typing is carried by phantoms. */
+export type StaticActorDeclaration<
+	P extends ProtocolCst = ProtocolCst,
+	I = unknown,
+	Brand = unknown,
+> = {
+	readonly kind: "actorDeclaration";
+	readonly definition: ActorDefinitionCst;
+	readonly input: ValueExpr<I>;
+	readonly __protocol?: P;
+	readonly __actorInput?: I;
+	readonly __declarationBrand?: Brand;
+};
+
+export type AnyStaticActorDeclaration = StaticActorDeclaration<ProtocolCst, unknown, unknown>;
+
+export type StateCst =
+	| ActionStateCst
+	| FinalStateCst
+	| CompoundStateCst
+	| ParallelStateCst
+	| MapStateCst
+	| SendStateCst
+	| CallStateCst;
+
+export type ChartCst = ActorOwnerCst & {
 	kind: "chart";
 	id: string;
 	/** Optional serializable metadata for host launch forms; not runtime validation. */
@@ -459,6 +576,67 @@ export type ParallelStateAst = Readonly<{
 	onDone: StateId;
 }>;
 
+export type ReceiveStateAst = Readonly<{
+	kind: "receive";
+	id: StateId;
+	parent: StatePath;
+	on: Readonly<Record<string, StateId>>;
+}>;
+
+export type SendStateAst = Readonly<{
+	kind: "send";
+	id: StateId;
+	parent?: StatePath;
+	to: StatePath;
+	event: string;
+	target: StateId;
+	/** Empty; present so generic control-flow inspection can treat send as a state node. */
+	transitions: Readonly<Record<EventType, TransitionAst>>;
+	input?: ValueAst;
+	inputs?: ValueAst;
+}>;
+
+export type CallStateAst = Readonly<{
+	kind: "call";
+	id: StateId;
+	parent?: StatePath;
+	to: StatePath;
+	event: string;
+	input: ValueAst;
+	target?: StateId;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
+}>;
+
+export type ReplyStateAst = Readonly<{
+	kind: "reply";
+	id: StateId;
+	parent: StatePath;
+	target: StateId;
+	message: string;
+	event?: string;
+	output?: ValueAst;
+}>;
+
+export type ActorWorkflowStateAst =
+	| ActionStateAst
+	| ReceiveStateAst
+	| SendStateAst
+	| CallStateAst
+	| ReplyStateAst;
+
+export type ActorDeclarationAst = Readonly<{
+	kind: "actor";
+	name: string;
+	path: StatePath;
+	owner?: StatePath;
+	input: SchemaAst;
+	inputValue: ValueAst;
+	protocol: ProtocolAst;
+	initial: StateId;
+	/** Flat actor-local graph keyed by paths relative to this declaration. */
+	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>;
+}>;
+
 export type MapStateAst = Readonly<{
 	kind: "map";
 	id: StateId;
@@ -478,7 +656,9 @@ export type StateAst =
 	| CompoundStateAst
 	| RegionStateAst
 	| ParallelStateAst
-	| MapStateAst;
+	| MapStateAst
+	| SendStateAst
+	| CallStateAst;
 
 export type ChartAst = Readonly<{
 	kind: "chart";
@@ -487,6 +667,7 @@ export type ChartAst = Readonly<{
 	initial: StateId;
 	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).
 	states: Readonly<Record<StatePath, StateAst>>;
+	actors: Readonly<Record<StatePath, ActorDeclarationAst>>;
 }>;
 
 export type ActionEvent = {

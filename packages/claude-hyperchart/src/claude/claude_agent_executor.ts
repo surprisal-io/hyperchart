@@ -85,6 +85,8 @@ type LiveAgent = {
 
 export class ClaudeAgentExecutor implements AgentExecutor {
 	private readonly live = new Map<string, LiveAgent>();
+	private readonly runs = new Map<string, Map<number, Promise<void>>>();
+	private readonly cancellations = new Map<string, Promise<void>>();
 	private readonly generations = new GenerationTracker();
 	private readonly definitionDirs: string[];
 	private readonly maxFinishRetries: number;
@@ -99,7 +101,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 	start(effect: AgentEffect, emit: EmitCompletion): void {
 		const key = actionUidKey(effect.actionUid);
 		const generation = this.generations.next(key);
-		void this.run(
+		this.launch(key, generation, this.run(
 			effect,
 			emit,
 			{
@@ -112,7 +114,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		).catch((error: unknown) => {
 			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
-		});
+		}));
 	}
 
 	reject(effect: RejectedEffect, emit: EmitCompletion): void {
@@ -137,10 +139,10 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			effect.onReject === "restart"
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
 				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
-		void this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
+		this.launch(key, generation, this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
 			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect, errorMessage(error));
 			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
-		});
+		}));
 	}
 
 	async steer(actionKey: string, message: string): Promise<boolean> {
@@ -150,15 +152,31 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		return true;
 	}
 
-	cancel(actionUid: ActionUID): void {
+	cancel(actionUid: ActionUID): Promise<void> {
 		const key = actionUidKey(actionUid);
+		const existing = this.cancellations.get(key);
+		if (existing !== undefined) return existing;
 		const generation = this.generations.current(key);
-		if (generation !== undefined) this.generations.markCancelled(key, generation);
+		if (generation === undefined) return Promise.resolve();
+		this.generations.markCancelled(key, generation);
 		const live = this.live.get(key);
-		if (live === undefined) return;
-		this.live.delete(key);
-		this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
-		live.session.abort();
+		if (live !== undefined) {
+			this.live.delete(key);
+			this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
+			live.session.abort();
+		}
+		const run = this.runs.get(key)?.get(generation);
+		const cancellation = (async () => {
+			if (live !== undefined) await live.session.settled();
+			await run;
+		})();
+		this.cancellations.set(key, cancellation);
+		void cancellation.then(() => {
+			if (this.cancellations.get(key) === cancellation) this.cancellations.delete(key);
+		}, () => {
+			if (this.cancellations.get(key) === cancellation) this.cancellations.delete(key);
+		});
+		return cancellation;
 	}
 
 	async dispose(): Promise<void> {
@@ -174,6 +192,22 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			}),
 		);
 		this.live.clear();
+	}
+
+	private launch(key: string, generation: number, run: Promise<void>): void {
+		let runs = this.runs.get(key);
+		if (runs === undefined) {
+			runs = new Map();
+			this.runs.set(key, runs);
+		}
+		const tracked = run.finally(() => {
+			const current = this.runs.get(key);
+			if (current?.get(generation) !== tracked) return;
+			current.delete(generation);
+			if (current.size === 0) this.runs.delete(key);
+		});
+		runs.set(generation, tracked);
+		void tracked;
 	}
 
 	private async run(

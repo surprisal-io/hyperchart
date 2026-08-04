@@ -48,10 +48,15 @@ Record kinds:
 | `state_action / complete` | completion event claimed by the action |
 | `state_action / validated` | validator reference and stored verdict for a completion claim |
 | `state_action / timer_fired` | deadline expired for an invocation |
+| `actor_created` | immutable actor occurrence input, generation, and definition provenance |
+| `actor_messages_enqueued` | one exact-validated atomic FIFO enqueue transaction plus send/call source provenance |
+| `actor_message`, `actor_call_resolved`, `actor_scope` | receive acceptance, validated reply/settlement, caller wake-up, closing/drain/stop |
+| `failure_intent` | first durable fact of reserved global fail-fast |
+| `cancellation / requested`, `cancellation / acknowledged` | quiescence handshake for each phase live at global failure |
 
-Transitions are deliberately absent. The projection reads the event and asks the current chart where it leads.
+Transitions are deliberately absent. The projection reads accepted facts and asks the current chart where control leads.
 
-Cancellation is a runtime effect derived from scope exit, deadline, terminal rejection, or stop. The durable cause is recorded where applicable—for example `timer_fired`—but there is no standalone cancellation record kind in the current log contract.
+Normal scope-exit and deadline cancellation is a best-effort runtime effect derived from its durable control-flow cause. Global failure is different: `failure_intent` blocks all successors, every live action/validation/actor effect/message/call receives a durable cancellation request, and the failed outcome is withheld until matching executor acknowledgements are durably projected. Agent, user, and script executors acknowledge only after asynchronous abort, polling/validation, and child-process termination have actually quiesced; repeated requests share the same in-flight cancellation.
 
 ## Why store facts instead of current state
 
@@ -220,3 +225,7 @@ tla/trace/validate.sh sample_chart.ts sample-run.jsonl
 - [Recovery and safety](safety.md)
 - [Architecture and TLA+](architecture.md)
 - [Host and React integration](integration.md)
+
+## Actor mailbox facts
+
+Explicit actors use the durable log as their only state. Creation, atomic enqueue, receive acceptance, reply validation, settlement/call wake-up, closing, drain, stop, failure intent, and cancellation acknowledgements are semantic facts. Replay never reads an actor snapshot. See [Explicit event-sourced actors](./explicit-actors.md).

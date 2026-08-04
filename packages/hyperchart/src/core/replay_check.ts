@@ -1,6 +1,7 @@
 import { actionUidKey } from "./action_uid.js";
 import type { DurableLogRecord } from "./durable_events.js";
-import { nodeAt } from "./paths.js";
+import { actorContextForState, actorGenerationPath, actorOccurrencePath } from "./actors.js";
+import { nodeAt, templatePath } from "./paths.js";
 import {
 	createBranchProjection,
 	projectBranch,
@@ -29,7 +30,13 @@ export type ReplayStaleRecord = Readonly<{
 	seqId: number;
 	record: DurableLogRecord;
 	state: StatePath;
-	reason: "action_definition_changed" | "guard_changed";
+	reason:
+		| "action_definition_changed"
+		| "guard_changed"
+		| "actor_definition_changed"
+		| "actor_placement_changed"
+		| "actor_message_source_changed"
+		| "actor_reply_contract_changed";
 	message: string;
 	invokeSeqId?: number;
 }>;
@@ -85,6 +92,38 @@ function staleRecordsFor(
 	index: number,
 	record: DurableLogRecord,
 ): ReplayStaleRecord[] {
+	if (record.type === "actor_created") {
+		const actor = ast.actors[record.declaration];
+		if (actor === undefined) return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor declaration ${record.declaration} was removed or moved` }];
+		const ownerMatches = (actor.owner === undefined) === (record.owner === undefined)
+			&& (actor.owner === undefined || (record.owner !== undefined && templatePath(record.owner) === actor.owner));
+		const expectedLogicalOccurrence = actorOccurrencePath(actor, record.owner);
+		if (!ownerMatches || record.logicalOccurrence !== expectedLogicalOccurrence || record.occurrence !== actorGenerationPath(expectedLogicalOccurrence, record.generation)) {
+			return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor owner, logical occurrence, occurrence, or generation placement changed for ${record.declaration}` }];
+		}
+		if (stableStringify(actor) === stableStringify(record.definition)) return [];
+		return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_definition_changed", message: `Actor definition or protocol for ${record.declaration} changed since creation seqId ${record.seqId}` }];
+	}
+	if (record.type === "actor_messages_enqueued") {
+		const current = actorContextForState(ast, record.source.producerState)?.node ?? nodeAt(ast, record.source.producerState);
+		const target = ast.actors[record.source.targetDeclaration];
+		const schema = target?.protocol[record.source.event]?.input;
+		const matches = (current?.kind === "send" || current?.kind === "call")
+			&& stableStringify(current) === stableStringify(record.source.definition)
+			&& current.kind === record.source.kind
+			&& current.to === record.source.targetDeclaration
+			&& current.event === record.source.event
+			&& stableStringify(schema) === stableStringify(record.source.inputSchema);
+		if (matches) return [];
+		return [{ index, seqId: record.seqId, record, state: record.source.producerState, reason: "actor_message_source_changed", message: `Actor ${record.source.kind} source, target, event, schema, or routing changed for ${record.source.producerState}` }];
+	}
+	if (record.type === "actor_message" && record.kind === "replied") {
+		const actor = Object.values(projection.actors).find((entry) => entry.occurrence === record.occurrence);
+		const contract = actor?.definition.protocol[record.message]?.reply;
+		const schema = contract?.kind === "single" ? contract.schema : contract?.kind === "named" && record.replyEvent !== undefined ? contract.schemas[record.replyEvent] : undefined;
+		if (stableStringify(schema) === stableStringify(record.schema)) return [];
+		return [{ index, seqId: record.seqId, record, state: record.occurrence, reason: "actor_reply_contract_changed", message: `Actor reply contract for ${record.occurrence}/${record.message} changed` }];
+	}
 	if (record.type !== "state_action") return [];
 	const state = record.actionUid.state;
 	if (!projection.activeLeaves.includes(state) && record.kind !== "validated") return [];
@@ -137,7 +176,17 @@ function brokenRecordFor(
 		error: error instanceof Error ? error.message : String(error),
 	};
 	if (record.type !== "state_action") {
-		return record.type === "spawned" ? { ...base, state: record.path } : base;
+		if (record.type === "spawned") return { ...base, state: record.path };
+		if (record.type === "actor_created") return { ...base, state: record.occurrence };
+		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope") return { ...base, state: record.occurrence };
+		if (record.type === "actor_call_resolved") return { ...base, state: record.callerState };
+		if (record.type === "failure_intent") return { ...base, state: record.origin };
+		if (record.type === "cancellation") {
+			const target = record.target;
+			const state = target.kind === "action" ? target.actionUid.state : target.kind === "actor_call" ? target.callerState : target.occurrence;
+			return { ...base, state };
+		}
+		return base;
 	}
 	const pending = projection.pendingActions.find((entry) => sameActionUid(entry.actionUid, record.actionUid));
 	const invokeSeqId =

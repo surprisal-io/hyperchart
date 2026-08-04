@@ -5,6 +5,9 @@ import { SchemaRegistry } from "./schema_registry.js";
 import type {
 	ActionStateAst,
 	ActionUID,
+	ActorDeclarationAst,
+	ActorWorkflowStateAst,
+	CallStateAst,
 	AgentActionAst,
 	AuthoringDiagnostic,
 	ChartArgumentAst,
@@ -26,8 +29,13 @@ import type {
 	SchemaAst,
 	ParallelStateAst,
 	ParsedChart,
+	ProtocolAst,
+	ProtocolMessageAst,
+	ReceiveStateAst,
 	RegionStateAst,
+	ReplyStateAst,
 	ScriptActionAst,
+	SendStateAst,
 	StateActionAst,
 	StateAst,
 	StateId,
@@ -36,6 +44,7 @@ import type {
 	TerminalNotificationAst,
 	TransitionAst,
 	UserActionAst,
+	ValueAst,
 } from "./types.js";
 
 const RESERVED_SYSTEM_EVENTS = new Set(["FAILED"]);
@@ -99,6 +108,21 @@ function toChartAst(
 	const chartId = typeof id === "string" ? id : "";
 	const args = toChartArguments(input.args, diagnostics, source);
 	const states: Record<StatePath, StateAst> = {};
+	const actors: Record<StatePath, ActorDeclarationAst> = {};
+	const actorTargets = new Map<object, StatePath>();
+	const rawActors: Array<{ declaration: Record<string, unknown>; name: string; path: StatePath; owner?: StatePath; pointer: string }> = [];
+	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
+	for (const placement of rawActors) {
+		const declaration = toActorDeclarationAst(
+			placement,
+			chartId,
+			actorTargets,
+			diagnostics,
+			source,
+			schemaRegistry,
+		);
+		if (declaration !== undefined) actors[placement.path] = declaration;
+	}
 	for (const [stateId, stateInput] of Object.entries(input.states)) {
 		collectState(
 			stateInput,
@@ -110,6 +134,9 @@ function toChartAst(
 			diagnostics,
 			source,
 			schemaRegistry,
+			"state",
+			actorTargets,
+			actors,
 		);
 	}
 
@@ -119,6 +146,8 @@ function toChartAst(
 		);
 	}
 	validateTargets(states, diagnostics, source);
+	validateActorTargets(states, actors, diagnostics, source);
+	validateActorCallCycles(actors, diagnostics, source);
 	const beforeCycles = diagnostics.length;
 	validateEnterCycles(states, diagnostics, source);
 	// Input and domination analysis walk the same enter-resolution chain (inputEntryTargets) and
@@ -126,6 +155,7 @@ function toChartAst(
 	if (diagnostics.length === beforeCycles) {
 		validateInputs(states, typeof initial === "string" ? initial : "", diagnostics, source);
 		validateDominatedRefs(states, typeof initial === "string" ? initial : "", diagnostics, source);
+		validateActorPlacementRefs(states, actors, typeof initial === "string" ? initial : "", diagnostics, source);
 	}
 
 	if (diagnostics.length > 0) return undefined;
@@ -135,6 +165,7 @@ function toChartAst(
 		...(args === undefined ? {} : { args }),
 		initial: typeof initial === "string" ? initial : "",
 		states,
+		actors,
 	});
 }
 
@@ -229,6 +260,513 @@ function toJsonValue(
 	return result;
 }
 
+type RawActorPlacement = {
+	declaration: Record<string, unknown>;
+	name: string;
+	path: StatePath;
+	owner?: StatePath;
+	pointer: string;
+};
+
+/** First pass: establish object-identity capabilities before any send/call is normalized. */
+function collectActorPlacements(
+	ownerInput: Record<string, unknown>,
+	ownerPath: StatePath | undefined,
+	pointer: string,
+	targets: Map<object, StatePath>,
+	placements: RawActorPlacement[],
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	legalOwner = true,
+): void {
+	if (ownerInput.actors !== undefined && !legalOwner) {
+		diagnostics.push(diagnostic("INVALID_ACTOR_OWNER", "actors may be placed only on chart, compound, parallel, or map owners.", `${pointer}/actors`, source));
+	}
+	if (ownerInput.actors !== undefined && legalOwner) {
+		if (!isRecord(ownerInput.actors)) {
+			diagnostics.push(diagnostic("INVALID_ACTORS", "actors must be an object of static actor declarations.", `${pointer}/actors`, source));
+		} else {
+			for (const [name, raw] of Object.entries(ownerInput.actors)) {
+				const actorPointer = `${pointer}/actors/${escapePointer(name)}`;
+				if (!STATE_ID_PATTERN.test(name)) {
+					diagnostics.push(diagnostic("INVALID_ACTOR_NAME", `Actor name '${name}' must match [A-Za-z0-9_-]+.`, actorPointer, source));
+					continue;
+				}
+				if (!isRecord(raw) || raw.kind !== "actorDeclaration") {
+					diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", `actors.${name} must be the result of invoking actor().`, actorPointer, source));
+					continue;
+				}
+				const path = ownerPath === undefined ? `@${name}` : `${ownerPath}.@${name}`;
+				const previous = targets.get(raw);
+				if (previous !== undefined) {
+					diagnostics.push(diagnostic("DUPLICATE_ACTOR_PLACEMENT", `The same actor declaration is placed at both '${previous}' and '${path}'. Invoke the template again for a second actor.`, actorPointer, source));
+					continue;
+				}
+				targets.set(raw, path);
+				placements.push({ declaration: raw, name, path, ...(ownerPath === undefined ? {} : { owner: ownerPath }), pointer: actorPointer });
+			}
+		}
+	}
+	if (!isRecord(ownerInput.states)) return;
+	for (const [childName, child] of Object.entries(ownerInput.states)) {
+		if (!isRecord(child)) continue;
+		const childPath = ownerPath === undefined ? childName : `${ownerPath}.${childName}`;
+		const childIsOwner = child.kind === "compound" || child.kind === "parallel" || child.kind === "map";
+		collectActorPlacements(child, childPath, `${pointer}/states/${escapePointer(childName)}`, targets, placements, diagnostics, source, childIsOwner);
+	}
+}
+
+function toActorDeclarationAst(
+	placement: RawActorPlacement,
+	chartId: string,
+	actorTargets: ReadonlyMap<object, StatePath>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	schemaRegistry: SchemaRegistry,
+): ActorDeclarationAst | undefined {
+	const definition = placement.declaration.definition;
+	if (!isRecord(definition) || definition.kind !== "actorTemplate") {
+		diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", "Actor declaration has no actor() template definition.", placement.pointer, source));
+		return undefined;
+	}
+	const input = toSchemaAst(definition.input, `${placement.pointer}/input`, diagnostics, source, schemaRegistry);
+	const inputValue = toValueAst(placement.declaration.input, `${placement.pointer}/placement`, diagnostics, source);
+	const protocol = toProtocolAst(definition.protocol, `${placement.pointer}/protocol`, diagnostics, source, schemaRegistry);
+	if (!isRecord(definition.states)) {
+		diagnostics.push(diagnostic("INVALID_ACTOR_STATES", "actor.states must be an object.", `${placement.pointer}/states`, source));
+		return undefined;
+	}
+	const initial = typeof definition.initial === "string" ? definition.initial : "";
+	if (initial.length === 0 || !(initial in definition.states)) {
+		diagnostics.push(diagnostic("UNKNOWN_INITIAL_STATE", `Actor '${placement.path}' must name an existing initial state.`, `${placement.pointer}/initial`, source));
+	}
+	const states: Record<StatePath, ActorWorkflowStateAst> = {};
+	for (const [id, raw] of Object.entries(definition.states)) {
+		const pointer = `${placement.pointer}/states/${escapePointer(id)}`;
+		if (!STATE_ID_PATTERN.test(id) || !isRecord(raw)) {
+			diagnostics.push(diagnostic("INVALID_ACTOR_STATE", `Actor state '${id}' is invalid.`, pointer, source));
+			continue;
+		}
+		const parent = placement.path;
+		if (raw.kind === "receive") {
+			if (!isRecord(raw.on) || Object.keys(raw.on).length === 0) {
+				diagnostics.push(diagnostic("INVALID_RECEIVE", "receive() requires a non-empty on map.", `${pointer}/on`, source));
+				continue;
+			}
+			const on: Record<string, string> = {};
+			for (const [event, target] of Object.entries(raw.on)) {
+				if (typeof target !== "string" || target.length === 0) {
+					diagnostics.push(diagnostic("INVALID_RECEIVE", `receive.${event} must target an actor state.`, `${pointer}/on/${escapePointer(event)}`, source));
+					continue;
+				}
+				on[event] = target;
+			}
+			states[id] = { kind: "receive", id, parent, on };
+			continue;
+		}
+		if (raw.kind === "send" || raw.kind === "call") {
+			const targetActor = isRecord(raw.to) ? actorTargets.get(raw.to) : undefined;
+			if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${raw.kind} in actor '${placement.path}' must target a placed static declaration.`, `${pointer}/to`, source));
+			const event = typeof raw.event === "string" ? raw.event : "";
+			if (raw.kind === "send") {
+				const hasInput = Object.hasOwn(raw, "input");
+				const hasInputs = Object.hasOwn(raw, "inputs");
+				if (hasInput === hasInputs) diagnostics.push(diagnostic("INVALID_SEND_INPUT", "send() requires exactly one of input or inputs.", pointer, source));
+				states[id] = {
+					kind: "send", id, parent, to: targetActor ?? "", event,
+					target: typeof raw.target === "string" ? raw.target : "", transitions: {},
+					...(hasInput
+						? { input: toValueAst(raw.input, `${pointer}/input`, diagnostics, source) ?? null }
+						: { inputs: toValueAst(raw.inputs, `${pointer}/inputs`, diagnostics, source) ?? [] }),
+				};
+				continue;
+			}
+			states[id] = {
+				kind: "call", id, parent, to: targetActor ?? "", event,
+				input: toValueAst(raw.input, `${pointer}/input`, diagnostics, source) ?? null,
+				...(typeof raw.target === "string" ? { target: raw.target } : {}),
+				transitions: toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {},
+			};
+			continue;
+		}
+		if (raw.kind === "reply") {
+			states[id] = {
+				kind: "reply", id, parent,
+				target: typeof raw.target === "string" ? raw.target : "",
+				message: "",
+				...(typeof raw.event === "string" ? { event: raw.event } : {}),
+				...(Object.hasOwn(raw, "output") ? { output: toValueAst(raw.output, `${pointer}/output`, diagnostics, source) ?? null } : {}),
+			};
+			continue;
+		}
+		if ("action" in raw) {
+			const action = toStateActionAst(raw.action, chartId, `${placement.path}.${id}`, `${pointer}/action`, diagnostics, source, schemaRegistry);
+			if (action === undefined) continue;
+			const transitions = toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
+			if ("FAILED" in transitions) diagnostics.push(diagnostic("RESERVED_FAILED_TRANSITION", "FAILED is globally fail-fast and cannot be routed inside an actor.", `${pointer}/transitions/FAILED`, source));
+			const stateInput = toInputDeclarations(raw.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
+			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
+			const validate = toGuardRef(raw.validate, `${pointer}/validate`, diagnostics, source, schemaRegistry);
+			states[id] = {
+				kind: "state", id, parent, action,
+				transitions,
+				...(stateInput === undefined ? {} : { input: stateInput }),
+				...(after === undefined ? {} : { after }),
+				...(validate === undefined ? {} : { validate, onReject: raw.onReject === "restart" ? "restart" : "resume" }),
+				...(typeof raw.retries === "number" ? { retries: raw.retries } : {}),
+			};
+			continue;
+		}
+		diagnostics.push(diagnostic("INVALID_ACTOR_STATE", "Actor states must use receive(), send(), call(), reply(), or an action state.", pointer, source));
+	}
+	const initialNode = states[initial];
+	if (initialNode !== undefined && initialNode.kind !== "receive") {
+		diagnostics.push(diagnostic("ACTOR_INITIAL_NOT_RECEIVE", `Actor '${placement.path}' must enter through an explicit receive() state.`, `${placement.pointer}/initial`, source));
+	}
+	const resolved = protocol === undefined ? states : inferAndValidateActorReplies(placement, states, protocol, actorTargets, diagnostics, source);
+	if (input !== undefined && protocol !== undefined) validateActorIsolation(placement, resolved, input, protocol, diagnostics, source);
+	if (input === undefined || inputValue === undefined || protocol === undefined) return undefined;
+	return deepFreeze({
+		kind: "actor",
+		name: placement.name,
+		path: placement.path,
+		...(placement.owner === undefined ? {} : { owner: placement.owner }),
+		input,
+		inputValue,
+		protocol,
+		initial,
+		states: resolved,
+	});
+}
+
+function toProtocolAst(
+	input: unknown,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	schemaRegistry: SchemaRegistry,
+): ProtocolAst | undefined {
+	if (!isRecord(input) || Object.keys(input).length === 0) {
+		diagnostics.push(diagnostic("INVALID_PROTOCOL", "protocol() requires at least one message.", pointer, source));
+		return undefined;
+	}
+	const protocol: Record<string, ProtocolMessageAst> = {};
+	for (const [event, raw] of Object.entries(input)) {
+		const path = `${pointer}/${escapePointer(event)}`;
+		if (!STATE_ID_PATTERN.test(event) || event === "FAILED" || !isRecord(raw)) {
+			diagnostics.push(diagnostic("INVALID_PROTOCOL_MESSAGE", `Protocol message '${event}' is invalid or reserved.`, path, source));
+			continue;
+		}
+		const messageInput = toSchemaAst(raw.input, `${path}/input`, diagnostics, source, schemaRegistry);
+		const hasReply = Object.hasOwn(raw, "reply");
+		const hasReplies = Object.hasOwn(raw, "replies");
+		if (hasReply && hasReplies) diagnostics.push(diagnostic("INVALID_REPLY_CONTRACT", "message() cannot declare both reply and replies.", path, source));
+		let reply: ProtocolMessageAst["reply"] = { kind: "void" };
+		if (hasReply) {
+			const schema = toSchemaAst(raw.reply, `${path}/reply`, diagnostics, source, schemaRegistry);
+			if (schema !== undefined) reply = { kind: "single", schema };
+		} else if (hasReplies) {
+			if (!isRecord(raw.replies) || Object.keys(raw.replies).length === 0) {
+				diagnostics.push(diagnostic("INVALID_REPLY_CONTRACT", "Named replies must be a non-empty schema map.", `${path}/replies`, source));
+			} else {
+				const schemas: Record<string, SchemaAst> = {};
+				for (const [name, schemaInput] of Object.entries(raw.replies)) {
+					if (!STATE_ID_PATTERN.test(name) || name === "FAILED") diagnostics.push(diagnostic("INVALID_REPLY_EVENT", `Reply event '${name}' is invalid or reserved.`, `${path}/replies/${escapePointer(name)}`, source));
+					const schema = toSchemaAst(schemaInput, `${path}/replies/${escapePointer(name)}`, diagnostics, source, schemaRegistry);
+					if (schema !== undefined) schemas[name] = schema;
+				}
+				reply = { kind: "named", schemas };
+			}
+		}
+		if (messageInput !== undefined) protocol[event] = { input: messageInput, reply };
+	}
+	return protocol;
+}
+
+function inferAndValidateActorReplies(
+	placement: RawActorPlacement,
+	states: Record<StatePath, ActorWorkflowStateAst>,
+	protocol: ProtocolAst,
+	actorTargets: ReadonlyMap<object, StatePath>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): Record<StatePath, ActorWorkflowStateAst> {
+	const contexts = new Map<StatePath, Set<string>>();
+	const addContext = (state: string, message: string): boolean => {
+		const set = contexts.get(state) ?? new Set<string>();
+		const before = set.size;
+		set.add(message);
+		contexts.set(state, set);
+		return set.size !== before;
+	};
+	for (const [id, node] of Object.entries(states)) {
+		if (node.kind !== "receive") continue;
+		for (const [message, target] of Object.entries(node.on)) {
+			if (!(message in protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `receive() in '${placement.path}.${id}' names unknown message '${message}'.`, `${placement.pointer}/states/${escapePointer(id)}/on/${escapePointer(message)}`, source));
+			if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `receive.${message} targets unknown actor state '${target}'.`, `${placement.pointer}/states/${escapePointer(id)}/on/${escapePointer(message)}`, source));
+			addContext(target, message);
+		}
+	}
+	const successors = (node: ActorWorkflowStateAst): string[] => {
+		if (node.kind === "state") return Object.values(node.transitions).map((transition) => transition.target);
+		if (node.kind === "send") return [node.target];
+		if (node.kind === "call") return node.target === undefined ? Object.values(node.transitions).map((transition) => transition.target) : [node.target];
+		return [];
+	};
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const [id, node] of Object.entries(states)) {
+			for (const message of contexts.get(id) ?? []) {
+				for (const target of successors(node)) if (addContext(target, message)) changed = true;
+			}
+		}
+	}
+	const result = { ...states };
+	for (const [id, node] of Object.entries(states)) {
+		const pointer = `${placement.pointer}/states/${escapePointer(id)}`;
+		for (const target of successors(node)) if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `Actor state '${id}' targets unknown state '${target}'.`, pointer, source));
+		if (node.kind === "send" || node.kind === "call") validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
+		if (node.kind !== "reply") continue;
+		const messages = [...(contexts.get(id) ?? [])];
+		if (messages.length !== 1) {
+			diagnostics.push(diagnostic(messages.length === 0 ? "UNREACHABLE_REPLY" : "AMBIGUOUS_REPLY_PATH", `reply() state '${placement.path}.${id}' must be reachable from exactly one protocol message; got ${messages.join(", ") || "none"}.`, pointer, source));
+			continue;
+		}
+		const message = messages[0] ?? "";
+		const contract = protocol[message]?.reply;
+		if (contract?.kind === "void" && (node.event !== undefined || node.output !== undefined)) diagnostics.push(diagnostic("INVALID_VOID_REPLY", `Void message '${message}' reply() cannot have event or output.`, pointer, source));
+		if (contract?.kind === "single" && (node.event !== undefined || node.output === undefined)) diagnostics.push(diagnostic("INVALID_SINGLE_REPLY", `Single-reply message '${message}' requires output and no event.`, pointer, source));
+		if (contract?.kind === "named" && (node.event === undefined || !(node.event in contract.schemas) || node.output === undefined)) diagnostics.push(diagnostic("INVALID_NAMED_REPLY", `Named-reply message '${message}' requires a declared event and output.`, pointer, source));
+		if (states[node.target]?.kind !== "receive") diagnostics.push(diagnostic("REPLY_TARGET_NOT_RECEIVE", `reply() target '${node.target}' must be an explicit receive() state.`, `${pointer}/target`, source));
+		result[id] = { ...node, message };
+	}
+	for (const [receiveId, receive] of Object.entries(states)) {
+		if (receive.kind !== "receive") continue;
+		for (const [message, target] of Object.entries(receive.on)) {
+			const visiting = new Set<string>();
+			const verified = new Set<string>();
+			const walk = (stateId: string): boolean => {
+				if (verified.has(stateId)) return true;
+				if (visiting.has(stateId)) return false;
+				const state = states[stateId];
+				if (state === undefined || state.kind === "receive") return false;
+				if (state.kind === "reply") return contexts.get(stateId)?.size === 1 && contexts.get(stateId)?.has(message) === true;
+				const next = successors(state);
+				if (next.length === 0) return false;
+				visiting.add(stateId);
+				const ok = next.every(walk);
+				visiting.delete(stateId);
+				if (ok) verified.add(stateId);
+				return ok;
+			};
+			if (!walk(target)) diagnostics.push(diagnostic("MISSING_REPLY", `Every '${message}' workflow from receive '${receiveId}' must terminate in exactly one reply() before returning to receive.`, `${placement.pointer}/states/${escapePointer(receiveId)}/on/${escapePointer(message)}`, source));
+		}
+	}
+	return result;
+}
+
+function valueRefs(value: ValueAst | undefined): InputRef[] {
+	if (value === undefined || value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return [];
+	if (Array.isArray(value)) return value.flatMap(valueRefs);
+	if ("kind" in value && typeof value.kind === "string") return [value as InputRef];
+	return Object.values(value).flatMap(valueRefs);
+}
+
+function schemaHasPath(schema: SchemaAst, path: string | undefined): boolean {
+	if (path === undefined) return true;
+	let current: unknown = schema.schema;
+	for (const segment of path.split(".")) {
+		if (!isRecord(current)) return false;
+		const properties = isRecord(current.properties) ? current.properties : undefined;
+		if (properties !== undefined && segment in properties) current = properties[segment];
+		else if (isRecord(current.additionalProperties)) current = current.additionalProperties;
+		else if (current.type === "array" && isRecord(current.items)) current = current.items;
+		else return false;
+	}
+	return true;
+}
+
+function validateActorIsolation(
+	placement: RawActorPlacement,
+	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>,
+	actorInputSchema: SchemaAst,
+	protocol: ProtocolAst,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	for (const [stateId, node] of Object.entries(states)) {
+		const pointer = `${placement.pointer}/states/${escapePointer(stateId)}`;
+		const refs: InputRef[] = [];
+		if (node.kind === "state") {
+			for (const template of actionTemplates(node.action)) refs.push(...template.refs);
+			for (const read of artifactReads(node.action, pointer)) {
+				if (states[read.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor artifact read '${read.state}' must name an actor-local action state.`, read.pointer, source));
+			}
+		}
+		if (node.kind === "send") refs.push(...valueRefs(node.input), ...valueRefs(node.inputs));
+		if (node.kind === "call") refs.push(...valueRefs(node.input));
+		if (node.kind === "reply") refs.push(...valueRefs(node.output));
+		for (const ref of refs) {
+			if (ref.kind === "actorInput") {
+				if (!schemaHasPath(actorInputSchema, ref.path)) diagnostics.push(diagnostic("INVALID_ACTOR_INPUT_REF", `actorInput selector '${ref.path}' does not exist.`, pointer, source));
+				continue;
+			}
+			if (ref.kind === "messageInput") {
+				const message = protocol[ref.message];
+				if (message === undefined || !schemaHasPath(message.input, ref.path)) diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", `messageInput('${ref.message}', '${ref.path ?? ""}') does not match the actor protocol.`, pointer, source));
+				continue;
+			}
+			if (ref.kind === "result") {
+				const producer = states[ref.state];
+				if (producer?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor result('${ref.state}') must name an actor-local action state.`, pointer, source));
+				else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path)) diagnostics.push(diagnostic("UNKNOWN_INPUT_RESULT", `Actor result selector '${ref.path}' does not exist on '${ref.state}'.`, pointer, source));
+				continue;
+			}
+			if (ref.kind === "input") {
+				const schema = node.kind === "state" ? node.input?.[ref.name] : undefined;
+				if (schema === undefined || !schemaHasPath(schema, ref.path)) diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor input('${ref.name}') must name an input of the current actor-local action state.`, pointer, source));
+				continue;
+			}
+			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor visit('${ref.state}') must name an actor-local state.`, pointer, source));
+			else if (ref.kind !== "visit") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `${ref.kind}() cannot cross an actor boundary; capture it in the actor placement input.`, pointer, source));
+		}
+	}
+}
+
+function validateMessagingNode(
+	placement: RawActorPlacement,
+	node: SendStateAst | CallStateAst,
+	_protocol: ProtocolAst,
+	_actorTargets: ReadonlyMap<object, StatePath>,
+	diagnostics: AuthoringDiagnostic[],
+	pointer: string,
+	source: ChartSource,
+): void {
+	if (node.to.length === 0) return;
+	const targetOwner = node.to.includes(".@") ? node.to.slice(0, node.to.lastIndexOf(".@")) : undefined;
+	if (targetOwner !== undefined && placement.owner !== targetOwner && !(placement.owner?.startsWith(`${targetOwner}.`) ?? false)) {
+		diagnostics.push(diagnostic("ACTOR_SCOPE_VIOLATION", `Actor '${placement.path}' cannot address declaration '${node.to}' outside its lexical scope.`, `${pointer}/to`, source));
+	}
+}
+
+function validateActorTargets(
+	states: Readonly<Record<StatePath, StateAst>>,
+	actors: Readonly<Record<StatePath, ActorDeclarationAst>>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	for (const [path, node] of Object.entries(states)) {
+		if (node.kind !== "send" && node.kind !== "call") continue;
+		const actor = actors[node.to];
+		if (actor === undefined) continue;
+		if (!(node.event in actor.protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `${node.kind} in '${path}' names unknown message '${node.event}'.`, `${statePointer(path)}/event`, source));
+		const owner = actor.owner;
+		if (owner !== undefined && path !== owner && !path.startsWith(`${owner}.`)) diagnostics.push(diagnostic("ACTOR_SCOPE_VIOLATION", `State '${path}' cannot address actor '${actor.path}' outside its lexical scope.`, `${statePointer(path)}/to`, source));
+		validateCallRouting(node, actor.protocol[node.event], `${statePointer(path)}`, diagnostics, source);
+	}
+	for (const declaration of Object.values(actors)) {
+		for (const [stateId, node] of Object.entries(declaration.states)) {
+			if (node.kind !== "send" && node.kind !== "call") continue;
+			const target = actors[node.to];
+			const pointer = `/actors/${escapePointer(declaration.name)}/states/${escapePointer(stateId)}`;
+			if (target === undefined) continue;
+			if (!(node.event in target.protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `${node.kind} in actor '${declaration.path}.${stateId}' names unknown message '${node.event}'.`, `${pointer}/event`, source));
+			const targetOwner = target.owner;
+			if (targetOwner !== undefined && declaration.owner !== targetOwner && !(declaration.owner?.startsWith(`${targetOwner}.`) ?? false)) diagnostics.push(diagnostic("ACTOR_SCOPE_VIOLATION", `Actor '${declaration.path}' cannot address actor '${target.path}' outside its lexical scope.`, `${pointer}/to`, source));
+			validateCallRouting(node, target.protocol[node.event], pointer, diagnostics, source);
+		}
+	}
+}
+
+function validateCallRouting(
+	node: SendStateAst | CallStateAst,
+	message: ProtocolMessageAst | undefined,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	if (node.kind !== "call" || message === undefined) return;
+	if (message.reply.kind === "named") {
+		const expected = Object.keys(message.reply.schemas).sort();
+		const actual = Object.keys(node.transitions).sort();
+		if (JSON.stringify(expected) !== JSON.stringify(actual) || node.target !== undefined) diagnostics.push(diagnostic("INVALID_CALL_TRANSITIONS", `call() named reply transitions must be exactly: ${expected.join(", ")}.`, pointer, source));
+	} else if (node.target === undefined || Object.keys(node.transitions).length > 0) {
+		diagnostics.push(diagnostic("INVALID_CALL_TARGET", "Void/single reply call() requires target and no named transitions.", pointer, source));
+	}
+}
+
+function validateActorCallCycles(
+	actors: Readonly<Record<StatePath, ActorDeclarationAst>>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const graph = new Map<string, Set<string>>();
+	for (const [path, actor] of Object.entries(actors)) {
+		graph.set(path, new Set(Object.values(actor.states).flatMap((state) => state.kind === "call" ? [state.to] : [])));
+	}
+	const settled = new Set<string>();
+	const visiting = new Set<string>();
+	const visit = (path: string, trail: string[]): void => {
+		if (settled.has(path)) return;
+		if (visiting.has(path)) {
+			const cycle = [...trail.slice(trail.indexOf(path)), path];
+			diagnostics.push(diagnostic("ACTOR_CALL_CYCLE", `Static actor call cycle is forbidden: ${cycle.join(" -> ")}.`, `/actors`, source));
+			return;
+		}
+		visiting.add(path);
+		for (const next of graph.get(path) ?? []) if (graph.has(next)) visit(next, [...trail, path]);
+		visiting.delete(path);
+		settled.add(path);
+	};
+	for (const path of graph.keys()) visit(path, []);
+}
+
+function toValueAst(
+	input: unknown,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	ancestors = new WeakSet<object>(),
+): ValueAst | undefined {
+	if (input === null || typeof input === "string" || typeof input === "boolean") return input;
+	if (typeof input === "number") {
+		if (Number.isFinite(input)) return input;
+		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values require finite numbers.", pointer, source));
+		return undefined;
+	}
+	if (typeof input !== "object") {
+		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values must be JSON data with InputRef leaves.", pointer, source));
+		return undefined;
+	}
+	if (isRecord(input) && input.kind === "actorDeclaration") {
+		diagnostics.push(diagnostic("ACTOR_DECLARATION_IN_DATA", "Static actor declarations cannot be embedded in runtime data.", pointer, source));
+		return undefined;
+	}
+	if (isRecord(input) && typeof input.kind === "string" && ["arg", "result", "input", "visit", "key", "item", "actorInput", "messageInput"].includes(input.kind)) {
+		return toInputRef(input, pointer, diagnostics, source);
+	}
+	if (ancestors.has(input)) {
+		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values cannot be circular.", pointer, source));
+		return undefined;
+	}
+	ancestors.add(input);
+	if (Array.isArray(input)) {
+		const values = input.map((value, index) => toValueAst(value, `${pointer}/${index}`, diagnostics, source, ancestors) ?? null);
+		ancestors.delete(input);
+		return values;
+	}
+	if (!isRecord(input) || (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)) {
+		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values must contain only plain objects.", pointer, source));
+		ancestors.delete(input);
+		return undefined;
+	}
+	const value: Record<string, ValueAst> = {};
+	for (const [name, child] of Object.entries(input)) value[name] = toValueAst(child, `${pointer}/${escapePointer(name)}`, diagnostics, source, ancestors) ?? null;
+	ancestors.delete(input);
+	return value;
+}
+
 // Builds the node at its absolute path and recurses into compound children — the AST stays a
 // flat path-keyed map, nesting lives in `parent` links. Direct children of a parallel are
 // collected with the "region" role: authored as compounds, they become region nodes.
@@ -243,6 +781,8 @@ function collectState(
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
 	role: "state" | "region" = "state",
+	actorTargets: ReadonlyMap<object, StatePath> = new Map(),
+	actors: Readonly<Record<StatePath, ActorDeclarationAst>> = {},
 ): void {
 	if (!STATE_ID_PATTERN.test(localId)) {
 		diagnostics.push(
@@ -314,6 +854,8 @@ function collectState(
 				source,
 				schemaRegistry,
 				"region",
+				actorTargets,
+				actors,
 			);
 		}
 		states[path] = deepFreeze({
@@ -376,6 +918,9 @@ function collectState(
 				diagnostics,
 				source,
 				schemaRegistry,
+				"state",
+				actorTargets,
+				actors,
 			);
 		}
 		// An instance completes by reaching a direct final child — same rule as a compound.
@@ -424,6 +969,9 @@ function collectState(
 				diagnostics,
 				source,
 				schemaRegistry,
+				"state",
+				actorTargets,
+				actors,
 			);
 		}
 		// Every compound (and region) must be completable: a direct final child is its exit.
@@ -464,6 +1012,68 @@ function collectState(
 			transitions: transitions ?? {},
 			onDone: onDone ?? "",
 		} satisfies CompoundStateAst);
+		return;
+	}
+
+	if (input.kind === "send" || input.kind === "call") {
+		if (role === "region") {
+			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
+			return;
+		}
+		const targetActor = isRecord(input.to) ? actorTargets.get(input.to) : undefined;
+		if (targetActor === undefined) {
+			diagnostics.push(
+				diagnostic(
+					"INVALID_ACTOR_TARGET",
+					`${input.kind} in state '${path}' must target a placed static actor declaration.`,
+					`${pointer}/to`,
+					source,
+				),
+			);
+		}
+		const eventType = typeof input.event === "string" && input.event.length > 0 ? input.event : undefined;
+		if (eventType === undefined) {
+			diagnostics.push(diagnostic("INVALID_ACTOR_EVENT", `${input.kind}.event must be a non-empty protocol message name.`, `${pointer}/event`, source));
+		}
+		if (input.kind === "send") {
+			const hasInput = Object.hasOwn(input, "input");
+			const hasInputs = Object.hasOwn(input, "inputs");
+			if (hasInput === hasInputs) {
+				diagnostics.push(diagnostic("INVALID_SEND_INPUT", "send() requires exactly one of input or inputs.", pointer, source));
+			}
+			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
+			if (target.length === 0) diagnostics.push(diagnostic("INVALID_TRANSITION_TARGET", "send target must be a non-empty state id.", `${pointer}/target`, source));
+			const value = toValueAst(hasInput ? input.input : input.inputs, hasInput ? `${pointer}/input` : `${pointer}/inputs`, diagnostics, source) ?? (hasInput ? null : []);
+			states[path] = deepFreeze({
+				kind: "send",
+				id: localId,
+				...parent,
+				to: targetActor ?? "",
+				event: eventType ?? "",
+				target,
+				transitions: {},
+				...(hasInput ? { input: value } : { inputs: value }),
+			} satisfies SendStateAst);
+			return;
+		}
+		const value = toValueAst(input.input, `${pointer}/input`, diagnostics, source);
+		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
+		const target = typeof input.target === "string" && input.target.length > 0 ? input.target : undefined;
+		states[path] = deepFreeze({
+			kind: "call",
+			id: localId,
+			...parent,
+			to: targetActor ?? "",
+			event: eventType ?? "",
+			input: value ?? null,
+			...(target === undefined ? {} : { target }),
+			transitions,
+		} satisfies CallStateAst);
+		return;
+	}
+
+	if (input.kind === "receive" || input.kind === "reply") {
+		diagnostics.push(diagnostic("ACTOR_STATE_OUTSIDE_ACTOR", `${String(input.kind)}() may only appear inside actor().`, pointer, source));
 		return;
 	}
 
@@ -618,6 +1228,9 @@ function validateTargets(
 			continue;
 		}
 		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
+		if ((node.kind === "send" || node.kind === "call") && node.target !== undefined && !(sibling(node.target) in states)) {
+			diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `${node.kind} in state '${path}' targets unknown state '${node.target}'.`, `${pointer}/target`, source));
+		}
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			const target = transition.target;
 			if (!(sibling(target) in states)) {
@@ -642,28 +1255,6 @@ function validateTargets(
 			}
 		}
 		if (node.kind === "state") {
-			// An exhausted retry budget turns into a FAILED transition — it needs a route.
-			if (node.retries !== undefined) {
-				let handled = false;
-				let cur: StateAst | undefined = node;
-				while (cur !== undefined) {
-					if (cur.kind !== "final" && "FAILED" in cur.transitions) {
-						handled = true;
-						break;
-					}
-					cur = cur.parent === undefined ? undefined : states[cur.parent];
-				}
-				if (!handled) {
-					diagnostics.push(
-						diagnostic(
-							"MISSING_FAILED_ROUTE",
-							`State '${path}' declares retries but no FAILED transition is reachable for the exhausted budget.`,
-							`${pointer}/retries`,
-							source,
-						),
-					);
-				}
-			}
 			if (node.after !== undefined && !(sibling(node.after.target) in states)) {
 				diagnostics.push(
 					diagnostic(
@@ -870,6 +1461,36 @@ function validateEnterCycles(
 	for (const path of Object.keys(states)) visit(path, []);
 }
 
+function validateActorPlacementRefs(
+	states: Record<StatePath, StateAst>,
+	actors: Readonly<Record<StatePath, ActorDeclarationAst>>,
+	initial: StateId,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const dominators = computeDominators(buildDominanceGraph(states, initial));
+	for (const actor of Object.values(actors)) {
+		const consumer = actor.owner;
+		for (const ref of valueRefs(actor.inputValue)) {
+			const pointer = `/actors/${escapePointer(actor.name)}/placement`;
+			if (ref.kind === "arg") continue;
+			if (ref.kind === "result") {
+				if (consumer === undefined || states[ref.state]?.kind !== "state" || !dominatesForDataRef(states, dominators, ref.state, consumer)) {
+					diagnostics.push(diagnostic("INVALID_ACTOR_PLACEMENT_REF", `Actor '${actor.path}' placement result('${ref.state}') must be available before its owner activates.`, pointer, source));
+				}
+				continue;
+			}
+			if (ref.kind === "key" || ref.kind === "item") {
+				let scope = consumer;
+				while (scope !== undefined && states[scope]?.kind !== "map") scope = parentStatePath(scope);
+				if (scope === undefined || (ref.map !== undefined && ref.map !== scope)) diagnostics.push(diagnostic("INVALID_ACTOR_PLACEMENT_REF", `Actor '${actor.path}' placement ${ref.kind}() must refer to its enclosing map owner.`, pointer, source));
+				continue;
+			}
+			diagnostics.push(diagnostic("INVALID_ACTOR_PLACEMENT_REF", `${ref.kind}() is unavailable while actor '${actor.path}' placement input is created.`, pointer, source));
+		}
+	}
+}
+
 function validateInputs(
 	states: Record<StatePath, StateAst>,
 	initial: StateId,
@@ -910,6 +1531,10 @@ function validateInputs(
 				pointer: `${pointer}/transitions/${escapePointer(eventType)}`,
 				...(transition.input === undefined ? {} : { bindings: transition.input }),
 			});
+		}
+		if ((node.kind === "send" || node.kind === "call") && node.target !== undefined) {
+			const target = sibling(node.target);
+			if (target in states) edges.push({ target, pointer: `${pointer}/target` });
 		}
 		if (node.kind === "state" && node.after !== undefined) {
 			const target = sibling(node.after.target);
@@ -1093,6 +1718,9 @@ function buildDominanceGraph(
 			for (const transition of Object.values(node.transitions)) {
 				addEdge(path, siblingTarget(node, transition.target));
 			}
+		}
+		if ((node.kind === "send" || node.kind === "call") && node.target !== undefined) {
+			addEdge(path, siblingTarget(node, node.target));
 		}
 		if (node.kind === "state" && node.after !== undefined) {
 			addEdge(path, siblingTarget(node, node.after.target));
@@ -1285,6 +1913,9 @@ function validateTemplateRefs(
 	options: { includeSelfMap?: boolean } = {},
 ): void {
 	for (const ref of template.refs) {
+		if (ref.kind === "actorInput" || ref.kind === "messageInput") {
+			diagnostics.push(diagnostic("ACTOR_LOCAL_REF_OUTSIDE_ACTOR", `${ref.kind}() may only be used inside an actor workflow.`, pointer, source));
+		}
 		if (
 			(ref.kind === "key" || ref.kind === "item") &&
 			!insideMap(states, path, ref.map, options.includeSelfMap === true)
@@ -1716,6 +2347,24 @@ function toInputRef(
 			...jsonMark,
 		};
 	}
+	if (input.kind === "actorInput") {
+		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
+			diagnostics.push(diagnostic("INVALID_ACTOR_INPUT_REF", "actorInput path must be a non-empty selector.", path, source));
+			return undefined;
+		}
+		return { kind: "actorInput", ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
+	}
+	if (input.kind === "messageInput") {
+		if (typeof input.message !== "string" || input.message.length === 0) {
+			diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", "messageInput message must be non-empty.", path, source));
+			return undefined;
+		}
+		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
+			diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", "messageInput path must be a non-empty selector.", path, source));
+			return undefined;
+		}
+		return { kind: "messageInput", message: input.message, ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
+	}
 	if (input.kind === "key" || input.kind === "item") {
 		if (input.map !== undefined && (typeof input.map !== "string" || input.map.length === 0)) {
 			diagnostics.push(
@@ -1743,7 +2392,7 @@ function toInputRef(
 	diagnostics.push(
 		diagnostic(
 			"INVALID_TEMPLATE",
-			"Template ref kind must be 'arg', 'result', 'input', 'visit', 'key' or 'item'.",
+			"Template ref kind must be 'arg', 'result', 'input', 'visit', 'key', 'item', 'actorInput' or 'messageInput'.",
 			path,
 			source,
 		),
@@ -2070,6 +2719,10 @@ function toTransitionMap(
 	const transitions: Record<string, TransitionAst> = {};
 	for (const [eventType, raw] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(eventType)}`;
+		if (eventType === "FAILED") {
+			diagnostics.push(diagnostic("RESERVED_FAILED_TRANSITION", "FAILED is globally fail-fast and cannot be routed in authored charts.", pointer, source));
+			continue;
+		}
 		if (typeof raw === "string") {
 			if (raw.length === 0) {
 				diagnostics.push(
@@ -2103,16 +2756,6 @@ function toTransitionMap(
 			continue;
 		}
 		const bindings = toEventBindings(raw.input, `${pointer}/input`, diagnostics, source);
-		if (eventType === "FAILED" && bindings !== undefined && Object.keys(bindings).length > 0) {
-			diagnostics.push(
-				diagnostic(
-					"INVALID_BINDING",
-					"FAILED transitions cannot bind input in this phase.",
-					`${pointer}/input`,
-					source,
-				),
-			);
-		}
 		transitions[eventType] = {
 			target: raw.target,
 			...(bindings === undefined ? {} : { input: bindings }),

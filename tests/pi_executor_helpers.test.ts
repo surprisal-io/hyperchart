@@ -4,13 +4,16 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
 import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
-import type { AgentActionAst, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
+import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
+import type { AgentActionAst, ChartEvent, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
 import { createAgentDefaultsResolver, loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
 import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
+import { runAcceptanceLoop } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,
+	lastAssistantError,
 	PiAgentExecutor,
 	validateDeclaredReadPaths,
 	shouldRecoverRestoredFinish,
@@ -44,6 +47,41 @@ function effect(overrides: Partial<AgentEffect> = {}, actionOverrides: Partial<A
 		...overrides,
 	};
 }
+
+describe("PiAgentExecutor cancellation", () => {
+	it("shares repeated cancellation and resolves only after asynchronous abort", async () => {
+		const dir = await makeTempDir();
+		let finishAbort!: () => void;
+		const abort = new Promise<void>((resolve) => { finishAbort = resolve; });
+		let disposed = false;
+		const target = effect();
+		const sessionsDir = join(dir, "sessions");
+		await mkdir(sessionsDir, { recursive: true });
+		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir, modelRuntime: {} as never });
+		const internal = executor as unknown as {
+			generations: { next(key: string): number };
+			live: Map<string, { session: { abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number }>;
+		};
+		const key = actionUidKey(target.actionUid);
+		const generation = internal.generations.next(key);
+		internal.live.set(key, {
+			session: { abort: () => abort, dispose: () => { disposed = true; } },
+			effect: target,
+			sink: { captured: undefined },
+			generation,
+		});
+
+		const first = executor.cancel(target.actionUid);
+		expect(executor.cancel(target.actionUid)).toBe(first);
+		let quiesced = false;
+		void first.then(() => { quiesced = true; });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(quiesced).toBe(false);
+		finishAbort();
+		await expect(first).resolves.toBeUndefined();
+		expect(disposed).toBe(true);
+	});
+});
 
 describe("agent definitions", () => {
 	it("loads markdown frontmatter with project-over-global priority", async () => {
@@ -373,6 +411,44 @@ describe("pi executor helpers", () => {
 		expect(prompt).toContain("## Deliverables");
 		expect(prompt).toContain("## Completion");
 		expect(prompt).not.toContain("invocationId");
+	});
+
+	it("extracts only the latest assistant turn's provider error", () => {
+		expect(
+			lastAssistantError([
+				{ role: "assistant", stopReason: "error", errorMessage: "402: Insufficient Balance" },
+			]),
+		).toBe("402: Insufficient Balance");
+		expect(
+			lastAssistantError([
+				{ role: "assistant", stopReason: "error", errorMessage: "old error" },
+				{ role: "user", content: "retry" },
+				{ role: "assistant", stopReason: "stop", content: [] },
+			]),
+		).toBeUndefined();
+	});
+
+	it("propagates a provider error instead of spending finish nudges", async () => {
+		const sink: CompletionSink = { captured: undefined };
+		const emitted: ChartEvent[] = [];
+		let promptCount = 0;
+
+		await runAcceptanceLoop({
+			effect: effect(),
+			sink,
+			maxRetries: 2,
+			isCancelled: () => false,
+			prompt: async () => {
+				promptCount++;
+			},
+			lastAssistantText: () => undefined,
+			lastAssistantError: () => "402: Insufficient Balance",
+			checkArtifacts: async () => [],
+			emit: (event) => emitted.push(event),
+		});
+
+		expect(promptCount).toBe(0);
+		expect(emitted).toEqual([{ type: "FAILED", error: "402: Insufficient Balance" }]);
 	});
 
 	it("finds a successful finish call after the last user message in restored messages", async () => {

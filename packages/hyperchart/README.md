@@ -61,3 +61,7 @@ The core package has no Pi dependency. React integrations use the optional peer 
 - [DSL reference and examples](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/dsl.md)
 
 MIT · experimental `0.4.0`
+
+## Explicit actors
+
+The core package includes statically placed, event-sourced actors with explicit `receive()`, FIFO `send`, typed `call`, and graph-inferred `reply()`. See the canonical [explicit actor guide](../../docs/explicit-actors.md).

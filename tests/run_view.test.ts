@@ -21,7 +21,7 @@ function linearChart(validate = false): ChartAst {
 					kind: "state",
 					action: agent("worker"),
 					...(validate ? { validate: tsImport("./check.js", "ok"), retries: 2 } : {}),
-					transitions: { DONE: "done", FAILED: "failed" },
+					transitions: { DONE: "done", ERROR: "failed" },
 				},
 				done: final(),
 				failed: failed(),

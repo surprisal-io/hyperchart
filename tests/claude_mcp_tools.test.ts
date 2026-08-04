@@ -374,7 +374,7 @@ describe("hyperchart MCP tools", () => {
 		const { tools, chartsDir } = makeWorld();
 		writeFileSync(join(chartsDir, "failure.chart.ts"), `import { chart, failed, script } from "@surprisal/hyperchart";
 export default chart({ kind: "chart", id: "failure", initial: "work", states: {
-	work: { kind: "state", action: script("node", ["-e", "console.error('specific boom'); process.exit(9)"]), transitions: { FAILED: "failed" } },
+	work: { kind: "state", action: script("node", ["-e", "console.error('specific boom'); process.exit(9)"]), transitions: { ERROR: "failed" } },
 	failed: failed(),
 } });
 `);

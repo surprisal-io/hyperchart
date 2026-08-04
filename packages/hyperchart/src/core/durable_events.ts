@@ -1,4 +1,15 @@
-import type { ActionUID, ChartEvent, GuardOutcome, GuardRefAst, StateActionAst, StatePath } from "./types.js";
+import type {
+	ActionUID,
+	ActorDeclarationAst,
+	ChartEvent,
+	GuardOutcome,
+	GuardRefAst,
+	SchemaAst,
+	SendStateAst,
+	CallStateAst,
+	StateActionAst,
+	StatePath,
+} from "./types.js";
 
 type SessionParams = {
 	seqId: number;
@@ -70,4 +81,133 @@ type StateActionTimerFiredLog = {
 
 type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog | StateActionTimerFiredLog;
 
-export type DurableLogRecord = SessionRefLog | ArgsLog | SpawnedLog | StateAction;
+/** First durable fact of global fail-fast. No successor state may start after this record. */
+export type FailureIntentLog = {
+	type: "failure_intent";
+	origin: StatePath;
+	error: unknown;
+} & SessionParams;
+
+/** Every cancellable runtime phase has a durable identity. */
+export type CancellationTarget =
+	| Readonly<{ kind: "action"; actionUid: ActionUID; phase: "running" | "validating" | "rejected" }>
+	| Readonly<{ kind: "actor_effect"; effectId: string; operation: "create" | "enqueue" | "reply"; occurrence: StatePath }>
+	| Readonly<{ kind: "actor_message"; occurrence: StatePath; messageId: string }>
+	| Readonly<{ kind: "actor_call"; callId: string; callerState: StatePath }>;
+
+/** One request/ack pair per in-flight phase. Terminal failure waits until every request is acked. */
+export type CancellationRequestedLog = {
+	type: "cancellation";
+	kind: "requested";
+	requestId: string;
+	target: CancellationTarget;
+} & SessionParams;
+
+export type CancellationAcknowledgedLog = {
+	type: "cancellation";
+	kind: "acknowledged";
+	requestId: string;
+	target: CancellationTarget;
+} & SessionParams;
+
+export type ActorMessageEnvelope = Readonly<{
+	messageId: string;
+	event: string;
+	input: unknown;
+	producerState: StatePath;
+	producerVisit: number;
+	callId?: string;
+	batchIndex: number;
+}>;
+
+export type ActorCreatedLog = {
+	type: "actor_created";
+	declaration: StatePath;
+	/** Logical address without a generation suffix. */
+	logicalOccurrence: StatePath;
+	/** Concrete occurrence path; generation 1 uses the logical path, later generations use ~N. */
+	occurrence: StatePath;
+	generation: number;
+	owner?: StatePath;
+	input: unknown;
+	definition: ActorDeclarationAst;
+} & SessionParams;
+
+export type ActorMessageSource = Readonly<{
+	producerState: StatePath;
+	kind: "send" | "call";
+	definition: SendStateAst | CallStateAst;
+	targetDeclaration: StatePath;
+	event: string;
+	inputSchema: SchemaAst;
+}>;
+
+/** One record is the atomic mailbox transaction for both a singleton and authored-order batch. */
+export type ActorMessagesEnqueuedLog = {
+	type: "actor_messages_enqueued";
+	occurrence: StatePath;
+	generation: number;
+	source: ActorMessageSource;
+	messages: readonly ActorMessageEnvelope[];
+} & SessionParams;
+
+export type ActorMessageAcceptedLog = {
+	type: "actor_message";
+	kind: "accepted";
+	occurrence: StatePath;
+	messageId: string;
+	receiveState: StatePath;
+} & SessionParams;
+
+export type ActorMessageRepliedLog = {
+	type: "actor_message";
+	kind: "replied";
+	occurrence: StatePath;
+	messageId: string;
+	message: string;
+	replyEvent?: string;
+	output?: unknown;
+	/** Exact selected schema (or absence for void) is replay provenance. */
+	schema?: SchemaAst;
+} & SessionParams;
+
+export type ActorMessageSettledLog = {
+	type: "actor_message";
+	kind: "settled";
+	occurrence: StatePath;
+	messageId: string;
+} & SessionParams;
+
+export type ActorCallResolvedLog = {
+	type: "actor_call_resolved";
+	callId: string;
+	callerState: StatePath;
+	messageId: string;
+	replyEvent?: string;
+	output?: unknown;
+} & SessionParams;
+
+export type ActorScopeLog = ({
+	type: "actor_scope";
+	kind: "closing" | "stopped";
+	occurrence: StatePath;
+} & SessionParams);
+
+export type ActorLogRecord =
+	| ActorCreatedLog
+	| ActorMessagesEnqueuedLog
+	| ActorMessageAcceptedLog
+	| ActorMessageRepliedLog
+	| ActorMessageSettledLog
+	| ActorCallResolvedLog
+	| ActorScopeLog;
+
+export type DurableLogRecord =
+	| SessionRefLog
+	| ArgsLog
+	| SpawnedLog
+	| StateAction
+	| FailureIntentLog
+	| CancellationRequestedLog
+	| CancellationAcknowledgedLog
+	| ActorLogRecord;

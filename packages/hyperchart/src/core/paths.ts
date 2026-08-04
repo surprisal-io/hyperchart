@@ -6,16 +6,16 @@ import type { ActionUID, ChartAst, StateAst, StateId, StatePath } from "./types.
 // instance path. All node lookups and parent/sibling walks in the projection and the machine go
 // through these helpers, so template charts and their instances share one code path.
 
-// The template path of a possibly-instanced path: every "#key" suffix stripped per segment.
+// The template path of a possibly-instanced path: map "#key" and actor "~generation"
+// suffixes are stripped per segment. Generation 1 deliberately has no suffix for stable paths.
 export function templatePath(path: StatePath): StatePath {
-	if (!path.includes("#")) {
-		return path;
-	}
+	if (!path.includes("#") && !path.includes("~")) return path;
 	return path
 		.split(".")
 		.map((segment) => {
 			const hash = segment.indexOf("#");
-			return hash === -1 ? segment : segment.slice(0, hash);
+			const withoutMap = hash === -1 ? segment : segment.slice(0, hash);
+			return withoutMap.replace(/~[1-9][0-9]*$/, "");
 		})
 		.join(".");
 }

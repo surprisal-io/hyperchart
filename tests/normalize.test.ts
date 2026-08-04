@@ -85,7 +85,7 @@ describe("normalizeChartConfig", () => {
 						action: agent("worker", {
 							reply: z.object({ value: z.string() }),
 						}),
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done", ERROR: "failed" },
 					},
 					done: final(),
 					failed: failed(),
@@ -226,7 +226,7 @@ describe("normalizeChartConfig", () => {
 							analyze: { kind: "state", action: agent("analyzer"), transitions: { OK: "verified" } },
 							verified: final(),
 						},
-						transitions: { FAILED: "done" },
+						transitions: { ERROR: "done" },
 					}),
 					done: final(),
 				},
@@ -327,7 +327,7 @@ describe("normalizeChartConfig", () => {
 				review: compound({
 					initial: "work",
 					onDone: "done",
-					states: { work: { kind: "state" as const, action: agent("coder"), transitions: { FAILED: "work" } } },
+					states: { work: { kind: "state" as const, action: agent("coder"), transitions: { ERROR: "work" } } },
 				}),
 				done: final(),
 			},
@@ -853,7 +853,7 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(failedBinding.ok).toBe(false);
-		expect(failedBinding.diagnostics.map((d) => d.code)).toContain("INVALID_BINDING");
+		expect(failedBinding.diagnostics.map((d) => d.code)).toContain("RESERVED_FAILED_TRANSITION");
 	});
 
 	it("normalizes visit refs and rejects non-action visit refs", () => {
@@ -1022,7 +1022,7 @@ describe("normalizeChartConfig", () => {
 			id: "no-validate",
 			initial: "work",
 			states: {
-				work: { action: agent("coder"), retries: 2, transitions: { DONE: "done", FAILED: "done" } },
+				work: { action: agent("coder"), retries: 2, transitions: { DONE: "done", ERROR: "done" } },
 				done: final(),
 			},
 		});
@@ -1042,8 +1042,7 @@ describe("normalizeChartConfig", () => {
 				done: final(),
 			},
 		});
-		expect(noRoute.ok).toBe(false);
-		expect(noRoute.diagnostics.map((d) => d.code)).toContain("MISSING_FAILED_ROUTE");
+		expect(noRoute.ok).toBe(true);
 	});
 
 	it("reports invalid initial state and transition targets", () => {
@@ -1082,7 +1081,7 @@ describe("normalizeChartConfig", () => {
 			id: "broken",
 			initial: "ask",
 			states: {
-				ask: { action: user({ prompt: "Pick", options: ["FAILED"] }), transitions: { FAILED: "done" } },
+				ask: { action: user({ prompt: "Pick", options: ["FAILED"] }), transitions: { ERROR: "done" } },
 				done: final(),
 			},
 		});

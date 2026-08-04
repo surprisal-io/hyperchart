@@ -115,7 +115,7 @@ Hyperchart recognizes only DSL interpolation tokens. Text that happens to contai
 
 ## Terminal states and notifications
 
-Use `final()` for a successful top-level terminal and `failed()` for a failed one. Outcome is explicit metadata; names such as `failed` and incoming `FAILED` events do not classify a terminal.
+Use `final()` for a successful top-level terminal and `failed()` for an authored failed business terminal. Outcome is explicit metadata; a terminal's name does not classify it. Reserved executor `FAILED` never routes into either terminal—it records global failure intent and terminalizes only after cancellation quiescence.
 
 ```ts
 done: final({
@@ -351,3 +351,7 @@ The Pi runner normalizes automatically. Hosts embedding the core package should 
 - [Compose states](composition.md)
 - [Runtime and durable facts](runtime-and-durability.md)
 - [DSL reference](api/dsl.md)
+
+## Explicit actors
+
+Use [`actor()`, protocols, `receive()`, `send()`, `call()`, and `reply()`](./explicit-actors.md) for sequential side-effecting workflows. Actor templates are invoked with placement expressions and the resulting static declaration is placed directly in one owner's `actors` object; there is no dynamic actor API.

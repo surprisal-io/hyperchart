@@ -141,7 +141,7 @@ function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartA
 					validate: tsImport("./checks.js", "testsPass"),
 					...(onReject === undefined ? {} : { onReject }),
 					...(retries === undefined ? {} : { retries }),
-					transitions: { DONE: "done", FAILED: "failed" },
+					transitions: { DONE: "done" },
 				},
 				done: final(),
 				failed: failed(),
@@ -189,7 +189,7 @@ function compoundAst(): ChartAst {
 						fix: { kind: "state", action: agent("fixer"), transitions: { OK: "verified" } },
 						verified: final(),
 					},
-					transitions: { FAILED: "escalate" },
+					transitions: { ESCALATE: "escalate" },
 				}),
 				deploy: final(),
 				escalate: final(),
@@ -218,7 +218,7 @@ function parallelAst(): ChartAst {
 				audit: parallel({
 					states: { security: region("security-bot"), perf: region("perf-bot") },
 					onDone: "merge",
-					transitions: { FAILED: "escalate" },
+					transitions: { ESCALATE: "escalate" },
 				}),
 				merge: final(),
 				escalate: final(),
@@ -256,7 +256,7 @@ function mapAst(concurrency?: number): ChartAst {
 						},
 						written: final(),
 					},
-					transitions: { FAILED: "escalate" },
+					transitions: { ESCALATE: "escalate" },
 				}),
 				done: final(),
 				escalate: final(),
@@ -577,6 +577,9 @@ describe("execution loop", () => {
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
 					}
+					if (effect.kind === "cancel" && effect.requestId !== undefined && effect.target !== undefined) {
+						events.push({ kind: "cancellation_acknowledged", effectId: effect.id, requestId: effect.requestId, target: effect.target });
+					}
 				}
 			},
 		});
@@ -639,26 +642,29 @@ describe("execution loop", () => {
 		expect(rejections[0]?.reason).toBeUndefined();
 	});
 
-	it("exhausts the retry budget into FAILED and cancels the agent", async () => {
+	it("exhausts the retry budget into global failure and cancels the agent", async () => {
 		// retries: 1 — one rejected round may be retried; the second rejection is terminal.
 		const { runtime, rejections, run } = runValidatedChart([{ ok: false, reason: "no" }, false], { retries: 1 });
 
 		const state = await run;
 
-		expect(state.projection.activeLeaves).toEqual(["failed"]);
-		// only the first rejection produced feedback; the terminal one went straight to FAILED
+		expect(state.projection.activeLeaves).toEqual(["work"]);
+		expect(state.projection.failure).toMatchObject({ origin: "work", error: "Validation retry budget exhausted" });
+		// only the first rejection produced feedback; the terminal one wrote failure intent
 		expect(rejections).toHaveLength(1);
 		expect(rejections[0]).toMatchObject({ validationAttempts: 1 });
-		// the still-running session was abandoned by the FAILED exit and must be killed
+		// the validating phase is cancelled and acknowledged before failure terminalization
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "cancel")).toHaveLength(1);
+		expect(Object.values(state.projection.cancellations)).toEqual([expect.objectContaining({ acknowledged: true })]);
 	});
 
-	it("lets FAILED bypass validation", async () => {
+	it("lets reserved FAILED bypass validation and enter global fail-fast", async () => {
 		const { validations, rejections, run } = runValidatedChart([], { claim: "FAILED" });
 
 		const state = await run;
 
-		expect(state.projection.activeLeaves).toEqual(["failed"]);
+		expect(state.projection.activeLeaves).toEqual(["work"]);
+		expect(state.projection.failure).toMatchObject({ origin: "work", error: "Action emitted FAILED" });
 		expect(rejections).toEqual([]);
 		expect(validations).toEqual([]);
 	});
@@ -1170,7 +1176,7 @@ describe("execution loop", () => {
 						validate: tsImport("./checks.js", "testsPass"),
 						onReject: "restart",
 						retries: 1,
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done" },
 					},
 					done: final(),
 					failed: failed(),
@@ -1310,7 +1316,7 @@ describe("execution loop", () => {
 			},
 		});
 		// and an agent reads the same artifact through its own channel
-		expect(readerReads).toEqual([{ path: "artifacts/evidence.json" }]);
+		expect(readerReads).toEqual([{ name: "evidence", sourceState: "normalize", path: "artifacts/evidence.json" }]);
 	});
 
 	it("rejects a non-primitive interpolation at the effect boundary", async () => {
@@ -1698,8 +1704,8 @@ describe("execution loop", () => {
 		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
 
 		const [agentEffect] = runtime.effectBatches.flat().filter((effect) => effect.kind === "agent");
-		// analyze's own OK plus the compound's bubbled FAILED, innermost first.
-		expect(agentEffect?.events).toEqual(["OK", "FAILED"]);
+		// Reserved FAILED is runtime-only and is never advertised as an authored route.
+		expect(agentEffect?.events).toEqual(["OK", "ESCALATE"]);
 	});
 
 	it("bubbles an unhandled event to the ancestor's handler", async () => {
@@ -1711,8 +1717,8 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						// analyze has no FAILED transition; the compound catches it.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
+						// analyze has no local route; the compound catches this domain event.
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "ESCALATE" } });
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1779,8 +1785,8 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "audit.security.scan") {
-						// security fails; perf's agent keeps hanging and must be killed.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
+						// security raises a domain abort; perf's agent keeps hanging and must be killed.
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "ESCALATE" } });
 					}
 					if (effect.kind === "cancel") {
 						cancels.push(effect);
@@ -1944,10 +1950,10 @@ describe("execution loop", () => {
 						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", output: PLAN_OUTPUT } });
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "chapters#intro.author") {
-						// intro fails; body's agent keeps hanging and must be killed.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
+						// intro raises a domain abort; body's agent keeps hanging and must be killed.
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "ESCALATE" } });
 					}
-					if (effect.kind === "cancel") {
+					if (effect.kind === "cancel" && effect.actionUid !== undefined) {
 						cancels.push(effect.actionUid.state);
 					}
 					if (effect.kind === "durable_records") {

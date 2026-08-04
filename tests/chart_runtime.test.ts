@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeChartConfig, start } from "../packages/hyperchart/src/index.js";
 import { agent, arg, chart, final, map, user } from "../packages/hyperchart/src/core/dsl.js";
-import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
+import type { ActionUID, ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
@@ -211,6 +211,36 @@ describe("ChartRuntime", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(invokeRecords(await logStore.readAll())).toHaveLength(1);
 		expect((await logStore.readAll()).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(1);
+	});
+
+	it("acknowledges durable cancellation only after executor quiescence", async () => {
+		let release!: () => void;
+		const quiescence = new Promise<void>((resolve) => { release = resolve; });
+		class QuiescingExecutor extends FakeAgentExecutor {
+			override async cancel(actionUid: ActionUID): Promise<void> {
+				await super.cancel(actionUid);
+				await quiescence;
+			}
+		}
+		const executor = new QuiescingExecutor();
+		const runtime = new ChartRuntime({
+			ast: linearChart(),
+			logStore: new MemoryLogStore(),
+			agentExecutor: executor,
+			workDir: process.cwd(),
+			chartDir: process.cwd(),
+		});
+		const actionUid = { chart: "runtime-linear", state: "work", action: "agent" } as const;
+		const target = { kind: "action", actionUid, phase: "running" } as const;
+		const iterator = runtime.eventsQueue()[Symbol.asyncIterator]();
+		runtime.runEffects([{ kind: "cancel", id: "cancel:1", actionUid, requestId: "request:1", target }]);
+		let acknowledged = false;
+		const next = iterator.next().then((value) => { acknowledged = true; return value; });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(acknowledged).toBe(false);
+		release();
+		await expect(next).resolves.toMatchObject({ value: { kind: "cancellation_acknowledged", requestId: "request:1", target } });
+		await runtime.dispose();
 	});
 
 	it("fires timers and cancels the timed-out action", async () => {

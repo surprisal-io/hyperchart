@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { agent, final, json, map, refs, script, t, z } from "../packages/hyperchart/src/index.js";
-import { arg as untypedArg, event as untypedEvent, result as untypedResult } from "../packages/hyperchart/src/core/dsl.js";
+import {
+	actor,
+	actorInput,
+	messageInput,
+	agent,
+	call,
+	final,
+	json,
+	map,
+	message,
+	protocol,
+	receive,
+	refs,
+	reply,
+	script,
+	send,
+	t,
+	z,
+} from "../packages/hyperchart/src/index.js";
+import { arg as untypedArg, artifactOf as untypedArtifactOf, event as untypedEvent, result as untypedResult } from "../packages/hyperchart/src/core/dsl.js";
 
 type Args = { topic: string; goal: string };
 type EmptyFiles = Record<never, Record<string, unknown>>;
@@ -283,5 +301,103 @@ describe("typed refs (TS-first)", () => {
 		// ...but an explicit json() marks the intent
 		const template = t`plan: ${json(result("plan"))}`;
 		expect(template.refs).toEqual([{ kind: "result", state: "plan", json: true }]);
+	});
+});
+
+
+describe("typed explicit actor protocols", () => {
+	const Request = z.object({ patch: z.string() });
+	const Receipt = z.object({ commit: z.string() });
+	const Rejection = z.object({ reason: z.string() });
+	const Protocol = protocol({
+		APPLY: message({ input: Request, replies: { APPLIED: Receipt, REJECTED: Rejection } }),
+		READ: message({ input: z.object({ path: z.string() }), reply: z.object({ text: z.string() }) }),
+		PING: message({ input: z.object({ id: z.number() }) }),
+	});
+	const Template = actor({
+		input: z.object({ file: z.string() }),
+		protocol: Protocol,
+		initial: "idle",
+		states: {
+			idle: receive({ on: { APPLY: "applied", READ: "read", PING: "pong" } }),
+			applied: reply({ target: "idle", event: "APPLIED", output: { commit: "abc" } }),
+			read: reply({ target: "idle", output: { text: "contents" } }),
+			pong: reply({ target: "idle" }),
+		},
+	});
+	const declaration = Template({ file: "src/index.ts" });
+
+	it("infers target message inputs and exact named reply routes", () => {
+		expect(send({ to: declaration, event: "APPLY", input: { patch: "p" }, target: "next" }).event).toBe("APPLY");
+		expect(send({ to: declaration, event: "APPLY", inputs: [{ patch: "a" }, { patch: "b" }], target: "next" }).event).toBe("APPLY");
+		expect(call({ to: declaration, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "retry" } }).event).toBe("APPLY");
+		expect(call({ to: declaration, event: "READ", input: { path: "x" }, target: "next" }).event).toBe("READ");
+
+		// @ts-expect-error unknown protocol message
+		send({ to: declaration, event: "UNKNOWN", input: { patch: "p" }, target: "next" });
+		// @ts-expect-error wrong singleton input
+		send({ to: declaration, event: "APPLY", input: { path: "p" }, target: "next" });
+		// @ts-expect-error wrong batch element input
+		send({ to: declaration, event: "APPLY", inputs: [{ patch: "ok" }, { path: "bad" }], target: "next" });
+		// @ts-expect-error send has exactly one of input/inputs
+		send({ to: declaration, event: "APPLY", input: { patch: "p" }, inputs: [{ patch: "p" }], target: "next" });
+		// @ts-expect-error named call must route every and only named reply
+		call({ to: declaration, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done" } });
+		// @ts-expect-error named call cannot add a reply event
+		call({ to: declaration, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "retry", OTHER: "no" } });
+		// @ts-expect-error single reply uses target, not named transitions
+		call({ to: declaration, event: "READ", input: { path: "x" }, transitions: { DONE: "next" } });
+		// @ts-expect-error a dynamic string is not a static declaration capability
+		call({ to: "@editor", event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "retry" } });
+		// @ts-expect-error a static capability cannot be embedded in message data
+		send({ to: declaration, event: "APPLY", input: { patch: declaration }, target: "next" });
+	});
+
+	it("mutually checks reply graphs and actor-local selectors", () => {
+		// @ts-expect-error reply event is not declared for APPLY
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { APPLY: "bad" } }), bad: reply({ target: "idle", event: "OTHER", output: { commit: "x" } }) },
+		});
+		// @ts-expect-error reply output violates the READ contract
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "bad" } }), bad: reply({ target: "idle", output: { text: 42 } }) },
+		});
+		// @ts-expect-error a receive workflow must be able to reach a reply
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "loop" } }), loop: { kind: "state", action: agent("reader"), transitions: { DONE: "loop" } } },
+		});
+		// @ts-expect-error shared reply has ambiguous message reachability
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { APPLY: "shared", READ: "shared" } }), shared: reply({ target: "idle", output: { text: "x" } }) },
+		});
+		// @ts-expect-error actor input selector does not exist
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "work" } }), work: { kind: "state", action: agent("reader", { task: t`${actorInput("missing")}` }), transitions: { DONE: "settle" } }, settle: reply({ target: "idle", output: { text: "x" } }) },
+		});
+		// @ts-expect-error messageInput does not match the message context reaching work
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "work" } }), work: { kind: "state", action: agent("reader", { task: t`${messageInput("APPLY", "patch")}` }), transitions: { DONE: "settle" } }, settle: reply({ target: "idle", output: { text: "x" } }) },
+		});
+		// @ts-expect-error actor-local result cannot read a parent state
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "settle" } }), settle: reply({ target: "idle", output: { text: untypedResult("parent", "text") } }) },
+		});
+		// @ts-expect-error actor-local artifact cannot read a parent state
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "work" } }), work: { kind: "state", action: agent("reader", { reads: [untypedArtifactOf("parent", { artifact: "doc" })] }), transitions: { DONE: "settle" } }, settle: reply({ target: "idle", output: { text: "x" } }) },
+		});
+		// @ts-expect-error FAILED is reserved in actor transitions
+		actor({
+			input: z.object({ file: z.string() }), protocol: Protocol, initial: "idle",
+			states: { idle: receive({ on: { READ: "work" } }), work: { kind: "state", action: agent("reader"), transitions: { FAILED: "settle" } }, settle: reply({ target: "idle", output: { text: "x" } }) },
+		});
 	});
 });

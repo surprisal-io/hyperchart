@@ -51,7 +51,7 @@ function scriptConfig(reply?: z.ZodType, artifacts?: Record<string, string | Ret
 					...(reply === undefined ? {} : { reply }),
 					...(artifacts === undefined ? {} : { artifacts }),
 				}),
-				transitions: { DONE: "done", FAILED: "failed" },
+				transitions: { DONE: "done", ERROR: "failed" },
 			},
 			done: final(),
 			failed: failed(),

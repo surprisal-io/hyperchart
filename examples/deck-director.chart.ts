@@ -123,7 +123,7 @@ Style: ${arg("style")}
 Constraints: ${arg("constraints")}`,
 				reply: Plan,
 			}),
-			transitions: { PLAN_READY: "research", FAILED: "failed" },
+			transitions: { PLAN_READY: "research" },
 		},
 
 		// taskflow: source-scout map over research_buckets. One instance per bucket the PLANNER
@@ -146,7 +146,6 @@ Your bucket (${key("research")}): ${json(item("research"))}`,
 				},
 				done: final(),
 			},
-			transitions: { FAILED: "failed" },
 		}),
 
 		// taskflow: normalize-evidence + cluster-dedupe + evidence-coverage-gate — an honest
@@ -163,11 +162,11 @@ Your bucket (${key("research")}): ${json(item("research"))}`,
 				artifacts: { evidence: artifact(t`${result("plan", "artifacts_dir")}/evidence.json`, Evidence) },
 			}),
 			// The coverage gate: verdict is stored in the log as a validated fact; onReject=restart
-			// is taskflow's onBlock:retry, retries: 2 its retry.max — the third rejection is FAILED.
+			// is taskflow's onBlock:retry, retries: 2 its retry.max — the third rejection records global failure intent.
 			validate: script("python3", ["bin/check_coverage.py"]),
 			onReject: "restart",
 			retries: 2,
-			transitions: { NORMALIZED: "claims", FAILED: "failed" },
+			transitions: { NORMALIZED: "claims" },
 		},
 
 		// taskflow: build-context-claims + claim-builder + build-evidence-map.
@@ -179,7 +178,7 @@ Your bucket (${key("research")}): ${json(item("research"))}`,
 				reads: [artifactOf("normalize", { select: "facts" })],
 				artifacts: { claims: artifact(t`${result("plan", "artifacts_dir")}/claims.json`, Claims) },
 			}),
-			transitions: { CLAIMS_READY: "narrative", FAILED: "failed" },
+			transitions: { CLAIMS_READY: "narrative" },
 		},
 
 		// taskflow: narrative-synthesizer + materialize-outline + narrative-design-gate. The reply
@@ -198,7 +197,7 @@ Your bucket (${key("research")}): ${json(item("research"))}`,
 			validate: script("python3", ["bin/check_narrative_design.py"]),
 			onReject: "restart",
 			retries: 2,
-			transitions: { NARRATIVE_READY: "chapters", FAILED: "failed" },
+			transitions: { NARRATIVE_READY: "chapters" },
 		},
 
 		// taskflow: chapter-authoring map over work items. Items come from narrative's reply (an
@@ -223,7 +222,6 @@ Your work item: ${json(item("chapters"))}`,
 				},
 				written: final(),
 			},
-			transitions: { FAILED: "failed" },
 		}),
 
 		// taskflow: interaction-designer + validate-draft + final-consistency-gate.
@@ -238,7 +236,7 @@ Your work item: ${json(item("chapters"))}`,
 			validate: script("python3", ["bin/validate_report_data.py"]),
 			onReject: "restart",
 			retries: 2,
-			transitions: { INTERACTIONS_READY: "assemble", FAILED: "failed" },
+			transitions: { INTERACTIONS_READY: "assemble" },
 		},
 
 		// taskflow: assemble-report-data + emit-quarto-source + check + quarto-source-gate.
@@ -257,7 +255,7 @@ Your work item: ${json(item("chapters"))}`,
 			validate: script("python3", ["bin/check_quarto_source.py"]),
 			onReject: "restart",
 			retries: 2,
-			transitions: { ASSEMBLED: "render", FAILED: "failed" },
+			transitions: { ASSEMBLED: "render" },
 		},
 
 		// taskflow: render-html (quarto in docker), timeoutMs → after-deadline.
@@ -267,7 +265,7 @@ Your work item: ${json(item("chapters"))}`,
 				env: { REPORT_QMD: artifactOf("assemble") },
 			}),
 			after: { delayMs: 120_000, target: "failed" },
-			transitions: { RENDERED: "done", FAILED: "failed" },
+			transitions: { RENDERED: "done" },
 		},
 
 		done: final(),

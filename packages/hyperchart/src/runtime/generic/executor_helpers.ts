@@ -141,6 +141,8 @@ export type AcceptanceLoopOptions = {
 	isCancelled(): boolean;
 	prompt(text: string): Promise<void>;
 	lastAssistantText(): string | undefined;
+	/** Returns the latest assistant turn's provider/runtime error, if that turn failed. */
+	lastAssistantError?(): string | undefined;
 	checkArtifacts(): Promise<string[]>;
 	/** Called at most once with the accepted completion or a FAILED event. */
 	emit(event: ChartEvent): void;
@@ -155,6 +157,11 @@ export async function runAcceptanceLoop(options: AcceptanceLoopOptions): Promise
 	let remaining = options.maxRetries;
 	while (!options.isCancelled()) {
 		if (options.sink.captured === undefined) {
+			const assistantError = options.lastAssistantError?.();
+			if (assistantError !== undefined) {
+				options.emit({ type: "FAILED", error: assistantError });
+				return;
+			}
 			if (remaining-- <= 0) {
 				options.emit({ type: "FAILED", error: "agent did not produce a valid completion" });
 				return;

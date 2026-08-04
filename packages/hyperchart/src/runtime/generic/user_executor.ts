@@ -15,7 +15,8 @@ import {
 export interface UserExecutor {
 	start(effect: UserEffect, emit: EmitCompletion): void;
 	reject(effect: RejectedEffect, emit: EmitCompletion): void;
-	cancel(actionUid: ActionUID): void;
+	/** Resolves only after polling/validation for the cancelled phase has quiesced. */
+	cancel(actionUid: ActionUID): Promise<void>;
 	dispose(): Promise<void>;
 }
 
@@ -34,12 +35,14 @@ type LiveUserPhase = {
 	timer: NodeJS.Timeout;
 	emitted: boolean;
 	checking: boolean;
+	polling?: Promise<void>;
 	lastError?: string;
 };
 
 /** File-backed durable rendezvous for user actions. */
 export class FileUserExecutor implements UserExecutor {
 	private readonly live = new Map<number, LiveUserPhase>();
+	private readonly cancellations = new Map<string, Promise<void>>();
 	private readonly pollMs: number;
 	private readonly onWarn: (message: string) => void;
 	private disposed = false;
@@ -72,10 +75,12 @@ export class FileUserExecutor implements UserExecutor {
 		);
 	}
 
-	cancel(actionUid: ActionUID): void {
+	cancel(actionUid: ActionUID): Promise<void> {
 		const key = actionUidKey(actionUid);
-		for (const [seqId, phase] of this.live) {
-			if (actionUidKey(phase.actionUid) !== key) continue;
+		const existing = this.cancellations.get(key);
+		if (existing !== undefined) return existing;
+		const phases = [...this.live.entries()].filter(([, phase]) => actionUidKey(phase.actionUid) === key);
+		for (const [seqId, phase] of phases) {
 			clearInterval(phase.timer);
 			this.live.delete(seqId);
 			try {
@@ -88,6 +93,12 @@ export class FileUserExecutor implements UserExecutor {
 				this.onWarn(`Failed to close user interaction (${this.options.runId}, ${seqId}): ${errorMessage(error)}`);
 			}
 		}
+		const cancellation = Promise.all(phases.map(([, phase]) => phase.polling)).then(() => undefined);
+		this.cancellations.set(key, cancellation);
+		void cancellation.finally(() => {
+			if (this.cancellations.get(key) === cancellation) this.cancellations.delete(key);
+		});
+		return cancellation;
 	}
 
 	async dispose(): Promise<void> {
@@ -115,7 +126,14 @@ export class FileUserExecutor implements UserExecutor {
 			...(rejection === undefined ? {} : { rejection }),
 		});
 		let phase: LiveUserPhase;
-		const poll = () => void this.poll(phase);
+		const poll = () => {
+			if (phase.polling !== undefined) return;
+			const polling = this.poll(phase);
+			phase.polling = polling;
+			void polling.finally(() => {
+				if (phase.polling === polling) delete phase.polling;
+			});
+		};
 		phase = {
 			seqId: effect.seqId,
 			actionUid: effect.actionUid,
@@ -127,7 +145,7 @@ export class FileUserExecutor implements UserExecutor {
 		// Keep this interval referenced: an unresolved promise alone does not keep the
 		// detached runner alive while every active branch is waiting for the user.
 		this.live.set(effect.seqId, phase);
-		void this.poll(phase);
+		poll();
 	}
 
 	private async poll(phase: LiveUserPhase): Promise<void> {

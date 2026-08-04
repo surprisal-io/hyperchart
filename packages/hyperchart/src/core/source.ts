@@ -1,4 +1,6 @@
 import type {
+	ActorDeclarationAst,
+	ActorWorkflowStateAst,
 	ArtifactAst,
 	ArtifactOfAst,
 	ChartAst,
@@ -19,10 +21,30 @@ import type {
 const DSL_INDENT = "\t";
 
 export function hyperchartSource(ast: ChartAst, selectedStateId: StatePath | null = null): string {
-	if (selectedStateId === null) return `chart(${chartDsl(ast)})`;
+	if (selectedStateId === null) {
+		const actorBindings = new Map(Object.keys(ast.actors).sort().map((path, index) => [path, `actorDeclaration${index + 1}`]));
+		if (actorBindings.size === 0) return `chart(${chartDsl(ast, actorBindings)})`;
+		// Allocate every static capability before evaluating any actor body. This keeps
+		// actor-to-actor send cycles representable without strings or temporal-dead-zone
+		// failures; Object.create(null) is intentionally typed as `any` in generated TS.
+		const placeholders = [...actorBindings.values()].map((binding) => `const ${binding} = Object.create(null);`).join("\n");
+		const declarations = [...actorBindings].map(([path, binding]) => `Object.assign(${binding}, ${actorDeclarationDsl(ast.actors[path]!, actorBindings)});`).join("\n");
+		return `(() => {\n${indentDslValue(`${placeholders}\n${declarations}`)}\n\treturn chart(${indentDslValue(chartDsl(ast, actorBindings))});\n})()`;
+	}
+	const actorBindings = new Map(Object.keys(ast.actors).sort().map((path, index) => [path, `actorDeclaration${index + 1}`]));
+	const actor = ast.actors[selectedStateId];
+	if (actor !== undefined) return `${objectKeyDsl(actor.name)}: ${actorDeclarationDsl(actor, actorBindings)}`;
+	const actorOwner = Object.values(ast.actors)
+		.filter((candidate) => selectedStateId.startsWith(`${candidate.path}.`))
+		.sort((left, right) => right.path.length - left.path.length)[0];
+	if (actorOwner !== undefined) {
+		const localState = selectedStateId.slice(actorOwner.path.length + 1);
+		const actorState = actorOwner.states[localState];
+		if (actorState !== undefined) return `${objectKeyDsl(localState)}: ${actorStateDsl(actorState, actorBindings)}`;
+	}
 	const state = ast.states[selectedStateId];
 	if (state === undefined) return "undefined";
-	return `${objectKeyDsl(state.id)}: ${stateDsl(ast, selectedStateId)}`;
+	return `${objectKeyDsl(state.id)}: ${stateDsl(ast, selectedStateId, actorBindings)}`;
 }
 
 export function hyperchartStateSources(ast: ChartAst): Record<StatePath, string> {
@@ -59,7 +81,7 @@ function arrayDsl(values: string[]): string {
 	return `[\n${values.map((value) => `${DSL_INDENT}${indentDslValue(value)},`).join("\n")}\n]`;
 }
 
-function chartDsl(ast: ChartAst): string {
+function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>): string {
 	return objectDsl([
 		["kind", stringDsl("chart")],
 		["id", stringDsl(ast.id)],
@@ -75,9 +97,17 @@ function chartDsl(ast: ChartAst): string {
 						]),
 					])),
 		],
+		["actors", actorsDsl(ast, undefined, actorBindings)],
 		["initial", stringDsl(ast.initial)],
-		["states", statesDsl(ast, undefined)],
+		["states", statesDsl(ast, undefined, actorBindings)],
 	]);
+}
+
+function valueDsl(value: import("./types.js").ValueAst): string {
+	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
+	if (Array.isArray(value)) return arrayDsl(value.map(valueDsl));
+	if ("kind" in value && typeof value.kind === "string") return inputRefDsl(value as InputRef);
+	return objectDsl(Object.entries(value).map(([key, child]) => [key, valueDsl(child)]));
 }
 
 function jsonValueDsl(value: JsonValue): string {
@@ -88,11 +118,53 @@ function jsonValueDsl(value: JsonValue): string {
 	return objectDsl(Object.entries(value).map(([key, child]) => [key, jsonValueDsl(child)]));
 }
 
-function statesDsl(ast: ChartAst, parent: StatePath | undefined): string {
-	return objectDsl(childStatePaths(ast, parent).map((path) => [ast.states[path]?.id ?? path, stateDsl(ast, path)]));
+function statesDsl(ast: ChartAst, parent: StatePath | undefined, actorBindings: ReadonlyMap<StatePath, string>): string {
+	return objectDsl(childStatePaths(ast, parent).map((path) => [ast.states[path]?.id ?? path, stateDsl(ast, path, actorBindings)]));
 }
 
-function stateDsl(ast: ChartAst, path: StatePath): string {
+function actorsDsl(ast: ChartAst, owner: StatePath | undefined, actorBindings: ReadonlyMap<StatePath, string>): string | undefined {
+	const declarations = Object.values(ast.actors).filter((actor) => actor.owner === owner);
+	if (declarations.length === 0) return undefined;
+	return objectDsl(declarations.map((actor) => [actor.name, actorBindings.get(actor.path) ?? actorDeclarationDsl(actor, actorBindings)]));
+}
+
+function actorDeclarationDsl(actor: ActorDeclarationAst, actorBindings: ReadonlyMap<StatePath, string>): string {
+	const protocol = `protocol(${objectDsl(Object.entries(actor.protocol).map(([event, message]) => [
+		event,
+		`message(${objectDsl([
+			["input", schemaDsl(message.input)],
+			["reply", message.reply.kind === "single" ? schemaDsl(message.reply.schema) : undefined],
+			["replies", message.reply.kind === "named" ? objectDsl(Object.entries(message.reply.schemas).map(([name, schema]) => [name, schemaDsl(schema)])) : undefined],
+		])})`,
+	]))})`;
+	const template = `actor(${objectDsl([
+		["input", schemaDsl(actor.input)],
+		["protocol", protocol],
+		["initial", stringDsl(actor.initial)],
+		["states", objectDsl(Object.entries(actor.states).map(([id, state]) => [id, actorStateDsl(state, actorBindings)]))],
+	])})`;
+	return `${template}(${valueDsl(actor.inputValue)})`;
+}
+
+function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<StatePath, string>): string {
+	if (state.kind === "receive") return `receive(${objectDsl([["on", objectDsl(Object.entries(state.on).map(([event, target]) => [event, stringDsl(target)]))]])})`;
+	if (state.kind === "reply") return `reply(${objectDsl([["target", stringDsl(state.target)], ["event", state.event === undefined ? undefined : stringDsl(state.event)], ["output", state.output === undefined ? undefined : valueDsl(state.output)]])})`;
+	if (state.kind === "send") return `send(${objectDsl([["to", actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["input", state.input === undefined ? undefined : valueDsl(state.input)], ["inputs", state.inputs === undefined ? undefined : valueDsl(state.inputs)], ["target", stringDsl(state.target)]])})`;
+	if (state.kind === "call") return `call(${objectDsl([["to", actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["input", valueDsl(state.input)], ["target", state.target === undefined ? undefined : stringDsl(state.target)], ["transitions", transitionsDsl(state.transitions)]])})`;
+	if (state.kind === "state") return objectDsl([
+		["kind", stringDsl("state")],
+		["input", schemaRecordDsl(state.input)],
+		["action", actionDsl(state.action)],
+		["transitions", transitionsDsl(state.transitions)],
+		["after", state.after === undefined ? undefined : objectDsl([["delayMs", String(state.after.delayMs)], ["target", stringDsl(state.after.target)]])],
+		["validate", state.validate === undefined ? undefined : guardDsl(state.validate)],
+		["onReject", state.onReject === undefined ? undefined : stringDsl(state.onReject)],
+		["retries", state.retries === undefined ? undefined : String(state.retries)],
+	]);
+	return "undefined";
+}
+
+function stateDsl(ast: ChartAst, path: StatePath, actorBindings: ReadonlyMap<StatePath, string>): string {
 	const state = ast.states[path];
 	if (state === undefined) return "undefined";
 	if (state.kind === "final") {
@@ -126,28 +198,49 @@ function stateDsl(ast: ChartAst, path: StatePath): string {
 			["retries", state.retries === undefined ? undefined : String(state.retries)],
 		]);
 	}
+	if (state.kind === "send") {
+		return `send(${objectDsl([
+			["to", actorBindings.get(state.to) ?? stringDsl(state.to)],
+			["event", stringDsl(state.event)],
+			["input", state.input === undefined ? undefined : valueDsl(state.input)],
+			["inputs", state.inputs === undefined ? undefined : valueDsl(state.inputs)],
+			["target", stringDsl(state.target)],
+		])})`;
+	}
+	if (state.kind === "call") {
+		return `call(${objectDsl([
+			["to", actorBindings.get(state.to) ?? stringDsl(state.to)],
+			["event", stringDsl(state.event)],
+			["input", valueDsl(state.input)],
+			["target", state.target === undefined ? undefined : stringDsl(state.target)],
+			["transitions", transitionsDsl(state.transitions)],
+		])})`;
+	}
 	if (state.kind === "map") {
 		return `map(${objectDsl([
+			["actors", actorsDsl(ast, path, actorBindings)],
 			["input", schemaRecordDsl(state.input)],
 			["over", inputRefDsl(state.over)],
 			["concurrency", state.concurrency === undefined ? undefined : String(state.concurrency)],
 			["onReenter", onReenterDsl(state.onReenter)],
 			["initial", stringDsl(state.initial)],
-			["states", statesDsl(ast, path)],
+			["states", statesDsl(ast, path, actorBindings)],
 			["transitions", transitionsDsl(state.transitions)],
 			["onDone", stringDsl(state.onDone)],
 		])})`;
 	}
 	if (state.kind === "parallel") {
 		return `parallel(${objectDsl([
-			["states", statesDsl(ast, path)],
+			["actors", actorsDsl(ast, path, actorBindings)],
+			["states", statesDsl(ast, path, actorBindings)],
 			["transitions", transitionsDsl(state.transitions)],
 			["onDone", stringDsl(state.onDone)],
 		])})`;
 	}
 	return `compound(${objectDsl([
+		["actors", actorsDsl(ast, path, actorBindings)],
 		["initial", stringDsl(state.initial)],
-		["states", statesDsl(ast, path)],
+		["states", statesDsl(ast, path, actorBindings)],
 		["transitions", transitionsDsl(state.transitions)],
 		...(state.kind === "compound"
 			? ([["onDone", stringDsl(state.onDone)]] as Array<[string, string | undefined]>)
@@ -263,6 +356,12 @@ function inputRefDslBase(ref: InputRef): string {
 					? `item(${stringDsl(ref.map)})`
 					: `item(${stringDsl(ref.map)}, ${stringDsl(ref.path)})`;
 			return ref.path === undefined ? "item()" : `item(${stringDsl(ref.path)})`;
+		case "actorInput":
+			return ref.path === undefined ? "actorInput()" : `actorInput(${stringDsl(ref.path)})`;
+		case "messageInput":
+			return ref.path === undefined
+				? `messageInput(${stringDsl(ref.message)})`
+				: `messageInput(${stringDsl(ref.message)}, ${stringDsl(ref.path)})`;
 	}
 }
 
