@@ -1,6 +1,6 @@
 import { actionUidKey } from "./action_uid.js";
 import type { DurableLogRecord } from "./durable_events.js";
-import { actorContextForState, actorGenerationPath, actorOccurrencePath } from "./actors.js";
+import { actorContextForState, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath } from "./actors.js";
 import { nodeAt, templatePath } from "./paths.js";
 import {
 	createBranchProjection,
@@ -97,9 +97,10 @@ function staleRecordsFor(
 		if (actor === undefined) return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor declaration ${record.declaration} was removed or moved` }];
 		const ownerMatches = (actor.owner === undefined) === (record.owner === undefined)
 			&& (actor.owner === undefined || (record.owner !== undefined && templatePath(record.owner) === actor.owner));
+		const logicalOccurrence = actorLogicalOccurrencePath(record.occurrence, record.generation);
 		const expectedLogicalOccurrence = actorOccurrencePath(actor, record.owner);
-		if (!ownerMatches || record.logicalOccurrence !== expectedLogicalOccurrence || record.occurrence !== actorGenerationPath(expectedLogicalOccurrence, record.generation)) {
-			return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor owner, logical occurrence, occurrence, or generation placement changed for ${record.declaration}` }];
+		if (!ownerMatches || logicalOccurrence !== expectedLogicalOccurrence || record.occurrence !== actorGenerationPath(logicalOccurrence, record.generation)) {
+			return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor owner, occurrence, or generation placement changed for ${record.declaration}` }];
 		}
 		if (stableStringify(actor) === stableStringify(record.definition)) return [];
 		return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_definition_changed", message: `Actor definition or protocol for ${record.declaration} changed since creation seqId ${record.seqId}` }];

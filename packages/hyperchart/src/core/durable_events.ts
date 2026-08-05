@@ -101,8 +101,6 @@ export type ActorMessageEnvelope = Readonly<{
 export type ActorCreatedLog = {
 	type: "actor_created";
 	declaration: StatePath;
-	/** Logical address without a generation suffix. */
-	logicalOccurrence: StatePath;
 	/** Concrete occurrence path; generation 1 uses the logical path, later generations use ~N. */
 	occurrence: StatePath;
 	generation: number;

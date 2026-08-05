@@ -160,6 +160,7 @@ describe("explicit event-sourced actors", () => {
 			"actor_message",
 			"actor_scope",
 		]));
+		expect(runtime.records.filter((record) => record.type === "actor_created").every((record) => !("logicalOccurrence" in record))).toBe(true);
 		const replayed = projectBranch(createBranchProjection(runtime.ast), runtime.ast, JSON.parse(JSON.stringify(runtime.records)) as DurableLogRecord[]);
 		expect(replayed.actors).toEqual(state.projection.actors);
 		expect(replayed.activeLeaves).toEqual(state.projection.activeLeaves);

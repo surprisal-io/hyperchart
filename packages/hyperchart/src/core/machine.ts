@@ -144,7 +144,6 @@ export type ActorCreateEffect = Readonly<{
 	kind: "actor_create";
 	id: EffectId;
 	declaration: ActorDeclarationAst;
-	logicalOccurrence: StatePath;
 	occurrence: StatePath;
 	generation: number;
 	owner?: StatePath;
@@ -800,7 +799,6 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					records: [{
 						type: "actor_created",
 						declaration: effect.declaration.path,
-						logicalOccurrence: effect.logicalOccurrence,
 						occurrence: effect.occurrence,
 						generation: effect.generation,
 						...(effect.owner === undefined ? {} : { owner: effect.owner }),
@@ -1040,7 +1038,6 @@ function dueActorCreates(state: MachineState): ActorCreateEffect[] {
 				kind: "actor_create",
 				id: `actor:create:${occurrence}`,
 				declaration,
-				logicalOccurrence,
 				occurrence,
 				generation,
 				...(owner === undefined ? {} : { owner }),

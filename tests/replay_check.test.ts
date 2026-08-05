@@ -7,6 +7,8 @@ import {
 	script,
 	event,
 	explainReplay,
+	createBranchProjection,
+	projectBranch,
 	final,
 	map,
 	message,
@@ -119,7 +121,6 @@ describe("explainReplay", () => {
 		const valid = {
 			type: "actor_created" as const,
 			declaration: "@a",
-			logicalOccurrence: "@a",
 			occurrence: "@a",
 			generation: 1,
 			input: {},
@@ -128,7 +129,7 @@ describe("explainReplay", () => {
 		};
 		const forgeries: DurableLogRecord[] = [
 			{ ...valid, owner: "forged" },
-			{ ...valid, logicalOccurrence: "forged.@a", occurrence: "forged.@a" },
+			{ ...valid, occurrence: "forged.@a" },
 			{ ...valid, occurrence: "forged" },
 			{ ...valid, generation: 2, occurrence: "@a" },
 		];
@@ -138,6 +139,30 @@ describe("explainReplay", () => {
 			expect(explanation.prefixEnd).toBe(0);
 			expect(explanation.broken).toMatchObject({ seqId: 1 });
 		}
+	});
+
+	it("derives a restarted actor's logical occurrence from its concrete occurrence", () => {
+		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
+		const Actor = actor({
+			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const declaration = Actor({});
+		const current = ast(chart({
+			kind: "chart", id: "actor-replay-generation", actors: { a: declaration }, initial: "done", states: { done: final() },
+		}));
+		const definition = current.actors["@a"]!;
+		const log: DurableLogRecord[] = [
+			{ type: "actor_created", declaration: "@a", occurrence: "@a", generation: 1, input: {}, definition, ...meta(1) },
+			{ type: "actor_scope", kind: "stopped", occurrence: "@a", ...meta(2) },
+			{ type: "actor_created", declaration: "@a", occurrence: "@a~2", generation: 2, input: {}, definition, ...meta(3) },
+		];
+
+		const explanation = explainReplay(current, log);
+		const projection = projectBranch(createBranchProjection(current), current, log);
+
+		expect(explanation.broken).toBeUndefined();
+		expect(projection.actors["@a~2"]?.logicalOccurrence).toBe("@a");
 	});
 
 	it("flags a reply contract changed in the live actor protocol", () => {
@@ -168,7 +193,7 @@ describe("explainReplay", () => {
 		if (contract.reply.kind !== "single") throw new Error("expected single reply contract");
 		const envelope = { messageId: "ping:message:1:0", event: "PING", input: {}, producerState: "ping", producerVisit: 1, batchIndex: 0 };
 		const log: DurableLogRecord[] = [
-			{ type: "actor_created", declaration: "@worker", logicalOccurrence: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: declaration, ...meta(1) },
+			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: declaration, ...meta(1) },
 			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: { producerState: "ping", kind: "send", definition: source, targetDeclaration: "@worker", event: "PING", inputSchema: contract.input }, messages: [envelope], ...meta(2) },
 			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: envelope.messageId, receiveState: "@worker.idle", ...meta(3) },
 			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: envelope.messageId, message: "PING", output: { value: "old" }, schema: contract.reply.schema, ...meta(4) },
@@ -204,7 +229,7 @@ describe("explainReplay", () => {
 			{ type: "spawned", path: "m", instances: { real: {} }, ...meta(2) },
 			{
 				type: "actor_created", declaration: "m.@a", owner: "m",
-				logicalOccurrence: "m.@a", occurrence: "m.@a", generation: 1,
+				occurrence: "m.@a", generation: 1,
 				input: {}, definition, ...meta(3),
 			},
 		];

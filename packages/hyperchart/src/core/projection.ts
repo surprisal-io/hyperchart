@@ -1,6 +1,6 @@
 import type { ActionStateAst, ActionUID, ActorDeclarationAst, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
 import type { ActorMessageEnvelope, DurableLogRecord } from "./durable_events.js";
-import { actorContextForState, actorDeclarationForOccurrence, actorGenerationPath, actorOccurrencePath, actorStatePath } from "./actors.js";
+import { actorContextForState, actorDeclarationForOccurrence, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
 	childPath,
@@ -186,15 +186,16 @@ export function projectBranch(
 						throw new Error(`Actor creation ${record.occurrence} targets an owner occurrence that is not active`);
 					}
 				}
+				const logicalOccurrence = actorLogicalOccurrencePath(record.occurrence, record.generation);
 				const expectedLogicalOccurrence = actorOccurrencePath(record.definition, record.owner);
-				if (record.logicalOccurrence !== expectedLogicalOccurrence) throw new Error(`Actor creation ${record.occurrence} has mismatched logical occurrence provenance`);
-				if (record.occurrence !== actorGenerationPath(record.logicalOccurrence, record.generation)) throw new Error(`Actor creation ${record.occurrence} does not match its generation`);
-				const priorGeneration = Object.values(projection.actors).filter((entry) => entry.logicalOccurrence === record.logicalOccurrence).sort((left, right) => right.generation - left.generation)[0];
-				if (record.generation !== (priorGeneration?.generation ?? 0) + 1) throw new Error(`Actor occurrence ${record.logicalOccurrence} generation is not sequential`);
-				if (priorGeneration !== undefined && priorGeneration.status !== "stopped") throw new Error(`Actor occurrence ${record.logicalOccurrence} re-entered before its prior generation stopped`);
+				if (logicalOccurrence !== expectedLogicalOccurrence) throw new Error(`Actor creation ${record.occurrence} has mismatched logical occurrence provenance`);
+				if (record.occurrence !== actorGenerationPath(logicalOccurrence, record.generation)) throw new Error(`Actor creation ${record.occurrence} does not match its generation`);
+				const priorGeneration = Object.values(projection.actors).filter((entry) => entry.logicalOccurrence === logicalOccurrence).sort((left, right) => right.generation - left.generation)[0];
+				if (record.generation !== (priorGeneration?.generation ?? 0) + 1) throw new Error(`Actor occurrence ${logicalOccurrence} generation is not sequential`);
+				if (priorGeneration !== undefined && priorGeneration.status !== "stopped") throw new Error(`Actor occurrence ${logicalOccurrence} re-entered before its prior generation stopped`);
 				projection.actors[record.occurrence] = {
 					declaration: record.declaration,
-					logicalOccurrence: record.logicalOccurrence,
+					logicalOccurrence,
 					occurrence: record.occurrence,
 					generation: record.generation,
 					...(record.owner === undefined ? {} : { owner: record.owner }),

@@ -19,6 +19,12 @@ export function actorGenerationPath(logicalOccurrence: StatePath, generation: nu
 	return generation === 1 ? logicalOccurrence : `${logicalOccurrence}~${generation}`;
 }
 
+export function actorLogicalOccurrencePath(occurrence: StatePath, generation: number): StatePath {
+	if (generation === 1) return occurrence;
+	const suffix = `~${generation}`;
+	return occurrence.endsWith(suffix) ? occurrence.slice(0, -suffix.length) : occurrence;
+}
+
 export function actorStatePath(occurrence: StatePath, localState: StatePath): StatePath {
 	return `${occurrence}.${localState}`;
 }
