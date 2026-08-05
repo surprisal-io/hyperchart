@@ -9,10 +9,14 @@ export function FullPreDialog({
 	children,
 	language,
 	onClose,
+	wrapLongLines = false,
+	renderContent,
 }: {
-	children: React.ReactNode;
+	children: string;
 	language?: string | undefined;
 	onClose: () => void;
+	wrapLongLines?: boolean;
+	renderContent?: (text: string) => React.ReactNode;
 }) {
 	const { resolved } = useHyperchartTheme();
 	const titleId = useId();
@@ -57,9 +61,9 @@ export function FullPreDialog({
 					</div>
 					<div className="min-h-0 overflow-auto p-4">
 						<div className="min-w-0 max-w-full rounded-lg border border-[var(--border-primary)] bg-[var(--bg-code)]">
-							<HighlightedBlock language={language} full>
-								{children}
-							</HighlightedBlock>
+							{renderContent === undefined ? (
+								<HighlightedBlock language={language} full wrapLongLines={wrapLongLines}>{children}</HighlightedBlock>
+							) : renderContent(children)}
 						</div>
 					</div>
 				</div>

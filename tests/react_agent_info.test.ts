@@ -3,8 +3,67 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
 import { AgentInfoCard } from "../packages/hyperchart/src/react/components/inspector/details/AgentInfoCard.js";
+import { VisitInvocationDetails } from "../packages/hyperchart/src/react/components/inspector/details/VisitInvocationDetails.js";
 
 describe("Agent inspector details", () => {
+	it("explains declared reads and renders their artifact contract", () => {
+		const state: HyperchartStateInfo = {
+			id: "write",
+			type: "agent",
+			status: "running",
+			agent: "writer",
+			reads: ['artifactOf("prepare", { artifact: "context" })'],
+			readArtifacts: [{
+				name: "context",
+				sourceState: "prepare",
+				path: "artifacts/context.json",
+				schema: { schema: { type: "object", description: "Context the writer must read.", properties: { risks: { type: "array", items: { type: "string" } } } } },
+			}],
+		};
+		const markup = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
+		expect(markup).toContain("prepare → context");
+		expect(markup).toContain("artifacts/context.json");
+		expect(markup).not.toContain('title="{');
+		expect(markup).not.toContain("Files supplied to the agent before it starts.");
+		expect(markup).not.toContain("Context the writer must read.");
+	});
+
+	it("distinguishes joined artifact reads from single artifact reads", () => {
+		const state: HyperchartStateInfo = {
+			id: "write",
+			type: "agent",
+			status: "running",
+			agent: "writer",
+			reads: ['joinArtifactOf("research.collect", { artifact: "brief" })'],
+			readArtifacts: [{ name: "brief", sourceState: "research.collect", path: "artifacts/source-{key}.json", readKind: "join" }],
+		};
+		const authored = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
+		const resolved = renderToStaticMarkup(createElement(VisitInvocationDetails, {
+			state,
+			allStates: [state],
+			invocation: { kind: "agent", reads: [{ name: "brief", sourceState: "research#a.collect", path: "artifacts/source-a.json", readKind: "join" }] },
+		}));
+		expect(authored).toContain('data-artifact-read-kind="join"');
+		expect(resolved).toContain('data-artifact-read-kind="join"');
+	});
+
+	it("keeps artifact schemas on resolved reads", () => {
+		const state: HyperchartStateInfo = { id: "write", type: "agent", status: "running", agent: "writer" };
+		const markup = renderToStaticMarkup(createElement(VisitInvocationDetails, {
+			state,
+			allStates: [state],
+			invocation: {
+				kind: "agent",
+				reads: [{ path: "artifacts/context.json", name: "context", sourceState: "prepare", schema: { schema: { type: "object", description: "Resolved context contract.", properties: { title: { type: "string" } } } } }],
+			},
+		}));
+		expect(markup).toContain("resolved reads");
+		expect(markup).toContain("prepare → context");
+		expect(markup).toContain("artifacts/context.json");
+		expect(markup).not.toContain("Resolved context contract.");
+		expect(markup).not.toContain("type Context");
+	});
+
 	it("renders the loaded agent description", () => {
 		const state: HyperchartStateInfo = {
 			id: "analyze",

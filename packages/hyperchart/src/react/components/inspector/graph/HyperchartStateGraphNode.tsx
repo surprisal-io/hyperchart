@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { EnvelopeIcon } from "@heroicons/react/24/outline";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { hyperchartStatusClasses, hyperchartStatusDotClass } from "../../../hyperchart-display.js";
 import type { StateNode } from "../types.js";
@@ -15,6 +16,7 @@ import {
 import { graphNodeSize } from "./graphModel.js";
 import { CompactMapNodePreview } from "./CompactMapNodePreview.js";
 import { CompactParallelNodePreview } from "./CompactParallelNodePreview.js";
+import { ActorNodePreview } from "./ActorNodePreview.js";
 
 function useDurationSnapshot(active: boolean, snapshotAt?: number): number | undefined {
 	const [current, setCurrent] = useState(() => snapshotAt ?? Date.now());
@@ -35,13 +37,21 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 	const kind = stateKindMeta(displayState);
 	const KindIcon = kind.Icon;
 	const validationLabel = validationRetryLabel(state);
-	const hasStructuredPreview = displayState.type === "map" || displayState.type === "parallel";
+	const hasStructuredPreview =
+		displayState.type === "map" ||
+		displayState.type === "parallel" ||
+		displayState.type === "actor-declaration" ||
+		displayState.type === "actor-occurrence";
 	const mechanism = hasStructuredPreview ? undefined : stateMechanismLabel(displayState);
+	const actorMessage = displayState.type === "send" || displayState.type === "call" ? displayState.actorMessageLink : undefined;
 	const durationSnapshot = useDurationSnapshot(
 		state.status === "running" && state.startedAt !== undefined && state.endedAt === undefined,
 		data.snapshotAt,
 	);
 	const duration = formatStateDuration(state, durationSnapshot);
+	const displayedStatus = displayState.type === "actor-declaration" && state.actorOccurrence === undefined
+		? "definition-only"
+		: state.status;
 	const runtimeChips = compactRuntimeFacts(state).slice(0, 2);
 	const triageChips = compactTriageFacts(state, validationLabel).slice(0, 2);
 	const outlineClass = selected
@@ -108,22 +118,32 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 					<span
 						className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${hyperchartStatusClasses(state.status)}`}
 					>
-						<span className={`h-1.5 w-1.5 rounded-full ${hyperchartStatusDotClass(state.status)}`} /> {state.status}
+						<span className={`h-1.5 w-1.5 rounded-full ${hyperchartStatusDotClass(state.status)}`} /> {displayedStatus}
 					</span>
 				</div>
 
 				{(mechanism !== undefined || (!hasStructuredPreview && displayState.type !== "user")) && (
 					<div className="mt-2 flex min-w-0 items-center gap-2 text-[10px]">
-						{!hasStructuredPreview && (
+						{actorMessage !== undefined ? (
+							<div className="flex min-w-0 items-center font-mono text-[10px] leading-none text-[var(--text-secondary)]">
+								<EnvelopeIcon className="mr-1 h-2.5 w-2.5 shrink-0 text-[var(--text-muted)]" aria-label="Event" title="Event" />
+								<span className="truncate text-[var(--text-primary)]" title={actorMessage.event}>{actorMessage.event}</span>
+								<span className="mx-1.5 text-[var(--text-muted)]" aria-hidden="true">→</span>
+								<span className="truncate" title={actorMessage.to}>{actorMessage.to}</span>
+							</div>
+						) : !hasStructuredPreview ? (
 							<div className="min-w-0 truncate font-mono text-[var(--text-secondary)]" title={mechanism ?? kind.label}>
 								{mechanism ?? kind.label}
 							</div>
-						)}
+						) : null}
 					</div>
 				)}
 
 				{displayState.type === "map" && <CompactMapNodePreview state={displayState} />}
 				{displayState.type === "parallel" && <CompactParallelNodePreview state={displayState} />}
+				{(displayState.type === "actor-declaration" || displayState.type === "actor-occurrence") && (
+					<ActorNodePreview state={displayState} />
+				)}
 			</div>
 
 			{triageChips.length > 0 && (

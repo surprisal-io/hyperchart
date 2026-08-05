@@ -1,7 +1,7 @@
 import type { HyperchartRunInfo, HyperchartStateInfo } from "../../../types.js";
 import { isImplicitFailedFinal } from "../helpers/state.js";
 
-export type StateTransitionEdge = { source: string; target: string; labels: string[] };
+export type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "call" | "reply" };
 
 export type GraphInput = {
 	stateById: Map<string, HyperchartStateInfo>;
@@ -16,6 +16,17 @@ function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): 
 	const grouped = new Map<string, StateTransitionEdge>();
 	for (const state of run.states) {
 		if (!visibleIds.has(state.id)) continue;
+		const link = state.actorMessageLink;
+		if (link !== undefined && visibleIds.has(link.to) && link.to !== state.id) {
+			const key = `${state.id}\u0000${link.to}\u0000${link.kind}`;
+			grouped.set(key, { source: state.id, target: link.to, labels: [link.event ?? link.kind], kind: link.kind });
+		}
+		const occurrence = state.actorOccurrence;
+		const caller = occurrence?.pendingCaller;
+		if (caller !== undefined && visibleIds.has(caller.state) && caller.state !== state.id) {
+			const key = `${state.id}\u0000${caller.state}\u0000reply`;
+			grouped.set(key, { source: state.id, target: caller.state, labels: [state.actorOccurrence?.currentMessage?.replyEvent ?? "reply"], kind: "reply" });
+		}
 		for (const transition of state.transitions ?? []) {
 			if (transition.target === state.id || !visibleIds.has(transition.target)) continue;
 			const key = `${state.id}\u0000${transition.target}`;

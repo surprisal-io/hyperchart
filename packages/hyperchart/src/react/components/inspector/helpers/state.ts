@@ -5,6 +5,8 @@ import {
 	CommandLineIcon,
 	FolderIcon,
 	MapIcon,
+	QueueListIcon,
+	PaperAirplaneIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import type { HyperchartRunInfo, HyperchartStateInfo, HyperchartUsageInfo } from "../../../types.js";
@@ -30,6 +32,36 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 	iconClassName: string;
 } {
 	switch (state.type ?? "agent") {
+		case "send":
+			return {
+				label: "send",
+				Icon: PaperAirplaneIcon,
+				className: "border-teal-500/45 bg-teal-500/10 text-[var(--hc-cyan-text)]",
+				iconClassName: "text-[var(--hc-cyan-text)]",
+			};
+		case "call":
+			return {
+				label: "call",
+				Icon: ArrowsRightLeftIcon,
+				className: "border-violet-500/45 bg-violet-500/10 text-[var(--hc-purple-text)]",
+				iconClassName: "text-[var(--hc-purple-text)]",
+			};
+		case "actor-declaration":
+		case "actor-occurrence":
+			return {
+				label: "actor",
+				Icon: QueueListIcon,
+				className: "border-amber-500/45 bg-amber-500/10 text-[var(--hc-amber-text)]",
+				iconClassName: "text-[var(--hc-amber-text)]",
+			};
+		case "receive":
+		case "reply":
+			return {
+				label: state.type === "receive" ? "receive" : "reply",
+				Icon: QueueListIcon,
+				className: "border-amber-500/45 bg-amber-500/10 text-[var(--hc-amber-text)]",
+				iconClassName: "text-[var(--hc-amber-text)]",
+			};
 		case "script":
 			return {
 				label: "script",
@@ -89,36 +121,6 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 	}
 }
 
-export function statePrimitiveSummary(state: HyperchartStateInfo): string | undefined {
-	switch (state.type ?? "agent") {
-		case "script":
-			return state.commandPreview ? state.commandPreview.split("\n")[0] : undefined;
-		case "map":
-			return (
-				[
-					state.subProgress?.total ? `${state.subProgress.total} items` : "dynamic items",
-					state.subProgress ? `${state.subProgress.done}/${state.subProgress.total} done` : undefined,
-				]
-					.filter(Boolean)
-					.join(" · ") || undefined
-			);
-		case "parallel":
-			return [`fan-out`, `${state.parallelConfig?.count ?? state.parallelConfig?.branches?.length ?? 0} branches`]
-				.filter(Boolean)
-				.join(" · ");
-		case "region":
-			return "parallel branch scope";
-		case "compound":
-			return "compound scope";
-		case "final":
-			return "terminal state";
-		case "user":
-			return (state.taskPreview ?? state.taskPrompt)?.split("\n")[0];
-		default:
-			return (state.taskPreview ?? state.taskPrompt)?.split("\n")[0];
-	}
-}
-
 export function formatStateDuration(state: HyperchartStateInfo, snapshotAt = Date.now()): string | undefined {
 	if (state.startedAt === undefined) return undefined;
 	const end = state.endedAt ?? snapshotAt;
@@ -149,6 +151,17 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 	switch (state.type ?? "agent") {
 		case "agent":
 			return state.agent ? `@${state.agent}` : "agent";
+		case "send":
+		case "call":
+			return state.taskPreview;
+		case "actor-declaration":
+			return `${state.actorDeclaration?.protocol.length ?? 0} messages`;
+		case "actor-occurrence":
+			return `${state.actorOccurrence?.currentState ?? "idle"} · mailbox ${state.actorOccurrence?.mailbox.totalCount ?? 0}`;
+		case "receive":
+			return "receive()";
+		case "reply":
+			return "reply()";
 		case "script":
 			return state.commandPreview?.split("\n")[0] ?? "script";
 		case "map": {
@@ -242,7 +255,11 @@ export function stateHasRuntimeDetails(state: HyperchartStateInfo): boolean {
 		state.subProgress !== undefined ||
 		state.mapConfig?.items !== undefined ||
 		Boolean(state.usage) ||
-		state.session !== undefined
+		state.session !== undefined ||
+		state.actorOccurrence !== undefined ||
+		state.actorInternal?.generations !== undefined ||
+		state.actorMessageHistory !== undefined ||
+		state.actorMessageLink?.messages !== undefined
 	);
 }
 

@@ -1,10 +1,12 @@
 import { inspectChartAst } from "../../../core/inspect_ast.js";
 import { normalizeChartConfig } from "../../../core/normalize.js";
 import { templatePath } from "../../../core/paths.js";
+import { explainReplay } from "../../../core/replay_check.js";
 import { hyperchartSource as coreHyperchartSource } from "../../../core/source.js";
 import type { ChartAst, ChartCst } from "../../../core/types.js";
 import type { DurableLogRecord } from "../../../core/durable_events.js";
 import {
+	hyperchartRunFromInspectResult,
 	hyperchartRunFromRuntime,
 	type HyperchartRunFromRuntimeOptions,
 	type HyperchartRuntimeSessionProgressFile,
@@ -54,6 +56,18 @@ function runFromInspectorPanelSpec(
 	key: string,
 	generated = generatedRuntimeForInspectorPanelSpec(spec, ast, key),
 ): HyperchartRunInfo {
+	if (spec.runtime.mode === "static") {
+		return hyperchartRunFromInspectResult(inspectChartAst(ast, { chartPath: `storybook:${ast.id}` }), {
+			runId: `inspect:${key}`,
+			cwd: "/Users/demo/Work/pi-hyperchart",
+			createdAt: 1_700_000_000_000,
+			updatedAt: 1_700_000_060_000,
+		});
+	}
+	const replay = explainReplay(ast, generated.records);
+	if (replay.broken !== undefined || replay.prefixEnd !== generated.records.length || replay.stale.length > 0 || replay.skipped.length > 0) {
+		throw new Error(`invalid inspector-panel story log for ${key}: ${JSON.stringify(replay)}`);
+	}
 	return hyperchartRunFromRuntime(inspectChartAst(ast, { chartPath: `storybook:${ast.id}` }), ast, generated.records, {
 		runId: `inspector-panel-${key}`,
 		status: generated.status,
@@ -95,6 +109,13 @@ function formatJson(value: unknown): string {
 	return JSON.stringify(value, null, 2);
 }
 
+export function inspectorPanelScenario(spec: InspectorPanelSpec): { run: HyperchartRunInfo; selectedStateId: string | null } | undefined {
+	const validation = validateChartForStory(spec.chart);
+	if (!validation.ok) return undefined;
+	const key = spec.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+	return { run: runFromInspectorPanelSpec(spec, validation.ast, key), selectedStateId: spec.runtime.selectedStateId };
+}
+
 export function inspectorPanelTileProps(spec: InspectorPanelSpec): InspectorPanelTileProps {
 	const { title, description, runtime, chart } = spec;
 	const validation = validateChartForStory(chart);
@@ -109,9 +130,12 @@ export function inspectorPanelTileProps(spec: InspectorPanelSpec): InspectorPane
 	const state = runtime.selectedStateId
 		? run.states.find((candidate) => candidate.id === runtime.selectedStateId)
 		: undefined;
-	const definitionSource =
-		state?.definitionSource ??
-		coreHyperchartSource(ast, runtime.selectedStateId === null ? null : templatePath(runtime.selectedStateId));
+	const definitionStateId = state?.actorInternal !== undefined
+		? `${state.actorInternal.declarationPath}.${state.actorInternal.localState}`
+		: state?.actorDeclaration !== undefined
+			? state.actorDeclaration.declarationPath
+			: runtime.selectedStateId === null ? null : templatePath(runtime.selectedStateId);
+	const definitionSource = state?.definitionSource ?? coreHyperchartSource(ast, definitionStateId);
 	return {
 		variant: "panel",
 		title,
@@ -119,20 +143,25 @@ export function inspectorPanelTileProps(spec: InspectorPanelSpec): InspectorPane
 		run,
 		selectedStateId: runtime.selectedStateId,
 		definitionSource,
-		runtimeSources: generatedRuntimeSources(definitionSource, generated),
+		runtimeSources: generatedRuntimeSources(definitionSource, generated, runtime.mode === "static"),
 	};
 }
 
 function generatedRuntimeSources(
 	definitionSource: string,
 	generated: InspectorPanelGeneratedRuntime,
+	staticOnly = false,
 ): RuntimeSourceBlock[] {
 	return [
 		{ title: "Definition", code: definitionSource, language: "typescript" },
-		{ title: "log records", code: formatJson(generated.records), language: "json" },
-		{ title: "status.json", code: formatJson(generated.status), language: "json" },
-		...(generated.sessionProgress === undefined
+		...(staticOnly
 			? []
-			: [{ title: "sessions/progress.json", code: formatJson(generated.sessionProgress), language: "json" }]),
+			: [
+					{ title: "log records", code: formatJson(generated.records), language: "json" },
+					{ title: "status.json", code: formatJson(generated.status), language: "json" },
+					...(generated.sessionProgress === undefined
+						? []
+						: [{ title: "sessions/progress.json", code: formatJson(generated.sessionProgress), language: "json" }]),
+				]),
 	];
 }

@@ -1,5 +1,4 @@
 import {
-	ArrowPathIcon,
 	CodeBracketSquareIcon,
 	CommandLineIcon,
 	InformationCircleIcon,
@@ -8,9 +7,7 @@ import type { HyperchartRunInfo } from "../../../types.js";
 import {
 	formatHyperchartDateTime,
 	formatHyperchartUsage,
-	runningHyperchartStates,
 } from "../../../hyperchart-display.js";
-import { stateDisplayName } from "../helpers/state.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
 import { Section } from "../ui/Section.js";
@@ -18,35 +15,19 @@ import { IssuesSection } from "../validation/IssuesSection.js";
 import { DefinitionSection } from "./DefinitionSection.js";
 
 export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo; definitionSource?: string }) {
-	const running = run.mode === "static" ? [] : runningHyperchartStates(run);
 	return (
 		<div className="space-y-3">
 			{run.mode === "static" ? (
 				<Section title="Static graph" icon={InformationCircleIcon}>
 					<div className="text-[var(--text-muted)]">
-						This is a static chart inspect. Runtime arguments, activity, process metadata, timings, and resolved fan-out
-						data are available only for run inspect.
+						This is a static chart inspect. Runtime arguments, process metadata, timings, and resolved fan-out data are
+						available only for run inspect.
 					</div>
 				</Section>
 			) : (
 				<>
 					<Section title="Run arguments" icon={CodeBracketSquareIcon}>
 						<JsonBlock value={run.args} />
-					</Section>
-					<Section title="Current activity" icon={ArrowPathIcon}>
-						{running.length > 0 ? (
-							<div className="space-y-2">
-								{running.map((state) => (
-									<div key={state.id} className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2">
-										<div className="font-mono text-[11px] text-[var(--hc-blue-text)]" title={state.id}>
-											{stateDisplayName(state)}
-										</div>
-									</div>
-								))}
-							</div>
-						) : (
-							<div className="text-[var(--text-muted)]">No state running right now.</div>
-						)}
 					</Section>
 					<Section title="Run metadata" icon={InformationCircleIcon}>
 						<dl className="grid gap-2 text-[11px]">
