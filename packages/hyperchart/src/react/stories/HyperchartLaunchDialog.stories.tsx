@@ -3,7 +3,8 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { HyperchartLaunchDialog } from "../HyperchartLaunchDialog.js";
 
 const meta = {
-	title: "Hyperchart/Components/Launch Dialog",
+	title: "Hyperchart/Launch/Dialog",
+	id: "hyperchart-components-launch-dialog",
 	component: HyperchartLaunchDialog,
 	parameters: {
 		layout: "fullscreen",

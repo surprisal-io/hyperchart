@@ -224,3 +224,7 @@ Recommended release practice:
 - [Runtime and durability](runtime-and-durability.md)
 - [Pi commands and tools](pi.md)
 - [Architecture and formal model](architecture.md)
+
+## Actor safety invariants
+
+Every message is accepted only by an explicit `receive()` state; an actor owns at most one current message; every accepted workflow reaches exactly one graph-inferred `reply()` before the next accept; FIFO head mismatch fails globally. Reserved `FAILED` cannot be authored as a transition and terminalizes immediately after durable failure intent. See [Explicit actors](./explicit-actors.md).

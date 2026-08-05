@@ -4,7 +4,8 @@ import { BoardPage, BoardSection } from "./components/index.js";
 import { TuiTerminalPreview } from "./tui/TuiTerminalPreview.js";
 
 const meta = {
-	title: "Hyperchart/TUI/Components/Run History",
+	title: "Hyperchart/TUI/Run History",
+	id: "hyperchart-tui-components-run-history",
 	component: TuiTerminalPreview,
 	parameters: {
 		layout: "fullscreen",
@@ -34,7 +35,8 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Playground: Story = {
+export const InteractiveSelection: Story = {
+	name: "interactive selection",
 	render: (args) => (
 		<BoardPage
 			title="TUI · Run history"

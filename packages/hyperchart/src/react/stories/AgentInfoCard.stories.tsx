@@ -1,50 +1,22 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { AgentInfoCard } from "../components/inspector/details/AgentInfoCard.js";
-import type { HyperchartStateInfo } from "../types.js";
+import { inspectorPanelSpecs } from "./inspector-panel/specs.js";
+import { inspectorPanelScenario } from "./inspector-panel/runtime.js";
 
-const state: HyperchartStateInfo = {
-	id: "research-planner",
-	type: "agent",
-	status: "running",
-	agent: "report-engine-research-scout",
-	agentDescription: "Fast structured web research worker for Report Engine Hypercharts. Handles initial-angle scans, evidence collection, and source synthesis.",
-	role: "worker",
-	model: "openai-codex/gpt-5.6-sol",
-	resolvedModel: "deepseek/deepseek-v4-pro",
-	thinking: "xhigh",
-	toolset: "researching",
-	tools: ["read"],
-	resolvedTools: ["read", "write", "web_search", "web_search_brave", "browser", "finish"],
-	reads: ["research.assemble-evidence", "plan.narrative-strategy"],
-	artifacts: [{ name: "research-brief" }],
-	replySchema: { schema: { type: "object" } },
-};
+const richAgentSpec = inspectorPanelSpecs.find((spec) => spec.group === "agent" && spec.title === "Rich agent");
+const scenario = richAgentSpec === undefined ? undefined : inspectorPanelScenario(richAgentSpec);
+const state = scenario?.run.states.find((candidate) => candidate.id === scenario.selectedStateId);
+if (scenario === undefined || state === undefined) throw new Error("adapter-derived rich agent fixture is unavailable");
 
 const meta = {
-	title: "Hyperchart/Components/Agent Info Card",
+	title: "Hyperchart/Inspector/State Details/Agent Info",
+	id: "hyperchart-components-agent-info-card",
 	component: AgentInfoCard,
-	parameters: {
-		layout: "centered",
-		docs: {
-			description: {
-				component: "Static agent metadata card. Run-specific session controls live in the inspector Runtime section.",
-			},
-		},
-	},
-	args: {
-		state,
-		allStates: [state],
-	},
-	decorators: [
-		(Story) => (
-			<div className="w-[390px] max-w-[calc(100vw-2rem)]">
-				<Story />
-			</div>
-		),
-	],
+	parameters: { layout: "centered", docs: { description: { component: "Agent metadata projected from a normalized chart and durable session facts." } } },
+	args: { state, allStates: scenario.run.states },
+	decorators: [(Story) => <div className="w-[390px] max-w-[calc(100vw-2rem)]"><Story /></div>],
 } satisfies Meta<typeof AgentInfoCard>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
-
-export const ResolvedRoleAndToolset: Story = {};
+export const ResolvedRoleAndToolset: Story = { name: "Authored model and toolset" };

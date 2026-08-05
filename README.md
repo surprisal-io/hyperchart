@@ -131,3 +131,7 @@ The pure machine requests facts and effects; it does not call Pi directly. The P
 - [Develop and release](docs/development.md)
 
 Hyperchart is experimental. Pin exact package versions for durable runs and keep the chart source that produced each log.
+
+### Explicit event-sourced actors
+
+Use static actor templates and durable FIFO mailboxes to serialize side-effecting workflows globally or per finite map item. Delivery is receive-only, `send` is fire-and-forget, `call` awaits an exact typed reply, and normal exit drains actor scopes. See [docs/explicit-actors.md](docs/explicit-actors.md).

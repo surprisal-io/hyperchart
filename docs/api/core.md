@@ -203,7 +203,8 @@ type HyperchartInspectResult = {
 | `task` | `string?` | Static template preview. |
 | `command` | `string?` | Script command preview. |
 | `env` | `HyperchartInspectEnv[]?` | Script environment declarations. |
-| `reads` | `string[]?` | Referenced state paths. |
+| `reads` | `string[]?` | Authored agent read declarations, including raw paths, templates, and artifact refs. |
+| `readArtifacts` | `HyperchartInspectArtifact[]?` | Producer artifact contracts referenced by `reads`, retaining paths and JSON schemas for Inspector presentation. |
 | `refs` | `HyperchartInspectRef[]?` | Structured refs used by the state. |
 | `inputs` | `HyperchartInspectInput[]?` | Declared transition inputs. |
 | `onReenter` | `HyperchartInspectOnReenter?` | Re-entry policy. |

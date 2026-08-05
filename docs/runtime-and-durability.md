@@ -48,10 +48,14 @@ Record kinds:
 | `state_action / complete` | completion event claimed by the action |
 | `state_action / validated` | validator reference and stored verdict for a completion claim |
 | `state_action / timer_fired` | deadline expired for an invocation |
+| `actor_created` | immutable actor occurrence input, generation, and definition provenance |
+| `actor_messages_enqueued` | one exact-validated atomic FIFO enqueue transaction plus send/call source provenance |
+| `actor_message`, `actor_call_resolved`, `actor_scope` | receive acceptance, validated reply/settlement, caller wake-up, closing/drain/stop |
+| `failure_intent` | durable fact of reserved global fail-fast; terminalizes the run without a successor |
 
-Transitions are deliberately absent. The projection reads the event and asks the current chart where it leads.
+Transitions are deliberately absent. The projection reads accepted facts and asks the current chart where control leads.
 
-Cancellation is a runtime effect derived from scope exit, deadline, terminal rejection, or stop. The durable cause is recorded where applicable—for example `timer_fired`—but there is no standalone cancellation record kind in the current log contract.
+Scope-exit, deadline, and global-failure cancellation are best-effort runtime effects, not durable facts. A `failure_intent` blocks all successors and terminalizes the run immediately; the final output carries cancellation effects for pending actions so the runtime can stop local work without delaying the failed outcome.
 
 ## Why store facts instead of current state
 
@@ -220,3 +224,7 @@ tla/trace/validate.sh sample_chart.ts sample-run.jsonl
 - [Recovery and safety](safety.md)
 - [Architecture and TLA+](architecture.md)
 - [Host and React integration](integration.md)
+
+## Actor mailbox facts
+
+Explicit actors use the durable log as their only state. Creation, atomic enqueue, receive acceptance, reply validation, settlement/call wake-up, closing, drain, stop, and failure intent are semantic facts. Replay never reads an actor snapshot. See [Explicit event-sourced actors](./explicit-actors.md).

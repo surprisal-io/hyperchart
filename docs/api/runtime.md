@@ -48,7 +48,7 @@ interface Runtime {
 
 The core execution loop owns machine semantics. A runtime interprets effects, returns machine events, and supplies chart and log data.
 
-`runEffects()` must arrange for every non-terminal effect to eventually produce the corresponding machine event or cancellation outcome. Durable records must be appended before emitting `durable_records_added`.
+`runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Durable records must be appended before emitting `durable_records_added`.
 
 ## `ChartRuntime`
 
@@ -357,6 +357,7 @@ if (!checked.ok) console.error(checked.errors);
 ```ts
 type RenderedArtifact = {
   name?: string;
+  sourceState?: string; // producer for artifact-backed reads
   path: string;
   shape?: SchemaAst;
   select?: string;
@@ -466,7 +467,7 @@ function terminalStateForFinalMachine(
 ): RunTerminalState;
 ```
 
-Returns `failed` when any active terminal leaf has `outcome: "failed"`; otherwise returns `complete`. This includes failed leaves in completed parallel regions. Terminal names and incoming event types do not infer run outcome.
+Returns `failed` when durable global failure intent exists or any active terminal leaf has `outcome: "failed"`; otherwise returns `complete`. This includes failed leaves in completed parallel regions. Terminal names do not infer run outcome.
 
 ### `finalMachineFailureMessage()`
 
@@ -477,7 +478,7 @@ function finalMachineFailureMessage(
 ): string | undefined;
 ```
 
-After an explicitly failed terminal establishes the outcome, returns the error from the `FAILED` completion that actually entered that active failed terminal (structured payloads are JSON-stringified), otherwise describes the reached failed terminal. It returns `undefined` for complete terminals and does not reuse errors from earlier recovered `FAILED` events.
+For global failure, returns the error stored on durable `failure_intent` (structured payloads are JSON-stringified). For an authored failed terminal without global failure, it describes the reached terminal. It returns `undefined` for complete terminals.
 
 ## User-interaction mailbox
 

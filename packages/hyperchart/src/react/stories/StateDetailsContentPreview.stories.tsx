@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { ContentPreviewBoard } from "./components/index.js";
 
 const meta = {
-	title: "Hyperchart/Visual Tests/Content Preview",
+	title: "Hyperchart/Inspector/State Details/Content Preview",
+	id: "hyperchart-visual-tests-content-preview",
 	parameters: {
 		layout: "fullscreen",
 		controls: { disable: true },

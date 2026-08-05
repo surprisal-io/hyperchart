@@ -2,7 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { RunStripBoardInner } from "./components/index.js";
 
 const meta = {
-	title: "Hyperchart/Visual Tests/Run Strip",
+	title: "Hyperchart/Inspector/Run Strip",
+	id: "hyperchart-visual-tests-run-strip",
 	parameters: {
 		layout: "fullscreen",
 		controls: { disable: true },
