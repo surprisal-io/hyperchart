@@ -15,19 +15,33 @@ type ProcessResult = Readonly<{
 	stderr: string;
 }>;
 
+type LiveScript = {
+	child?: ChildProcessWithoutNullStreams;
+	killTimer?: NodeJS.Timeout;
+	cancelled: boolean;
+	settled: Promise<void>;
+	settle: () => void;
+};
+
 export class ScriptRunner {
-	private readonly live = new Map<string, { child: ChildProcessWithoutNullStreams; killTimer?: NodeJS.Timeout }>();
+	private readonly live = new Map<string, LiveScript>();
 
 	constructor(private readonly opts: { workDir: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number }) {}
 
 	async run(effect: ScriptEffect, validationAttempt?: { n: number; reason?: string }): Promise<ChartEvent> {
 		const key = actionUidKey(effect.actionUid);
-		const env = await this.resolveEnv(effect.env, validationAttempt);
-		const result = await this.runProcess(effect.command, effect.args, env, undefined, key);
-		if (result.code !== 0) {
-			return { type: "FAILED", error: { code: result.code, signal: result.signal, stderr: tail(result.stderr, 2000) } };
+		const live = this.begin(key);
+		try {
+			const env = await this.resolveEnv(effect.env, validationAttempt);
+			if (live.cancelled) return { type: "FAILED", error: "script cancelled before process start" };
+			const result = await this.runProcess(effect.command, effect.args, env, undefined, live);
+			if (result.code !== 0) {
+				return { type: "FAILED", error: { code: result.code, signal: result.signal, stderr: tail(result.stderr, 2000) } };
+			}
+			return this.validateEvent(effect, eventFromStdout(result.stdout, effect.events));
+		} finally {
+			this.finish(key, live);
 		}
-		return this.validateEvent(effect, eventFromStdout(result.stdout, effect.events));
 	}
 
 	async runGuard(
@@ -42,57 +56,87 @@ export class ScriptRunner {
 		if (hasRawOptions && renderedEnv === undefined && artifacts === undefined && reply === undefined) {
 			throw new Error("Script guard env/artifacts/reply require rendered guard invocation options.");
 		}
-		const env = await this.resolveEnv(renderedEnv, undefined);
-		const result = await this.runProcess(
-			guard.command,
-			guard.args ?? [],
-			env,
-			JSON.stringify(event),
-			actionUid === undefined ? undefined : actionUidKey(actionUid),
-		);
-		if (result.code !== 0) {
-			return { ok: false, reason: result.stderr.trim() || `exit ${result.code ?? result.signal ?? "unknown"}` };
-		}
+		const key = actionUid === undefined ? undefined : actionUidKey(actionUid);
+		const live = this.begin(key);
+		try {
+			const env = await this.resolveEnv(renderedEnv, undefined);
+			if (live.cancelled) return { ok: false, reason: "script guard cancelled before process start" };
+			const result = await this.runProcess(
+				guard.command,
+				guard.args ?? [],
+				env,
+				JSON.stringify(event),
+				live,
+			);
+			if (result.code !== 0) {
+				return { ok: false, reason: result.stderr.trim() || `exit ${result.code ?? result.signal ?? "unknown"}` };
+			}
 
-		if (reply !== undefined) {
-			const replyEvent = eventFromStdout(result.stdout, ["DONE"]);
-			const error = await this.replyValidationError(reply, replyEvent);
-			if (error !== undefined) return { ok: false, reason: `script guard ${error}` };
+			if (reply !== undefined) {
+				const replyEvent = eventFromStdout(result.stdout, ["DONE"]);
+				const error = await this.replyValidationError(reply, replyEvent);
+				if (error !== undefined) return { ok: false, reason: `script guard ${error}` };
+			}
+			const artifactErrors = await this.validateArtifacts(artifacts);
+			if (artifactErrors.length > 0) {
+				return { ok: false, reason: `script guard deliverables are invalid: ${artifactErrors.join("; ")}` };
+			}
+			return true;
+		} finally {
+			this.finish(key, live);
 		}
-		const artifactErrors = await this.validateArtifacts(artifacts);
-		if (artifactErrors.length > 0) {
-			return { ok: false, reason: `script guard deliverables are invalid: ${artifactErrors.join("; ")}` };
-		}
-		return true;
 	}
 
-	cancel(actionUid: ActionUID): void {
+	cancel(actionUid: ActionUID): Promise<void> {
 		const live = this.live.get(actionUidKey(actionUid));
-		if (live !== undefined) this.terminate(live);
+		if (live === undefined) return Promise.resolve();
+		live.cancelled = true;
+		this.terminate(live);
+		return live.settled;
 	}
 
 	async dispose(): Promise<void> {
 		const lives = [...this.live.values()];
-		for (const live of lives) this.terminate(live);
-		await Promise.all(lives.map((live) => this.waitForTermination(live)));
-		for (const [key, live] of this.live) {
-			if (live.killTimer !== undefined) clearTimeout(live.killTimer);
-			this.live.delete(key);
+		for (const live of lives) {
+			live.cancelled = true;
+			this.terminate(live);
 		}
+		await Promise.all(lives.map((live) => live.settled));
 	}
 
-	private terminate(live: { child: ChildProcessWithoutNullStreams; killTimer?: NodeJS.Timeout }): void {
-		if (!this.isRunning(live.child)) return;
+	private begin(key: string | undefined): LiveScript {
+		let settle!: () => void;
+		const live: LiveScript = {
+			cancelled: false,
+			settled: new Promise<void>((resolve) => { settle = resolve; }),
+			settle: () => settle(),
+		};
+		if (key !== undefined) {
+			if (this.live.has(key)) throw new Error(`Script phase ${key} is already running`);
+			this.live.set(key, live);
+		}
+		return live;
+	}
+
+	private finish(key: string | undefined, live: LiveScript): void {
+		if (live.killTimer !== undefined) clearTimeout(live.killTimer);
+		if (key !== undefined && this.live.get(key) === live) this.live.delete(key);
+		live.settle();
+	}
+
+	private terminate(live: LiveScript): void {
+		const child = live.child;
+		if (child === undefined || !this.isRunning(child)) return;
 		try {
-			live.child.kill("SIGTERM");
+			child.kill("SIGTERM");
 		} catch {
 			// The process may have closed between isRunning() and kill().
 		}
 		if (live.killTimer === undefined) {
 			live.killTimer = setTimeout(() => {
-				if (this.isRunning(live.child)) {
+				if (this.isRunning(child)) {
 					try {
-						live.child.kill("SIGKILL");
+						child.kill("SIGKILL");
 					} catch {
 						// The process closed during escalation.
 					}
@@ -106,22 +150,15 @@ export class ScriptRunner {
 		return child.exitCode === null && child.signalCode === null;
 	}
 
-	private async waitForTermination(live: { child: ChildProcessWithoutNullStreams; killTimer?: NodeJS.Timeout }): Promise<void> {
-		if (!this.isRunning(live.child)) return;
-		await new Promise<void>((resolve) => {
-			live.child.once("close", () => resolve());
-		});
-	}
-
 	private async runProcess(
 		command: string,
 		args: readonly string[],
 		env: Record<string, string>,
 		stdin: string | undefined,
-		key: string | undefined,
+		live: LiveScript,
 	): Promise<ProcessResult> {
 		const child = spawn(command, [...args], { cwd: this.opts.workDir, env });
-		if (key !== undefined) this.live.set(key, { child });
+		live.child = child;
 		let stdout = "";
 		let stderr = "";
 		let stdinError: Error | undefined;
@@ -147,13 +184,11 @@ export class ScriptRunner {
 			}
 			return { ...exit, stdout, stderr };
 		} finally {
-			if (key !== undefined) {
-				const live = this.live.get(key);
-				if (live?.child === child) {
-					if (live.killTimer !== undefined) clearTimeout(live.killTimer);
-					this.live.delete(key);
-				}
+			if (live.killTimer !== undefined) {
+				clearTimeout(live.killTimer);
+				delete live.killTimer;
 			}
+			if (live.child === child) delete live.child;
 		}
 	}
 

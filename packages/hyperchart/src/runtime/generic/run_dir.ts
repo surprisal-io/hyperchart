@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { actionUidDirName, sanitizeSegment } from "../../core/action_uid.js";
-import type { ActionUID } from "../../core/types.js";
+import { sanitizeSegment } from "../../core/action_uid.js";
 
 export type RunMeta = {
 	chartPath: string;
@@ -39,12 +38,6 @@ export function saveRunMeta(runDir: string, meta: RunMeta): void {
 	mkdirSync(runDir, { recursive: true });
 	writeFileSync(join(runDir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
-}
-
-export function sessionDirFor(runDir: string, actionUid: ActionUID): string {
-	const dir = join(runDir, "sessions", actionUidDirName(actionUid));
-	mkdirSync(dir, { recursive: true });
-	return dir;
 }
 
 function formatTimestamp(date: Date): string {

@@ -28,7 +28,7 @@ export class FakeAgentExecutor implements AgentExecutor {
 		this.emitNext(effect.actionUid.state, emit);
 	}
 
-	cancel(actionUid: ActionUID): void {
+	async cancel(actionUid: ActionUID): Promise<void> {
 		this.cancels.push(actionUid);
 	}
 

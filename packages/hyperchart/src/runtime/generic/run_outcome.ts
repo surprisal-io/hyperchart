@@ -7,6 +7,7 @@ export type RunTerminalState = "complete" | "failed";
 
 /** Terminal outcome is explicit chart data. Names and the event that entered a terminal are irrelevant. */
 export function terminalStateForFinalMachine(state: MachineState, _log: readonly DurableLogRecord[] = []): RunTerminalState {
+	if (state.projection.failure !== undefined) return "failed";
 	return state.projection.activeLeaves.some((leaf) => {
 		const node = nodeAt(state.ast, leaf);
 		return node?.kind === "final" && node.outcome === "failed";
@@ -14,6 +15,7 @@ export function terminalStateForFinalMachine(state: MachineState, _log: readonly
 }
 
 export function finalMachineFailureMessage(state: MachineState, log: readonly DurableLogRecord[] = []): string | undefined {
+	if (state.projection.failure !== undefined) return describeEventError(state.projection.failure.error);
 	const failedLeaves = state.projection.activeLeaves.filter((leaf) => {
 		const node = nodeAt(state.ast, leaf);
 		return node?.kind === "final" && node.outcome === "failed";

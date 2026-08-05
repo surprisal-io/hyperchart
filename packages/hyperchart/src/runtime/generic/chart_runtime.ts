@@ -3,6 +3,7 @@ import type { ChartAst, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { Effect, MachineEvent, RejectedEffect } from "../../core/machine.js";
+import { actorContextForState } from "../../core/actors.js";
 import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -11,6 +12,7 @@ import type { UserExecutor } from "./user_executor.js";
 import type { LogStore } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
+import { checkSchemaAsync } from "./schema.js";
 
 export type ChartRuntimeOptions = {
 	ast: ChartAst;
@@ -47,6 +49,43 @@ export class ChartRuntime implements Runtime {
 				case "durable_records":
 					this.options.logStore.append(effect.records);
 					this.queue.send({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+					break;
+				case "actor_create":
+					void checkSchemaAsync(effect.declaration.input, effect.input, this.options.schemaRegistry).then((check) => {
+						this.queue.send({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: "create",
+							ok: check.ok,
+							...(check.ok ? {} : { error: `Actor input does not match exact placement schema: ${check.errors.join("; ")}` }),
+						});
+					});
+					break;
+				case "actor_enqueue":
+					void Promise.all(effect.messages.map((message) => checkSchemaAsync(effect.schema, message.input, this.options.schemaRegistry))).then((checks) => {
+						const errors = checks.flatMap((check, index) => check.ok ? [] : check.errors.map((error) => `inputs[${index}]: ${error}`));
+						this.queue.send({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: "enqueue",
+							ok: errors.length === 0,
+							...(errors.length === 0 ? {} : { error: `Atomic actor batch validation failed: ${errors.join("; ")}` }),
+						});
+					});
+					break;
+				case "actor_reply":
+					void (effect.schema === undefined
+						? Promise.resolve({ ok: true } as const)
+						: checkSchemaAsync(effect.schema, effect.output, this.options.schemaRegistry)
+					).then((check) => {
+						this.queue.send({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: "reply",
+							ok: check.ok,
+							...(check.ok ? {} : { error: `Actor reply does not match exact protocol schema: ${check.errors.join("; ")}` }),
+						});
+					});
 					break;
 				case "agent":
 					this.options.agentExecutor.start(effect, (event) => {
@@ -90,13 +129,17 @@ export class ChartRuntime implements Runtime {
 					this.timers.set(effect.id, timer);
 					break;
 				}
-				case "cancel":
-					if (effect.actionUid !== undefined) {
-						this.options.agentExecutor.cancel(effect.actionUid);
-						this.options.userExecutor?.cancel(effect.actionUid);
-						this.scripts.cancel(effect.actionUid);
-					}
+				case "cancel": {
+					const cancellations = [
+						this.options.agentExecutor.cancel(effect.actionUid),
+						...(this.options.userExecutor === undefined ? [] : [this.options.userExecutor.cancel(effect.actionUid)]),
+						this.scripts.cancel(effect.actionUid),
+					];
+					void Promise.all(cancellations).catch((error: unknown) => {
+						this.onWarn(`Cancellation ${effect.id} failed: ${errorMessage(error)}`);
+					});
 					break;
+				}
 				case "user":
 					if (this.options.userExecutor === undefined) {
 						throw new Error("ChartRuntime requires a userExecutor to execute user actions");
@@ -133,8 +176,10 @@ export class ChartRuntime implements Runtime {
 	}
 
 	private dispatchRejected(effect: RejectedEffect): void {
-		const state = nodeAt(this.options.ast, effect.actionUid.state);
-		if (state?.kind !== "state") {
+		const mainState = nodeAt(this.options.ast, effect.actionUid.state);
+		const actorState = actorContextForState(this.options.ast, effect.actionUid.state)?.node;
+		const state = mainState?.kind === "state" ? mainState : actorState?.kind === "state" ? actorState : undefined;
+		if (state === undefined) {
 			this.queue.send({
 				kind: "agent",
 				effectId: effect.id,

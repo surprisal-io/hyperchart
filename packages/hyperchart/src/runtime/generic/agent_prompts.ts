@@ -40,6 +40,10 @@ function looksLikeTextualToolCall(text: string): boolean {
 	return /<\/?(?:tool_call|arg_key|arg_value)>/.test(text) || /\b(?:read|write|bash|browser|finish)<arg_key>/.test(text);
 }
 
+export function buildErrorRetryPrompt(effect: AgentEffect, error: string): string {
+	return `The previous assistant turn failed with this provider/runtime error:\n${error}\n\nRetry the turn now. Preserve valid work from earlier turns and call \`finish\` when the step is complete.\n\n${formatCompletion(effect)}`;
+}
+
 export function buildRejectPrompt(effect: RejectedEffect): string {
 	if (effect.invocation.kind !== "agent") {
 		return `Your result was rejected by the validator (validation attempt ${effect.validationAttempts}). Reason: ${

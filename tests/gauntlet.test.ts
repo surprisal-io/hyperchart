@@ -69,6 +69,7 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 						events.push({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
 						break;
 					case "cancel":
+						break;
 					case "user":
 						break;
 				}
@@ -177,7 +178,7 @@ function nestedChart(): ChartAst {
 						fix: { kind: "state", action: agent("fixer"), transitions: { OK: "verified" } },
 						verified: final(),
 					},
-					transitions: { FAILED: "escalate" },
+					transitions: { ESCALATE: "escalate" },
 				}),
 				deploy: final(),
 				escalate: final(),
@@ -204,7 +205,7 @@ function parallelChart(): ChartAst {
 				audit: parallel({
 					states: { security: region("security-bot"), perf: region("perf-bot") },
 					onDone: "merge",
-					transitions: { FAILED: "escalate" },
+					transitions: { ESCALATE: "escalate" },
 				}),
 				merge: final(),
 				escalate: final(),
@@ -238,7 +239,7 @@ function mapChart(concurrency?: number): ChartAst {
 						},
 						written: final(),
 					},
-					transitions: { FAILED: "escalate" },
+					transitions: { ESCALATE: "escalate" },
 				}),
 				done: final(),
 				escalate: final(),
@@ -293,7 +294,7 @@ const SCENARIOS: Scenario[] = [
 	{
 		name: "parallel abort",
 		ast: parallelChart,
-		options: { agents: { "audit.security.scan": ["FAILED"] } },
+		options: { agents: { "audit.security.scan": ["ESCALATE"] } },
 		finalLeaves: ["escalate"],
 	},
 	{
@@ -314,7 +315,7 @@ const SCENARIOS: Scenario[] = [
 		// One instance's FAILED bubbles to the map's own transitions and aborts ALL instances.
 		name: "map abort",
 		ast: mapChart,
-		options: { agents: { plan: [MAP_PLAN_REPLY], "chapters#intro.author": ["FAILED"] } },
+		options: { agents: { plan: [MAP_PLAN_REPLY], "chapters#intro.author": ["ESCALATE"] } },
 		finalLeaves: ["escalate"],
 	},
 	{
@@ -447,7 +448,7 @@ describe("replay gauntlet", () => {
 							},
 							written: final(),
 						},
-						transitions: { FAILED: "escalate" },
+						transitions: { ESCALATE: "escalate" },
 					}),
 					done: final(),
 					escalate: final(),
@@ -601,7 +602,7 @@ describe("replay gauntlet", () => {
 		expect(live.state.projection.inputs.work).toEqual({ feedback: "none" });
 	});
 
-	it("exhausted retry FAILED transition does not bind new inputs", async () => {
+	it("exhausted retry enters global failure without binding successor inputs", async () => {
 		const ast = make(
 			chart({
 				kind: "chart",
@@ -614,7 +615,7 @@ describe("replay gauntlet", () => {
 						action: agent("worker", { task: t`${input("feedback")}` }),
 						validate: tsImport("./checks.js", "testsPass"),
 						retries: 0,
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done" },
 					},
 					done: final(),
 					failed: failed(),
@@ -622,11 +623,12 @@ describe("replay gauntlet", () => {
 			}),
 		);
 		const live = await runLive(ast, { agents: { work: ["DONE"] }, verdicts: [{ ok: false, reason: "no" }] });
-		expect(live.state.projection.activeLeaves).toEqual(["failed"]);
+		expect(live.state.projection.activeLeaves).toEqual(["work"]);
+		expect(live.state.projection.failure).toMatchObject({ origin: "work" });
 		expect(live.state.projection.inputs).toEqual({ work: { feedback: "keep" } });
 	});
 
-	it("materializes target defaults after an exhausted validation retry", async () => {
+	it("materializes target defaults after an authored domain recovery event", async () => {
 		const ast = make(
 			chart({
 				kind: "chart",
@@ -636,9 +638,7 @@ describe("replay gauntlet", () => {
 					work: {
 						kind: "state",
 						action: agent("worker"),
-						validate: tsImport("./checks.js", "testsPass"),
-						retries: 0,
-						transitions: { DONE: "done", FAILED: "recover" },
+						transitions: { DONE: "done", RECOVER: "recover" },
 					},
 					recover: {
 						kind: "state",
@@ -651,8 +651,7 @@ describe("replay gauntlet", () => {
 			}),
 		);
 		const live = await runLive(ast, {
-			agents: { work: ["DONE"], recover: ["FIXED"] },
-			verdicts: [{ ok: false, reason: "no" }],
+			agents: { work: ["RECOVER"], recover: ["FIXED"] },
 		});
 		const recoverAgent = live.runtime.effectBatches
 			.flat()
