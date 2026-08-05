@@ -417,6 +417,9 @@ function renderTemplateForProjection(
 }
 
 function resolveRefForProjection(projection: BranchProjection, ast: ChartAst, ref: InputRef, stateId: StatePath): unknown {
+	if (ref.kind === "actorInput" || ref.kind === "messageInput") {
+		throw new Error(`Actor refs are unavailable before the actor runtime layer (${stateId})`);
+	}
 	if (ref.kind === "arg") return projection.args?.[ref.name];
 	if (ref.kind === "visit") {
 		const target = ref.state === undefined ? stateId : instancePathFor(ref.state, stateId);

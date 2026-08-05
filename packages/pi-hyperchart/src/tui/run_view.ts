@@ -322,4 +322,5 @@ function recordText(record: DurableLogRecord): string {
 					return `timer ${record.actionUid.state}`;
 			}
 	}
+	return record.type;
 }

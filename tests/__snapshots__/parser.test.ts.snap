@@ -2,6 +2,7 @@
 
 exports[`parseChartModule > loads a trusted local TS chart module and returns a normalized AST 1`] = `
 {
+  "actors": {},
   "id": "review-and-fix",
   "initial": "research",
   "kind": "chart",
@@ -42,11 +43,6 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "kind": "final",
       "outcome": "complete",
     },
-    "failed": {
-      "id": "failed",
-      "kind": "final",
-      "outcome": "failed",
-    },
     "implement": {
       "action": {
         "kind": "agent",
@@ -60,9 +56,6 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "implement",
       "kind": "state",
       "transitions": {
-        "FAILED": {
-          "target": "failed",
-        },
         "IMPLEMENTED": {
           "target": "approval",
         },
@@ -100,9 +93,6 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "plan",
       "kind": "state",
       "transitions": {
-        "FAILED": {
-          "target": "failed",
-        },
         "PLAN_READY": {
           "target": "implement",
         },
@@ -137,9 +127,6 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "id": "research",
       "kind": "state",
       "transitions": {
-        "FAILED": {
-          "target": "failed",
-        },
         "RESEARCH_READY": {
           "target": "plan",
         },

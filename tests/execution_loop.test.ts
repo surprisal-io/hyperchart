@@ -1947,7 +1947,7 @@ describe("execution loop", () => {
 						// intro fails; body's agent keeps hanging and must be killed.
 						events.push({ kind: "agent", effectId: effect.id, event: { type: "FAILED" } });
 					}
-					if (effect.kind === "cancel") {
+					if (effect.kind === "cancel" && effect.actionUid !== undefined) {
 						cancels.push(effect.actionUid.state);
 					}
 					if (effect.kind === "durable_records") {

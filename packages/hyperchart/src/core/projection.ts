@@ -1,5 +1,6 @@
-import type { ActionUID, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
-import type { DurableLogRecord } from "./durable_events.js";
+import type { ActionStateAst, ActionUID, ActorDeclarationAst, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
+import type { ActorMessageEnvelope, DurableLogRecord } from "./durable_events.js";
+import { actorContextForState, actorDeclarationForOccurrence, actorGenerationPath, actorOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
 	childPath,
@@ -9,6 +10,7 @@ import {
 	parentPath,
 	siblingPath,
 	stripLastKey,
+	templatePath,
 	underScope,
 } from "./paths.js";
 
@@ -50,6 +52,36 @@ export type PendingAction =
 			reason?: string;
 	  };
 
+export type ProjectedActorMessage = ActorMessageEnvelope & {
+	status: "queued" | "accepted" | "replied" | "settled" | "failed" | "cancelled";
+	receiveState?: StatePath;
+	replyEvent?: string;
+	replyOutput?: unknown;
+};
+
+export type ProjectedActorOccurrence = {
+	declaration: StatePath;
+	logicalOccurrence: StatePath;
+	occurrence: StatePath;
+	generation: number;
+	owner?: StatePath;
+	input: unknown;
+	definition: import("./types.js").ActorDeclarationAst;
+	currentState: StatePath;
+	mailbox: ProjectedActorMessage[];
+	messages: ProjectedActorMessage[];
+	currentMessage?: ProjectedActorMessage;
+	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
+};
+
+export type PendingActorCall = {
+	callId: string;
+	callerState: StatePath;
+	occurrence: StatePath;
+	messageId: string;
+	status: "enqueued" | "accepted";
+};
+
 export type BranchProjection = {
 	// The active configuration: one leaf normally, one per region while a parallel is active.
 	// Always leaves — compounds drill down to their initial, parallels expand to their regions.
@@ -71,6 +103,12 @@ export type BranchProjection = {
 	// Latest persisted agent session file per concrete actionUid. Optional runtime metadata used
 	// for onReenter resume; it never drives chart control flow.
 	sessions: Record<string, string>;
+	/** Durable global fail-fast intent. Presence blocks every new invoke/message effect. */
+	failure?: { origin: StatePath; error: unknown; seqId: number };
+	actors: Record<StatePath, ProjectedActorOccurrence>;
+	pendingActorCalls: Record<string, PendingActorCall>;
+	/** Derived producer visit count makes message/call ids deterministic across restart. */
+	actorProducerVisits: Record<StatePath, number>;
 };
 
 export function isFinalState(projection: BranchProjection, ast: ChartAst): boolean {
@@ -89,6 +127,9 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		results: {},
 		stateVisits: {},
 		sessions: {},
+		actors: {},
+		pendingActorCalls: {},
+		actorProducerVisits: {},
 	};
 	applyInputsForEntry(projection, ast, ast.initial);
 	completeParallels(projection, ast);
@@ -119,6 +160,153 @@ export function projectBranch(
 			case "args":
 				projection.args = record.args;
 				break;
+			case "failure_intent":
+				if (projection.failure !== undefined) throw new Error("A run may contain only one failure intent");
+				projection.failure = { origin: record.origin, error: record.error, seqId: record.seqId };
+				break;
+			case "actor_created": {
+				if (projection.actors[record.occurrence] !== undefined) throw new Error(`Actor occurrence ${record.occurrence} was created twice`);
+				const liveDefinition = liveActorDeclaration(ast, record.declaration, record.occurrence);
+				if (record.definition.path !== record.declaration) throw new Error(`Actor creation ${record.occurrence} has mismatched definition provenance`);
+				if (!Number.isInteger(record.generation) || record.generation < 1) throw new Error(`Actor occurrence ${record.occurrence} has invalid generation`);
+				const declaredOwner = record.definition.owner;
+				if ((declaredOwner === undefined) !== (record.owner === undefined) || (declaredOwner !== undefined && record.owner !== undefined && templatePath(record.owner) !== declaredOwner)) {
+					throw new Error(`Actor creation ${record.occurrence} has mismatched owner provenance`);
+				}
+				if (record.owner !== undefined) {
+					const ownerNode = nodeAt(ast, declaredOwner!);
+					if (ownerNode?.kind === "map") {
+						const key = lastSegmentKey(record.owner);
+						const spawned = projection.spawns[stripLastKey(record.owner)];
+						if (key === undefined || spawned === undefined || !Object.prototype.hasOwnProperty.call(spawned, key)) {
+							throw new Error(`Actor creation ${record.occurrence} targets an owner map occurrence that was not spawned`);
+						}
+					}
+					if (!projection.activeLeaves.some((leaf) => underScope(leaf, record.owner!))) {
+						throw new Error(`Actor creation ${record.occurrence} targets an owner occurrence that is not active`);
+					}
+				}
+				const expectedLogicalOccurrence = actorOccurrencePath(record.definition, record.owner);
+				if (record.logicalOccurrence !== expectedLogicalOccurrence) throw new Error(`Actor creation ${record.occurrence} has mismatched logical occurrence provenance`);
+				if (record.occurrence !== actorGenerationPath(record.logicalOccurrence, record.generation)) throw new Error(`Actor creation ${record.occurrence} does not match its generation`);
+				const priorGeneration = Object.values(projection.actors).filter((entry) => entry.logicalOccurrence === record.logicalOccurrence).sort((left, right) => right.generation - left.generation)[0];
+				if (record.generation !== (priorGeneration?.generation ?? 0) + 1) throw new Error(`Actor occurrence ${record.logicalOccurrence} generation is not sequential`);
+				if (priorGeneration !== undefined && priorGeneration.status !== "stopped") throw new Error(`Actor occurrence ${record.logicalOccurrence} re-entered before its prior generation stopped`);
+				projection.actors[record.occurrence] = {
+					declaration: record.declaration,
+					logicalOccurrence: record.logicalOccurrence,
+					occurrence: record.occurrence,
+					generation: record.generation,
+					...(record.owner === undefined ? {} : { owner: record.owner }),
+					input: record.input,
+					definition: record.definition,
+					currentState: liveDefinition.initial,
+					mailbox: [],
+					messages: [],
+					status: "idle",
+				};
+				break;
+			}
+			case "actor_messages_enqueued": {
+				const actor = projection.actors[record.occurrence];
+				if (actor === undefined) throw new Error(`Message enqueue targets unknown actor ${record.occurrence}`);
+				if (record.generation !== actor.generation) throw new Error(`Message enqueue targets the wrong generation of ${actor.logicalOccurrence}`);
+				if (record.source.targetDeclaration !== actor.declaration || record.source.event !== record.messages[0]?.event) throw new Error(`Message enqueue has inconsistent target/event provenance`);
+				if (record.source.producerState !== record.messages[0]?.producerState || record.messages.some((message) => message.producerState !== record.source.producerState || message.event !== record.source.event)) throw new Error(`Message enqueue has inconsistent producer provenance`);
+				if (actor.status === "stopped" || actor.status === "cancelled" || actor.status === "failed") throw new Error(`Message enqueue targets stopped actor ${record.occurrence}`);
+				if (actor.status === "closing" || actor.status === "draining") {
+					const producerContext = actorContextForState(ast, record.source.producerState);
+					const producer = producerContext === undefined ? undefined : projection.actors[producerContext.occurrence];
+					if (producer?.currentMessage === undefined) throw new Error(`External message enqueue targets closing actor ${record.occurrence}`);
+				}
+				if (record.messages.length === 0) throw new Error("Actor enqueue transaction must contain at least one message");
+				const ids = new Set(actor.messages.map((message) => message.messageId));
+				for (const envelope of record.messages) {
+					if (ids.has(envelope.messageId)) throw new Error(`Duplicate actor message id ${envelope.messageId}`);
+					ids.add(envelope.messageId);
+					const message: ProjectedActorMessage = { ...envelope, status: "queued" };
+					actor.mailbox.push(message);
+					actor.messages.push(message);
+					if (envelope.callId !== undefined) {
+						if (projection.pendingActorCalls[envelope.callId] !== undefined) throw new Error(`Duplicate actor call id ${envelope.callId}`);
+						projection.pendingActorCalls[envelope.callId] = { callId: envelope.callId, callerState: envelope.producerState, occurrence: record.occurrence, messageId: envelope.messageId, status: "enqueued" };
+					}
+				}
+				const producer = record.messages[0]?.producerState;
+				if (producer !== undefined) {
+					projection.actorProducerVisits[producer] = Math.max(projection.actorProducerVisits[producer] ?? 0, record.messages[0]?.producerVisit ?? 0);
+					advanceActorControlState(projection, ast, producer, "enqueued", undefined, abandoned);
+				}
+				break;
+			}
+			case "actor_message": {
+				const actor = projection.actors[record.occurrence];
+				if (actor === undefined) throw new Error(`Actor message fact targets unknown actor ${record.occurrence}`);
+				const definition = liveActorDeclaration(ast, actor.declaration, actor.occurrence);
+				if (record.kind === "accepted") {
+					if (actor.currentMessage !== undefined) throw new Error(`Actor ${record.occurrence} already owns a current message`);
+					const head = actor.mailbox[0];
+					if (head?.messageId !== record.messageId) throw new Error(`Actor ${record.occurrence} may accept only its FIFO head`);
+					const receive = definition.states[actor.currentState];
+					if (receive?.kind !== "receive") throw new Error(`Actor ${record.occurrence} accepted a message outside receive()`);
+					if (record.receiveState !== actorStatePath(record.occurrence, actor.currentState)) throw new Error(`Actor ${record.occurrence} accepted from the wrong receive visit`);
+					const target = receive.on[head.event];
+					if (target === undefined) throw new Error(`FIFO head '${head.event}' is unsupported by receive '${actor.currentState}'`);
+					actor.mailbox.shift();
+					head.status = "accepted";
+					head.receiveState = record.receiveState;
+					actor.currentMessage = head;
+					applyActorInputForEntry(projection, ast, actor, target);
+					actor.currentState = target;
+					actor.status = actor.status === "closing" || actor.status === "draining" ? "draining" : "busy";
+					if (head.callId !== undefined && projection.pendingActorCalls[head.callId] !== undefined) projection.pendingActorCalls[head.callId]!.status = "accepted";
+					break;
+				}
+				if (record.kind === "replied") {
+					const current = actor.currentMessage;
+					if (current?.messageId !== record.messageId) throw new Error(`Actor ${record.occurrence} replied to a message it does not own`);
+					const reply = definition.states[actor.currentState];
+					if (reply?.kind !== "reply" || reply.message !== current.event || record.message !== current.event) throw new Error(`Actor ${record.occurrence} reply does not match its inferred current message`);
+					current.status = "replied";
+					if (record.replyEvent !== undefined) current.replyEvent = record.replyEvent;
+					if (Object.hasOwn(record, "output")) current.replyOutput = record.output;
+					break;
+				}
+				const current = actor.currentMessage;
+				if (current?.messageId !== record.messageId || current.status !== "replied") throw new Error(`Actor ${record.occurrence} settled before a validated reply`);
+				const reply = definition.states[actor.currentState];
+				if (reply?.kind !== "reply") throw new Error(`Actor ${record.occurrence} settled outside reply()`);
+				current.status = "settled";
+				delete actor.currentMessage;
+				actor.currentState = reply.target;
+				actor.status = actor.status === "closing" || actor.status === "draining" ? "draining" : "idle";
+				break;
+			}
+			case "actor_call_resolved": {
+				const call = projection.pendingActorCalls[record.callId];
+				if (call === undefined || call.callerState !== record.callerState || call.messageId !== record.messageId) throw new Error(`Actor call result ${record.callId} has no matching pending caller`);
+				const actor = projection.actors[call.occurrence];
+				const message = actor?.messages.find((entry) => entry.messageId === record.messageId);
+				if (message?.status !== "settled") throw new Error(`Actor call result ${record.callId} resolved before its message settled`);
+				if (message.callId !== record.callId || message.replyEvent !== record.replyEvent || (Object.hasOwn(record, "output") && JSON.stringify(message.replyOutput) !== JSON.stringify(record.output))) throw new Error(`Actor call result ${record.callId} does not match the correlated reply`);
+				delete projection.pendingActorCalls[record.callId];
+				if (Object.hasOwn(record, "output")) projection.results[record.callerState] = record.output;
+				advanceActorControlState(projection, ast, record.callerState, "replied", record.replyEvent, abandoned, record.output);
+				break;
+			}
+			case "actor_scope": {
+				const actor = projection.actors[record.occurrence];
+				if (actor === undefined) throw new Error(`Actor scope fact targets unknown actor ${record.occurrence}`);
+				if (record.kind === "closing") {
+					if (actor.status === "stopped") throw new Error(`Stopped actor ${record.occurrence} cannot close again`);
+					actor.status = actor.currentMessage === undefined && actor.mailbox.length === 0 ? "closing" : "draining";
+				} else {
+					if (actor.currentMessage !== undefined || actor.mailbox.length > 0) throw new Error(`Actor ${record.occurrence} stopped before drain`);
+					actor.status = "stopped";
+					completeParallels(projection, ast);
+				}
+				break;
+			}
 			case "spawned": {
 				// The placeholder guard mirrors invoke: a spawn for a map that is no longer active
 				// lost a race and is skipped.
@@ -141,7 +329,12 @@ export function projectBranch(
 						: enterState(ast, entered)),
 				];
 				if (entered === undefined) {
-					for (const key of keys) applyInputsForEntry(projection, ast, `${record.path}#${key}`);
+					for (const key of keys) {
+						// Finite maps share the occurrence input substrate with explicit actors. The
+						// spawn fact is still the only birth fact and pins this immutable pair.
+						projection.inputs[`${record.path}#${key}`] = { key, item: record.instances[key] };
+						applyInputsForEntry(projection, ast, `${record.path}#${key}`);
+					}
 				} else {
 					applyInputsForEntry(projection, ast, entered);
 				}
@@ -154,7 +347,7 @@ export function projectBranch(
 						if (!isRecord(record.definition)) {
 							throw new Error(`Invoke record for state ${record.actionUid.state} is missing action definition provenance`);
 						}
-						if (projection.activeLeaves.includes(record.actionUid.state)) {
+						if (isActionActive(projection, ast, record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "invoke");
 							const key = actionUidKey(record.actionUid);
 							const visitId = (projection.stateVisits[key] ?? 0) + 1;
@@ -172,9 +365,9 @@ export function projectBranch(
 						}
 						break;
 					case "complete":
-						if (projection.activeLeaves.includes(record.actionUid.state)) {
+						if (isActionActive(projection, ast, record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "complete");
-							const state = nodeAt(ast, record.actionUid.state);
+							const state = actionStateAt(ast, record.actionUid.state);
 							if (state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED") {
 								// The completion goes into validation, restarting the cycle if a previous round was
 								// rejected; the validation-attempt count survives the retry.
@@ -204,7 +397,7 @@ export function projectBranch(
 					case "timer_fired":
 						// The active-leaf guard makes race losers no-ops: a completion logged after the
 						// timer (or vice versa) refers to a state that is no longer active and is skipped.
-						if (projection.activeLeaves.includes(record.actionUid.state)) {
+						if (isActionActive(projection, ast, record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "timer_fired");
 							removePendingAction(projection, record.actionUid);
 							applyAfterTransition(projection, ast, record.actionUid.state, abandoned);
@@ -226,14 +419,12 @@ export function projectBranch(
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
 							break;
 						}
-						const node = nodeAt(ast, record.actionUid.state);
-						const retries = node?.kind === "state" ? node.retries : undefined;
+						const node = actionStateAt(ast, record.actionUid.state);
+						const retries = node?.retries;
 						const validationAttempts = validating.validationAttempts + 1;
 						if (retries !== undefined && validationAttempts > retries) {
-							// The budget is exhausted: the rejection is terminal and becomes a FAILED
-							// transition. The entry deliberately stays pending — the exit sweep reports it
-							// abandoned, so the machine cancels the still-running session.
-							applyTransition(projection, ast, record.actionUid.state, "FAILED", abandoned);
+							// The machine appends failure_intent in the same durable transaction. Keep the
+							// action pending so terminalization can issue a best-effort runtime cancel.
 							break;
 						}
 						projection.pendingActions[projection.pendingActions.indexOf(validating)] = {
@@ -285,9 +476,15 @@ function applyAfterTransition(
 	leaf: StatePath,
 	abandoned: PendingAction[],
 ): void {
-	const state = nodeAt(ast, leaf);
-	if (state?.kind !== "state" || state.after === undefined) {
-		throw new Error(`No after transition in state ${leaf}`);
+	const state = actionStateAt(ast, leaf);
+	if (state?.after === undefined) throw new Error(`No after transition in state ${leaf}`);
+	const actorContext = actorContextForState(ast, leaf);
+	if (actorContext !== undefined) {
+		const actor = projection.actors[actorContext.occurrence];
+		if (actor === undefined || actor.currentState !== actorContext.localState) throw new Error(`Actor state ${leaf} is not active`);
+		applyActorInputForEntry(projection, ast, actor, state.after.target);
+		actor.currentState = state.after.target;
+		return;
 	}
 	const target = siblingPath(leaf, state.after.target);
 	applyInputsForEntry(projection, ast, target);
@@ -304,16 +501,66 @@ function applyTransition(
 	abandoned: PendingAction[],
 	event?: ChartEvent,
 ): void {
+	const actorContext = actorContextForState(ast, fromLeaf);
+	if (actorContext !== undefined) {
+		const actor = projection.actors[actorContext.occurrence];
+		if (actor === undefined || actor.currentState !== actorContext.localState) throw new Error(`Actor state ${fromLeaf} is not active`);
+		if (actorContext.node.kind !== "state") throw new Error(`Actor state ${fromLeaf} cannot emit action event ${eventType}`);
+		const transition = actorContext.node.transitions[eventType];
+		if (transition === undefined) throw new Error(`No actor transition for event type ${eventType} in state ${fromLeaf}`);
+		applyActorInputForEntry(projection, ast, actor, transition.target, transition, event);
+		actor.currentState = transition.target;
+		return;
+	}
 	const handler = findHandler(ast, fromLeaf, eventType);
 	if (!handler) {
 		throw new Error(`No transition for event type ${eventType} in state ${fromLeaf}`);
 	}
 	const target = siblingPath(handler.path, handler.transition.target);
-	// Validation-budget exhaustion synthesizes a FAILED transition without a ChartEvent. Input
-	// defaults still belong to the entered state and must be materialized; only event-bound inputs
-	// require an event and fail explicitly inside applyInputsForEntry when one is unavailable.
+	// Input defaults belong to the entered state; event-bound inputs require a concrete event and
+	// fail explicitly inside applyInputsForEntry when one is unavailable.
 	applyInputsForEntry(projection, ast, target, handler.transition, event);
 	exitAndEnter(projection, ast, handler.path, target, abandoned);
+}
+
+function advanceActorControlState(
+	projection: BranchProjection,
+	ast: ChartAst,
+	statePath: StatePath,
+	phase: "enqueued" | "replied",
+	replyEvent: string | undefined,
+	abandoned: PendingAction[],
+	output?: unknown,
+): void {
+	const actorContext = actorContextForState(ast, statePath);
+	const node = actorContext?.node ?? nodeAt(ast, statePath);
+	if (node?.kind !== "send" && node?.kind !== "call") throw new Error(`Actor message fact has invalid producer state ${statePath}`);
+	if (phase === "enqueued" && node.kind === "call") return;
+	if (phase === "replied" && node.kind === "send") throw new Error(`Fire-and-forget send state ${statePath} cannot await a reply`);
+	const transition =
+		node.kind === "send"
+			? { target: node.target }
+			: node.target !== undefined
+				? { target: node.target }
+				: replyEvent === undefined
+					? undefined
+					: node.transitions[replyEvent];
+	if (transition === undefined) throw new Error(`Actor call ${statePath} has no route for reply '${replyEvent ?? "single"}'`);
+	const event: ChartEvent = {
+		type: replyEvent ?? "ACTOR_REPLY",
+		...(output === undefined ? {} : { output }),
+	};
+	if (actorContext !== undefined) {
+		const actor = projection.actors[actorContext.occurrence];
+		if (actor === undefined || actor.currentState !== actorContext.localState) throw new Error(`Actor producer state ${statePath} is not active`);
+		applyActorInputForEntry(projection, ast, actor, transition.target, transition, event);
+		actor.currentState = transition.target;
+		return;
+	}
+	if (!projection.activeLeaves.includes(statePath)) throw new Error(`Actor producer state ${statePath} is not active`);
+	const target = siblingPath(statePath, transition.target);
+	applyInputsForEntry(projection, ast, target, transition, event);
+	exitAndEnter(projection, ast, statePath, target, abandoned);
 }
 
 // The exit scope is the handler's own state: every active leaf under it leaves the
@@ -333,7 +580,9 @@ function exitAndEnter(
 	];
 	const kept: PendingAction[] = [];
 	for (const pending of projection.pendingActions) {
-		if (projection.activeLeaves.includes(pending.actionUid.state)) {
+		// Main-chart transitions must not abandon an independently active actor-local action.
+		// isActionActive checks both ordinary leaves and the actor occurrence's current state.
+		if (isActionActive(projection, ast, pending.actionUid.state)) {
 			kept.push(pending);
 		} else {
 			abandoned.push(pending);
@@ -401,8 +650,9 @@ export function allowedEvents(ast: ChartAst, fromPath: StatePath): string[] {
 
 // Entering a state resolves it to active leaves: compounds and regions drill down their initial
 // chain, parallels enter every region, and a final child immediately completes its compound
-// container through onDone — nothing is logged, replay recomputes the whole chain. A final in a
-// region stays as-is: it marks the region complete for the join.
+// container through onDone unless that compound owns actors. Actor-owning compounds hold the
+// final leaf until their projected occurrences stop. A final in a region stays as-is: it marks
+// the region complete for the join.
 function enterState(ast: ChartAst, path: StatePath): StatePath[] {
 	const node = nodeAt(ast, path);
 	if (node === undefined) {
@@ -426,18 +676,24 @@ function enterState(ast: ChartAst, path: StatePath): StatePath[] {
 			throw new Error(`Broken parent chain: state ${parent} not found`);
 		}
 		if (container.kind === "compound") {
-			return enterState(ast, siblingPath(parent, container.onDone));
+			const ownsActors = Object.values(ast.actors).some((actor) => actor.owner === templatePath(parent));
+			if (!ownsActors) return enterState(ast, siblingPath(parent, container.onDone));
 		}
 	}
 	return [path];
 }
 
-// A parallel — or a map fan-out — is complete when every active leaf under it is final; its
-// onDone then replaces them. Innermost first, repeated until stable — completing one may
+// A parallel or map fan-out completes when every active leaf and owned actor under it is final;
+// an actor-owning compound completes when its direct final child is held and its created actor
+// occurrences have stopped. Innermost first, repeated together until stable — completing one may
 // complete an outer.
 function completeParallels(projection: BranchProjection, ast: ChartAst): void {
 	for (;;) {
-		const done = findCompletedParallel(projection, ast);
+		const parallel = findCompletedParallel(projection, ast);
+		const compound = findCompletedCompound(projection, ast);
+		const done = parallel === undefined
+			? compound
+			: compound === undefined || parallel.path.length >= compound.path.length ? parallel : compound;
 		if (done === undefined) return;
 		projection.activeLeaves = [
 			...projection.activeLeaves.filter((leaf) => !underScope(leaf, done.path)),
@@ -475,8 +731,65 @@ function findCompletedParallel(
 	candidates.sort((a, b) => b.path.length - a.path.length);
 	return candidates.find(({ path }) => {
 		const leaves = projection.activeLeaves.filter((leaf) => underScope(leaf, path));
-		return leaves.length > 0 && leaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final");
+		const actors = Object.values(projection.actors).filter((actor) => actor.owner !== undefined && underScope(actor.owner, path));
+		const mapOwnedDeclarations = Object.values(ast.actors).filter((actor) => actor.owner === templatePath(path));
+		const expectedActors = mapOwnedDeclarations.length * Object.keys(projection.spawns[path] ?? {}).length;
+		return (
+			leaves.length > 0 &&
+			leaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final") &&
+			actors.length >= expectedActors &&
+			actors.every((actor) => actor.status === "stopped")
+		);
 	});
+}
+
+function findCompletedCompound(
+	projection: BranchProjection,
+	ast: ChartAst,
+): { path: StatePath; target: StatePath } | undefined {
+	const candidates: { path: StatePath; target: StatePath }[] = [];
+	for (const leaf of projection.activeLeaves) {
+		if (nodeAt(ast, leaf)?.kind !== "final") continue;
+		const path = parentPath(leaf);
+		if (path === undefined) continue;
+		const node = nodeAt(ast, path);
+		if (node?.kind !== "compound") continue;
+		if (!Object.values(ast.actors).some((actor) => actor.owner === templatePath(path))) continue;
+		const actors = Object.values(projection.actors).filter((actor) => actor.owner === path);
+		if (actors.every((actor) => actor.status === "stopped")) {
+			candidates.push({ path, target: siblingPath(path, node.onDone) });
+		}
+	}
+	return candidates.sort((left, right) => right.path.length - left.path.length)[0];
+}
+
+function liveActorDeclaration(ast: ChartAst, declaration: StatePath, occurrence: StatePath): ActorDeclarationAst {
+	const live = ast.actors[declaration];
+	if (live === undefined) throw new Error(`Actor ${occurrence} declaration ${declaration} is missing from the live chart`);
+	return live;
+}
+
+function applyActorInputForEntry(
+	projection: BranchProjection,
+	ast: ChartAst,
+	actor: ProjectedActorOccurrence,
+	target: StatePath,
+	transition?: TransitionAst,
+	event?: ChartEvent,
+): void {
+	const node = liveActorDeclaration(ast, actor.declaration, actor.occurrence).states[target];
+	if (node?.kind !== "state" || node.input === undefined) return;
+	const values: Record<string, unknown> = {};
+	for (const [name, schema] of Object.entries(node.input)) {
+		const binding = transition?.input?.[name];
+		if (binding !== undefined) {
+			if (event === undefined) throw new Error(`Input '${name}' for actor state ${actor.occurrence}.${target}: event binding has no event payload`);
+			values[name] = selectEventValue(event, binding.path, name, `${actor.occurrence}.${target}`);
+		} else if (schemaHasDefault(schema)) {
+			values[name] = cloneJson((schema.schema as Record<string, unknown>).default);
+		}
+	}
+	projection.inputs[actorStatePath(actor.occurrence, target)] = values;
 }
 
 function applyInputsForEntry(
@@ -570,14 +883,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function actionStateAt(ast: ChartAst, stateId: StatePath): ActionStateAst | undefined {
+	const main = nodeAt(ast, stateId);
+	if (main?.kind === "state") return main;
+	const actor = actorContextForState(ast, stateId)?.node;
+	return actor?.kind === "state" ? actor : undefined;
+}
+
+function isActionActive(projection: BranchProjection, ast: ChartAst, stateId: StatePath): boolean {
+	if (projection.activeLeaves.includes(stateId)) return true;
+	const context = actorContextForState(ast, stateId);
+	return context !== undefined && projection.actors[context.occurrence]?.currentState === context.localState;
+}
+
 function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: ActionUID, operation: string): void {
-	const state = nodeAt(ast, stateId);
-	if (state?.kind !== "state") {
-		throw new Error(`Cannot ${operation} action for non-action state ${stateId}`);
-	}
-	if (!matchesDeclaredUid(actual, state.action.uid)) {
-		throw new Error(`Invalid action ${operation} for state ${stateId}`);
-	}
+	const state = actionStateAt(ast, stateId);
+	if (state === undefined) throw new Error(`Cannot ${operation} action for non-action state ${stateId}`);
+	if (!matchesDeclaredUid(actual, state.action.uid)) throw new Error(`Invalid action ${operation} for state ${stateId}`);
 }
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {

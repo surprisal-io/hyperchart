@@ -1,4 +1,4 @@
-import type { ZodType } from "zod";
+import type { z, ZodType } from "zod";
 import type { RuntimeContractMetadata } from "./schema_contract.js";
 import type { SchemaRegistry } from "./schema_registry.js";
 
@@ -45,6 +45,252 @@ export type AuthoringDiagnostic = {
 // value to plain JSON Schema for the AST, so the chart-as-data doctrine holds where it matters
 // (AST, log, hashes) while a zod instance never enters serialized data.
 export type SchemaCst = ZodType;
+
+/** A protocol message always has one input contract and exactly one reply shape. */
+export type ProtocolMessageCst =
+	| { input: SchemaCst; reply?: never; replies?: never }
+	| { input: SchemaCst; reply: SchemaCst; replies?: never }
+	| { input: SchemaCst; reply?: never; replies: Record<string, SchemaCst> };
+
+export type ProtocolCst = Readonly<Record<string, ProtocolMessageCst>>;
+
+// Actor DSL type-level inference and graph verification live with the rest of the
+// public CST/AST types. dsl.ts remains the runtime constructor surface.
+export type InferSchema<S> = S extends z.ZodType ? z.infer<S> : unknown;
+export type MessageTypes<P extends ProtocolCst> = keyof P & string;
+export type MessageInput<P extends ProtocolCst, M extends keyof P> = P[M] extends { input: infer S }
+	? InferSchema<S>
+	: never;
+export type ReplyEvents<P extends ProtocolCst, M extends keyof P> = P[M] extends {
+	replies: infer R extends Record<string, SchemaCst>;
+}
+	? keyof R & string
+	: never;
+export type ReplyOutput<
+	P extends ProtocolCst,
+	M extends keyof P,
+	R extends string = ReplyEvents<P, M>,
+> = P[M] extends { replies: infer Replies extends Record<string, SchemaCst> }
+	? R extends keyof Replies
+		? InferSchema<Replies[R]>
+		: never
+	: P[M] extends { reply: infer S }
+		? InferSchema<S>
+		: void;
+export type ReplyUnion<P extends ProtocolCst, M extends keyof P> = P[M] extends {
+	replies: infer Replies extends Record<string, SchemaCst>;
+}
+	? { [R in keyof Replies]: InferSchema<Replies[R]> }[keyof Replies]
+	: P[M] extends { reply: infer S }
+		? InferSchema<S>
+		: void;
+
+export type ActorPlacement<T> = T extends string | number | boolean | null
+	? T | InputRef<T>
+	: T extends readonly (infer E)[]
+		? readonly ActorPlacement<E>[] | InputRef<T>
+		: T extends object
+			? { [K in keyof T]: ActorPlacement<T[K]> } | InputRef<T>
+			: ValueExpr<T>;
+
+export type ActorTemplate<P extends ProtocolCst, I, Brand> = {
+	(input: ActorPlacement<I>): StaticActorDeclaration<P, I, Brand>;
+	readonly definition: ActorDefinitionCst;
+};
+
+type ActorPath<T> = T extends readonly unknown[]
+	? never
+	: T extends object
+		? { [K in keyof T & string]: K | `${K}.${ActorPath<NonNullable<T[K]>>}` }[keyof T & string]
+		: never;
+type ActorValueAt<T, Path extends string> = Path extends `${infer Head}.${infer Tail}`
+	? Head extends keyof T ? ActorValueAt<NonNullable<T[Head]>, Tail> : never
+	: Path extends keyof T ? T[Path] : never;
+type RefSelected<T, Path> = Path extends string ? ActorValueAt<T, Path> : T;
+
+export type ActorInputRefMarker<Path extends string | undefined> = { readonly __actorInputPath: Path };
+export type ActorMessageInputRefMarker<Message extends string, Path extends string | undefined> = { readonly __actorMessage: Message; readonly __actorMessagePath: Path };
+export type ActorResultRefMarker<State extends string, Path extends string | undefined> = { readonly __actorResultState: State; readonly __actorResultPath: Path };
+export type ActorStateInputRefMarker<Name extends string, Path extends string | undefined> = { readonly __actorStateInput: Name; readonly __actorStateInputPath: Path };
+export type ActorArtifactRefMarker<State extends string, Artifact extends string | undefined, Select extends string | undefined> = { readonly __actorArtifactState: State; readonly __actorArtifactName: Artifact; readonly __actorArtifactSelect: Select };
+
+type StateSuccessors<Node> = Node extends { kind: "state"; transitions: infer T; after?: infer A }
+	? (T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never) | (A extends { target: infer Target extends string } ? Target : never)
+	: Node extends { kind: "send"; target: infer Target extends string }
+		? Target
+		: Node extends { kind: "call"; target: infer Target extends string }
+			? Target
+			: Node extends { kind: "call"; transitions: infer T }
+				? T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never
+				: never;
+
+type Reaches<S, Current extends string, Goal extends string, Seen extends string = never> = Current extends Goal
+	? true
+	: Current extends Seen
+		? false
+		: Current extends keyof S
+			? StateSuccessors<S[Current]> extends infer Next
+				? Next extends string ? Reaches<S, Next, Goal, Seen | Current> : false
+				: false
+			: false;
+type ReceiveTargets<S, Message extends string> = {
+	[K in keyof S & string]: S[K] extends { kind: "receive"; on: infer On }
+		? Message extends keyof On ? On[Message] & string : never
+		: never;
+}[keyof S & string];
+type MessageReaches<S, Message extends string, Goal extends string> = true extends Reaches<S, ReceiveTargets<S, Message>, Goal> ? true : false;
+type MessagesAt<P extends ProtocolCst, S, Goal extends string> = {
+	[M in keyof P & string]: MessageReaches<S, M, Goal> extends true ? M : never;
+}[keyof P & string];
+type IsUnion<T, Whole = T> = T extends unknown ? ([Whole] extends [T] ? false : true) : never;
+type SingleMessage<T> = [T] extends [never] ? never : true extends IsUnion<T> ? never : T;
+
+type ActionReplyFor<S, State extends string> = State extends keyof S
+	? S[State] extends { action: { reply: infer Reply } } ? InferSchema<Reply> : never
+	: never;
+type ActionInputFor<S, State extends string, Name extends string> = State extends keyof S
+	? S[State] extends { input: infer Inputs } ? Name extends keyof Inputs ? InferSchema<Inputs[Name]> : never : never
+	: never;
+type ArtifactFor<S, State extends string, Name extends string | undefined> = State extends keyof S
+	? S[State] extends { action: { artifacts: infer Artifacts } }
+		? Name extends keyof Artifacts
+			? Artifacts[Name] extends { shape: infer Shape } ? InferSchema<Shape> : unknown
+			: Name extends undefined
+				? Artifacts[keyof Artifacts] extends { shape: infer Shape } ? InferSchema<Shape> : unknown
+				: never
+		: never
+	: never;
+
+type ResolveActorValue<Value, P extends ProtocolCst, I, S> = Value extends ActorInputRefMarker<infer Path>
+	? RefSelected<I, Path>
+	: Value extends ActorMessageInputRefMarker<infer Message, infer Path>
+		? Message extends keyof P ? RefSelected<MessageInput<P, Message>, Path> : never
+		: Value extends ActorResultRefMarker<infer State, infer Path>
+			? RefSelected<ActionReplyFor<S, State>, Path>
+			: Value extends ActorStateInputRefMarker<infer Name, infer Path>
+				? Value
+				: Value extends readonly unknown[]
+					? { [K in keyof Value]: ResolveActorValue<Value[K], P, I, S> }
+					: Value extends object
+						? { [K in keyof Value as K extends `__${string}` ? never : K]: ResolveActorValue<Value[K], P, I, S> }
+						: Value;
+type SameShape<Actual, Expected> = [Actual] extends [never] ? false : [Actual] extends [Expected] ? true : false;
+
+type ReplyIsValid<Node, Contract, P extends ProtocolCst, I, S> = Contract extends { input: unknown; replies: infer Replies extends Record<string, SchemaCst> }
+	? Node extends { event: infer Event extends keyof Replies; output: infer Output }
+		? SameShape<ResolveActorValue<Output, P, I, S>, InferSchema<Replies[Event]>>
+		: false
+	: Contract extends { input: unknown; reply: infer Reply }
+		? "event" extends keyof Node ? false
+			: Node extends { output: infer Output } ? SameShape<ResolveActorValue<Output, P, I, S>, InferSchema<Reply>> : false
+		: "event" extends keyof Node ? false : "output" extends keyof Node ? false : true;
+type ReplyNodeValid<P extends ProtocolCst, I, S, Id extends keyof S & string> = S[Id] extends { kind: "reply" }
+	? [SingleMessage<MessagesAt<P, S, Id>>] extends [never]
+		? false
+		: SingleMessage<MessagesAt<P, S, Id>> extends infer Message
+			? Message extends keyof P ? ReplyIsValid<S[Id], P[Message], P, I, S> : false
+			: false
+	: true;
+type AllPathsReachReply<S, Current, Seen extends string = never> = [Current] extends [never]
+	? false
+	: false extends (Current extends string
+		? Current extends Seen
+			? false
+			: Current extends keyof S
+				? S[Current] extends { kind: "reply" }
+					? true
+					: AllPathsReachReply<S, StateSuccessors<S[Current]>, Seen | Current>
+				: false
+		: false)
+		? false
+		: true;
+type MessageAllPathsReply<S, Message extends string> = AllPathsReachReply<S, ReceiveTargets<S, Message>>;
+type ReceiveNodeValid<P extends ProtocolCst, S, Id extends keyof S & string> = S[Id] extends { kind: "receive"; on: infer On }
+	? Exclude<keyof On, keyof P> extends never
+		? false extends { [Message in keyof On & string]: MessageAllPathsReply<S, Message> }[keyof On & string] ? false : true
+		: false
+	: true;
+type PathValid<Value, Path> = Path extends undefined ? true : Path extends ActorPath<Value> ? true : false;
+type SelectorValid<Value, P extends ProtocolCst, I, S, Id extends keyof S & string> = Value extends ActorInputRefMarker<infer Path>
+	? PathValid<I, Path>
+	: Value extends ActorMessageInputRefMarker<infer Message, infer Path>
+		? Message extends keyof P
+			? Message extends MessagesAt<P, S, Id> ? PathValid<MessageInput<P, Message>, Path> : false
+			: false
+		: Value extends ActorResultRefMarker<infer State, infer Path>
+			? ActionReplyFor<S, State> extends never ? false : PathValid<ActionReplyFor<S, State>, Path>
+			: Value extends ActorStateInputRefMarker<infer Name, infer Path>
+				? PathValid<ActionInputFor<S, Id, Name>, Path>
+				: Value extends ActorArtifactRefMarker<infer State, infer Name, infer Select>
+					? ArtifactFor<S, State, Name> extends never ? false : PathValid<ArtifactFor<S, State, Name>, Select>
+					: Value extends readonly unknown[]
+						? false extends { [K in keyof Value]: SelectorValid<Value[K], P, I, S, Id> }[number] ? false : true
+						: Value extends InputRef ? true
+							: Value extends object
+								? false extends { [K in keyof Value]: SelectorValid<Value[K], P, I, S, Id> }[keyof Value] ? false : true
+								: true;
+type TemplateValues<Value> = Value extends { readonly __actorRefs?: infer Refs } ? Refs : never;
+type ArtifactPathValues<Artifacts> = Artifacts extends Record<string, infer Artifact>
+	? Artifact extends { path: infer Path } ? TemplateValues<Path> : TemplateValues<Artifact>
+	: never;
+type ActionValues<Action> = Action extends { kind: "agent" }
+	? TemplateValues<Action extends { task: infer Task } ? Task : never>
+		| (Action extends { reads: infer Reads } ? Reads : never)
+		| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
+	: Action extends { kind: "script" }
+		? (Action extends { env: infer Env } ? Env[keyof Env] : never)
+			| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
+		: Action extends { kind: "user" }
+			? TemplateValues<Action extends { prompt: infer Prompt } ? Prompt : never>
+			: never;
+type NodeValues<Node> = Node extends { kind: "reply"; output: infer Output } ? Output
+	: Node extends { kind: "send"; input: infer Input } ? Input
+	: Node extends { kind: "send"; inputs: infer Inputs } ? Inputs
+	: Node extends { kind: "call"; input: infer Input } ? Input
+	: Node extends { kind: "state"; action: infer Action } ? ActionValues<Action>
+	: never;
+type NodeSelectorsValid<P extends ProtocolCst, I, S, Id extends keyof S & string> = [NodeValues<S[Id]>] extends [never]
+	? true
+	: SelectorValid<NodeValues<S[Id]>, P, I, S, Id>;
+type ReservedNodeValid<Node> = Node extends { transitions: infer Transitions }
+	? "FAILED" extends keyof Transitions ? false : true
+	: true;
+type ActorReplyGraphValid<P extends ProtocolCst, I, S> = false extends {
+	[K in keyof S & string]: ReplyNodeValid<P, I, S, K> extends true
+		? ReceiveNodeValid<P, S, K> extends true ? ReservedNodeValid<S[K]> : false
+		: false;
+}[keyof S & string] ? false : true;
+type ActorSelectorsValid<P extends ProtocolCst, I, S> = false extends {
+	[K in keyof S & string]: NodeSelectorsValid<P, I, S, K>;
+}[keyof S & string] ? false : true;
+export type ActorVerification<I extends SchemaCst, P extends ProtocolCst, S, Initial extends string> = Initial extends keyof S
+	? S[Initial] extends { kind: "receive" }
+		? ActorReplyGraphValid<P, InferSchema<I>, S> extends true
+			? ActorSelectorsValid<P, InferSchema<I>, S> extends true ? unknown : { readonly "actor-local selector is invalid": never }
+			: { readonly "actor protocol/reply graph is invalid": never }
+		: { readonly "actor initial state must be receive()": never }
+	: { readonly "actor initial state is unknown": never };
+
+export type ProtocolOf<D> = D extends StaticActorDeclaration<infer P, unknown, unknown> ? P : never;
+export type SendInputOptions<I> =
+	| { input: ActorPlacement<I>; inputs?: never }
+	| { input?: never; inputs: ActorPlacement<I[]> | readonly ActorPlacement<I>[] };
+
+export type CallRouting<P extends ProtocolCst, M extends keyof P, Target extends string = string> = P[M] extends {
+	replies: infer R extends Record<string, SchemaCst>;
+}
+	? { target?: never; transitions: { [E in keyof R]: Target } }
+	: { target: Target; transitions?: never };
+
+export type ProtocolMessageAst = Readonly<{
+	input: SchemaAst;
+	reply:
+		| Readonly<{ kind: "void" }>
+		| Readonly<{ kind: "single"; schema: SchemaAst }>
+		| Readonly<{ kind: "named"; schemas: Readonly<Record<string, SchemaAst>> }>;
+}>;
+
+export type ProtocolAst = Readonly<Record<string, ProtocolMessageAst>>;
 
 export type SchemaAst = Readonly<{
 	kind: "jsonSchema";
@@ -242,12 +488,36 @@ export type InputRef<V = unknown> = (
 			kind: "visit";
 			state?: StatePath;
 	  }
+	| {
+			kind: "actorInput";
+			path?: string;
+	  }
+	| {
+			kind: "messageInput";
+			message: string;
+			path?: string;
+	  }
 ) & {
 	// Set by json(): the value is embedded as JSON text. Without it the renderer admits only
 	// primitives — the runtime twin of the static rule enforced by t().
 	json?: true;
 	__value?(value: V): void;
 };
+
+const INPUT_REF_KINDS: ReadonlySet<string> = new Set([
+	"arg",
+	"result",
+	"input",
+	"visit",
+	"key",
+	"item",
+	"actorInput",
+	"messageInput",
+]);
+
+export function isInputRef(value: unknown): value is InputRef {
+	return typeof value === "object" && value !== null && "kind" in value && typeof value.kind === "string" && INPUT_REF_KINDS.has(value.kind);
+}
 
 // A string with interpolated refs, authored as a tagged template:
 //   t`Report on ${arg("topic")} using ${result("plan", "steps")}`
@@ -261,6 +531,23 @@ export type TemplateCst = {
 
 // Anywhere a template is accepted, a plain string is too (a template with no refs).
 export type Templatable = string | TemplateCst;
+
+/**
+ * Immutable data assembled at an effect boundary. InputRef leaves are resolved from durable
+ * facts; arrays/objects preserve their authored shape. Actor declarations are deliberately not
+ * part of this union, so a capability cannot be smuggled through runtime data.
+ */
+export type ValueExpr<T = unknown> =
+	| InputRef<T>
+	| (T extends JsonPrimitive ? T : JsonPrimitive)
+	| { readonly [key: string]: ValueExpr }
+	| readonly ValueExpr[];
+
+export type ValueAst =
+	| JsonPrimitive
+	| InputRef
+	| Readonly<{ readonly [key: string]: ValueAst }>
+	| readonly ValueAst[];
 
 export type TemplateAst = Readonly<{
 	kind: "template";
@@ -280,9 +567,9 @@ export type ActionStateCst = {
 	validate?: GuardRef;
 	onReject?: OnReject;
 	onReenter?: OnReenterCst;
-	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection is
-	// terminal — the claim turns into a FAILED transition (a FAILED route must exist, possibly on
-	// an ancestor) and the abandoned session is cancelled. Requires validate; omitted = unbounded.
+	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection
+	// records global failure intent and terminalizes the run. Requires validate;
+	// omitted = unbounded.
 	retries?: number;
 };
 
@@ -305,7 +592,12 @@ export type FinalStateCst = {
 // transitions catch events its descendants leave unhandled (innermost-first); onDone is where the
 // chart goes when a direct final child is reached — required if it has one. All targets, here and
 // in children, resolve among the siblings of the level where they are declared.
-export type CompoundStateCst = {
+export type ActorOwnerCst = {
+	/** Static declarations owned by this lexical scope. There is intentionally no defineActors(). */
+	actors?: Record<string, AnyStaticActorDeclaration>;
+};
+
+export type CompoundStateCst = ActorOwnerCst & {
 	kind: "compound";
 	initial: StateId;
 	states: Record<StateId, StateCst>;
@@ -317,7 +609,7 @@ export type CompoundStateCst = {
 // inside a region marks that region complete (regions must not declare onDone); when every
 // region is complete the parallel exits through its own onDone. An event bubbling past a region
 // to the parallel (or above) exits all regions at once, abandoning their running actions.
-export type ParallelStateCst = {
+export type ParallelStateCst = ActorOwnerCst & {
 	kind: "parallel";
 	states: Record<StateId, StateCst>;
 	transitions?: TransitionMapCst;
@@ -329,7 +621,7 @@ export type ParallelStateCst = {
 // fact — the instance's input is frozen at birth (its future actor args). An instance completes
 // by reaching a final child; when all instances complete the map exits through onDone. The map's
 // own transitions catch what instances leave unhandled — exiting ALL instances (abort).
-export type MapStateCst = {
+export type MapStateCst = ActorOwnerCst & {
 	kind: "map";
 	input?: Record<string, SchemaCst>;
 	over: InputRef;
@@ -342,9 +634,77 @@ export type MapStateCst = {
 	onDone?: StateId;
 };
 
-export type StateCst = ActionStateCst | FinalStateCst | CompoundStateCst | ParallelStateCst | MapStateCst;
+export type ReceiveStateCst = {
+	kind: "receive";
+	on: Record<string, StateId>;
+};
 
-export type ChartCst = {
+export type SendStateCst = {
+	kind: "send";
+	to: AnyStaticActorDeclaration;
+	event: string;
+	target: StateId;
+	input?: ValueExpr;
+	inputs?: ValueExpr;
+};
+
+export type CallStateCst = {
+	kind: "call";
+	to: AnyStaticActorDeclaration;
+	event: string;
+	input: ValueExpr;
+	target?: StateId;
+	transitions?: TransitionMapCst;
+};
+
+export type ReplyStateCst = {
+	kind: "reply";
+	target: StateId;
+	event?: string;
+	output?: ValueExpr;
+};
+
+export type ActorWorkflowStateCst =
+	| ActionStateCst
+	| ReceiveStateCst
+	| SendStateCst
+	| CallStateCst
+	| ReplyStateCst;
+
+export type ActorDefinitionCst = {
+	kind: "actorTemplate";
+	input: SchemaCst;
+	protocol: ProtocolCst;
+	initial: StateId;
+	states: Record<StateId, ActorWorkflowStateCst>;
+};
+
+/** Runtime shape returned by actor template invocation; public typing is carried by phantoms. */
+export type StaticActorDeclaration<
+	P extends ProtocolCst = ProtocolCst,
+	I = unknown,
+	Brand = unknown,
+> = {
+	readonly kind: "actorDeclaration";
+	readonly definition: ActorDefinitionCst;
+	readonly input: ValueExpr<I>;
+	readonly __protocol?: P;
+	readonly __actorInput?: I;
+	readonly __declarationBrand?: Brand;
+};
+
+export type AnyStaticActorDeclaration = StaticActorDeclaration<ProtocolCst, unknown, unknown>;
+
+export type StateCst =
+	| ActionStateCst
+	| FinalStateCst
+	| CompoundStateCst
+	| ParallelStateCst
+	| MapStateCst
+	| SendStateCst
+	| CallStateCst;
+
+export type ChartCst = ActorOwnerCst & {
 	kind: "chart";
 	id: string;
 	/** Optional serializable metadata for host launch forms; not runtime validation. */
@@ -459,6 +819,67 @@ export type ParallelStateAst = Readonly<{
 	onDone: StateId;
 }>;
 
+export type ReceiveStateAst = Readonly<{
+	kind: "receive";
+	id: StateId;
+	parent: StatePath;
+	on: Readonly<Record<string, StateId>>;
+}>;
+
+export type SendStateAst = Readonly<{
+	kind: "send";
+	id: StateId;
+	parent?: StatePath;
+	to: StatePath;
+	event: string;
+	target: StateId;
+	/** Empty; present so generic control-flow inspection can treat send as a state node. */
+	transitions: Readonly<Record<EventType, TransitionAst>>;
+	input?: ValueAst;
+	inputs?: ValueAst;
+}>;
+
+export type CallStateAst = Readonly<{
+	kind: "call";
+	id: StateId;
+	parent?: StatePath;
+	to: StatePath;
+	event: string;
+	input: ValueAst;
+	target?: StateId;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
+}>;
+
+export type ReplyStateAst = Readonly<{
+	kind: "reply";
+	id: StateId;
+	parent: StatePath;
+	target: StateId;
+	message: string;
+	event?: string;
+	output?: ValueAst;
+}>;
+
+export type ActorWorkflowStateAst =
+	| ActionStateAst
+	| ReceiveStateAst
+	| SendStateAst
+	| CallStateAst
+	| ReplyStateAst;
+
+export type ActorDeclarationAst = Readonly<{
+	kind: "actor";
+	name: string;
+	path: StatePath;
+	owner?: StatePath;
+	input: SchemaAst;
+	inputValue: ValueAst;
+	protocol: ProtocolAst;
+	initial: StateId;
+	/** Flat actor-local graph keyed by paths relative to this declaration. */
+	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>;
+}>;
+
 export type MapStateAst = Readonly<{
 	kind: "map";
 	id: StateId;
@@ -478,7 +899,9 @@ export type StateAst =
 	| CompoundStateAst
 	| RegionStateAst
 	| ParallelStateAst
-	| MapStateAst;
+	| MapStateAst
+	| SendStateAst
+	| CallStateAst;
 
 export type ChartAst = Readonly<{
 	kind: "chart";
@@ -487,6 +910,7 @@ export type ChartAst = Readonly<{
 	initial: StateId;
 	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).
 	states: Readonly<Record<StatePath, StateAst>>;
+	actors: Readonly<Record<StatePath, ActorDeclarationAst>>;
 }>;
 
 export type ActionEvent = {
