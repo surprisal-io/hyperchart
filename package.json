@@ -13,7 +13,7 @@
 			"./packages/pi-hyperchart/extensions"
 		],
 		"skills": [
-			"./packages/pi-hyperchart/skills"
+			"./skills/pi"
 		]
 	},
 	"engines": {
@@ -27,8 +27,7 @@
 		"check": "npm run typecheck && npm run test && npm run validate:packages",
 		"storybook": "storybook dev -p 6006",
 		"build-storybook": "storybook build",
-		"validate:packages": "node scripts/validate-packages.mjs",
-		"sync:pi-docs": "node scripts/sync-pi-docs.mjs"
+		"validate:packages": "node scripts/validate-packages.mjs"
 	},
 	"devDependencies": {
 		"@earendil-works/pi-coding-agent": "^0.81.1",

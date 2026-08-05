@@ -91,6 +91,8 @@ npm run build-storybook
 
 React changes need a story that shows the affected state. Test both light and dark schemes, narrow layouts, long content, modal stacking, and keyboard behavior where relevant.
 
+Organize Storybook by product surface: `Hyperchart/Inspector`, `Hyperchart/Launch`, and `Hyperchart/TUI`. A story is a deterministic named UI state; rendering, visual, interaction, and stress are verification properties, not top-level navigation categories. Do not add `Components`, `Features`, `Examples`, `Visual Tests`, `Internal`, or giant-object `Playground` sections. Actor cases belong under the Inspector surface they exercise (Dialog, Graph, or State Details). Controls are disabled by default; use fixed typed fixtures and `play` functions for meaningful interactions. Semantic Inspector Storybook scenarios must pass real normalized charts and typed durable facts through the production host adapters; do not hand-author `HyperchartRunInfo`, state status/topology, actor declarations/occurrences/mailboxes, completion colors, or failure issues. Build runtime cases with the replay-checking `storyScenario()` fixture boundary. Card/detail boards may focus an adapter-derived run, but must not clone or mutate it. Manual data is limited to presentation-only concerns such as viewport widths, long overflow strings, theme, modal interaction, and summary-transport omission cases.
+
 TUI stories live under `Hyperchart/TUI`. They render the real compact `RunWidget` and selection-only `RunHistoryOverlay` through xterm.js; detailed run inspection belongs exclusively to the React browser inspector. The widget must use the shared path-aware percentage estimator rather than graph-node counts. Its stories include both a single active state and eight concurrent map instances at 60, 80, and 120 columns. The development server keeps a live Node-side component instance so keyboard input exercises the actual component state machine, while the static Storybook build contains deterministic initial/preset frames. The production picker materializes the real `deck-director` chart, durable JSONL records, and `sessions/progress.json` into a temporary run directory. Keep browser stories free of Node-only imports; fixture loading and TUI instances belong in the Storybook Vite plugin.
 
 The core package build bundles the standalone inspector client into `packages/hyperchart/dist/inspector-web/`. If browser inspector behavior or React dependencies change, run the full package build and verify both `client.js` and `styles.css` are present.
@@ -157,13 +159,9 @@ Documentation is part of the change.
 
 Do not rewrite or abbreviate the manual inside package READMEs or the skill. Package READMEs own installation and entry-point routing. The Pi skill uses the consolidated `hyperchart` tool with action parameters; the Claude skill uses individual `hyperchart_*` MCP tools. Both skills call tools directly rather than routing through slash commands.
 
-The repository-root `docs/`, `examples/`, and referenced documentation assets are canonical. `packages/pi-hyperchart/docs/`, `examples/`, and `assets/` are generated mirrors shipped for offline agent use. After editing a canonical file, synchronize the mirror:
+The repository-root `docs/`, `examples/`, and referenced documentation assets are the only checked-in copies. Agent skills live canonically at `skills/pi/SKILL.md` and `skills/claude/SKILL.md`. Do not add generated mirrors under package directories.
 
-```sh
-npm run sync:pi-docs
-```
-
-Package validation and `prepack` use `scripts/sync-pi-docs.mjs --check` and fail when the mirror differs. Never edit a mirrored file directly.
+Each package's `prepack` hook runs `scripts/stage-package-resources.mjs` after the build. It copies the canonical resources into the package directory just before npm builds the tarball; `postpack` removes them again. These transient paths are ignored by Git. `npm run validate:packages` verifies that the resulting tarballs contain the docs, examples, assets, and host-specific skill files.
 
 Every command and code sample must match a checked-in implementation, test, or example. State prerequisites before the procedure, especially agent definitions, model credentials, external scripts, and unsupported user actions.
 

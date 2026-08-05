@@ -51,11 +51,11 @@ agent workflow changes, and Storybook/README visual assets when users can see
 the change. Do not duplicate the full manual into package READMEs or the skill;
 keep those focused and link to canonical docs.
 
-`docs/` is the single source of truth, and that includes the agent skills:
-`docs/skills/pi.md` and `docs/skills/claude.md` are the canonical skill texts.
-The packaged copies (`packages/*/skills/hyperchart/SKILL.md` and
-`packages/pi-hyperchart/docs/`) are generated — never edit them directly; edit
-the canon and run `npm run sync:pi-docs` to regenerate (`--check` verifies).
+Canonical documentation lives only under `docs/`; canonical agent skills live at
+`skills/pi/SKILL.md` and `skills/claude/SKILL.md`. Documentation, examples,
+assets, and skills are staged transiently into package directories by
+`prepack` and removed by `postpack`; generated package mirrors must never be
+committed. `npm run validate:packages` verifies the published tarball contents.
 
 After changing runtime behavior, tool surfaces, or documentation, offer the
 user a run of the `docs-engine` chart (`.hypercharts/docs-engine`, a

@@ -58,7 +58,7 @@ Claude monitor delivery is host-scheduled and therefore cannot provide Pi's expl
 ### Pi host
 
 - `packages/pi-hyperchart/extensions/hyperchart.ts` — scanner, two-phase yield/presentation, lifecycle recovery, next-turn context, `respond` tool/command, waited-run boundary, and removal of the unsupported-user warning.
-- `docs/skills/pi.md` — teach the model to present gates, wait for actual user input, and submit responses rather than answering them; regenerate `packages/pi-hyperchart/skills/hyperchart/SKILL.md` and bundled docs with the existing sync script rather than editing mirrors directly.
+- `skills/pi/SKILL.md` — teach the model to present gates, wait for actual user input, and submit responses rather than answering them; package publication stages this canonical file as `skills/hyperchart/SKILL.md`.
 
 ### Claude Code host
 
@@ -66,7 +66,7 @@ Claude monitor delivery is host-scheduled and therefore cannot provide Pi's expl
 - `packages/claude-hyperchart/bin/hyperchart-monitor.mjs` — invoke the combined terminal/interaction scan.
 - `packages/claude-hyperchart/src/mcp/tools.ts` — add `hyperchart_respond`; make `wait: true` return on a user gate as well as terminal status.
 - `packages/claude-hyperchart/hooks/session_start.mjs` — include the exact pinned unanswered gate during session recovery so Claude re-invokes `AskUserQuestion` for it before other work.
-- `docs/skills/claude.md` — teach the `AskUserQuestion → hyperchart_respond` protocol and prohibit Claude from answering a gate itself; regenerate `packages/claude-hyperchart/skills/hyperchart/SKILL.md` from this canonical source.
+- `skills/claude/SKILL.md` — teach the `AskUserQuestion → hyperchart_respond` protocol and prohibit Claude from answering a gate itself; package publication stages this canonical file as `skills/hyperchart/SKILL.md`.
 
 ### Tests and documentation
 
