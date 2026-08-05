@@ -237,6 +237,21 @@ export function hyperchartRunFromRuntime(
 	const runtime = runtimeFacts(ast, records, projection, skipped, options.sessionProgress);
 	const staticStates = staticRun.states.map((state) => overlayRuntimeState(state, ast, projection, runtime));
 	const projectedActors = Object.values(projection.actors);
+	const actorGenerationsByLogicalOccurrence = new Map<StatePath, typeof projectedActors>();
+	for (const actor of projectedActors) {
+		const generations = actorGenerationsByLogicalOccurrence.get(actor.logicalOccurrence) ?? [];
+		generations.push(actor);
+		actorGenerationsByLogicalOccurrence.set(actor.logicalOccurrence, generations);
+	}
+	for (const generations of actorGenerationsByLogicalOccurrence.values()) {
+		generations.sort((left, right) => left.generation - right.generation);
+	}
+	const repliedByMessage = new Map<string, Extract<DurableLogRecord, { type: "actor_message"; kind: "replied" }>>();
+	for (const record of records) {
+		if (record.type === "actor_message" && record.kind === "replied") {
+			repliedByMessage.set(`${record.occurrence}\u0000${record.messageId}`, record);
+		}
+	}
 	const projectedActorDeclarations = new Set(projectedActors.map((actor) => actor.declaration));
 	const projectedLogicalOccurrences = new Set(projectedActors.map((actor) => actor.logicalOccurrence));
 	const actorPlacementForInternalState = (state: HyperchartStateInfo) => {
@@ -265,7 +280,7 @@ export function hyperchartRunFromRuntime(
 	const actorOccurrences: HyperchartActorOccurrenceInfo[] = latestProjectedActors.map((actor) => {
 		const pending = Object.values(projection.pendingActorCalls).find((call) => call.occurrence === actor.occurrence);
 		const messageInfo = (sourceActor: typeof actor, message: typeof actor.messages[number]) => {
-			const replyFact = [...records].reverse().find((record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "replied" }> => record.type === "actor_message" && record.kind === "replied" && record.occurrence === sourceActor.occurrence && record.messageId === message.messageId);
+			const replyFact = repliedByMessage.get(`${sourceActor.occurrence}\u0000${message.messageId}`);
 			return {
 				messageId: message.messageId,
 				actorOccurrencePath: sourceActor.occurrence,
@@ -285,9 +300,7 @@ export function hyperchartRunFromRuntime(
 				...(replyFact?.schema === undefined ? {} : { validation: "valid" as const }),
 			};
 		};
-		const actorGenerations = projectedActors
-			.filter((candidate) => candidate.logicalOccurrence === actor.logicalOccurrence)
-			.sort((left, right) => left.generation - right.generation);
+		const actorGenerations = actorGenerationsByLogicalOccurrence.get(actor.logicalOccurrence) ?? [];
 		const mailboxInstances = actorGenerations.map((candidate) => {
 			const mailbox = {
 				totalCount: candidate.mailbox.length,
@@ -384,9 +397,7 @@ export function hyperchartRunFromRuntime(
 	const actorInternalStates = actorOccurrences.flatMap((occurrence) => {
 		const templateStates = staticRun.states.filter((state) => state.actorInternal?.declarationPath === occurrence.declarationPath && state.actorInternal.occurrencePath === undefined);
 		const occurrenceId = actorOccurrenceInspectorId(occurrence.logicalPath ?? occurrence.occurrencePath);
-		const actorGenerations = projectedActors
-			.filter((candidate) => candidate.logicalOccurrence === (occurrence.logicalPath ?? occurrence.occurrencePath))
-			.sort((left, right) => left.generation - right.generation);
+		const actorGenerations = actorGenerationsByLogicalOccurrence.get(occurrence.logicalPath ?? occurrence.occurrencePath) ?? [];
 		return templateStates.map((templateState) => {
 			const localState = templateState.actorInternal!.localState;
 			const materializeTarget = (target: string) => {
@@ -1103,7 +1114,7 @@ function actorInternalMessageHistories(
 		if (record.type === "actor_message" && record.kind === "replied") {
 			const actor = replay.actors[record.occurrence];
 			const envelope = actor?.currentMessage;
-			const reply = actor?.definition.states[actor.currentState ?? ""];
+			const reply = actor === undefined ? undefined : ast.actors[actor.declaration]?.states[actor.currentState];
 			// The reply state is deliberately read from the sequential projection immediately
 			// before applying the replied fact. Event names are not unique actor-state identity.
 			if (actor !== undefined && envelope?.messageId === record.messageId && reply?.kind === "reply") {
