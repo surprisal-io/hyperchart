@@ -428,26 +428,30 @@ describe("pi executor helpers", () => {
 		).toBeUndefined();
 	});
 
-	it("propagates a provider error instead of spending finish nudges", async () => {
+	it("spends the retry budget on provider errors before failing with the latest error", async () => {
 		const sink: CompletionSink = { captured: undefined };
 		const emitted: ChartEvent[] = [];
-		let promptCount = 0;
+		const prompts: string[] = [];
+		const errors = ["429: rate limited", "402: Insufficient Balance", undefined];
 
 		await runAcceptanceLoop({
 			effect: effect(),
 			sink,
 			maxRetries: 2,
 			isCancelled: () => false,
-			prompt: async () => {
-				promptCount++;
+			prompt: async (prompt) => {
+				prompts.push(prompt);
 			},
 			lastAssistantText: () => undefined,
-			lastAssistantError: () => "402: Insufficient Balance",
+			lastAssistantError: () => errors.shift(),
 			checkArtifacts: async () => [],
 			emit: (event) => emitted.push(event),
 		});
 
-		expect(promptCount).toBe(0);
+		expect(prompts).toHaveLength(2);
+		expect(prompts[0]).toContain("previous assistant turn failed");
+		expect(prompts[0]).toContain("429: rate limited");
+		expect(prompts[1]).toContain("402: Insufficient Balance");
 		expect(emitted).toEqual([{ type: "FAILED", error: "402: Insufficient Balance" }]);
 	});
 
