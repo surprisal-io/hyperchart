@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { deepFreeze } from "./dsl.js";
 import { runtimeContractMetadata } from "./schema_contract.js";
+import { isInputRef } from "./types.js";
 import { SchemaRegistry } from "./schema_registry.js";
 import type {
 	ActionStateAst,
@@ -508,7 +509,7 @@ function inferAndValidateActorReplies(
 		}
 	}
 	const successors = (node: ActorWorkflowStateAst): string[] => {
-		if (node.kind === "state") return Object.values(node.transitions).map((transition) => transition.target);
+		if (node.kind === "state") return [...Object.values(node.transitions).map((transition) => transition.target), ...(node.after === undefined ? [] : [node.after.target])];
 		if (node.kind === "send") return [node.target];
 		if (node.kind === "call") return node.target === undefined ? Object.values(node.transitions).map((transition) => transition.target) : [node.target];
 		return [];
@@ -569,7 +570,7 @@ function inferAndValidateActorReplies(
 function valueRefs(value: ValueAst | undefined): InputRef[] {
 	if (value === undefined || value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return [];
 	if (Array.isArray(value)) return value.flatMap(valueRefs);
-	if ("kind" in value && typeof value.kind === "string") return [value as InputRef];
+	if (isInputRef(value)) return [value];
 	return Object.values(value).flatMap(valueRefs);
 }
 
@@ -743,9 +744,7 @@ function toValueAst(
 		diagnostics.push(diagnostic("ACTOR_DECLARATION_IN_DATA", "Static actor declarations cannot be embedded in runtime data.", pointer, source));
 		return undefined;
 	}
-	if (isRecord(input) && typeof input.kind === "string" && ["arg", "result", "input", "visit", "key", "item", "actorInput", "messageInput"].includes(input.kind)) {
-		return toInputRef(input, pointer, diagnostics, source);
-	}
+	if (isInputRef(input)) return toInputRef(input, pointer, diagnostics, source);
 	if (ancestors.has(input)) {
 		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values cannot be circular.", pointer, source));
 		return undefined;

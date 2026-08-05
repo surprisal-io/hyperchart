@@ -119,7 +119,7 @@ function staleRecordsFor(
 	}
 	if (record.type === "actor_message" && record.kind === "replied") {
 		const actor = Object.values(projection.actors).find((entry) => entry.occurrence === record.occurrence);
-		const contract = actor?.definition.protocol[record.message]?.reply;
+		const contract = actor === undefined ? undefined : ast.actors[actor.declaration]?.protocol[record.message]?.reply;
 		const schema = contract?.kind === "single" ? contract.schema : contract?.kind === "named" && record.replyEvent !== undefined ? contract.schemas[record.replyEvent] : undefined;
 		if (stableStringify(schema) === stableStringify(record.schema)) return [];
 		return [{ index, seqId: record.seqId, record, state: record.occurrence, reason: "actor_reply_contract_changed", message: `Actor reply contract for ${record.occurrence}/${record.message} changed` }];

@@ -276,6 +276,21 @@ export type InputRef<V = unknown> = (
 	__value?(value: V): void;
 };
 
+const INPUT_REF_KINDS: ReadonlySet<string> = new Set([
+	"arg",
+	"result",
+	"input",
+	"visit",
+	"key",
+	"item",
+	"actorInput",
+	"messageInput",
+]);
+
+export function isInputRef(value: unknown): value is InputRef {
+	return typeof value === "object" && value !== null && "kind" in value && typeof value.kind === "string" && INPUT_REF_KINDS.has(value.kind);
+}
+
 // A string with interpolated refs, authored as a tagged template:
 //   t`Report on ${arg("topic")} using ${result("plan", "steps")}`
 // Plain data (strings.length === refs.length + 1), no placeholder grammar to parse; the machine

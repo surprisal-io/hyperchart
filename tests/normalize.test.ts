@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../packages/hyperchart/src/index.js";
 import {
+	actor,
 	agent,
 	artifact,
 	compound,
 	failed,
 	final,
 	map,
+	message,
 	normalizeChartConfig,
 	parallel,
+	protocol,
+	receive,
+	reply,
 	t,
 	tsImport,
 	user,
@@ -507,6 +512,27 @@ describe("normalizeChartConfig", () => {
 		const work = result.ast.states.work;
 		if (work?.kind !== "state") throw new Error("expected action state");
 		expect(work.after).toEqual({ delayMs: 500, target: "escalated" });
+	});
+
+	it("infers an actor reply reachable only through after", () => {
+		const TimedProtocol = protocol({ RUN: message({ input: z.object({}).strict(), reply: z.object({ timedOut: z.boolean() }).strict() }) });
+		const Timed = actor({
+			input: z.object({}).strict(), protocol: TimedProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { RUN: "work" } }),
+				work: { kind: "state", action: agent("slow-worker"), transitions: {}, after: { delayMs: 10, target: "settle" } },
+				settle: reply({ target: "idle", output: { timedOut: true } }),
+			},
+		});
+		const timed = Timed({});
+		const result = normalizeChartConfig(chart({
+			kind: "chart", id: "actor-after-reply", actors: { timed }, initial: "done", states: { done: final() },
+		}));
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+		expect(result.diagnostics).toEqual([]);
+		expect(result.ast.actors["@timed"]?.states.settle).toMatchObject({ kind: "reply", message: "RUN" });
 	});
 
 	it("rejects invalid after shapes and unknown after targets", () => {

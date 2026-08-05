@@ -328,9 +328,9 @@ describe("React actor inspector structure", () => {
 		}
 
 		const drainingRoot = visibleStateIdsForScope(actorDrainingRun.states);
-		expect(drainingRoot.has("done")).toBe(true);
+		expect(drainingRoot.has("phase")).toBe(true);
 		expect(drainingRoot.has("phase.@worker")).toBe(false);
-		const drainingFinal = actorDrainingRun.states.find((state) => state.id === "done");
+		const drainingFinal = actorDrainingRun.states.find((state) => state.id === "phase.finished");
 		expect(drainingFinal).toBeDefined();
 		if (drainingFinal !== undefined) {
 			const drainingFinalMarkup = renderToStaticMarkup(createElement(StateDetails, {

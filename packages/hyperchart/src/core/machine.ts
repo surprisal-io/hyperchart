@@ -24,6 +24,7 @@ import type {
 	UserActionAst,
 	ValueAst,
 } from "./types.js";
+import { isInputRef } from "./types.js";
 import type { ActorMessageEnvelope, ActorMessageSource, CancellationTarget, DurableLogRecord } from "./durable_events.js";
 import { actorContextForState, actorGenerationPath, actorOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
@@ -848,10 +849,10 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 		}
 		case "actor_effect": {
 			const effect = [...dueActorCreates(state), ...dueActorEnqueues(state), ...dueActorReplies(state)].find((candidate) => candidate.id === event.effectId);
-			if (effect === undefined) {
-				if (!event.ok) break;
-				return { kind: "error", state, error: `No pending actor effect found for ${event.effectId}` };
-			}
+			// A response whose effect is no longer due lost a race — e.g. the owner
+			// scope exited before actor-create validation returned. Race losers are
+			// no-ops, mirroring invoke/spawn facts on inactive leaves.
+			if (effect === undefined) break;
 			if (!event.ok) {
 				const origin = effect.kind === "actor_enqueue" ? effect.messages[0]?.producerState ?? effect.occurrence : effect.occurrence;
 				return createMachineOutput(state, [{
@@ -998,20 +999,12 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 // all parallel regions — the runtime never initiates anything on its own. The id carries no
 // seqId, but between two entries into the same state the action is always pending, so the
 // dispatch marker is dropped in between.
-function mainAdmissionBlockedByActorDrain(state: MachineState, path: StatePath): boolean {
-	return Object.values(state.projection.actors).some((actor) =>
-		actor.owner !== undefined && actor.status !== "stopped" && actor.status !== "cancelled" && actor.status !== "failed" &&
-		(actor.status === "closing" || actor.status === "draining" || actorOwnerIsClosing(state, actor)) &&
-		!underScope(path, actor.owner),
-	);
-}
-
 function dueInvokes(state: MachineState): ActionUID[] {
 	const blocked = concurrencyBlockedActionLeaves(state.ast, state.projection);
 	const due: ActionUID[] = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const node = nodeAt(state.ast, leaf);
-		if (node?.kind !== "state" || blocked.has(leaf) || mainAdmissionBlockedByActorDrain(state, leaf)) continue;
+		if (node?.kind !== "state" || blocked.has(leaf)) continue;
 		// The uid of the invoke carries the INSTANCE path — that is the action's identity in the
 		// log and in effect ids; the chart's declared uid keeps the template path.
 		const actionUid = { ...node.action.uid, state: leaf };
@@ -1019,7 +1012,7 @@ function dueInvokes(state: MachineState): ActionUID[] {
 	}
 	for (const actor of Object.values(state.projection.actors)) {
 		if (actor.status === "stopped" || actor.status === "failed" || actor.status === "cancelled") continue;
-		const node = actor.definition.states[actor.currentState];
+		const node = liveActorDeclaration(state, actor).states[actor.currentState];
 		if (node?.kind !== "state") continue;
 		const actionUid = { ...node.action.uid, state: actorStatePath(actor.occurrence, actor.currentState) };
 		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid))) due.push(actionUid);
@@ -1143,11 +1136,11 @@ function messagingStates(state: MachineState): Array<{ path: StatePath; node: Ex
 	const states: Array<{ path: StatePath; node: Extract<ActorWorkflowStateAst | import("./types.js").StateAst, { kind: "send" | "call" }> }> = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const node = nodeAt(state.ast, leaf);
-		if ((node?.kind === "send" || node?.kind === "call") && !mainAdmissionBlockedByActorDrain(state, leaf)) states.push({ path: leaf, node });
+		if (node?.kind === "send" || node?.kind === "call") states.push({ path: leaf, node });
 	}
 	for (const actor of Object.values(state.projection.actors)) {
 		if (actor.status === "stopped" || actor.status === "failed" || actor.status === "cancelled") continue;
-		const node = actor.definition.states[actor.currentState];
+		const node = liveActorDeclaration(state, actor).states[actor.currentState];
 		if (node?.kind === "send" || node?.kind === "call") states.push({ path: actorStatePath(actor.occurrence, actor.currentState), node });
 	}
 	return states;
@@ -1186,7 +1179,7 @@ function dueActorEnqueues(state: MachineState): ActorEnqueueEffect[] {
 		const target = targetActorForProducer(state, node.to, path);
 		if (target === undefined) continue;
 		if ((target.status === "closing" || target.status === "draining") && !producerMayUseClosingActor(state, path)) continue;
-		const contract = target.definition.protocol[node.event];
+		const contract = liveActorDeclaration(state, target).protocol[node.event];
 		if (contract === undefined) throw new Error(`${node.kind} in ${path} names unknown protocol message ${node.event}`);
 		const visit = (state.projection.actorProducerVisits[path] ?? 0) + 1;
 		const values = node.kind === "send" && node.inputs !== undefined
@@ -1215,7 +1208,7 @@ function dueActorAccepts(state: MachineState): RecordAppend[] {
 	const ready: Array<{ actor: BranchProjection["actors"][string]; head: ActorMessageEnvelope }> = [];
 	for (const actor of Object.values(state.projection.actors)) {
 		if (actor.currentMessage !== undefined || actor.mailbox.length === 0 || actor.status === "stopped" || actor.status === "cancelled" || actor.status === "failed") continue;
-		const receive = actor.definition.states[actor.currentState];
+		const receive = liveActorDeclaration(state, actor).states[actor.currentState];
 		if (receive?.kind !== "receive") continue;
 		const head = actor.mailbox[0];
 		if (head === undefined) continue;
@@ -1243,9 +1236,10 @@ function dueActorReplies(state: MachineState): ActorReplyEffect[] {
 	const effects: ActorReplyEffect[] = [];
 	for (const actor of Object.values(state.projection.actors)) {
 		const message = actor.currentMessage;
-		const reply = actor.definition.states[actor.currentState];
+		const definition = liveActorDeclaration(state, actor);
+		const reply = definition.states[actor.currentState];
 		if (message === undefined || reply?.kind !== "reply" || message.status === "replied") continue;
-		const contract = actor.definition.protocol[message.event]?.reply;
+		const contract = definition.protocol[message.event]?.reply;
 		if (contract === undefined) throw new Error(`Actor ${actor.occurrence} has no protocol contract for ${message.event}`);
 		const schema = contract.kind === "single" ? contract.schema : contract.kind === "named" && reply.event !== undefined ? contract.schemas[reply.event] : undefined;
 		const output = reply.output === undefined ? undefined : resolveValueAst(state, reply.output, actorStatePath(actor.occurrence, actor.currentState));
@@ -1264,12 +1258,21 @@ function dueActorReplies(state: MachineState): ActorReplyEffect[] {
 	return effects;
 }
 
+function liveActorDeclaration(state: MachineState, actor: BranchProjection["actors"][string]): ActorDeclarationAst {
+	const declaration = state.ast.actors[actor.declaration];
+	if (declaration === undefined) throw new Error(`Actor ${actor.occurrence} declaration ${actor.declaration} is missing from the live chart`);
+	return declaration;
+}
+
 function actorOwnerIsClosing(state: MachineState, actor: BranchProjection["actors"][string]): boolean {
-	if (actor.owner === undefined) return isFinalState(state.projection, state.ast);
+	if (actor.owner === undefined) return state.projection.activeLeaves.some((leaf) => {
+		const node = nodeAt(state.ast, leaf);
+		return node?.kind === "final" && node.parent === undefined;
+	});
 	const ownerNode = nodeAt(state.ast, actor.owner);
 	const leaves = state.projection.activeLeaves.filter((leaf) => underScope(leaf, actor.owner as string));
 	if (ownerNode?.kind === "map" && leaves.length > 0) return leaves.every((leaf) => nodeAt(state.ast, leaf)?.kind === "final");
-	return leaves.length === 0;
+	return leaves.length === 0 || leaves.every((leaf) => nodeAt(state.ast, leaf)?.kind === "final");
 }
 
 function dueActorScopeFacts(state: MachineState): RecordAppend[] {
@@ -1296,7 +1299,7 @@ function actorsTerminalForRun(state: MachineState): boolean {
 function resolveValueAst(state: MachineState, value: ValueAst, stateId: StatePath): unknown {
 	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return value;
 	if (Array.isArray(value)) return value.map((entry) => resolveValueAst(state, entry, stateId));
-	if ("kind" in value && typeof value.kind === "string") return resolveRef(state, value as InputRef, stateId);
+	if (isInputRef(value)) return resolveRef(state, value, stateId);
 	return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveValueAst(state, entry, stateId)]));
 }
 

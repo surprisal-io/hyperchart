@@ -1,3 +1,4 @@
+import { isInputRef } from "./types.js";
 import type {
 	ActorDeclarationAst,
 	ActorWorkflowStateAst,
@@ -106,7 +107,7 @@ function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>):
 function valueDsl(value: import("./types.js").ValueAst): string {
 	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
 	if (Array.isArray(value)) return arrayDsl(value.map(valueDsl));
-	if ("kind" in value && typeof value.kind === "string") return inputRefDsl(value as InputRef);
+	if (isInputRef(value)) return inputRefDsl(value);
 	return objectDsl(Object.entries(value).map(([key, child]) => [key, valueDsl(child)]));
 }
 

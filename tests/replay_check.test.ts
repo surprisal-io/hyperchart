@@ -14,6 +14,7 @@ import {
 	protocol,
 	receive,
 	reply,
+	send,
 	tsImport,
 	z,
 	t,
@@ -137,6 +138,48 @@ describe("explainReplay", () => {
 			expect(explanation.prefixEnd).toBe(0);
 			expect(explanation.broken).toMatchObject({ seqId: 1 });
 		}
+	});
+
+	it("flags a reply contract changed in the live actor protocol", () => {
+		const OldProtocol = protocol({ PING: message({ input: z.object({}), reply: z.object({ value: z.string() }) }) });
+		const NewProtocol = protocol({ PING: message({ input: z.object({}), reply: z.object({ value: z.number() }) }) });
+		const OldActor = actor({
+			input: z.object({}), protocol: OldProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle", output: { value: "old" } }) },
+		});
+		const NewActor = actor({
+			input: z.object({}), protocol: NewProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle", output: { value: 1 } }) },
+		});
+		const oldActor = OldActor({});
+		const newActor = NewActor({});
+		const old = ast(chart({
+			kind: "chart", id: "actor-reply-contract", actors: { worker: oldActor }, initial: "ping",
+			states: { ping: send({ to: oldActor, event: "PING", input: {}, target: "done" }), done: final() },
+		}));
+		const current = ast(chart({
+			kind: "chart", id: "actor-reply-contract", actors: { worker: newActor }, initial: "ping",
+			states: { ping: send({ to: newActor, event: "PING", input: {}, target: "done" }), done: final() },
+		}));
+		const declaration = old.actors["@worker"]!;
+		const source = old.states.ping;
+		if (source?.kind !== "send") throw new Error("expected send source");
+		const contract = declaration.protocol.PING!;
+		if (contract.reply.kind !== "single") throw new Error("expected single reply contract");
+		const envelope = { messageId: "ping:message:1:0", event: "PING", input: {}, producerState: "ping", producerVisit: 1, batchIndex: 0 };
+		const log: DurableLogRecord[] = [
+			{ type: "actor_created", declaration: "@worker", logicalOccurrence: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: declaration, ...meta(1) },
+			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: { producerState: "ping", kind: "send", definition: source, targetDeclaration: "@worker", event: "PING", inputSchema: contract.input }, messages: [envelope], ...meta(2) },
+			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: envelope.messageId, receiveState: "@worker.idle", ...meta(3) },
+			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: envelope.messageId, message: "PING", output: { value: "old" }, schema: contract.reply.schema, ...meta(4) },
+		];
+
+		const explanation = explainReplay(current, log);
+
+		expect(explanation.broken).toBeUndefined();
+		expect(explanation.stale).toEqual(expect.arrayContaining([
+			expect.objectContaining({ seqId: 4, reason: "actor_reply_contract_changed", state: "@worker" }),
+		]));
 	});
 
 	it("rejects an actor creation whose map owner was not a concrete spawned occurrence", () => {

@@ -242,7 +242,7 @@ describe("Storybook information architecture", () => {
 		expect(actorSendVoidRun.actorOccurrences?.[0]?.status).toBe("stopped");
 		expect(actorNamedReplyRun.actorOccurrences?.[0]?.pendingCaller?.waitReason).toBe("reply");
 		expect(actorDrainingRun.states.find((state) => state.id === "phase.dispatch")).toMatchObject({ type: "send", status: "done" });
-		expect(actorDrainingRun.states.find((state) => state.id === "done")).toMatchObject({ type: "final", status: "waiting" });
+		expect(actorDrainingRun.states.find((state) => state.id === "phase.finished")).toMatchObject({ type: "final", status: "waiting" });
 		expect(actorDrainingRun.status).toBe("running");
 		expect(actorDrainingRun.actorOccurrences?.[0]).toMatchObject({
 			logicalPath: "phase.@worker",
