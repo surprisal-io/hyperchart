@@ -169,7 +169,7 @@ export function projectBranch(
 				const liveDefinition = liveActorDeclaration(ast, record.declaration, record.occurrence);
 				if (record.definition.path !== record.declaration) throw new Error(`Actor creation ${record.occurrence} has mismatched definition provenance`);
 				if (!Number.isInteger(record.generation) || record.generation < 1) throw new Error(`Actor occurrence ${record.occurrence} has invalid generation`);
-				const declaredOwner = record.definition.owner;
+				const declaredOwner: StatePath | undefined = record.definition.owner;
 				if ((declaredOwner === undefined) !== (record.owner === undefined) || (declaredOwner !== undefined && record.owner !== undefined && templatePath(record.owner) !== declaredOwner)) {
 					throw new Error(`Actor creation ${record.occurrence} has mismatched owner provenance`);
 				}
