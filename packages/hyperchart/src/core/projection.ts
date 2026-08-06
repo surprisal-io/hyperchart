@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { ActionStateAst, ActionUID, ActorDeclarationAst, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
 import type { ActorMessageEnvelope, DurableLogRecord } from "./durable_events.js";
 import { actorContextForState, actorDeclarationForOccurrence, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorStatePath } from "./actors.js";
@@ -161,38 +162,11 @@ export function projectBranch(
 				projection.args = record.args;
 				break;
 			case "failure_intent":
-				if (projection.failure !== undefined) throw new Error("A run may contain only one failure intent");
+				assertFailureIntent(projection);
 				projection.failure = { origin: record.origin, error: record.error, seqId: record.seqId };
 				break;
 			case "actor_created": {
-				if (projection.actors[record.occurrence] !== undefined) throw new Error(`Actor occurrence ${record.occurrence} was created twice`);
-				const liveDefinition = liveActorDeclaration(ast, record.declaration, record.occurrence);
-				if (record.definition.path !== record.declaration) throw new Error(`Actor creation ${record.occurrence} has mismatched definition provenance`);
-				if (!Number.isInteger(record.generation) || record.generation < 1) throw new Error(`Actor occurrence ${record.occurrence} has invalid generation`);
-				const declaredOwner: StatePath | undefined = record.definition.owner;
-				if ((declaredOwner === undefined) !== (record.owner === undefined) || (declaredOwner !== undefined && record.owner !== undefined && templatePath(record.owner) !== declaredOwner)) {
-					throw new Error(`Actor creation ${record.occurrence} has mismatched owner provenance`);
-				}
-				if (record.owner !== undefined) {
-					const ownerNode = nodeAt(ast, declaredOwner!);
-					if (ownerNode?.kind === "map") {
-						const key = lastSegmentKey(record.owner);
-						const spawned = projection.spawns[stripLastKey(record.owner)];
-						if (key === undefined || spawned === undefined || !Object.prototype.hasOwnProperty.call(spawned, key)) {
-							throw new Error(`Actor creation ${record.occurrence} targets an owner map occurrence that was not spawned`);
-						}
-					}
-					if (!projection.activeLeaves.some((leaf) => underScope(leaf, record.owner!))) {
-						throw new Error(`Actor creation ${record.occurrence} targets an owner occurrence that is not active`);
-					}
-				}
-				const logicalOccurrence = actorLogicalOccurrencePath(record.occurrence, record.generation);
-				const expectedLogicalOccurrence = actorOccurrencePath(record.definition, record.owner);
-				if (logicalOccurrence !== expectedLogicalOccurrence) throw new Error(`Actor creation ${record.occurrence} has mismatched logical occurrence provenance`);
-				if (record.occurrence !== actorGenerationPath(logicalOccurrence, record.generation)) throw new Error(`Actor creation ${record.occurrence} does not match its generation`);
-				const priorGeneration = Object.values(projection.actors).filter((entry) => entry.logicalOccurrence === logicalOccurrence).sort((left, right) => right.generation - left.generation)[0];
-				if (record.generation !== (priorGeneration?.generation ?? 0) + 1) throw new Error(`Actor occurrence ${logicalOccurrence} generation is not sequential`);
-				if (priorGeneration !== undefined && priorGeneration.status !== "stopped") throw new Error(`Actor occurrence ${logicalOccurrence} re-entered before its prior generation stopped`);
+				const { liveDefinition, logicalOccurrence } = assertActorCreated(projection, ast, record);
 				projection.actors[record.occurrence] = {
 					declaration: record.declaration,
 					logicalOccurrence,
@@ -209,27 +183,12 @@ export function projectBranch(
 				break;
 			}
 			case "actor_messages_enqueued": {
-				const actor = projection.actors[record.occurrence];
-				if (actor === undefined) throw new Error(`Message enqueue targets unknown actor ${record.occurrence}`);
-				if (record.generation !== actor.generation) throw new Error(`Message enqueue targets the wrong generation of ${actor.logicalOccurrence}`);
-				if (record.source.targetDeclaration !== actor.declaration || record.source.event !== record.messages[0]?.event) throw new Error(`Message enqueue has inconsistent target/event provenance`);
-				if (record.source.producerState !== record.messages[0]?.producerState || record.messages.some((message) => message.producerState !== record.source.producerState || message.event !== record.source.event)) throw new Error(`Message enqueue has inconsistent producer provenance`);
-				if (actor.status === "stopped" || actor.status === "cancelled" || actor.status === "failed") throw new Error(`Message enqueue targets stopped actor ${record.occurrence}`);
-				if (actor.status === "closing" || actor.status === "draining") {
-					const producerContext = actorContextForState(ast, record.source.producerState);
-					const producer = producerContext === undefined ? undefined : projection.actors[producerContext.occurrence];
-					if (producer?.currentMessage === undefined) throw new Error(`External message enqueue targets closing actor ${record.occurrence}`);
-				}
-				if (record.messages.length === 0) throw new Error("Actor enqueue transaction must contain at least one message");
-				const ids = new Set(actor.messages.map((message) => message.messageId));
+				const actor = assertActorMessagesEnqueued(projection, ast, record);
 				for (const envelope of record.messages) {
-					if (ids.has(envelope.messageId)) throw new Error(`Duplicate actor message id ${envelope.messageId}`);
-					ids.add(envelope.messageId);
 					const message: ProjectedActorMessage = { ...envelope, status: "queued" };
 					actor.mailbox.push(message);
 					actor.messages.push(message);
 					if (envelope.callId !== undefined) {
-						if (projection.pendingActorCalls[envelope.callId] !== undefined) throw new Error(`Duplicate actor call id ${envelope.callId}`);
 						projection.pendingActorCalls[envelope.callId] = { callId: envelope.callId, callerState: envelope.producerState, occurrence: record.occurrence, messageId: envelope.messageId, status: "enqueued" };
 					}
 				}
@@ -241,18 +200,8 @@ export function projectBranch(
 				break;
 			}
 			case "actor_message": {
-				const actor = projection.actors[record.occurrence];
-				if (actor === undefined) throw new Error(`Actor message fact targets unknown actor ${record.occurrence}`);
-				const definition = liveActorDeclaration(ast, actor.declaration, actor.occurrence);
 				if (record.kind === "accepted") {
-					if (actor.currentMessage !== undefined) throw new Error(`Actor ${record.occurrence} already owns a current message`);
-					const head = actor.mailbox[0];
-					if (head?.messageId !== record.messageId) throw new Error(`Actor ${record.occurrence} may accept only its FIFO head`);
-					const receive = definition.states[actor.currentState];
-					if (receive?.kind !== "receive") throw new Error(`Actor ${record.occurrence} accepted a message outside receive()`);
-					if (record.receiveState !== actorStatePath(record.occurrence, actor.currentState)) throw new Error(`Actor ${record.occurrence} accepted from the wrong receive visit`);
-					const target = receive.on[head.event];
-					if (target === undefined) throw new Error(`FIFO head '${head.event}' is unsupported by receive '${actor.currentState}'`);
+					const { actor, head, target } = assertActorMessageAccepted(projection, ast, record);
 					actor.mailbox.shift();
 					head.status = "accepted";
 					head.receiveState = record.receiveState;
@@ -264,19 +213,13 @@ export function projectBranch(
 					break;
 				}
 				if (record.kind === "replied") {
-					const current = actor.currentMessage;
-					if (current?.messageId !== record.messageId) throw new Error(`Actor ${record.occurrence} replied to a message it does not own`);
-					const reply = definition.states[actor.currentState];
-					if (reply?.kind !== "reply" || reply.message !== current.event || record.message !== current.event) throw new Error(`Actor ${record.occurrence} reply does not match its inferred current message`);
+					const { current } = assertActorMessageReplied(projection, ast, record);
 					current.status = "replied";
 					if (record.replyEvent !== undefined) current.replyEvent = record.replyEvent;
 					if (Object.hasOwn(record, "output")) current.replyOutput = record.output;
 					break;
 				}
-				const current = actor.currentMessage;
-				if (current?.messageId !== record.messageId || current.status !== "replied") throw new Error(`Actor ${record.occurrence} settled before a validated reply`);
-				const reply = definition.states[actor.currentState];
-				if (reply?.kind !== "reply") throw new Error(`Actor ${record.occurrence} settled outside reply()`);
+				const { actor, current, reply } = assertActorMessageSettled(projection, ast, record);
 				current.status = "settled";
 				delete actor.currentMessage;
 				actor.currentState = reply.target;
@@ -284,25 +227,17 @@ export function projectBranch(
 				break;
 			}
 			case "actor_call_resolved": {
-				const call = projection.pendingActorCalls[record.callId];
-				if (call === undefined || call.callerState !== record.callerState || call.messageId !== record.messageId) throw new Error(`Actor call result ${record.callId} has no matching pending caller`);
-				const actor = projection.actors[call.occurrence];
-				const message = actor?.messages.find((entry) => entry.messageId === record.messageId);
-				if (message?.status !== "settled") throw new Error(`Actor call result ${record.callId} resolved before its message settled`);
-				if (message.callId !== record.callId || message.replyEvent !== record.replyEvent || (Object.hasOwn(record, "output") && JSON.stringify(message.replyOutput) !== JSON.stringify(record.output))) throw new Error(`Actor call result ${record.callId} does not match the correlated reply`);
+				assertActorCallResolved(projection, record);
 				delete projection.pendingActorCalls[record.callId];
 				if (Object.hasOwn(record, "output")) projection.results[record.callerState] = record.output;
 				advanceActorControlState(projection, ast, record.callerState, "replied", record.replyEvent, abandoned, record.output);
 				break;
 			}
 			case "actor_scope": {
-				const actor = projection.actors[record.occurrence];
-				if (actor === undefined) throw new Error(`Actor scope fact targets unknown actor ${record.occurrence}`);
+				const actor = assertActorScope(projection, record);
 				if (record.kind === "closing") {
-					if (actor.status === "stopped") throw new Error(`Stopped actor ${record.occurrence} cannot close again`);
 					actor.status = actor.currentMessage === undefined && actor.mailbox.length === 0 ? "closing" : "draining";
 				} else {
-					if (actor.currentMessage !== undefined || actor.mailbox.length > 0) throw new Error(`Actor ${record.occurrence} stopped before drain`);
 					actor.status = "stopped";
 					completeParallels(projection, ast);
 				}
@@ -764,9 +699,203 @@ function findCompletedCompound(
 	return candidates.sort((left, right) => right.path.length - left.path.length)[0];
 }
 
+type ActorCreatedRecord = Extract<DurableLogRecord, { type: "actor_created" }>;
+type ActorMessagesEnqueuedRecord = Extract<DurableLogRecord, { type: "actor_messages_enqueued" }>;
+type ActorMessageAcceptedRecord = Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }>;
+type ActorMessageRepliedRecord = Extract<DurableLogRecord, { type: "actor_message"; kind: "replied" }>;
+type ActorMessageSettledRecord = Extract<DurableLogRecord, { type: "actor_message"; kind: "settled" }>;
+type ActorCallResolvedRecord = Extract<DurableLogRecord, { type: "actor_call_resolved" }>;
+type ActorScopeRecord = Extract<DurableLogRecord, { type: "actor_scope" }>;
+
+function assertFailureIntent(projection: BranchProjection): void {
+	assert.equal(projection.failure, undefined, "A run may contain only one failure intent");
+}
+
+function assertActorCreated(
+	projection: BranchProjection,
+	ast: ChartAst,
+	record: ActorCreatedRecord,
+): { liveDefinition: ActorDeclarationAst; logicalOccurrence: StatePath } {
+	assert.equal(projection.actors[record.occurrence], undefined, `Actor occurrence ${record.occurrence} was created twice`);
+	const liveDefinition = liveActorDeclaration(ast, record.declaration, record.occurrence);
+	assert.equal(record.definition.path, record.declaration, `Actor creation ${record.occurrence} has mismatched definition provenance`);
+	assert(Number.isInteger(record.generation) && record.generation >= 1, `Actor occurrence ${record.occurrence} has invalid generation`);
+	const declaredOwner: StatePath | undefined = record.definition.owner;
+	assert(
+		(declaredOwner === undefined) === (record.owner === undefined) &&
+			(declaredOwner === undefined || record.owner === undefined || templatePath(record.owner) === declaredOwner),
+		`Actor creation ${record.occurrence} has mismatched owner provenance`,
+	);
+	if (record.owner !== undefined) {
+		assert(declaredOwner !== undefined, `Actor creation ${record.occurrence} has mismatched owner provenance`);
+		const ownerNode = nodeAt(ast, declaredOwner);
+		if (ownerNode?.kind === "map") {
+			const key = lastSegmentKey(record.owner);
+			const spawned = projection.spawns[stripLastKey(record.owner)];
+			assert(
+				key !== undefined && spawned !== undefined && Object.prototype.hasOwnProperty.call(spawned, key),
+				`Actor creation ${record.occurrence} targets an owner map occurrence that was not spawned`,
+			);
+		}
+		assert(
+			projection.activeLeaves.some((leaf) => underScope(leaf, record.owner!)),
+			`Actor creation ${record.occurrence} targets an owner occurrence that is not active`,
+		);
+	}
+	const logicalOccurrence = actorLogicalOccurrencePath(record.occurrence, record.generation);
+	assert.equal(
+		logicalOccurrence,
+		actorOccurrencePath(record.definition, record.owner),
+		`Actor creation ${record.occurrence} has mismatched logical occurrence provenance`,
+	);
+	assert.equal(
+		record.occurrence,
+		actorGenerationPath(logicalOccurrence, record.generation),
+		`Actor creation ${record.occurrence} does not match its generation`,
+	);
+	const priorGeneration = Object.values(projection.actors)
+		.filter((entry) => entry.logicalOccurrence === logicalOccurrence)
+		.sort((left, right) => right.generation - left.generation)[0];
+	assert.equal(
+		record.generation,
+		(priorGeneration?.generation ?? 0) + 1,
+		`Actor occurrence ${logicalOccurrence} generation is not sequential`,
+	);
+	assert(
+		priorGeneration === undefined || priorGeneration.status === "stopped",
+		`Actor occurrence ${logicalOccurrence} re-entered before its prior generation stopped`,
+	);
+	return { liveDefinition, logicalOccurrence };
+}
+
+function assertActorMessagesEnqueued(
+	projection: BranchProjection,
+	ast: ChartAst,
+	record: ActorMessagesEnqueuedRecord,
+): ProjectedActorOccurrence {
+	const actor = projection.actors[record.occurrence];
+	assert(actor !== undefined, `Message enqueue targets unknown actor ${record.occurrence}`);
+	assert.equal(record.generation, actor.generation, `Message enqueue targets the wrong generation of ${actor.logicalOccurrence}`);
+	const first = record.messages[0];
+	assert(first !== undefined, "Actor enqueue transaction must contain at least one message");
+	assert(
+		record.source.targetDeclaration === actor.declaration && record.source.event === first.event,
+		"Message enqueue has inconsistent target/event provenance",
+	);
+	assert(
+		record.source.producerState === first.producerState &&
+			record.messages.every((message) => message.producerState === record.source.producerState && message.event === record.source.event),
+		"Message enqueue has inconsistent producer provenance",
+	);
+	assert(
+		actor.status !== "stopped" && actor.status !== "cancelled" && actor.status !== "failed",
+		`Message enqueue targets stopped actor ${record.occurrence}`,
+	);
+	if (actor.status === "closing" || actor.status === "draining") {
+		const producerContext = actorContextForState(ast, record.source.producerState);
+		const producer = producerContext === undefined ? undefined : projection.actors[producerContext.occurrence];
+		assert(producer?.currentMessage !== undefined, `External message enqueue targets closing actor ${record.occurrence}`);
+	}
+	const ids = new Set(actor.messages.map((message) => message.messageId));
+	const callIds = new Set(Object.keys(projection.pendingActorCalls));
+	for (const envelope of record.messages) {
+		assert(!ids.has(envelope.messageId), `Duplicate actor message id ${envelope.messageId}`);
+		ids.add(envelope.messageId);
+		if (envelope.callId !== undefined) {
+			assert(!callIds.has(envelope.callId), `Duplicate actor call id ${envelope.callId}`);
+			callIds.add(envelope.callId);
+		}
+	}
+	return actor;
+}
+
+function assertActorMessageAccepted(
+	projection: BranchProjection,
+	ast: ChartAst,
+	record: ActorMessageAcceptedRecord,
+) {
+	const actor = projection.actors[record.occurrence];
+	assert(actor !== undefined, `Actor message fact targets unknown actor ${record.occurrence}`);
+	assert.equal(actor.currentMessage, undefined, `Actor ${record.occurrence} already owns a current message`);
+	const head = actor.mailbox[0];
+	assert(head !== undefined && head.messageId === record.messageId, `Actor ${record.occurrence} may accept only its FIFO head`);
+	const definition = liveActorDeclaration(ast, actor.declaration, actor.occurrence);
+	const receive = definition.states[actor.currentState];
+	assert(receive?.kind === "receive", `Actor ${record.occurrence} accepted a message outside receive()`);
+	assert.equal(record.receiveState, actorStatePath(record.occurrence, actor.currentState), `Actor ${record.occurrence} accepted from the wrong receive visit`);
+	const target = receive.on[head.event];
+	assert(target !== undefined, `FIFO head '${head.event}' is unsupported by receive '${actor.currentState}'`);
+	return { actor, head, target };
+}
+
+function assertActorMessageReplied(
+	projection: BranchProjection,
+	ast: ChartAst,
+	record: ActorMessageRepliedRecord,
+) {
+	const actor = projection.actors[record.occurrence];
+	assert(actor !== undefined, `Actor message fact targets unknown actor ${record.occurrence}`);
+	const current = actor.currentMessage;
+	assert(current !== undefined && current.messageId === record.messageId, `Actor ${record.occurrence} replied to a message it does not own`);
+	const reply = liveActorDeclaration(ast, actor.declaration, actor.occurrence).states[actor.currentState];
+	assert(
+		reply?.kind === "reply" && reply.message === current.event && record.message === current.event,
+		`Actor ${record.occurrence} reply does not match its inferred current message`,
+	);
+	return { current };
+}
+
+function assertActorMessageSettled(
+	projection: BranchProjection,
+	ast: ChartAst,
+	record: ActorMessageSettledRecord,
+) {
+	const actor = projection.actors[record.occurrence];
+	assert(actor !== undefined, `Actor message fact targets unknown actor ${record.occurrence}`);
+	const current = actor.currentMessage;
+	assert(
+		current !== undefined && current.messageId === record.messageId && current.status === "replied",
+		`Actor ${record.occurrence} settled before a validated reply`,
+	);
+	const reply = liveActorDeclaration(ast, actor.declaration, actor.occurrence).states[actor.currentState];
+	assert(reply?.kind === "reply", `Actor ${record.occurrence} settled outside reply()`);
+	return { actor, current, reply };
+}
+
+function assertActorCallResolved(projection: BranchProjection, record: ActorCallResolvedRecord): void {
+	const call = projection.pendingActorCalls[record.callId];
+	assert(
+		call !== undefined && call.callerState === record.callerState && call.messageId === record.messageId,
+		`Actor call result ${record.callId} has no matching pending caller`,
+	);
+	const actor = projection.actors[call.occurrence];
+	const message = actor?.messages.find((entry) => entry.messageId === record.messageId);
+	assert(message?.status === "settled", `Actor call result ${record.callId} resolved before its message settled`);
+	assert(
+		message.callId === record.callId &&
+			message.replyEvent === record.replyEvent &&
+			(!Object.hasOwn(record, "output") || JSON.stringify(message.replyOutput) === JSON.stringify(record.output)),
+		`Actor call result ${record.callId} does not match the correlated reply`,
+	);
+}
+
+function assertActorScope(projection: BranchProjection, record: ActorScopeRecord): ProjectedActorOccurrence {
+	const actor = projection.actors[record.occurrence];
+	assert(actor !== undefined, `Actor scope fact targets unknown actor ${record.occurrence}`);
+	if (record.kind === "closing") {
+		assert.notEqual(actor.status, "stopped", `Stopped actor ${record.occurrence} cannot close again`);
+	} else {
+		assert(
+			actor.currentMessage === undefined && actor.mailbox.length === 0,
+			`Actor ${record.occurrence} stopped before drain`,
+		);
+	}
+	return actor;
+}
+
 function liveActorDeclaration(ast: ChartAst, declaration: StatePath, occurrence: StatePath): ActorDeclarationAst {
 	const live = ast.actors[declaration];
-	if (live === undefined) throw new Error(`Actor ${occurrence} declaration ${declaration} is missing from the live chart`);
+	assert(live !== undefined, `Actor ${occurrence} declaration ${declaration} is missing from the live chart`);
 	return live;
 }
 
