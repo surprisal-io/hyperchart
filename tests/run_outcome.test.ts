@@ -22,14 +22,14 @@ function definitionForUid(uid: ActionUID): StateActionAst {
 }
 
 describe("run outcome", () => {
-	it("classifies a terminal FAILED completion as a failed run", () => {
+	it("classifies durable global failure intent as a failed run", () => {
 		const machineAst = ast(
 			chart({
 				kind: "chart",
 				id: "failure-route",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "failed" } },
+					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
 					done: final(),
 					failed: failed(),
 				},
@@ -38,15 +38,7 @@ describe("run outcome", () => {
 		const uid = { chart: "failure-route", state: "work", action: "agent" };
 		const log: DurableLogRecord[] = [
 			{ type: "state_action", kind: "invoke", actionUid: uid, definition: definitionForUid(uid), parentId: 0, seqId: 1, timestamp: 1 },
-			{
-				type: "state_action",
-				kind: "complete",
-				actionUid: uid,
-				event: { type: "FAILED", error: "boom" },
-				parentId: 1,
-				seqId: 2,
-				timestamp: 2,
-			},
+			{ type: "failure_intent", origin: "work", error: "boom", parentId: 1, seqId: 2, timestamp: 2 },
 		];
 
 		const state = stateFromLog(machineAst, log);
@@ -72,14 +64,14 @@ describe("run outcome", () => {
 		expect(finalMachineFailureMessage(stateFromLog(completeAst, []), log)).toBeUndefined();
 	});
 
-	it("does not reuse a recovered FAILED error when a later completion enters the active failed terminal", () => {
+	it("does not invent an error when a domain recovery later enters an explicit failed terminal", () => {
 		const machineAst = ast(
 			chart({
 				kind: "chart",
 				id: "stale-error-route",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { FAILED: "recover" } },
+					work: { kind: "state", action: agent("worker"), transitions: { NEEDS_RECOVERY: "recover" } },
 					recover: { kind: "state", action: agent("fixer"), transitions: { DONE: "failed" } },
 					failed: failed(),
 				},
@@ -89,7 +81,7 @@ describe("run outcome", () => {
 		const recover = { chart: "stale-error-route", state: "recover", action: "agent" };
 		const log: DurableLogRecord[] = [
 			{ type: "state_action", kind: "invoke", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, timestamp: 1 },
-			{ type: "state_action", kind: "complete", actionUid: work, event: { type: "FAILED", error: "recovered boom" }, parentId: 1, seqId: 2, timestamp: 2 },
+			{ type: "state_action", kind: "complete", actionUid: work, event: { type: "NEEDS_RECOVERY" }, parentId: 1, seqId: 2, timestamp: 2 },
 			{ type: "state_action", kind: "invoke", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, timestamp: 3 },
 			{ type: "state_action", kind: "complete", actionUid: recover, event: { type: "DONE" }, parentId: 3, seqId: 4, timestamp: 4 },
 		];
@@ -104,8 +96,8 @@ describe("run outcome", () => {
 				id: "recovered-route",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", FAILED: "recover" } },
-					recover: { kind: "state", action: agent("fixer"), transitions: { DONE: "done", FAILED: "failed" } },
+					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done", NEEDS_RECOVERY: "recover" } },
+					recover: { kind: "state", action: agent("fixer"), transitions: { DONE: "done", GIVE_UP: "failed" } },
 					done: final(),
 					failed: failed(),
 				},
@@ -119,7 +111,7 @@ describe("run outcome", () => {
 				type: "state_action",
 				kind: "complete",
 				actionUid: work,
-				event: { type: "FAILED", error: "boom" },
+				event: { type: "NEEDS_RECOVERY" },
 				parentId: 1,
 				seqId: 2,
 				timestamp: 2,

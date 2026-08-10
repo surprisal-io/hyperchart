@@ -150,7 +150,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		return true;
 	}
 
-	cancel(actionUid: ActionUID): void {
+	async cancel(actionUid: ActionUID): Promise<void> {
 		const key = actionUidKey(actionUid);
 		const generation = this.generations.current(key);
 		if (generation !== undefined) this.generations.markCancelled(key, generation);
@@ -159,6 +159,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		this.live.delete(key);
 		this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
 		live.session.abort();
+		await live.session.settled();
 	}
 
 	async dispose(): Promise<void> {

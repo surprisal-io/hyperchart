@@ -52,7 +52,7 @@ function scriptChart(action: ReturnType<typeof script>): ChartAst {
 			id: "script-chart",
 			initial: "run",
 			states: {
-				run: { kind: "state", action, transitions: { DONE: "done", OTHER: "other", FAILED: "failed" } },
+				run: { kind: "state", action, transitions: { DONE: "done", OTHER: "other" } },
 				done: final(),
 				other: final(),
 				failed: failed(),
@@ -112,7 +112,8 @@ describe("ScriptRunner via ChartRuntime", () => {
 
 		const state = await runScriptChart(ast, dir);
 
-		expect(state.projection.activeLeaves).toEqual(["failed"]);
+		expect(state.projection.activeLeaves).toEqual(["run"]);
+		expect(state.projection.failure).toBeDefined();
 		expect(state.projection.results.run).toBeUndefined();
 	});
 
@@ -122,7 +123,8 @@ describe("ScriptRunner via ChartRuntime", () => {
 
 		const state = await runScriptChart(ast, dir);
 
-		expect(state.projection.activeLeaves).toEqual(["failed"]);
+		expect(state.projection.activeLeaves).toEqual(["run"]);
+		expect(state.projection.failure).toBeDefined();
 	});
 
 	it("re-runs a rejected script with validation attempt environment", async () => {
@@ -159,7 +161,7 @@ process.stdin.on("end", () => {
 						action,
 						validate: guard,
 						retries: 1,
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done" },
 					},
 					done: final(),
 					failed: failed(),
@@ -207,7 +209,7 @@ process.stdin.on("end", () => {
 						action,
 						validate: guard,
 						retries: 1,
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done" },
 					},
 					done: final(),
 					failed: failed(),
@@ -307,7 +309,13 @@ describe("guards", () => {
 			await new Promise((resolve) => setTimeout(resolve, 10));
 		}
 		expect(existsSync(ready)).toBe(true);
-		runner.cancel(actionUid);
+		const cancelling = runner.cancel(actionUid);
+		expect(runner.cancel(actionUid)).toBe(cancelling);
+		let quiesced = false;
+		void cancelling.then(() => { quiesced = true; });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(quiesced).toBe(false);
+		await expect(withTimeout(cancelling)).resolves.toBeUndefined();
 		await expect(withTimeout(pending)).resolves.toEqual({ ok: false, reason: "exit SIGKILL" });
 		await runner.dispose();
 	});

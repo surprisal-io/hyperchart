@@ -164,7 +164,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		return true;
 	}
 
-	cancel(actionUid: ActionUID): void {
+	async cancel(actionUid: ActionUID): Promise<void> {
 		const key = actionUidKey(actionUid);
 		const generation = this.generations.current(key);
 		if (generation !== undefined) this.generations.markCancelled(key, generation);
@@ -173,7 +173,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		this.live.delete(key);
 		live.unsubscribeProgress?.();
 		this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
-		void live.session.abort().finally(() => live.session.dispose());
+		await live.session.abort().finally(() => live.session.dispose());
 	}
 
 	async dispose(): Promise<void> {

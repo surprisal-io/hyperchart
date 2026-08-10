@@ -5,7 +5,7 @@ import type { ChartEvent } from "../../core/types.js";
 import type { AgentEffect } from "../../core/machine.js";
 import type { SchemaRegistryLike as SchemaRegistry } from "../../core/schema_registry.js";
 import { checkArtifactFile, resolveArtifactValue } from "./artifacts.js";
-import { buildArtifactFeedbackPrompt, buildNudgePrompt, type ResolvedRead } from "./agent_prompts.js";
+import { buildArtifactFeedbackPrompt, buildErrorRetryPrompt, buildNudgePrompt, type ResolvedRead } from "./agent_prompts.js";
 import type { CompletionSink } from "./finish_protocol.js";
 import type { AgentDefinition, ThinkingLevel } from "./agent_definitions.js";
 
@@ -141,6 +141,8 @@ export type AcceptanceLoopOptions = {
 	isCancelled(): boolean;
 	prompt(text: string): Promise<void>;
 	lastAssistantText(): string | undefined;
+	/** Returns the latest assistant turn's provider/runtime error, if that turn failed. */
+	lastAssistantError?(): string | undefined;
 	checkArtifacts(): Promise<string[]>;
 	/** Called at most once with the accepted completion or a FAILED event. */
 	emit(event: ChartEvent): void;
@@ -153,13 +155,18 @@ export type AcceptanceLoopOptions = {
  */
 export async function runAcceptanceLoop(options: AcceptanceLoopOptions): Promise<void> {
 	let remaining = options.maxRetries;
+	let lastError: string | undefined;
 	while (!options.isCancelled()) {
 		if (options.sink.captured === undefined) {
+			const assistantError = options.lastAssistantError?.();
+			if (assistantError !== undefined) lastError = assistantError;
 			if (remaining-- <= 0) {
-				options.emit({ type: "FAILED", error: "agent did not produce a valid completion" });
+				options.emit({ type: "FAILED", error: lastError ?? "agent did not produce a valid completion" });
 				return;
 			}
-			await options.prompt(buildNudgePrompt(options.effect, options.lastAssistantText()));
+			await options.prompt(assistantError === undefined
+				? buildNudgePrompt(options.effect, options.lastAssistantText())
+				: buildErrorRetryPrompt(options.effect, assistantError));
 			continue;
 		}
 		if (options.sink.captured.type !== "FAILED") {

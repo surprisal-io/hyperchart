@@ -1,7 +1,7 @@
-import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../../core/action_uid.js";
+import { actorContextForState, actorStatePath } from "../../core/actors.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { ActionUID } from "../../core/types.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
@@ -152,11 +152,21 @@ function findRewindMatch(
 	return { index, label: `${opts.mode} state ${state}`, ...(recordSeqId === undefined ? {} : { recordSeqId }) };
 }
 
+function semanticStatesForRecord(record: DurableLogRecord): StatePath[] {
+	if (record.type === "spawned") return [record.path];
+	if (record.type === "state_action") return [record.actionUid.state];
+	if (record.type === "failure_intent") return [record.origin];
+	if (record.type === "actor_created") return [record.declaration, record.occurrence];
+	if (record.type === "actor_messages_enqueued") return [record.source.producerState, record.occurrence];
+	if (record.type === "actor_message" || record.type === "actor_scope") return [record.occurrence];
+	if (record.type === "actor_call_resolved") return [record.callerState];
+	return ["<run>"];
+}
+
 function summarizeRemovedRecordsByState(records: readonly DurableLogRecord[]): Array<{ state: string; records: number }> {
 	const counts = new Map<string, number>();
 	for (const record of records) {
-		const state = record.type === "spawned" ? record.path : record.type === "state_action" ? record.actionUid.state : "<run>";
-		counts.set(state, (counts.get(state) ?? 0) + 1);
+		for (const state of new Set(semanticStatesForRecord(record))) counts.set(state, (counts.get(state) ?? 0) + 1);
 	}
 	return [...counts.entries()]
 		.map(([state, count]) => ({ state, records: count }))
@@ -164,9 +174,7 @@ function summarizeRemovedRecordsByState(records: readonly DurableLogRecord[]): A
 }
 
 function recordMatchesState(record: DurableLogRecord, state: string): boolean {
-	if (record.type === "spawned") return record.path === state || templatePath(record.path) === state || isUnderState(record.path, state);
-	if (record.type !== "state_action") return false;
-	return record.actionUid.state === state || templatePath(record.actionUid.state) === state || isUnderState(record.actionUid.state, state);
+	return semanticStatesForRecord(record).some((path) => path === state || templatePath(path) === state || isUnderState(path, state));
 }
 
 function isUnderState(path: string, state: string): boolean {
@@ -385,8 +393,10 @@ function collectDownstreamArtifactPaths(
 		if (record?.type !== "state_action" || record.kind !== "invoke") continue;
 		try {
 			const projection = projectBranch(createBranchProjection(ast), ast, records.slice(0, index + 1));
-			const node = nodeAt(ast, record.actionUid.state);
-			if (node?.kind !== "state") continue;
+			const mainNode = nodeAt(ast, record.actionUid.state);
+			const actorNode = actorContextForState(ast, record.actionUid.state)?.node;
+			const node = mainNode?.kind === "state" ? mainNode : actorNode?.kind === "state" ? actorNode : undefined;
+			if (node === undefined) continue;
 			const action = node.action;
 			if (action.kind === "user" || action.artifacts === undefined) continue;
 			for (const artifact of Object.values(action.artifacts)) {
@@ -418,12 +428,20 @@ function renderTemplateForProjection(
 }
 
 function resolveRefForProjection(projection: BranchProjection, ast: ChartAst, ref: InputRef, stateId: StatePath): unknown {
-	assert(ref.kind !== "actorInput" && ref.kind !== "messageInput", `Actor refs are unavailable before the actor runtime layer (${stateId})`);
+	const actorContext = actorContextForState(ast, stateId);
+	const actor = actorContext === undefined ? undefined : projection.actors[actorContext.occurrence];
+	if (ref.kind === "actorInput") return selectPathForProjection(actor?.input, ref.path);
+	if (ref.kind === "messageInput") {
+		if (actor?.currentMessage?.event !== ref.message) throw new Error(`Cannot resolve messageInput('${ref.message}') for ${stateId}`);
+		return selectPathForProjection(actor.currentMessage.input, ref.path);
+	}
 	if (ref.kind === "arg") return projection.args?.[ref.name];
 	if (ref.kind === "visit") {
-		const target = ref.state === undefined ? stateId : instancePathFor(ref.state, stateId);
-		const node = nodeAt(ast, target);
-		if (node?.kind !== "state") throw new Error(`Cannot resolve visit(${ref.state ?? ""}) for ${stateId}`);
+		const target = ref.state === undefined ? stateId : actorContext === undefined ? instancePathFor(ref.state, stateId) : actorStatePath(actorContext.occurrence, ref.state);
+		const mainNode = nodeAt(ast, target);
+		const localNode = actorContextForState(ast, target)?.node;
+		const node = mainNode?.kind === "state" ? mainNode : localNode?.kind === "state" ? localNode : undefined;
+		if (node === undefined) throw new Error(`Cannot resolve visit(${ref.state ?? ""}) for ${stateId}`);
 		return projection.stateVisits[actionUidKey({ ...node.action.uid, state: target })];
 	}
 	if (ref.kind === "input") {
@@ -437,7 +455,7 @@ function resolveRefForProjection(projection: BranchProjection, ast: ChartAst, re
 		if (instances === undefined || !(instance.key in instances)) throw new Error(`No spawned instance ${instance.key} in ${instance.container}`);
 		return ref.kind === "key" ? instance.key : selectPathForProjection(instances[instance.key], ref.path);
 	}
-	const resultKey = instancePathFor(ref.state, stateId);
+	const resultKey = actorContext === undefined ? instancePathFor(ref.state, stateId) : actorStatePath(actorContext.occurrence, ref.state);
 	return selectPathForProjection(projection.results[resultKey], ref.path);
 }
 
@@ -447,6 +465,10 @@ function inputSlotForProjection(
 	name: string,
 	stateId: StatePath,
 ): { values: Record<string, unknown> } | undefined {
+	const actor = actorContextForState(ast, stateId);
+	if (actor?.node.kind === "state" && actor.node.input !== undefined && name in actor.node.input) {
+		return { values: projection.inputs[stateId] ?? {} };
+	}
 	let current: StatePath | undefined = stateId;
 	while (current !== undefined) {
 		const node = nodeAt(ast, current);
