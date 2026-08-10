@@ -729,6 +729,12 @@ describe("explicit event-sourced actors", () => {
 		if (resolved === undefined) throw new Error("missing call resolution fact");
 		broken.splice(settledIndex, 0, resolved);
 		expect(explainReplay(callAst, broken).broken?.error).toContain("before its message settled");
+
+		const missingOutput = structuredClone(callRuntime.records);
+		const resolutionWithoutOutput = missingOutput.find((record) => record.type === "actor_call_resolved");
+		if (resolutionWithoutOutput?.type !== "actor_call_resolved") throw new Error("missing call resolution fact");
+		delete resolutionWithoutOutput.output;
+		expect(explainReplay(callAst, missingOutput).broken?.error).toContain("output presence does not match");
 	});
 
 	it("resolves actor-local typed input, message, state input, results, and artifacts", async () => {

@@ -195,7 +195,7 @@ export function projectBranch(
 				const producer = record.messages[0]?.producerState;
 				if (producer !== undefined) {
 					projection.actorProducerVisits[producer] = Math.max(projection.actorProducerVisits[producer] ?? 0, record.messages[0]?.producerVisit ?? 0);
-					advanceActorControlState(projection, ast, producer, "enqueued", undefined, abandoned);
+					advanceActorProducerAfterEnqueue(projection, ast, producer, abandoned);
 				}
 				break;
 			}
@@ -230,7 +230,7 @@ export function projectBranch(
 				assertActorCallResolved(projection, record);
 				delete projection.pendingActorCalls[record.callId];
 				if (Object.hasOwn(record, "output")) projection.results[record.callerState] = record.output;
-				advanceActorControlState(projection, ast, record.callerState, "replied", record.replyEvent, abandoned, record.output);
+				advanceActorProducerAfterReply(projection, ast, record.callerState, record.replyEvent, record.output, abandoned);
 				break;
 			}
 			case "actor_scope": {
@@ -435,7 +435,7 @@ function applyTransition(
 	fromLeaf: StatePath,
 	eventType: string,
 	abandoned: PendingAction[],
-	event?: ChartEvent,
+	event: ChartEvent,
 ): void {
 	const actorContext = actorContextForState(ast, fromLeaf);
 	if (actorContext !== undefined) {
@@ -444,7 +444,7 @@ function applyTransition(
 		if (actorContext.node.kind !== "state") throw new Error(`Actor state ${fromLeaf} cannot emit action event ${eventType}`);
 		const transition = actorContext.node.transitions[eventType];
 		if (transition === undefined) throw new Error(`No actor transition for event type ${eventType} in state ${fromLeaf}`);
-		applyActorInputForEntry(projection, ast, actor, transition.target, transition, event);
+		applyActorInputForEntry(projection, ast, actor, transition.target, { transition, event });
 		actor.currentState = transition.target;
 		return;
 	}
@@ -453,49 +453,80 @@ function applyTransition(
 		throw new Error(`No transition for event type ${eventType} in state ${fromLeaf}`);
 	}
 	const target = siblingPath(handler.path, handler.transition.target);
-	// Input defaults belong to the entered state; event-bound inputs require a concrete event and
-	// fail explicitly inside applyInputsForEntry when one is unavailable.
-	applyInputsForEntry(projection, ast, target, handler.transition, event);
+	applyInputsForEntry(projection, ast, target, { transition: handler.transition, event });
 	exitAndEnter(projection, ast, handler.path, target, abandoned);
 }
 
-function advanceActorControlState(
+function advanceActorProducerAfterEnqueue(
 	projection: BranchProjection,
 	ast: ChartAst,
 	statePath: StatePath,
-	phase: "enqueued" | "replied",
-	replyEvent: string | undefined,
 	abandoned: PendingAction[],
-	output?: unknown,
 ): void {
+	const node = actorProducerNode(ast, statePath);
+	if (node.kind === "call") return;
+	applyActorProducerTransition(
+		projection,
+		ast,
+		statePath,
+		{ target: node.target },
+		{ type: "ACTOR_REPLY" },
+		abandoned,
+	);
+}
+
+function advanceActorProducerAfterReply(
+	projection: BranchProjection,
+	ast: ChartAst,
+	statePath: StatePath,
+	replyEvent: string | undefined,
+	output: unknown,
+	abandoned: PendingAction[],
+): void {
+	const node = actorProducerNode(ast, statePath);
+	assert.equal(node.kind, "call", `Fire-and-forget send state ${statePath} cannot await a reply`);
+	const transition = node.target !== undefined
+		? { target: node.target }
+		: replyEvent === undefined
+			? undefined
+			: node.transitions[replyEvent];
+	assert(transition !== undefined, `Actor call ${statePath} has no route for reply '${replyEvent ?? "missing"}'`);
+	applyActorProducerTransition(
+		projection,
+		ast,
+		statePath,
+		transition,
+		{ type: replyEvent ?? "ACTOR_REPLY", ...(output === undefined ? {} : { output }) },
+		abandoned,
+	);
+}
+
+function actorProducerNode(ast: ChartAst, statePath: StatePath) {
 	const actorContext = actorContextForState(ast, statePath);
 	const node = actorContext?.node ?? nodeAt(ast, statePath);
-	if (node?.kind !== "send" && node?.kind !== "call") throw new Error(`Actor message fact has invalid producer state ${statePath}`);
-	if (phase === "enqueued" && node.kind === "call") return;
-	if (phase === "replied" && node.kind === "send") throw new Error(`Fire-and-forget send state ${statePath} cannot await a reply`);
-	const transition =
-		node.kind === "send"
-			? { target: node.target }
-			: node.target !== undefined
-				? { target: node.target }
-				: replyEvent === undefined
-					? undefined
-					: node.transitions[replyEvent];
-	if (transition === undefined) throw new Error(`Actor call ${statePath} has no route for reply '${replyEvent ?? "single"}'`);
-	const event: ChartEvent = {
-		type: replyEvent ?? "ACTOR_REPLY",
-		...(output === undefined ? {} : { output }),
-	};
+	assert(node?.kind === "send" || node?.kind === "call", `Actor message fact has invalid producer state ${statePath}`);
+	return node;
+}
+
+function applyActorProducerTransition(
+	projection: BranchProjection,
+	ast: ChartAst,
+	statePath: StatePath,
+	transition: TransitionAst,
+	event: ChartEvent,
+	abandoned: PendingAction[],
+): void {
+	const actorContext = actorContextForState(ast, statePath);
 	if (actorContext !== undefined) {
 		const actor = projection.actors[actorContext.occurrence];
-		if (actor === undefined || actor.currentState !== actorContext.localState) throw new Error(`Actor producer state ${statePath} is not active`);
-		applyActorInputForEntry(projection, ast, actor, transition.target, transition, event);
+		assert(actor !== undefined && actor.currentState === actorContext.localState, `Actor producer state ${statePath} is not active`);
+		applyActorInputForEntry(projection, ast, actor, transition.target, { transition, event });
 		actor.currentState = transition.target;
 		return;
 	}
-	if (!projection.activeLeaves.includes(statePath)) throw new Error(`Actor producer state ${statePath} is not active`);
+	assert(projection.activeLeaves.includes(statePath), `Actor producer state ${statePath} is not active`);
 	const target = siblingPath(statePath, transition.target);
-	applyInputsForEntry(projection, ast, target, transition, event);
+	applyInputsForEntry(projection, ast, target, { transition, event });
 	exitAndEnter(projection, ast, statePath, target, abandoned);
 }
 
@@ -872,11 +903,18 @@ function assertActorCallResolved(projection: BranchProjection, record: ActorCall
 	const message = actor?.messages.find((entry) => entry.messageId === record.messageId);
 	assert(message?.status === "settled", `Actor call result ${record.callId} resolved before its message settled`);
 	assert(
-		message.callId === record.callId &&
-			message.replyEvent === record.replyEvent &&
-			(!Object.hasOwn(record, "output") || JSON.stringify(message.replyOutput) === JSON.stringify(record.output)),
+		message.callId === record.callId && message.replyEvent === record.replyEvent,
 		`Actor call result ${record.callId} does not match the correlated reply`,
 	);
+	const resolvedHasOutput = Object.hasOwn(record, "output");
+	assert.equal(
+		resolvedHasOutput,
+		Object.hasOwn(message, "replyOutput"),
+		`Actor call result ${record.callId} output presence does not match the correlated reply`,
+	);
+	if (resolvedHasOutput) {
+		assert.deepStrictEqual(message.replyOutput, record.output, `Actor call result ${record.callId} output does not match the correlated reply`);
+	}
 }
 
 function assertActorScope(projection: BranchProjection, record: ActorScopeRecord): ProjectedActorOccurrence {
@@ -899,53 +937,52 @@ function liveActorDeclaration(ast: ChartAst, declaration: StatePath, occurrence:
 	return live;
 }
 
+type EntryEvent = Readonly<{ transition: TransitionAst; event: ChartEvent }>;
+
 function applyActorInputForEntry(
 	projection: BranchProjection,
 	ast: ChartAst,
 	actor: ProjectedActorOccurrence,
 	target: StatePath,
-	transition?: TransitionAst,
-	event?: ChartEvent,
+	entry?: EntryEvent,
 ): void {
 	const node = liveActorDeclaration(ast, actor.declaration, actor.occurrence).states[target];
 	if (node?.kind !== "state" || node.input === undefined) return;
-	const values: Record<string, unknown> = {};
-	for (const [name, schema] of Object.entries(node.input)) {
-		const binding = transition?.input?.[name];
-		if (binding !== undefined) {
-			if (event === undefined) throw new Error(`Input '${name}' for actor state ${actor.occurrence}.${target}: event binding has no event payload`);
-			values[name] = selectEventValue(event, binding.path, name, `${actor.occurrence}.${target}`);
-		} else if (schemaHasDefault(schema)) {
-			values[name] = cloneJson((schema.schema as Record<string, unknown>).default);
-		}
-	}
-	projection.inputs[actorStatePath(actor.occurrence, target)] = values;
+	projection.inputs[actorStatePath(actor.occurrence, target)] = resolveInputValues(
+		node.input,
+		entry,
+		`${actor.occurrence}.${target}`,
+	);
 }
 
 function applyInputsForEntry(
 	projection: BranchProjection,
 	ast: ChartAst,
 	entryPath: StatePath,
-	transition?: TransitionAst,
-	event?: ChartEvent,
+	entry?: EntryEvent,
 ): void {
 	for (const target of inputEntryTargets(ast, entryPath)) {
-		const values: Record<string, unknown> = {};
-		for (const [name, schema] of Object.entries(target.input)) {
-			const binding = transition?.input?.[name];
-			if (binding !== undefined) {
-				if (event === undefined) {
-					throw new Error(`Input '${name}' for state ${target.path}: event binding has no event payload`);
-				}
-				values[name] = selectEventValue(event, binding.path, name, target.path);
-				continue;
-			}
-			if (schemaHasDefault(schema)) {
-				values[name] = cloneJson((schema.schema as Record<string, unknown>).default);
-			}
-		}
-		projection.inputs[target.path] = values;
+		projection.inputs[target.path] = resolveInputValues(target.input, entry, target.path);
 	}
+}
+
+function resolveInputValues(
+	input: Readonly<Record<string, SchemaAst>>,
+	entry: EntryEvent | undefined,
+	statePath: StatePath,
+): Record<string, unknown> {
+	const values: Record<string, unknown> = {};
+	for (const [name, schema] of Object.entries(input)) {
+		const binding = entry?.transition.input?.[name];
+		if (entry !== undefined && binding !== undefined) {
+			values[name] = selectEventValue(entry.event, binding.path, name, statePath);
+			continue;
+		}
+		if (schemaHasDefault(schema)) {
+			values[name] = structuredClone((schema.schema as Record<string, unknown>).default);
+		}
+	}
+	return values;
 }
 
 function inputEntryTargets(
@@ -1002,11 +1039,6 @@ function selectEventValue(
 
 function schemaHasDefault(schema: SchemaAst): boolean {
 	return typeof schema.schema === "object" && schema.schema !== null && "default" in schema.schema;
-}
-
-function cloneJson(value: unknown): unknown {
-	if (value === undefined) return undefined;
-	return JSON.parse(JSON.stringify(value)) as unknown;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
