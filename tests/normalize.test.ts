@@ -1,14 +1,20 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../packages/hyperchart/src/index.js";
 import {
+	actor,
 	agent,
 	artifact,
 	compound,
 	failed,
 	final,
 	map,
+	message,
 	normalizeChartConfig,
 	parallel,
+	protocol,
+	receive,
+	reply,
 	t,
 	tsImport,
 	user,
@@ -85,7 +91,7 @@ describe("normalizeChartConfig", () => {
 						action: agent("worker", {
 							reply: z.object({ value: z.string() }),
 						}),
-						transitions: { DONE: "done", FAILED: "failed" },
+						transitions: { DONE: "done", ERROR: "failed" },
 					},
 					done: final(),
 					failed: failed(),
@@ -226,7 +232,7 @@ describe("normalizeChartConfig", () => {
 							analyze: { kind: "state", action: agent("analyzer"), transitions: { OK: "verified" } },
 							verified: final(),
 						},
-						transitions: { FAILED: "done" },
+						transitions: { ERROR: "done" },
 					}),
 					done: final(),
 				},
@@ -327,7 +333,7 @@ describe("normalizeChartConfig", () => {
 				review: compound({
 					initial: "work",
 					onDone: "done",
-					states: { work: { kind: "state" as const, action: agent("coder"), transitions: { FAILED: "work" } } },
+					states: { work: { kind: "state" as const, action: agent("coder"), transitions: { ERROR: "work" } } },
 				}),
 				done: final(),
 			},
@@ -507,6 +513,27 @@ describe("normalizeChartConfig", () => {
 		const work = result.ast.states.work;
 		if (work?.kind !== "state") throw new Error("expected action state");
 		expect(work.after).toEqual({ delayMs: 500, target: "escalated" });
+	});
+
+	it("infers an actor reply reachable only through after", () => {
+		const TimedProtocol = protocol({ RUN: message({ input: z.object({}).strict(), reply: z.object({ timedOut: z.boolean() }).strict() }) });
+		const Timed = actor({
+			input: z.object({}).strict(), protocol: TimedProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { RUN: "work" } }),
+				work: { kind: "state", action: agent("slow-worker"), transitions: {}, after: { delayMs: 10, target: "settle" } },
+				settle: reply({ target: "idle", output: { timedOut: true } }),
+			},
+		});
+		const timed = Timed({});
+		const result = normalizeChartConfig(chart({
+			kind: "chart", id: "actor-after-reply", actors: { timed }, initial: "done", states: { done: final() },
+		}));
+
+		expect(result.ok).toBe(true);
+		assert(result.ok, JSON.stringify(result.diagnostics));
+		expect(result.diagnostics).toEqual([]);
+		expect(result.ast.actors["@timed"]?.states.settle).toMatchObject({ kind: "reply", message: "RUN" });
 	});
 
 	it("rejects invalid after shapes and unknown after targets", () => {
@@ -853,7 +880,7 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(failedBinding.ok).toBe(false);
-		expect(failedBinding.diagnostics.map((d) => d.code)).toContain("INVALID_BINDING");
+		expect(failedBinding.diagnostics.map((d) => d.code)).toContain("RESERVED_FAILED_TRANSITION");
 	});
 
 	it("normalizes visit refs and rejects non-action visit refs", () => {
@@ -1022,7 +1049,7 @@ describe("normalizeChartConfig", () => {
 			id: "no-validate",
 			initial: "work",
 			states: {
-				work: { action: agent("coder"), retries: 2, transitions: { DONE: "done", FAILED: "done" } },
+				work: { action: agent("coder"), retries: 2, transitions: { DONE: "done", ERROR: "done" } },
 				done: final(),
 			},
 		});
@@ -1042,8 +1069,7 @@ describe("normalizeChartConfig", () => {
 				done: final(),
 			},
 		});
-		expect(noRoute.ok).toBe(false);
-		expect(noRoute.diagnostics.map((d) => d.code)).toContain("MISSING_FAILED_ROUTE");
+		expect(noRoute.ok).toBe(true);
 	});
 
 	it("reports invalid initial state and transition targets", () => {
@@ -1082,7 +1108,7 @@ describe("normalizeChartConfig", () => {
 			id: "broken",
 			initial: "ask",
 			states: {
-				ask: { action: user({ prompt: "Pick", options: ["FAILED"] }), transitions: { FAILED: "done" } },
+				ask: { action: user({ prompt: "Pick", options: ["FAILED"] }), transitions: { ERROR: "done" } },
 				done: final(),
 			},
 		});

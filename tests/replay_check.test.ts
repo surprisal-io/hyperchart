@@ -1,13 +1,23 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import {
 	agent,
+	actor,
+	arg,
 	chart,
 	script,
 	event,
 	explainReplay,
+	createBranchProjection,
+	projectBranch,
 	final,
 	map,
+	message,
 	normalizeChartConfig,
+	protocol,
+	receive,
+	reply,
+	send,
 	tsImport,
 	z,
 	t,
@@ -19,7 +29,6 @@ import {
 	type StateAst,
 	type StatePath,
 } from "../packages/hyperchart/src/index.js";
-import { arg } from "../packages/hyperchart/src/core/dsl.js";
 
 function ast(input: unknown): ChartAst {
 	const parsed = normalizeChartConfig(input);
@@ -99,6 +108,139 @@ function validated(uid: ActionUID, eventType: string, seqId: number, guard: Guar
 }
 
 describe("explainReplay", () => {
+	it("rejects forged actor creation placement and generation provenance", () => {
+		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
+		const Actor = actor({
+			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const declaration = Actor({});
+		const current = ast(chart({
+			kind: "chart", id: "actor-replay-provenance", actors: { a: declaration }, initial: "done", states: { done: final() },
+		}));
+		const definition = current.actors["@a"]!;
+		const valid = {
+			type: "actor_created" as const,
+			declaration: "@a",
+			occurrence: "@a",
+			generation: 1,
+			input: {},
+			definition,
+			...meta(1),
+		};
+		const forgeries: DurableLogRecord[] = [
+			{ ...valid, owner: "forged" },
+			{ ...valid, occurrence: "forged.@a" },
+			{ ...valid, occurrence: "forged" },
+			{ ...valid, generation: 2, occurrence: "@a" },
+		];
+
+		for (const forged of forgeries) {
+			const explanation = explainReplay(current, [forged]);
+			expect(explanation.prefixEnd).toBe(0);
+			expect(explanation.broken).toMatchObject({ seqId: 1 });
+		}
+	});
+
+	it("derives a restarted actor's logical occurrence from its concrete occurrence", () => {
+		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
+		const Actor = actor({
+			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const declaration = Actor({});
+		const current = ast(chart({
+			kind: "chart", id: "actor-replay-generation", actors: { a: declaration }, initial: "done", states: { done: final() },
+		}));
+		const definition = current.actors["@a"]!;
+		const log: DurableLogRecord[] = [
+			{ type: "actor_created", declaration: "@a", occurrence: "@a", generation: 1, input: {}, definition, ...meta(1) },
+			{ type: "actor_scope", kind: "stopped", occurrence: "@a", ...meta(2) },
+			{ type: "actor_created", declaration: "@a", occurrence: "@a~2", generation: 2, input: {}, definition, ...meta(3) },
+		];
+
+		const explanation = explainReplay(current, log);
+		const projection = projectBranch(createBranchProjection(current), current, log);
+
+		expect(explanation.broken).toBeUndefined();
+		expect(projection.actors["@a~2"]?.logicalOccurrence).toBe("@a");
+	});
+
+	it("flags a reply contract changed in the live actor protocol", () => {
+		const OldProtocol = protocol({ PING: message({ input: z.object({}), reply: z.object({ value: z.string() }) }) });
+		const NewProtocol = protocol({ PING: message({ input: z.object({}), reply: z.object({ value: z.number() }) }) });
+		const OldActor = actor({
+			input: z.object({}), protocol: OldProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle", output: { value: "old" } }) },
+		});
+		const NewActor = actor({
+			input: z.object({}), protocol: NewProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle", output: { value: 1 } }) },
+		});
+		const oldActor = OldActor({});
+		const newActor = NewActor({});
+		const old = ast(chart({
+			kind: "chart", id: "actor-reply-contract", actors: { worker: oldActor }, initial: "ping",
+			states: { ping: send({ to: oldActor, event: "PING", input: {}, target: "done" }), done: final() },
+		}));
+		const current = ast(chart({
+			kind: "chart", id: "actor-reply-contract", actors: { worker: newActor }, initial: "ping",
+			states: { ping: send({ to: newActor, event: "PING", input: {}, target: "done" }), done: final() },
+		}));
+		const declaration = old.actors["@worker"]!;
+		const source = old.states.ping;
+		assert(source?.kind === "send", "expected send source");
+		const contract = declaration.protocol.PING!;
+		assert(contract.reply.kind === "single", "expected single reply contract");
+		const envelope = { messageId: "ping:message:1:0", event: "PING", input: {}, producerState: "ping", producerVisit: 1, batchIndex: 0 };
+		const log: DurableLogRecord[] = [
+			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: declaration, ...meta(1) },
+			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: { producerState: "ping", kind: "send", definition: source, targetDeclaration: "@worker", event: "PING", inputSchema: contract.input }, messages: [envelope], ...meta(2) },
+			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: envelope.messageId, receiveState: "@worker.idle", ...meta(3) },
+			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: envelope.messageId, message: "PING", output: { value: "old" }, schema: contract.reply.schema, ...meta(4) },
+		];
+
+		const explanation = explainReplay(current, log);
+
+		expect(explanation.broken).toBeUndefined();
+		expect(explanation.stale).toEqual(expect.arrayContaining([
+			expect.objectContaining({ seqId: 4, reason: "actor_reply_contract_changed", state: "@worker" }),
+		]));
+	});
+
+	it("rejects an actor creation whose map owner was not a concrete spawned occurrence", () => {
+		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
+		const Actor = actor({
+			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const declaration = Actor({});
+		const current = ast(chart({
+			kind: "chart", id: "actor-map-owner-provenance", initial: "m", states: {
+				m: map({
+					over: arg("items"), actors: { a: declaration }, initial: "work", onDone: "done",
+					states: { work: { kind: "state", action: agent("worker"), transitions: { DONE: "finished" } }, finished: final() },
+				}),
+				done: final(),
+			},
+		}));
+		const definition = current.actors["m.@a"]!;
+		const log: DurableLogRecord[] = [
+			args(),
+			{ type: "spawned", path: "m", instances: { real: {} }, ...meta(2) },
+			{
+				type: "actor_created", declaration: "m.@a", owner: "m",
+				occurrence: "m.@a", generation: 1,
+				input: {}, definition, ...meta(3),
+			},
+		];
+
+		const explanation = explainReplay(current, log);
+		expect(explanation.prefixEnd).toBe(2);
+		expect(explanation.broken).toMatchObject({ seqId: 3 });
+		expect(explanation.broken?.error).toContain("was not spawned");
+	});
+
 	it("treats guard env, reply, and artifact provenance as replay-sensitive", () => {
 		const make = (value: string) => ast(chart({ kind: "chart", id: "guard-provenance", initial: "work", states: {
 			work: { kind: "state", action: agent("worker"), validate: script("node", [], { env: { CHECK: value }, artifacts: { report: "report.json" }, reply: z.object({ ok: z.boolean() }) }), transitions: { DONE: "done" } }, done: final(),

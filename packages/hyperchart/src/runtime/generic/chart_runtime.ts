@@ -91,9 +91,11 @@ export class ChartRuntime implements Runtime {
 					break;
 				}
 				case "cancel":
-					this.options.agentExecutor.cancel(effect.actionUid);
-					this.options.userExecutor?.cancel(effect.actionUid);
-					this.scripts.cancel(effect.actionUid);
+					if (effect.actionUid !== undefined) {
+						this.options.agentExecutor.cancel(effect.actionUid);
+						this.options.userExecutor?.cancel(effect.actionUid);
+						this.scripts.cancel(effect.actionUid);
+					}
 					break;
 				case "user":
 					if (this.options.userExecutor === undefined) {

@@ -2,6 +2,9 @@ import { hyperchartSource } from "./source.js";
 import type {
 	ArtifactAst,
 	ArtifactOfAst,
+	AgentActionAst,
+	ActorDeclarationAst,
+	ActorWorkflowStateAst,
 	ChartArgumentAst,
 	ChartAst,
 	EventBindingAst,
@@ -15,6 +18,7 @@ import type {
 	StateActionAst,
 	StateAst,
 	TemplateAst,
+	ValueAst,
 } from "./types.js";
 
 export type HyperchartInspectAgentDefaults = {
@@ -38,6 +42,10 @@ export type HyperchartInspectArtifact = {
 	name: string;
 	path?: string;
 	shape?: JsonSchema;
+	/** Producer state when this artifact is referenced as an agent read. */
+	sourceState?: string;
+	/** Whether this read references one producer or joins every instance of a map producer. */
+	readKind?: "artifact" | "join";
 };
 
 export type HyperchartInspectInput = {
@@ -92,7 +100,10 @@ export type HyperchartInspectBranch = {
 
 export type HyperchartInspectState = {
 	id: string;
-	kind: "agent" | "user" | "script" | "map" | "parallel" | "compound" | "region" | "final";
+	scopeParentId?: string;
+	runtimeStatePath?: string;
+	actorInternal?: { declarationPath: string; localState: string; occurrencePath?: string };
+	kind: "agent" | "user" | "script" | "send" | "call" | "receive" | "reply" | "map" | "parallel" | "compound" | "region" | "final";
 	initial?: boolean;
 	definitionSource?: string;
 	agent?: string;
@@ -100,6 +111,7 @@ export type HyperchartInspectState = {
 	command?: string;
 	env?: HyperchartInspectEnv[];
 	reads?: string[];
+	readArtifacts?: HyperchartInspectArtifact[];
 	refs?: HyperchartInspectRef[];
 	inputs?: HyperchartInspectInput[];
 	onReenter?: HyperchartInspectOnReenter;
@@ -123,6 +135,26 @@ export type HyperchartInspectState = {
 	branches?: HyperchartInspectBranch[];
 	retries?: number;
 	transitions?: HyperchartInspectTransition[];
+	actorMessageLink?: { kind: "send" | "call"; to: string; event: string };
+	finalConfig?: {
+		outcome: "complete" | "failed";
+		notify?: { prompt?: string; artifacts?: HyperchartInspectArtifact[]; scope?: string };
+	};
+};
+
+export type HyperchartInspectActorDeclaration = {
+	declarationPath: string;
+	ownerPath?: string;
+	definitionSource?: string;
+	inputSchema: JsonSchema;
+	/** Concrete placement value/expression, before runtime reference resolution. */
+	inputValue: ValueAst;
+	initialReceive: string;
+	protocol: Array<{
+		event: string;
+		inputSchema: JsonSchema;
+		reply: { kind: "void" } | { kind: "single"; schema: JsonSchema } | { kind: "named"; schemas: Record<string, JsonSchema> };
+	}>;
 };
 
 export type HyperchartInspectResult = {
@@ -133,6 +165,7 @@ export type HyperchartInspectResult = {
 	definitionSource?: string;
 	mode: "static";
 	states: HyperchartInspectState[];
+	actorDeclarations?: HyperchartInspectActorDeclaration[];
 };
 
 export function inspectChartAst(
@@ -147,18 +180,54 @@ export function inspectChartAst(
 		definitionSource: hyperchartSource(ast, null),
 		mode: "static",
 		states: statesFromAst(ast, options),
+		...(Object.keys(ast.actors).length === 0
+			? {}
+			: {
+					actorDeclarations: Object.values(ast.actors).map((actor) => ({
+						declarationPath: actor.path,
+						...(actor.owner === undefined ? {} : { ownerPath: actor.owner }),
+						definitionSource: hyperchartSource(ast, actor.path),
+						inputSchema: actor.input.schema,
+						inputValue: actor.inputValue,
+						initialReceive: actor.initial,
+						protocol: Object.entries(actor.protocol).map(([event, message]) => ({
+							event,
+							inputSchema: message.input.schema,
+							reply:
+								message.reply.kind === "void"
+									? { kind: "void" as const }
+									: message.reply.kind === "single"
+										? { kind: "single" as const, schema: message.reply.schema.schema }
+										: { kind: "named" as const, schemas: Object.fromEntries(Object.entries(message.reply.schemas).map(([name, schema]) => [name, schema.schema])) },
+						})),
+					})),
+				}),
 	};
 }
 
 function statesFromAst(ast: ChartAst, options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined } = {}): HyperchartInspectState[] {
-	return Object.entries(ast.states).map(([path, state]) => {
+	const chartStates = Object.entries(ast.states).map(([path, state]) => {
 		const initial = isInitialState(ast, path, state);
 		if (state.kind === "final") {
+			const notifyArtifacts = referencedArtifacts(state.notify?.artifacts ?? [], ast);
+			const prompt = templatePreview(state.notify?.prompt);
 			return {
 				id: path,
-				kind: "final",
+				kind: "final" as const,
 				...(initial ? { initial: true } : {}),
 				definitionSource: hyperchartSource(ast, path),
+				finalConfig: {
+					outcome: state.outcome,
+					...(state.notify === undefined
+						? {}
+						: {
+							notify: {
+								...(prompt === undefined ? {} : { prompt }),
+								...(notifyArtifacts.length === 0 ? {} : { artifacts: notifyArtifacts }),
+								...(state.notify.scope === undefined ? {} : { scope: state.notify.scope }),
+							},
+						}),
+				},
 			};
 		}
 		const transitions = transitionEntries(state);
@@ -169,6 +238,70 @@ function statesFromAst(ast: ChartAst, options: { agentDefaults?: (agentName: str
 			...(transitions.length === 0 ? {} : { transitions }),
 		};
 	});
+	return [...chartStates, ...Object.values(ast.actors).flatMap((actor) => actorDefinitionStates(ast, actor, options))];
+}
+
+function actorDefinitionStates(
+	ast: ChartAst,
+	actor: ActorDeclarationAst,
+	options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined },
+): HyperchartInspectState[] {
+	return Object.entries(actor.states).map(([localState, state]) => {
+		const path = `${actor.path}.${localState}`;
+		const common = {
+			id: path,
+			scopeParentId: actor.path,
+			actorInternal: { declarationPath: actor.path, localState },
+			...(localState === actor.initial ? { initial: true } : {}),
+		};
+		if (state.kind === "state") {
+			const inspected = actionStateFromAst(ast, path, state as Extract<StateAst, { kind: "state" }>, options);
+			return {
+				...inspected,
+				...common,
+				transitions: actorTransitionEntries(actor, state),
+			};
+		}
+		if (state.kind === "receive") {
+			return {
+				...common,
+				kind: "receive" as const,
+				transitions: Object.entries(state.on).map(([event, target]) => ({ event, target: `${actor.path}.${target}` })),
+			};
+		}
+		if (state.kind === "reply") {
+			return {
+				...common,
+				kind: "reply" as const,
+				transitions: [{ event: state.event ?? "reply", target: `${actor.path}.${state.target}` }],
+			};
+		}
+		if (state.kind === "send") {
+			return {
+				...common,
+				kind: "send" as const,
+				task: `${state.event} → ${state.to}`,
+				actorMessageLink: { kind: "send" as const, to: state.to, event: state.event },
+				transitions: [{ event: "ENQUEUED", target: `${actor.path}.${state.target}` }],
+			};
+		}
+		return {
+			...common,
+			kind: "call" as const,
+			task: `${state.event} → ${state.to}`,
+			actorMessageLink: { kind: "call" as const, to: state.to, event: state.event },
+			transitions: actorTransitionEntries(actor, state),
+		};
+	});
+}
+
+function actorTransitionEntries(actor: ActorDeclarationAst, state: ActorWorkflowStateAst): HyperchartInspectTransition[] {
+	if (state.kind === "send") return [{ event: "ENQUEUED", target: `${actor.path}.${state.target}` }];
+	if (state.kind === "reply") return [{ event: state.event ?? "reply", target: `${actor.path}.${state.target}` }];
+	if (state.kind === "receive") return Object.entries(state.on).map(([event, target]) => ({ event, target: `${actor.path}.${target}` }));
+	if (state.kind === "call" && state.target !== undefined) return [{ event: "ACTOR_REPLY", target: `${actor.path}.${state.target}` }];
+	if (state.kind === "call") return Object.entries(state.transitions).map(([event, transition]) => ({ event, target: `${actor.path}.${transition.target}` }));
+	return Object.entries(state.transitions).map(([event, transition]) => ({ event, target: `${actor.path}.${transition.target}` }));
 }
 
 function isInitialState(ast: ChartAst, path: string, state: StateAst): boolean {
@@ -179,6 +312,8 @@ function isInitialState(ast: ChartAst, path: string, state: StateAst): boolean {
 
 function stateFromAst(ast: ChartAst, path: string, state: Exclude<StateAst, { kind: "final" }>, options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined } = {}): HyperchartInspectState {
 	if (state.kind === "state") return actionStateFromAst(ast, path, state, options);
+	if (state.kind === "send") return { id: path, kind: "send", task: `${state.event} → ${state.to}`, actorMessageLink: { kind: "send", to: state.to, event: state.event } };
+	if (state.kind === "call") return { id: path, kind: "call", task: `${state.event} → ${state.to}`, actorMessageLink: { kind: "call", to: state.to, event: state.event } };
 	if (state.kind === "map") {
 		const refs = [inputRefInfo(state.over)];
 		const inputs = inputDefinitions(state.input);
@@ -223,12 +358,16 @@ function branchInfos(ast: ChartAst, _path: string, regions: string[]): Hyperchar
 function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst, { kind: "state" }>, options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined } = {}): HyperchartInspectState {
 	const action = state.action;
 	const refs = actionRefs(action);
-	const reads = refs.flatMap((ref) => (ref.state === undefined ? [] : [ref.state]));
+	const reads = action.kind === "agent"
+		? (action.reads ?? []).map((read) => read.kind === "artifactOf" || read.kind === "joinArtifactOf" ? artifactRefPreview(read) : templatePreview(read)).filter((read): read is string => read !== undefined)
+		: [];
+	const readArtifacts = action.kind === "agent" ? referencedReadArtifacts(action, ast) : [];
 	const artifacts = actionArtifacts(action, state.validate);
 	const inputs = inputDefinitions(state.input);
 	const base = {
 		id: path,
 		...(reads.length === 0 ? {} : { reads: [...new Set(reads)] }),
+		...(readArtifacts.length === 0 ? {} : { readArtifacts }),
 		...(refs.length === 0 ? {} : { refs }),
 		...(inputs === undefined ? {} : { inputs }),
 		...(state.onReenter === undefined ? {} : { onReenter: onReenterInfo(state.onReenter) }),
@@ -333,13 +472,15 @@ function inputRefSchema(ref: InputRef, ast: ChartAst, statePath: string): JsonSc
 		}
 		case "input": {
 			const state = ast.states[statePath];
-			const schema = state !== undefined && "input" in state ? state.input?.[ref.name]?.schema : undefined;
+			const schema = state?.kind === "state" || state?.kind === "map" ? state.input?.[ref.name]?.schema : undefined;
 			return schema === undefined ? undefined : jsonSchemaAtPath(schema, ref.path);
 		}
 		case "visit":
 			return { type: "integer" };
 		case "key":
 			return { type: "string" };
+		case "actorInput":
+		case "messageInput":
 		default:
 			return undefined;
 	}
@@ -401,12 +542,37 @@ function actionArtifactsFromMap(artifacts: Readonly<Record<string, ArtifactAst>>
 	return Object.entries(artifacts ?? {}).map(([name, artifact]) => artifactInfo(name, artifact));
 }
 
+function referencedReadArtifacts(action: AgentActionAst, ast: ChartAst): HyperchartInspectArtifact[] {
+	return referencedArtifacts(action.reads ?? [], ast);
+}
+
+function referencedArtifacts(reads: readonly (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[], ast: ChartAst): HyperchartInspectArtifact[] {
+	const artifacts = reads.flatMap((read) => {
+		if (read.kind !== "artifactOf" && read.kind !== "joinArtifactOf") return [];
+		const producer = ast.states[read.state];
+		if (producer?.kind !== "state") return [];
+		const declared = actionArtifacts(producer.action, producer.validate);
+		const artifact = read.artifact === undefined
+			? declared.length === 1 ? declared[0] : undefined
+			: declared.find((candidate) => candidate.name === read.artifact);
+		return artifact === undefined ? [] : [{
+			...artifact,
+			sourceState: read.state,
+			...(read.kind === "joinArtifactOf" ? { readKind: "join" as const } : {}),
+		}];
+	});
+	return artifacts.filter((artifact, index) => artifacts.findIndex((candidate) => candidate.sourceState === artifact.sourceState && candidate.name === artifact.name && candidate.path === artifact.path && candidate.readKind === artifact.readKind) === index);
+}
+
 function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): HyperchartInspectTransition[] {
 	const entries = Object.entries(state.transitions).map(([event, transition]) => ({
 		event,
 		target: siblingStatePath(state.parent, transition.target),
 		...(transition.input === undefined ? {} : { input: eventBindingsInfo(transition.input) }),
 	}));
+	if (state.kind === "send") {
+		entries.push({ event: "ENQUEUED", target: siblingStatePath(state.parent, state.target) });
+	}
 	if (state.kind === "compound" || state.kind === "parallel" || state.kind === "map") {
 		entries.push({ event: "onDone", target: siblingStatePath(state.parent, state.onDone) });
 	}
@@ -492,6 +658,10 @@ function inputRefInfo(ref: InputRef): HyperchartInspectRef {
 			return { ...common, name: ref.name, ...(ref.path === undefined ? {} : { path: ref.path }) };
 		case "visit":
 			return { ...common, ...(ref.state === undefined ? {} : { state: ref.state }) };
+		case "actorInput":
+			return { ...common, ...(ref.path === undefined ? {} : { path: ref.path }) };
+		case "messageInput":
+			return { ...common, name: ref.message, ...(ref.path === undefined ? {} : { path: ref.path }) };
 	}
 }
 
@@ -528,6 +698,12 @@ function inputRefPreviewBase(ref: InputRef): string {
 			return ref.path === undefined ? `input(${literal(ref.name)})` : `input(${literal(ref.name)}, ${literal(ref.path)})`;
 		case "visit":
 			return ref.state === undefined ? "visit()" : `visit(${literal(ref.state)})`;
+		case "actorInput":
+			return ref.path === undefined ? "actorInput()" : `actorInput(${literal(ref.path)})`;
+		case "messageInput":
+			return ref.path === undefined
+				? `messageInput(${literal(ref.message)})`
+				: `messageInput(${literal(ref.message)}, ${literal(ref.path)})`;
 	}
 }
 
