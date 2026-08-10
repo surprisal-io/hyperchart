@@ -310,6 +310,18 @@ function recordText(record: DurableLogRecord): string {
 			return `spawned ${record.path} (${Object.keys(record.instances).length})`;
 		case "session_ref":
 			return `session ${record.index}: ${record.file}`;
+		case "failure_intent":
+			return `failure ${record.origin}: ${String(record.error)}`;
+		case "actor_created":
+			return `actor ${record.occurrence} created`;
+		case "actor_messages_enqueued":
+			return `actor ${record.occurrence} enqueued ${record.messages.length}`;
+		case "actor_message":
+			return `actor ${record.occurrence} ${record.kind} ${record.messageId}`;
+		case "actor_call_resolved":
+			return `actor call ${record.callId} resolved`;
+		case "actor_scope":
+			return `actor ${record.occurrence} ${record.kind}`;
 		case "state_action":
 			switch (record.kind) {
 				case "invoke":
@@ -322,5 +334,4 @@ function recordText(record: DurableLogRecord): string {
 					return `timer ${record.actionUid.state}`;
 			}
 	}
-	return record.type;
 }

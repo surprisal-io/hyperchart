@@ -1114,7 +1114,7 @@ describe("hyperchart extension", () => {
 			[
 				{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 1, timestamp: 1 },
 				{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, timestamp: 2 },
-				{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "FAILED", error: { code: 2, stderr: "nope" } }, parentId: 2, seqId: 3, timestamp: 3 },
+				{ type: "failure_intent", origin: "work", error: { code: 2, stderr: "nope" }, parentId: 2, seqId: 3, timestamp: 3 },
 			]
 				.map((record) => JSON.stringify(record))
 				.join("\n") + "\n",
@@ -1543,7 +1543,7 @@ function writeChart(name: string, sideEffectPath?: string): string {
 	id: "demo",
 	initial: "work",
 	states: {
-		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done", FAILED: "failed" } },
+		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },
 		done: { kind: "final" },
 		failed: { kind: "final" }
 	}
