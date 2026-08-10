@@ -1,15 +1,18 @@
+import { ArchiveBoxIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo } from "../../../types.js";
 import { hasInterpolation } from "../helpers/interpolation.js";
-import { replySectionElementId, schemaLabel } from "../helpers/schema.js";
+import { artifactContractElementId, replySectionElementId, schemaLabel } from "../helpers/schema.js";
 import { stateDisplayName } from "../helpers/state.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
 import { TypeBlock } from "../ui/TypeBlock.js";
+import { TypeTooltip } from "../ui/TypeTooltip.js";
 
 export function ContractCard({
 	state,
 	allStates,
 	showStateName,
 	highlightedReplyPath,
+	highlightedArtifactName,
 	onHighlightInput,
 	onHighlightReply,
 	onHighlightRef,
@@ -18,6 +21,7 @@ export function ContractCard({
 	allStates: HyperchartStateInfo[];
 	showStateName: boolean;
 	highlightedReplyPath?: string | null;
+	highlightedArtifactName?: string | null;
 	onHighlightInput?: (name: string) => void;
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
@@ -44,10 +48,10 @@ export function ContractCard({
 				<div className="space-y-2">
 					<div className="text-[10px] uppercase tracking-wide text-[var(--hc-purple-text)]">artifacts</div>
 					{state.artifacts?.map((artifact) => (
-						<div key={artifact.name} className="rounded-lg border border-purple-500/20 bg-purple-500/10 p-2">
+						<div id={artifactContractElementId(state.id, artifact.name)} key={artifact.name} className={`rounded-lg border bg-purple-500/10 p-2 ${highlightedArtifactName === artifact.name ? "border-purple-400 ring-2 ring-purple-500/30" : "border-purple-500/20"}`}>
 							<div className="flex flex-wrap items-center gap-1.5">
-								<span className="rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-purple-text)]">
-									{artifact.name}
+								<span className="inline-flex items-center gap-1 rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-purple-text)]">
+									<TypeTooltip text="artifact"><span className="inline-flex"><ArchiveBoxIcon className="h-3 w-3" aria-hidden="true" /></span></TypeTooltip>{artifact.name}
 								</span>
 								{artifact.schema && (
 									<span className="rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">

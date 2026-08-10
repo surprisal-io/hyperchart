@@ -2,12 +2,15 @@ import { z } from "zod";
 import {
 	agent,
 	artifact,
+	artifactOf,
 	chart,
 	compound,
 	event,
 	final, failed,
 	input,
+	joinArtifactOf,
 	json,
+	key,
 	map,
 	parallel,
 	result,
@@ -23,9 +26,16 @@ import type { ActionUID, ChartAst, ChartCst, ChartEvent, StateAst, StatePath } f
 import type { DurableLogRecord } from "../../../core/durable_events.js";
 import type { HyperchartRuntimeSessionProgressFile } from "../../../host/index.js";
 import type { HyperchartRunStatus } from "../../types.js";
+import {
+	actorInspectorChart,
+	actorInspectorRecords,
+	mailboxReentryChart,
+	mailboxReentryRecords,
+} from "../../fixtures/actor-runtime-fixtures.js";
 
 export type InspectorPanelRuntime = {
 	selectedStateId: StatePath | null;
+	mode?: "static" | "run";
 	run?: {
 		status?: HyperchartRunStatus;
 		args?: Record<string, unknown>;
@@ -37,12 +47,14 @@ export type InspectorPanelRuntime = {
 	sessionProgress?: (ast: ChartAst) => HyperchartRuntimeSessionProgressFile;
 };
 
-export type InspectorPanelGroupId = "overview" | "agent" | "user" | "script" | "map" | "parallel" | "compound" | "final";
+export type InspectorPanelGroupId = "overview" | "agent" | "actors" | "user" | "script" | "map" | "parallel" | "compound" | "final";
 
 export type InspectorPanelSpecInput = {
 	group: InspectorPanelGroupId;
 	title: string;
 	description: string;
+	/** Include only when the graph node itself is a distinct visual state. */
+	graphAtlas?: boolean;
 	chart: ChartCst;
 	runtime: InspectorPanelRuntime;
 };
@@ -62,6 +74,12 @@ export const inspectorPanelGroups: Array<{ id: InspectorPanelGroupId; title: str
 			title: "Agent states",
 			description: "Agent nodes: minimal, rich prompt, refs/re-entry, and validation guard variants.",
 			storyId: "hyperchart-visual-tests-inspector-panel--agent-states",
+		},
+		{
+			id: "actors",
+			title: "Actors",
+			description: "Actor declarations, occurrences and mailboxes, protocols, receive states, internal actions, and replies.",
+			storyId: "hyperchart-visual-tests-inspector-panel--actor-states",
 		},
 		{
 			id: "user",
@@ -115,13 +133,38 @@ const longPrompt = [
 ].join("\n");
 
 const sectionMapSchema = z.record(z.string(), z.object({ title: z.string(), summary: z.string().optional() }));
-const writerReplySchema = z.object({ draft: z.string() });
+const writerReplySchema = z.object({
+	draft: z.string(),
+	review: z.object({
+		risks: z.array(z.string()),
+		evidence: z.array(z.object({ file: z.string(), line: z.number().int() })),
+		score: z.number(),
+	}),
+}).strict();
 const renderReplySchema = z.object({
 	ok: z.boolean(),
 	url: z.string().optional(),
 	sections: sectionMapSchema.optional(),
 });
 const reportDataSchema = z.object({ title: z.string(), sections: z.array(z.string()) });
+const richAgentContextSchema = z.object({
+	title: z.string().describe("Document title."),
+	risks: z.array(z.string()).describe("Known implementation risks."),
+	testCommands: z.array(z.string()).describe("Commands that verify the change."),
+}).describe("Implementation context the writer must read before starting.");
+const richAgentConventionsSchema = z.object({
+	style: z.enum(["concise", "detailed"]),
+	requiredSections: z.array(z.string()),
+}).describe("Writing conventions for the implementation note.");
+const richAgentNoteSchema = z.object({
+	summary: z.string(),
+	risks: z.array(z.string()),
+	verification: z.array(z.object({ command: z.string(), expected: z.string() })),
+}).describe("Structured implementation note produced by the writer.");
+const richAgentSourceBriefSchema = z.object({
+	source: z.string(),
+	findings: z.array(z.string()),
+}).describe("One source brief produced by a map instance.");
 const scopedPlanSchema = z.object({ next: z.string().optional() });
 
 function panelChart(id: string, initial: string, states: ChartCst["states"]): ChartCst {
@@ -132,7 +175,7 @@ function reviewerRegion(agentName: string, task: string): ReturnType<typeof comp
 	return compound({
 		initial: "review",
 		states: {
-			review: { kind: "state", action: agent(agentName, { task }), transitions: { DONE: "done", FAILED: "failed" } },
+			review: { kind: "state", action: agent(agentName, { task }), transitions: { DONE: "done", ERROR: "failed" } },
 			done: final(),
 			failed: failed(),
 		},
@@ -143,7 +186,7 @@ const mapReviewChart = panelChart("inspector-map-review", "script-contracts", {
 	"script-contracts": {
 		kind: "state",
 		action: script("node", ["scripts/render-report.mjs"], { reply: z.object({ sections: sectionMapSchema }) }),
-		transitions: { RENDERED: "map-review", FAILED: "failed" },
+		transitions: { RENDERED: "map-review", ERROR: "failed" },
 	},
 	"map-review": map({
 		over: result("script-contracts", "sections"),
@@ -158,7 +201,7 @@ const mapReviewChart = panelChart("inspector-map-review", "script-contracts", {
 					artifacts: { draft: "artifacts/risk.md" },
 				}),
 				input: { sectionLabel: z.string().default("Risk") },
-				transitions: { DONE: "done", FAILED: "failed" },
+				transitions: { DONE: "done", ERROR: "failed" },
 			},
 			done: final(),
 			failed: failed(),
@@ -168,13 +211,27 @@ const mapReviewChart = panelChart("inspector-map-review", "script-contracts", {
 	failed: failed(),
 });
 
+const parallelReviewChart = panelChart("inspector-parallel-review", "parallel-review", {
+	"parallel-review": parallel({
+		states: {
+			copy: reviewerRegion("copy-reviewer", "Review copy"),
+			visual: reviewerRegion("visual-reviewer", "Review visuals"),
+			data: reviewerRegion("data-reviewer", "Review data"),
+		},
+		onDone: "done",
+	}),
+	done: final(),
+});
+
 type StoryLogBuilder = {
 	records: DurableLogRecord[];
 	seq: number;
 };
+const STORY_RUNTIME_STARTED_AT = 1_700_000_000_000;
+const storyTimestamp = (seqId: number) => STORY_RUNTIME_STARTED_AT + seqId * 1_000;
 
 export function storyLog(args: Record<string, unknown> = { topic: "visual QA board" }): StoryLogBuilder {
-	return { records: [{ type: "args", args, parentId: null, seqId: 1, timestamp: 1 }], seq: 1 };
+	return { records: [{ type: "args", args, parentId: null, seqId: 1, timestamp: storyTimestamp(1) }], seq: 1 };
 }
 
 function storyActionUid(ast: ChartAst, statePath: StatePath): ActionUID {
@@ -198,7 +255,7 @@ function pushInvoke(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePat
 		definition: storyActionDefinition(ast, statePath),
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: builder.seq,
+		timestamp: storyTimestamp(builder.seq),
 	});
 	return actionUid;
 }
@@ -211,13 +268,18 @@ function pushComplete(builder: StoryLogBuilder, ast: ChartAst, statePath: StateP
 		event,
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: builder.seq,
+		timestamp: storyTimestamp(builder.seq),
 	});
 }
 
 function pushAction(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event?: ChartEvent): void {
 	pushInvoke(builder, ast, statePath);
 	if (event !== undefined) pushComplete(builder, ast, statePath, event);
+}
+
+function pushFailure(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, error: unknown): void {
+	pushInvoke(builder, ast, statePath);
+	builder.records.push({ type: "failure_intent", origin: statePath, error, parentId: builder.seq, seqId: ++builder.seq, timestamp: storyTimestamp(builder.seq) });
 }
 
 function pushValidated(
@@ -239,7 +301,7 @@ function pushValidated(
 		outcome: { ok: false, reason },
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: builder.seq,
+		timestamp: storyTimestamp(builder.seq),
 	});
 }
 
@@ -250,7 +312,7 @@ function pushSpawned(builder: StoryLogBuilder, path: StatePath, instances: Recor
 		instances,
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: builder.seq,
+		timestamp: storyTimestamp(builder.seq),
 	});
 }
 
@@ -283,29 +345,17 @@ function storyLiveSession(ast: ChartAst, statePath: StatePath): HyperchartRuntim
 	};
 }
 
-function storySessionFailure(
-	ast: ChartAst,
-	statePath: StatePath,
-	message: string,
-): HyperchartRuntimeSessionProgressFile {
-	const actionUid = storyActionUid(ast, statePath);
-	return {
-		updatedAt: 1_700_000_060_000,
-		sessions: {
-			[JSON.stringify(actionUid)]: {
-				actionUid,
-				status: "failed",
-				lastActivityAt: 1_700_000_040_000,
-				error: message,
-			},
-		},
-	};
-}
-
-function mapReviewRecords(ast: ChartAst, opts: { failRisk?: boolean } = {}): DurableLogRecord[] {
+function mapReviewRecords(ast: ChartAst, opts: { failRisk?: boolean; overflow?: boolean; complete?: boolean } = {}): DurableLogRecord[] {
 	const b = storyLog();
-	const sections =
-		opts.failRisk === true
+	const sections = opts.overflow === true
+		? Object.fromEntries(Array.from({ length: 14 }, (_, index) => [
+				`section-${index + 1}`,
+				{
+					title: `A deliberately long section title ${index + 1} that must remain bounded inside the resolved map input card`,
+					summary: `Verified evidence summary ${index + 1}. `.repeat(12),
+				},
+			]))
+		: opts.failRisk === true
 			? { risk: { title: "Risk", summary: "Citation gap" } }
 			: {
 					intro: { title: "Intro", summary: "Done" },
@@ -315,23 +365,29 @@ function mapReviewRecords(ast: ChartAst, opts: { failRisk?: boolean } = {}): Dur
 	pushAction(b, ast, "script-contracts", { type: "RENDERED", output: { sections } });
 	pushSpawned(b, "map-review", sections);
 	if (opts.failRisk === true) {
-		pushAction(b, ast, "map-review#risk.risk-write", {
-			type: "FAILED",
-			error: "Could not write artifacts/risk.md because the citation source is missing.",
-		});
+		pushAction(b, ast, "map-review#risk.risk-write", { type: "ERROR" });
+		return b.records;
+	}
+	if (opts.complete === true) {
+		for (const key of Object.keys(sections)) pushAction(b, ast, `map-review#${key}.risk-write`, { type: "DONE" });
+		return b.records;
+	}
+	if (opts.overflow === true) {
+		pushInvoke(b, ast, "map-review#section-1.risk-write");
 		return b.records;
 	}
 	pushAction(b, ast, "map-review#intro.risk-write", { type: "DONE" });
 	pushInvoke(b, ast, "map-review#risk.risk-write");
-	pushAction(b, ast, "map-review#market.risk-write", { type: "FAILED", error: "Missing revenue split" });
+	pushAction(b, ast, "map-review#market.risk-write", { type: "ERROR" });
 	return b.records;
 }
 
-function parallelReviewRecords(ast: ChartAst): DurableLogRecord[] {
+function parallelReviewRecords(ast: ChartAst, complete = false): DurableLogRecord[] {
 	const b = storyLog();
 	pushAction(b, ast, "parallel-review.copy.review", { type: "DONE" });
-	pushAction(b, ast, "parallel-review.visual.review", { type: "FAILED", error: "Screenshot diff exceeded threshold." });
-	pushInvoke(b, ast, "parallel-review.data.review");
+	pushAction(b, ast, "parallel-review.visual.review", { type: complete ? "DONE" : "ERROR" });
+	if (complete) pushAction(b, ast, "parallel-review.data.review", { type: "DONE" });
+	else pushInvoke(b, ast, "parallel-review.data.review");
 	return b.records;
 }
 
@@ -404,7 +460,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			work: {
 				kind: "state",
 				action: agent("worker", { task: "Resume a run with replay warnings." }),
-				transitions: { DONE: "done", FAILED: "failed" },
+				transitions: { DONE: "done", ERROR: "failed" },
 			},
 			done: final(),
 			failed: failed(),
@@ -427,24 +483,87 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		chart: panelChart("inspector-minimal-pending", "minimal-pending", {
 			"minimal-pending": { kind: "state", action: agent("worker") },
 		}),
-		runtime: { selectedStateId: "minimal-pending" },
+		runtime: { selectedStateId: "minimal-pending", mode: "static" },
 	},
 	{
 		group: "agent",
 		title: "Rich agent",
 		description: "Definition-only agent card, short prompt, and run-specific live session inside Runtime alongside visits.",
-		chart: panelChart("inspector-rich-agent", "rich-agent", {
+		chart: panelChart("inspector-rich-agent", "prepare-context", {
+			"prepare-context": {
+				kind: "state",
+				action: script("node", ["scripts/prepare-context.mjs"], {
+					artifacts: {
+						context: artifact("artifacts/implementation-context.json", richAgentContextSchema),
+						conventions: artifact("artifacts/writing-conventions.json", richAgentConventionsSchema),
+					},
+					reply: z.object({ sources: z.record(z.string(), z.object({ title: z.string() })) }),
+				}),
+				transitions: { DONE: "source-map" },
+			},
+			"source-map": map({
+				over: result("prepare-context", "sources"),
+				initial: "collect",
+				onDone: "rich-agent",
+				states: {
+					collect: {
+						kind: "state",
+						action: agent("source-reader", {
+							task: "Summarize the assigned implementation source.",
+							artifacts: {
+								brief: artifact(t`artifacts/source-${key()}.json`, richAgentSourceBriefSchema),
+							},
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
 			"rich-agent": {
 				kind: "state",
 				action: agent("writer", {
 					task: "Write a compact implementation note.\n\nInclude risks, test commands, and exact file paths.",
+					artifacts: {
+						note: artifact(t`artifacts/implementation-note-${visit("rich-agent")}.json`, richAgentNoteSchema),
+						appendix: t`artifacts/implementation-note-${visit("rich-agent")}.md`,
+					},
 					model: "claude-sonnet",
 					thinking: "medium",
 					tools: ["read", "edit", "bash"],
-					reads: ["src/react/HyperchartInspectorDialog.tsx"],
+					reads: [
+						artifactOf("prepare-context", { artifact: "context" }),
+						artifactOf("prepare-context", { artifact: "conventions" }),
+						joinArtifactOf("source-map.collect", { artifact: "brief" }),
+						t`notes/rich-agent-visit-${visit("rich-agent")}.md`,
+					],
 					reply: writerReplySchema,
 				}),
-				transitions: { DONE: { target: "long-prompt", input: { draft: event("draft") } } },
+				transitions: {
+					REVISE: "rich-agent",
+					DONE: { target: "long-prompt", input: { draft: event("draft") } },
+					REVIEW_REQUIRED: {
+						target: "review-follow-up",
+						input: {
+							draft: event("draft"),
+							primaryRisk: event("review.risks.0"),
+							evidence: event("review.evidence"),
+							score: event("review.score"),
+						},
+					},
+				},
+			},
+			"review-follow-up": {
+				kind: "state",
+				input: {
+					draft: z.string(),
+					primaryRisk: z.string(),
+					evidence: z.array(z.object({ file: z.string(), line: z.number().int() })),
+					score: z.number(),
+				},
+				action: agent("reviewer", {
+					task: t`Review ${input("draft")} for risk ${input("primaryRisk")} with evidence ${json(input("evidence"))} at score ${input("score")}.`,
+				}),
+				transitions: { DONE: "done" },
 			},
 			"long-prompt": {
 				kind: "state",
@@ -458,6 +577,25 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			selectedStateId: "rich-agent",
 			records: (ast) => {
 				const b = storyLog();
+				const sources = {
+					api: { title: "Core API" },
+					runtime: { title: "Runtime semantics" },
+				};
+				pushAction(b, ast, "prepare-context", { type: "DONE", output: { sources } });
+				pushSpawned(b, "source-map", sources);
+				pushAction(b, ast, "source-map#api.collect", { type: "DONE" });
+				pushAction(b, ast, "source-map#runtime.collect", { type: "DONE" });
+				pushAction(b, ast, "rich-agent", {
+					type: "REVISE",
+					output: {
+						draft: "First implementation note draft.",
+						review: {
+							risks: ["The replay contract may drift."],
+							evidence: [{ file: "packages/hyperchart/src/core/replay_check.ts", line: 184 }],
+							score: 0.72,
+						},
+					},
+				});
 				pushInvoke(b, ast, "rich-agent");
 				return b.records;
 			},
@@ -467,59 +605,30 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "agent",
 		title: "Failed action issue",
-		description: "FAILED transition with a readable action failure issue from a durable event.",
+		description: "Global failure intent with a readable action failure issue from a durable event.",
 		chart: panelChart("inspector-failed-action-issue", "worker", {
 			worker: {
 				kind: "state",
-				action: agent("worker", { task: "Attempt the risky operation." }),
-				transitions: { DONE: "done", FAILED: "failed" },
+				action: agent("worker", { task: longPrompt }),
+				transitions: { DONE: "done" },
 			},
 			done: final(),
-			failed: failed(),
 		}),
 		runtime: {
 			selectedStateId: "worker",
 			run: { status: "failed" },
 			records: (ast) => {
 				const b = storyLog();
-				pushAction(b, ast, "worker", { type: "FAILED", error: "Agent process exited before calling finish." });
+				pushFailure(b, ast, "worker", "Agent process exited before calling finish.");
 				return b.records;
 			},
-		},
-	},
-	{
-		group: "agent",
-		title: "Session failure issue",
-		description: "Agent session progress failure linked to the matching state.",
-		chart: panelChart("inspector-session-failure", "session-worker", {
-			"session-worker": {
-				kind: "state",
-				action: agent("worker", { task: "Continue a long-running session." }),
-				transitions: { DONE: "done", FAILED: "failed" },
-			},
-			done: final(),
-			failed: failed(),
-		}),
-		runtime: {
-			selectedStateId: "session-worker",
-			run: { status: "failed" },
-			records: (ast) => {
-				const b = storyLog();
-				pushInvoke(b, ast, "session-worker");
-				return b.records;
-			},
-			sessionProgress: (ast) =>
-				storySessionFailure(
-					ast,
-					"session-worker",
-					"Subagent session ended unexpectedly after tool budget was exceeded.",
-				),
 		},
 	},
 	{
 		group: "agent",
 		title: "Long prompt",
 		description: "Prompt exceeds its preview, shows Open full, and does not mount the complete text initially.",
+		graphAtlas: false,
 		chart: panelChart("inspector-long-prompt", "long-prompt", {
 			"long-prompt": { kind: "state", action: agent("writer", { task: longPrompt }), transitions: { DONE: "done" } },
 			done: final(),
@@ -530,6 +639,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		group: "agent",
 		title: "Inputs, refs, re-entry",
 		description: "Declared inputs, typed refs, and onReenter resume copy.",
+		graphAtlas: false,
 		chart: panelChart("inspector-inputs-and-refs", "rich-agent", {
 			"rich-agent": {
 				kind: "state",
@@ -560,6 +670,69 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		runtime: { selectedStateId: "inputs-and-refs" },
 	},
 	{
+		group: "actors",
+		title: "Actor definition-only",
+		description: "Static actor placement input, initial receive state, and complete protocol.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "@editor" },
+	},
+	{
+		group: "actors",
+		title: "Actor runtime and mailbox",
+		description: "A materialized actor with immutable input, accepted current message, and FIFO queued message.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "@editor", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Mailbox across re-entry",
+		description: "A simple actor with two generations: processed messages in the first instance and a current plus queued message in the second.",
+		chart: mailboxReentryChart,
+		runtime: { selectedStateId: "phase.@worker", records: mailboxReentryRecords },
+	},
+	{
+		group: "actors",
+		title: "Send state",
+		description: "Completed fire-and-forget REVIEW send with its resolved message payload and actor destination.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "queue-review", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Call state",
+		description: "Blocked APPLY call with its pending caller, typed reply transitions, and queued runtime message.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "apply-call", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Receive state",
+		description: "Materialized receive node with its protocol transition and actor-internal identity.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "@editor.idle", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Receive state across re-entry",
+		description: "Receive state inside a two-generation actor, with accepted messages from both durable instances.",
+		chart: mailboxReentryChart,
+		runtime: { selectedStateId: "phase.@worker.idle", records: mailboxReentryRecords },
+	},
+	{
+		group: "actors",
+		title: "Reply state",
+		description: "Materialized named reply node and its return transition to receive.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "@editor.settle", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Reply state across re-entry",
+		description: "Reply state inside a two-generation actor, with settled replies retained from the first instance.",
+		chart: mailboxReentryChart,
+		runtime: { selectedStateId: "phase.@worker.settle", records: mailboxReentryRecords },
+	},
+	{
 		group: "user",
 		title: "User state",
 		description: "Real user state kind with prompt and transition.",
@@ -577,6 +750,29 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			done: final(),
 		}),
 		runtime: { selectedStateId: "user-feedback" },
+	},
+	{
+		group: "user",
+		title: "Completed user decision",
+		description: "Completed user state with two possible transitions; APPROVED was selected and execution advanced to publish.",
+		chart: panelChart("inspector-user-decision-complete", "user-decision", {
+			"user-decision": {
+				kind: "state",
+				action: user({ prompt: "Approve the report for publication or return it for revision." }),
+				transitions: { APPROVED: "publish", REVISE: "revise" },
+			},
+			publish: { kind: "state", action: agent("publisher", { task: "Publish the approved report." }) },
+			revise: { kind: "state", action: agent("editor", { task: "Revise the rejected report." }) },
+		}),
+		runtime: {
+			selectedStateId: "user-decision",
+			records: (ast) => {
+				const builder = storyLog();
+				pushAction(builder, ast, "user-decision", { type: "APPROVED" });
+				pushInvoke(builder, ast, "publish");
+				return builder.records;
+			},
+		},
 	},
 	{
 		group: "script",
@@ -618,7 +814,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			render: {
 				kind: "state",
 				action: script("node", ["scripts/render-report.mjs"], { reply: renderReplySchema }),
-				transitions: { RENDERED: "done", FAILED: "failed" },
+				transitions: { RENDERED: "done", ERROR: "failed" },
 			},
 			done: final(),
 			failed: failed(),
@@ -628,13 +824,17 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			run: { status: "failed" },
 			records: (ast) => {
 				const b = storyLog();
-				pushAction(b, ast, "render", {
-					type: "FAILED",
-					error: { code: 2, signal: null, stderr: "Error: missing report template" },
-				});
+				pushFailure(b, ast, "render", { code: 2, signal: null, stderr: "Error: missing report template" });
 				return b.records;
 			},
 		},
+	},
+	{
+		group: "map",
+		title: "Empty pending map",
+		description: "Pending map before input resolution and item spawning.",
+		chart: mapReviewChart,
+		runtime: { selectedStateId: "map-review", mode: "static" },
 	},
 	{
 		group: "map",
@@ -648,8 +848,27 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	},
 	{
 		group: "map",
+		title: "Completed map",
+		description: "Map after every spawned item reached its final state.",
+		chart: mapReviewChart,
+		runtime: { selectedStateId: "map-review", records: (ast) => mapReviewRecords(ast, { complete: true }) },
+	},
+	{
+		group: "map",
+		title: "Map parent overflow",
+		description: "Long adapter-derived map values exercise bounded resolved-input previews.",
+		graphAtlas: false,
+		chart: mapReviewChart,
+		runtime: {
+			selectedStateId: "map-review",
+			records: (ast) => mapReviewRecords(ast, { overflow: true }),
+		},
+	},
+	{
+		group: "map",
 		title: "Map item worker",
 		description: "Mapped item label, item artifact, and runtime item status.",
+		graphAtlas: false,
 		chart: mapReviewChart,
 		runtime: {
 			selectedStateId: "map-review#risk.risk-write",
@@ -659,23 +878,24 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	},
 	{
 		group: "parallel",
+		title: "Empty pending parallel",
+		description: "Pending parallel before any branch starts.",
+		chart: parallelReviewChart,
+		runtime: { selectedStateId: "parallel-review", mode: "static" },
+	},
+	{
+		group: "parallel",
 		title: "Parallel fan-out",
 		description: "Parallel branches, branch chips, and progress.",
-		chart: panelChart("inspector-parallel-review", "parallel-review", {
-			"parallel-review": parallel({
-				states: {
-					copy: reviewerRegion("copy-reviewer", "Review copy"),
-					visual: reviewerRegion("visual-reviewer", "Review visuals"),
-					data: reviewerRegion("data-reviewer", "Review data"),
-				},
-				onDone: "compound-scope",
-			}),
-			"compound-scope": final(),
-		}),
-		runtime: {
-			selectedStateId: "parallel-review",
-			records: parallelReviewRecords,
-		},
+		chart: parallelReviewChart,
+		runtime: { selectedStateId: "parallel-review", records: parallelReviewRecords },
+	},
+	{
+		group: "parallel",
+		title: "Completed parallel",
+		description: "Parallel after every branch reached its final state.",
+		chart: parallelReviewChart,
+		runtime: { selectedStateId: "parallel-review", records: (ast) => parallelReviewRecords(ast, true) },
 	},
 	{
 		group: "compound",
@@ -705,6 +925,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		group: "compound",
 		title: "Parallel branch scope",
 		description: "A parallel branch is shown with the same compound scope UI, not as a separate product type.",
+		graphAtlas: false,
 		chart: panelChart("inspector-branch-scope", "parallel-review", {
 			"parallel-review": parallel({
 				states: { branch: reviewerRegion("branch-reviewer", "Review one branch") },
@@ -724,7 +945,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				action: agent("reviewer", { tools: [] }),
 				validate: script("node", ["scripts/validate-review.mjs"]),
 				retries: 2,
-				transitions: { PASS: "done", FAILED: "failed" },
+				transitions: { PASS: "done", ERROR: "failed" },
 			},
 			done: final(),
 			failed: failed(),
@@ -750,6 +971,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		group: "agent",
 		title: "Imported validation guard",
 		description: "A TypeScript import guard with restart-on-reject and a bounded retry budget.",
+		graphAtlas: false,
 		chart: panelChart("inspector-imported-guard", "coverage-review", {
 			"coverage-review": {
 				kind: "state",
@@ -757,7 +979,7 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				validate: tsImport("./guards/coverage.ts", "coverageGuard"),
 				onReject: "restart",
 				retries: 1,
-				transitions: { PASS: "done", FAILED: "failed" },
+				transitions: { PASS: "done", ERROR: "failed" },
 			},
 			done: final(),
 			failed: failed(),
@@ -784,10 +1006,42 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	},
 	{
 		group: "final",
-		title: "Final",
-		description: "Terminal final state with no fake flow concepts.",
-		chart: panelChart("inspector-final", "final", { final: final() }),
-		runtime: { selectedStateId: "final", run: { status: "completed" } },
+		title: "Final notification",
+		description: "Reached successful terminal with a typed notification prompt, artifact attachment, and explicit render scope.",
+		chart: panelChart("inspector-final-notification", "prepare", {
+			prepare: {
+				kind: "state",
+				action: agent("reporter", {
+					task: "Prepare the final report and summary.",
+					reply: z.object({ summary: z.string() }).strict(),
+					artifacts: { report: artifact("artifacts/final-report.json", reportDataSchema) },
+				}),
+				transitions: { DONE: "final" },
+			},
+			final: final({
+				notify: {
+					prompt: t`Report completed: ${result("prepare", "summary")}`,
+					artifacts: [artifactOf("prepare", { artifact: "report" })],
+					scope: "prepare",
+				},
+			}),
+		}),
+		runtime: {
+			selectedStateId: "final",
+			run: { status: "completed" },
+			records: (ast) => {
+				const builder = storyLog();
+				pushAction(builder, ast, "prepare", { type: "DONE", output: { summary: "The final report is ready." } });
+				return builder.records;
+			},
+		},
+	},
+	{
+		group: "final",
+		title: "Failed final",
+		description: "Reached failed terminal with an explicit failed outcome and no notification override.",
+		chart: panelChart("inspector-failed-final", "failed", { failed: failed() }),
+		runtime: { selectedStateId: "failed", run: { status: "failed" } },
 	},
 ];
 

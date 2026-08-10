@@ -84,13 +84,7 @@ export function interpolationAction(
 			...(actions.onHighlightInput === undefined ? {} : { onClick: () => actions.onHighlightInput?.(inputInfo.name) }),
 		};
 	}
-	if (ref.kind === "visit") {
-		return {
-			title: "number",
-			tone: "visit",
-			...(actions.onHighlightRef === undefined ? {} : { onClick: () => actions.onHighlightRef?.(token) }),
-		};
-	}
+	if (ref.kind === "visit") return { title: "number", tone: "visit" };
 	const resultTarget = resultRefTarget(ref, allStates);
 	if (resultTarget) {
 		const schema = schemaAtPath(resultTarget.state.replySchema, resultTarget.path);
@@ -108,7 +102,7 @@ export function interpolationAction(
 
 export function interpolationTokenClass(tone: PromptInterpolationTone, clickable: boolean): string {
 	const base =
-		"mx-0.5 inline-block max-w-full overflow-x-auto whitespace-nowrap rounded border px-1 align-baseline font-mono text-left";
+		"mx-0.5 inline-flex max-w-full items-center overflow-x-auto whitespace-nowrap rounded border px-1 py-0.5 align-baseline font-mono text-left leading-[1.35]";
 	const interaction = clickable ? "cursor-pointer" : "cursor-help";
 	switch (tone) {
 		case "input":

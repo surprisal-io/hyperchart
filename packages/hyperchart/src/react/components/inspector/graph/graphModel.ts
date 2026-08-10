@@ -20,6 +20,8 @@ export const GRAPH_MAP_NODE_WIDTH = 320;
 export const GRAPH_MAP_NODE_HEIGHT = 154;
 export const GRAPH_PARALLEL_NODE_WIDTH = 320;
 export const GRAPH_PARALLEL_NODE_HEIGHT = 142;
+export const GRAPH_ACTOR_NODE_WIDTH = 286;
+export const GRAPH_ACTOR_NODE_HEIGHT = 148;
 
 const elk = new (ElkConstructor as unknown as { new (): ElkLayoutEngine })();
 
@@ -29,6 +31,9 @@ export function graphNodeSize(state: { type?: HyperchartStateType | undefined })
 			return { width: GRAPH_MAP_NODE_WIDTH, height: GRAPH_MAP_NODE_HEIGHT };
 		case "parallel":
 			return { width: GRAPH_PARALLEL_NODE_WIDTH, height: GRAPH_PARALLEL_NODE_HEIGHT };
+		case "actor-declaration":
+		case "actor-occurrence":
+			return { width: GRAPH_ACTOR_NODE_WIDTH, height: GRAPH_ACTOR_NODE_HEIGHT };
 		default:
 			return { width: GRAPH_COMPACT_NODE_WIDTH, height: GRAPH_COMPACT_NODE_HEIGHT };
 	}
@@ -62,7 +67,7 @@ function elkPortSide(side: PortSide): string {
 	}
 }
 
-type StateTransitionEdge = { source: string; target: string; labels: string[] };
+type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "call" | "reply" };
 
 function edgePortSides(
 	edge: StateTransitionEdge,
@@ -77,7 +82,8 @@ function edgePortSides(
 
 function visualTransitionEdgeId(edge: StateTransitionEdge): string {
 	const label = edge.labels.join(" / ");
-	return label ? `${edge.source}->${edge.target}:${label}` : `${edge.source}->${edge.target}`;
+	const kind = edge.kind ?? "transition";
+	return label ? `${edge.source}->${edge.target}:${kind}:${label}` : `${edge.source}->${edge.target}:${kind}`;
 }
 
 function fallbackPositions(states: HyperchartStateInfo[]): Map<string, NodePosition> {
@@ -148,6 +154,7 @@ export function buildGraph(
 			const label = edge.labels.join(" / ");
 			const edgeId = visualTransitionEdgeId(edge);
 			const running = sourceState?.status === "running";
+			const actorEdge = edge.kind !== undefined && edge.kind !== "transition";
 			const routedPoints = layoutRoutes?.get(edgeId);
 			edges.push({
 				id: edgeId,
@@ -156,7 +163,7 @@ export function buildGraph(
 				sourceHandle: reactFlowHandleId("source", sides.source),
 				targetHandle: reactFlowHandleId("target", sides.target),
 				type: "transition",
-				label,
+				label: actorEdge ? `${edge.kind} · ${label}` : label,
 				markerEnd: {
 					type: MarkerType.ArrowClosed,
 					color: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
@@ -166,7 +173,8 @@ export function buildGraph(
 				style: {
 					stroke: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
 					strokeWidth: running ? 1.6 : 1.15,
-					opacity: 0.72,
+					strokeDasharray: edge.kind === "send" || edge.kind === "reply" ? "5 4" : undefined,
+					opacity: edge.kind === "send" ? 0.58 : 0.72,
 				},
 				data: routedPoints === undefined && !running ? undefined : { points: routedPoints, running },
 			} as Edge);

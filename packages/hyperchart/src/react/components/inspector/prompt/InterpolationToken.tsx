@@ -6,12 +6,16 @@ export function InterpolationToken({
 	token,
 	action,
 	display,
+	inline = false,
 }: {
 	token: string;
 	action: PromptInterpolationAction;
 	display?: string;
+	inline?: boolean;
 }) {
-	const className = interpolationTokenClass(action.tone, action.onClick !== undefined);
+	const className = inline
+		? `inline whitespace-nowrap font-mono ${action.onClick === undefined ? "cursor-help" : "cursor-pointer"} ${action.tone === "visit" ? "text-[var(--hc-amber-text)]" : "text-[var(--hc-cyan-text)]"}`
+		: interpolationTokenClass(action.tone, action.onClick !== undefined);
 	const label = display ?? `{${token}}`;
 	const content =
 		action.onClick === undefined ? (

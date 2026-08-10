@@ -9,9 +9,21 @@ import { HyperchartTransitionEdge } from "./HyperchartTransitionEdge.js";
 const nodeTypes = { hyperchartState: HyperchartStateGraphNode };
 const edgeTypes = { transition: HyperchartTransitionEdge };
 
-export function HyperchartGraphPreview({ run, className = "h-72" }: { run: HyperchartRunInfo; className?: string }) {
+export function HyperchartGraphPreview({
+	run,
+	className = "h-72",
+	visibleStateIds,
+}: {
+	run: HyperchartRunInfo;
+	className?: string;
+	/** Presentation-only focus. The source run and its projected state objects are never cloned or mutated. */
+	visibleStateIds?: readonly string[];
+}) {
 	const { resolved } = useHyperchartTheme();
-	const visibleIds = useMemo(() => new Set(run.states.map((state) => state.id)), [run]);
+	const visibleIds = useMemo(
+		() => new Set(visibleStateIds ?? run.states.map((state) => state.id)),
+		[run, visibleStateIds],
+	);
 	const graph = useGraphLayout(run, visibleIds);
 	return (
 		<div

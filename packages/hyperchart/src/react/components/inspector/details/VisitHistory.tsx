@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { CommandLineIcon } from "@heroicons/react/24/outline";
-import type { HyperchartVisitInfo } from "../../../types.js";
+import type { HyperchartStateInfo, HyperchartVisitInfo } from "../../../types.js";
 import { formatHyperchartDateTime } from "../../../hyperchart-display.js";
 import { StatusPill } from "../../ui/StatusPill.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
@@ -9,12 +9,18 @@ import { VisitInvocationDetails } from "./VisitInvocationDetails.js";
 
 export function VisitHistory({
 	visits,
+	state,
+	allStates,
 	agentName,
 	onSteerSession,
+	onHighlightArtifact,
 }: {
 	visits: HyperchartVisitInfo[];
+	state: HyperchartStateInfo;
+	allStates: HyperchartStateInfo[];
 	agentName?: string;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
+	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
 	if (visits.length === 0) return null;
@@ -26,18 +32,13 @@ export function VisitHistory({
 				{visits.map((visit, index) => (
 					<details
 						key={visit.invokeSeqId}
-						open={index === visits.length - 1}
+						open={index === visits.length - 1 && visit.status === "running"}
 						className="group rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]"
 					>
 						<summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] marker:hidden">
 							<span className="font-semibold text-[var(--text-primary)]">Visit {visit.visit}</span>
 							<StatusPill status={visit.status} />
 							<span className="text-[var(--text-muted)]">{formatHyperchartDateTime(visit.startedAt)}</span>
-							{visit.completedEvent !== undefined && (
-								<code className="rounded bg-[var(--bg-code)] px-1 py-0.5 font-mono text-[10px] text-[var(--text-secondary)]">
-									{visit.completedEvent}
-								</code>
-							)}
 							{visit.session !== undefined && (
 								<button
 									type="button"
@@ -53,10 +54,15 @@ export function VisitHistory({
 									<CommandLineIcon className="h-3 w-3" aria-hidden="true" /> View session
 								</button>
 							)}
-							<span className={`${visit.session === undefined ? "ml-auto " : ""}text-[10px] text-[var(--text-muted)] group-open:hidden`}>show</span>
-							<span className={`${visit.session === undefined ? "ml-auto " : ""}hidden text-[10px] text-[var(--text-muted)] group-open:inline`}>hide</span>
+							<span className="basis-full text-right text-[10px] text-[var(--text-muted)] group-open:hidden">show</span>
+							<span className="hidden basis-full text-right text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
 						</summary>
 						<div className="space-y-3 border-t border-[var(--border-primary)] px-2.5 py-2.5">
+							{visit.completedEvent !== undefined && (
+								<div className="text-[10px] text-[var(--text-muted)]">
+									completed event <code className="ml-1 rounded bg-[var(--bg-code)] px-1 py-0.5 font-mono text-[var(--text-secondary)]">{visit.completedEvent}</code>
+								</div>
+							)}
 							{visit.endedAt !== undefined && (
 								<div className="text-[10px] text-[var(--text-muted)]">
 									ended {formatHyperchartDateTime(visit.endedAt)}
@@ -87,7 +93,7 @@ export function VisitHistory({
 									<JsonBlock value={visit.mapItem.value} previewLines={9} />
 								</div>
 							)}
-							<VisitInvocationDetails invocation={visit.invocation} />
+							<VisitInvocationDetails invocation={visit.invocation} state={state} allStates={allStates} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
 						</div>
 					</details>
 				))}
