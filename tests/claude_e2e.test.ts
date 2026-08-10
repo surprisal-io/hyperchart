@@ -38,7 +38,7 @@ export default chart({
 		work: {
 			kind: "state",
 			action: agent("finisher", { task: "Reply DONE via the finish tool immediately. Do not read or write any files." }),
-			transitions: { DONE: "done", FAILED: "failed" },
+			transitions: { DONE: "done", ERROR: "failed" },
 		},
 		done: final(),
 		failed: failed(),
