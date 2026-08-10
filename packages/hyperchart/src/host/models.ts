@@ -210,7 +210,6 @@ export interface HyperchartActorOccurrenceInfo {
 	currentMessage?: HyperchartActorMessageInfo;
 	pendingCaller?: { callId: string; state: string; waitReason: "enqueue" | "accept" | "reply" };
 	drain?: { queued: number; current: number; settled: number };
-	cancellation?: { requested: boolean; acknowledged: boolean };
 }
 
 export interface HyperchartArtifactInfo {
@@ -297,7 +296,8 @@ export type HyperchartVisitInvocationInfo =
 			env?: Record<string, unknown>;
 			artifacts?: HyperchartRenderedArtifactInfo[];
 	  }
-	| { kind: "user"; prompt: string };
+	| { kind: "user"; prompt: string }
+	| { kind: "actor" };
 
 export interface HyperchartVisitInfo {
 	visit: number;

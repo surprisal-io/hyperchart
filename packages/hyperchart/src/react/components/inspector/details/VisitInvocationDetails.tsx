@@ -3,6 +3,7 @@ import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
 
 export function VisitInvocationDetails({ invocation }: { invocation: HyperchartVisitInvocationInfo }) {
+	if (invocation.kind === "actor") return null;
 	if (invocation.kind === "user") {
 		return (
 			<div>
