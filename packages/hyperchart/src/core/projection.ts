@@ -413,11 +413,11 @@ function applyAfterTransition(
 	abandoned: PendingAction[],
 ): void {
 	const state = actionStateAt(ast, leaf);
-	if (state?.after === undefined) throw new Error(`No after transition in state ${leaf}`);
+	assert(state?.after !== undefined, `No after transition in state ${leaf}`);
 	const actorContext = actorContextForState(ast, leaf);
 	if (actorContext !== undefined) {
 		const actor = projection.actors[actorContext.occurrence];
-		if (actor === undefined || actor.currentState !== actorContext.localState) throw new Error(`Actor state ${leaf} is not active`);
+		assert(actor !== undefined && actor.currentState === actorContext.localState, `Actor state ${leaf} is not active`);
 		applyActorInputForEntry(projection, ast, actor, state.after.target);
 		actor.currentState = state.after.target;
 		return;
@@ -440,10 +440,10 @@ function applyTransition(
 	const actorContext = actorContextForState(ast, fromLeaf);
 	if (actorContext !== undefined) {
 		const actor = projection.actors[actorContext.occurrence];
-		if (actor === undefined || actor.currentState !== actorContext.localState) throw new Error(`Actor state ${fromLeaf} is not active`);
-		if (actorContext.node.kind !== "state") throw new Error(`Actor state ${fromLeaf} cannot emit action event ${eventType}`);
+		assert(actor !== undefined && actor.currentState === actorContext.localState, `Actor state ${fromLeaf} is not active`);
+		assert(actorContext.node.kind === "state", `Actor state ${fromLeaf} cannot emit action event ${eventType}`);
 		const transition = actorContext.node.transitions[eventType];
-		if (transition === undefined) throw new Error(`No actor transition for event type ${eventType} in state ${fromLeaf}`);
+		assert(transition !== undefined, `No actor transition for event type ${eventType} in state ${fromLeaf}`);
 		applyActorInputForEntry(projection, ast, actor, transition.target, { transition, event });
 		actor.currentState = transition.target;
 		return;
@@ -1060,8 +1060,8 @@ function isActionActive(projection: BranchProjection, ast: ChartAst, stateId: St
 
 function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: ActionUID, operation: string): void {
 	const state = actionStateAt(ast, stateId);
-	if (state === undefined) throw new Error(`Cannot ${operation} action for non-action state ${stateId}`);
-	if (!matchesDeclaredUid(actual, state.action.uid)) throw new Error(`Invalid action ${operation} for state ${stateId}`);
+	assert(state !== undefined, `Cannot ${operation} action for non-action state ${stateId}`);
+	assert(matchesDeclaredUid(actual, state.action.uid), `Invalid action ${operation} for state ${stateId}`);
 }
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {
