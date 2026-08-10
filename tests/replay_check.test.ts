@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import {
 	agent,
@@ -188,9 +189,9 @@ describe("explainReplay", () => {
 		}));
 		const declaration = old.actors["@worker"]!;
 		const source = old.states.ping;
-		if (source?.kind !== "send") throw new Error("expected send source");
+		assert(source?.kind === "send", "expected send source");
 		const contract = declaration.protocol.PING!;
-		if (contract.reply.kind !== "single") throw new Error("expected single reply contract");
+		assert(contract.reply.kind === "single", "expected single reply contract");
 		const envelope = { messageId: "ping:message:1:0", event: "PING", input: {}, producerState: "ping", producerVisit: 1, batchIndex: 0 };
 		const log: DurableLogRecord[] = [
 			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: declaration, ...meta(1) },

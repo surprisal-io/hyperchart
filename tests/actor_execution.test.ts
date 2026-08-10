@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import {
 	actor,
@@ -120,7 +121,7 @@ class ActorRuntime implements Runtime {
 
 function parsed(input: unknown = actorChart()) {
 	const result = normalizeChartConfig(input);
-	if (!result.ok) throw new Error(result.diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join("\n"));
+	assert(result.ok, result.diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join("\n"));
 	return result.ast;
 }
 
@@ -204,7 +205,7 @@ describe("explicit event-sourced actors", () => {
 		const successorInvoke = runtime.records.find((record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "successor");
 		expect(stopped).toBeDefined();
 		expect(successorInvoke).toBeDefined();
-		if (stopped === undefined || successorInvoke === undefined) throw new Error("missing drain/successor facts");
+		assert(stopped !== undefined && successorInvoke !== undefined, "missing drain/successor facts");
 		expect(successorInvoke.seqId).toBeGreaterThan(stopped.seqId);
 	});
 
@@ -351,7 +352,7 @@ describe("explicit event-sourced actors", () => {
 			kind: "chart", id: "actor-data-kind-placement", actors: { placed }, initial: "done", states: { done: final() },
 		}));
 		expect(normalized.ok).toBe(true);
-		if (!normalized.ok) throw new Error(JSON.stringify(normalized.diagnostics));
+		assert(normalized.ok, JSON.stringify(normalized.diagnostics));
 		expect(normalized.diagnostics).toEqual([]);
 		const runtime = new ActorRuntime(normalized.ast);
 		const state = await loop(runtime);
@@ -503,7 +504,7 @@ describe("explicit event-sourced actors", () => {
 		);
 		for (const statePath of ["projects#a.@worker.handle", "projects#b.@worker.handle"]) {
 			const handler = agentEffect(statePath);
-			if (handler === undefined) throw new Error(`missing ${statePath}`);
+			assert(handler !== undefined, `missing ${statePath}`);
 			runtime.queue.send({ kind: "agent", effectId: handler.id, event: { type: "DONE" } });
 		}
 		for (const occurrence of ["projects#a.@worker", "projects#b.@worker"]) {
@@ -562,7 +563,7 @@ describe("explicit event-sourced actors", () => {
 		const auditorEnqueue = runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.occurrence === "@auditor");
 		expect(auditorClosing).toBeDefined();
 		expect(auditorEnqueue).toBeDefined();
-		if (auditorClosing === undefined || auditorEnqueue === undefined) throw new Error("missing auditor lifecycle facts");
+		assert(auditorClosing !== undefined && auditorEnqueue !== undefined, "missing auditor lifecycle facts");
 		expect(auditorClosing.seqId).toBeGreaterThan(Math.max(...mapItemSeqIds));
 		expect(auditorClosing.seqId).toBeGreaterThan(auditorEnqueue.seqId);
 		expect(runtime.records.flatMap((record) => record.type === "actor_scope" && record.occurrence === "@auditor" ? [record.kind] : [])).toEqual(["closing", "stopped"]);
@@ -726,9 +727,15 @@ describe("explicit event-sourced actors", () => {
 		const resolvedIndex = broken.findIndex((record) => record.type === "actor_call_resolved");
 		const settledIndex = broken.findIndex((record) => record.type === "actor_message" && record.kind === "settled");
 		const [resolved] = broken.splice(resolvedIndex, 1);
-		if (resolved === undefined) throw new Error("missing call resolution fact");
+		assert(resolved !== undefined, "missing call resolution fact");
 		broken.splice(settledIndex, 0, resolved);
 		expect(explainReplay(callAst, broken).broken?.error).toContain("before its message settled");
+
+		const missingOutput = structuredClone(callRuntime.records);
+		const resolutionWithoutOutput = missingOutput.find((record) => record.type === "actor_call_resolved");
+		assert(resolutionWithoutOutput?.type === "actor_call_resolved", "missing call resolution fact");
+		delete resolutionWithoutOutput.output;
+		expect(explainReplay(callAst, missingOutput).broken?.error).toContain("output presence does not match");
 	});
 
 	it("resolves actor-local typed input, message, state input, results, and artifacts", async () => {

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, send, t } from "../packages/hyperchart/src/core/dsl.js";
@@ -33,7 +34,7 @@ describe("hyperchart source", () => {
 			initial: "done",
 			states: { done: final() },
 		}));
-		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("args: {");
@@ -58,7 +59,7 @@ describe("hyperchart source", () => {
 				failed: failed({ notify: { prompt: t`Failure ${result("work")}`, artifacts: [artifactOf("work", { artifact: "report" })], scope: "work" } }),
 			},
 		}));
-		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("done: final()");
 		expect(source).toContain("failed: failed({");
@@ -88,7 +89,7 @@ describe("hyperchart source", () => {
 				done: final(),
 			},
 		}));
-		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("const actorDeclaration1");
 		expect(source).toContain("to: actorDeclaration");
@@ -96,7 +97,7 @@ describe("hyperchart source", () => {
 		const scope = { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, send, t, z };
 		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
 		const roundTrip = normalizeChartConfig(rebuilt);
-		if (!roundTrip.ok) throw new Error(JSON.stringify(roundTrip.diagnostics));
+		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));
 		expect(roundTrip.ast).toEqual(parsed.ast);
 	});
 
@@ -110,7 +111,7 @@ describe("hyperchart source", () => {
 		const parsed = normalizeChartConfig(chart({
 			kind: "chart", id: "selected-actor-source", actors: { worker }, initial: "done", states: { done: final() },
 		}));
-		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		expect(hyperchartSource(parsed.ast, "@worker")).toContain("worker: actor(");
 		expect(hyperchartSource(parsed.ast, "@worker.idle")).toContain("idle: receive(");
 		expect(hyperchartSource(parsed.ast, "@worker.settle")).toContain("settle: reply(");
@@ -136,7 +137,7 @@ describe("hyperchart source", () => {
 		const parsed = normalizeChartConfig(chart({
 			kind: "chart", id: "actor-dependency-source", actors: { aSource, zTarget }, initial: "done", states: { done: final() },
 		}));
-		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("aSource: actorDeclaration1");
@@ -148,7 +149,7 @@ describe("hyperchart source", () => {
 		const scope = { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, send, t, z };
 		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
 		const roundTrip = normalizeChartConfig(rebuilt);
-		if (!roundTrip.ok) throw new Error(JSON.stringify(roundTrip.diagnostics));
+		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));
 		expect(roundTrip.ast).toEqual(parsed.ast);
 	});
 
