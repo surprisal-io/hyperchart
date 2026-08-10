@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../../core/action_uid.js";
@@ -417,9 +418,7 @@ function renderTemplateForProjection(
 }
 
 function resolveRefForProjection(projection: BranchProjection, ast: ChartAst, ref: InputRef, stateId: StatePath): unknown {
-	if (ref.kind === "actorInput" || ref.kind === "messageInput") {
-		throw new Error(`Actor refs are unavailable before the actor runtime layer (${stateId})`);
-	}
+	assert(ref.kind !== "actorInput" && ref.kind !== "messageInput", `Actor refs are unavailable before the actor runtime layer (${stateId})`);
 	if (ref.kind === "arg") return projection.args?.[ref.name];
 	if (ref.kind === "visit") {
 		const target = ref.state === undefined ? stateId : instancePathFor(ref.state, stateId);

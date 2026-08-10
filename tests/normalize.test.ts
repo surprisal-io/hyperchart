@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import type { InputRef } from "../packages/hyperchart/src/index.js";
 import {
@@ -530,7 +531,7 @@ describe("normalizeChartConfig", () => {
 		}));
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+		assert(result.ok, JSON.stringify(result.diagnostics));
 		expect(result.diagnostics).toEqual([]);
 		expect(result.ast.actors["@timed"]?.states.settle).toMatchObject({ kind: "reply", message: "RUN" });
 	});

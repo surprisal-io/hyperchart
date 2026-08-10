@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type {
 	ChartEvent,
 	ActionStateAst,
@@ -1096,14 +1097,14 @@ function dueActorEnqueues(state: MachineState): ActorEnqueueEffect[] {
 		if (target === undefined) continue;
 		if ((target.status === "closing" || target.status === "draining") && !producerMayUseClosingActor(state, path)) continue;
 		const contract = liveActorDeclaration(state, target).protocol[node.event];
-		if (contract === undefined) throw new Error(`${node.kind} in ${path} names unknown protocol message ${node.event}`);
+		assert(contract !== undefined, `${node.kind} in ${path} names unknown protocol message ${node.event}`);
 		const visit = (state.projection.actorProducerVisits[path] ?? 0) + 1;
 		const values = node.kind === "send" && node.inputs !== undefined
 			? resolveValueAst(state, node.inputs, path)
 			: [resolveValueAst(state, node.kind === "send" ? (node.input ?? null) : node.input, path)];
-		if (!Array.isArray(values)) throw new Error(`Batch send in ${path} must resolve inputs to an array`);
-		if (values.length === 0) throw new Error(`Batch send in ${path} must contain at least one message`);
-		if (node.kind === "call" && values.length !== 1) throw new Error(`call() in ${path} sends exactly one message`);
+		assert(Array.isArray(values), `Batch send in ${path} must resolve inputs to an array`);
+		assert(values.length > 0, `Batch send in ${path} must contain at least one message`);
+		assert(node.kind !== "call" || values.length === 1, `call() in ${path} sends exactly one message`);
 		const callId = node.kind === "call" ? `${path}:call:${visit}` : undefined;
 		const messages = values.map((input, batchIndex): ActorMessageEnvelope => ({
 			messageId: `${path}:message:${visit}:${batchIndex}`,
@@ -1156,7 +1157,7 @@ function dueActorReplies(state: MachineState): ActorReplyEffect[] {
 		const reply = definition.states[actor.currentState];
 		if (message === undefined || reply?.kind !== "reply" || message.status === "replied") continue;
 		const contract = definition.protocol[message.event]?.reply;
-		if (contract === undefined) throw new Error(`Actor ${actor.occurrence} has no protocol contract for ${message.event}`);
+		assert(contract !== undefined, `Actor ${actor.occurrence} has no protocol contract for ${message.event}`);
 		const schema = contract.kind === "single" ? contract.schema : contract.kind === "named" && reply.event !== undefined ? contract.schemas[reply.event] : undefined;
 		const output = reply.output === undefined ? undefined : resolveValueAst(state, reply.output, actorStatePath(actor.occurrence, actor.currentState));
 		effects.push({
@@ -1176,7 +1177,7 @@ function dueActorReplies(state: MachineState): ActorReplyEffect[] {
 
 function liveActorDeclaration(state: MachineState, actor: BranchProjection["actors"][string]): ActorDeclarationAst {
 	const declaration = state.ast.actors[actor.declaration];
-	if (declaration === undefined) throw new Error(`Actor ${actor.occurrence} declaration ${actor.declaration} is missing from the live chart`);
+	assert(declaration !== undefined, `Actor ${actor.occurrence} declaration ${actor.declaration} is missing from the live chart`);
 	return declaration;
 }
 
@@ -1358,12 +1359,12 @@ function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknow
 	const actorContext = actorContextForState(state.ast, stateId);
 	const actor = actorContext === undefined ? undefined : state.projection.actors[actorContext.occurrence];
 	if (ref.kind === "actorInput") {
-		if (actor === undefined) throw new Error(`Template in state ${stateId}: actorInput() used outside an actor`);
+		assert(actor !== undefined, `Template in state ${stateId}: actorInput() used outside an actor`);
 		return selectPath(actor.input, ref.path, ref, stateId);
 	}
 	if (ref.kind === "messageInput") {
 		const message = actor?.currentMessage;
-		if (message === undefined || message.event !== ref.message) throw new Error(`Template in state ${stateId}: messageInput('${ref.message}') does not match the current message`);
+		assert(message !== undefined && message.event === ref.message, `Template in state ${stateId}: messageInput('${ref.message}') does not match the current message`);
 		return selectPath(message.input, ref.path, ref, stateId);
 	}
 	if (ref.kind === "arg") {
@@ -1461,7 +1462,7 @@ function selectPath(value: unknown, path: string | undefined, ref: InputRef, sta
 
 function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 	const node = actionStateAtMachine(state.ast, actionUid.state);
-	if (node === undefined) throw new Error(`Cannot invoke non-action state ${actionUid.state}`);
+	assert(node !== undefined, `Cannot invoke non-action state ${actionUid.state}`);
 	return {
 		kind: "append",
 		id: `invoke:${actionUidKey(actionUid)}`,
