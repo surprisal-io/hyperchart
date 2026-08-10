@@ -5,7 +5,8 @@ import { allRuns, failedRun, inspectRun, runningRun } from "../fixtures/hypercha
 import { InteractiveInspector } from "./harnesses/InteractiveInspector.js";
 
 const meta = {
-	title: "Hyperchart/Features/Inspector Dialog",
+	title: "Hyperchart/Inspector/Dialog",
+	id: "hyperchart-features-inspector-dialog",
 	component: HyperchartInspectorDialog,
 	parameters: {
 		layout: "fullscreen",
@@ -27,6 +28,7 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Running: Story = {
+	name: "Active Run · Multi-run Selection",
 	args: {
 		onSelectRun: fn(),
 		onResume: fn(),
@@ -34,7 +36,7 @@ export const Running: Story = {
 	},
 	render: (args) => <InteractiveInspector {...args} />,
 	parameters: {
-		docs: { description: { story: "Running multi-run inspector with controlled run selection." } },
+		docs: { description: { story: "Live runtime inspector with controlled selection between durable runs." } },
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement.ownerDocument.body);
@@ -43,10 +45,13 @@ export const Running: Story = {
 		const resume = await canvas.findByRole("button", { name: "Resume" });
 		await userEvent.click(resume);
 		await expect(args.onResume).toHaveBeenCalledWith(failedRun.runId);
+		await userEvent.click(canvas.getByRole("button", { name: /deck-director · running/i }));
+		await expect(args.onSelectRun).toHaveBeenLastCalledWith(runningRun.runId);
 	},
 };
 
 export const StaticInspect: Story = {
+	name: "Static Chart · Read Only",
 	args: {
 		runs: [inspectRun],
 		selectedRunId: inspectRun.runId,
@@ -66,12 +71,13 @@ export const StaticInspect: Story = {
 };
 
 export const FailedValidation: Story = {
+	name: "Failed Run · Resumable",
 	args: {
 		runs: [failedRun],
 		selectedRunId: failedRun.runId,
 		onResume: fn(),
 	},
 	parameters: {
-		docs: { description: { story: "Failed validation state with a resume action available." } },
+		docs: { description: { story: "A failed durable run opened directly in its resumable state." } },
 	},
 };

@@ -23,10 +23,18 @@ const preview: Preview = {
 	},
 	parameters: {
 		layout: "fullscreen",
-		controls: { expanded: true },
+		controls: { disable: true },
 		options: {
 			storySort: {
-				order: ["Hyperchart", ["Components", "Features", "Examples", "TUI", "Visual Tests"]],
+				order: [
+					"Hyperchart",
+					[
+						"Inspector",
+						["Dialog", "Graph", "State Details", "Runtime Section", "Run Strip", "Agent Session"],
+						"Launch",
+						"TUI",
+					],
+				],
 			},
 		},
 	},

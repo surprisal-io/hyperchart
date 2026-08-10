@@ -187,7 +187,6 @@ review: {
   retries: 2,
   transitions: {
     PASS: "done",
-    FAILED: "failed",
   },
 }
 ```
@@ -231,7 +230,7 @@ A declared guard `reply` validates the guard completion envelope but is not stor
 | `onReject: "restart"` | abandon the rejected action and invoke a fresh one |
 | omitted | defaults to `resume` when validation is present |
 
-`retries` is the number of rejected rounds that may be retried. The next rejection becomes `FAILED`, and Hyperchart cancels the abandoned action. Omitting `retries` permits unbounded rejection rounds; use that only when another policy bounds the run.
+`retries` is the number of rejected rounds that may be retried. The next rejection records global failure intent and terminalizes the run; pending actions receive best-effort runtime cancellation. Omitting `retries` permits unbounded rejection rounds; use that only when another policy bounds the run.
 
 Accepted facts are not revalidated during replay. Changing validator code can therefore make an old accepted claim incompatible; `explainReplay()` reports the mismatch instead of silently reinterpreting it.
 
@@ -272,21 +271,16 @@ A repeated state path is not the same visit. Runtime history records visits inde
 
 ## Failure and scope exit
 
-`FAILED` is a system event. Handle it locally when the chart has a meaningful recovery path:
+`FAILED` is reserved global fail-fast. It cannot be authored in a transition: the machine records failure intent, starts no successor, terminalizes immediately, and emits best-effort runtime cancellation for pending actions. Model recoverable business outcomes with ordinary events or typed actor replies such as `REJECTED`; use `failed()` when the chart deliberately reaches a failed business terminal.
 
-```ts
-transitions: {
-  COMPLETE: "done",
-  FAILED: "fallback",
-}
-```
-
-Otherwise let it bubble to an ancestor or terminate the run.
-
-Leaving a compound, parallel, or map scope asks the runtime to cancel active descendant actions. Replay derives that cancellation from the durable event that caused scope exit; the current log contract has no standalone cancellation record.
+Leaving a compound, parallel, or map scope asks the runtime to cancel active descendant actions. Scope-exit and failure cancellation are best-effort effects derived from durable control-flow facts; cancellation itself is not recorded in the semantic log.
 
 ## Next steps
 
 - [Pi run operations](pi.md)
 - [Recovery and safety](safety.md)
 - [Runtime and durability](runtime-and-durability.md)
+
+## Lexical actors
+
+[Explicit actors](./explicit-actors.md) are lexically scoped capabilities. Root actors serialize across the run; actors owned by a finite map have one isolated occurrence per pinned item. A caller can address only declarations in its own or an ancestor scope.

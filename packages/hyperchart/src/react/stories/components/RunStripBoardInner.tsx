@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { HyperchartRunStrip } from "../../HyperchartRunStrip.js";
 import type { HyperchartRunSummaryInfo } from "../../types.js";
-import { boardCharts, runStripRuns } from "../../fixtures/hyperchart-board-fixtures.js";
+import { allRunStripRuns, inspectorDialogInspectResult } from "../../fixtures/hyperchart-fixtures.js";
 import { BoardPage } from "./BoardPage.js";
 import { BoardSection } from "./BoardSection.js";
 
@@ -35,8 +35,16 @@ const summaryProgressStates: HyperchartRunSummaryInfo[] = [
 	},
 ];
 
+const definitionCharts = [{
+	name: inspectorDialogInspectResult.chartId,
+	description: "Definition-backed Storybook chart",
+	scope: "project" as const,
+	stateCount: inspectorDialogInspectResult.states.length,
+	updatedAt: summaryRunBase.updatedAt,
+}];
+
 export function RunStripBoardInner() {
-	const [selectedRunId, setSelectedRunId] = useState<string | null>(runStripRuns[0]?.runId ?? null);
+	const [selectedRunId, setSelectedRunId] = useState<string | null>(allRunStripRuns[0]?.runId ?? null);
 	return (
 		<BoardPage
 			title="Run strip states"
@@ -44,8 +52,8 @@ export function RunStripBoardInner() {
 		>
 			<BoardSection title="Run strip with all run statuses">
 				<HyperchartRunStrip
-					hypercharts={boardCharts}
-					runs={runStripRuns}
+					hypercharts={definitionCharts}
+					runs={allRunStripRuns}
 					selectedRunId={selectedRunId}
 					onSelectRun={setSelectedRunId}
 					onRun={() => undefined}

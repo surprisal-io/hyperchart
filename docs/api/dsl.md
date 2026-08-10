@@ -31,7 +31,7 @@ Use `refs()` for arguments, results, artifacts, map items, and transition inputs
 ## Minimal chart
 
 ```ts
-import { artifact, chart, failed, final, script } from "@surprisal/hyperchart";
+import { artifact, chart, final, script } from "@surprisal/hyperchart";
 
 export default chart({
   kind: "chart",
@@ -43,10 +43,9 @@ export default chart({
       action: script("node", ["-e", "require('node:fs').writeFileSync('hello.txt', 'hello\\n')"], {
         artifacts: { greeting: artifact("hello.txt") },
       }),
-      transitions: { DONE: "done", FAILED: "failed" },
+      transitions: { DONE: "done" },
     },
     done: final(),
-    failed: failed(),
   },
 });
 ```
@@ -385,7 +384,9 @@ type ActionStateCst = {
 | `validate` | Acceptance guard for non-`FAILED` completion claims. |
 | `onReject` | Continue the current action session or start the action again after rejection. Default: `"resume"`. |
 | `onReenter` | Policy for a later visit. `resume()` is meaningful only where the runtime can identify and reuse an agent session. |
-| `retries` | Number of rejected rounds allowed. The next rejection emits `FAILED`. Omitted means unbounded. Requires `validate` and a reachable `FAILED` route. |
+| `retries` | Number of rejected rounds allowed. The next rejection records global failure intent and terminalizes the run. Omitted means unbounded. Requires `validate`. |
+
+`FAILED` is reserved global fail-fast and is not a routable transition. An executor `FAILED`, protocol/schema failure, or exhausted validation budget writes durable failure intent, blocks successors, terminalizes immediately, and emits best-effort runtime cancellation for pending actions. Use ordinary events, named actor replies, or an explicit `failed()` terminal for authored business outcomes.
 
 ### `agent(name, options?)`
 
@@ -410,7 +411,7 @@ action: agent("planner", {
   task: t`Plan a report about ${arg("topic")}`,
   reply: Plan,
 }),
-transitions: { PLANNED: "write", FAILED: "failed" },
+transitions: { PLANNED: "write" },
 ```
 
 `reply` validates the completion event's `output`; it is for small routing data. Put large deliverables in artifacts.
@@ -485,7 +486,6 @@ action: user({
 transitions: {
   APPROVED: "publish",
   BLOCK: "revise",
-  FAILED: "failed",
 },
 ```
 
@@ -523,14 +523,13 @@ review: {
       target: "revise",
       input: { feedback: event("feedback") },
     },
-    FAILED: "failed",
   },
 },
 revise: {
   kind: "state",
   input: { feedback: z.string() },
   action: agent("writer", { task: t`Fix: ${input("feedback")}` }),
-  transitions: { DONE: "review", FAILED: "failed" },
+  transitions: { DONE: "review" },
 },
 ```
 
@@ -585,7 +584,6 @@ pipeline: compound({
     },
     finished: final(),
   },
-  transitions: { FAILED: "failed" },
   onDone: "publish",
 }),
 ```
@@ -631,7 +629,6 @@ fanout: parallel({
     }),
   },
   onDone: "merge",
-  transitions: { FAILED: "failed" },
 }),
 ```
 
@@ -693,17 +690,15 @@ const definition = chart({
         done: final(),
       },
       onDone: "merge",
-      transitions: { FAILED: "failed" },
     }),
     merge: {
       kind: "state",
       action: script("node", ["scripts/merge.mjs"], {
         env: { ITEM_FILES: joinArtifactOf("items.write") },
       }),
-      transitions: { DONE: "done", FAILED: "failed" },
+      transitions: { DONE: "done" },
     },
     done: final(),
-    failed: failed(),
   },
 });
 ```
@@ -757,7 +752,6 @@ onReject: "resume",
 retries: 2,
 transitions: {
   DONE: "done",
-  FAILED: "failed",
 },
 ```
 
@@ -822,7 +816,7 @@ Normalization converts Zod to plain JSON Schema in the AST. Runtime validation u
 | `AMBIGUOUS_ARTIFACT` | Artifact name was omitted for a multi-artifact producer. |
 | `INVALID_MAP_REF` | A map-only ref is used outside a valid map scope. |
 | `INVALID_VISIT_REF` | `visit()` does not name an action state. |
-| `MISSING_FAILED_ROUTE` | A state can emit terminal `FAILED` but no route handles it. |
+| `RESERVED_FAILED_TRANSITION` | An authored transition attempts to route global fail-fast `FAILED`. |
 | `ON_DONE_CYCLE` | Initial/final/onDone entry cannot settle on an action or final leaf. |
 | `TS_MODULE_LOAD_FAILED` | The chart module could not be loaded. |
 

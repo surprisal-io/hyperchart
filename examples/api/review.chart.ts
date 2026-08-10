@@ -1,4 +1,4 @@
-import { agent, final, failed, refs, user, z } from "@surprisal/hyperchart";
+import { agent, final, refs, user, z } from "@surprisal/hyperchart";
 
 const Research = z.object({ summary: z.string() });
 const Plan = z.object({ steps: z.array(z.string()) });
@@ -19,7 +19,6 @@ export default chart({
 			}),
 			transitions: {
 				RESEARCH_READY: "plan",
-				FAILED: "failed",
 			},
 		},
 
@@ -30,7 +29,6 @@ export default chart({
 			}),
 			transitions: {
 				PLAN_READY: "implement",
-				FAILED: "failed",
 			},
 		},
 
@@ -39,7 +37,6 @@ export default chart({
 			action: agent("coder"),
 			transitions: {
 				IMPLEMENTED: "approval",
-				FAILED: "failed",
 			},
 		},
 
@@ -53,6 +50,5 @@ export default chart({
 		},
 
 		done: final(),
-		failed: failed(),
 	},
 });
