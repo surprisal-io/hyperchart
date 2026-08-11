@@ -119,6 +119,9 @@ export type ActorResultRefMarker<State extends string, Path extends string | und
 export type ActorStateInputRefMarker<Name extends string, Path extends string | undefined> = { readonly __actorStateInput: Name; readonly __actorStateInputPath: Path };
 export type ActorArtifactRefMarker<State extends string, Artifact extends string | undefined, Select extends string | undefined> = { readonly __actorArtifactState: State; readonly __actorArtifactName: Artifact; readonly __actorArtifactSelect: Select };
 
+/** Authoring-only symbolic capability resolved to the current actor endpoint at placement normalization. */
+export type ActorSelfTarget = Readonly<{ kind: "actorSelf" }>;
+
 type StateSuccessors<Node> = Node extends { kind: "state"; transitions: infer T; after?: infer A }
 	? (T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never) | (A extends { target: infer Target extends string } ? Target : never)
 	: Node extends { kind: "send" | "sendBatch"; target: infer Target extends string }
@@ -174,12 +177,28 @@ type ResolveActorValue<Value, P extends ProtocolCst, I, S> = Value extends Actor
 			? RefSelected<ActionReplyFor<S, State>, Path>
 			: Value extends ActorStateInputRefMarker<infer Name, infer Path>
 				? Value
-				: Value extends readonly unknown[]
-					? { [K in keyof Value]: ResolveActorValue<Value[K], P, I, S> }
-					: Value extends object
-						? { [K in keyof Value as K extends `__${string}` ? never : K]: ResolveActorValue<Value[K], P, I, S> }
-						: Value;
+				: Value extends InputRef<infer Resolved>
+					? Resolved
+					: Value extends readonly unknown[]
+						? { [K in keyof Value]: ResolveActorValue<Value[K], P, I, S> }
+						: Value extends object
+							? { [K in keyof Value as K extends `__${string}` ? never : K]: ResolveActorValue<Value[K], P, I, S> }
+							: Value;
 type SameShape<Actual, Expected> = [Actual] extends [never] ? false : [Actual] extends [Expected] ? true : false;
+
+type SelfSendNodeValid<Node, P extends ProtocolCst, I, S> = Node extends { to: ActorSelfTarget }
+	? Node extends { kind: "send"; event: infer Event; input: infer Input }
+		? Event extends keyof P ? SameShape<ResolveActorValue<Input, P, I, S>, MessageInput<P, Event>> : false
+		: Node extends { kind: "sendBatch"; event: infer Event; inputs: infer Inputs }
+			? Event extends keyof P
+				? ResolveActorValue<Inputs, P, I, S> extends infer Resolved
+					? Resolved extends readonly unknown[]
+						? SameShape<Resolved[number], MessageInput<P, Event>>
+						: false
+					: false
+				: false
+			: false
+	: true;
 
 type ReplyIsValid<Node, Contract, P extends ProtocolCst, I, S> = Contract extends { input: unknown; replies: infer Replies extends Record<string, SchemaCst> }
 	? Node extends { event: infer Event extends keyof Replies; output: infer Output }
@@ -269,10 +288,15 @@ type ActorReplyGraphValid<P extends ProtocolCst, I, S> = false extends {
 type ActorSelectorsValid<P extends ProtocolCst, I, S> = false extends {
 	[K in keyof S & string]: NodeSelectorsValid<P, I, S, K>;
 }[keyof S & string] ? false : true;
+type ActorSelfSendsValid<P extends ProtocolCst, I, S> = false extends {
+	[K in keyof S & string]: SelfSendNodeValid<S[K], P, I, S>;
+}[keyof S & string] ? false : true;
 export type ActorVerification<I extends SchemaCst, P extends ProtocolCst, S, Initial extends string> = Initial extends keyof S
 	? S[Initial] extends { kind: "receive" }
 		? ActorReplyGraphValid<P, InferSchema<I>, S> extends true
-			? ActorSelectorsValid<P, InferSchema<I>, S> extends true ? unknown : { readonly "actor-local selector is invalid": never }
+			? ActorSelectorsValid<P, InferSchema<I>, S> extends true
+				? ActorSelfSendsValid<P, InferSchema<I>, S> extends true ? unknown : { readonly "self() send does not match the actor protocol": never }
+				: { readonly "actor-local selector is invalid": never }
 			: { readonly "actor protocol/reply graph is invalid": never }
 		: { readonly "actor initial state must be receive()": never }
 	: { readonly "actor initial state is unknown": never };
@@ -654,7 +678,7 @@ export type ReceiveStateCst = {
 
 export type SendStateCst = {
 	kind: "send";
-	to: AnyStaticActorDeclaration;
+	to: AnyStaticActorDeclaration | ActorSelfTarget;
 	event: string;
 	target: StateId;
 	input: ValueExpr;
@@ -662,7 +686,7 @@ export type SendStateCst = {
 
 export type SendBatchStateCst = {
 	kind: "sendBatch";
-	to: AnyStaticActorDeclaration;
+	to: AnyStaticActorDeclaration | ActorSelfTarget;
 	event: string;
 	target: StateId;
 	inputs: ValueExpr;
@@ -884,6 +908,8 @@ export type SendStateAst = Readonly<{
 	id: StateId;
 	parent?: StatePath;
 	to: StatePath;
+	/** Authored with self(); `to` is the placement-resolved declaration path. */
+	self?: true;
 	event: string;
 	target: StateId;
 	/** Empty; present so generic control-flow inspection can treat messaging as a state node. */
@@ -896,6 +922,8 @@ export type SendBatchStateAst = Readonly<{
 	id: StateId;
 	parent?: StatePath;
 	to: StatePath;
+	/** Authored with self(); `to` is the placement-resolved declaration path. */
+	self?: true;
 	event: string;
 	target: StateId;
 	transitions: Readonly<Record<EventType, TransitionAst>>;

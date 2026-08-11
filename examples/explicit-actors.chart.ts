@@ -11,11 +11,17 @@ import {
 	protocol,
 	receive,
 	reply,
+	self,
+	send,
 	z,
 } from "@surprisal/hyperchart";
 
 const EditorProtocol = protocol({
 	APPLY: message({
+		input: z.object({ patch: z.string() }).strict(),
+		reply: z.object({ patch: z.string() }).strict(),
+	}),
+	FOLLOW_UP: message({
 		input: z.object({ patch: z.string() }).strict(),
 		reply: z.object({ patch: z.string() }).strict(),
 	}),
@@ -26,8 +32,15 @@ const Editor = actor({
 	protocol: EditorProtocol,
 	initial: "idle",
 	states: {
-		idle: receive({ on: { APPLY: "settle" } }),
-		settle: reply({ target: "idle", output: messageInput("APPLY") }),
+		idle: receive({ on: { APPLY: "queueFollowUp", FOLLOW_UP: "settleFollowUp" } }),
+		queueFollowUp: send({
+			to: self(),
+			event: "FOLLOW_UP",
+			input: messageInput("APPLY"),
+			target: "settleApply",
+		}),
+		settleApply: reply({ target: "idle", output: messageInput("APPLY") }),
+		settleFollowUp: reply({ target: "idle", output: messageInput("FOLLOW_UP") }),
 	},
 });
 

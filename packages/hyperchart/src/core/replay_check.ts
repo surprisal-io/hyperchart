@@ -107,7 +107,12 @@ function staleRecordsFor(
 		return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_definition_changed", message: `Actor definition or protocol for ${record.declaration} changed since creation seqId ${record.seqId}` }];
 	}
 	if (record.type === "actor_messages_enqueued") {
-		const current = actorContextForState(ast, record.source.producerState)?.node ?? nodeAt(ast, record.source.producerState);
+		const actorContext = actorContextForState(ast, record.source.producerState);
+		const current = actorContext?.node ?? nodeAt(ast, record.source.producerState);
+		const selfSource = (current?.kind === "send" || current?.kind === "sendBatch") && current.self === true;
+		if (selfSource && (actorContext === undefined || record.occurrence !== actorContext.endpointOccurrence || record.source.targetDeclaration !== actorContext.declaration.path)) {
+			return [{ index, seqId: record.seqId, record, state: record.source.producerState, reason: "actor_message_source_changed", message: `Actor self-send escaped its producer occurrence for ${record.source.producerState}` }];
+		}
 		const target = ast.actors[record.source.targetDeclaration];
 		const schema = target?.protocol[record.source.event]?.input;
 		const matches = (current?.kind === "send" || current?.kind === "sendBatch" || current?.kind === "call" || current?.kind === "callBatch")

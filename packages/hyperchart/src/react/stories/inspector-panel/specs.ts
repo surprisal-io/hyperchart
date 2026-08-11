@@ -32,7 +32,7 @@ import {
 	mailboxReentryChart,
 	mailboxReentryRecords,
 } from "../../fixtures/actor-runtime-fixtures.js";
-import { actorPoolChart, actorPoolCrowdedChart, actorPoolCrowdedRecords } from "../../fixtures/actor-fixtures.js";
+import { actorPoolChart, actorPoolCrowdedChart, actorPoolCrowdedRecords, actorSelfChart } from "../../fixtures/actor-fixtures.js";
 
 export type InspectorPanelRuntime = {
 	selectedStateId: StatePath | null;
@@ -718,6 +718,13 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		description: "Completed sendBatch with its ordered APPLY inputs and projected durable messages.",
 		chart: actorInspectorChart,
 		runtime: { selectedStateId: "queue", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Self-send state",
+		description: "Actor-local sendBatch targets self(), resolves to the shared pool endpoint, and retains the typed CRAWL contract.",
+		chart: actorSelfChart,
+		runtime: { selectedStateId: "@workers.$worker.fanout" },
 	},
 	{
 		group: "actors",

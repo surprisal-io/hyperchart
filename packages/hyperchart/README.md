@@ -66,4 +66,4 @@ The core package includes statically placed, event-sourced actors with explicit 
 
 MIT · experimental `0.4.1`
 
-Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; see the canonical [explicit actors guide](../../docs/explicit-actors.md).
+Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; actor templates may target their current endpoint with send-only `self()`. See the canonical [explicit actors guide](../../docs/explicit-actors.md).

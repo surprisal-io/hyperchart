@@ -967,6 +967,17 @@ function assertActorMessagesEnqueued(
 			record.messages.every((message) => message.producerState === record.source.producerState && message.event === record.source.event),
 		"Message enqueue has inconsistent producer provenance",
 	);
+	const selfSource = (record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch") && record.source.definition.self === true;
+	if (selfSource) {
+		const producerContext = actorContextForState(ast, record.source.producerState);
+		assert(producerContext !== undefined, `Self-send producer ${record.source.producerState} is not an actor workflow state`);
+		const producerExecution = actorExecutionForContext(projection, producerContext);
+		const producerCurrent = producerExecution.worker?.currentMessage ?? (producerExecution.endpoint as ProjectedActorOccurrence).currentMessage;
+		assert(producerCurrent !== undefined, `Self-send producer ${record.source.producerState} has no current message`);
+		assert.equal(executionCurrentState(producerExecution.endpoint, producerExecution.worker), producerContext.localState, `Self-send producer ${record.source.producerState} is not current`);
+		assert.equal(record.source.targetDeclaration, producerContext.declaration.path, `Self-send producer ${record.source.producerState} changed declaration`);
+		assert.equal(record.occurrence, producerContext.endpointOccurrence, `Self-send producer ${record.source.producerState} escaped its actor occurrence`);
+	}
 	assert(
 		actor.status !== "stopped" && actor.status !== "cancelled" && actor.status !== "failed",
 		`Message enqueue targets stopped actor ${record.occurrence}`,

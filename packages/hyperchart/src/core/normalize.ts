@@ -386,8 +386,14 @@ function toActorDeclarationAst(
 			continue;
 		}
 		if (raw.kind === "send" || raw.kind === "sendBatch" || raw.kind === "call" || raw.kind === "callBatch") {
-			const targetActor = isRecord(raw.to) ? actorTargets.get(raw.to) : undefined;
-			if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${raw.kind} in actor '${placement.path}' must target a placed static declaration.`, `${pointer}/to`, source));
+			const authoredSelf = isRecord(raw.to) && raw.to.kind === "actorSelf";
+			if (authoredSelf && (raw.kind === "call" || raw.kind === "callBatch")) {
+				diagnostics.push(diagnostic("SELF_CALL_FORBIDDEN", `${raw.kind}() cannot target self(); recursive actor calls are not supported.`, `${pointer}/to`, source));
+			}
+			const targetActor = authoredSelf && (raw.kind === "send" || raw.kind === "sendBatch")
+				? placement.path
+				: isRecord(raw.to) ? actorTargets.get(raw.to) : undefined;
+			if (targetActor === undefined && !authoredSelf) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${raw.kind} in actor '${placement.path}' must target a placed static declaration.`, `${pointer}/to`, source));
 			const event = typeof raw.event === "string" ? raw.event : "";
 			if (raw.kind === "send" || raw.kind === "sendBatch") {
 				const batch = raw.kind === "sendBatch";
@@ -396,8 +402,8 @@ function toActorDeclarationAst(
 				if (batch && Array.isArray(raw.inputs) && raw.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
 				const value = toValueAst(raw[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
 				states[id] = batch
-					? { kind: "sendBatch", id, parent, to: targetActor ?? "", event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, inputs: value }
-					: { kind: "send", id, parent, to: targetActor ?? "", event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, input: value };
+					? { kind: "sendBatch", id, parent, to: targetActor ?? "", ...(authoredSelf ? { self: true } : {}), event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, inputs: value }
+					: { kind: "send", id, parent, to: targetActor ?? "", ...(authoredSelf ? { self: true } : {}), event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, input: value };
 				continue;
 			}
 			if (raw.kind === "callBatch") {
@@ -759,7 +765,7 @@ function validateActorUsage(
 ): void {
 	const targeted = new Set<string>();
 	const collect = (node: StateAst | ActorWorkflowStateAst) => {
-		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") targeted.add(node.to);
+		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && !("self" in node && node.self === true)) targeted.add(node.to);
 	};
 	for (const node of Object.values(states)) collect(node);
 	for (const actor of Object.values(actors)) {
@@ -1101,8 +1107,10 @@ function collectState(
 			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
 			return;
 		}
-		const targetActor = isRecord(input.to) ? actorTargets.get(input.to) : undefined;
-		if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${input.kind} in state '${path}' must target a placed static actor declaration.`, `${pointer}/to`, source));
+		const authoredSelf = isRecord(input.to) && input.to.kind === "actorSelf";
+		const targetActor = authoredSelf ? undefined : isRecord(input.to) ? actorTargets.get(input.to) : undefined;
+		if (authoredSelf) diagnostics.push(diagnostic("SELF_OUTSIDE_ACTOR", "self() may only target send() or sendBatch() inside actor().", `${pointer}/to`, source));
+		else if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${input.kind} in state '${path}' must target a placed static actor declaration.`, `${pointer}/to`, source));
 		const eventType = typeof input.event === "string" && input.event.length > 0 ? input.event : undefined;
 		if (eventType === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_EVENT", `${input.kind}.event must be a non-empty protocol message name.`, `${pointer}/event`, source));
 		if (input.kind === "send" || input.kind === "sendBatch") {

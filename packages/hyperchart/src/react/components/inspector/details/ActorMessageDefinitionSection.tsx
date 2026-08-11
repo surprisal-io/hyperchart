@@ -3,6 +3,7 @@ import type { HyperchartStateInfo } from "../../../types.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
 import { Section } from "../ui/Section.js";
 import { TypeBlock } from "../ui/TypeBlock.js";
+import { TypeTooltip } from "../ui/TypeTooltip.js";
 import { ActorProtocolCard } from "./ActorProtocolCard.js";
 
 export function ActorMessageDefinitionSection({
@@ -11,12 +12,14 @@ export function ActorMessageDefinitionSection({
 	onHighlightInput,
 	onHighlightReply,
 	onHighlightRef,
+	onNavigateToState,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
 	onHighlightInput?: (name: string) => void;
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
+	onNavigateToState?: (stateId: string) => void;
 }) {
 	const definition = state.actorMessageDefinition;
 	if (definition === undefined) return null;
@@ -25,6 +28,12 @@ export function ActorMessageDefinitionSection({
 		: definition.kind === "reply"
 			? "Reply definition"
 			: "Outgoing message definition";
+	const targetPath = state.actorMessageLink?.to ?? definition.resolvedTo ?? definition.to;
+	const targetState = targetPath === undefined
+		? undefined
+		: allStates.find((candidate) => candidate.id === targetPath)
+			?? allStates.find((candidate) => candidate.actorDeclaration?.declarationPath === targetPath);
+	const targetStateId = targetState?.id ?? targetPath;
 	return (
 		<Section title={title} icon={ArrowsRightLeftIcon} defaultOpen>
 			<div className="space-y-3">
@@ -39,10 +48,19 @@ export function ActorMessageDefinitionSection({
 							<div className="font-mono text-[var(--hc-amber-text)]">{definition.event}</div>
 						</div>
 					)}
-					{definition.to !== undefined && (
+					{definition.to !== undefined && targetStateId !== undefined && (
 						<div>
 							<div className="text-[var(--text-muted)]">actor target</div>
-							<div className="break-all font-mono text-[var(--text-primary)]">{definition.to}</div>
+							<TypeTooltip text={`state ${targetStateId}`}>
+								<button
+									type="button"
+									onClick={() => onNavigateToState?.(targetStateId)}
+									className={`mt-0.5 break-all rounded border px-1.5 py-0.5 text-left font-mono font-semibold transition-colors hover:underline focus:outline-none focus:ring-2 focus:ring-cyan-500/40 ${definition.targetKind === "self" ? "border-violet-400/35 bg-violet-500/15 text-[var(--hc-purple-text)] hover:bg-violet-500/25" : "border-[var(--border-secondary)] bg-[var(--bg-tertiary)] text-[var(--hc-cyan-text)] hover:bg-[var(--bg-hover)]"}`}
+									aria-label={`Navigate to actor state ${targetStateId}`}
+								>
+									{definition.targetKind === "self" ? "Self()" : definition.to}
+								</button>
+							</TypeTooltip>
 						</div>
 					)}
 					{definition.target !== undefined && (
@@ -63,7 +81,7 @@ export function ActorMessageDefinitionSection({
 							state={state}
 							allStates={allStates}
 							language="typescript"
-							cssCollapse
+							collapsedLines={4}
 							wrapLongLines
 							{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 							{...(onHighlightReply === undefined ? {} : { onHighlightReply })}

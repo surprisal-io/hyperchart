@@ -49,7 +49,7 @@ Record kinds:
 | `state_action / validated` | validator reference and stored verdict for a completion claim |
 | `state_action / timer_fired` | deadline expired for an invocation |
 | `actor_created` | immutable endpoint occurrence input, generation, ordinary/pool definition, and concurrency provenance |
-| `actor_messages_enqueued` | one exact-validated atomic FIFO enqueue plus exact `send`/`sendBatch`/`call`/`callBatch` source and item correlation |
+| `actor_messages_enqueued` | one exact-validated atomic FIFO enqueue plus exact `send`/`sendBatch`/`call`/`callBatch` source, symbolic-self provenance when authored, resolved target declaration, and item correlation |
 | `actor_message` | receive acceptance, validated reply, or settlement; pool facts carry the durable `workerIndex` assignment |
 | `actor_call_resolved` | singleton caller wake-up |
 | `actor_batch_call_resolved` | batch caller wake-up with exact ordered `messageIds` membership |
@@ -234,6 +234,6 @@ Explicit actors use the durable log as their only state. Creation, atomic enqueu
 
 ## Actor pools and batch facts
 
-`actor_created.definition` contains the endpoint union; a pool record carries declared concurrency and the worker graph and materializes exactly that many workers. `actor_messages_enqueued.source.kind` remains one of `send | sendBatch | call | callBatch`, and every envelope preserves `callId` when present plus authored `batchIndex`. Pool `actor_message` accepted/replied/settled facts require `workerIndex`; `occurrence` continues to name the endpoint. `actor_batch_call_resolved` stores `callId`, caller state, and ordered `messageIds`, while reply payloads stay in item reply facts.
+`actor_created.definition` contains the endpoint union; a pool record carries declared concurrency and the worker graph and materializes exactly that many workers. `actor_messages_enqueued.source.kind` remains one of `send | sendBatch | call | callBatch`, and every envelope preserves `callId` when present plus authored `batchIndex`. A normalized self-send retains `definition.self: true`, while `targetDeclaration` and `occurrence` record the resolved endpoint; for a pool this is the shared endpoint and `workerIndex` appears only when admission later assigns the message. Pool `actor_message` accepted/replied/settled facts require `workerIndex`; `occurrence` continues to name the endpoint. `actor_batch_call_resolved` stores `callId`, caller state, and ordered `messageIds`, while reply payloads stay in item reply facts.
 
 Replay validates the FIFO head, that the durably selected worker was idle and receive-compatible at that prefix, assignment/reply/settlement identity, group membership and order, and full settlement before resolution. Fresh execution may select any eligible worker. While a pool acceptance append is unprojected, the machine keeps an ordered pool-local reservation that virtually dequeues its message and occupies its worker; it does not gate ordinary actors, unrelated pools, or other durable work. Projection becomes the sole owner of active worker state when the matching acknowledgement is applied. Closing stops external admission but continues pool assignment and active work; stop requires an empty mailbox and no worker current message.

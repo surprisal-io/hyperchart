@@ -194,7 +194,7 @@ Package moves, UI work, and documentation edits must not alter this contract acc
 
 ## Explicit actor kernel
 
-Static actor declarations normalize into lexical paths while runtime occurrences are projected from creation/mailbox facts. The same finite occurrence input substrate now carries map `{key,item}` pairs. Machine effects perform exact async validation; only the single runner appends ordered facts. Details: [Explicit actors](./explicit-actors.md).
+Static actor declarations normalize into lexical paths while runtime occurrences are projected from creation/mailbox facts. The authoring-only `self()` marker is placement-rebased during normalization into that declaration path while retaining `self: true` provenance; runtime occurrence resolution therefore reuses ordinary lexical/map/generation addressing. It is send-only, so the one-current-message call kernel is unchanged. The same finite occurrence input substrate now carries map `{key,item}` pairs. Machine effects perform exact async validation; only the single runner appends ordered facts. Details: [Explicit actors](./explicit-actors.md).
 
 ## Actor pool architecture
 

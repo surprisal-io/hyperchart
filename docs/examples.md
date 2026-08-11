@@ -84,4 +84,4 @@ Examples are typechecked and covered by `tests/examples.test.ts`. If an example 
 
 ## Explicit actor pool
 
-[`examples/explicit-actors.chart.ts`](../examples/explicit-actors.chart.ts) is the checked bounded-worker example. A map-owned pool uses `callBatch` with a batch larger than concurrency; workers execute concurrently while the caller receives one input-ordered output array. The same guide also documents singleton actors and named replies: [Explicit actors](explicit-actors.md).
+[`examples/explicit-actors.chart.ts`](../examples/explicit-actors.chart.ts) is the checked bounded-worker example. A map-owned pool uses `callBatch` with a batch larger than concurrency; workers execute concurrently while the caller receives one input-ordered output array. Each APPLY handler also uses send-only `self()` to enqueue a FOLLOW_UP on the shared pool endpoint before replying. The same guide documents singleton actors and named replies: [Explicit actors](explicit-actors.md).

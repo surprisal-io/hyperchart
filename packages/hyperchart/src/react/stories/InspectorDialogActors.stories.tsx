@@ -8,6 +8,7 @@ import {
 	actorFailureRun,
 	actorIdleRun,
 	actorReentryRun,
+	actorSelfSendRun,
 	actorPoolIdleRun,
 	actorPoolCrowdedRun,
 	actorPoolPartialBatchRun,
@@ -72,6 +73,23 @@ export const PoolIdle: Story = {
 export const PoolBusyBacklog: Story = {
 	name: "Pool Busy Slots and Backlog",
 	args: { runs: [actorPoolCrowdedRun], selectedRunId: actorPoolCrowdedRun.runId },
+};
+export const PoolSelfSend: Story = {
+	name: "Pool Self-send",
+	args: { runs: [actorSelfSendRun], selectedRunId: actorSelfSendRun.runId },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		const graph = within(canvas.getByRole("main"));
+
+		await userEvent.click(await graph.findByTitle("@workers"));
+		await userEvent.click(canvas.getByRole("button", { name: "Open scope" }));
+		await userEvent.click(await graph.findByTitle("@workers.$worker.fanout"));
+		const selfTarget = canvas.getByRole("button", { name: "Navigate to actor state @workers" });
+		await expect(selfTarget).toHaveTextContent("Self()");
+		await userEvent.hover(selfTarget);
+		await expect(canvas.getByRole("tooltip")).toHaveTextContent("state @workers");
+		await userEvent.unhover(selfTarget);
+	},
 };
 export const PoolPartialBatch: Story = {
 	name: "Pool Partial callBatch",

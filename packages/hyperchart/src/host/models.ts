@@ -123,6 +123,8 @@ export interface HyperchartActorMessageContractInfo {
 export interface HyperchartActorMessageDefinitionInfo {
 	kind: "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply";
 	to?: string;
+	resolvedTo?: string;
+	targetKind?: "actor" | "self";
 	event?: string;
 	target?: string;
 	payload?: {
@@ -482,6 +484,7 @@ export interface HyperchartStateInfo {
 		kind: "send" | "sendBatch" | "call" | "callBatch" | "reply";
 		to: string;
 		event?: string;
+		self?: true;
 		pending?: boolean;
 		messages?: HyperchartActorSentMessageInfo[];
 	};

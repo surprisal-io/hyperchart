@@ -40,13 +40,13 @@ Do not expand the `onReenter` API or add more special cases until this decision 
 
 Decide what replay should mean. The original idea was based on branching, but the current implementation behaves differently.
 
-## Complete actor recursion
+## Complete recursive actor calls
 
-Add recursive actor messaging. `self()` is part of this feature: it must provide a typed capability for the current actor without requiring its declaration to exist before the actor template is defined.
+Send-only recursive actor messaging is implemented: `self()` is a typed symbolic capability for actor-local `send()`/`sendBatch()`, resolves to the current logical endpoint (the shared endpoint for a pool), preserves placement/map/generation identity, and uses ordinary FIFO drain semantics. Calls to `self()` remain rejected.
 
-Define the mailbox semantics before adding the API. A self-`send` can enqueue work for processing after the current message settles, while a self-`call` would deadlock under the current non-reentrant one-current-message rule unless it has explicit tail-call or reentrant semantics. Recursive and cyclic actor calls need one coherent policy rather than accidental exceptions.
+Do not enable self-`call` or static actor call cycles without choosing one coherent tail-call or reentrant policy. Under the current non-reentrant one-current-message rule, an ordinary self-call deadlocks; bounded pool capacity only makes that failure depth-dependent rather than valid.
 
-The implementation must cover normalization and cycle legality, durable addressing/correlation, replay and rewind, owner shutdown/draining, actor-local references, Inspector/TUI presentation, tests, TLA+, and trace validation.
+Any future recursive-call implementation must cover durable frame/correlation semantics, cycle legality and deadlock behavior, replay and rewind, shutdown/draining, failure and cancellation, Inspector/TUI presentation, tests, TLA+, and trace validation.
 
 ## Support named replies in `callBatch()`
 

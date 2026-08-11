@@ -108,6 +108,8 @@ export type HyperchartInspectActorMessageContract = {
 export type HyperchartInspectActorMessageDefinition = {
 	kind: "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply";
 	to?: string;
+	resolvedTo?: string;
+	targetKind?: "actor" | "self";
 	event?: string;
 	target?: string;
 	payload?: { label: "input" | "inputs" | "output"; source: string; schema?: JsonSchema };
@@ -151,7 +153,7 @@ export type HyperchartInspectState = {
 	branches?: HyperchartInspectBranch[];
 	retries?: number;
 	transitions?: HyperchartInspectTransition[];
-	actorMessageLink?: { kind: "send" | "sendBatch" | "call" | "callBatch"; to: string; event: string };
+	actorMessageLink?: { kind: "send" | "sendBatch" | "call" | "callBatch"; to: string; event: string; self?: true };
 	actorMessageDefinition?: HyperchartInspectActorMessageDefinition;
 	finalConfig?: {
 		outcome: "complete" | "failed";
@@ -271,9 +273,11 @@ function outgoingActorMessageDefinition(
 ): HyperchartInspectActorMessageDefinition {
 	const message = ast.actors[state.to]?.protocol[state.event];
 	const source = hyperchartValueSource(state.kind === "send" || state.kind === "call" ? state.input : state.inputs);
+	const authoredSelf = (state.kind === "send" || state.kind === "sendBatch") && state.self === true;
 	return {
 		kind: state.kind,
-		to: state.to,
+		to: authoredSelf ? "self()" : state.to,
+		...(authoredSelf ? { resolvedTo: state.to, targetKind: "self" as const } : { targetKind: "actor" as const }),
 		event: state.event,
 		...(state.target === undefined ? {} : { target: state.target }),
 		payload: {
@@ -360,11 +364,12 @@ function actorDefinitionStates(
 			};
 		}
 		if (state.kind === "send" || state.kind === "sendBatch") {
+			const targetLabel = state.self === true ? "self()" : state.to;
 			return {
 				...common,
 				kind: state.kind,
-				task: `${state.event} → ${state.to}`,
-				actorMessageLink: { kind: state.kind, to: state.to, event: state.event },
+				task: `${state.event} → ${targetLabel}`,
+				actorMessageLink: { kind: state.kind, to: state.to, event: state.event, ...(state.self === true ? { self: true as const } : {}) },
 				actorMessageDefinition: outgoingActorMessageDefinition(ast, state),
 				transitions: [{ event: "ENQUEUED", target: `${actorBase}.${state.target}` }],
 			};

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, send, t } from "../packages/hyperchart/src/core/dsl.js";
+import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t } from "../packages/hyperchart/src/core/dsl.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
 import { hyperchartSource } from "../packages/hyperchart/src/core/source.js";
 
@@ -116,6 +116,32 @@ describe("hyperchart source", () => {
 		expect(hyperchartSource(parsed.ast, "@worker")).toContain("worker: actor(");
 		expect(hyperchartSource(parsed.ast, "@worker.idle")).toContain("idle: receive(");
 		expect(hyperchartSource(parsed.ast, "@worker.settle")).toContain("settle: reply(");
+	});
+
+	it("renders self() symbolically and round-trips its resolved placement identity", () => {
+		const Protocol = protocol({ PING: message({ input: z.object({ id: z.number() }) }) });
+		const Worker = actor({
+			input: z.object({}), protocol: Protocol, initial: "idle",
+			states: {
+				idle: receive({ on: { PING: "again" } }),
+				again: sendBatch({ to: self(), event: "PING", inputs: [{ id: 2 }], target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		});
+		const worker = Worker({});
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart", id: "actor-self-source", actors: { worker }, initial: "start",
+			states: { start: send({ to: worker, event: "PING", input: { id: 1 }, target: "done" }), done: final() },
+		}));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain("to: self()");
+		expect(source).not.toContain('to: "@worker"');
+		const scope = { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t, z };
+		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
+		const roundTrip = normalizeChartConfig(rebuilt);
+		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));
+		expect(roundTrip.ast).toEqual(parsed.ast);
 	});
 
 	it("preallocates actor declarations before actor-workflow dependencies", () => {

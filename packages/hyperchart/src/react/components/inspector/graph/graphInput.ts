@@ -1,7 +1,7 @@
 import type { HyperchartRunInfo, HyperchartStateInfo } from "../../../types.js";
 import { isImplicitFailedFinal } from "../helpers/state.js";
 
-export type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "sendBatch" | "call" | "callBatch" | "reply" };
+export type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "sendBatch" | "call" | "callBatch" | "reply"; self?: true };
 
 export type GraphInput = {
 	stateById: Map<string, HyperchartStateInfo>;
@@ -18,8 +18,8 @@ function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): 
 		if (!visibleIds.has(state.id)) continue;
 		const link = state.actorMessageLink;
 		if (link !== undefined && visibleIds.has(link.to) && link.to !== state.id) {
-			const key = `${state.id}\u0000${link.to}\u0000${link.kind}`;
-			grouped.set(key, { source: state.id, target: link.to, labels: [link.event ?? link.kind], kind: link.kind });
+			const key = `${state.id}\u0000${link.to}\u0000${link.kind}${link.self === true ? "\u0000self" : ""}`;
+			grouped.set(key, { source: state.id, target: link.to, labels: [link.event ?? link.kind], kind: link.kind, ...(link.self === true ? { self: true } : {}) });
 		}
 		const occurrence = state.actorOccurrence;
 		const caller = occurrence?.pendingCaller;

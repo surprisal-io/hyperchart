@@ -648,6 +648,8 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 					actorMessageDefinition: {
 						kind: state.actorMessageDefinition.kind,
 						...(state.actorMessageDefinition.to === undefined ? {} : { to: state.actorMessageDefinition.to }),
+						...(state.actorMessageDefinition.resolvedTo === undefined ? {} : { resolvedTo: state.actorMessageDefinition.resolvedTo }),
+						...(state.actorMessageDefinition.targetKind === undefined ? {} : { targetKind: state.actorMessageDefinition.targetKind }),
 						...(state.actorMessageDefinition.event === undefined ? {} : { event: state.actorMessageDefinition.event }),
 						...(state.actorMessageDefinition.target === undefined ? {} : { target: state.actorMessageDefinition.target }),
 						...(state.actorMessageDefinition.payload === undefined

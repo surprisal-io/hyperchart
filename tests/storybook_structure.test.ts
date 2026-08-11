@@ -97,6 +97,11 @@ describe("Storybook information architecture", () => {
 			type: "callBatch",
 			actorMessageLink: { kind: "callBatch", to: "@workers", event: "WORK" },
 		});
+		expect(visualState("Self-send state")).toMatchObject({
+			type: "sendBatch",
+			actorMessageLink: { kind: "sendBatch", to: "@workers", event: "CRAWL", self: true },
+			actorMessageDefinition: { to: "self()", resolvedTo: "@workers", targetKind: "self" },
+		});
 		expect(visualState("Empty pending map")).toMatchObject({
 			status: "pending",
 			mapConfig: expect.not.objectContaining({ items: expect.anything() }),
@@ -357,6 +362,7 @@ describe("Storybook information architecture", () => {
 			"ActorReentry",
 			"PoolIdle",
 			"PoolBusyBacklog",
+			"PoolSelfSend",
 			"PoolPartialBatch",
 			"PoolMapGenerationReentry",
 			"ClosingAndDraining",
@@ -367,7 +373,8 @@ describe("Storybook information architecture", () => {
 		expect(dialogSource).not.toMatch(/PendingTypedCall|FireAndForgetVoidSettlement|NamedReplyVariants/);
 
 		const graphSource = readFileSync(join(storyDirectory, "InspectorGraphActors.stories.tsx"), "utf8");
-		expect(graphSource.match(/<GraphTile\b/g)).toHaveLength(6);
+		expect(graphSource.match(/<GraphTile\b/g)).toHaveLength(7);
+		expect(graphSource).toContain("self-send · shared pool endpoint");
 		expect(graphSource).toContain("structured drain · SEND-only");
 		expect(graphSource).toContain("visibleStateIds={drainingRootStateIds}");
 		expect(graphSource).not.toMatch(/actorNamedReplyRun|actorSendVoidRun/);

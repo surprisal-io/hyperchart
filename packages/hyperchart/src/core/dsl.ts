@@ -8,6 +8,7 @@ import type {
 	ActorTemplate,
 	ActorPoolTemplate,
 	ActorVerification,
+	ActorSelfTarget,
 	CallRouting,
 	InferSchema,
 	MessageInput,
@@ -119,11 +120,18 @@ export function receive<const O extends Omit<ReceiveStateCst, "kind">>(options: 
 	return { kind: "receive", ...options };
 }
 
+/** Symbolic capability for the current actor endpoint; valid only in actor-local send/sendBatch states. */
+export function self(): ActorSelfTarget {
+	return Object.freeze({ kind: "actorSelf" });
+}
+
 export function send<
 	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
->(options: { to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> }): { kind: "send"; to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } {
+>(options: { to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> }): { kind: "send"; to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> };
+export function send<const M extends string, const Target extends string, const Input>(options: { to: ActorSelfTarget; event: M; target: Target; input: Input }): { kind: "send"; to: ActorSelfTarget; event: M; target: Target; input: Input };
+export function send(options: Omit<SendStateCst, "kind">): SendStateCst {
 	return { kind: "send", ...options };
 }
 
@@ -131,7 +139,9 @@ export function sendBatch<
 	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
->(options: { to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> }): { kind: "sendBatch"; to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> } {
+>(options: { to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> }): { kind: "sendBatch"; to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> };
+export function sendBatch<const M extends string, const Target extends string, const Inputs>(options: { to: ActorSelfTarget; event: M; target: Target; inputs: Inputs }): { kind: "sendBatch"; to: ActorSelfTarget; event: M; target: Target; inputs: Inputs };
+export function sendBatch(options: Omit<SendBatchStateCst, "kind">): SendBatchStateCst {
 	return { kind: "sendBatch", ...options };
 }
 

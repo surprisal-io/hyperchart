@@ -358,4 +358,4 @@ Use [`actor()`, protocols, `receive()`, `send()`, `call()`, and `reply()`](./exp
 
 ### Actor pools and batches
 
-Use `actorPool({ concurrency, worker })` when one statically placed capability needs bounded parallelism. The endpoint keeps one durable FIFO mailbox and fixed persistent workers; use singleton `send`/`call` or explicit non-empty `sendBatch`/single-reply `callBatch`. `callBatch` publishes outputs only after all items settle and preserves input order. See [Explicit actors](explicit-actors.md).
+Use `actorPool({ concurrency, worker })` when one statically placed capability needs bounded parallelism. The endpoint keeps one durable FIFO mailbox and fixed persistent workers; use singleton `send`/`call` or explicit non-empty `sendBatch`/single-reply `callBatch`. Inside an actor template, `send({ to: self(), ... })` and `sendBatch({ to: self(), ... })` enqueue follow-up work on the current logical endpoint; pool self-sends return to the shared endpoint, not a concrete worker. Calls to `self()` are deliberately unsupported. `callBatch` publishes outputs only after all items settle and preserves input order. See [Explicit actors](explicit-actors.md).

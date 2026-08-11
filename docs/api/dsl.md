@@ -829,7 +829,7 @@ Values:
 ```text
 actor, actorPool, actorInput, call, callBatch, chart, agent, artifact, compound,
 contract, event, final, input, json, map, message, messageInput, parallel,
-protocol, receive, refs, reply, resume, script, send, sendBatch, t, tsImport,
+protocol, receive, refs, reply, resume, script, self, send, sendBatch, t, tsImport,
 user, visit, z
 ```
 
@@ -838,7 +838,7 @@ The argument, result, artifact-read, map-key, and map-item constructors are meth
 Authoring types:
 
 ```text
-ActionStateCst, AgentActionCst, ArtifactCst, ArtifactOfCst, AfterCst,
+ActionStateCst, ActorSelfTarget, AgentActionCst, ArtifactCst, ArtifactOfCst, AfterCst,
 ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst,
 EventBindingCst, FinalStateCst, InputRef,
 JoinArtifactOfCst, MapStateCst, OnReject, OnReenterCst,
@@ -857,6 +857,8 @@ const workers = Pool({ projectId: arg("projectId") });
 
 send({ to: workers, event: "WORK", input: one, target: "next" });
 sendBatch({ to: workers, event: "WORK", inputs: [one, two], target: "next" });
+// Inside the worker actor template only:
+sendBatch({ to: self(), event: "WORK", inputs: [one, two], target: "settle" });
 call({ to: workers, event: "WORK", input: one, target: "next" });
 callBatch({ to: workers, event: "WORK", inputs: result("prepare", "items"), target: "merge" });
 ```
@@ -865,4 +867,6 @@ callBatch({ to: workers, event: "WORK", inputs: result("prepare", "items"), targ
 
 `send` and `call` accept exactly one `input`. `sendBatch` and `callBatch` accept `inputs`; literal values are typed as non-empty tuples, while a ref-resolved array is checked non-empty at the runtime boundary. Every item is exact-validated before the single atomic enqueue fact. All four factories address ordinary actors or pools. `callBatch` is available only for a protocol message with one `reply` schema, waits for every item settlement, and stores typed `Output[]` in authored `batchIndex` order rather than completion order. Named- or void-reply protocols cannot be used with `callBatch`.
 
-`receive()` is the only acceptance point. `reply()` validates the inferred current message and returns the worker to its authored receive target. Use `actorInput()` and `messageInput()` for isolated actor-local data. See [Explicit event-sourced actors](../explicit-actors.md).
+`self()` is a zero-argument symbolic capability available only to actor-local `send` and `sendBatch`. The containing `actor()` checks its event and input against that actor's protocol, and normalization resolves the marker independently for every placement. For an ordinary actor it addresses that actor occurrence; for a pool worker it addresses the shared pool endpoint, so any eligible idle worker may accept the FIFO message. `self()` outside an actor and `call`/`callBatch` to `self()` are rejected.
+
+`receive()` is the only acceptance point. `reply()` validates the inferred current message and returns the worker to its authored receive target. A self-send is queued before the current workflow reaches its required `reply()` and is accepted only after an ordinary actor, or an eligible pool worker, returns to `receive()`. Use `actorInput()` and `messageInput()` for isolated actor-local data. See [Explicit event-sourced actors](../explicit-actors.md).

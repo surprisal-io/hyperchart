@@ -32,6 +32,7 @@ describe("React actor inspector structure", () => {
 			"Actor pool workers and backlog",
 			"Send state",
 			"Send batch state",
+			"Self-send state",
 			"Call state",
 			"Call batch state",
 			"Receive state",
@@ -65,6 +66,23 @@ describe("React actor inspector structure", () => {
 		}
 		expect(batchStates).toHaveLength(2);
 		expect(stateKindMeta(batchStates[0]!).Icon).not.toBe(stateKindMeta(batchStates[1]!).Icon);
+
+		const selfTile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === "Self-send state")!);
+		if (selfTile.variant !== "panel" || selfTile.selectedStateId === null) throw new Error("missing self-send fixture");
+		const selfState = selfTile.run.states.find((state) => state.id === selfTile.selectedStateId);
+		expect(selfState).toMatchObject({
+			actorMessageLink: { kind: "sendBatch", to: "@workers", event: "CRAWL", self: true },
+			actorMessageDefinition: { to: "self()", resolvedTo: "@workers", targetKind: "self" },
+		});
+		const selfMarkup = selfState === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state: selfState, allStates: selfTile.run.states, onNavigateToState: () => undefined }));
+		expect(selfMarkup).toContain("Self()");
+		expect(selfMarkup).toContain('aria-label="Navigate to actor state @workers"');
+		expect(selfMarkup).toContain("@workers");
+		expect(selfMarkup).toContain("react-syntax-highlighter");
+		const selfGraph = buildGraph(selfTile.run, new Set(["@workers.$worker.fanout", "@workers"]));
+		expect(selfGraph.edges).toEqual(expect.arrayContaining([
+			expect.objectContaining({ source: "@workers.$worker.fanout", target: "@workers", label: "sendBatch · CRAWL · self" }),
+		]));
 
 		const poolTile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === "Actor pool workers and backlog")!);
 		expect(poolTile.variant).toBe("panel");

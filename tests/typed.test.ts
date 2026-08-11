@@ -15,6 +15,7 @@ import {
 	receive,
 	refs,
 	reply,
+	self,
 	script,
 	send,
 	sendBatch,
@@ -368,6 +369,32 @@ describe("typed explicit actor protocols", () => {
 		callBatch({ to: pool, event: "APPLY", inputs: [{ patch: "a" }], target: "next" });
 		// @ts-expect-error void messages cannot be used with callBatch
 		callBatch({ to: pool, event: "PING", inputs: [{ id: 1 }], target: "next" });
+	});
+
+	it("types self() sends against the containing actor protocol and excludes calls", () => {
+		const RecursiveProtocol = protocol({ NEXT: message({ input: z.object({ value: z.number() }).strict() }) });
+		const Recursive = actor({
+			input: z.object({}).strict(), protocol: RecursiveProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { NEXT: "forward" } }),
+				forward: send({ to: self(), event: "NEXT", input: { value: messageInput("NEXT", "value") }, target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		});
+		expect(Recursive({}).kind).toBe("actorDeclaration");
+
+		// @ts-expect-error self() input is checked against the containing protocol
+		actor({
+			input: z.object({}).strict(), protocol: RecursiveProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { NEXT: "forward" } }),
+				forward: send({ to: self(), event: "NEXT", input: { value: "wrong" }, target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		});
+
+		// @ts-expect-error self() is intentionally send-only
+		call({ to: self(), event: "NEXT", input: { value: 1 }, target: "settle" });
 	});
 
 	it("mutually checks reply graphs and actor-local selectors", () => {

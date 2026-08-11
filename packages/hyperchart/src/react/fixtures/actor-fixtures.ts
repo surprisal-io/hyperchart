@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { agent, actor, actorPool, arg, call, callBatch, chart, failed, final, item, map, message, protocol, receive, reply, send, sendBatch } from "../../core/dsl.js";
+import { agent, actor, actorPool, arg, call, callBatch, chart, failed, final, item, map, message, protocol, receive, reply, self, send, sendBatch } from "../../core/dsl.js";
 import type { DurableLogRecord, ActorMessageEnvelope } from "../../core/durable_events.js";
 import { explainReplay } from "../../core/replay_check.js";
 import type { ActorDeclarationAst, ActorEndpointDeclarationAst, CallStateAst, CallBatchStateAst, ChartAst, SendStateAst, SendBatchStateAst } from "../../core/types.js";
@@ -78,6 +78,23 @@ const baseEditorRecords: DurableLogRecord[] = [
 export const actorIdleRun = buildRun("idle", actorInspectorAst, actorInspectorInspectResult, baseEditorRecords);
 
 export const actorBusyFifoRun = buildRun("busy-fifo", actorInspectorAst, actorInspectorInspectResult, actorInspectorRecords(actorInspectorAst));
+
+const SelfProtocol = protocol({ CRAWL: message({ input: z.object({ url: z.string() }).strict() }) });
+const SelfWorker = actor({
+	input: z.object({}).strict(), protocol: SelfProtocol, initial: "idle",
+	states: {
+		idle: receive({ on: { CRAWL: "fanout" } }),
+		fanout: sendBatch({ to: self(), event: "CRAWL", inputs: [{ url: "/docs" }, { url: "/about" }], target: "settle" }),
+		settle: reply({ target: "idle" }),
+	},
+});
+const selfWorkers = actorPool({ concurrency: 3, worker: SelfWorker })({});
+export const actorSelfChart = chart({
+	kind: "chart", id: "actor-self-send-story", actors: { workers: selfWorkers }, initial: "start",
+	states: { start: send({ to: selfWorkers, event: "CRAWL", input: { url: "/" }, target: "done" }), done: final() },
+});
+export const actorSelfScenario = storyScenario(actorSelfChart);
+export const actorSelfSendRun = actorSelfScenario.staticRun({ runId: "actor:self-send" });
 
 const callEditor = Editor({ file: "src/index.ts" });
 const callScenario = storyScenario(chart({ kind: "chart", id: "actor-call-story", actors: { editor: callEditor }, initial: "apply", states: { apply: call({ to: callEditor, event: "APPLY", input: { patch: "follow-up" }, transitions: { APPLIED: "done", REJECTED: "done" } }), done: final() } }));

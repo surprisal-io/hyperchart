@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { HyperchartInspectorSidePanel } from "../../HyperchartInspectorDialog.js";
 import { CodeBlock } from "./CodeBlock.js";
 import { GeneratedRuntimeBlock } from "./GeneratedRuntimeBlock.js";
 import type { InspectorPanelTileProps } from "./types.js";
 
 export function InspectorPanelTile(props: InspectorPanelTileProps) {
+	const [navigatedStateId, setNavigatedStateId] = useState<string | null>();
 	if (props.variant === "validation-error") {
 		return (
 			<article className="min-w-0 overflow-hidden rounded-2xl border border-red-500 bg-[var(--bg-secondary)] shadow-[0_16px_48px_var(--shadow-card)]">
@@ -18,7 +20,8 @@ export function InspectorPanelTile(props: InspectorPanelTileProps) {
 		);
 	}
 
-	const { title, description, run, selectedStateId, definitionSource, runtimeSources } = props;
+	const { title, description, run, selectedStateId: initialSelectedStateId, definitionSource, runtimeSources } = props;
+	const selectedStateId = navigatedStateId ?? initialSelectedStateId;
 	const state = selectedStateId ? run.states.find((candidate) => candidate.id === selectedStateId) : undefined;
 	return (
 		<article className="min-w-0 overflow-x-auto overflow-y-hidden rounded-2xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] shadow-[0_16px_48px_var(--shadow-card)]">
@@ -43,6 +46,7 @@ export function InspectorPanelTile(props: InspectorPanelTileProps) {
 						run={run}
 						selectedStateId={selectedStateId}
 						onOpenScope={() => undefined}
+						onNavigateToState={setNavigatedStateId}
 						definitionSource={definitionSource}
 						className="bg-[var(--bg-secondary)]"
 					/>

@@ -381,6 +381,7 @@ export function StateDetails({
 				{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 				{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+				{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 			/>
 
 			{state.actorInternal === undefined && <ActorDetailsSection state={state} {...(onNavigateToState === undefined ? {} : { onNavigateToState })} />}

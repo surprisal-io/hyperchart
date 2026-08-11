@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { actorBusyFifoRun, actorDrainingRun, actorPoolBusyRun, actorPoolMapReentryRun, actorPoolOutOfOrderRun, actorReentryRun } from "../fixtures/actor-fixtures.js";
+import { actorBusyFifoRun, actorDrainingRun, actorPoolBusyRun, actorPoolMapReentryRun, actorPoolOutOfOrderRun, actorReentryRun, actorSelfSendRun } from "../fixtures/actor-fixtures.js";
 import { visibleStateIdsForScope } from "../components/inspector/helpers/scope.js";
 import { BoardPage, GraphTile } from "./components/index.js";
 
@@ -22,6 +22,7 @@ export const ActorNodesAndEdges: Story = {
 				<GraphTile title="pool complete · out-of-order work, ordered result" run={actorPoolOutOfOrderRun} height="h-[520px]" />
 				<GraphTile title="map-owned pool · generation 2" run={actorPoolMapReentryRun} height="h-[520px]" />
 				<GraphTile title="actor re-entry · generation 3" run={actorReentryRun} height="h-[520px]" />
+				<GraphTile title="self-send · shared pool endpoint" run={actorSelfSendRun} height="h-[620px]" className="xl:col-span-2" />
 				<GraphTile title="nested structured drain · SEND-only" run={actorDrainingRun} visibleStateIds={drainingRootStateIds} height="h-[480px]" />
 			</div>
 		</BoardPage>

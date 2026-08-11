@@ -153,6 +153,7 @@ export function buildGraph(
 			const edgeId = visualTransitionEdgeId(edge);
 			const running = sourceState?.status === "running";
 			const actorEdge = edge.kind !== undefined && edge.kind !== "transition";
+			const actorEdgeLabel = actorEdge ? `${edge.kind} · ${label}${edge.self === true ? " · self" : ""}` : label;
 			const routedPoints = layoutRoutes?.get(edgeId);
 			edges.push({
 				id: edgeId,
@@ -161,7 +162,7 @@ export function buildGraph(
 				sourceHandle: reactFlowHandleId("source", sides.source),
 				targetHandle: reactFlowHandleId("target", sides.target),
 				type: "transition",
-				label: actorEdge ? `${edge.kind} · ${label}` : label,
+				label: actorEdgeLabel,
 				markerEnd: {
 					type: MarkerType.ArrowClosed,
 					color: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,

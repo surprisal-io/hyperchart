@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import {
 	actor,
+	actorPool,
 	actorInput,
 	messageInput,
 	input,
@@ -24,6 +25,7 @@ import {
 	protocol,
 	receive,
 	reply,
+	self,
 	send,
 	sendBatch,
 	z,
@@ -120,6 +122,12 @@ class ActorRuntime implements Runtime {
 	async loadLogs() { return this.records; }
 }
 
+function isSelfEnqueue(record: DurableLogRecord): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> {
+	return record.type === "actor_messages_enqueued"
+		&& (record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch")
+		&& record.source.definition.self === true;
+}
+
 function parsed(input: unknown = actorChart()) {
 	const result = normalizeChartConfig(input);
 	assert(result.ok, result.diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join("\n"));
@@ -166,6 +174,130 @@ describe("explicit event-sourced actors", () => {
 		const replayed = projectBranch(createBranchProjection(runtime.ast), runtime.ast, JSON.parse(JSON.stringify(runtime.records)) as DurableLogRecord[]);
 		expect(replayed.actors).toEqual(state.projection.actors);
 		expect(replayed.activeLeaves).toEqual(state.projection.activeLeaves);
+	});
+
+	it("resolves self() to the current actor occurrence and drains recursively sent work", async () => {
+		const CrawlInput = z.object({ url: z.string() }).strict();
+		const CrawlProtocol = protocol({ CRAWL: message({ input: CrawlInput }) });
+		const Crawler = actor({
+			input: z.object({}).strict(), protocol: CrawlProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { CRAWL: "crawl" } }),
+				crawl: { kind: "state", action: agent("crawler", { reply: z.array(CrawlInput) }), transitions: { LINKS: "queue", LEAF: "settle" } },
+				queue: sendBatch({ to: self(), event: "CRAWL", inputs: result("crawl"), target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		});
+		const crawler = Crawler({});
+		const ast = parsed(chart({
+			kind: "chart", id: "actor-self-send", actors: { crawler }, initial: "start",
+			states: { start: send({ to: crawler, event: "CRAWL", input: { url: "root" }, target: "done" }), done: final() },
+		}));
+		const queue = ast.actors["@crawler"]?.kind === "actor" ? ast.actors["@crawler"].states.queue : undefined;
+		expect(queue).toMatchObject({ kind: "sendBatch", to: "@crawler", self: true });
+		expect(inspectChartAst(ast).states.find((state) => state.id === "@crawler.queue")).toMatchObject({
+			task: "CRAWL → self()",
+			actorMessageLink: { kind: "sendBatch", to: "@crawler", event: "CRAWL", self: true },
+			actorMessageDefinition: { to: "self()", resolvedTo: "@crawler", targetKind: "self" },
+		});
+		const runtime = new ActorRuntime(ast, undefined, {
+			"@crawler.crawl": [
+				{ type: "LINKS", output: [{ url: "a" }, { url: "b" }] },
+				{ type: "LEAF", output: [] },
+				{ type: "LEAF", output: [] },
+			],
+		});
+		const state = await loop(runtime);
+		expect(state.projection.actors["@crawler"]?.messages.map((message) => [message.input, message.status])).toEqual([
+			[{ url: "root" }, "settled"],
+			[{ url: "a" }, "settled"],
+			[{ url: "b" }, "settled"],
+		]);
+		const selfEnqueue = runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState === "@crawler.queue");
+		expect(selfEnqueue).toMatchObject({ occurrence: "@crawler", generation: 1, source: { targetDeclaration: "@crawler", definition: { self: true } } });
+		expect(explainReplay(ast, runtime.records)).toMatchObject({ prefixEnd: runtime.records.length, stale: [], skipped: [] });
+	});
+
+	it("keeps singleton self-sends inside each map-owned occurrence while draining", async () => {
+		const WorkInput = z.object({ id: z.string() }).strict();
+		const WorkProtocol = protocol({ ROOT: message({ input: WorkInput }), CHILD: message({ input: WorkInput }) });
+		const Worker = actor({
+			input: z.object({ itemId: z.string() }).strict(), protocol: WorkProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { ROOT: "queue", CHILD: "settleChild" } }),
+				queue: send({ to: self(), event: "CHILD", input: messageInput("ROOT"), target: "settleRoot" }),
+				settleRoot: reply({ target: "idle" }),
+				settleChild: reply({ target: "idle" }),
+			},
+		});
+		const worker = Worker({ itemId: item("id") });
+		const ast = parsed(chart({
+			kind: "chart", id: "map-self-send", initial: "prepare",
+			states: {
+				prepare: { kind: "state", action: agent("prepare-map-self"), transitions: { OK: "projects" } },
+				projects: map({
+					over: result("prepare", "items"), actors: { worker }, initial: "start", onDone: "done",
+					states: {
+						start: send({ to: worker, event: "ROOT", input: { id: item("id") }, target: "finished" }),
+						finished: final(),
+					},
+				}),
+				done: final(),
+			},
+		}));
+		const runtime = new ActorRuntime(ast, undefined, { prepare: [{ type: "OK", output: { items: { a: { id: "a" }, b: { id: "b" } } } }] });
+		const state = await loop(runtime);
+		for (const key of ["a", "b"]) {
+			const occurrence = `projects#${key}.@worker`;
+			expect(state.projection.actors[occurrence]?.messages.map((message) => [message.event, message.input, message.status])).toEqual([
+				["ROOT", { id: key }, "settled"],
+				["CHILD", { id: key }, "settled"],
+			]);
+		}
+		const selfEnqueues = runtime.records.filter(isSelfEnqueue);
+		expect(selfEnqueues.map((record) => [record.source.producerState, record.occurrence])).toEqual(expect.arrayContaining([
+			["projects#a.@worker.queue", "projects#a.@worker"],
+			["projects#b.@worker.queue", "projects#b.@worker"],
+		]));
+
+		const redirected = structuredClone(runtime.records);
+		const fromA = redirected.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState === "projects#a.@worker.queue");
+		if (fromA?.type !== "actor_messages_enqueued") throw new Error("missing map self enqueue");
+		(fromA as { occurrence: string }).occurrence = "projects#b.@worker";
+		const redirectedReplay = explainReplay(ast, redirected);
+		expect(redirectedReplay.stale.map((entry) => entry.message)).toContain("Actor self-send escaped its producer occurrence for projects#a.@worker.queue");
+	});
+
+	it("routes pool worker self-send batches through the shared FIFO endpoint", async () => {
+		const WorkInput = z.object({ id: z.number() }).strict();
+		const WorkProtocol = protocol({ WORK: message({ input: WorkInput }) });
+		const Worker = actor({
+			input: z.object({}).strict(), protocol: WorkProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { WORK: "work" } }),
+				work: { kind: "state", action: agent("pool-self-worker", { reply: z.array(WorkInput) }), transitions: { MORE: "queue", DONE: "settle" } },
+				queue: sendBatch({ to: self(), event: "WORK", inputs: result("work"), target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		});
+		const workers = actorPool({ concurrency: 2, worker: Worker })({});
+		const ast = parsed(chart({
+			kind: "chart", id: "pool-self-send", actors: { workers }, initial: "start",
+			states: { start: send({ to: workers, event: "WORK", input: { id: 0 }, target: "done" }), done: final() },
+		}));
+		const runtime = new ActorRuntime(ast, undefined, {
+			"@workers.$worker-0.work": [{ type: "MORE", output: [{ id: 1 }, { id: 2 }] }, { type: "DONE", output: [] }],
+			"@workers.$worker-1.work": [{ type: "DONE", output: [] }],
+		});
+		const state = await loop(runtime);
+		const pool = state.projection.actorPools["@workers"];
+		expect(pool?.messages).toHaveLength(3);
+		expect(pool?.messages.every((message) => message.status === "settled")).toBe(true);
+		expect(new Set(pool?.messages.slice(1).map((message) => message.workerIndex))).toEqual(new Set([0, 1]));
+		expect(runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState.includes(".$worker-"))).toMatchObject({
+			occurrence: "@workers",
+			source: { targetDeclaration: "@workers", definition: { self: true } },
+		});
 	});
 
 	it("holds an actor-owning compound final until queued mail drains before invoking its successor", async () => {
@@ -825,6 +957,65 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		expect(run.states.some((entry) => entry.id.includes("~2"))).toBe(false);
+	});
+
+	it("binds self-send to each concrete re-entry generation", async () => {
+		const Ping = z.object({ value: z.string() }).strict();
+		const SelfProtocol = protocol({ ROOT: message({ input: Ping }), CHILD: message({ input: Ping }) });
+		const SelfWorker = actor({
+			input: z.object({}).strict(), protocol: SelfProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { ROOT: "queue", CHILD: "settleChild" } }),
+				queue: send({ to: self(), event: "CHILD", input: messageInput("ROOT"), target: "settleRoot" }),
+				settleRoot: reply({ target: "idle" }),
+				settleChild: reply({ target: "idle" }),
+			},
+		});
+		const worker = SelfWorker({});
+		const ast = parsed(chart({
+			kind: "chart", id: "self-reentry", initial: "phase",
+			states: {
+				phase: {
+					kind: "compound", actors: { worker }, initial: "start", onDone: "between",
+					states: { start: send({ to: worker, event: "ROOT", input: { value: "ping" }, target: "finished" }), finished: final() },
+				},
+				between: { kind: "state", action: agent("self-reentry-choice"), transitions: { AGAIN: "phase", DONE: "done" } },
+				done: final(),
+			},
+		}));
+		const runtime = new ActorRuntime(ast, undefined, { between: ["AGAIN", "DONE"] });
+		await loop(runtime);
+		const selfEnqueues = runtime.records.filter(isSelfEnqueue);
+		expect(selfEnqueues.map((record) => [record.occurrence, record.generation, record.source.producerState])).toEqual([
+			["phase.@worker", 1, "phase.@worker.queue"],
+			["phase.@worker~2", 2, "phase.@worker~2.queue"],
+		]);
+		expect(explainReplay(ast, runtime.records)).toMatchObject({ prefixEnd: runtime.records.length, stale: [], skipped: [] });
+	});
+
+	it("rejects self() outside actors and on recursive calls", () => {
+		const outside = normalizeChartConfig(chart({
+			kind: "chart", id: "self-outside", initial: "send",
+			states: { send: send({ to: self(), event: "RECORD", input: { path: "x" }, target: "done" }), done: final() },
+		}));
+		expect(outside.ok).toBe(false);
+		if (!outside.ok) expect(outside.diagnostics.map((entry) => entry.code)).toContain("SELF_OUTSIDE_ACTOR");
+
+		const Recursive = (actor as (options: unknown) => (input: unknown) => ReturnType<typeof Auditor>)({
+			input: z.object({}).strict(), protocol: AuditProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { RECORD: "recurse" } }),
+				recurse: { kind: "call", to: self(), event: "RECORD", input: { path: "x" }, target: "settle" },
+				settle: reply({ target: "idle" }),
+			},
+		});
+		const recursive = Recursive({});
+		const recursiveCall = normalizeChartConfig(chart({
+			kind: "chart", id: "self-call", actors: { recursive }, initial: "start",
+			states: { start: send({ to: recursive, event: "RECORD", input: { path: "x" }, target: "done" }), done: final() },
+		}));
+		expect(recursiveCall.ok).toBe(false);
+		if (!recursiveCall.ok) expect(recursiveCall.diagnostics.map((entry) => entry.code)).toContain("SELF_CALL_FORBIDDEN");
 	});
 
 	it("rejects declarations in runtime data, duplicate or unused placement, illegal owners, and unavailable placement refs", () => {

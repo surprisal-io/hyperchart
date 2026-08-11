@@ -107,4 +107,4 @@ Include the chart id, run id, absolute run directory, current or terminal status
 
 For shared mutable resources, prefer a statically placed actor: declare its `protocol`, build an `actor()` template, place one invocation in the lexical owner's `actors`, and use typed `send`/`call`. Never invent dynamic actor names or route `FAILED`; business rejection is a named reply. Every handler must enter through `receive()` and terminate with graph-inferred `reply()`.
 
-When authoring bounded actor concurrency, use `actorPool({ concurrency, worker })`. Never encode batching as `send({ inputs })`: choose `sendBatch` or single-reply-only `callBatch`, and preserve FIFO/drain semantics.
+When authoring bounded actor concurrency, use `actorPool({ concurrency, worker })`. Never encode batching as `send({ inputs })`: choose `sendBatch` or single-reply-only `callBatch`, and preserve FIFO/drain semantics. Inside an actor template, use `self()` only with `send`/`sendBatch`; for a pool it addresses the shared endpoint, and recursive calls remain unsupported.

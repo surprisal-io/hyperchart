@@ -256,7 +256,12 @@ interface HyperchartStateInfo {
   visitHistory?: HyperchartVisitInfo[];
   issues?: HyperchartIssueInfo[];
   session?: HyperchartAgentSessionInfo;
-  actorMessageLink?: { kind: "send" | "call"; to: string; event: string };
+  actorMessageLink?: {
+    kind: "send" | "sendBatch" | "call" | "callBatch" | "reply";
+    to: string;
+    event?: string;
+    self?: true;
+  };
   actorDeclaration?: HyperchartActorDeclarationInfo;
   actorOccurrence?: HyperchartActorOccurrenceInfo;
 }
@@ -723,4 +728,4 @@ RunInspectSummary
 
 `HyperchartActorDeclarationInfo.kind` is `"actor" | "actorPool"` and pool declarations include `concurrency`. `HyperchartActorOccurrenceInfo` has the same discriminator plus optional `concurrency`, `activeCount`, `idleCount`, `workers`, and `batchCalls`. A `HyperchartActorPoolWorkerInfo` carries concrete `occurrencePath`, canonical navigable `currentStateId`, current/next message, worker-local messages, visits/session, and projected results. A `HyperchartActorBatchCallInfo` carries caller state, ordered ids/items, item `batchIndex`/status/worker, and settled/total progress.
 
-`HyperchartActorMessageInfo` preserves optional `batchIndex`, `workerIndex`, and `workerOccurrencePath`. `HyperchartStateType` and `actorMessageLink.kind` preserve `sendBatch` and `callBatch`; adapters do not collapse them into singleton operations.
+`HyperchartActorMessageInfo` preserves optional `batchIndex`, `workerIndex`, and `workerOccurrencePath`. `HyperchartStateType` and `actorMessageLink.kind` preserve `sendBatch` and `callBatch`; adapters do not collapse them into singleton operations. A self-send keeps `actorMessageLink.self: true` while `to` remains the navigable logical endpoint. Its message definition exposes `targetKind: "self"`, author-facing `to: "self()"`, and `resolvedTo` for the concrete static placement, allowing details and graph views to distinguish self-addressing without losing navigation.

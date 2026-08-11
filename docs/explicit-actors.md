@@ -67,6 +67,8 @@ A root declaration has one occurrence per run. A map-owned declaration has one o
 
 Actor actions can read only immutable `actorInput()`, the accepted `messageInput()`, and actor-local results/artifacts/visits. Parent or sibling values must be captured explicitly in placement input.
 
+Inside an actor template, `self()` is a typed symbolic capability for that actor's current logical endpoint. It exists because the static declaration is created only after the reusable template has been defined. `self()` is valid only as `to` for `send()` and `sendBatch()`; normalization resolves it independently for every placement. At runtime it stays within the current map-item occurrence and targets the generation processing the producer message. It is rejected outside `actor()` and by `call()`/`callBatch()`.
+
 ## `send` and `call`
 
 ```ts
@@ -75,7 +77,7 @@ sendBatch({ to: actors.auditor, event: "RECORD", inputs: result("prepare", "reco
 call({ to: projectActors.editor, event: "APPLY", input: result("prepare"), transitions: { APPLIED: "done", REJECTED: "rework" } });
 ```
 
-`send` is fire-and-forget after one durable singleton enqueue and requires `input`. Use `sendBatch({ inputs })` for a non-empty batch; exact validation of every item happens before the one atomic enqueue fact, so failure writes no partial batch. `call` sends exactly one message and keeps the caller visit pending until the correlated typed reply. The optional `callId` is engine-owned; actors never name a reply recipient. Static actor-to-actor call cycles are rejected.
+`send` is fire-and-forget after one durable singleton enqueue and requires `input`. Use `sendBatch({ inputs })` for a non-empty batch; exact validation of every item happens before the one atomic enqueue fact, so failure writes no partial batch. An actor may enqueue follow-up work to itself with `send({ to: self(), ... })` or `sendBatch({ to: self(), ... })`; the current message continues to its required `reply()`, and the self-message waits in the ordinary FIFO until the endpoint can receive it. `call` sends exactly one message and keeps the caller visit pending until the correlated typed reply. The optional `callId` is engine-owned; actors never name a reply recipient. Static actor-to-actor call cycles and calls to `self()` are rejected.
 
 ## Durable ordering and shutdown
 
@@ -114,4 +116,4 @@ callBatch({ to: editors, event: "READ", inputs: result("prepare", "requests"), t
 
 `send()`/`call()` are singleton-only. `sendBatch()`/`callBatch()` require a non-empty batch, exact-validate every item before one atomic enqueue fact, and address ordinary actors or pools. `callBatch()` is limited to a protocol message with one `reply` schema and publishes its output array only after every item settles, in authored input order.
 
-Pool admission considers only the FIFO head and may durably assign it to any compatible idle worker. The accepted fact captures the scheduler choice as `workerIndex`; replay validates that the selected worker was idle and receive-compatible at that durable prefix rather than choosing again. Concrete identities (`@editors.$worker-0.apply`) isolate results, visits, artifacts, and sessions; normalized declarations use the canonical `$worker` segment. Workers persist through `reply()` and return to the authored receive target. Closing rejects external admission but drains backlog and current work; owners wait for every worker to stop. An unsupported head waits while any worker is busy and fails globally only when all workers are idle and incompatible.
+Pool admission considers only the FIFO head and may durably assign it to any compatible idle worker. The accepted fact captures the scheduler choice as `workerIndex`; replay validates that the selected worker was idle and receive-compatible at that durable prefix rather than choosing again. For a pool worker, `self()` means the shared logical pool endpoint, never that concrete worker; the resulting FIFO message may be assigned to any eligible idle worker. Concrete identities (`@editors.$worker-0.apply`) isolate results, visits, artifacts, and sessions; normalized declarations use the canonical `$worker` segment. Workers persist through `reply()` and return to the authored receive target. Closing rejects external admission but allows a current actor workflow to enqueue internal self-work, then drains backlog and current work; an unbounded self-send chain can therefore keep the owner draining. Owners wait for every worker to stop. An unsupported head waits while any worker is busy and fails globally only when all workers are idle and incompatible.
