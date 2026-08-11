@@ -248,3 +248,9 @@ The repository's Storybook boards cover light/dark themes, mobile layouts, long 
 - [Pi commands and run files](pi.md)
 - [Host API](api/host.md)
 - [React API](api/react.md)
+
+## Integrating actor pools
+
+Do not synthesize pool view models in a host. Feed the normalized AST and durable records to `hyperchartRunFromRuntime()`. Pool occurrences are discriminated by `kind: "actorPool"` and expose declared concurrency, active/idle counts, aggregate mailbox, concrete workers, per-worker visits/results/session/message history, and partial batch-call items. Queued messages remain endpoint-level until a durable acceptance fact assigns one to a worker; the host must not predict a scheduler choice. Message links keep `sendBatch` and `callBatch` distinct and include batch index and assigned worker identity.
+
+Use each worker's canonical `currentStateId` for Inspector navigation while displaying its concrete `occurrencePath` for durable identity. Keep batch item order from the adapter; never sort by reply timestamp. The React Inspector renders one endpoint node and one canonical worker workflow template, with concrete slot/history details under the endpoint.

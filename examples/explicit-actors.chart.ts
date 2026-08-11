@@ -1,12 +1,13 @@
 import {
 	actor,
-	call,
+	actorPool,
+	callBatch,
 	chart,
-	failed,
 	final,
 	item,
 	map,
 	message,
+	messageInput,
 	protocol,
 	receive,
 	reply,
@@ -16,10 +17,7 @@ import {
 const EditorProtocol = protocol({
 	APPLY: message({
 		input: z.object({ patch: z.string() }).strict(),
-		replies: {
-			APPLIED: z.object({ commit: z.string() }).strict(),
-			REJECTED: z.object({ reason: z.string() }).strict(),
-		},
+		reply: z.object({ patch: z.string() }).strict(),
 	}),
 });
 
@@ -29,11 +27,12 @@ const Editor = actor({
 	initial: "idle",
 	states: {
 		idle: receive({ on: { APPLY: "settle" } }),
-		settle: reply({ target: "idle", event: "APPLIED", output: { commit: "example" } }),
+		settle: reply({ target: "idle", output: messageInput("APPLY") }),
 	},
 });
 
-const editor = Editor({ projectId: item("id"), file: item("sourceFile") });
+const Editors = actorPool({ concurrency: 2, worker: Editor });
+const editors = Editors({ projectId: item("id"), file: item("sourceFile") });
 
 export default chart({
 	kind: "chart",
@@ -42,18 +41,21 @@ export default chart({
 	states: {
 		projects: map({
 			over: { kind: "arg", name: "projects" },
-			actors: { editor },
+			actors: { editors },
 			initial: "apply",
 			onDone: "done",
 			states: {
-				apply: call({
-					to: editor,
+				apply: callBatch({
+					to: editors,
 					event: "APPLY",
-					input: { patch: "example patch" },
-					transitions: { APPLIED: "finished", REJECTED: "rejected" },
+					inputs: [
+						{ patch: "first patch" },
+						{ patch: "second patch" },
+						{ patch: "third patch" },
+					],
+					target: "finished",
 				}),
 				finished: final(),
-				rejected: failed(),
 			},
 		}),
 		done: final(),

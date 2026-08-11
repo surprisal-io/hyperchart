@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
 	actor,
+	actorPool,
 	actorInput,
 	messageInput,
 	agent,
 	call,
+	callBatch,
 	final,
 	json,
 	map,
@@ -15,6 +17,7 @@ import {
 	reply,
 	script,
 	send,
+	sendBatch,
 	t,
 	z,
 } from "../packages/hyperchart/src/index.js";
@@ -329,7 +332,7 @@ describe("typed explicit actor protocols", () => {
 
 	it("infers target message inputs and exact named reply routes", () => {
 		expect(send({ to: declaration, event: "APPLY", input: { patch: "p" }, target: "next" }).event).toBe("APPLY");
-		expect(send({ to: declaration, event: "APPLY", inputs: [{ patch: "a" }, { patch: "b" }], target: "next" }).event).toBe("APPLY");
+		expect(sendBatch({ to: declaration, event: "APPLY", inputs: [{ patch: "a" }, { patch: "b" }], target: "next" }).event).toBe("APPLY");
 		expect(call({ to: declaration, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "retry" } }).event).toBe("APPLY");
 		expect(call({ to: declaration, event: "READ", input: { path: "x" }, target: "next" }).event).toBe("READ");
 
@@ -338,9 +341,11 @@ describe("typed explicit actor protocols", () => {
 		// @ts-expect-error wrong singleton input
 		send({ to: declaration, event: "APPLY", input: { path: "p" }, target: "next" });
 		// @ts-expect-error wrong batch element input
-		send({ to: declaration, event: "APPLY", inputs: [{ patch: "ok" }, { path: "bad" }], target: "next" });
-		// @ts-expect-error send has exactly one of input/inputs
-		send({ to: declaration, event: "APPLY", input: { patch: "p" }, inputs: [{ patch: "p" }], target: "next" });
+		sendBatch({ to: declaration, event: "APPLY", inputs: [{ patch: "ok" }, { path: "bad" }], target: "next" });
+		// @ts-expect-error singleton send has no inputs option
+		send({ to: declaration, event: "APPLY", inputs: [{ patch: "p" }], target: "next" });
+		// @ts-expect-error literal batches are non-empty
+		sendBatch({ to: declaration, event: "APPLY", inputs: [], target: "next" });
 		// @ts-expect-error named call must route every and only named reply
 		call({ to: declaration, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done" } });
 		// @ts-expect-error named call cannot add a reply event
@@ -351,6 +356,18 @@ describe("typed explicit actor protocols", () => {
 		call({ to: "@editor", event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "retry" } });
 		// @ts-expect-error a static capability cannot be embedded in message data
 		send({ to: declaration, event: "APPLY", input: { patch: declaration }, target: "next" });
+	});
+
+	it("types actor pools and permits callBatch only for single-reply protocols", () => {
+		const Pool = actorPool({ concurrency: 2, worker: Template });
+		const pool = Pool({ file: "src/index.ts" });
+		expect(send({ to: pool, event: "PING", input: { id: 1 }, target: "next" }).event).toBe("PING");
+		expect(sendBatch({ to: pool, event: "APPLY", inputs: [{ patch: "a" }], target: "next" }).event).toBe("APPLY");
+		expect(callBatch({ to: pool, event: "READ", inputs: [{ path: "a" }, { path: "b" }], target: "next" }).event).toBe("READ");
+		// @ts-expect-error named-reply messages cannot be used with callBatch
+		callBatch({ to: pool, event: "APPLY", inputs: [{ patch: "a" }], target: "next" });
+		// @ts-expect-error void messages cannot be used with callBatch
+		callBatch({ to: pool, event: "PING", inputs: [{ id: 1 }], target: "next" });
 	});
 
 	it("mutually checks reply graphs and actor-local selectors", () => {

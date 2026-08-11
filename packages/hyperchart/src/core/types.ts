@@ -98,6 +98,11 @@ export type ActorTemplate<P extends ProtocolCst, I, Brand> = {
 	readonly definition: ActorDefinitionCst;
 };
 
+export type ActorPoolTemplate<P extends ProtocolCst, I, Brand> = {
+	(input: ActorPlacement<I>): StaticActorPoolDeclaration<P, I, Brand>;
+	readonly definition: ActorPoolDefinitionCst;
+};
+
 type ActorPath<T> = T extends readonly unknown[]
 	? never
 	: T extends object
@@ -116,9 +121,9 @@ export type ActorArtifactRefMarker<State extends string, Artifact extends string
 
 type StateSuccessors<Node> = Node extends { kind: "state"; transitions: infer T; after?: infer A }
 	? (T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never) | (A extends { target: infer Target extends string } ? Target : never)
-	: Node extends { kind: "send"; target: infer Target extends string }
+	: Node extends { kind: "send" | "sendBatch"; target: infer Target extends string }
 		? Target
-		: Node extends { kind: "call"; target: infer Target extends string }
+		: Node extends { kind: "call" | "callBatch"; target: infer Target extends string }
 			? Target
 			: Node extends { kind: "call"; transitions: infer T }
 				? T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never
@@ -245,8 +250,9 @@ type ActionValues<Action> = Action extends { kind: "agent" }
 			: never;
 type NodeValues<Node> = Node extends { kind: "reply"; output: infer Output } ? Output
 	: Node extends { kind: "send"; input: infer Input } ? Input
-	: Node extends { kind: "send"; inputs: infer Inputs } ? Inputs
+	: Node extends { kind: "sendBatch"; inputs: infer Inputs } ? Inputs
 	: Node extends { kind: "call"; input: infer Input } ? Input
+	: Node extends { kind: "callBatch"; inputs: infer Inputs } ? Inputs
 	: Node extends { kind: "state"; action: infer Action } ? ActionValues<Action>
 	: never;
 type NodeSelectorsValid<P extends ProtocolCst, I, S, Id extends keyof S & string> = [NodeValues<S[Id]>] extends [never]
@@ -271,10 +277,17 @@ export type ActorVerification<I extends SchemaCst, P extends ProtocolCst, S, Ini
 		: { readonly "actor initial state must be receive()": never }
 	: { readonly "actor initial state is unknown": never };
 
-export type ProtocolOf<D> = D extends StaticActorDeclaration<infer P, unknown, unknown> ? P : never;
-export type SendInputOptions<I> =
-	| { input: ActorPlacement<I>; inputs?: never }
-	| { input?: never; inputs: ActorPlacement<I[]> | readonly ActorPlacement<I>[] };
+export type ProtocolOf<D> = D extends StaticActorDeclaration<infer P, unknown, unknown>
+	? P
+	: D extends StaticActorPoolDeclaration<infer P, unknown, unknown> ? P : never;
+
+export type NonEmptyActorBatch<I> =
+	| readonly [ActorPlacement<I>, ...ActorPlacement<I>[]]
+	| InputRef<readonly I[] | I[]>;
+
+export type SingleReplyMessageTypes<P extends ProtocolCst> = {
+	[M in keyof P & string]: P[M] extends { reply: SchemaCst } ? M : never;
+}[keyof P & string];
 
 export type CallRouting<P extends ProtocolCst, M extends keyof P, Target extends string = string> = P[M] extends {
 	replies: infer R extends Record<string, SchemaCst>;
@@ -644,8 +657,15 @@ export type SendStateCst = {
 	to: AnyStaticActorDeclaration;
 	event: string;
 	target: StateId;
-	input?: ValueExpr;
-	inputs?: ValueExpr;
+	input: ValueExpr;
+};
+
+export type SendBatchStateCst = {
+	kind: "sendBatch";
+	to: AnyStaticActorDeclaration;
+	event: string;
+	target: StateId;
+	inputs: ValueExpr;
 };
 
 export type CallStateCst = {
@@ -655,6 +675,14 @@ export type CallStateCst = {
 	input: ValueExpr;
 	target?: StateId;
 	transitions?: TransitionMapCst;
+};
+
+export type CallBatchStateCst = {
+	kind: "callBatch";
+	to: AnyStaticActorDeclaration;
+	event: string;
+	inputs: ValueExpr;
+	target: StateId;
 };
 
 export type ReplyStateCst = {
@@ -668,7 +696,9 @@ export type ActorWorkflowStateCst =
 	| ActionStateCst
 	| ReceiveStateCst
 	| SendStateCst
+	| SendBatchStateCst
 	| CallStateCst
+	| CallBatchStateCst
 	| ReplyStateCst;
 
 export type ActorDefinitionCst = {
@@ -677,6 +707,12 @@ export type ActorDefinitionCst = {
 	protocol: ProtocolCst;
 	initial: StateId;
 	states: Record<StateId, ActorWorkflowStateCst>;
+};
+
+export type ActorPoolDefinitionCst = {
+	kind: "actorPoolTemplate";
+	concurrency: number;
+	worker: ActorDefinitionCst;
 };
 
 /** Runtime shape returned by actor template invocation; public typing is carried by phantoms. */
@@ -693,7 +729,22 @@ export type StaticActorDeclaration<
 	readonly __declarationBrand?: Brand;
 };
 
-export type AnyStaticActorDeclaration = StaticActorDeclaration<ProtocolCst, unknown, unknown>;
+export type StaticActorPoolDeclaration<
+	P extends ProtocolCst = ProtocolCst,
+	I = unknown,
+	Brand = unknown,
+> = {
+	readonly kind: "actorPoolDeclaration";
+	readonly definition: ActorPoolDefinitionCst;
+	readonly input: ValueExpr<I>;
+	readonly __protocol?: P;
+	readonly __actorInput?: I;
+	readonly __declarationBrand?: Brand;
+};
+
+export type AnyStaticActorDeclaration =
+	| StaticActorDeclaration<ProtocolCst, unknown, unknown>
+	| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>;
 
 export type StateCst =
 	| ActionStateCst
@@ -702,7 +753,9 @@ export type StateCst =
 	| ParallelStateCst
 	| MapStateCst
 	| SendStateCst
-	| CallStateCst;
+	| SendBatchStateCst
+	| CallStateCst
+	| CallBatchStateCst;
 
 export type ChartCst = ActorOwnerCst & {
 	kind: "chart";
@@ -833,10 +886,20 @@ export type SendStateAst = Readonly<{
 	to: StatePath;
 	event: string;
 	target: StateId;
-	/** Empty; present so generic control-flow inspection can treat send as a state node. */
+	/** Empty; present so generic control-flow inspection can treat messaging as a state node. */
 	transitions: Readonly<Record<EventType, TransitionAst>>;
-	input?: ValueAst;
-	inputs?: ValueAst;
+	input: ValueAst;
+}>;
+
+export type SendBatchStateAst = Readonly<{
+	kind: "sendBatch";
+	id: StateId;
+	parent?: StatePath;
+	to: StatePath;
+	event: string;
+	target: StateId;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
+	inputs: ValueAst;
 }>;
 
 export type CallStateAst = Readonly<{
@@ -847,6 +910,17 @@ export type CallStateAst = Readonly<{
 	event: string;
 	input: ValueAst;
 	target?: StateId;
+	transitions: Readonly<Record<EventType, TransitionAst>>;
+}>;
+
+export type CallBatchStateAst = Readonly<{
+	kind: "callBatch";
+	id: StateId;
+	parent?: StatePath;
+	to: StatePath;
+	event: string;
+	inputs: ValueAst;
+	target: StateId;
 	transitions: Readonly<Record<EventType, TransitionAst>>;
 }>;
 
@@ -864,8 +938,18 @@ export type ActorWorkflowStateAst =
 	| ActionStateAst
 	| ReceiveStateAst
 	| SendStateAst
+	| SendBatchStateAst
 	| CallStateAst
+	| CallBatchStateAst
 	| ReplyStateAst;
+
+export type ActorDefinitionAst = Readonly<{
+	input: SchemaAst;
+	protocol: ProtocolAst;
+	initial: StateId;
+	/** Flat actor-local graph keyed by paths relative to the executable actor. */
+	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>;
+}>;
 
 export type ActorDeclarationAst = Readonly<{
 	kind: "actor";
@@ -876,9 +960,22 @@ export type ActorDeclarationAst = Readonly<{
 	inputValue: ValueAst;
 	protocol: ProtocolAst;
 	initial: StateId;
-	/** Flat actor-local graph keyed by paths relative to this declaration. */
 	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>;
 }>;
+
+export type ActorPoolDeclarationAst = Readonly<{
+	kind: "actorPool";
+	name: string;
+	path: StatePath;
+	owner?: StatePath;
+	input: SchemaAst;
+	inputValue: ValueAst;
+	protocol: ProtocolAst;
+	concurrency: number;
+	worker: ActorDefinitionAst;
+}>;
+
+export type ActorEndpointDeclarationAst = ActorDeclarationAst | ActorPoolDeclarationAst;
 
 export type MapStateAst = Readonly<{
 	kind: "map";
@@ -901,7 +998,9 @@ export type StateAst =
 	| ParallelStateAst
 	| MapStateAst
 	| SendStateAst
-	| CallStateAst;
+	| SendBatchStateAst
+	| CallStateAst
+	| CallBatchStateAst;
 
 export type ChartAst = Readonly<{
 	kind: "chart";
@@ -910,7 +1009,7 @@ export type ChartAst = Readonly<{
 	initial: StateId;
 	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).
 	states: Readonly<Record<StatePath, StateAst>>;
-	actors: Readonly<Record<StatePath, ActorDeclarationAst>>;
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>;
 }>;
 
 export type ActionEvent = {

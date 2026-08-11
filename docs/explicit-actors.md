@@ -71,11 +71,11 @@ Actor actions can read only immutable `actorInput()`, the accepted `messageInput
 
 ```ts
 send({ to: actors.auditor, event: "RECORD", input: { path: result("prepare", "path") }, target: "next" });
-send({ to: actors.auditor, event: "RECORD", inputs: result("prepare", "records"), target: "next" });
+sendBatch({ to: actors.auditor, event: "RECORD", inputs: result("prepare", "records"), target: "next" });
 call({ to: projectActors.editor, event: "APPLY", input: result("prepare"), transitions: { APPLIED: "done", REJECTED: "rework" } });
 ```
 
-`send` is fire-and-forget after a durable enqueue. It requires exactly one of `input` or `inputs`; an async exact validation failure writes no partial batch. `call` sends exactly one message and keeps the caller visit pending until the correlated typed reply. The optional `callId` is engine-owned; actors never name a reply recipient. Static actor-to-actor call cycles are rejected.
+`send` is fire-and-forget after one durable singleton enqueue and requires `input`. Use `sendBatch({ inputs })` for a non-empty batch; exact validation of every item happens before the one atomic enqueue fact, so failure writes no partial batch. `call` sends exactly one message and keeps the caller visit pending until the correlated typed reply. The optional `callId` is engine-owned; actors never name a reply recipient. Static actor-to-actor call cycles are rejected.
 
 ## Durable ordering and shutdown
 
@@ -98,3 +98,20 @@ Durability does not make external side effects exactly-once. Replay and rewind r
 ## Inspector
 
 Static actor declarations are nested under their lexical owner; runtime occurrences remain separate per map item. Actor details show immutable input, protocol schemas, current state, ordered mailbox, current message, producer visit/call correlation, reply validation, drain, visits, and actor-local outputs. Fire-and-forget send edges are dashed; call/reply correlation is shown as a wait edge. Large mailboxes use head/count with an expandable ordered list.
+
+## Static actor pools and explicit batches
+
+`actorPool({ concurrency, worker })` places one endpoint with one durable FIFO mailbox and exactly `concurrency` persistent workers. It infers placement input and protocol from the worker template.
+
+```ts
+const Editors = actorPool({ concurrency: 4, worker: Editor });
+const editors = Editors({ file: arg("file") });
+
+send({ to: editors, event: "APPLY", input: { patch: "one" }, target: "next" });
+sendBatch({ to: editors, event: "APPLY", inputs: [{ patch: "a" }, { patch: "b" }], target: "next" });
+callBatch({ to: editors, event: "READ", inputs: result("prepare", "requests"), target: "merge" });
+```
+
+`send()`/`call()` are singleton-only. `sendBatch()`/`callBatch()` require a non-empty batch, exact-validate every item before one atomic enqueue fact, and address ordinary actors or pools. `callBatch()` is limited to a protocol message with one `reply` schema and publishes its output array only after every item settles, in authored input order.
+
+Pool admission considers only the FIFO head and may durably assign it to any compatible idle worker. The accepted fact captures the scheduler choice as `workerIndex`; replay validates that the selected worker was idle and receive-compatible at that durable prefix rather than choosing again. Concrete identities (`@editors.$worker-0.apply`) isolate results, visits, artifacts, and sessions; normalized declarations use the canonical `$worker` segment. Workers persist through `reply()` and return to the authored receive target. Closing rejects external admission but drains backlog and current work; owners wait for every worker to stop. An unsupported head waits while any worker is busy and fails globally only when all workers are idle and incompatible.

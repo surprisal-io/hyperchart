@@ -228,3 +228,9 @@ Recommended release practice:
 ## Actor safety invariants
 
 Every message is accepted only by an explicit `receive()` state; an actor owns at most one current message; every accepted workflow reaches exactly one graph-inferred `reply()` before the next accept; FIFO head mismatch fails globally. Reserved `FAILED` cannot be authored as a transition and terminalizes immediately after durable failure intent. See [Explicit actors](./explicit-actors.md).
+
+### Pool and batch invariants
+
+A pool has exactly its declared positive concurrency, at most that many busy workers, and at most one current message per worker. Only the FIFO head can be assigned; the scheduler may choose any compatible idle worker, and that durable `workerIndex` must be named by every later reply/settlement. Ordered pool-local reservations treat dispatched but unprojected acceptance facts as virtual dequeues and occupied workers, preventing duplicate assignment without blocking ordinary actors or unrelated pools. A batch is non-empty and all items validate before atomic enqueue. Batch resolution is impossible until every declared member settles and its `messageIds` must match authored `batchIndex` order.
+
+When an unsupported head exists, a busy worker may still return to a compatible receive state, so failure waits until all workers are idle and incompatible. Closing rejects external admission but drains queued/current work. The owner and terminal run wait for empty backlog and all idle/stopped workers. Global failure prevents successor effects and includes pending worker actions in best-effort cancellation.

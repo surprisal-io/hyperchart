@@ -116,7 +116,8 @@ describe("explainReplay", () => {
 		});
 		const declaration = Actor({});
 		const current = ast(chart({
-			kind: "chart", id: "actor-replay-provenance", actors: { a: declaration }, initial: "done", states: { done: final() },
+			kind: "chart", id: "actor-replay-provenance", actors: { a: declaration }, initial: "done",
+			states: { ping: send({ to: declaration, event: "PING", input: {}, target: "done" }), done: final() },
 		}));
 		const definition = current.actors["@a"]!;
 		const valid = {
@@ -150,7 +151,8 @@ describe("explainReplay", () => {
 		});
 		const declaration = Actor({});
 		const current = ast(chart({
-			kind: "chart", id: "actor-replay-generation", actors: { a: declaration }, initial: "done", states: { done: final() },
+			kind: "chart", id: "actor-replay-generation", actors: { a: declaration }, initial: "done",
+			states: { ping: send({ to: declaration, event: "PING", input: {}, target: "done" }), done: final() },
 		}));
 		const definition = current.actors["@a"]!;
 		const log: DurableLogRecord[] = [
@@ -219,7 +221,11 @@ describe("explainReplay", () => {
 			kind: "chart", id: "actor-map-owner-provenance", initial: "m", states: {
 				m: map({
 					over: arg("items"), actors: { a: declaration }, initial: "work", onDone: "done",
-					states: { work: { kind: "state", action: agent("worker"), transitions: { DONE: "finished" } }, finished: final() },
+					states: {
+						work: { kind: "state", action: agent("worker"), transitions: { DONE: "finished" } },
+						ping: send({ to: declaration, event: "PING", input: {}, target: "finished" }),
+						finished: final(),
+					},
 				}),
 				done: final(),
 			},

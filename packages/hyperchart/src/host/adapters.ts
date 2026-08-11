@@ -10,10 +10,15 @@ import {
 import {
 	createBranchProjection,
 	projectBranch,
+	projectedActorEndpoint,
+	projectedActorEndpoints,
 	type PendingAction,
+	type ProjectedActorOccurrence,
+	type ProjectedActorPoolOccurrence,
 	type ProjectionSkippedRecord,
 } from "../core/projection.js";
 import type { ActionUID, ChartAst, ChartEvent, StatePath } from "../core/types.js";
+import { actorDefinitionForEndpoint, actorPoolWorkerOccurrencePath } from "../core/actors.js";
 import {
 	instancePathFor,
 	nearestInstance,
@@ -26,6 +31,7 @@ import {
 } from "../core/paths.js";
 import type {
 	HyperchartActorDeclarationInfo,
+	HyperchartActorMessageContractInfo,
 	HyperchartActorMessageInfo,
 	HyperchartActorOccurrenceInfo,
 	HyperchartActorSentMessageInfo,
@@ -98,27 +104,35 @@ export function hyperchartRunFromInfo(
 	};
 }
 
+type InspectActorMessageContract = NonNullable<NonNullable<HyperchartInspectState["actorMessageDefinition"]>["contracts"]>[number];
+
+function actorMessageContractInfo(message: InspectActorMessageContract): HyperchartActorMessageContractInfo {
+	return {
+		event: message.event,
+		input: { schema: message.inputSchema },
+		reply: message.reply.kind === "void"
+			? { kind: "void" }
+			: message.reply.kind === "single"
+				? { kind: "single", schema: { schema: message.reply.schema } }
+				: { kind: "named", schemas: Object.fromEntries(Object.entries(message.reply.schemas).map(([event, schema]) => [event, { schema }])) },
+	};
+}
+
 export function hyperchartRunFromInspectResult(
 	result: HyperchartInspectResult,
 	options: HyperchartRunFromInspectOptions = {},
 ): HyperchartRunInfo {
 	const now = Date.now();
 	const actorDeclarations: HyperchartActorDeclarationInfo[] = (result.actorDeclarations ?? []).map((actor) => ({
+		kind: actor.kind,
 		declarationPath: actor.declarationPath,
 		...(actor.ownerPath === undefined ? {} : { ownerPath: actor.ownerPath }),
 		...(actor.definitionSource === undefined ? {} : { definitionSource: actor.definitionSource }),
 		inputSchema: { schema: actor.inputSchema },
 		inputValue: actor.inputValue,
 		initialReceive: actor.initialReceive,
-		protocol: actor.protocol.map((message) => ({
-			event: message.event,
-			input: { schema: message.inputSchema },
-			reply: message.reply.kind === "void"
-				? { kind: "void" }
-				: message.reply.kind === "single"
-					? { kind: "single", schema: { schema: message.reply.schema } }
-					: { kind: "named", schemas: Object.fromEntries(Object.entries(message.reply.schemas).map(([event, schema]) => [event, { schema }])) },
-		})),
+		...(actor.concurrency === undefined ? {} : { concurrency: actor.concurrency }),
+		protocol: actor.protocol.map(actorMessageContractInfo),
 	}));
 	const states = [
 		...result.states.map(stateFromInspectState),
@@ -236,7 +250,7 @@ export function hyperchartRunFromRuntime(
 	});
 	const runtime = runtimeFacts(ast, records, projection, skipped, options.sessionProgress);
 	const staticStates = staticRun.states.map((state) => overlayRuntimeState(state, ast, projection, runtime));
-	const projectedActors = Object.values(projection.actors);
+	const projectedActors = projectedActorEndpoints(projection);
 	const actorGenerationsByLogicalOccurrence = new Map<StatePath, typeof projectedActors>();
 	for (const actor of projectedActors) {
 		const generations = actorGenerationsByLogicalOccurrence.get(actor.logicalOccurrence) ?? [];
@@ -279,6 +293,13 @@ export function hyperchartRunFromRuntime(
 	).values()];
 	const actorOccurrences: HyperchartActorOccurrenceInfo[] = latestProjectedActors.map((actor) => {
 		const pending = Object.values(projection.pendingActorCalls).find((call) => call.occurrence === actor.occurrence);
+		const pool = actor.definition.kind === "actorPool" ? actor as ProjectedActorPoolOccurrence : undefined;
+		const ordinary = pool === undefined ? actor as ProjectedActorOccurrence : undefined;
+		const currentMessages = pool === undefined
+			? (ordinary?.currentMessage === undefined ? [] : [ordinary.currentMessage])
+			: pool.workers.flatMap((worker) => worker.currentMessage === undefined ? [] : [worker.currentMessage]);
+		// Pool messages are owned by concrete worker slots, never by the endpoint mailbox itself.
+		const currentMessage = ordinary?.currentMessage;
 		const messageInfo = (sourceActor: typeof actor, message: typeof actor.messages[number]) => {
 			const replyFact = repliedByMessage.get(`${sourceActor.occurrence}\u0000${message.messageId}`);
 			return {
@@ -290,11 +311,13 @@ export function hyperchartRunFromRuntime(
 				input: message.input,
 				producerVisit: `${message.producerState}:${message.producerVisit}`,
 				...(message.callId === undefined ? {} : { callId: message.callId }),
+				batchIndex: message.batchIndex,
 				status: message.status,
 				...(message.receiveState === undefined
 					? {}
 					: { receiveState: message.receiveState.replace(`${sourceActor.occurrence}.`, `${sourceActor.logicalOccurrence}.`) }),
 				...(message.replyEvent === undefined ? {} : { replyEvent: message.replyEvent }),
+				...(message.workerIndex === undefined ? {} : { workerIndex: message.workerIndex, workerOccurrencePath: actorPoolWorkerOccurrencePath(sourceActor.occurrence, message.workerIndex) }),
 				...(message.replyOutput === undefined ? {} : { replyOutput: message.replyOutput }),
 				...(replyFact?.schema === undefined ? {} : { replySchema: { schema: replyFact.schema.schema } }),
 				...(replyFact?.schema === undefined ? {} : { validation: "valid" as const }),
@@ -310,13 +333,16 @@ export function hyperchartRunFromRuntime(
 			const messageHistory = candidate.messages
 				.filter((message) => message.status === "settled" || message.status === "failed" || message.status === "cancelled")
 				.map((message) => messageInfo(candidate, message));
+			const candidateCurrent = candidate.definition.kind === "actorPool"
+				? undefined
+				: (candidate as ProjectedActorOccurrence).currentMessage;
 			return {
 				occurrencePath: candidate.occurrence,
 				generation: candidate.generation,
 				status: candidate.status,
 				mailbox,
 				messageHistory,
-				...(candidate.currentMessage === undefined ? {} : { currentMessage: messageInfo(candidate, candidate.currentMessage) }),
+				...(candidateCurrent === undefined ? {} : { currentMessage: messageInfo(candidate, candidateCurrent) }),
 			};
 		});
 		const messageHistory = mailboxInstances.flatMap((instance) => instance.messageHistory);
@@ -346,7 +372,39 @@ export function hyperchartRunFromRuntime(
 					invocation: { kind: "actor" as const },
 				};
 			});
+		const workers = pool?.workers.map((worker) => {
+			const workerFacts = [...runtime.byState.entries()].filter(([statePath]) => statePath.startsWith(`${worker.occurrence}.`));
+			const visitHistory = workerFacts.flatMap(([, facts]) => facts.visitHistory ?? []).sort((left, right) => left.startedAt - right.startedAt);
+			const sessions = workerFacts.flatMap(([, facts]) => facts.session === undefined ? [] : [facts.session]).sort((left, right) => sessionActivity(left) - sessionActivity(right));
+			const latestSession = sessions.at(-1);
+			const results = Object.entries(projection.results).flatMap(([statePath, value]) => statePath.startsWith(`${worker.occurrence}.`) ? [{ state: statePath.slice(worker.occurrence.length + 1), value }] : []);
+			const workerMessages = actor.messages
+				.filter((message) => message.workerIndex === worker.index && message.messageId !== worker.currentMessage?.messageId)
+				.map((message) => messageInfo(actor, message));
+			return {
+				index: worker.index,
+				occurrencePath: worker.occurrence,
+				currentState: worker.currentState,
+				currentStateId: `${actorOccurrenceInspectorId(pool.logicalOccurrence)}.$worker.${worker.currentState}`,
+				status: worker.status,
+				...(worker.currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, worker.currentMessage) }),
+				...(workerMessages.length === 0 ? {} : { messageHistory: workerMessages }),
+				...(visitHistory.length === 0 ? {} : { visits: visitHistory.length, visitHistory }),
+				...(latestSession === undefined ? {} : { session: latestSession }),
+				...(results.length === 0 ? {} : { results }),
+			};
+		});
+		const batchCalls = Object.values(projection.pendingActorCalls).flatMap((call) => {
+			if (call.kind !== "batch" || call.occurrence !== actor.occurrence) return [];
+			const items = call.messageIds.flatMap((messageId) => {
+				const message = actor.messages.find((candidate) => candidate.messageId === messageId);
+				return message === undefined ? [] : [messageInfo(actor, message)];
+			});
+			const settled = items.filter((message) => message.status === "settled").length;
+			return [{ callId: call.callId, callerState: call.callerState, status: call.status, messageIds: call.messageIds, items, settled, total: call.messageIds.length }];
+		});
 		return {
+			kind: actor.definition.kind,
 			declarationPath: actor.declaration,
 			...(actor.owner === undefined ? {} : { ownerPath: actor.owner }),
 			occurrencePath: actor.occurrence,
@@ -356,7 +414,14 @@ export function hyperchartRunFromRuntime(
 
 			input: actor.input,
 			status: actorFailed ? "failed" : actor.status,
-			currentState: actor.currentState,
+			currentState: ordinary?.currentState ?? pool?.workers[0]?.currentState ?? "",
+			...(pool === undefined ? {} : {
+				concurrency: pool.definition.concurrency,
+				activeCount: currentMessages.length,
+				idleCount: pool.workers.filter((worker) => worker.currentMessage === undefined).length,
+				workers: workers ?? [],
+				...(batchCalls.length === 0 ? {} : { batchCalls }),
+			}),
 			mailbox: {
 				totalCount: actor.mailbox.length,
 				...(actor.mailbox[0] === undefined ? {} : { head: messageInfo(actor, actor.mailbox[0]) }),
@@ -364,9 +429,9 @@ export function hyperchartRunFromRuntime(
 			},
 			mailboxInstances,
 			...(messageHistory.length === 0 ? {} : { messageHistory }),
-			...(actor.currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, actor.currentMessage) }),
-			...(pending === undefined || projection.failure !== undefined ? {} : { pendingCaller: { callId: pending.callId, state: pending.callerState, waitReason: pending.status === "accepted" ? "reply" as const : "accept" as const } }),
-			...(actor.status === "closing" || actor.status === "draining" ? { drain: { queued: actor.mailbox.length, current: actor.currentMessage === undefined ? 0 : 1, settled: actor.messages.filter((message) => message.status === "settled").length } } : {}),
+			...(currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, currentMessage) }),
+			...(pending === undefined || projection.failure !== undefined ? {} : { pendingCaller: { callId: pending.callId, state: pending.callerState, waitReason: pending.status === "enqueued" ? "accept" as const : "reply" as const } }),
+			...(actor.status === "closing" || actor.status === "draining" ? { drain: { queued: actor.mailbox.length, current: currentMessages.length, settled: actor.messages.filter((message) => message.status === "settled").length } } : {}),
 		};
 	});
 	const actorOccurrenceStates: HyperchartStateInfo[] = actorOccurrences.map((occurrence) => {
@@ -387,7 +452,8 @@ export function hyperchartRunFromRuntime(
 			id: owner,
 			scopeParentId: stripLastKey(owner),
 			type: "compound" as const,
-			status: Object.values(projection.actors).some((actor) => actor.owner === owner && actor.status !== "stopped") ? "running" as const : "done" as const,
+			status: [...Object.values(projection.actors), ...Object.values(projection.actorPools)]
+				.some((actor) => actor.owner === owner && actor.status !== "stopped") ? "running" as const : "done" as const,
 		}));
 	const actorInternalStates = actorOccurrences.flatMap((occurrence) => {
 		const templateStates = staticRun.states.filter((state) => state.actorInternal?.declarationPath === occurrence.declarationPath && state.actorInternal.occurrencePath === undefined);
@@ -395,15 +461,16 @@ export function hyperchartRunFromRuntime(
 		const actorGenerations = actorGenerationsByLogicalOccurrence.get(occurrence.logicalPath ?? occurrence.occurrencePath) ?? [];
 		return templateStates.map((templateState) => {
 			const localState = templateState.actorInternal!.localState;
+			const internalLocalPath = occurrence.kind === "actorPool" ? `$worker.${localState}` : localState;
 			const materializeTarget = (target: string) => {
 				const prefix = `${occurrence.declarationPath}.`;
 				return target.startsWith(prefix) ? `${occurrenceId}.${target.slice(prefix.length)}` : target;
 			};
 			const materializeGeneration = (candidate: (typeof actorGenerations)[number]) => overlayRuntimeState({
 				...templateState,
-				id: `${occurrenceId}.${localState}`,
+				id: `${occurrenceId}.${internalLocalPath}`,
 				scopeParentId: occurrenceId,
-				runtimeStatePath: `${candidate.occurrence}.${localState}`,
+				runtimeStatePath: `${candidate.occurrence}.${internalLocalPath}`,
 				actorInternal: {
 					...templateState.actorInternal!,
 					occurrencePath: candidate.occurrence,
@@ -444,7 +511,18 @@ export function hyperchartRunFromRuntime(
 		const logicalTarget = actorTargetForInspectorState(state.id, link.to, actorOccurrences);
 		return logicalTarget === undefined ? state : { ...state, actorMessageLink: { ...link, to: logicalTarget } };
 	});
-	const states = markStaleRuntimeStates([...actorLinkedRuntimeStates, ...actorOwnerStates, ...actorOccurrenceStates, ...actorInternalStates], ast, projection, runtime);
+	// Map materialization already expands static actor workflow templates, while
+	// the actor projection above materializes the same logical workflow with
+	// generation-aware runtime data. Keep the latter and collapse re-entry
+	// generations to one Inspector state per logical id.
+	const actorInternalById = new Map(actorInternalStates.map((state) => [state.id, state]));
+	const materializedActorInternalIds = new Set(actorInternalById.keys());
+	const states = markStaleRuntimeStates([
+		...actorLinkedRuntimeStates.filter((state) => !materializedActorInternalIds.has(state.id)),
+		...actorOwnerStates,
+		...actorOccurrenceStates,
+		...actorInternalById.values(),
+	], ast, projection, runtime);
 	const statusIssues = runIssues(options.status);
 	const issues = [
 		...statusIssues,
@@ -564,6 +642,26 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 			? {}
 			: { parallelConfig: inspectParallelConfig(state) }),
 		...(state.retries === undefined ? {} : { retry: { max: state.retries } }),
+		...(state.actorMessageDefinition === undefined
+			? {}
+			: {
+					actorMessageDefinition: {
+						kind: state.actorMessageDefinition.kind,
+						...(state.actorMessageDefinition.to === undefined ? {} : { to: state.actorMessageDefinition.to }),
+						...(state.actorMessageDefinition.event === undefined ? {} : { event: state.actorMessageDefinition.event }),
+						...(state.actorMessageDefinition.target === undefined ? {} : { target: state.actorMessageDefinition.target }),
+						...(state.actorMessageDefinition.payload === undefined
+							? {}
+							: {
+									payload: {
+										label: state.actorMessageDefinition.payload.label,
+										source: state.actorMessageDefinition.payload.source,
+										...(state.actorMessageDefinition.payload.schema === undefined ? {} : { schema: { schema: state.actorMessageDefinition.payload.schema } }),
+									},
+								}),
+						...(state.actorMessageDefinition.contracts === undefined ? {} : { contracts: state.actorMessageDefinition.contracts.map(actorMessageContractInfo) }),
+					},
+				}),
 		...(state.actorMessageLink === undefined ? {} : { actorMessageLink: state.actorMessageLink }),
 		...(state.finalConfig === undefined
 			? {}
@@ -956,7 +1054,7 @@ function runtimeFacts(
 			continue;
 		}
 		if (record.type === "actor_message" && record.kind === "accepted" && !skippedRecords.has(record)) {
-			const message = projection.actors[record.occurrence]?.messages.find((candidate) => candidate.messageId === record.messageId);
+			const message = projectedActorEndpoint(projection, record.occurrence)?.messages.find((candidate) => candidate.messageId === record.messageId);
 			const facts = byState.get(record.receiveState) ?? {};
 			facts.invokedAt ??= record.timestamp;
 			facts.completedAt = record.timestamp;
@@ -968,7 +1066,7 @@ function runtimeFacts(
 		if (record.type === "actor_messages_enqueued" && !skippedRecords.has(record)) {
 			const stateId = record.source.producerState;
 			const facts = byState.get(stateId) ?? {};
-			const actor = projection.actors[record.occurrence];
+			const actor = projectedActorEndpoint(projection, record.occurrence);
 			facts.actorMessages = [
 				...(facts.actorMessages ?? []),
 				...record.messages.map((message) => ({
@@ -982,7 +1080,7 @@ function runtimeFacts(
 					targetGeneration: record.generation,
 				})),
 			];
-			if (record.source.kind === "send") {
+			if (record.source.kind === "send" || record.source.kind === "sendBatch") {
 				facts.invokedAt ??= record.timestamp;
 				facts.completedAt = record.timestamp;
 				facts.completedEvent = { type: "ENQUEUED" };
@@ -1085,13 +1183,13 @@ function actorInternalMessageHistories(
 	for (const record of records) {
 		if (skippedRecords.has(record)) continue;
 		if (record.type === "actor_message" && record.kind === "accepted") {
-			const actor = replay.actors[record.occurrence];
+			const actor = projectedActorEndpoint(replay, record.occurrence);
 			const envelope = actor?.mailbox[0];
 			if (actor !== undefined && envelope?.messageId === record.messageId) {
 				const localState = record.receiveState.slice(record.occurrence.length + 1);
 				const logicalReceiveState = `${actor.logicalOccurrence}.${localState}`;
 				acceptedAt.set(keyFor(record.occurrence, record.messageId), record.timestamp);
-				append(`${record.occurrence}.${localState}`, {
+				append(record.receiveState, {
 					messageId: envelope.messageId,
 					actorOccurrencePath: actor.occurrence,
 					actorLogicalPath: actor.logicalOccurrence,
@@ -1100,6 +1198,7 @@ function actorInternalMessageHistories(
 					input: envelope.input,
 					producerVisit: `${envelope.producerState}:${envelope.producerVisit}`,
 					...(envelope.callId === undefined ? {} : { callId: envelope.callId }),
+					...(record.workerIndex === undefined ? {} : { workerIndex: record.workerIndex, workerOccurrencePath: actorPoolWorkerOccurrencePath(actor.occurrence, record.workerIndex) }),
 					status: "accepted",
 					receiveState: logicalReceiveState,
 					acceptedAt: record.timestamp,
@@ -1107,14 +1206,19 @@ function actorInternalMessageHistories(
 			}
 		}
 		if (record.type === "actor_message" && record.kind === "replied") {
-			const actor = replay.actors[record.occurrence];
-			const envelope = actor?.currentMessage;
-			const reply = actor === undefined ? undefined : ast.actors[actor.declaration]?.states[actor.currentState];
+			const actor = projectedActorEndpoint(replay, record.occurrence);
+			const worker = actor?.definition.kind === "actorPool" && record.workerIndex !== undefined ? (actor as ProjectedActorPoolOccurrence).workers[record.workerIndex] : undefined;
+			const ordinary = actor?.definition.kind === "actor" ? actor as ProjectedActorOccurrence : undefined;
+			const envelope = worker?.currentMessage ?? ordinary?.currentMessage;
+			const currentState = worker?.currentState ?? ordinary?.currentState;
+			const declaration = actor === undefined ? undefined : ast.actors[actor.declaration];
+			const reply = currentState === undefined || declaration === undefined ? undefined : actorDefinitionForEndpoint(declaration).states[currentState];
 			// The reply state is deliberately read from the sequential projection immediately
 			// before applying the replied fact. Event names are not unique actor-state identity.
-			if (actor !== undefined && envelope?.messageId === record.messageId && reply?.kind === "reply") {
-				const historyState = `${record.occurrence}.${actor.currentState}`;
-				const replyState = `${actor.logicalOccurrence}.${actor.currentState}`;
+			if (actor !== undefined && currentState !== undefined && envelope?.messageId === record.messageId && reply?.kind === "reply") {
+				const executableOccurrence = worker?.occurrence ?? actor.occurrence;
+				const historyState = `${executableOccurrence}.${currentState}`;
+				const replyState = `${actor.logicalOccurrence}${worker === undefined ? "" : `.$worker-${worker.index}`}.${currentState}`;
 				const messageAcceptedAt = acceptedAt.get(keyFor(record.occurrence, record.messageId));
 				append(historyState, {
 					messageId: envelope.messageId,
@@ -1125,6 +1229,7 @@ function actorInternalMessageHistories(
 					input: envelope.input,
 					producerVisit: `${envelope.producerState}:${envelope.producerVisit}`,
 					...(envelope.callId === undefined ? {} : { callId: envelope.callId }),
+					...(record.workerIndex === undefined ? {} : { workerIndex: record.workerIndex, workerOccurrencePath: actorPoolWorkerOccurrencePath(actor.occurrence, record.workerIndex) }),
 					status: "replied",
 					...(envelope.receiveState === undefined
 						? {}
@@ -1142,7 +1247,7 @@ function actorInternalMessageHistories(
 	}
 	for (const history of histories.values()) {
 		for (const entry of history) {
-			const final = Object.values(finalProjection.actors)
+			const final = projectedActorEndpoints(finalProjection)
 				.flatMap((actor) => actor.messages)
 				.find((message) => message.messageId === entry.messageId);
 			if (final !== undefined) entry.status = final.status;
@@ -1766,9 +1871,12 @@ function runtimeStateStatus(
 	const pending = runtime.pendingByState.get(runtimeStatePath);
 	if (state.actorInternal?.occurrencePath !== undefined) {
 		if (projection.failure?.origin === runtimeStatePath) return "failed";
-		const actor = projection.actors[state.actorInternal.occurrencePath];
+		const actor = projectedActorEndpoint(projection, state.actorInternal.occurrencePath);
 		const actorIsLive = actor !== undefined && actor.status !== "stopped" && actor.status !== "failed" && actor.status !== "cancelled";
-		if (actorIsLive && actor.currentState === state.actorInternal.localState) return state.type === "receive" ? "waiting" : "running";
+		const isCurrent = actor?.definition.kind === "actorPool"
+			? (actor as ProjectedActorPoolOccurrence).workers.some((worker) => worker.currentState === state.actorInternal?.localState)
+			: (actor as ProjectedActorOccurrence | undefined)?.currentState === state.actorInternal.localState;
+		if (actorIsLive && isCurrent) return state.type === "receive" ? "waiting" : "running";
 		if (facts?.completedAt !== undefined || (facts?.attempts ?? 0) > 0 || (facts?.actorMessageHistory?.length ?? 0) > 0) return "done";
 		return "pending";
 	}
@@ -1786,15 +1894,20 @@ function runtimeStateStatus(
 		const reached = projection.activeLeaves.includes(state.id) ||
 			finalReached(state.id, ast, runtime) ||
 			finalReachedViaOnDone(state.id, ast, projection, runtime);
-		const waitingForActorDrain = reached && Object.values(projection.actors).some((actor) =>
-			actor.status === "closing" || actor.status === "draining");
+		const waitingForActorDrain = reached && [
+			...Object.values(projection.actors),
+			...Object.values(projection.actorPools),
+		].some((actor) => actor.status === "closing" || actor.status === "draining");
 		return waitingForActorDrain ? "waiting" : reached ? "done" : "pending";
 	}
 	if (
 		(state.type === "compound" || state.type === "region") &&
 		scopeReachedFinal(state.id, ast, projection, runtime)
 	) {
-		const waitingForActorDrain = Object.values(projection.actors).some((actor) =>
+		const waitingForActorDrain = [
+			...Object.values(projection.actors),
+			...Object.values(projection.actorPools),
+		].some((actor) =>
 			(actor.status === "closing" || actor.status === "draining") &&
 			(actor.owner === state.id || (actor.owner !== undefined && underScope(actor.owner, state.id))));
 		return waitingForActorDrain ? "waiting" : "done";
@@ -1983,7 +2096,7 @@ function finalReached(finalPath: StatePath, ast: ChartAst, runtime: RuntimeFacts
 		const eventType = facts.completedEvent?.type;
 		if (eventType === undefined || runtime.pendingByState.has(statePath)) continue;
 		const state = nodeAt(ast, statePath);
-		if (state?.kind === "send" && eventType === "ENQUEUED") {
+		if ((state?.kind === "send" || state?.kind === "sendBatch") && eventType === "ENQUEUED") {
 			if (siblingPath(statePath, state.target) === finalPath) return true;
 			continue;
 		}
@@ -2012,7 +2125,10 @@ function finalReachedViaOnDone(
 		if (candidate.onDone !== finalId) return false;
 		const containerPath = `${scope}.${candidate.id}`;
 		if (candidate.kind === "compound") {
-			const waitingForActorDrain = Object.values(projection.actors).some((actor) =>
+			const waitingForActorDrain = [
+				...Object.values(projection.actors),
+				...Object.values(projection.actorPools),
+			].some((actor) =>
 				(actor.status === "closing" || actor.status === "draining") &&
 				(actor.owner === containerPath || (actor.owner !== undefined && underScope(actor.owner, containerPath))));
 			return !waitingForActorDrain && scopeReachedFinal(containerPath, ast, projection, runtime);
@@ -2041,6 +2157,14 @@ function mapItemStatus(
 	const childFacts = [...runtime.byState.entries()].filter(([path]) => underScope(path, instancePath));
 	if (childFacts.some(([, facts]) => facts.completedEvent?.type === "FAILED")) return "failed";
 	const activeLeaves = projection.activeLeaves.filter((leaf) => underScope(leaf, instancePath));
+	const waitingForActorDrain = [
+		...Object.values(projection.actors),
+		...Object.values(projection.actorPools),
+	].some((actor) =>
+		(actor.status === "closing" || actor.status === "draining") &&
+		actor.owner !== undefined &&
+		(actor.owner === instancePath || underScope(actor.owner, instancePath)));
+	if (waitingForActorDrain) return "waiting";
 	if (ast !== undefined) {
 		const activeStatus = activeLeavesStatus(activeLeaves, ast, runtime, true);
 		if (activeStatus !== undefined) return activeStatus;

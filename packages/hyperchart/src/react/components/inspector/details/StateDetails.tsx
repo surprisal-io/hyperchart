@@ -29,6 +29,7 @@ import { IssuesSection } from "../validation/IssuesSection.js";
 import { ValidationSection } from "../validation/ValidationSection.js";
 import { AgentInfoCard } from "./AgentInfoCard.js";
 import { ActorDetailsSection, ActorMailboxSection } from "./ActorDetailsSection.js";
+import { ActorMessageDefinitionSection } from "./ActorMessageDefinitionSection.js";
 import { ContractsSection } from "./ContractsSection.js";
 import { DefinitionSection } from "./DefinitionSection.js";
 import { EnvTypeDisplay } from "./EnvTypeDisplay.js";
@@ -374,7 +375,15 @@ export function StateDetails({
 				</Section>
 			)}
 
-			{state.actorInternal === undefined && <ActorDetailsSection state={state} />}
+			<ActorMessageDefinitionSection
+				state={state}
+				allStates={allStates}
+				{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+				{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+			/>
+
+			{state.actorInternal === undefined && <ActorDetailsSection state={state} {...(onNavigateToState === undefined ? {} : { onNavigateToState })} />}
 
 			{state.actorDeclaration !== undefined && state.actorInternal === undefined && (
 				<>

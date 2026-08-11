@@ -109,7 +109,8 @@ describe("hyperchart source", () => {
 		});
 		const worker = Worker({});
 		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "selected-actor-source", actors: { worker }, initial: "done", states: { done: final() },
+			kind: "chart", id: "selected-actor-source", actors: { worker }, initial: "done",
+			states: { ping: send({ to: worker, event: "PING", input: {}, target: "done" }), done: final() },
 		}));
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		expect(hyperchartSource(parsed.ast, "@worker")).toContain("worker: actor(");
@@ -135,7 +136,8 @@ describe("hyperchart source", () => {
 		});
 		const aSource = Source({});
 		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-dependency-source", actors: { aSource, zTarget }, initial: "done", states: { done: final() },
+			kind: "chart", id: "actor-dependency-source", actors: { aSource, zTarget }, initial: "kick",
+			states: { kick: send({ to: aSource, event: "GO", input: { id: 1 }, target: "done" }), done: final() },
 		}));
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 

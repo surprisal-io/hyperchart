@@ -10,6 +10,7 @@ import { ActorInternalMessageHistory } from "../packages/hyperchart/src/react/co
 import { StateDetails } from "../packages/hyperchart/src/react/components/inspector/details/StateDetails.js";
 import { buildGraph } from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
 import { visibleStateIdsForScope } from "../packages/hyperchart/src/react/components/inspector/helpers/scope.js";
+import { stateKindMeta } from "../packages/hyperchart/src/react/components/inspector/helpers/state.js";
 import { actorDrainingRun, actorReentryRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 import {
 	actorRuntimeAdapterRun,
@@ -27,8 +28,12 @@ describe("React actor inspector structure", () => {
 			"Actor definition-only",
 			"Actor runtime and mailbox",
 			"Mailbox across re-entry",
+			"Actor pool definition-only",
+			"Actor pool workers and backlog",
 			"Send state",
+			"Send batch state",
 			"Call state",
+			"Call batch state",
 			"Receive state",
 			"Receive state across re-entry",
 			"Reply state",
@@ -45,6 +50,39 @@ describe("React actor inspector structure", () => {
 				"status.json",
 			]));
 		}
+		const batchStates = [];
+		for (const [title, kind] of [["Send batch state", "sendBatch"], ["Call batch state", "callBatch"]] as const) {
+			const tile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === title)!);
+			if (tile.variant !== "panel" || tile.selectedStateId === null) throw new Error(`missing ${title} fixture`);
+			const state = tile.run.states.find((candidate) => candidate.id === tile.selectedStateId);
+			expect(state?.type).toBe(kind);
+			if (state !== undefined) batchStates.push(state);
+			const markup = state === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state, allStates: tile.run.states, onNavigateToState: () => undefined }));
+			expect(markup).toContain(kind);
+			expect(markup).toContain("Outgoing message definition");
+			expect(markup).toContain("inputs expression");
+			expect(markup).toContain("message contract");
+		}
+		expect(batchStates).toHaveLength(2);
+		expect(stateKindMeta(batchStates[0]!).Icon).not.toBe(stateKindMeta(batchStates[1]!).Icon);
+
+		const poolTile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === "Actor pool workers and backlog")!);
+		expect(poolTile.variant).toBe("panel");
+		if (poolTile.variant !== "panel" || poolTile.selectedStateId === null) throw new Error("missing actor pool panel fixture");
+		const poolState = poolTile.run.states.find((state) => state.id === poolTile.selectedStateId);
+		expect(poolState?.actorOccurrence).toMatchObject({ kind: "actorPool", activeCount: 2, concurrency: 2, mailbox: { totalCount: 4 } });
+		const poolMarkup = poolState === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state: poolState, allStates: poolTile.run.states, onNavigateToState: () => undefined }));
+		expect(poolMarkup).toContain("Workers · 2/2 active");
+		expect(poolMarkup).toContain("$worker-0");
+		expect(poolMarkup).toContain("$worker-1");
+		const poolOccurrence = poolState?.actorOccurrence;
+		expect(poolOccurrence?.workers?.[0]).toMatchObject({ currentMessage: { messageId: "batch:message:1:4" }, messageHistory: [{ messageId: "batch:message:1:0" }, { messageId: "batch:message:1:2" }] });
+		expect(poolOccurrence?.workers?.[1]).toMatchObject({ currentMessage: { messageId: "batch:message:1:5" }, messageHistory: [{ messageId: "batch:message:1:1" }, { messageId: "batch:message:1:3" }] });
+		expect(poolTile.run.states.find((state) => state.id === "batch")?.type).toBe("callBatch");
+		const poolGraph = buildGraph(poolTile.run, new Set(["batch", "@workers"]));
+		expect(poolGraph.edges).toEqual(expect.arrayContaining([
+			expect.objectContaining({ source: "batch", target: "@workers", label: "callBatch · WORK" }),
+		]));
 	});
 
 	it("keeps re-entered actor mailboxes separated by durable generation", () => {
@@ -117,7 +155,7 @@ describe("React actor inspector structure", () => {
 		expect(actorRuntimeAdapterRun.states).toEqual(expect.arrayContaining([
 			expect.objectContaining({
 				id: "queue",
-				type: "send",
+				type: "sendBatch",
 				status: "done",
 				actorMessageLink: expect.objectContaining({
 					event: "APPLY",
@@ -137,9 +175,32 @@ describe("React actor inspector structure", () => {
 			expect.objectContaining({ id: "@editor.apply", scopeParentId: "@editor", type: "agent", status: "running" }),
 			expect.objectContaining({ id: "@editor.settle", scopeParentId: "@editor", type: "reply" }),
 		]));
-		expect(actorRuntimeAdapterRun.states.find((state) => state.id === "queue")).not.toHaveProperty("taskPrompt");
+		const sendBatchState = actorRuntimeAdapterRun.states.find((state) => state.id === "queue");
+		expect(sendBatchState).not.toHaveProperty("taskPrompt");
+		expect(sendBatchState?.actorMessageDefinition).toMatchObject({
+			kind: "sendBatch",
+			to: "@editor",
+			event: "APPLY",
+			payload: { label: "inputs", source: expect.stringContaining('patch: "patch-0"') },
+			contracts: [expect.objectContaining({ event: "APPLY", input: { schema: expect.any(Object) } })],
+		});
 		const applyCall = actorRuntimeAdapterRun.states.find((state) => state.id === "apply-call");
 		expect(applyCall).not.toHaveProperty("taskPrompt");
+		expect(applyCall?.actorMessageDefinition).toMatchObject({
+			kind: "call",
+			to: "@editor",
+			event: "APPLY",
+			payload: { label: "input", source: expect.stringContaining('patch: "follow-up patch"') },
+		});
+		expect(actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.idle")?.actorMessageDefinition).toMatchObject({
+			kind: "receive",
+			contracts: expect.arrayContaining([expect.objectContaining({ event: "APPLY" }), expect.objectContaining({ event: "REVIEW" })]),
+		});
+		expect(actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.settle")?.actorMessageDefinition).toMatchObject({
+			kind: "reply",
+			event: "APPLIED",
+			payload: { label: "output", source: expect.stringContaining('commit: "storybook-commit"'), schema: { schema: expect.any(Object) } },
+		});
 		expect(applyCall?.actorMessageLink).toMatchObject({
 			event: "APPLY",
 			messages: [expect.objectContaining({
@@ -248,7 +309,7 @@ describe("React actor inspector structure", () => {
 		const staticGraph = buildGraph(actorStaticAdapterRun, staticVisible);
 
 		expect(staticGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "queue", target: "@editor", label: "send · APPLY" }),
+			expect.objectContaining({ source: "queue", target: "@editor", label: "sendBatch · APPLY" }),
 			expect.objectContaining({ source: "apply-call", target: "@editor", label: "call · APPLY" }),
 		]));
 

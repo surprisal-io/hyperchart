@@ -23,7 +23,9 @@ export type HyperchartStateType =
 	| "user"
 	| "script"
 	| "send"
+	| "sendBatch"
 	| "call"
+	| "callBatch"
 	| "actor-declaration"
 	| "actor-occurrence"
 	| "receive"
@@ -118,7 +120,21 @@ export interface HyperchartActorMessageContractInfo {
 	reply: HyperchartActorReplyContractInfo;
 }
 
+export interface HyperchartActorMessageDefinitionInfo {
+	kind: "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply";
+	to?: string;
+	event?: string;
+	target?: string;
+	payload?: {
+		label: "input" | "inputs" | "output";
+		source: string;
+		schema?: HyperchartSchemaInfo;
+	};
+	contracts?: HyperchartActorMessageContractInfo[];
+}
+
 export interface HyperchartActorDeclarationInfo {
+	kind: "actor" | "actorPool";
 	declarationPath: string;
 	ownerPath?: string;
 	definitionSource?: string;
@@ -127,6 +143,7 @@ export interface HyperchartActorDeclarationInfo {
 	inputValue: unknown;
 	protocol: HyperchartActorMessageContractInfo[];
 	initialReceive: string;
+	concurrency?: number;
 }
 
 export type HyperchartActorMessageStatus = "queued" | "accepted" | "replied" | "settled" | "failed" | "cancelled";
@@ -140,6 +157,7 @@ export interface HyperchartActorMessageInfo {
 	input?: unknown;
 	producerVisit: string;
 	callId?: string;
+	batchIndex?: number;
 	status: HyperchartActorMessageStatus;
 	receiveState?: string;
 	replyState?: string;
@@ -147,6 +165,8 @@ export interface HyperchartActorMessageInfo {
 	repliedAt?: number;
 	replyEvent?: string;
 	replyOutput?: unknown;
+	workerIndex?: number;
+	workerOccurrencePath?: string;
 	replySchema?: HyperchartSchemaInfo;
 	validation?: "pending" | "valid" | "invalid";
 }
@@ -189,7 +209,33 @@ export interface HyperchartActorInternalGenerationInfo {
 	actorMessages?: HyperchartActorSentMessageInfo[];
 }
 
+export interface HyperchartActorPoolWorkerInfo {
+	index: number;
+	occurrencePath: string;
+	currentState: string;
+	/** Canonical worker-template state used by Inspector navigation. */
+	currentStateId: string;
+	status: "idle" | "busy" | "draining" | "stopped" | "failed" | "cancelled";
+	currentMessage?: HyperchartActorMessageInfo;
+	messageHistory?: HyperchartActorMessageInfo[];
+	visits?: number;
+	visitHistory?: HyperchartVisitInfo[];
+	session?: HyperchartAgentSessionInfo;
+	results?: ReadonlyArray<{ state: string; value: unknown }>;
+}
+
+export interface HyperchartActorBatchCallInfo {
+	callId: string;
+	callerState: string;
+	status: "enqueued" | "accepted" | "partial";
+	messageIds: readonly string[];
+	items: ReadonlyArray<Pick<HyperchartActorMessageInfo, "messageId" | "batchIndex" | "status" | "workerIndex" | "workerOccurrencePath">>;
+	settled: number;
+	total: number;
+}
+
 export interface HyperchartActorOccurrenceInfo {
+	kind: "actor" | "actorPool";
 	declarationPath: string;
 	ownerPath?: string;
 	/** Durable concrete occurrence path for the latest generation. */
@@ -202,6 +248,11 @@ export interface HyperchartActorOccurrenceInfo {
 	input: unknown;
 	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
 	currentState: string;
+	concurrency?: number;
+	activeCount?: number;
+	idleCount?: number;
+	workers?: HyperchartActorPoolWorkerInfo[];
+	batchCalls?: HyperchartActorBatchCallInfo[];
 	mailbox: HyperchartActorMailboxInfo;
 	/** Per-generation mailbox and processed-message histories, oldest generation first. */
 	mailboxInstances: HyperchartActorMailboxInstanceInfo[];
@@ -426,8 +477,9 @@ export interface HyperchartStateInfo {
 		outcome: "complete" | "failed";
 		notify?: { prompt?: string; artifacts?: HyperchartArtifactInfo[]; scope?: string };
 	};
+	actorMessageDefinition?: HyperchartActorMessageDefinitionInfo;
 	actorMessageLink?: {
-		kind: "send" | "call" | "reply";
+		kind: "send" | "sendBatch" | "call" | "callBatch" | "reply";
 		to: string;
 		event?: string;
 		pending?: boolean;

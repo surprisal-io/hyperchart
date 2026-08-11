@@ -1,4 +1,5 @@
 import {
+	ArrowPathRoundedSquareIcon,
 	ArrowsRightLeftIcon,
 	ChatBubbleLeftRightIcon,
 	CheckBadgeIcon,
@@ -7,6 +8,7 @@ import {
 	MapIcon,
 	QueueListIcon,
 	PaperAirplaneIcon,
+	RectangleStackIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import type { HyperchartRunInfo, HyperchartStateInfo, HyperchartUsageInfo } from "../../../types.js";
@@ -39,10 +41,24 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 				className: "border-teal-500/45 bg-teal-500/10 text-[var(--hc-cyan-text)]",
 				iconClassName: "text-[var(--hc-cyan-text)]",
 			};
+		case "sendBatch":
+			return {
+				label: "sendBatch",
+				Icon: RectangleStackIcon,
+				className: "border-teal-500/45 bg-teal-500/10 text-[var(--hc-cyan-text)]",
+				iconClassName: "text-[var(--hc-cyan-text)]",
+			};
 		case "call":
 			return {
 				label: "call",
 				Icon: ArrowsRightLeftIcon,
+				className: "border-violet-500/45 bg-violet-500/10 text-[var(--hc-purple-text)]",
+				iconClassName: "text-[var(--hc-purple-text)]",
+			};
+		case "callBatch":
+			return {
+				label: "callBatch",
+				Icon: ArrowPathRoundedSquareIcon,
 				className: "border-violet-500/45 bg-violet-500/10 text-[var(--hc-purple-text)]",
 				iconClassName: "text-[var(--hc-purple-text)]",
 			};
@@ -154,6 +170,9 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 		case "send":
 		case "call":
 			return state.taskPreview;
+		case "sendBatch":
+		case "callBatch":
+			return `${state.type} · ${state.taskPreview ?? "message batch"}`;
 		case "actor-declaration":
 			return `${state.actorDeclaration?.protocol.length ?? 0} messages`;
 		case "actor-occurrence":

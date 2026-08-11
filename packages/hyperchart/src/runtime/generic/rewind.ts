@@ -1,12 +1,12 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../../core/action_uid.js";
-import { actorContextForState, actorStatePath } from "../../core/actors.js";
+import { actorContextForState, actorPoolWorkerOccurrencePath, actorStatePath } from "../../core/actors.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { ActionUID } from "../../core/types.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
 import { instancePathFor, nearestInstance, nodeAt, stripLastKey, templatePath } from "../../core/paths.js";
-import { createBranchProjection, projectBranch, type BranchProjection } from "../../core/projection.js";
+import { createBranchProjection, projectBranch, projectedActorEndpoint, type BranchProjection, type ProjectedActorOccurrence, type ProjectedActorPoolOccurrence } from "../../core/projection.js";
 import { explainReplay } from "../../core/replay_check.js";
 import type { ChartAst, InputRef, StatePath, TemplateAst } from "../../core/types.js";
 import { loadRunMeta } from "./run_dir.js";
@@ -146,35 +146,65 @@ function findRewindMatch(
 		return { index, label: `${opts.mode} seqId ${opts.seqId}`, recordSeqId: opts.seqId };
 	}
 	const state = opts.state ?? "";
-	const index = records.findIndex((record) => recordMatchesState(record, state));
+	const index = records.findIndex((record, recordIndex) => recordMatchesState(records, recordIndex, state));
 	if (index === -1) throw new Error(`No durable log record matched state '${state}'`);
 	const recordSeqId = records[index]?.seqId;
 	return { index, label: `${opts.mode} state ${state}`, ...(recordSeqId === undefined ? {} : { recordSeqId }) };
 }
 
-function semanticStatesForRecord(record: DurableLogRecord): StatePath[] {
+export function semanticStatesForRecord(
+	record: DurableLogRecord,
+	records: readonly DurableLogRecord[],
+	recordIndex: number,
+): StatePath[] {
 	if (record.type === "spawned") return [record.path];
 	if (record.type === "state_action") return [record.actionUid.state];
 	if (record.type === "failure_intent") return [record.origin];
 	if (record.type === "actor_created") return [record.declaration, record.occurrence];
 	if (record.type === "actor_messages_enqueued") return [record.source.producerState, record.occurrence];
-	if (record.type === "actor_message" || record.type === "actor_scope") return [record.occurrence];
-	if (record.type === "actor_call_resolved") return [record.callerState];
+	if (record.type === "actor_message") {
+		if (record.workerIndex === undefined) return [record.occurrence];
+		const workerOccurrence = actorPoolWorkerOccurrencePath(record.occurrence, record.workerIndex);
+		let accepted: Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> | undefined;
+		if (record.kind === "accepted") {
+			accepted = record;
+		} else {
+			for (let index = recordIndex - 1; index >= 0; index--) {
+				const candidate = records[index];
+				if (candidate?.type === "actor_message"
+					&& candidate.kind === "accepted"
+					&& candidate.occurrence === record.occurrence
+					&& candidate.messageId === record.messageId
+					&& candidate.workerIndex === record.workerIndex) {
+					accepted = candidate;
+					break;
+				}
+			}
+		}
+		return accepted === undefined
+			? [record.occurrence, workerOccurrence]
+			: [record.occurrence, workerOccurrence, accepted.receiveState];
+	}
+	if (record.type === "actor_scope") return [record.occurrence];
+	if (record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") return [record.callerState];
 	return ["<run>"];
 }
 
 function summarizeRemovedRecordsByState(records: readonly DurableLogRecord[]): Array<{ state: string; records: number }> {
 	const counts = new Map<string, number>();
-	for (const record of records) {
-		for (const state of new Set(semanticStatesForRecord(record))) counts.set(state, (counts.get(state) ?? 0) + 1);
+	for (const [recordIndex, record] of records.entries()) {
+		for (const state of new Set(semanticStatesForRecord(record, records, recordIndex))) counts.set(state, (counts.get(state) ?? 0) + 1);
 	}
 	return [...counts.entries()]
 		.map(([state, count]) => ({ state, records: count }))
 		.sort((left, right) => right.records - left.records || left.state.localeCompare(right.state));
 }
 
-function recordMatchesState(record: DurableLogRecord, state: string): boolean {
-	return semanticStatesForRecord(record).some((path) => path === state || templatePath(path) === state || isUnderState(path, state));
+function recordMatchesState(records: readonly DurableLogRecord[], recordIndex: number, state: string): boolean {
+	const record = records[recordIndex];
+	if (record === undefined) return false;
+	return semanticStatesForRecord(record, records, recordIndex)
+		.some((path) => path === state || templatePath(path) === state || isUnderState(path, state));
 }
 
 function isUnderState(path: string, state: string): boolean {
@@ -429,11 +459,13 @@ function renderTemplateForProjection(
 
 function resolveRefForProjection(projection: BranchProjection, ast: ChartAst, ref: InputRef, stateId: StatePath): unknown {
 	const actorContext = actorContextForState(ast, stateId);
-	const actor = actorContext === undefined ? undefined : projection.actors[actorContext.occurrence];
+	const actor = actorContext === undefined ? undefined : projectedActorEndpoint(projection, actorContext.endpointOccurrence);
+	const worker = actorContext?.workerIndex === undefined || actor?.definition.kind !== "actorPool" ? undefined : (actor as ProjectedActorPoolOccurrence).workers[actorContext.workerIndex];
 	if (ref.kind === "actorInput") return selectPathForProjection(actor?.input, ref.path);
 	if (ref.kind === "messageInput") {
-		if (actor?.currentMessage?.event !== ref.message) throw new Error(`Cannot resolve messageInput('${ref.message}') for ${stateId}`);
-		return selectPathForProjection(actor.currentMessage.input, ref.path);
+		const message = worker?.currentMessage ?? (actor as ProjectedActorOccurrence | undefined)?.currentMessage;
+		if (message?.event !== ref.message) throw new Error(`Cannot resolve messageInput('${ref.message}') for ${stateId}`);
+		return selectPathForProjection(message.input, ref.path);
 	}
 	if (ref.kind === "arg") return projection.args?.[ref.name];
 	if (ref.kind === "visit") {

@@ -195,3 +195,9 @@ Package moves, UI work, and documentation edits must not alter this contract acc
 ## Explicit actor kernel
 
 Static actor declarations normalize into lexical paths while runtime occurrences are projected from creation/mailbox facts. The same finite occurrence input substrate now carries map `{key,item}` pairs. Machine effects perform exact async validation; only the single runner appends ordered facts. Details: [Explicit actors](./explicit-actors.md).
+
+## Actor pool architecture
+
+`ActorEndpointDeclarationAst` is the discriminated union of ordinary actors and actor pools. One `actor_created` fact for a pool generation materializes the declared fixed workers; workers use canonical `$worker` declaration paths and concrete `$worker-N` runtime paths. The endpoint, not a worker, owns the durable FIFO mailbox. `actorEndpointAdmission()` is the shared pure assignment view used by the machine and host adapter: it repeatedly takes the head and allows the scheduler to choose any compatible idle worker.
+
+Assignments are durable facts, so replay validates the recorded worker's eligibility and never selects a worker again. Before acknowledgement, ordered reservations in `MachineState` make accepted messages and workers visible only to admission for that pool; after acknowledgement, projection is the durable owner of worker state. Per-worker current state, results, visits, artifacts, and sessions remain keyed by concrete paths. `Hyperchart.tla` mirrors endpoint creation, scheduler assignment, capacity, ordered batch resolution, closing, and quiescent stop; `ActorPool.tla` model-checks the bounded worker kernel, and the real trace retains pool provenance instead of collapsing it to a capacity-one actor.

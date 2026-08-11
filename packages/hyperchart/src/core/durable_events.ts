@@ -1,12 +1,14 @@
 import type {
 	ActionUID,
-	ActorDeclarationAst,
+	ActorEndpointDeclarationAst,
 	ChartEvent,
 	GuardOutcome,
 	GuardRefAst,
 	SchemaAst,
 	SendStateAst,
+	SendBatchStateAst,
 	CallStateAst,
+	CallBatchStateAst,
 	StateActionAst,
 	StatePath,
 } from "./types.js";
@@ -106,13 +108,13 @@ export type ActorCreatedLog = {
 	generation: number;
 	owner?: StatePath;
 	input: unknown;
-	definition: ActorDeclarationAst;
+	definition: ActorEndpointDeclarationAst;
 } & SessionParams;
 
 export type ActorMessageSource = Readonly<{
 	producerState: StatePath;
-	kind: "send" | "call";
-	definition: SendStateAst | CallStateAst;
+	kind: "send" | "sendBatch" | "call" | "callBatch";
+	definition: SendStateAst | SendBatchStateAst | CallStateAst | CallBatchStateAst;
 	targetDeclaration: StatePath;
 	event: string;
 	inputSchema: SchemaAst;
@@ -130,9 +132,11 @@ export type ActorMessagesEnqueuedLog = {
 export type ActorMessageAcceptedLog = {
 	type: "actor_message";
 	kind: "accepted";
+	/** Endpoint occurrence. Pool worker identity is carried separately. */
 	occurrence: StatePath;
 	messageId: string;
 	receiveState: StatePath;
+	workerIndex?: number;
 } & SessionParams;
 
 export type ActorMessageRepliedLog = {
@@ -145,6 +149,7 @@ export type ActorMessageRepliedLog = {
 	output?: unknown;
 	/** Exact selected schema (or absence for void) is replay provenance. */
 	schema?: SchemaAst;
+	workerIndex?: number;
 } & SessionParams;
 
 export type ActorMessageSettledLog = {
@@ -152,6 +157,7 @@ export type ActorMessageSettledLog = {
 	kind: "settled";
 	occurrence: StatePath;
 	messageId: string;
+	workerIndex?: number;
 } & SessionParams;
 
 export type ActorCallResolvedLog = {
@@ -161,6 +167,14 @@ export type ActorCallResolvedLog = {
 	messageId: string;
 	replyEvent?: string;
 	output?: unknown;
+} & SessionParams;
+
+export type ActorBatchCallResolvedLog = {
+	type: "actor_batch_call_resolved";
+	callId: string;
+	callerState: StatePath;
+	/** Authored input order; item payloads remain in actor_message/replied facts. */
+	messageIds: readonly string[];
 } & SessionParams;
 
 export type ActorScopeLog = ({
@@ -176,6 +190,7 @@ export type ActorLogRecord =
 	| ActorMessageRepliedLog
 	| ActorMessageSettledLog
 	| ActorCallResolvedLog
+	| ActorBatchCallResolvedLog
 	| ActorScopeLog;
 
 export type DurableLogRecord =

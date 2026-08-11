@@ -9,13 +9,14 @@ import type { ActionUID, ChartAst, StateAst, StateId, StatePath } from "./types.
 // The template path of a possibly-instanced path: map "#key" and actor "~generation"
 // suffixes are stripped per segment. Generation 1 deliberately has no suffix for stable paths.
 export function templatePath(path: StatePath): StatePath {
-	if (!path.includes("#") && !path.includes("~")) return path;
+	if (!path.includes("#") && !path.includes("~") && !path.includes("$worker-")) return path;
 	return path
 		.split(".")
 		.map((segment) => {
 			const hash = segment.indexOf("#");
 			const withoutMap = hash === -1 ? segment : segment.slice(0, hash);
-			return withoutMap.replace(/~[1-9][0-9]*$/, "");
+			const withoutGeneration = withoutMap.replace(/~[1-9][0-9]*$/, "");
+			return /^\$worker-[0-9]+$/.test(withoutGeneration) ? "$worker" : withoutGeneration;
 		})
 		.join(".");
 }

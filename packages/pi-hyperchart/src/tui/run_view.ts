@@ -317,9 +317,11 @@ function recordText(record: DurableLogRecord): string {
 		case "actor_messages_enqueued":
 			return `actor ${record.occurrence} enqueued ${record.messages.length}`;
 		case "actor_message":
-			return `actor ${record.occurrence} ${record.kind} ${record.messageId}`;
+			return `actor ${record.occurrence}${record.workerIndex === undefined ? "" : ` worker-${record.workerIndex}`} ${record.kind} ${record.messageId}`;
 		case "actor_call_resolved":
 			return `actor call ${record.callId} resolved`;
+		case "actor_batch_call_resolved":
+			return `actor batch ${record.callId} resolved [${record.messageIds.join(", ")}]`;
 		case "actor_scope":
 			return `actor ${record.occurrence} ${record.kind}`;
 		case "state_action":

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { actorBusyFifoRun, actorDrainingRun, actorReentryRun } from "../fixtures/actor-fixtures.js";
+import { actorBusyFifoRun, actorDrainingRun, actorPoolBusyRun, actorPoolMapReentryRun, actorPoolOutOfOrderRun, actorReentryRun } from "../fixtures/actor-fixtures.js";
 import { visibleStateIdsForScope } from "../components/inspector/helpers/scope.js";
 import { BoardPage, GraphTile } from "./components/index.js";
 
@@ -15,9 +15,12 @@ type Story = StoryObj;
 
 export const ActorNodesAndEdges: Story = {
 	render: () => (
-		<BoardPage title="Explicit actor graph" description="Only visually distinct graph states: a busy FIFO/call, generation re-entry, and SEND-only structured drain.">
+		<BoardPage title="Explicit actor graph" description="Adapter-derived singleton actors and bounded pools: one endpoint node plus one canonical worker workflow scope.">
 			<div className="grid gap-4 xl:grid-cols-2">
 				<GraphTile title="busy FIFO · blocked caller" run={actorBusyFifoRun} height="h-[520px]" />
+				<GraphTile title="pool busy · two slots and backlog" run={actorPoolBusyRun} height="h-[520px]" />
+				<GraphTile title="pool complete · out-of-order work, ordered result" run={actorPoolOutOfOrderRun} height="h-[520px]" />
+				<GraphTile title="map-owned pool · generation 2" run={actorPoolMapReentryRun} height="h-[520px]" />
 				<GraphTile title="actor re-entry · generation 3" run={actorReentryRun} height="h-[520px]" />
 				<GraphTile title="nested structured drain · SEND-only" run={actorDrainingRun} visibleStateIds={drainingRootStateIds} height="h-[480px]" />
 			</div>

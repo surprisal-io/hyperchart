@@ -1,9 +1,10 @@
-import { hyperchartSource } from "./source.js";
+import { hyperchartSource, hyperchartValueSource } from "./source.js";
 import type {
 	ArtifactAst,
 	ArtifactOfAst,
 	AgentActionAst,
-	ActorDeclarationAst,
+	ActorDefinitionAst,
+	ActorEndpointDeclarationAst,
 	ActorWorkflowStateAst,
 	ChartArgumentAst,
 	ChartAst,
@@ -98,12 +99,27 @@ export type HyperchartInspectBranch = {
 	task?: string;
 };
 
+export type HyperchartInspectActorMessageContract = {
+	event: string;
+	inputSchema: JsonSchema;
+	reply: { kind: "void" } | { kind: "single"; schema: JsonSchema } | { kind: "named"; schemas: Record<string, JsonSchema> };
+};
+
+export type HyperchartInspectActorMessageDefinition = {
+	kind: "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply";
+	to?: string;
+	event?: string;
+	target?: string;
+	payload?: { label: "input" | "inputs" | "output"; source: string; schema?: JsonSchema };
+	contracts?: HyperchartInspectActorMessageContract[];
+};
+
 export type HyperchartInspectState = {
 	id: string;
 	scopeParentId?: string;
 	runtimeStatePath?: string;
 	actorInternal?: { declarationPath: string; localState: string; occurrencePath?: string };
-	kind: "agent" | "user" | "script" | "send" | "call" | "receive" | "reply" | "map" | "parallel" | "compound" | "region" | "final";
+	kind: "agent" | "user" | "script" | "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply" | "map" | "parallel" | "compound" | "region" | "final";
 	initial?: boolean;
 	definitionSource?: string;
 	agent?: string;
@@ -135,7 +151,8 @@ export type HyperchartInspectState = {
 	branches?: HyperchartInspectBranch[];
 	retries?: number;
 	transitions?: HyperchartInspectTransition[];
-	actorMessageLink?: { kind: "send" | "call"; to: string; event: string };
+	actorMessageLink?: { kind: "send" | "sendBatch" | "call" | "callBatch"; to: string; event: string };
+	actorMessageDefinition?: HyperchartInspectActorMessageDefinition;
 	finalConfig?: {
 		outcome: "complete" | "failed";
 		notify?: { prompt?: string; artifacts?: HyperchartInspectArtifact[]; scope?: string };
@@ -143,6 +160,7 @@ export type HyperchartInspectState = {
 };
 
 export type HyperchartInspectActorDeclaration = {
+	kind: "actor" | "actorPool";
 	declarationPath: string;
 	ownerPath?: string;
 	definitionSource?: string;
@@ -150,11 +168,8 @@ export type HyperchartInspectActorDeclaration = {
 	/** Concrete placement value/expression, before runtime reference resolution. */
 	inputValue: ValueAst;
 	initialReceive: string;
-	protocol: Array<{
-		event: string;
-		inputSchema: JsonSchema;
-		reply: { kind: "void" } | { kind: "single"; schema: JsonSchema } | { kind: "named"; schemas: Record<string, JsonSchema> };
-	}>;
+	concurrency?: number;
+	protocol: HyperchartInspectActorMessageContract[];
 };
 
 export type HyperchartInspectResult = {
@@ -184,22 +199,15 @@ export function inspectChartAst(
 			? {}
 			: {
 					actorDeclarations: Object.values(ast.actors).map((actor) => ({
+						kind: actor.kind,
 						declarationPath: actor.path,
 						...(actor.owner === undefined ? {} : { ownerPath: actor.owner }),
 						definitionSource: hyperchartSource(ast, actor.path),
 						inputSchema: actor.input.schema,
 						inputValue: actor.inputValue,
-						initialReceive: actor.initial,
-						protocol: Object.entries(actor.protocol).map(([event, message]) => ({
-							event,
-							inputSchema: message.input.schema,
-							reply:
-								message.reply.kind === "void"
-									? { kind: "void" as const }
-									: message.reply.kind === "single"
-										? { kind: "single" as const, schema: message.reply.schema.schema }
-										: { kind: "named" as const, schemas: Object.fromEntries(Object.entries(message.reply.schemas).map(([name, schema]) => [name, schema.schema])) },
-						})),
+						initialReceive: actorDefinition(actor).initial,
+						...(actor.kind === "actorPool" ? { concurrency: actor.concurrency } : {}),
+						protocol: Object.entries(actor.protocol).map(([event, message]) => inspectActorMessageContract(event, message)),
 					})),
 				}),
 	};
@@ -241,67 +249,144 @@ function statesFromAst(ast: ChartAst, options: { agentDefaults?: (agentName: str
 	return [...chartStates, ...Object.values(ast.actors).flatMap((actor) => actorDefinitionStates(ast, actor, options))];
 }
 
+function actorDefinition(actor: ActorEndpointDeclarationAst): ActorDefinitionAst {
+	return actor.kind === "actorPool" ? actor.worker : { input: actor.input, protocol: actor.protocol, initial: actor.initial, states: actor.states };
+}
+
+function inspectActorMessageContract(event: string, message: ActorDefinitionAst["protocol"][string]): HyperchartInspectActorMessageContract {
+	return {
+		event,
+		inputSchema: message.input.schema,
+		reply: message.reply.kind === "void"
+			? { kind: "void" }
+			: message.reply.kind === "single"
+				? { kind: "single", schema: message.reply.schema.schema }
+				: { kind: "named", schemas: Object.fromEntries(Object.entries(message.reply.schemas).map(([name, schema]) => [name, schema.schema])) },
+	};
+}
+
+function outgoingActorMessageDefinition(
+	ast: ChartAst,
+	state: Extract<StateAst | ActorWorkflowStateAst, { kind: "send" | "sendBatch" | "call" | "callBatch" }>,
+): HyperchartInspectActorMessageDefinition {
+	const message = ast.actors[state.to]?.protocol[state.event];
+	const source = hyperchartValueSource(state.kind === "send" || state.kind === "call" ? state.input : state.inputs);
+	return {
+		kind: state.kind,
+		to: state.to,
+		event: state.event,
+		...(state.target === undefined ? {} : { target: state.target }),
+		payload: {
+			label: state.kind === "send" || state.kind === "call" ? "input" : "inputs",
+			source,
+			...(message === undefined ? {} : { schema: message.input.schema }),
+		},
+		...(message === undefined ? {} : { contracts: [inspectActorMessageContract(state.event, message)] }),
+	};
+}
+
+function receiveActorMessageDefinition(actor: ActorEndpointDeclarationAst, state: Extract<ActorWorkflowStateAst, { kind: "receive" }>): HyperchartInspectActorMessageDefinition {
+	return {
+		kind: "receive",
+		contracts: Object.keys(state.on).flatMap((event) => {
+			const message = actor.protocol[event];
+			return message === undefined ? [] : [inspectActorMessageContract(event, message)];
+		}),
+	};
+}
+
+function replyOutputSchema(actor: ActorEndpointDeclarationAst, event: string | undefined): JsonSchema | undefined {
+	const schemas = Object.values(actor.protocol).flatMap((message) => {
+		if (message.reply.kind === "single") return event === undefined || event === "reply" ? [message.reply.schema.schema] : [];
+		if (message.reply.kind === "named" && event !== undefined) {
+			const schema = message.reply.schemas[event];
+			return schema === undefined ? [] : [schema.schema];
+		}
+		return [];
+	});
+	const unique = new Map(schemas.map((schema) => [JSON.stringify(schema), schema]));
+	return unique.size === 1 ? unique.values().next().value : undefined;
+}
+
+function replyActorMessageDefinition(actor: ActorEndpointDeclarationAst, state: Extract<ActorWorkflowStateAst, { kind: "reply" }>): HyperchartInspectActorMessageDefinition {
+	const schema = replyOutputSchema(actor, state.event);
+	return {
+		kind: "reply",
+		event: state.event ?? "reply",
+		target: state.target,
+		...(state.output === undefined
+			? {}
+			: { payload: { label: "output" as const, source: hyperchartValueSource(state.output), ...(schema === undefined ? {} : { schema }) } }),
+	};
+}
+
 function actorDefinitionStates(
 	ast: ChartAst,
-	actor: ActorDeclarationAst,
+	actor: ActorEndpointDeclarationAst,
 	options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined },
 ): HyperchartInspectState[] {
-	return Object.entries(actor.states).map(([localState, state]) => {
-		const path = `${actor.path}.${localState}`;
+	const definition = actorDefinition(actor);
+	const actorBase = actor.kind === "actorPool" ? `${actor.path}.$worker` : actor.path;
+	return Object.entries(definition.states).map(([localState, state]) => {
+		const path = `${actorBase}.${localState}`;
 		const common = {
 			id: path,
 			scopeParentId: actor.path,
 			actorInternal: { declarationPath: actor.path, localState },
-			...(localState === actor.initial ? { initial: true } : {}),
+			...(localState === definition.initial ? { initial: true } : {}),
 		};
 		if (state.kind === "state") {
 			const inspected = actionStateFromAst(ast, path, state as Extract<StateAst, { kind: "state" }>, options);
 			return {
 				...inspected,
 				...common,
-				transitions: actorTransitionEntries(actor, state),
+				transitions: actorTransitionEntries(actorBase, state),
 			};
 		}
 		if (state.kind === "receive") {
 			return {
 				...common,
 				kind: "receive" as const,
-				transitions: Object.entries(state.on).map(([event, target]) => ({ event, target: `${actor.path}.${target}` })),
+				actorMessageDefinition: receiveActorMessageDefinition(actor, state),
+				transitions: Object.entries(state.on).map(([event, target]) => ({ event, target: `${actorBase}.${target}` })),
 			};
 		}
 		if (state.kind === "reply") {
 			return {
 				...common,
 				kind: "reply" as const,
-				transitions: [{ event: state.event ?? "reply", target: `${actor.path}.${state.target}` }],
+				actorMessageDefinition: replyActorMessageDefinition(actor, state),
+				transitions: [{ event: state.event ?? "reply", target: `${actorBase}.${state.target}` }],
 			};
 		}
-		if (state.kind === "send") {
+		if (state.kind === "send" || state.kind === "sendBatch") {
 			return {
 				...common,
-				kind: "send" as const,
+				kind: state.kind,
 				task: `${state.event} → ${state.to}`,
-				actorMessageLink: { kind: "send" as const, to: state.to, event: state.event },
-				transitions: [{ event: "ENQUEUED", target: `${actor.path}.${state.target}` }],
+				actorMessageLink: { kind: state.kind, to: state.to, event: state.event },
+				actorMessageDefinition: outgoingActorMessageDefinition(ast, state),
+				transitions: [{ event: "ENQUEUED", target: `${actorBase}.${state.target}` }],
 			};
 		}
 		return {
 			...common,
-			kind: "call" as const,
+			kind: state.kind,
 			task: `${state.event} → ${state.to}`,
-			actorMessageLink: { kind: "call" as const, to: state.to, event: state.event },
-			transitions: actorTransitionEntries(actor, state),
+			actorMessageLink: { kind: state.kind, to: state.to, event: state.event },
+			actorMessageDefinition: outgoingActorMessageDefinition(ast, state),
+			transitions: actorTransitionEntries(actorBase, state),
 		};
 	});
 }
 
-function actorTransitionEntries(actor: ActorDeclarationAst, state: ActorWorkflowStateAst): HyperchartInspectTransition[] {
-	if (state.kind === "send") return [{ event: "ENQUEUED", target: `${actor.path}.${state.target}` }];
-	if (state.kind === "reply") return [{ event: state.event ?? "reply", target: `${actor.path}.${state.target}` }];
-	if (state.kind === "receive") return Object.entries(state.on).map(([event, target]) => ({ event, target: `${actor.path}.${target}` }));
-	if (state.kind === "call" && state.target !== undefined) return [{ event: "ACTOR_REPLY", target: `${actor.path}.${state.target}` }];
-	if (state.kind === "call") return Object.entries(state.transitions).map(([event, transition]) => ({ event, target: `${actor.path}.${transition.target}` }));
-	return Object.entries(state.transitions).map(([event, transition]) => ({ event, target: `${actor.path}.${transition.target}` }));
+function actorTransitionEntries(actorBase: string, state: ActorWorkflowStateAst): HyperchartInspectTransition[] {
+	if (state.kind === "send" || state.kind === "sendBatch") return [{ event: "ENQUEUED", target: `${actorBase}.${state.target}` }];
+	if (state.kind === "reply") return [{ event: state.event ?? "reply", target: `${actorBase}.${state.target}` }];
+	if (state.kind === "receive") return Object.entries(state.on).map(([event, target]) => ({ event, target: `${actorBase}.${target}` }));
+	if ((state.kind === "call" || state.kind === "callBatch") && state.target !== undefined) return [{ event: "ACTOR_REPLY", target: `${actorBase}.${state.target}` }];
+	if (state.kind === "call") return Object.entries(state.transitions).map(([event, transition]) => ({ event, target: `${actorBase}.${transition.target}` }));
+	return Object.entries(state.transitions).map(([event, transition]) => ({ event, target: `${actorBase}.${transition.target}` }));
 }
 
 function isInitialState(ast: ChartAst, path: string, state: StateAst): boolean {
@@ -312,8 +397,8 @@ function isInitialState(ast: ChartAst, path: string, state: StateAst): boolean {
 
 function stateFromAst(ast: ChartAst, path: string, state: Exclude<StateAst, { kind: "final" }>, options: { agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined } = {}): HyperchartInspectState {
 	if (state.kind === "state") return actionStateFromAst(ast, path, state, options);
-	if (state.kind === "send") return { id: path, kind: "send", task: `${state.event} → ${state.to}`, actorMessageLink: { kind: "send", to: state.to, event: state.event } };
-	if (state.kind === "call") return { id: path, kind: "call", task: `${state.event} → ${state.to}`, actorMessageLink: { kind: "call", to: state.to, event: state.event } };
+	if (state.kind === "send" || state.kind === "sendBatch") return { id: path, kind: state.kind, task: `${state.event} → ${state.to}`, actorMessageLink: { kind: state.kind, to: state.to, event: state.event }, actorMessageDefinition: outgoingActorMessageDefinition(ast, state) };
+	if (state.kind === "call" || state.kind === "callBatch") return { id: path, kind: state.kind, task: `${state.event} → ${state.to}`, actorMessageLink: { kind: state.kind, to: state.to, event: state.event }, actorMessageDefinition: outgoingActorMessageDefinition(ast, state) };
 	if (state.kind === "map") {
 		const refs = [inputRefInfo(state.over)];
 		const inputs = inputDefinitions(state.input);
@@ -570,8 +655,11 @@ function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): Hyperch
 		target: siblingStatePath(state.parent, transition.target),
 		...(transition.input === undefined ? {} : { input: eventBindingsInfo(transition.input) }),
 	}));
-	if (state.kind === "send") {
+	if (state.kind === "send" || state.kind === "sendBatch") {
 		entries.push({ event: "ENQUEUED", target: siblingStatePath(state.parent, state.target) });
+	}
+	if ((state.kind === "call" || state.kind === "callBatch") && state.target !== undefined) {
+		entries.push({ event: "ACTOR_REPLY", target: siblingStatePath(state.parent, state.target) });
 	}
 	if (state.kind === "compound" || state.kind === "parallel" || state.kind === "map") {
 		entries.push({ event: "onDone", target: siblingStatePath(state.parent, state.onDone) });

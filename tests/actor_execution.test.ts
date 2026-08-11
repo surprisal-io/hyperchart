@@ -25,6 +25,7 @@ import {
 	receive,
 	reply,
 	send,
+	sendBatch,
 	z,
 	normalizeChartConfig,
 	createBranchProjection,
@@ -184,7 +185,7 @@ describe("explicit event-sourced actors", () => {
 				phase: compound({
 					actors: { worker }, initial: "dispatch", onDone: "successor",
 					states: {
-						dispatch: send({ to: worker, event: "WORK", inputs: [{ id: 1 }, { id: 2 }], target: "finished" }),
+						dispatch: sendBatch({ to: worker, event: "WORK", inputs: [{ id: 1 }, { id: 2 }], target: "finished" }),
 						finished: final(),
 					},
 				}),
@@ -349,7 +350,8 @@ describe("explicit event-sourced actors", () => {
 		});
 		const placed = Placed({ meta: { kind: "unit" } });
 		const normalized = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-data-kind-placement", actors: { placed }, initial: "done", states: { done: final() },
+			kind: "chart", id: "actor-data-kind-placement", actors: { placed }, initial: "ping",
+			states: { ping: send({ to: placed, event: "PING", input: {}, target: "done" }), done: final() },
 		}));
 		expect(normalized.ok).toBe(true);
 		assert(normalized.ok, JSON.stringify(normalized.diagnostics));
@@ -387,7 +389,7 @@ describe("explicit event-sourced actors", () => {
 		const ast = parsed(chart({
 			kind: "chart", id: "actor-batch", actors: { auditor }, initial: "record",
 			states: {
-				record: send({ to: auditor, event: "RECORD", inputs: [{ path: "a" }, { path: "b" }, { path: "c" }], target: "done" }),
+				record: sendBatch({ to: auditor, event: "RECORD", inputs: [{ path: "a" }, { path: "b" }, { path: "c" }], target: "done" }),
 				done: final(),
 			},
 		}));
@@ -611,7 +613,7 @@ describe("explicit event-sourced actors", () => {
 		const auditor = Auditor({});
 		const ast = parsed(chart({
 			kind: "chart", id: "actor-invalid-batch", actors: { auditor }, initial: "record",
-			states: { record: send({ to: auditor, event: "RECORD", inputs: [{ path: "a" }], target: "done" }), done: final() },
+			states: { record: sendBatch({ to: auditor, event: "RECORD", inputs: [{ path: "a" }], target: "done" }), done: final() },
 		}));
 		const runtime = new ActorRuntime(ast, "enqueue");
 		const state = await loop(runtime);
@@ -687,7 +689,7 @@ describe("explicit event-sourced actors", () => {
 		expect(acceptedIndex).toBeGreaterThan(0);
 		const prefix = JSON.parse(JSON.stringify(oldRuntime.records.slice(0, acceptedIndex))) as DurableLogRecord[];
 		const created = prefix.find((record) => record.type === "actor_created");
-		expect(created?.type === "actor_created" ? created.definition.states.idle : undefined).toMatchObject({ kind: "receive", on: { PING: "logged" } });
+		expect(created?.type === "actor_created" && created.definition.kind === "actor" ? created.definition.states.idle : undefined).toMatchObject({ kind: "receive", on: { PING: "logged" } });
 
 		const liveRuntime = new ActorRuntime(makeChart("live"));
 		liveRuntime.records.push(...prefix);
@@ -825,13 +827,19 @@ describe("explicit event-sourced actors", () => {
 		expect(run.states.some((entry) => entry.id.includes("~2"))).toBe(false);
 	});
 
-	it("rejects declarations in runtime data, duplicate placement, illegal owners, and unavailable placement refs", () => {
+	it("rejects declarations in runtime data, duplicate or unused placement, illegal owners, and unavailable placement refs", () => {
 		const auditor = Auditor({});
 		const duplicate = normalizeChartConfig(chart({
 			kind: "chart", id: "duplicate", actors: { first: auditor, second: auditor }, initial: "done", states: { done: final() },
 		}));
 		expect(duplicate.ok).toBe(false);
 		if (!duplicate.ok) expect(duplicate.diagnostics.map((entry) => entry.code)).toContain("DUPLICATE_ACTOR_PLACEMENT");
+
+		const unused = normalizeChartConfig(chart({
+			kind: "chart", id: "unused-actor", actors: { auditor: Auditor({}) }, initial: "done", states: { done: final() },
+		}));
+		expect(unused.ok).toBe(false);
+		if (!unused.ok) expect(unused.diagnostics.map((entry) => entry.code)).toContain("UNUSED_ACTOR");
 
 		const embedded = normalizeChartConfig({
 			kind: "chart", id: "embedded", actors: { auditor }, initial: "record",

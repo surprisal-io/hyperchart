@@ -11,6 +11,7 @@ import {
 	receive,
 	reply,
 	send,
+	sendBatch,
 } from "../../core/dsl.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { ChartAst, ChartCst } from "../../core/types.js";
@@ -100,7 +101,7 @@ export const actorInspectorChart: ChartCst = chart({
 	actors: { editor },
 	initial: "queue",
 	states: {
-		queue: send({
+		queue: sendBatch({
 			to: editor,
 			event: "APPLY",
 			inputs: [{ patch: "patch-0" }],
@@ -164,11 +165,11 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 	const queueReview = ast.states["queue-review"];
 	const queueArchive = ast.states["queue-archive"];
 	const applyCall = ast.states["apply-call"];
-	const action = declaration?.states.apply;
+	const action = declaration?.kind === "actor" ? declaration.states.apply : undefined;
 	const applyInputSchema = declaration?.protocol.APPLY?.input;
 	const reviewInputSchema = declaration?.protocol.REVIEW?.input;
 	const archiveInputSchema = declaration?.protocol.ARCHIVE?.input;
-	if (declaration === undefined || queue?.kind !== "send" || !Array.isArray(queue.inputs) || queueReview?.kind !== "send" || queueReview.input === undefined || queueArchive?.kind !== "send" || queueArchive.input === undefined || applyCall?.kind !== "call" || action?.kind !== "state" || applyInputSchema === undefined || reviewInputSchema === undefined || archiveInputSchema === undefined) {
+	if (declaration?.kind !== "actor" || queue?.kind !== "sendBatch" || !Array.isArray(queue.inputs) || queueReview?.kind !== "send" || queueReview.input === undefined || queueArchive?.kind !== "send" || queueArchive.input === undefined || applyCall?.kind !== "call" || action?.kind !== "state" || applyInputSchema === undefined || reviewInputSchema === undefined || archiveInputSchema === undefined) {
 		throw new Error("actor inspector fixture did not normalize to the expected actor graph");
 	}
 	return [
@@ -190,7 +191,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			generation: 1,
 			source: {
 				producerState: "queue",
-				kind: "send",
+				kind: "sendBatch",
 				definition: queue,
 				targetDeclaration: "@editor",
 				event: "APPLY",
@@ -338,7 +339,7 @@ export const mailboxReentryChart = chart({
 			initial: "dispatch",
 			onDone: "between",
 			states: {
-				dispatch: send({
+				dispatch: sendBatch({
 					to: mailboxWorker,
 					event: "PING",
 					inputs: [{ value: "first" }, { value: "second" }],
@@ -361,7 +362,7 @@ export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
 	const hold = ast.states["phase.hold"];
 	const between = ast.states.between;
 	const contract = declaration?.protocol.PING;
-	if (declaration === undefined || dispatch?.kind !== "send" || !Array.isArray(dispatch.inputs) || hold?.kind !== "state" || between?.kind !== "state" || contract === undefined) {
+	if (declaration?.kind !== "actor" || dispatch?.kind !== "sendBatch" || !Array.isArray(dispatch.inputs) || hold?.kind !== "state" || between?.kind !== "state" || contract === undefined) {
 		throw new Error("mailbox reentry fixture did not normalize to the expected graph");
 	}
 	const dispatchInputs = dispatch.inputs;
@@ -378,7 +379,7 @@ export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
 		type: "actor_messages_enqueued",
 		occurrence,
 		generation,
-		source: { producerState: "phase.dispatch", kind: "send", definition: dispatch, targetDeclaration: "phase.@worker", event: dispatch.event, inputSchema: contract.input },
+		source: { producerState: "phase.dispatch", kind: "sendBatch", definition: dispatch, targetDeclaration: "phase.@worker", event: dispatch.event, inputSchema: contract.input },
 		messages: messages(visit),
 		...stamp(seqId),
 	});

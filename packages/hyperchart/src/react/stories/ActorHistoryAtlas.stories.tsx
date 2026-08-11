@@ -1,15 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 import { ActorMailboxCard } from "../components/inspector/details/ActorMailboxCard.js";
+import { ActorPoolWorkersCard } from "../components/inspector/details/ActorPoolWorkersCard.js";
 import { ActorInternalMessageHistory } from "../components/inspector/details/RuntimeSection.js";
-import { actorReentryRun } from "../fixtures/actor-fixtures.js";
+import { actorPoolOutOfOrderRun, actorReentryRun } from "../fixtures/actor-fixtures.js";
 import { BoardPage } from "./components/index.js";
 
 const receiveState = actorReentryRun.states.find((state) => state.id === "phase.@auditor.idle");
 const replyState = actorReentryRun.states.find((state) => state.id === "phase.@auditor.settle");
 const occurrence = actorReentryRun.actorOccurrences?.[0];
-if (receiveState === undefined || replyState === undefined || occurrence === undefined) {
-	throw new Error("actor history atlas requires the replay-valid reentry projection");
+const poolOccurrence = actorPoolOutOfOrderRun.actorOccurrences?.[0];
+if (receiveState === undefined || replyState === undefined || occurrence === undefined || poolOccurrence === undefined) {
+	throw new Error("actor history atlas requires replay-valid actor and pool projections");
 }
 const receiveMessages = receiveState.actorInternal?.generations?.flatMap((generation) => generation.actorMessageHistory ?? []) ?? [];
 const replyMessages = replyState.actorInternal?.generations?.flatMap((generation) => generation.actorMessageHistory ?? []) ?? [];
@@ -38,7 +40,7 @@ export const CollapsedHistoriesAndPreviousMessages: Story = {
 			title="Actor history card atlas"
 			description="Compact production cards derived from the normalized, replay-valid actor reentry run; no duplicate dialogs or semantic view models."
 		>
-			<div className="grid gap-4 lg:grid-cols-3">
+			<div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
 				<AtlasCard title="Receive History · selected receive state" testId="receive-history">
 					<ActorInternalMessageHistory state={receiveState} messages={receiveMessages} />
 				</AtlasCard>
@@ -48,6 +50,9 @@ export const CollapsedHistoriesAndPreviousMessages: Story = {
 				<AtlasCard title="Mailbox History · generation instances" testId="previous-messages">
 					<ActorMailboxCard instances={occurrence.mailboxInstances} />
 				</AtlasCard>
+				<AtlasCard title="Pool Worker History · persistent reuse" testId="pool-worker-history">
+					<ActorPoolWorkersCard occurrence={poolOccurrence} />
+				</AtlasCard>
 			</div>
 		</BoardPage>
 	),
@@ -56,6 +61,7 @@ export const CollapsedHistoriesAndPreviousMessages: Story = {
 		const receive = within(canvas.getByTestId("receive-history"));
 		const replies = within(canvas.getByTestId("reply-history"));
 		const previous = within(canvas.getByTestId("previous-messages"));
+		const pool = within(canvas.getByTestId("pool-worker-history"));
 		const firstMessageId = "phase.record:message:1:0";
 
 		await expect(receive.getAllByRole("button")).toHaveLength(3);
@@ -79,5 +85,11 @@ export const CollapsedHistoriesAndPreviousMessages: Story = {
 		await expect(previous.getByText("Instance · generation 1")).toBeVisible();
 		await expect(previous.getAllByText("RECORD")).toHaveLength(3);
 		await expect(previous.queryByText(firstMessageId)).not.toBeInTheDocument();
+
+		await userEvent.click(pool.getByText("$worker-1"));
+		await expect(pool.getByText("Mailbox is empty.")).toBeVisible();
+		await userEvent.click(pool.getByRole("button", { name: "Show history" }));
+		await expect(pool.getByText("batch:message:1:1")).toBeVisible();
+		await expect(pool.getByText("batch:message:1:2")).toBeVisible();
 	},
 };

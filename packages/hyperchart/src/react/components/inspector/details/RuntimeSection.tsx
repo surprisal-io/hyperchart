@@ -197,7 +197,9 @@ export function RuntimeSection({
 	if (!stateHasRuntimeDetails(state)) return null;
 	const sessionIsLive = session?.status === "running" || session?.status === "starting";
 	const actorOccurrence = state.actorOccurrence;
-	const actorMessage = state.type === "send" || state.type === "call" ? state.actorMessageLink : undefined;
+	const actorMessage = state.type === "send" || state.type === "sendBatch" || state.type === "call" || state.type === "callBatch"
+		? state.actorMessageLink
+		: undefined;
 	const actorInternalMessages = state.actorMessageHistory;
 	const actorInternalGenerations = state.actorInternal?.generations;
 	return (

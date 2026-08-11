@@ -6,6 +6,7 @@ import type {
 	ActorStateInputRefMarker,
 	ActorPlacement,
 	ActorTemplate,
+	ActorPoolTemplate,
 	ActorVerification,
 	CallRouting,
 	InferSchema,
@@ -15,11 +16,14 @@ import type {
 	ReplyEvents,
 	ReplyOutput,
 	ReplyUnion,
-	SendInputOptions,
+	NonEmptyActorBatch,
+	SingleReplyMessageTypes,
 	AgentActionCst,
 	ActorDefinitionCst,
+	ActorPoolDefinitionCst,
 	ActorWorkflowStateCst,
 	CallStateCst,
+	CallBatchStateCst,
 	ChartCst,
 	CompoundStateCst,
 	EventBindingCst,
@@ -37,7 +41,9 @@ import type {
 	ReplyStateCst,
 	SchemaCst,
 	SendStateCst,
+	SendBatchStateCst,
 	StaticActorDeclaration,
+	StaticActorPoolDeclaration,
 	ParallelStateCst,
 	ScriptActionCst,
 	Templatable,
@@ -89,28 +95,69 @@ export function actor<
 	return template;
 }
 
+/** Creates one statically placed endpoint with a fixed set of persistent worker actors. */
+export function actorPool<
+	const P extends ProtocolCst,
+	I,
+	Brand,
+>(options: { concurrency: number; worker: ActorTemplate<P, I, Brand> }): ActorPoolTemplate<P, I, Brand> {
+	const definition: ActorPoolDefinitionCst = {
+		kind: "actorPoolTemplate",
+		concurrency: options.concurrency,
+		worker: options.worker.definition,
+	};
+	const template = ((input: ActorPlacement<I>) => ({
+		kind: "actorPoolDeclaration" as const,
+		definition,
+		input: input as ValueExpr<I>,
+	})) as ActorPoolTemplate<P, I, Brand>;
+	Object.defineProperty(template, "definition", { enumerable: false, value: definition });
+	return template;
+}
+
 export function receive<const O extends Omit<ReceiveStateCst, "kind">>(options: O): { kind: "receive" } & O {
 	return { kind: "receive", ...options };
 }
 
 export function send<
-	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
->(options: { to: D; event: M; target: Target } & SendInputOptions<MessageInput<ProtocolOf<D>, M>>): SendStateCst & { target: Target } {
-	return { kind: "send", ...options } as SendStateCst & { target: Target };
+>(options: { to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> }): { kind: "send"; to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } {
+	return { kind: "send", ...options };
+}
+
+export function sendBatch<
+	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const M extends MessageTypes<ProtocolOf<D>>,
+	const Target extends string,
+>(options: { to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> }): { kind: "sendBatch"; to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> } {
+	return { kind: "sendBatch", ...options };
 }
 
 export function call<
-	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
 >(options: {
 	to: D;
 	event: M;
 	input: ActorPlacement<MessageInput<ProtocolOf<D>, M>>;
-} & CallRouting<ProtocolOf<D>, M, Target>): CallStateCst & CallRouting<ProtocolOf<D>, M, Target> & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> } {
-	return { kind: "call", ...options } as unknown as CallStateCst & CallRouting<ProtocolOf<D>, M, Target> & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> };
+} & CallRouting<ProtocolOf<D>, M, Target>): { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & CallRouting<ProtocolOf<D>, M, Target> & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> } {
+	return { kind: "call", ...options } as { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & CallRouting<ProtocolOf<D>, M, Target> & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> };
+}
+
+export function callBatch<
+	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const M extends SingleReplyMessageTypes<ProtocolOf<D>>,
+	const Target extends string,
+>(options: {
+	to: D;
+	event: M;
+	inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>>;
+	target: Target;
+}): CallBatchStateCst & { target: Target; readonly __result?: ReplyOutput<ProtocolOf<D>, M>[] } {
+	return { kind: "callBatch", ...options } as unknown as CallBatchStateCst & { target: Target; readonly __result?: ReplyOutput<ProtocolOf<D>, M>[] };
 }
 
 export function reply<const O extends Omit<ReplyStateCst, "kind">>(options: O): { kind: "reply" } & O {

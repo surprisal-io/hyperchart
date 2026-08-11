@@ -15,6 +15,7 @@ import {
 	protocol,
 	receive,
 	reply,
+	send,
 	t,
 	tsImport,
 	user,
@@ -527,13 +528,15 @@ describe("normalizeChartConfig", () => {
 		});
 		const timed = Timed({});
 		const result = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-after-reply", actors: { timed }, initial: "done", states: { done: final() },
+			kind: "chart", id: "actor-after-reply", actors: { timed }, initial: "dispatch",
+			states: { dispatch: send({ to: timed, event: "RUN", input: {}, target: "done" }), done: final() },
 		}));
 
 		expect(result.ok).toBe(true);
 		assert(result.ok, JSON.stringify(result.diagnostics));
 		expect(result.diagnostics).toEqual([]);
-		expect(result.ast.actors["@timed"]?.states.settle).toMatchObject({ kind: "reply", message: "RUN" });
+		const timedActor = result.ast.actors["@timed"];
+		expect(timedActor?.kind === "actor" ? timedActor.states.settle : undefined).toMatchObject({ kind: "reply", message: "RUN" });
 	});
 
 	it("rejects invalid after shapes and unknown after targets", () => {

@@ -6,6 +6,7 @@ import {
 	createBranchProjection,
 	projectBranch,
 	type BranchProjection,
+	projectedActorEndpoint,
 	type ProjectionSkippedRecord,
 } from "./projection.js";
 import type { ActionUID, ChartAst, StatePath } from "./types.js";
@@ -109,7 +110,7 @@ function staleRecordsFor(
 		const current = actorContextForState(ast, record.source.producerState)?.node ?? nodeAt(ast, record.source.producerState);
 		const target = ast.actors[record.source.targetDeclaration];
 		const schema = target?.protocol[record.source.event]?.input;
-		const matches = (current?.kind === "send" || current?.kind === "call")
+		const matches = (current?.kind === "send" || current?.kind === "sendBatch" || current?.kind === "call" || current?.kind === "callBatch")
 			&& stableStringify(current) === stableStringify(record.source.definition)
 			&& current.kind === record.source.kind
 			&& current.to === record.source.targetDeclaration
@@ -119,7 +120,7 @@ function staleRecordsFor(
 		return [{ index, seqId: record.seqId, record, state: record.source.producerState, reason: "actor_message_source_changed", message: `Actor ${record.source.kind} source, target, event, schema, or routing changed for ${record.source.producerState}` }];
 	}
 	if (record.type === "actor_message" && record.kind === "replied") {
-		const actor = Object.values(projection.actors).find((entry) => entry.occurrence === record.occurrence);
+		const actor = projectedActorEndpoint(projection, record.occurrence);
 		const contract = actor === undefined ? undefined : ast.actors[actor.declaration]?.protocol[record.message]?.reply;
 		const schema = contract?.kind === "single" ? contract.schema : contract?.kind === "named" && record.replyEvent !== undefined ? contract.schemas[record.replyEvent] : undefined;
 		if (stableStringify(schema) === stableStringify(record.schema)) return [];
@@ -128,7 +129,7 @@ function staleRecordsFor(
 	if (record.type !== "state_action") return [];
 	const state = record.actionUid.state;
 	if (!projection.activeLeaves.includes(state) && record.kind !== "validated") return [];
-	const node = nodeAt(ast, state);
+	const node = actorContextForState(ast, state)?.node ?? nodeAt(ast, state);
 	if (node?.kind !== "state") return [];
 	if (record.kind === "invoke") {
 		if (!isRecord(record.definition)) return [];
@@ -180,7 +181,7 @@ function brokenRecordFor(
 		if (record.type === "spawned") return { ...base, state: record.path };
 		if (record.type === "actor_created") return { ...base, state: record.occurrence };
 		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope") return { ...base, state: record.occurrence };
-		if (record.type === "actor_call_resolved") return { ...base, state: record.callerState };
+		if (record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") return { ...base, state: record.callerState };
 		if (record.type === "failure_intent") return { ...base, state: record.origin };
 		return base;
 	}

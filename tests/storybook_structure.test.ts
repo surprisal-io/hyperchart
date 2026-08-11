@@ -19,7 +19,14 @@ import {
 	actorPendingCallRun,
 	actorSendVoidRun,
 	actorOverflowRun,
+	actorPoolIdleRun,
+	actorPoolBusyRun,
+	actorPoolPartialBatchRun,
+	actorPoolOutOfOrderRun,
+	actorPoolDrainingRun,
+	actorPoolMapReentryRun,
 	allActorRuns,
+	allActorPoolRuns,
 } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 import {
 	blockedRun,
@@ -82,6 +89,14 @@ describe("Storybook information architecture", () => {
 			const scenario = spec === undefined ? undefined : inspectorPanelScenario(spec);
 			return scenario?.selectedStateId === null ? undefined : scenario?.run.states.find((state) => state.id === scenario?.selectedStateId);
 		};
+		expect(visualState("Send batch state")).toMatchObject({
+			type: "sendBatch",
+			actorMessageLink: { kind: "sendBatch", to: "@editor", event: "APPLY" },
+		});
+		expect(visualState("Call batch state")).toMatchObject({
+			type: "callBatch",
+			actorMessageLink: { kind: "callBatch", to: "@workers", event: "WORK" },
+		});
 		expect(visualState("Empty pending map")).toMatchObject({
 			status: "pending",
 			mapConfig: expect.not.objectContaining({ items: expect.anything() }),
@@ -230,7 +245,7 @@ describe("Storybook information architecture", () => {
 		expect(actorPendingCallRun.actorOccurrences?.[0]?.pendingCaller).toBeDefined();
 		expect(actorSendVoidRun.actorOccurrences?.[0]?.status).toBe("stopped");
 		expect(actorNamedReplyRun.actorOccurrences?.[0]?.pendingCaller?.waitReason).toBe("reply");
-		expect(actorDrainingRun.states.find((state) => state.id === "phase.dispatch")).toMatchObject({ type: "send", status: "done" });
+		expect(actorDrainingRun.states.find((state) => state.id === "phase.dispatch")).toMatchObject({ type: "sendBatch", status: "done" });
 		expect(actorDrainingRun.states.find((state) => state.id === "phase.finished")).toMatchObject({ type: "final", status: "waiting" });
 		expect(actorDrainingRun.status).toBe("running");
 		expect(actorDrainingRun.actorOccurrences?.[0]).toMatchObject({
@@ -256,8 +271,25 @@ describe("Storybook information architecture", () => {
 		expect(overflowProtocol?.event).not.toBe(fittingProtocol?.event);
 		expect(Object.keys(overflowProtocol?.reply.schemas ?? {})).toHaveLength(6);
 		expect(actorBrokenReplayRun.issues).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "replay_warning" })]));
+		expect(allActorPoolRuns).toEqual([
+			actorPoolIdleRun, actorPoolBusyRun, actorPoolPartialBatchRun, actorPoolOutOfOrderRun, actorPoolDrainingRun, actorPoolMapReentryRun,
+		]);
+		expect(actorPoolIdleRun.actorOccurrences?.[0]).toMatchObject({ kind: "actorPool", concurrency: 2, activeCount: 0, idleCount: 2, workers: [{ index: 0 }, { index: 1 }] });
+		expect(actorPoolBusyRun.actorOccurrences?.[0]).toMatchObject({ kind: "actorPool", activeCount: 2, mailbox: { totalCount: 2 }, workers: [{ currentState: "work" }, { currentState: "settle" }] });
+		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]).toMatchObject({
+			activeCount: 1,
+			workers: expect.arrayContaining([expect.objectContaining({ currentStateId: "@workers.$worker.work" })]),
+			batchCalls: [expect.objectContaining({ callId: "batch:1", settled: 1, total: 4, items: expect.any(Array) })],
+		});
+		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]?.workers?.some((worker) => "nextMessageId" in worker)).toBe(false);
+		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.workers?.[1]).toMatchObject({ visits: 2, messageHistory: expect.arrayContaining([expect.objectContaining({ messageId: "batch:message:1:2", batchIndex: 2 })]) });
+		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.messageHistory?.map((message) => message.batchIndex)).toEqual([0, 1, 2, 3]);
+		expect(actorPoolDrainingRun.actorOccurrences?.[0]).toMatchObject({ status: "draining", activeCount: 2, mailbox: { totalCount: 2 } });
+		expect(actorPoolMapReentryRun.actorOccurrences?.[0]).toMatchObject({ occurrencePath: "projects#a.@workers~2", generation: 2, generationHistory: [{ visit: 1 }, { visit: 2 }] });
+		expect(actorPoolPartialBatchRun.states.some((state) => state.id === "@workers.$worker.work")).toBe(true);
 		const replyFact = actorNamedReplyRecords.find((record) => record.type === "actor_message" && record.kind === "replied");
-		const settle = actorCallAst.actors["@editor"]?.states.settle;
+		const editorActor = actorCallAst.actors["@editor"];
+		const settle = editorActor?.kind === "actor" ? editorActor.states.settle : undefined;
 		expect(settle?.kind).toBe("reply");
 		if (replyFact?.type !== "actor_message" || replyFact.kind !== "replied" || settle?.kind !== "reply") throw new Error("expected named reply fixture facts");
 		expect(replyFact).toMatchObject({ message: settle.message, replyEvent: settle.event, output: settle.output });
@@ -323,14 +355,19 @@ describe("Storybook information architecture", () => {
 			"RootActorIdle",
 			"BusyFifoMailbox",
 			"ActorReentry",
+			"PoolIdle",
+			"PoolBusyBacklog",
+			"PoolPartialBatch",
+			"PoolMapGenerationReentry",
 			"ClosingAndDraining",
+			"PoolDraining",
 			"Failure",
 			"BrokenReplayWarning",
 		]);
 		expect(dialogSource).not.toMatch(/PendingTypedCall|FireAndForgetVoidSettlement|NamedReplyVariants/);
 
 		const graphSource = readFileSync(join(storyDirectory, "InspectorGraphActors.stories.tsx"), "utf8");
-		expect(graphSource.match(/<GraphTile\b/g)).toHaveLength(3);
+		expect(graphSource.match(/<GraphTile\b/g)).toHaveLength(6);
 		expect(graphSource).toContain("structured drain · SEND-only");
 		expect(graphSource).toContain("visibleStateIds={drainingRootStateIds}");
 		expect(graphSource).not.toMatch(/actorNamedReplyRun|actorSendVoidRun/);
@@ -340,6 +377,7 @@ describe("Storybook information architecture", () => {
 		expect(atlasSource).toMatch(/Reply History · selected reply state/);
 		expect(atlasSource).toMatch(/name: "Show history"/);
 		expect(atlasSource).toMatch(/userEvent\.click\(receive\.getAllByRole\("button"\)\[0\]!\)/);
+		expect(atlasSource).toMatch(/Pool Worker History · persistent reuse/);
 	});
 
 	it("does not restore mechanism-named story files", () => {

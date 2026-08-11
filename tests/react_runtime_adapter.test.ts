@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, send, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
@@ -13,6 +13,7 @@ import {
 	hyperchartRunFromToolDetails,
 } from "../packages/hyperchart/src/host/adapters.js";
 import { inspectChartAst } from "../packages/hyperchart/src/core/inspect.js";
+import { actorPoolDrainingRun, actorPoolMapReentryRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 
 function ast(cst: ChartCst): ChartAst {
 	const parsed = normalizeChartConfig(cst, { path: "test.chart.ts" });
@@ -34,9 +35,28 @@ function baseRecord(seqId: number, timestamp = seqId * 1000) {
 describe("React runtime adapter", () => {
 	it("resolves descendant actor messages through lexical map ancestry", () => {
 		expect(actorTargetForInspectorState("projects#a.nested.send", "projects.@editor", [
-			{ declarationPath: "projects.@editor", ownerPath: "projects#b", occurrencePath: "projects#b.@editor", logicalPath: "projects#b.@editor", generation: 1, input: {}, status: "idle", currentState: "idle", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
-			{ declarationPath: "projects.@editor", ownerPath: "projects#a", occurrencePath: "projects#a.@editor~2", logicalPath: "projects#a.@editor", generation: 2, input: {}, status: "busy", currentState: "apply", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
+			{ kind: "actor", declarationPath: "projects.@editor", ownerPath: "projects#b", occurrencePath: "projects#b.@editor", logicalPath: "projects#b.@editor", generation: 1, input: {}, status: "idle", currentState: "idle", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
+			{ kind: "actor", declarationPath: "projects.@editor", ownerPath: "projects#a", occurrencePath: "projects#a.@editor~2", logicalPath: "projects#a.@editor", generation: 2, input: {}, status: "busy", currentState: "apply", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
 		])).toBe("projects#a.@editor");
+	});
+
+	it("projects map-owned pool status and internal states from the production fixture", () => {
+		const owner = actorPoolMapReentryRun.states.find((state) => state.id === "projects#a");
+		expect(owner?.status).toBe("running");
+		const internalIds = actorPoolMapReentryRun.states
+			.filter((state) => state.id.startsWith("projects#a.@workers.$worker."))
+			.map((state) => state.id);
+		expect(internalIds).toEqual([
+			"projects#a.@workers.$worker.idle",
+			"projects#a.@workers.$worker.work",
+			"projects#a.@workers.$worker.settle",
+		]);
+		expect(new Set(actorPoolMapReentryRun.states.map((state) => state.id)).size).toBe(actorPoolMapReentryRun.states.length);
+	});
+
+	it("keeps a finalized owner waiting while its pool drains", () => {
+		expect(actorPoolDrainingRun.states.find((state) => state.id === "phase")?.status).toBe("waiting");
+		expect(actorPoolDrainingRun.states.find((state) => state.id === "phase.@workers")?.status).toBe("running");
 	});
 	it("keeps static inspect mode static", () => {
 		const chartAst = ast(
@@ -71,8 +91,8 @@ describe("React runtime adapter", () => {
 			kind: "chart",
 			id: "actor-input-adapter",
 			actors: { worker },
-			initial: "done",
-			states: { done: final() },
+			initial: "ping",
+			states: { ping: send({ to: worker, event: "PING", input: {}, target: "done" }), done: final() },
 		}));
 		const declaration = chartAst.actors["@worker"];
 		if (declaration === undefined) throw new Error("missing actor declaration");
@@ -1542,6 +1562,7 @@ describe("React runtime adapter", () => {
 							onDone: "finished",
 							states: {
 								work: { kind: "state", action: agent("nested-worker"), transitions: { DONE: "done" } },
+								ping: send({ to: worker, event: "PING", input: {}, target: "done" }),
 								done: final(),
 							},
 						}),

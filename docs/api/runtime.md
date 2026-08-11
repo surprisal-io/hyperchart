@@ -48,7 +48,7 @@ interface Runtime {
 
 The core execution loop owns machine semantics. A runtime interprets effects, returns machine events, and supplies chart and log data.
 
-`runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Durable records must be appended before emitting `durable_records_added`.
+`runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Effects are consumed in the supplied list order. Durable records must be appended before emitting `durable_records_added`; when one batch contains multiple `durable_records` effects, both appends and acknowledgements must preserve that order.
 
 ## `ChartRuntime`
 
@@ -558,3 +558,7 @@ hasTerminalNotificationReceipt, removeTerminalNotificationReceipt,
 removeTerminalNotificationOutbox, TerminalNotificationPayload,
 TerminalNotificationRequest, TerminalNotificationReceipt
 ```
+
+## Actor pool runtime behavior
+
+Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_reply` effect kinds for ordinary actors and pools. The core scheduler may choose any idle, receive-compatible pool worker and emits that choice as an accepted fact before worker workflow invocation. Hosts must append each `durable_records` effect atomically and acknowledge multiple effects in their supplied order. Until an accepted append is projected, the machine keeps an ordered reservation for that pool so the message is virtually dequeued and the chosen worker virtually occupied; ordinary actors and unrelated pools continue independently. On restart, load the complete log and let projection restore endpoint generations, worker ownership, partial batches, and drain state—never reconstruct or reassign from external worker sessions. Global failure best-effort cancels pending concrete worker actions.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, compound, final, failed, json, map, normalizeChartConfig, parallel, t, tsImport, z } from "../packages/hyperchart/src/index.js";
+import { actor, actorPool, agent, callBatch, compound, final, failed, json, map, message, messageInput, normalizeChartConfig, parallel, protocol, receive, reply, t, tsImport, z } from "../packages/hyperchart/src/index.js";
 import { arg, chart, event, input, item, key, result } from "../packages/hyperchart/src/core/dsl.js";
 import { loop, start } from "../packages/hyperchart/src/core/execution_loop.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../packages/hyperchart/src/index.js";
@@ -34,6 +34,7 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 	const verdicts = [...(options.verdicts ?? [])];
 	const events: MachineEvent[] = [];
 	const appended: DurableLogRecord[] = [];
+	const appendBoundaries: number[] = [];
 	const runtime = new MockRuntime({
 		ast,
 		logs: options.logs ?? [],
@@ -66,7 +67,13 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 						break;
 					case "durable_records":
 						appended.push(...effect.records);
+						appendBoundaries.push((options.logs?.length ?? 0) + appended.length);
 						events.push({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+						break;
+					case "actor_create":
+					case "actor_enqueue":
+					case "actor_reply":
+						events.push({ kind: "actor_effect", effectId: effect.id, operation: effect.kind.slice("actor_".length) as "create" | "enqueue" | "reply", ok: true });
 						break;
 					case "cancel":
 						break;
@@ -77,7 +84,7 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 		},
 	});
 	const state = await (options.args === undefined ? loop(runtime) : start(runtime, options.args));
-	return { state, runtime, log: [...(options.logs ?? []), ...appended] };
+	return { state, runtime, log: [...(options.logs ?? []), ...appended], appendBoundaries };
 }
 
 async function replay(ast: ChartAst, log: readonly DurableLogRecord[]) {
@@ -709,6 +716,32 @@ describe("replay gauntlet", () => {
 		expect(live.state.projection.inputs.items).toEqual({ items: { beta: { title: "Beta" } } });
 		const spawned = live.log.filter((record) => record.type === "spawned");
 		expect(spawned.map((record) => Object.keys(record.instances))).toEqual([["alpha"], ["beta"]]);
+	});
+
+	it("restarts a pool callBatch after every atomic durable boundary", async () => {
+		const Work = protocol({ WORK: message({ input: z.object({ id: z.number() }).strict(), reply: z.object({ id: z.number() }).strict() }) });
+		const DirectWorker = actor({
+			input: z.object({}).strict(), protocol: Work, initial: "idle",
+			states: { idle: receive({ on: { WORK: "settle" } }), settle: reply({ target: "idle", output: messageInput("WORK") }) },
+		});
+		const Pool = actorPool({ concurrency: 2, worker: DirectWorker });
+		const workers = Pool({});
+		const ast = make(chart({
+			kind: "chart", id: "gauntlet-pool-restart", actors: { workers }, initial: "batch",
+			states: { batch: callBatch({ to: workers, event: "WORK", inputs: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }], target: "done" }), done: final() },
+		}));
+		const live = await runLive(ast, { args: {} });
+		expect(live.state.projection.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+		const assignments = live.log.filter((record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> => record.type === "actor_message" && record.kind === "accepted");
+		expect(assignments.map((record) => record.messageId)).toEqual(["batch:message:1:0", "batch:message:1:1", "batch:message:1:2", "batch:message:1:3"]);
+		expect(new Set(assignments.slice(0, 2).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));
+		expect(new Set(assignments.slice(2, 4).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));
+
+		for (const boundary of live.appendBoundaries.slice(0, -1)) {
+			const restarted = await runLive(ast, { logs: live.log.slice(0, boundary) });
+			expect(restarted.state.projection.results.batch, `boundary ${boundary}`).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+			expect(restarted.state.projection.actorPools["@workers"]?.status, `boundary ${boundary}`).toBe("stopped");
+		}
 	});
 
 	it("modified chart: a fact the chart cannot apply fails loud", async () => {

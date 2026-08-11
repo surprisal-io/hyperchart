@@ -537,7 +537,16 @@ type DurableLogRecord =
   | StateActionInvokeLog
   | StateActionCompleteLog
   | StateActionValidatedLog
-  | StateActionTimerFiredLog;
+  | StateActionTimerFiredLog
+  | ActorCreatedLog
+  | ActorMessagesEnqueuedLog
+  | ActorMessageAcceptedLog
+  | ActorMessageRepliedLog
+  | ActorMessageSettledLog
+  | ActorCallResolvedLog
+  | ActorBatchCallResolvedLog
+  | ActorScopeLog
+  | FailureIntentLog;
 ```
 
 Every record carries:
@@ -559,6 +568,13 @@ Every record carries:
 | `state_action/complete` | Claimed completion event. |
 | `state_action/validated` | Guard, event, and accepted/rejected verdict. |
 | `state_action/timer_fired` | Deadline won the race. |
+| `actor_created` | Ordinary actor or pool generation and immutable definition/input provenance. |
+| `actor_messages_enqueued` | Atomic singleton/batch FIFO transaction with exact four-way source provenance. |
+| `actor_message` | Accepted/replied/settled fact; pool facts preserve `workerIndex`. |
+| `actor_call_resolved` | Correlated singleton result became visible. |
+| `actor_batch_call_resolved` | All group items settled; ordered membership became visible. |
+| `actor_scope` | Closing or quiescent stop. |
+| `failure_intent` | Reserved global failure became durable. |
 
 `StateActionInvokeLog` is exported separately because replay and integrations commonly need its `definition` provenance.
 
@@ -710,3 +726,9 @@ ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord,
 ReplayStaleRecord, BranchProjection, PendingAction,
 ProjectionSkippedRecord, AsyncQueue, MaybeAsyncIterable
 ```
+
+## Actor endpoint projection and admission
+
+The root core API exports `ProjectedActorEndpointOccurrence`, `ProjectedActorPoolOccurrence`, and `ProjectedActorPoolWorker`. Pool occurrences expose the endpoint declaration/logical/concrete generation identity, aggregate mailbox/messages/status, and fixed `workers`; each worker exposes index, concrete occurrence, current state/message, and lifecycle status.
+
+`actorEndpointAdmission(ast, projection): ActorAdmissionView` is the pure machine/host contract. `assignments: ActorAdmissionAssignment[]` is a FIFO wave (`occurrence`, `messageId`, `receiveState`, optional `workerIndex`); a pool assignment may use any idle, receive-compatible worker, while `failure` describes an unsupported head only when no busy worker can later become eligible. Machine execution additionally supplies its pool-local in-flight reservations so unacknowledged accepted facts are treated as virtual dequeues and occupied workers. Durable actor records include four-way `ActorMessageSource`, optional pool `workerIndex`, and `ActorBatchCallResolvedLog`.

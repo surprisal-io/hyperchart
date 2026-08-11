@@ -12,7 +12,7 @@ import {
 	stateMechanismLabel,
 	validationRetryLabel,
 } from "../helpers/state.js";
-import { graphInput } from "./graphInput.js";
+import { graphInput, type StateTransitionEdge } from "./graphInput.js";
 
 export const GRAPH_COMPACT_NODE_WIDTH = 270;
 export const GRAPH_COMPACT_NODE_HEIGHT = 118;
@@ -66,8 +66,6 @@ function elkPortSide(side: PortSide): string {
 			return "EAST";
 	}
 }
-
-type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "call" | "reply" };
 
 function edgePortSides(
 	edge: StateTransitionEdge,
@@ -173,8 +171,8 @@ export function buildGraph(
 				style: {
 					stroke: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
 					strokeWidth: running ? 1.6 : 1.15,
-					strokeDasharray: edge.kind === "send" || edge.kind === "reply" ? "5 4" : undefined,
-					opacity: edge.kind === "send" ? 0.58 : 0.72,
+					strokeDasharray: edge.kind === "send" || edge.kind === "sendBatch" || edge.kind === "reply" ? "5 4" : undefined,
+					opacity: edge.kind === "send" || edge.kind === "sendBatch" ? 0.58 : 0.72,
 				},
 				data: routedPoints === undefined && !running ? undefined : { points: routedPoints, running },
 			} as Edge);

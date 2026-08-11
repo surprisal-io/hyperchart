@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { agent, actor, arg, call, chart, failed, final, item, map, message, protocol, receive, reply, send } from "../../core/dsl.js";
+import { agent, actor, actorPool, arg, call, callBatch, chart, failed, final, item, map, message, protocol, receive, reply, send, sendBatch } from "../../core/dsl.js";
 import type { DurableLogRecord, ActorMessageEnvelope } from "../../core/durable_events.js";
 import { explainReplay } from "../../core/replay_check.js";
-import type { ActorDeclarationAst, CallStateAst, ChartAst, SendStateAst } from "../../core/types.js";
+import type { ActorDeclarationAst, ActorEndpointDeclarationAst, CallStateAst, CallBatchStateAst, ChartAst, SendStateAst, SendBatchStateAst } from "../../core/types.js";
 import { hyperchartRunFromRuntime } from "../../host/adapters.js";
 import type { HyperchartRunInfo } from "../../host/models.js";
 import {
@@ -17,32 +17,37 @@ import { storyScenario } from "./story-scenario.js";
 const now = 1_783_000_000_000;
 const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, timestamp: now + seqId * 1_000 });
 
-function actorDefinition(ast: ChartAst, path: string): ActorDeclarationAst {
+function endpointDefinition(ast: ChartAst, path: string): ActorEndpointDeclarationAst {
 	const definition = ast.actors[path];
-	if (definition === undefined) throw new Error(`missing actor declaration ${path}`);
+	if (definition === undefined) throw new Error(`missing actor endpoint declaration ${path}`);
+	return definition;
+}
+function actorDefinition(ast: ChartAst, path: string): ActorDeclarationAst {
+	const definition = endpointDefinition(ast, path);
+	if (definition.kind !== "actor") throw new Error(`missing ordinary actor declaration ${path}`);
 	return definition;
 }
 function messageContract(ast: ChartAst, declaration: string, event: string) {
-	const contract = actorDefinition(ast, declaration).protocol[event];
+	const contract = endpointDefinition(ast, declaration).protocol[event];
 	if (contract === undefined) throw new Error(`missing actor message ${declaration}.${event}`);
 	return contract;
 }
-function sourceState(ast: ChartAst, path: string): SendStateAst | CallStateAst {
+function sourceState(ast: ChartAst, path: string): SendStateAst | SendBatchStateAst | CallStateAst | CallBatchStateAst {
 	const state = ast.states[path];
-	if (state?.kind !== "send" && state?.kind !== "call") throw new Error(`missing actor source ${path}`);
+	if (state?.kind !== "send" && state?.kind !== "sendBatch" && state?.kind !== "call" && state?.kind !== "callBatch") throw new Error(`missing actor source ${path}`);
 	return state;
 }
-function created(ast: ChartAst, declarationPath: string, occurrence: string, seqId: number, owner?: string, resolvedInput?: unknown): DurableLogRecord {
-	const definition = actorDefinition(ast, declarationPath);
-	return { type: "actor_created", declaration: declarationPath, occurrence, generation: 1, ...(owner === undefined ? {} : { owner }), input: resolvedInput ?? definition.inputValue, definition, ...stamp(seqId) };
+function created(ast: ChartAst, declarationPath: string, occurrence: string, seqId: number, owner?: string, resolvedInput?: unknown, generation = 1): DurableLogRecord {
+	const definition = endpointDefinition(ast, declarationPath);
+	return { type: "actor_created", declaration: declarationPath, occurrence, generation, ...(owner === undefined ? {} : { owner }), input: resolvedInput ?? definition.inputValue, definition, ...stamp(seqId) };
 }
 function envelope(ast: ChartAst, definitionPath: string, producerState: string, messageId: string, batchIndex: number, callId?: string): ActorMessageEnvelope {
 	const definition = sourceState(ast, definitionPath);
-	const input = definition.kind === "call"
+	const input = definition.kind === "call" || definition.kind === "send"
 		? definition.input
 		: Array.isArray(definition.inputs)
 			? definition.inputs[batchIndex]
-			: definition.input;
+			: undefined;
 	if (input === undefined) throw new Error(`missing concrete actor input ${definitionPath}[${batchIndex}]`);
 	return { messageId, event: definition.event, input, producerState, producerVisit: 1, batchIndex, ...(callId === undefined ? {} : { callId }) };
 }
@@ -128,7 +133,7 @@ const drainScenario = storyScenario(chart({
 			initial: "dispatch",
 			onDone: "done",
 			states: {
-				dispatch: send({
+				dispatch: sendBatch({
 					to: drainWorker,
 					event: "RECORD",
 					inputs: [
@@ -147,7 +152,7 @@ const drainScenario = storyScenario(chart({
 }));
 const drainAst = drainScenario.ast;
 const drainDispatch = sourceState(drainAst, "phase.dispatch");
-if (drainDispatch.kind !== "send" || !Array.isArray(drainDispatch.inputs)) throw new Error("expected structured-drain batch send");
+if (drainDispatch.kind !== "sendBatch" || !Array.isArray(drainDispatch.inputs)) throw new Error("expected structured-drain batch send");
 const drainMessages = drainDispatch.inputs.map((_, index) => envelope(drainAst, "phase.dispatch", "phase.dispatch", `phase.dispatch:1:${index}`, index));
 const drainingRecords: DurableLogRecord[] = [
 	{ type: "args", args: {}, ...stamp(1) },
@@ -190,7 +195,7 @@ const changedActorScenario = storyScenario(chart({
 	actors: { editor: changedEditor },
 	initial: "queue",
 	states: {
-		queue: send({ to: changedEditor, event: "APPLY", inputs: [{ patch: "first patch" }, { patch: "second patch" }], target: "apply-call" }),
+		queue: sendBatch({ to: changedEditor, event: "APPLY", inputs: [{ patch: "first patch" }, { patch: "second patch" }], target: "apply-call" }),
 		"apply-call": call({ to: changedEditor, event: "APPLY", input: { patch: "follow-up patch" }, transitions: { APPLIED: "done", REJECTED: "failed" } }),
 		done: final(),
 		failed: failed(),
@@ -309,6 +314,301 @@ const mapRecords: DurableLogRecord[] = [
 export const actorMapPartialRun = mapScenario.runtimeRun(mapRecords.slice(0, 3), { runId: "actor:map-partial", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
 export const actorMapLocalRun = mapScenario.runtimeRun(mapRecords, { runId: "actor:map-local", status: { state: "running", updatedAt: now + 4_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 4_000 });
 
+const PoolWorkProtocol = protocol({
+	WORK: message({ input: z.object({ id: z.number(), label: z.string() }).strict(), reply: z.object({ id: z.number(), receipt: z.string() }).strict() }),
+});
+const PoolWorker = actor({
+	input: z.object({ lane: z.string() }).strict(),
+	protocol: PoolWorkProtocol,
+	initial: "idle",
+	states: {
+		idle: receive({ on: { WORK: "work" } }),
+		work: { kind: "state", action: agent("pool-worker", { task: "Process the assigned pool item.", reply: z.object({ id: z.number(), receipt: z.string() }).strict() }), transitions: { DONE: "settle" } },
+		settle: reply({ target: "idle", output: { id: 0, receipt: "storybook" } }),
+	},
+});
+const PoolTemplate = actorPool({ concurrency: 2, worker: PoolWorker });
+const storyPool = PoolTemplate({ lane: "storybook" });
+export const actorPoolChart = chart({
+	kind: "chart",
+	id: "actor-pool-story",
+	actors: { workers: storyPool },
+	initial: "batch",
+	states: {
+		batch: callBatch({
+			to: storyPool,
+			event: "WORK",
+			inputs: [
+				{ id: 0, label: "alpha-with-a-long-value-for-narrow-layout" },
+				{ id: 1, label: "beta" },
+				{ id: 2, label: "gamma" },
+				{ id: 3, label: "delta" },
+			],
+			target: "done",
+		}),
+		done: final(),
+	},
+});
+const poolScenario = storyScenario(actorPoolChart);
+export const actorPoolAst = poolScenario.ast;
+const poolDefinition = endpointDefinition(actorPoolAst, "@workers");
+if (poolDefinition.kind !== "actorPool") throw new Error("expected pool story declaration");
+const poolAction = poolDefinition.worker.states.work;
+if (poolAction?.kind !== "state") throw new Error("expected pool worker action");
+const poolReply = poolDefinition.worker.states.settle;
+if (poolReply?.kind !== "reply") throw new Error("expected pool worker reply");
+const poolReplyContract = messageContract(actorPoolAst, "@workers", "WORK").reply;
+if (poolReplyContract.kind !== "single") throw new Error("expected single pool reply schema");
+const poolSource = sourceState(actorPoolAst, "batch");
+if (poolSource.kind !== "callBatch" || !Array.isArray(poolSource.inputs)) throw new Error("expected pool callBatch story");
+const poolMessages = poolSource.inputs.map((_, index) => envelope(actorPoolAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:1"));
+const poolWorkerUid = (index: number) => ({ ...poolAction.action.uid, state: poolAction.action.uid.state.replace(".$worker.", `.$worker-${index}.`) });
+const poolAccepted = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "actor_message", kind: "accepted", occurrence: "@workers", messageId: poolMessages[messageIndex]!.messageId,
+	receiveState: `@workers.$worker-${workerIndex}.idle`, workerIndex, ...stamp(seqId),
+});
+const poolInvoked = (workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "state_action", kind: "invoke", actionUid: poolWorkerUid(workerIndex), definition: poolAction.action, ...stamp(seqId),
+});
+const poolCompleted = (workerIndex: number, messageIndex: number, seqId: number): DurableLogRecord => ({
+	type: "state_action", kind: "complete", actionUid: poolWorkerUid(workerIndex), event: { type: "DONE", output: { id: messageIndex, receipt: `receipt-${messageIndex}` } }, ...stamp(seqId),
+});
+const poolReplied = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "actor_message", kind: "replied", occurrence: "@workers", messageId: poolMessages[messageIndex]!.messageId, message: "WORK",
+	output: { id: messageIndex, receipt: `receipt-${messageIndex}` }, schema: poolReplyContract.schema, workerIndex, ...stamp(seqId),
+});
+const poolSettled = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "actor_message", kind: "settled", occurrence: "@workers", messageId: poolMessages[messageIndex]!.messageId, workerIndex, ...stamp(seqId),
+});
+const poolBaseRecords: DurableLogRecord[] = [
+	{ type: "args", args: {}, ...stamp(1) },
+	created(actorPoolAst, "@workers", "@workers", 2),
+];
+const poolEnqueuedRecords: DurableLogRecord[] = [
+	...poolBaseRecords,
+	enqueue(actorPoolAst, "batch", "@workers", "WORK", poolMessages, 3),
+];
+export const actorPoolBusyRecords: DurableLogRecord[] = [
+	...poolEnqueuedRecords,
+	poolAccepted(0, 0, 4),
+	poolAccepted(1, 1, 5),
+	poolInvoked(0, 6),
+	poolInvoked(1, 7),
+	poolCompleted(1, 1, 8),
+];
+const poolPartialRecords: DurableLogRecord[] = [
+	...actorPoolBusyRecords,
+	poolReplied(1, 1, 9),
+	poolSettled(1, 1, 10),
+];
+const poolCompleteRecords: DurableLogRecord[] = [
+	...poolPartialRecords,
+	poolAccepted(2, 1, 11),
+	poolInvoked(1, 12),
+	poolCompleted(1, 2, 13),
+	poolReplied(2, 1, 14),
+	poolSettled(2, 1, 15),
+	poolCompleted(0, 0, 16),
+	poolReplied(0, 0, 17),
+	poolSettled(0, 0, 18),
+	poolAccepted(3, 0, 19),
+	poolInvoked(0, 20),
+	poolCompleted(0, 3, 21),
+	poolReplied(3, 0, 22),
+	poolSettled(3, 0, 23),
+	{ type: "actor_batch_call_resolved", callId: "batch:1", callerState: "batch", messageIds: poolMessages.map((message) => message.messageId), ...stamp(24) },
+	{ type: "actor_scope", kind: "closing", occurrence: "@workers", ...stamp(25) },
+	{ type: "actor_scope", kind: "stopped", occurrence: "@workers", ...stamp(26) },
+];
+const poolSessionProgress = {
+	updatedAt: now + 23_000,
+	sessions: {
+		"actor-pool-story:@workers.$worker-0.work:work:1:6": { actionUid: poolWorkerUid(0), visit: 1, status: "completed", startedAt: now + 6_000, completedAt: now + 16_000, model: "storybook/pool-worker", turnCount: 2, lastMessage: "Finished alpha." },
+		"actor-pool-story:@workers.$worker-1.work:work:1:7": { actionUid: poolWorkerUid(1), visit: 1, status: "completed", startedAt: now + 7_000, completedAt: now + 8_000, model: "storybook/pool-worker", turnCount: 1, lastMessage: "Finished beta first." },
+		"actor-pool-story:@workers.$worker-1.work:work:2:12": { actionUid: poolWorkerUid(1), visit: 2, status: "completed", startedAt: now + 12_000, completedAt: now + 13_000, model: "storybook/pool-worker", turnCount: 1, lastMessage: "Reused worker for gamma." },
+	},
+};
+export const actorPoolIdleRun = poolScenario.runtimeRun(poolBaseRecords, { runId: "actor:pool-idle", status: { state: "running", updatedAt: now + 2_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 2_000 });
+export const actorPoolBusyRun = poolScenario.runtimeRun(actorPoolBusyRecords, { runId: "actor:pool-busy", status: { state: "running", updatedAt: now + 8_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 8_000, sessionProgress: poolSessionProgress });
+export const actorPoolPartialBatchRun = poolScenario.runtimeRun(poolPartialRecords, { runId: "actor:pool-partial", status: { state: "running", updatedAt: now + 10_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 10_000, sessionProgress: poolSessionProgress });
+export const actorPoolOutOfOrderRun = poolScenario.runtimeRun(poolCompleteRecords, { runId: "actor:pool-complete", status: { state: "complete", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000, sessionProgress: poolSessionProgress });
+
+const crowdedPool = PoolTemplate({ lane: "crowded" });
+export const actorPoolCrowdedChart = chart({
+	kind: "chart",
+	id: "actor-pool-crowded-story",
+	actors: { workers: crowdedPool },
+	initial: "batch",
+	states: {
+		batch: callBatch({
+			to: crowdedPool,
+			event: "WORK",
+			inputs: [
+				{ id: 0, label: "queued-item-0" }, { id: 1, label: "queued-item-1" },
+				{ id: 2, label: "queued-item-2" }, { id: 3, label: "queued-item-3" },
+				{ id: 4, label: "queued-item-4" }, { id: 5, label: "queued-item-5" },
+				{ id: 6, label: "queued-item-6" }, { id: 7, label: "queued-item-7" },
+				{ id: 8, label: "queued-item-8" }, { id: 9, label: "queued-item-9" },
+			],
+			target: "done",
+		}),
+		done: final(),
+	},
+});
+const crowdedScenario = storyScenario(actorPoolCrowdedChart);
+const crowdedAst = crowdedScenario.ast;
+const crowdedDefinition = endpointDefinition(crowdedAst, "@workers");
+if (crowdedDefinition.kind !== "actorPool") throw new Error("expected crowded pool declaration");
+const crowdedAction = crowdedDefinition.worker.states.work;
+if (crowdedAction?.kind !== "state") throw new Error("expected crowded pool worker action");
+const crowdedReplyContract = messageContract(crowdedAst, "@workers", "WORK").reply;
+if (crowdedReplyContract.kind !== "single") throw new Error("expected crowded pool reply schema");
+const crowdedSource = sourceState(crowdedAst, "batch");
+if (crowdedSource.kind !== "callBatch" || !Array.isArray(crowdedSource.inputs)) throw new Error("expected crowded pool callBatch");
+const crowdedMessages = crowdedSource.inputs.map((_, index) => envelope(crowdedAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:1"));
+const crowdedWorkerUid = (index: number) => ({ ...crowdedAction.action.uid, state: crowdedAction.action.uid.state.replace(".$worker.", `.$worker-${index}.`) });
+const crowdedAccepted = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "actor_message", kind: "accepted", occurrence: "@workers", messageId: crowdedMessages[messageIndex]!.messageId,
+	receiveState: `@workers.$worker-${workerIndex}.idle`, workerIndex, ...stamp(seqId),
+});
+const crowdedInvoked = (workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "state_action", kind: "invoke", actionUid: crowdedWorkerUid(workerIndex), definition: crowdedAction.action, ...stamp(seqId),
+});
+const crowdedCompleted = (workerIndex: number, messageIndex: number, seqId: number): DurableLogRecord => ({
+	type: "state_action", kind: "complete", actionUid: crowdedWorkerUid(workerIndex), event: { type: "DONE", output: { id: messageIndex, receipt: `receipt-${messageIndex}` } }, ...stamp(seqId),
+});
+const crowdedReplied = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "actor_message", kind: "replied", occurrence: "@workers", messageId: crowdedMessages[messageIndex]!.messageId, message: "WORK",
+	output: { id: messageIndex, receipt: `receipt-${messageIndex}` }, schema: crowdedReplyContract.schema, workerIndex, ...stamp(seqId),
+});
+const crowdedSettled = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
+	type: "actor_message", kind: "settled", occurrence: "@workers", messageId: crowdedMessages[messageIndex]!.messageId, workerIndex, ...stamp(seqId),
+});
+export const actorPoolCrowdedRecords: DurableLogRecord[] = [
+	{ type: "args", args: {}, ...stamp(1) },
+	created(crowdedAst, "@workers", "@workers", 2),
+	enqueue(crowdedAst, "batch", "@workers", "WORK", crowdedMessages, 3),
+	crowdedAccepted(0, 0, 4),
+	crowdedAccepted(1, 1, 5),
+	crowdedInvoked(0, 6),
+	crowdedInvoked(1, 7),
+	crowdedCompleted(0, 0, 8),
+	crowdedReplied(0, 0, 9),
+	crowdedSettled(0, 0, 10),
+	crowdedCompleted(1, 1, 11),
+	crowdedReplied(1, 1, 12),
+	crowdedSettled(1, 1, 13),
+	crowdedAccepted(2, 0, 14),
+	crowdedAccepted(3, 1, 15),
+	crowdedInvoked(0, 16),
+	crowdedInvoked(1, 17),
+	crowdedCompleted(0, 2, 18),
+	crowdedReplied(2, 0, 19),
+	crowdedSettled(2, 0, 20),
+	crowdedCompleted(1, 3, 21),
+	crowdedReplied(3, 1, 22),
+	crowdedSettled(3, 1, 23),
+	crowdedAccepted(4, 0, 24),
+	crowdedAccepted(5, 1, 25),
+	crowdedInvoked(0, 26),
+	crowdedInvoked(1, 27),
+];
+export const actorPoolCrowdedRun = crowdedScenario.runtimeRun(actorPoolCrowdedRecords, {
+	runId: "actor:pool-crowded",
+	status: { state: "running", updatedAt: now + 27_000 },
+	cwd: "/workspace",
+	createdAt: now,
+	updatedAt: now + 27_000,
+});
+
+const drainingPool = PoolTemplate({ lane: "drain" });
+const poolDrainScenario = storyScenario(chart({
+	kind: "chart", id: "actor-pool-drain-story", initial: "phase",
+	states: {
+		phase: { kind: "compound", actors: { workers: drainingPool }, initial: "dispatch", onDone: "done", states: {
+			dispatch: sendBatch({ to: drainingPool, event: "WORK", inputs: [
+				{ id: 0, label: "alpha-with-a-long-value-for-narrow-layout" },
+				{ id: 1, label: "beta" },
+				{ id: 2, label: "gamma" },
+				{ id: 3, label: "delta" },
+			], target: "finished" }),
+			finished: final(),
+		} },
+		done: final(),
+	},
+}));
+const poolDrainAst = poolDrainScenario.ast;
+const poolDrainSource = sourceState(poolDrainAst, "phase.dispatch");
+if (poolDrainSource.kind !== "sendBatch" || !Array.isArray(poolDrainSource.inputs)) throw new Error("expected pool drain sendBatch");
+const poolDrainMessages = poolDrainSource.inputs.map((_, index) => envelope(poolDrainAst, "phase.dispatch", "phase.dispatch", `phase.dispatch:message:1:${index}`, index));
+const poolDrainRecords: DurableLogRecord[] = [
+	{ type: "args", args: {}, ...stamp(1) },
+	created(poolDrainAst, "phase.@workers", "phase.@workers", 2, "phase"),
+	enqueue(poolDrainAst, "phase.dispatch", "phase.@workers", "WORK", poolDrainMessages, 3),
+	{ type: "actor_message", kind: "accepted", occurrence: "phase.@workers", messageId: poolDrainMessages[0]!.messageId, receiveState: "phase.@workers.$worker-0.idle", workerIndex: 0, ...stamp(4) },
+	{ type: "actor_message", kind: "accepted", occurrence: "phase.@workers", messageId: poolDrainMessages[1]!.messageId, receiveState: "phase.@workers.$worker-1.idle", workerIndex: 1, ...stamp(5) },
+	{ type: "actor_scope", kind: "closing", occurrence: "phase.@workers", ...stamp(6) },
+];
+export const actorPoolDrainingRun = poolDrainScenario.runtimeRun(poolDrainRecords, { runId: "actor:pool-draining", status: { state: "running", updatedAt: now + 6_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 6_000 });
+
+const MapPoolTemplate = actorPool({ concurrency: 2, worker: PoolWorker });
+const mapPool = MapPoolTemplate({ lane: item("lane") });
+const mapPoolScenario = storyScenario(chart({
+	kind: "chart", id: "actor-pool-map-reentry-story", args: { projects: {} }, initial: "projects",
+	states: {
+		projects: map({ over: arg("projects"), actors: { workers: mapPool }, initial: "dispatch", onDone: "between", states: {
+			dispatch: send({ to: mapPool, event: "WORK", input: { id: 0, label: "map-generation-work" }, target: "hold" }),
+			hold: { kind: "state", action: agent("pool-map-hold"), transitions: { FINISH: "finished" } },
+			finished: final(),
+		} }),
+		between: { kind: "state", action: agent("pool-map-loop"), transitions: { AGAIN: "projects", DONE: "done" } },
+		done: final(),
+	},
+}));
+const mapPoolAst = mapPoolScenario.ast;
+const mapPoolInput = { lane: "map-a" };
+const mapPoolBetween = mapPoolAst.states.between;
+const mapPoolHold = mapPoolAst.states["projects.hold"];
+const mapPoolDispatch = sourceState(mapPoolAst, "projects.dispatch");
+const mapPoolDefinition = endpointDefinition(mapPoolAst, "projects.@workers");
+if (mapPoolBetween?.kind !== "state" || mapPoolHold?.kind !== "state" || mapPoolDefinition.kind !== "actorPool") throw new Error("expected map pool loop actions");
+const mapPoolWorkerAction = mapPoolDefinition.worker.states.work;
+if (mapPoolWorkerAction?.kind !== "state") throw new Error("expected map pool worker action");
+const mapPoolReply = messageContract(mapPoolAst, "projects.@workers", "WORK").reply;
+if (mapPoolReply.kind !== "single") throw new Error("expected map pool reply schema");
+const mapPoolHoldUid = { ...mapPoolHold.action.uid, state: "projects#a.hold" };
+const mapPoolWorkerUid = { ...mapPoolWorkerAction.action.uid, state: "projects#a.@workers.$worker-0.work" };
+const mapPoolMessage = envelope(mapPoolAst, "projects.dispatch", "projects#a.dispatch", "projects#a.dispatch:message:1:0", 0);
+const mapPoolRecords: DurableLogRecord[] = [
+	{ type: "args", args: { projects: { a: mapPoolInput } }, ...stamp(1) },
+	{ type: "spawned", path: "projects", instances: { a: mapPoolInput }, ...stamp(2) },
+	created(mapPoolAst, "projects.@workers", "projects#a.@workers", 3, "projects#a", mapPoolInput),
+	enqueue(mapPoolAst, "projects#a.dispatch", "projects#a.@workers", mapPoolDispatch.event, [mapPoolMessage], 4, "projects.dispatch"),
+	{ type: "actor_message", kind: "accepted", occurrence: "projects#a.@workers", messageId: mapPoolMessage.messageId, receiveState: "projects#a.@workers.$worker-0.idle", workerIndex: 0, ...stamp(5) },
+	{ type: "state_action", kind: "invoke", actionUid: mapPoolWorkerUid, definition: mapPoolWorkerAction.action, ...stamp(6) },
+	{ type: "state_action", kind: "complete", actionUid: mapPoolWorkerUid, event: { type: "DONE", output: { id: 0, receipt: "map-generation-receipt" } }, ...stamp(7) },
+	{ type: "actor_message", kind: "replied", occurrence: "projects#a.@workers", messageId: mapPoolMessage.messageId, message: "WORK", output: { id: 0, receipt: "map-generation-receipt" }, schema: mapPoolReply.schema, workerIndex: 0, ...stamp(8) },
+	{ type: "actor_message", kind: "settled", occurrence: "projects#a.@workers", messageId: mapPoolMessage.messageId, workerIndex: 0, ...stamp(9) },
+	{ type: "state_action", kind: "invoke", actionUid: mapPoolHoldUid, definition: mapPoolHold.action, ...stamp(10) },
+	{ type: "state_action", kind: "complete", actionUid: mapPoolHoldUid, event: { type: "FINISH" }, ...stamp(11) },
+	{ type: "actor_scope", kind: "closing", occurrence: "projects#a.@workers", ...stamp(12) },
+	{ type: "actor_scope", kind: "stopped", occurrence: "projects#a.@workers", ...stamp(13) },
+	{ type: "state_action", kind: "invoke", actionUid: mapPoolBetween.action.uid, definition: mapPoolBetween.action, ...stamp(14) },
+	{ type: "state_action", kind: "complete", actionUid: mapPoolBetween.action.uid, event: { type: "AGAIN" }, ...stamp(15) },
+	{ type: "spawned", path: "projects", instances: { a: mapPoolInput }, ...stamp(16) },
+	created(mapPoolAst, "projects.@workers", "projects#a.@workers~2", 17, "projects#a", mapPoolInput, 2),
+];
+export const actorPoolMapReentryRun = mapPoolScenario.runtimeRun(mapPoolRecords, { runId: "actor:pool-map-reentry", status: { state: "running", updatedAt: now + 17_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 17_000 });
+
+export const allActorPoolRuns = [
+	actorPoolIdleRun,
+	actorPoolBusyRun,
+	actorPoolPartialBatchRun,
+	actorPoolOutOfOrderRun,
+	actorPoolDrainingRun,
+	actorPoolMapReentryRun,
+];
+
 const OverflowProtocol = protocol({
 	PROCESS_WITH_A_LONG_PROTOCOL_EVENT_NAME: message({
 		input: z.object({
@@ -336,10 +636,10 @@ const overflowInput = (index: number) => ({
 	field5: `value-${index}-5`, field6: `value-${index}-6`, field7: `value-${index}-7`, field8: `value-${index}-8`,
 });
 const overflowActor = OverflowActor({ file: "overflow.ts" });
-const overflowScenario = storyScenario(chart({ kind: "chart", id: "actor-overflow-story", actors: { overflow: overflowActor }, initial: "queue", states: { queue: send({ to: overflowActor, event: "PROCESS_WITH_A_LONG_PROTOCOL_EVENT_NAME", inputs: Array.from({ length: 50 }, (_, index) => overflowInput(index)), target: "done" }), done: final() } }));
+const overflowScenario = storyScenario(chart({ kind: "chart", id: "actor-overflow-story", actors: { overflow: overflowActor }, initial: "queue", states: { queue: sendBatch({ to: overflowActor, event: "PROCESS_WITH_A_LONG_PROTOCOL_EVENT_NAME", inputs: Array.from({ length: 50 }, (_, index) => overflowInput(index)) as [ReturnType<typeof overflowInput>, ...ReturnType<typeof overflowInput>[]], target: "done" }), done: final() } }));
 const overflowAst = overflowScenario.ast;
 const overflowQueue = sourceState(overflowAst, "queue");
-if (overflowQueue.kind !== "send" || !Array.isArray(overflowQueue.inputs)) throw new Error("expected overflow batch send state");
+if (overflowQueue.kind !== "sendBatch" || !Array.isArray(overflowQueue.inputs)) throw new Error("expected overflow batch send state");
 const overflowMessages = overflowQueue.inputs.map((_, index) => envelope(overflowAst, "queue", "queue", `queue:1:${index}`, index));
 const overflowRecords: DurableLogRecord[] = [
 	{ type: "args", args: {}, ...stamp(1) },

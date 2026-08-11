@@ -32,6 +32,7 @@ import {
 	mailboxReentryChart,
 	mailboxReentryRecords,
 } from "../../fixtures/actor-runtime-fixtures.js";
+import { actorPoolChart, actorPoolCrowdedChart, actorPoolCrowdedRecords } from "../../fixtures/actor-fixtures.js";
 
 export type InspectorPanelRuntime = {
 	selectedStateId: StatePath | null;
@@ -692,6 +693,20 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	},
 	{
 		group: "actors",
+		title: "Actor pool definition-only",
+		description: "A fixed-concurrency pool endpoint with one canonical persistent worker workflow.",
+		chart: actorPoolChart,
+		runtime: { selectedStateId: "@workers" },
+	},
+	{
+		group: "actors",
+		title: "Actor pool workers and backlog",
+		description: "Ten batch messages: four queued at the endpoint while each persistent worker shows two processed messages and one current assignment.",
+		chart: actorPoolCrowdedChart,
+		runtime: { selectedStateId: "@workers", records: () => actorPoolCrowdedRecords },
+	},
+	{
+		group: "actors",
 		title: "Send state",
 		description: "Completed fire-and-forget REVIEW send with its resolved message payload and actor destination.",
 		chart: actorInspectorChart,
@@ -699,10 +714,24 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	},
 	{
 		group: "actors",
+		title: "Send batch state",
+		description: "Completed sendBatch with its ordered APPLY inputs and projected durable messages.",
+		chart: actorInspectorChart,
+		runtime: { selectedStateId: "queue", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
 		title: "Call state",
 		description: "Blocked APPLY call with its pending caller, typed reply transitions, and queued runtime message.",
 		chart: actorInspectorChart,
 		runtime: { selectedStateId: "apply-call", records: actorInspectorRecords },
+	},
+	{
+		group: "actors",
+		title: "Call batch state",
+		description: "Running callBatch against a two-worker pool with ordered inputs, per-message assignments, replies, and backlog.",
+		chart: actorPoolCrowdedChart,
+		runtime: { selectedStateId: "batch", records: () => actorPoolCrowdedRecords },
 	},
 	{
 		group: "actors",

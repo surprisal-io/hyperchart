@@ -827,8 +827,10 @@ Inspect a chart before execution to obtain the complete diagnostics for that def
 Values:
 
 ```text
-chart, agent, artifact, compound, contract, event, final, input, json,
-map, parallel, refs, resume, script, t, tsImport, user, visit, z
+actor, actorPool, actorInput, call, callBatch, chart, agent, artifact, compound,
+contract, event, final, input, json, map, message, messageInput, parallel,
+protocol, receive, refs, reply, resume, script, send, sendBatch, t, tsImport,
+user, visit, z
 ```
 
 The argument, result, artifact-read, map-key, and map-item constructors are methods returned by `refs()`.
@@ -845,3 +847,22 @@ TemplateCst, Templatable, TransitionCst, TransitionMapCst,
 UserActionCst, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
 Paths, ValueAt
 ```
+
+### Actor endpoints and messaging
+
+```ts
+const Worker = actor({ input, protocol, initial: "idle", states });
+const Pool = actorPool({ concurrency: 4, worker: Worker });
+const workers = Pool({ projectId: arg("projectId") });
+
+send({ to: workers, event: "WORK", input: one, target: "next" });
+sendBatch({ to: workers, event: "WORK", inputs: [one, two], target: "next" });
+call({ to: workers, event: "WORK", input: one, target: "next" });
+callBatch({ to: workers, event: "WORK", inputs: result("prepare", "items"), target: "merge" });
+```
+
+`actor()` declares a capacity-one event-sourced endpoint. `actorPool()` infers the same input and protocol types from its worker and declares one endpoint with a positive safe-integer `concurrency`; concurrency and the normalized worker definition are durable replay provenance. Placements are static and lexical.
+
+`send` and `call` accept exactly one `input`. `sendBatch` and `callBatch` accept `inputs`; literal values are typed as non-empty tuples, while a ref-resolved array is checked non-empty at the runtime boundary. Every item is exact-validated before the single atomic enqueue fact. All four factories address ordinary actors or pools. `callBatch` is available only for a protocol message with one `reply` schema, waits for every item settlement, and stores typed `Output[]` in authored `batchIndex` order rather than completion order. Named- or void-reply protocols cannot be used with `callBatch`.
+
+`receive()` is the only acceptance point. `reply()` validates the inferred current message and returns the worker to its authored receive target. Use `actorInput()` and `messageInput()` for isolated actor-local data. See [Explicit event-sourced actors](../explicit-actors.md).

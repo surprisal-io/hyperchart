@@ -43,7 +43,9 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 		displayState.type === "actor-declaration" ||
 		displayState.type === "actor-occurrence";
 	const mechanism = hasStructuredPreview ? undefined : stateMechanismLabel(displayState);
-	const actorMessage = displayState.type === "send" || displayState.type === "call" ? displayState.actorMessageLink : undefined;
+	const actorMessage = displayState.type === "send" || displayState.type === "sendBatch" || displayState.type === "call" || displayState.type === "callBatch"
+		? displayState.actorMessageLink
+		: undefined;
 	const durationSnapshot = useDurationSnapshot(
 		state.status === "running" && state.startedAt !== undefined && state.endedAt === undefined,
 		data.snapshotAt,
@@ -70,13 +72,18 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 								? "border-sky-400/45 shadow-sky-950/15"
 								: "border-transparent";
 	const size = graphNodeSize(displayState);
+	const isActorPool = state.actorOccurrence?.kind === "actorPool" || state.actorDeclaration?.kind === "actorPool";
 	const handleClass = "!h-px !w-px !border-0 !bg-transparent !opacity-0";
 	const handleStyle = { background: "transparent", border: 0, opacity: 0, width: 1, height: 1 };
 	return (
-		<div
-			className={`relative overflow-hidden rounded-xl border bg-[var(--bg-secondary)] shadow-lg ${outlineClass}`}
-			style={{ width: size.width, height: size.height }}
-		>
+		<div className="relative" style={{ width: size.width, height: size.height }}>
+			{isActorPool && (
+				<>
+					<div className="pointer-events-none absolute inset-0 translate-x-2 translate-y-2 rounded-xl border border-amber-500/15 bg-[var(--bg-tertiary)] shadow-md" aria-hidden="true" />
+					<div className="pointer-events-none absolute inset-0 translate-x-1 translate-y-1 rounded-xl border border-amber-500/20 bg-[var(--bg-secondary)] shadow-md" aria-hidden="true" />
+				</>
+			)}
+			<div className={`absolute inset-0 z-10 overflow-hidden rounded-xl border bg-[var(--bg-secondary)] shadow-lg ${outlineClass}`}>
 			<div
 				className={`absolute inset-x-0 top-0 h-1 ${hyperchartStatusDotClass(state.status)} ${state.status === "running" ? "animate-pulse" : ""}`}
 				aria-hidden="true"
@@ -197,6 +204,7 @@ export function HyperchartStateGraphNode({ data, selected }: NodeProps<StateNode
 				className={handleClass}
 				style={{ ...handleStyle, left: "52%" }}
 			/>
+			</div>
 		</div>
 	);
 }

@@ -395,3 +395,7 @@ all host model types and the four host adapter functions
 HyperchartRunFromInspectOptions, HyperchartRunFromRuntimeOptions
 HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo
 ```
+
+## Actor pool Inspector UI
+
+The Inspector graph represents a pool as one endpoint and one canonical `$worker` workflow scope. Runtime node previews show active/concurrency. Selecting the endpoint opens the Workers section with concurrency, active/idle counts, backlog/next assignment, concrete `$worker-N` state links, worker-local message/visit/result/session history, and ordered partial `callBatch` membership. Worker links navigate to the canonical workflow state while retaining the concrete occurrence in the slot card. The cards use adapter-derived data and support dark/light themes and narrow overflow; no React-only semantic fixture model is supported.

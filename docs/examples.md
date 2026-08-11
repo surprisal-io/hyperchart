@@ -81,3 +81,7 @@ A checked-in example should state:
 - safety implications for external effects and replay.
 
 Examples are typechecked and covered by `tests/examples.test.ts`. If an example is intentionally non-runnable, its missing prerequisites must be explicit here and near the source file.
+
+## Explicit actor pool
+
+[`examples/explicit-actors.chart.ts`](../examples/explicit-actors.chart.ts) is the checked bounded-worker example. A map-owned pool uses `callBatch` with a batch larger than concurrency; workers execute concurrently while the caller receives one input-ordered output array. The same guide also documents singleton actors and named replies: [Explicit actors](explicit-actors.md).

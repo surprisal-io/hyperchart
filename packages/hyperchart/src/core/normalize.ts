@@ -7,8 +7,12 @@ import type {
 	ActionStateAst,
 	ActionUID,
 	ActorDeclarationAst,
+	ActorPoolDeclarationAst,
+	ActorEndpointDeclarationAst,
+	ActorDefinitionAst,
 	ActorWorkflowStateAst,
 	CallStateAst,
+	CallBatchStateAst,
 	AgentActionAst,
 	AuthoringDiagnostic,
 	ChartArgumentAst,
@@ -37,6 +41,7 @@ import type {
 	ReplyStateAst,
 	ScriptActionAst,
 	SendStateAst,
+	SendBatchStateAst,
 	StateActionAst,
 	StateAst,
 	StateId,
@@ -109,7 +114,7 @@ function toChartAst(
 	const chartId = typeof id === "string" ? id : "";
 	const args = toChartArguments(input.args, diagnostics, source);
 	const states: Record<StatePath, StateAst> = {};
-	const actors: Record<StatePath, ActorDeclarationAst> = {};
+	const actors: Record<StatePath, ActorEndpointDeclarationAst> = {};
 	const actorTargets = new Map<object, StatePath>();
 	const rawActors: Array<{ declaration: Record<string, unknown>; name: string; path: StatePath; owner?: StatePath; pointer: string }> = [];
 	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
@@ -148,6 +153,7 @@ function toChartAst(
 	}
 	validateTargets(states, diagnostics, source);
 	validateActorTargets(states, actors, diagnostics, source);
+	validateActorUsage(states, actors, diagnostics, source);
 	validateActorCallCycles(actors, diagnostics, source);
 	const beforeCycles = diagnostics.length;
 	validateEnterCycles(states, diagnostics, source);
@@ -293,8 +299,8 @@ function collectActorPlacements(
 					diagnostics.push(diagnostic("INVALID_ACTOR_NAME", `Actor name '${name}' must match [A-Za-z0-9_-]+.`, actorPointer, source));
 					continue;
 				}
-				if (!isRecord(raw) || raw.kind !== "actorDeclaration") {
-					diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", `actors.${name} must be the result of invoking actor().`, actorPointer, source));
+				if (!isRecord(raw) || (raw.kind !== "actorDeclaration" && raw.kind !== "actorPoolDeclaration")) {
+					diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", `actors.${name} must be the result of invoking actor() or actorPool().`, actorPointer, source));
 					continue;
 				}
 				const path = ownerPath === undefined ? `@${name}` : `${ownerPath}.@${name}`;
@@ -324,10 +330,24 @@ function toActorDeclarationAst(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
-): ActorDeclarationAst | undefined {
-	const definition = placement.declaration.definition;
+): ActorEndpointDeclarationAst | undefined {
+	const authoredDefinition = placement.declaration.definition;
+	const isPool = placement.declaration.kind === "actorPoolDeclaration";
+	if (!isRecord(authoredDefinition) || (isPool ? authoredDefinition.kind !== "actorPoolTemplate" : authoredDefinition.kind !== "actorTemplate")) {
+		diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", `Actor declaration has no ${isPool ? "actorPool()" : "actor()"} template definition.`, placement.pointer, source));
+		return undefined;
+	}
+	let concurrency: number | undefined;
+	if (isPool) {
+		if (typeof authoredDefinition.concurrency !== "number" || !Number.isSafeInteger(authoredDefinition.concurrency) || authoredDefinition.concurrency < 1) {
+			diagnostics.push(diagnostic("INVALID_ACTOR_POOL_CONCURRENCY", "actorPool() concurrency must be a positive safe integer.", `${placement.pointer}/concurrency`, source));
+		} else {
+			concurrency = authoredDefinition.concurrency;
+		}
+	}
+	const definition = isPool && isRecord(authoredDefinition.worker) ? authoredDefinition.worker : authoredDefinition;
 	if (!isRecord(definition) || definition.kind !== "actorTemplate") {
-		diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", "Actor declaration has no actor() template definition.", placement.pointer, source));
+		diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", "actorPool() worker must be an actor() template.", `${placement.pointer}/worker`, source));
 		return undefined;
 	}
 	const input = toSchemaAst(definition.input, `${placement.pointer}/input`, diagnostics, source, schemaRegistry);
@@ -348,7 +368,7 @@ function toActorDeclarationAst(
 			diagnostics.push(diagnostic("INVALID_ACTOR_STATE", `Actor state '${id}' is invalid.`, pointer, source));
 			continue;
 		}
-		const parent = placement.path;
+		const parent = isPool ? `${placement.path}.$worker` : placement.path;
 		if (raw.kind === "receive") {
 			if (!isRecord(raw.on) || Object.keys(raw.on).length === 0) {
 				diagnostics.push(diagnostic("INVALID_RECEIVE", "receive() requires a non-empty on map.", `${pointer}/on`, source));
@@ -365,20 +385,27 @@ function toActorDeclarationAst(
 			states[id] = { kind: "receive", id, parent, on };
 			continue;
 		}
-		if (raw.kind === "send" || raw.kind === "call") {
+		if (raw.kind === "send" || raw.kind === "sendBatch" || raw.kind === "call" || raw.kind === "callBatch") {
 			const targetActor = isRecord(raw.to) ? actorTargets.get(raw.to) : undefined;
 			if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${raw.kind} in actor '${placement.path}' must target a placed static declaration.`, `${pointer}/to`, source));
 			const event = typeof raw.event === "string" ? raw.event : "";
-			if (raw.kind === "send") {
-				const hasInput = Object.hasOwn(raw, "input");
-				const hasInputs = Object.hasOwn(raw, "inputs");
-				if (hasInput === hasInputs) diagnostics.push(diagnostic("INVALID_SEND_INPUT", "send() requires exactly one of input or inputs.", pointer, source));
+			if (raw.kind === "send" || raw.kind === "sendBatch") {
+				const batch = raw.kind === "sendBatch";
+				const field = batch ? "inputs" : "input";
+				if (!Object.hasOwn(raw, field)) diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${raw.kind}() requires ${field}.`, pointer, source));
+				if (batch && Array.isArray(raw.inputs) && raw.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
+				const value = toValueAst(raw[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
+				states[id] = batch
+					? { kind: "sendBatch", id, parent, to: targetActor ?? "", event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, inputs: value }
+					: { kind: "send", id, parent, to: targetActor ?? "", event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, input: value };
+				continue;
+			}
+			if (raw.kind === "callBatch") {
+				if (Array.isArray(raw.inputs) && raw.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
 				states[id] = {
-					kind: "send", id, parent, to: targetActor ?? "", event,
+					kind: "callBatch", id, parent, to: targetActor ?? "", event,
+					inputs: toValueAst(raw.inputs, `${pointer}/inputs`, diagnostics, source) ?? [],
 					target: typeof raw.target === "string" ? raw.target : "", transitions: {},
-					...(hasInput
-						? { input: toValueAst(raw.input, `${pointer}/input`, diagnostics, source) ?? null }
-						: { inputs: toValueAst(raw.inputs, `${pointer}/inputs`, diagnostics, source) ?? [] }),
 				};
 				continue;
 			}
@@ -401,7 +428,7 @@ function toActorDeclarationAst(
 			continue;
 		}
 		if ("action" in raw) {
-			const action = toStateActionAst(raw.action, chartId, `${placement.path}.${id}`, `${pointer}/action`, diagnostics, source, schemaRegistry);
+			const action = toStateActionAst(raw.action, chartId, `${isPool ? `${placement.path}.$worker` : placement.path}.${id}`, `${pointer}/action`, diagnostics, source, schemaRegistry);
 			if (action === undefined) continue;
 			const transitions = toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
 			if ("FAILED" in transitions) diagnostics.push(diagnostic("RESERVED_FAILED_TRANSITION", "FAILED is globally fail-fast and cannot be routed inside an actor.", `${pointer}/transitions/FAILED`, source));
@@ -427,6 +454,21 @@ function toActorDeclarationAst(
 	const resolved = protocol === undefined ? states : inferAndValidateActorReplies(placement, states, protocol, actorTargets, diagnostics, source);
 	if (input !== undefined && protocol !== undefined) validateActorIsolation(placement, resolved, input, protocol, diagnostics, source);
 	if (input === undefined || inputValue === undefined || protocol === undefined) return undefined;
+	if (isPool) {
+		if (concurrency === undefined) return undefined;
+		const worker: ActorDefinitionAst = { input, protocol, initial, states: resolved };
+		return deepFreeze({
+			kind: "actorPool",
+			name: placement.name,
+			path: placement.path,
+			...(placement.owner === undefined ? {} : { owner: placement.owner }),
+			input,
+			inputValue,
+			protocol,
+			concurrency,
+			worker,
+		} satisfies ActorPoolDeclarationAst);
+	}
 	return deepFreeze({
 		kind: "actor",
 		name: placement.name,
@@ -437,7 +479,7 @@ function toActorDeclarationAst(
 		protocol,
 		initial,
 		states: resolved,
-	});
+	} satisfies ActorDeclarationAst);
 }
 
 function toProtocolAst(
@@ -510,7 +552,7 @@ function inferAndValidateActorReplies(
 	}
 	const successors = (node: ActorWorkflowStateAst): string[] => {
 		if (node.kind === "state") return [...Object.values(node.transitions).map((transition) => transition.target), ...(node.after === undefined ? [] : [node.after.target])];
-		if (node.kind === "send") return [node.target];
+		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "callBatch") return [node.target];
 		if (node.kind === "call") return node.target === undefined ? Object.values(node.transitions).map((transition) => transition.target) : [node.target];
 		return [];
 	};
@@ -527,7 +569,7 @@ function inferAndValidateActorReplies(
 	for (const [id, node] of Object.entries(states)) {
 		const pointer = `${placement.pointer}/states/${escapePointer(id)}`;
 		for (const target of successors(node)) if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `Actor state '${id}' targets unknown state '${target}'.`, pointer, source));
-		if (node.kind === "send" || node.kind === "call") validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
+		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
 		if (node.kind !== "reply") continue;
 		const messages = [...(contexts.get(id) ?? [])];
 		if (messages.length !== 1) {
@@ -605,7 +647,8 @@ function validateActorIsolation(
 				if (states[read.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor artifact read '${read.state}' must name an actor-local action state.`, read.pointer, source));
 			}
 		}
-		if (node.kind === "send") refs.push(...valueRefs(node.input), ...valueRefs(node.inputs));
+		if (node.kind === "send") refs.push(...valueRefs(node.input));
+		if (node.kind === "sendBatch" || node.kind === "callBatch") refs.push(...valueRefs(node.inputs));
 		if (node.kind === "call") refs.push(...valueRefs(node.input));
 		if (node.kind === "reply") refs.push(...valueRefs(node.output));
 		for (const ref of refs) {
@@ -637,7 +680,7 @@ function validateActorIsolation(
 
 function validateMessagingNode(
 	placement: RawActorPlacement,
-	node: SendStateAst | CallStateAst,
+	node: SendStateAst | SendBatchStateAst | CallStateAst | CallBatchStateAst,
 	_protocol: ProtocolAst,
 	_actorTargets: ReadonlyMap<object, StatePath>,
 	diagnostics: AuthoringDiagnostic[],
@@ -651,14 +694,20 @@ function validateMessagingNode(
 	}
 }
 
+function actorDefinitionAst(declaration: ActorEndpointDeclarationAst): ActorDefinitionAst {
+	return declaration.kind === "actorPool"
+		? declaration.worker
+		: { input: declaration.input, protocol: declaration.protocol, initial: declaration.initial, states: declaration.states };
+}
+
 function validateActorTargets(
 	states: Readonly<Record<StatePath, StateAst>>,
-	actors: Readonly<Record<StatePath, ActorDeclarationAst>>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
 	for (const [path, node] of Object.entries(states)) {
-		if (node.kind !== "send" && node.kind !== "call") continue;
+		if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch") continue;
 		const actor = actors[node.to];
 		if (actor === undefined) continue;
 		if (!(node.event in actor.protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `${node.kind} in '${path}' names unknown message '${node.event}'.`, `${statePointer(path)}/event`, source));
@@ -667,8 +716,8 @@ function validateActorTargets(
 		validateCallRouting(node, actor.protocol[node.event], `${statePointer(path)}`, diagnostics, source);
 	}
 	for (const declaration of Object.values(actors)) {
-		for (const [stateId, node] of Object.entries(declaration.states)) {
-			if (node.kind !== "send" && node.kind !== "call") continue;
+		for (const [stateId, node] of Object.entries(actorDefinitionAst(declaration).states)) {
+			if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch") continue;
 			const target = actors[node.to];
 			const pointer = `/actors/${escapePointer(declaration.name)}/states/${escapePointer(stateId)}`;
 			if (target === undefined) continue;
@@ -681,13 +730,18 @@ function validateActorTargets(
 }
 
 function validateCallRouting(
-	node: SendStateAst | CallStateAst,
+	node: SendStateAst | SendBatchStateAst | CallStateAst | CallBatchStateAst,
 	message: ProtocolMessageAst | undefined,
 	pointer: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
-	if (node.kind !== "call" || message === undefined) return;
+	if (message === undefined || (node.kind !== "call" && node.kind !== "callBatch")) return;
+	if (node.kind === "callBatch") {
+		if (message.reply.kind !== "single") diagnostics.push(diagnostic("INVALID_CALL_BATCH_REPLY", "callBatch() requires a protocol message with exactly one reply schema.", pointer, source));
+		if (node.target.length === 0) diagnostics.push(diagnostic("INVALID_CALL_TARGET", "callBatch() requires a target.", pointer, source));
+		return;
+	}
 	if (message.reply.kind === "named") {
 		const expected = Object.keys(message.reply.schemas).sort();
 		const actual = Object.keys(node.transitions).sort();
@@ -697,14 +751,42 @@ function validateCallRouting(
 	}
 }
 
+function validateActorUsage(
+	states: Readonly<Record<StatePath, StateAst>>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const targeted = new Set<string>();
+	const collect = (node: StateAst | ActorWorkflowStateAst) => {
+		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") targeted.add(node.to);
+	};
+	for (const node of Object.values(states)) collect(node);
+	for (const actor of Object.values(actors)) {
+		for (const node of Object.values(actorDefinitionAst(actor).states)) collect(node);
+	}
+	for (const [path, actor] of Object.entries(actors)) {
+		if (targeted.has(path)) continue;
+		const pointer = actor.owner === undefined
+			? `/actors/${escapePointer(actor.name)}`
+			: `${statePointer(actor.owner)}/actors/${escapePointer(actor.name)}`;
+		diagnostics.push(diagnostic(
+			"UNUSED_ACTOR",
+			`Actor '${path}' is never targeted by send(), sendBatch(), call(), or callBatch().`,
+			pointer,
+			source,
+		));
+	}
+}
+
 function validateActorCallCycles(
-	actors: Readonly<Record<StatePath, ActorDeclarationAst>>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
 	const graph = new Map<string, Set<string>>();
 	for (const [path, actor] of Object.entries(actors)) {
-		graph.set(path, new Set(Object.values(actor.states).flatMap((state) => state.kind === "call" ? [state.to] : [])));
+		graph.set(path, new Set(Object.values(actorDefinitionAst(actor).states).flatMap((state) => state.kind === "call" || state.kind === "callBatch" ? [state.to] : [])));
 	}
 	const settled = new Set<string>();
 	const visiting = new Set<string>();
@@ -740,7 +822,7 @@ function toValueAst(
 		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values must be JSON data with InputRef leaves.", pointer, source));
 		return undefined;
 	}
-	if (isRecord(input) && input.kind === "actorDeclaration") {
+	if (isRecord(input) && (input.kind === "actorDeclaration" || input.kind === "actorPoolDeclaration")) {
 		diagnostics.push(diagnostic("ACTOR_DECLARATION_IN_DATA", "Static actor declarations cannot be embedded in runtime data.", pointer, source));
 		return undefined;
 	}
@@ -781,7 +863,7 @@ function collectState(
 	schemaRegistry: SchemaRegistry,
 	role: "state" | "region" = "state",
 	actorTargets: ReadonlyMap<object, StatePath> = new Map(),
-	actors: Readonly<Record<StatePath, ActorDeclarationAst>> = {},
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>> = {},
 ): void {
 	if (!STATE_ID_PATTERN.test(localId)) {
 		diagnostics.push(
@@ -1014,60 +1096,42 @@ function collectState(
 		return;
 	}
 
-	if (input.kind === "send" || input.kind === "call") {
+	if (input.kind === "send" || input.kind === "sendBatch" || input.kind === "call" || input.kind === "callBatch") {
 		if (role === "region") {
 			diagnostics.push(diagnostic("INVALID_REGION", `Region '${path}' must be a compound state.`, pointer, source));
 			return;
 		}
 		const targetActor = isRecord(input.to) ? actorTargets.get(input.to) : undefined;
-		if (targetActor === undefined) {
-			diagnostics.push(
-				diagnostic(
-					"INVALID_ACTOR_TARGET",
-					`${input.kind} in state '${path}' must target a placed static actor declaration.`,
-					`${pointer}/to`,
-					source,
-				),
-			);
-		}
+		if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${input.kind} in state '${path}' must target a placed static actor declaration.`, `${pointer}/to`, source));
 		const eventType = typeof input.event === "string" && input.event.length > 0 ? input.event : undefined;
-		if (eventType === undefined) {
-			diagnostics.push(diagnostic("INVALID_ACTOR_EVENT", `${input.kind}.event must be a non-empty protocol message name.`, `${pointer}/event`, source));
-		}
-		if (input.kind === "send") {
-			const hasInput = Object.hasOwn(input, "input");
-			const hasInputs = Object.hasOwn(input, "inputs");
-			if (hasInput === hasInputs) {
-				diagnostics.push(diagnostic("INVALID_SEND_INPUT", "send() requires exactly one of input or inputs.", pointer, source));
-			}
+		if (eventType === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_EVENT", `${input.kind}.event must be a non-empty protocol message name.`, `${pointer}/event`, source));
+		if (input.kind === "send" || input.kind === "sendBatch") {
+			const batch = input.kind === "sendBatch";
+			const field = batch ? "inputs" : "input";
+			if (!Object.hasOwn(input, field)) diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${input.kind}() requires ${field}.`, pointer, source));
+			if (batch && Array.isArray(input.inputs) && input.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
 			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
-			if (target.length === 0) diagnostics.push(diagnostic("INVALID_TRANSITION_TARGET", "send target must be a non-empty state id.", `${pointer}/target`, source));
-			const value = toValueAst(hasInput ? input.input : input.inputs, hasInput ? `${pointer}/input` : `${pointer}/inputs`, diagnostics, source) ?? (hasInput ? null : []);
+			if (target.length === 0) diagnostics.push(diagnostic("INVALID_TRANSITION_TARGET", `${input.kind} target must be a non-empty state id.`, `${pointer}/target`, source));
+			const value = toValueAst(input[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
+			states[path] = deepFreeze(batch
+				? { kind: "sendBatch", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, inputs: value } satisfies SendBatchStateAst
+				: { kind: "send", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, input: value } satisfies SendStateAst);
+			return;
+		}
+		if (input.kind === "callBatch") {
+			if (Array.isArray(input.inputs) && input.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
+			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
+			if (target.length === 0) diagnostics.push(diagnostic("INVALID_CALL_TARGET", "callBatch() target must be a non-empty state id.", `${pointer}/target`, source));
 			states[path] = deepFreeze({
-				kind: "send",
-				id: localId,
-				...parent,
-				to: targetActor ?? "",
-				event: eventType ?? "",
-				target,
-				transitions: {},
-				...(hasInput ? { input: value } : { inputs: value }),
-			} satisfies SendStateAst);
+				kind: "callBatch", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "",
+				inputs: toValueAst(input.inputs, `${pointer}/inputs`, diagnostics, source) ?? [], target, transitions: {},
+			} satisfies CallBatchStateAst);
 			return;
 		}
 		const value = toValueAst(input.input, `${pointer}/input`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
 		const target = typeof input.target === "string" && input.target.length > 0 ? input.target : undefined;
-		states[path] = deepFreeze({
-			kind: "call",
-			id: localId,
-			...parent,
-			to: targetActor ?? "",
-			event: eventType ?? "",
-			input: value ?? null,
-			...(target === undefined ? {} : { target }),
-			transitions,
-		} satisfies CallStateAst);
+		states[path] = deepFreeze({ kind: "call", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", input: value ?? null, ...(target === undefined ? {} : { target }), transitions } satisfies CallStateAst);
 		return;
 	}
 
@@ -1227,7 +1291,7 @@ function validateTargets(
 			continue;
 		}
 		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
-		if ((node.kind === "send" || node.kind === "call") && node.target !== undefined && !(sibling(node.target) in states)) {
+		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && node.target !== undefined && !(sibling(node.target) in states)) {
 			diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `${node.kind} in state '${path}' targets unknown state '${node.target}'.`, `${pointer}/target`, source));
 		}
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
@@ -1462,7 +1526,7 @@ function validateEnterCycles(
 
 function validateActorPlacementRefs(
 	states: Record<StatePath, StateAst>,
-	actors: Readonly<Record<StatePath, ActorDeclarationAst>>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
 	initial: StateId,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
@@ -1531,7 +1595,7 @@ function validateInputs(
 				...(transition.input === undefined ? {} : { bindings: transition.input }),
 			});
 		}
-		if ((node.kind === "send" || node.kind === "call") && node.target !== undefined) {
+		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && node.target !== undefined) {
 			const target = sibling(node.target);
 			if (target in states) edges.push({ target, pointer: `${pointer}/target` });
 		}
@@ -1718,7 +1782,7 @@ function buildDominanceGraph(
 				addEdge(path, siblingTarget(node, transition.target));
 			}
 		}
-		if ((node.kind === "send" || node.kind === "call") && node.target !== undefined) {
+		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && node.target !== undefined) {
 			addEdge(path, siblingTarget(node, node.target));
 		}
 		if (node.kind === "state" && node.after !== undefined) {

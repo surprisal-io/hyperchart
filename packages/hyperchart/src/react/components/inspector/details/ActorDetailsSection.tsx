@@ -4,6 +4,7 @@ import { Section } from "../ui/Section.js";
 import { TypeBlock } from "../ui/TypeBlock.js";
 import { ActorMailboxCard } from "./ActorMailboxCard.js";
 import { ActorProtocolCard } from "./ActorProtocolCard.js";
+import { ActorPoolWorkersCard } from "./ActorPoolWorkersCard.js";
 
 export function ActorMailboxSection({ state }: { state: HyperchartStateInfo }) {
 	const occurrence = state.actorOccurrence;
@@ -21,7 +22,7 @@ export function ActorMailboxSection({ state }: { state: HyperchartStateInfo }) {
 	);
 }
 
-export function ActorDetailsSection({ state }: { state: HyperchartStateInfo }) {
+export function ActorDetailsSection({ state, onNavigateToState }: { state: HyperchartStateInfo; onNavigateToState?: (stateId: string) => void }) {
 	const declaration = state.actorDeclaration;
 	const internal = state.actorInternal;
 	if (declaration === undefined && internal === undefined) return null;
@@ -45,6 +46,12 @@ export function ActorDetailsSection({ state }: { state: HyperchartStateInfo }) {
 					</div>
 				)}
 			</Section>
+
+			{state.actorOccurrence?.kind === "actorPool" && (
+				<Section title={`Workers · ${state.actorOccurrence.activeCount ?? 0}/${state.actorOccurrence.concurrency ?? 0} active`} icon={QueueListIcon} defaultOpen>
+					<ActorPoolWorkersCard occurrence={state.actorOccurrence} {...(onNavigateToState === undefined ? {} : { onNavigateToState })} />
+				</Section>
+			)}
 
 			{declaration !== undefined && (
 				<Section title={`Protocol · ${declaration.protocol.length} ${declaration.protocol.length === 1 ? "message" : "messages"}`} icon={ArrowsRightLeftIcon} defaultOpen>

@@ -400,15 +400,18 @@ interface HyperchartOnReenterInfo {
 
 ```ts
 interface HyperchartActorDeclarationInfo {
+  kind: "actor" | "actorPool";
   declarationPath: string;
   ownerPath?: string;
   inputSchema: HyperchartSchemaInfo;
   inputValue: unknown; // configured placement value/expression
   protocol: HyperchartActorMessageContractInfo[];
   initialReceive: string;
+  concurrency?: number;
 }
 
 interface HyperchartActorOccurrenceInfo {
+  kind: "actor" | "actorPool";
   declarationPath: string;
   ownerPath?: string;
   occurrencePath: string; // latest durable generation path
@@ -419,6 +422,11 @@ interface HyperchartActorOccurrenceInfo {
   input: unknown;
   status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
   currentState: string;
+  concurrency?: number;
+  activeCount?: number;
+  idleCount?: number;
+  workers?: HyperchartActorPoolWorkerInfo[];
+  batchCalls?: HyperchartActorBatchCallInfo[];
   mailbox: HyperchartActorMailboxInfo; // latest generation
   mailboxInstances: Array<{
     occurrencePath: string;
@@ -434,7 +442,7 @@ interface HyperchartActorOccurrenceInfo {
 }
 ```
 
-`inputSchema` is the immutable actor input type, while `inputValue` is the declaration's configured placement value/expression. An occurrence's `input` is the actual resolved runtime value. `mailbox` is the latest generation's live FIFO view; `mailboxInstances` preserves every durable generation separately, including its current/queued messages and processed-message history. Mailbox entries preserve durable order and expose message id, producer visit, optional call id, receive/reply status, reply schema provenance, and validation status. Runtime messages projected onto `send` and `call` states also retain `targetOccurrencePath`, `targetLogicalPath`, and `targetGeneration`, so a message id is never mistaken for the concrete actor instance that received it. Materialized actor-internal states expose `actorInternal.generations`; each entry identifies its parent actor occurrence/generation and keeps that generation's action visits, receive/reply history, and internal send/call messages separate. Static declarations, concrete map-local occurrences, and each occurrence's ordinary internal state graph have distinct inspector ids.
+`inputSchema` is the immutable actor input type, while `inputValue` is the declaration's configured placement value/expression. An occurrence's `input` is the actual resolved runtime value. `mailbox` is the latest generation's live FIFO view; `mailboxInstances` preserves every durable generation separately, including its current/queued messages and processed-message history. Mailbox entries preserve durable order and expose message id, producer visit, optional call id, receive/reply status, reply schema provenance, and validation status. Runtime messages projected onto `send`, `sendBatch`, `call`, and `callBatch` states also retain `targetOccurrencePath`, `targetLogicalPath`, and `targetGeneration`, so a message id is never mistaken for the concrete actor instance that received it. Materialized actor-internal states expose `actorInternal.generations`; each entry identifies its parent actor occurrence/generation and keeps that generation's action visits, receive/reply history, and internal send/call messages separate. Static declarations, concrete map-local occurrences, and each occurrence's ordinary internal state graph have distinct inspector ids.
 
 ## Artifacts and environment
 
@@ -710,3 +718,9 @@ DisplayStringSummary, UserGateOptionSummary, UserGateSummary,
 ChartInspectStateSummary, ChartInspectSummary, RunInspectStateSummary,
 RunInspectSummary
 ```
+
+### Pool host models
+
+`HyperchartActorDeclarationInfo.kind` is `"actor" | "actorPool"` and pool declarations include `concurrency`. `HyperchartActorOccurrenceInfo` has the same discriminator plus optional `concurrency`, `activeCount`, `idleCount`, `workers`, and `batchCalls`. A `HyperchartActorPoolWorkerInfo` carries concrete `occurrencePath`, canonical navigable `currentStateId`, current/next message, worker-local messages, visits/session, and projected results. A `HyperchartActorBatchCallInfo` carries caller state, ordered ids/items, item `batchIndex`/status/worker, and settled/total progress.
+
+`HyperchartActorMessageInfo` preserves optional `batchIndex`, `workerIndex`, and `workerOccurrencePath`. `HyperchartStateType` and `actorMessageLink.kind` preserve `sendBatch` and `callBatch`; adapters do not collapse them into singleton operations.

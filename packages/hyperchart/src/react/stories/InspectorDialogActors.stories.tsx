@@ -8,7 +8,13 @@ import {
 	actorFailureRun,
 	actorIdleRun,
 	actorReentryRun,
+	actorPoolIdleRun,
+	actorPoolCrowdedRun,
+	actorPoolPartialBatchRun,
+	actorPoolDrainingRun,
+	actorPoolMapReentryRun,
 	allActorRuns,
+	allActorPoolRuns,
 } from "../fixtures/actor-fixtures.js";
 import { InteractiveInspector } from "./harnesses/InteractiveInspector.js";
 
@@ -17,7 +23,7 @@ const meta = {
 	id: "hyperchart-features-explicit-actors",
 	component: HyperchartInspectorDialog,
 	parameters: { layout: "fullscreen", controls: { disable: true } },
-	args: { runs: allActorRuns, selectedRunId: actorIdleRun.runId, onClose: fn() },
+	args: { runs: [...allActorRuns, ...allActorPoolRuns], selectedRunId: actorIdleRun.runId, onClose: fn() },
 	render: (args) => <InteractiveInspector {...args} />,
 } satisfies Meta<typeof HyperchartInspectorDialog>;
 export default meta;
@@ -59,6 +65,30 @@ export const ActorReentry: Story = {
 	name: "Actor Reentry",
 	args: { runs: [actorReentryRun], selectedRunId: actorReentryRun.runId },
 };
+export const PoolIdle: Story = {
+	name: "Pool Idle",
+	args: { runs: [actorPoolIdleRun], selectedRunId: actorPoolIdleRun.runId },
+};
+export const PoolBusyBacklog: Story = {
+	name: "Pool Busy Slots and Backlog",
+	args: { runs: [actorPoolCrowdedRun], selectedRunId: actorPoolCrowdedRun.runId },
+};
+export const PoolPartialBatch: Story = {
+	name: "Pool Partial callBatch",
+	args: { runs: [actorPoolPartialBatchRun], selectedRunId: actorPoolPartialBatchRun.runId },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		const graph = within(canvas.getByRole("main"));
+		await userEvent.click(await graph.findByTitle("@workers"));
+		await expect(canvas.getByText("Workers · 1/2 active")).toBeVisible();
+		await userEvent.click(canvas.getByRole("button", { name: /\$worker-0/ }));
+		await expect(canvas.getByRole("button", { name: /current WORK CALL ACCEPTED/ })).toBeVisible();
+	},
+};
+export const PoolMapGenerationReentry: Story = {
+	name: "Map-owned Pool Generation Re-entry",
+	args: { runs: [actorPoolMapReentryRun], selectedRunId: actorPoolMapReentryRun.runId },
+};
 export const ClosingAndDraining: Story = {
 	name: "Nested Actor Drain Navigation",
 	args: { runs: [actorDrainingRun], selectedRunId: actorDrainingRun.runId },
@@ -71,6 +101,10 @@ export const ClosingAndDraining: Story = {
 		await expect(canvas.getByRole("button", { name: /phase\.@worker/ })).toBeVisible();
 		await expect(graph.queryByTitle("phase.@worker")).not.toBeInTheDocument();
 	},
+};
+export const PoolDraining: Story = {
+	name: "Pool Draining",
+	args: { runs: [actorPoolDrainingRun], selectedRunId: actorPoolDrainingRun.runId },
 };
 export const Failure: Story = {
 	name: "Failure",

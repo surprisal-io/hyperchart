@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { normalizeChartConfig, start } from "../packages/hyperchart/src/index.js";
 import { agent, arg, chart, final, map, user } from "../packages/hyperchart/src/core/dsl.js";
-import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
+import type { ChartAst, ChartCst, DurableLogRecord, Effect } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
@@ -130,6 +130,28 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
 }
 
 describe("ChartRuntime", () => {
+	it("appends and acknowledges durable effects in supplied order", async () => {
+		const store = new MemoryLogStore();
+		const runtime = new ChartRuntime({
+			ast: linearChart(),
+			logStore: store,
+			agentExecutor: new FakeAgentExecutor(),
+			workDir: process.cwd(),
+			chartDir: process.cwd(),
+		});
+		const effects: Effect[] = [
+			{ kind: "durable_records", id: "first", records: [{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 }] },
+			{ kind: "durable_records", id: "second", records: [{ type: "failure_intent", origin: "work", error: "test", parentId: 1, seqId: 2, timestamp: 2 }] },
+		];
+
+		runtime.runEffects(effects);
+		const events = runtime.eventsQueue()[Symbol.asyncIterator]();
+		expect(await events.next()).toMatchObject({ value: { kind: "durable_records_added", effectId: "first" } });
+		expect(await events.next()).toMatchObject({ value: { kind: "durable_records_added", effectId: "second" } });
+		expect((await store.readAll()).map((record) => record.seqId)).toEqual([1, 2]);
+		await runtime.dispose();
+	});
+
 	it("runs a linear agent chart through the real execution loop", async () => {
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE", output: { ok: true } }] });
 		const store = new MemoryLogStore();

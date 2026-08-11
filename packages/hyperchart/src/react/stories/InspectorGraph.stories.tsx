@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { agent, chart, final, script } from "../../core/dsl.js";
 import { storyScenario } from "../fixtures/story-scenario.js";
-import { actorNamedReplyRun, actorSendVoidRun } from "../fixtures/actor-fixtures.js";
+import { actorNamedReplyRun, actorPoolCrowdedRun, actorSendVoidRun } from "../fixtures/actor-fixtures.js";
+import { actorStaticAdapterRun } from "../fixtures/actor-runtime-fixtures.js";
 import { BoardPage, BoardSection, GraphTile } from "./components/index.js";
 import { inspectorPanelSpecs } from "./inspector-panel/specs.js";
 import { inspectorPanelScenario } from "./inspector-panel/runtime.js";
@@ -70,7 +71,9 @@ export const EdgeTypes: Story = {
 			<div className="grid gap-4">
 				<GraphTile title="Branch, fan-in, retry/back transition" run={transitionEdgeRun} height="h-[760px]" />
 				<GraphTile title="Actor send · fire-and-forget" run={actorSendVoidRun} height="h-[500px]" />
+				<GraphTile title="Actor sendBatch · ordered fire-and-forget messages" run={actorStaticAdapterRun} visibleStateIds={["queue", "@editor"]} height="h-[500px]" />
 				<GraphTile title="Actor call · request and reply" run={actorNamedReplyRun} height="h-[500px]" />
+				<GraphTile title="Actor callBatch · pooled requests and replies" run={actorPoolCrowdedRun} visibleStateIds={["batch", "@workers"]} height="h-[500px]" />
 			</div>
 		</BoardPage>
 	),

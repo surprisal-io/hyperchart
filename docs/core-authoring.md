@@ -355,3 +355,7 @@ The Pi runner normalizes automatically. Hosts embedding the core package should 
 ## Explicit actors
 
 Use [`actor()`, protocols, `receive()`, `send()`, `call()`, and `reply()`](./explicit-actors.md) for sequential side-effecting workflows. Actor templates are invoked with placement expressions and the resulting static declaration is placed directly in one owner's `actors` object; there is no dynamic actor API.
+
+### Actor pools and batches
+
+Use `actorPool({ concurrency, worker })` when one statically placed capability needs bounded parallelism. The endpoint keeps one durable FIFO mailbox and fixed persistent workers; use singleton `send`/`call` or explicit non-empty `sendBatch`/single-reply `callBatch`. `callBatch` publishes outputs only after all items settle and preserves input order. See [Explicit actors](explicit-actors.md).

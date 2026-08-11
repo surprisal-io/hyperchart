@@ -3,7 +3,7 @@ import { useState } from "react";
 import type { HyperchartActorMailboxInstanceInfo, HyperchartActorMessageInfo } from "../../../types.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 
-function MessageRow({ message, index, current = false }: { message: HyperchartActorMessageInfo; index?: number; current?: boolean }) {
+export function ActorMailboxMessageRow({ message, index, current = false }: { message: HyperchartActorMessageInfo; index?: number; current?: boolean }) {
 	const [open, setOpen] = useState(false);
 	const toggle = () => setOpen((value) => !value);
 	return (
@@ -70,8 +70,8 @@ export function ActorMailboxCard({
 				</div>
 			)}
 			<div className="grid gap-1">
-				{latest.currentMessage !== undefined && <MessageRow message={latest.currentMessage} current />}
-				{entries.map((entry, index) => <MessageRow key={entry.messageId} message={entry} index={index} />)}
+				{latest.currentMessage !== undefined && <ActorMailboxMessageRow message={latest.currentMessage} current />}
+				{entries.map((entry, index) => <ActorMailboxMessageRow key={entry.messageId} message={entry} index={index} />)}
 				{latest.currentMessage === undefined && entries.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">Mailbox is empty.</div>}
 				{hasHistory && (
 					<button
@@ -88,7 +88,7 @@ export function ActorMailboxCard({
 							<section>
 								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed in latest instance · {latest.messageHistory.length}</div>
 								<div className="grid gap-1">
-									{latest.messageHistory.map((entry, index) => <MessageRow key={`history:${latest.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
+									{latest.messageHistory.map((entry, index) => <ActorMailboxMessageRow key={`history:${latest.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
 								</div>
 							</section>
 						)}
@@ -103,7 +103,7 @@ export function ActorMailboxCard({
 								</div>
 								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed messages · {instance.messageHistory.length}</div>
 								<div className="grid gap-1">
-									{instance.messageHistory.map((entry, index) => <MessageRow key={`history:${instance.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
+									{instance.messageHistory.map((entry, index) => <ActorMailboxMessageRow key={`history:${instance.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
 									{instance.messageHistory.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No processed messages.</div>}
 								</div>
 							</section>

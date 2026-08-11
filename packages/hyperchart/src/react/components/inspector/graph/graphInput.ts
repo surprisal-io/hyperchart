@@ -1,7 +1,7 @@
 import type { HyperchartRunInfo, HyperchartStateInfo } from "../../../types.js";
 import { isImplicitFailedFinal } from "../helpers/state.js";
 
-export type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "call" | "reply" };
+export type StateTransitionEdge = { source: string; target: string; labels: string[]; kind?: "transition" | "send" | "sendBatch" | "call" | "callBatch" | "reply" };
 
 export type GraphInput = {
 	stateById: Map<string, HyperchartStateInfo>;
