@@ -40,10 +40,20 @@ Do not expand the `onReenter` API or add more special cases until this decision 
 
 Decide what replay should mean. The original idea was based on branching, but the current implementation behaves differently.
 
+## Complete actor recursion
+
+Add recursive actor messaging. `self()` is part of this feature: it must provide a typed capability for the current actor without requiring its declaration to exist before the actor template is defined.
+
+Define the mailbox semantics before adding the API. A self-`send` can enqueue work for processing after the current message settles, while a self-`call` would deadlock under the current non-reentrant one-current-message rule unless it has explicit tail-call or reentrant semantics. Recursive and cyclic actor calls need one coherent policy rather than accidental exceptions.
+
+The implementation must cover normalization and cycle legality, durable addressing/correlation, replay and rewind, owner shutdown/draining, actor-local references, Inspector/TUI presentation, tests, TLA+, and trace validation.
+
+## Support named replies in `callBatch()`
+
+`callBatch()` currently accepts only protocol messages with one `reply` schema. Extend it to support messages with named replies such as `APPLIED` and `REJECTED`.
+
+Define the ordered aggregate result shape and routing semantics first. Each batch item must retain its authored index, durable call/message identity, reply event, and validated event-specific output. Partial completion, mixed reply events, replay, rewind, pool worker assignment, failure, and Inspector presentation must remain deterministic without weakening atomic batch enqueue.
+
 ## Rework the documentation
 
 Review and restructure the documentation. Its current organization and presentation are not effective enough and need a broader redesign.
-
-## Complete the `user` action implementation
-
-The `user` action is currently only partially implemented and does not yet provide a coherent end-to-end interaction model. Define its intended semantics and finish the runtime, host-adapter, persistence/recovery, inspection, and UI behavior required to make it a fully supported action type.
