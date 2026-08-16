@@ -176,6 +176,7 @@ export function hyperchartRunFromToolDetails(
 
 type RuntimeStatusInfo = {
 	runId?: string;
+	branchId?: string;
 	runDir?: string;
 	chartId?: string;
 	state?: string;

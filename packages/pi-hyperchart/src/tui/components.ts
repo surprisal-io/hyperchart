@@ -18,12 +18,14 @@ export type RunComponentOptions = {
 	runDir: string;
 	logPath: string;
 	ast: ChartAst;
+	branchId?: string;
 	live?: boolean;
 	cwd?: string;
 };
 
 export type RunHistoryItem = {
 	runId: string;
+	branchId?: string;
 	runDir: string;
 	chartId: string;
 	state: string;
@@ -162,6 +164,10 @@ export class RunWidget implements Component {
 		const header = joinParts([
 			`${colorRunGlyph(this.theme, view, live)} ${this.theme.bold(view.chartId)}`,
 			colorRunState(this.theme, runStateLabel(view, live)),
+			accent(this.theme, `branch:${view.branchId}`),
+			view.branches.length > 1 ? dim(this.theme, `${view.branches.length} heads`) : undefined,
+			dim(this.theme, `tree:${view.recordCount}`),
+			view.runnerBranchId !== undefined && view.runnerBranchId !== view.branchId ? dim(this.theme, `runner:${view.runnerBranchId}`) : undefined,
 			accent(this.theme, `${this.progressPercent}%`),
 			activeCount > 0 ? accent(this.theme, `${activeCount} active`) : undefined,
 		]);
@@ -173,8 +179,10 @@ export class RunWidget implements Component {
 			activeLines.push(...sessions.slice(0, 3).map((session) => compactSessionLine(session, this.theme, live)));
 		}
 		const hidden = Math.max(active.length, sessions.length) - activeLines.length;
+		const heads = view.branches.length === 0 ? undefined : dim(this.theme, `  heads ${view.branches.map((branch) => `${branch.branchId}@${branch.headSeqId ?? "empty"}`).join(" · ")}`);
 		return [
 			header,
+			heads,
 			this.refreshError === undefined ? undefined : error(this.theme, `  inspect failed: ${this.refreshError}`),
 			...activeLines,
 			hidden > 0 ? dim(this.theme, `  +${hidden} more`) : undefined,
@@ -194,9 +202,17 @@ export class RunWidget implements Component {
 		const stat = `${statKeyFor(this.opts.logPath)}:${statKeyFor(progressPath)}`;
 		if (stat === this.lastStat && this.view !== undefined) return;
 		this.lastStat = stat;
-		const records = await new JsonlLogStore(this.opts.logPath).readAll();
-		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, records });
-		this.view = buildRunView(this.opts.ast, records, Date.now());
+		const branchId = this.opts.branchId ?? "main";
+		const store = new JsonlLogStore(this.opts.logPath, () => {}, branchId);
+		const normalized = await store.read();
+		const records = normalized.ancestry(branchId);
+		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId, records });
+		this.view = buildRunView(this.opts.ast, records, Date.now(), {
+			branchId,
+			...(run.runnerBranchId === undefined ? {} : { runnerBranchId: run.runnerBranchId }),
+			branches: [...normalized.branches.values()].map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
+			recordCount: normalized.records.length,
+		});
 		this.progress = readSessionProgress(resolve(this.opts.runDir, "sessions")).sessions;
 		this.progressPercent = summarizeHyperchartProgress(run).pct;
 		this.refreshError = undefined;

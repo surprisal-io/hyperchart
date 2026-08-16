@@ -14,7 +14,7 @@ import { actorMapLocalRun, actorMapPartialRun, actorNamedReplyRun, actorSendVoid
 function run(status: "pending" | "running" | "done", target = "done"): HyperchartRunInfo {
 	return {
 		runId: "layout-run",
-		chartName: "layout",
+		branchId: "main",		chartName: "layout",
 		status: status === "done" ? "completed" : "running",
 		cwd: "/workspace",
 		createdAt: 1,

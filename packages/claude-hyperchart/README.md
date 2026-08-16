@@ -62,7 +62,7 @@ Under SSH the plugin does not try to open a server-side browser; `hyperchart_vie
 
 ## Run layout
 
-Each run directory contains `meta.json`, `status.json` (heartbeat + terminal state), `log.jsonl` (the durable event log), `terminal-notification/` (persist-once request plus per-session receipts), `user-interactions/<seqId>/` (`request.json`, immutable response-or-close `resolution.json`, and presentation receipts), `runner.config.json`, runner stdout/stderr logs, and `sessions/` with per-action session progress, neutral JSONL transcripts, and the steering queue. Stop/resume preserves open gates; rewind moves the whole mailbox into its backup.
+Each run directory contains `meta.json`, `status.json` (heartbeat + terminal state), `log.jsonl` (the durable event log), `terminal-notification/` (persist-once request plus per-session receipts), `user-interactions/<seqId>/` (`request.json`, immutable response-or-close `resolution.json`, and presentation receipts), `runner.config.json`, runner stdout/stderr logs, and `sessions/` with per-action session progress, neutral JSONL transcripts, and the steering queue. Stop/resume preserves open gates; rewind preserves the branch-scoped mailbox and every prior record.
 
 ## Testing
 
@@ -75,3 +75,7 @@ HYPERCHART_E2E=1 npx vitest run tests/claude_e2e.test.ts
 ## Not yet included
 
 Marketplace packaging, model-id mapping between hosts, and cross-host run interop (Pi runs and Claude runs use separate run roots) are deliberately out of scope for this first version.
+
+## Named branches
+
+Claude tools require explicit branch handles for run/inspection/view/response/rewind and provide `hyperchart_branches` plus `hyperchart_fork`. Checkout is read-only; fork never selects; rewind only moves the named durable head.

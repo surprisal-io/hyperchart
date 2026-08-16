@@ -5,6 +5,7 @@ import { start } from "../../core/execution_loop.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
 import { explainReplay, type ReplayExplanation } from "../../core/replay_check.js";
 import type { ChartAst } from "../../core/types.js";
+import type { BranchId } from "../../core/durable_events.js";
 import type { SchemaRegistry } from "../../core/schema_registry.js";
 import { ChartRuntime } from "./chart_runtime.js";
 import { FileUserExecutor } from "./user_executor.js";
@@ -24,6 +25,8 @@ import type { AgentExecutor } from "./agent_executor.js";
 export type HyperchartRunnerConfig = {
 	runId: string;
 	runDir: string;
+	/** Explicit non-durable branch handle executed by this runner. */
+	branchId: BranchId;
 	chartPath: string;
 	chartId: string;
 	exportName?: string;
@@ -57,6 +60,7 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 	if (
 		typeof value.runId !== "string" ||
 		typeof value.runDir !== "string" ||
+		typeof value.branchId !== "string" || value.branchId.length === 0 ||
 		typeof value.chartPath !== "string" ||
 		typeof value.chartId !== "string" ||
 		typeof value.workDir !== "string"
@@ -66,6 +70,7 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 	return {
 		runId: value.runId,
 		runDir: value.runDir,
+		branchId: value.branchId,
 		chartPath: value.chartPath,
 		chartId: value.chartId,
 		workDir: value.workDir,
@@ -101,6 +106,7 @@ export async function runHyperchartRunner(
 		runId: config.runId,
 		chartId: config.chartId,
 		state: "starting",
+		branchId: config.branchId,
 		attemptId,
 		pid: process.pid,
 		heartbeatAt: Date.now(),
@@ -139,7 +145,7 @@ export async function runHyperchartRunner(
 			config.exportName === undefined ? {} : { exportName: config.exportName },
 		);
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-		const logStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message));
+		const logStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message), config.branchId);
 		const existingLog = await logStore.readAll();
 		const replayExplanation = existingLog.length === 0 ? undefined : explainReplay(parsed.ast, existingLog);
 		if (replayExplanation?.broken !== undefined) {
@@ -154,6 +160,7 @@ export async function runHyperchartRunner(
 			runId: config.runId,
 			chartId: parsed.ast.id,
 			state: "running",
+			branchId: config.branchId,
 			pid: process.pid,
 			heartbeatAt: Date.now(),
 			error: undefined,
@@ -170,12 +177,14 @@ export async function runHyperchartRunner(
 		const userExecutor = new FileUserExecutor({
 			runId: config.runId,
 			runDir: config.runDir,
+			branchId: config.branchId,
 			schemaRegistry: parsed.schemaRegistry,
 			onWarn: (message) => console.warn(message),
 		});
 		stopSteering = watchSessionSteering(sessionsDir, (request) => executor.steer(request.actionKey, request.message));
 		runtime = new ChartRuntime({
 			ast: parsed.ast,
+			branchId: config.branchId,
 			logStore,
 			agentExecutor: executor,
 			userExecutor,
@@ -193,6 +202,7 @@ export async function runHyperchartRunner(
 				config.runDir,
 				renderTerminalNotificationPayload(finalState, {
 					runId: config.runId,
+					branchId: config.branchId,
 					runDir: config.runDir,
 					workDir: config.workDir,
 					outcome: terminalState,
@@ -203,6 +213,7 @@ export async function runHyperchartRunner(
 				runId: config.runId,
 				chartId: parsed.ast.id,
 				state: terminalState,
+				branchId: config.branchId,
 				pid: process.pid,
 				heartbeatAt: Date.now(),
 				exitCode: terminalState === "failed" ? 1 : 0,
@@ -218,6 +229,7 @@ export async function runHyperchartRunner(
 					config.runDir,
 					defaultFailedTerminalNotificationPayload({
 						runId: config.runId,
+						branchId: config.branchId,
 						runDir: config.runDir,
 						chartId: config.chartId,
 						error: message,
@@ -229,6 +241,7 @@ export async function runHyperchartRunner(
 			patchRunStatus(config.runDir, {
 				runId: config.runId,
 				state: "failed",
+				branchId: config.branchId,
 				pid: process.pid,
 				heartbeatAt: Date.now(),
 				exitCode: 1,

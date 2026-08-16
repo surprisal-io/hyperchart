@@ -15,7 +15,7 @@ import {
 import { storyScenario } from "./story-scenario.js";
 
 const now = 1_783_000_000_000;
-const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, timestamp: now + seqId * 1_000 });
+const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: now + seqId * 1_000 });
 
 function endpointDefinition(ast: ChartAst, path: string): ActorEndpointDeclarationAst {
 	const definition = ast.actors[path];

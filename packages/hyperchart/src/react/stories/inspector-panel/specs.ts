@@ -232,7 +232,7 @@ const STORY_RUNTIME_STARTED_AT = 1_700_000_000_000;
 const storyTimestamp = (seqId: number) => STORY_RUNTIME_STARTED_AT + seqId * 1_000;
 
 export function storyLog(args: Record<string, unknown> = { topic: "visual QA board" }): StoryLogBuilder {
-	return { records: [{ type: "args", args, parentId: null, seqId: 1, timestamp: storyTimestamp(1) }], seq: 1 };
+	return { records: [{ type: "args", args, parentId: null, seqId: 1, branchId: "main", timestamp: storyTimestamp(1) }], seq: 1 };
 }
 
 function storyActionUid(ast: ChartAst, statePath: StatePath): ActionUID {
@@ -256,7 +256,7 @@ function pushInvoke(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePat
 		definition: storyActionDefinition(ast, statePath),
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: storyTimestamp(builder.seq),
+		branchId: "main", timestamp: storyTimestamp(builder.seq),
 	});
 	return actionUid;
 }
@@ -269,7 +269,7 @@ function pushComplete(builder: StoryLogBuilder, ast: ChartAst, statePath: StateP
 		event,
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: storyTimestamp(builder.seq),
+		branchId: "main", timestamp: storyTimestamp(builder.seq),
 	});
 }
 
@@ -280,7 +280,7 @@ function pushAction(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePat
 
 function pushFailure(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, error: unknown): void {
 	pushInvoke(builder, ast, statePath);
-	builder.records.push({ type: "failure_intent", origin: statePath, error, parentId: builder.seq, seqId: ++builder.seq, timestamp: storyTimestamp(builder.seq) });
+	builder.records.push({ type: "failure_intent", origin: statePath, error, parentId: builder.seq, seqId: ++builder.seq, branchId: "main", timestamp: storyTimestamp(builder.seq) });
 }
 
 function pushValidated(
@@ -302,7 +302,7 @@ function pushValidated(
 		outcome: { ok: false, reason },
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: storyTimestamp(builder.seq),
+		branchId: "main", timestamp: storyTimestamp(builder.seq),
 	});
 }
 
@@ -313,7 +313,7 @@ function pushSpawned(builder: StoryLogBuilder, path: StatePath, instances: Recor
 		instances,
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		timestamp: storyTimestamp(builder.seq),
+		branchId: "main", timestamp: storyTimestamp(builder.seq),
 	});
 }
 

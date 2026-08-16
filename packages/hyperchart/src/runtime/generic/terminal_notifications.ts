@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { MachineState } from "../../core/machine.js";
 import { renderJoin, renderRead, renderTemplate } from "../../core/machine.js";
 import { nodeAt } from "../../core/paths.js";
+import type { BranchId } from "../../core/durable_events.js";
 import type { RunTerminalState } from "./run_outcome.js";
 import { isRunLive, patchRunStatus, readRunStatus } from "./run_status.js";
 
@@ -13,6 +14,7 @@ export const TERMINAL_NOTIFICATION_REQUEST = "request.json";
 
 export type TerminalNotificationPayload = Readonly<{
 	runId: string;
+	branchId: BranchId;
 	runDir: string;
 	chartId: string;
 	outcome: RunTerminalState;
@@ -23,7 +25,7 @@ export type TerminalNotificationPayload = Readonly<{
 }>;
 
 export type TerminalNotificationRequest = Readonly<{
-	version: 1;
+	version: 2;
 	requestId: string;
 	createdAt: string;
 	/** Runner attempt that produced this request; absent only on legacy outboxes. */
@@ -49,7 +51,7 @@ export function terminalNotificationRequestPath(runDir: string): string {
 
 export function renderTerminalNotificationPayload(
 	state: MachineState,
-	input: { runId: string; runDir: string; workDir: string; outcome: RunTerminalState; error?: string },
+	input: { runId: string; branchId: BranchId; runDir: string; workDir: string; outcome: RunTerminalState; error?: string },
 ): TerminalNotificationPayload {
 	const standard = input.outcome === "failed"
 		? `Hyperchart run ${input.runId} (${state.ast.id}) failed${input.error === undefined ? "" : `: ${input.error}`}. Inspect the durable run at ${input.runDir}.`
@@ -73,6 +75,7 @@ export function renderTerminalNotificationPayload(
 	if (artifacts.length > 0) sections.push(`Declared artifacts (authoritative paths; contents not inlined):\n${artifacts.map((path) => `- ${path}`).join("\n")}`);
 	return {
 		runId: input.runId,
+		branchId: input.branchId,
 		runDir: resolve(input.runDir),
 		chartId: state.ast.id,
 		outcome: input.outcome,
@@ -84,6 +87,7 @@ export function renderTerminalNotificationPayload(
 
 export function defaultFailedTerminalNotificationPayload(input: {
 	runId: string;
+	branchId: BranchId;
 	runDir: string;
 	chartId: string;
 	error: string;
@@ -91,6 +95,7 @@ export function defaultFailedTerminalNotificationPayload(input: {
 	const runDir = resolve(input.runDir);
 	return {
 		runId: input.runId,
+		branchId: input.branchId,
 		runDir,
 		chartId: input.chartId,
 		outcome: "failed",
@@ -105,7 +110,7 @@ export function readDeliverableTerminalNotificationRequest(runDir: string): Term
 	const request = readTerminalNotificationRequest(runDir);
 	if (request === undefined) return undefined;
 	const status = readRunStatus(runDir);
-	return status?.state === request.payload.outcome ? request : undefined;
+	return status?.state === request.payload.outcome && status.branchId === request.payload.branchId ? request : undefined;
 }
 
 /**
@@ -117,7 +122,7 @@ export function recoverStaleRunTerminalNotification(
 	now = Date.now(),
 ): TerminalNotificationRequest | undefined {
 	const status = readRunStatus(runDir);
-	if (status === undefined || (status.state !== "starting" && status.state !== "running") || isRunLive(status, now)) {
+	if (status === undefined || status.branchId === undefined || (status.state !== "starting" && status.state !== "running") || isRunLive(status, now)) {
 		return undefined;
 	}
 	let request = readTerminalNotificationRequest(runDir);
@@ -133,6 +138,7 @@ export function recoverStaleRunTerminalNotification(
 			runDir,
 			defaultFailedTerminalNotificationPayload({
 				runId: status.runId,
+				branchId: status.branchId,
 				runDir,
 				chartId: status.chartId,
 				error,
@@ -182,7 +188,7 @@ export function persistTerminalNotificationRequest(runDir: string, payload: Term
 	mkdirSync(join(runDir, TERMINAL_NOTIFICATION_DIR), { recursive: true });
 	const attemptId = readRunStatus(runDir)?.attemptId;
 	const request: TerminalNotificationRequest = {
-		version: 1,
+		version: 2,
 		// Identity belongs to this outbox generation, not its payload. Rewind removes the
 		// outbox, so replaying an identical terminal creates a notification that hosts can
 		// distinguish from the pre-rewind delivery.
@@ -199,7 +205,7 @@ export function readTerminalNotificationRequest(runDir: string): TerminalNotific
 	const path = terminalNotificationRequestPath(runDir);
 	if (!existsSync(path)) return undefined;
 	const value = JSON.parse(readFileSync(path, "utf8")) as TerminalNotificationRequest;
-	if (value.version !== 1 || typeof value.requestId !== "string" || typeof value.payload?.prompt !== "string") {
+	if (value.version !== 2 || typeof value.requestId !== "string" || typeof value.payload?.prompt !== "string" || typeof value.payload?.branchId !== "string") {
 		throw new Error(`Invalid terminal notification request: ${path}`);
 	}
 	return value;

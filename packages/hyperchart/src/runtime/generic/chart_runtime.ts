@@ -1,7 +1,7 @@
 import type { Runtime } from "../runtime.js";
 import type { ChartAst, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
-import type { DurableLogRecord } from "../../core/durable_events.js";
+import type { BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import type { Effect, MachineEvent, RejectedEffect } from "../../core/machine.js";
 import { actorContextForState } from "../../core/actors.js";
 import { nodeAt } from "../../core/paths.js";
@@ -16,6 +16,8 @@ import { checkSchemaAsync } from "./schema.js";
 
 export type ChartRuntimeOptions = {
 	ast: ChartAst;
+	/** Explicit non-durable branch handle for replay and every append. */
+	branchId: BranchId;
 	logStore: LogStore;
 	agentExecutor: AgentExecutor;
 	/** Required only when this runtime may execute user actions; detached runners always provide it. */
@@ -28,6 +30,7 @@ export type ChartRuntimeOptions = {
 };
 
 export class ChartRuntime implements Runtime {
+	readonly branchId: BranchId;
 	private readonly queue: AsyncQueue<MachineEvent> = createAsyncQueue<MachineEvent>();
 	private readonly timers = new Map<string, NodeJS.Timeout>();
 	private readonly scripts: ScriptRunner;
@@ -35,6 +38,10 @@ export class ChartRuntime implements Runtime {
 	private readonly onWarn: (msg: string) => void;
 
 	constructor(private readonly options: ChartRuntimeOptions) {
+		if (options.logStore.branchId !== options.branchId) {
+			throw new Error(`ChartRuntime branch '${options.branchId}' does not match log store branch '${options.logStore.branchId}'`);
+		}
+		this.branchId = options.branchId;
 		this.scripts = new ScriptRunner({
 			workDir: options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
@@ -46,10 +53,11 @@ export class ChartRuntime implements Runtime {
 	runEffects(effects: Effect[]): void {
 		for (const effect of effects) {
 			switch (effect.kind) {
-				case "durable_records":
-					this.options.logStore.append(effect.records);
-					this.queue.send({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+				case "durable_records": {
+					const records = this.options.logStore.appendDrafts(effect.records);
+					this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 					break;
+				}
 				case "actor_create":
 					void checkSchemaAsync(effect.declaration.input, effect.input, this.options.schemaRegistry).then((check) => {
 						this.queue.send({
@@ -100,7 +108,7 @@ export class ChartRuntime implements Runtime {
 							this.queue.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) }),
 						);
 					break;
-				case "validate":
+				case "validate": {
 					void runGuard(
 						effect.guard,
 						effect.event,
@@ -116,6 +124,7 @@ export class ChartRuntime implements Runtime {
 						.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
 						.then((outcome) => this.queue.send({ kind: "validated", effectId: effect.id, outcome }));
 					break;
+				}
 				case "rejected":
 					this.dispatchRejected(effect);
 					break;

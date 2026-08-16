@@ -9,7 +9,7 @@ function state(id: string, status: HyperchartStateInfo["status"], options: Parti
 function run(states: HyperchartStateInfo[], status: HyperchartRunInfo["status"] = "running"): HyperchartRunInfo {
 	return {
 		runId: "run-1",
-		chartName: "review",
+		branchId: "main",		chartName: "review",
 		status,
 		cwd: "/project",
 		createdAt: 1,

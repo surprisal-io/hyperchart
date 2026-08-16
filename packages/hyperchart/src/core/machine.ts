@@ -4,7 +4,6 @@ import type {
 	ActionStateAst,
 	ActionUID,
 	ActorEndpointDeclarationAst,
-	ActorPoolDeclarationAst,
 	ActorWorkflowStateAst,
 	AgentActionAst,
 	ChartAst,
@@ -27,8 +26,8 @@ import type {
 	ValueAst,
 } from "./types.js";
 import { isInputRef } from "./types.js";
-import type { ActorMessageEnvelope, ActorMessageSource, DurableLogRecord } from "./durable_events.js";
-import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
+import type { ActorMessageEnvelope, ActorMessageSource, DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
+import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import { declaredArtifactsForState } from "./normalize.js";
 import {
@@ -116,7 +115,7 @@ export type AgentEffect = Readonly<{
 export type UserEffect = Readonly<{
 	kind: "user";
 	id: EffectId;
-	/** Durable record that caused this user phase; public gate identity is (runId, seqId). */
+	/** Durable record that caused this user phase; public gate identity is (runId, branchId, seqId). */
 	seqId: number;
 	actionUid: ActionUID;
 	action: UserActionAst;
@@ -149,7 +148,8 @@ export type ActionEffect = AgentEffect | UserEffect | ScriptEffect;
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
 	id: EffectId;
-	records: readonly DurableLogRecord[];
+	/** Unstamped machine payloads. The selected branch writer assigns every coordinate. */
+	records: readonly DurableRecordDraft[];
 }>;
 
 export type ActorCreateEffect = Readonly<{
@@ -250,17 +250,12 @@ export type Effect =
 	| TimerEffect
 	| CancelEffect;
 
-type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
-
-// A record the machine wants to append, before numbering. parentId/seqId/timestamp are assigned
-// in one place — when the append is actually emitted — so building an append is pure and it can
-// be derived speculatively and deduplicated.
-type DraftRecord = DistributiveOmit<DurableLogRecord, "parentId" | "seqId" | "timestamp">;
-
+// A record the machine wants to append, before global numbering and branch provenance. Building
+// an append is pure; only the serialized storage writer may stamp durable coordinates.
 export type RecordAppend = Readonly<{
 	kind: "append";
 	id: EffectId;
-	records: readonly DraftRecord[];
+	records: readonly DurableRecordDraft[];
 }>;
 
 export type AgentMachineEvent = Readonly<{
@@ -355,7 +350,7 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 			kind: "final",
 			state,
 			effects: [
-				...responses.map((entry) => (entry.kind === "append" ? stampAppend(state, entry) : entry)),
+				...responses.map((entry) => (entry.kind === "append" ? prepareAppend(state, entry) : entry)),
 				...state.projection.pendingActions.map((pending): CancelEffect => ({
 					kind: "cancel",
 					id: pendingEffectId(pending),
@@ -369,7 +364,7 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 		return {
 			kind: "final",
 			state,
-			effects: responses.map((entry) => (entry.kind === "append" ? stampAppend(state, entry) : entry)),
+			effects: responses.map((entry) => (entry.kind === "append" ? prepareAppend(state, entry) : entry)),
 			result: state.projection.results[state.projection.activeLeaves[0] ?? ""],
 		};
 	}
@@ -404,23 +399,16 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 		state.dispatched.add(entry.id);
 	}
 
-	// The only place where records are numbered: appends that made it into the output consume
-	// their seqIds here.
+	// Appends remain unstamped until the selected branch writer commits them.
 	const effects = [...responses, ...fresh].map((entry) =>
-		entry.kind === "append" ? stampAppend(state, entry) : entry,
+		entry.kind === "append" ? prepareAppend(state, entry) : entry,
 	);
 
 	return { kind: "effect", state, effects };
 }
 
-function stampAppend(state: MachineState, append: RecordAppend): DurableRecordsEffect {
-	const records = append.records.map((record) => ({
-		...record,
-		parentId: state.projection.seqId,
-		seqId: ++state.projection.seqId,
-		timestamp: Date.now(),
-	}));
-	for (const record of records) {
+function prepareAppend(state: MachineState, append: RecordAppend): DurableRecordsEffect {
+	for (const record of append.records) {
 		if (record.type !== "actor_message" || record.kind !== "accepted" || record.workerIndex === undefined) continue;
 		const reservations = state.poolAdmissionReservations.get(record.occurrence) ?? [];
 		reservations.push({
@@ -431,7 +419,7 @@ function stampAppend(state: MachineState, append: RecordAppend): DurableRecordsE
 		});
 		state.poolAdmissionReservations.set(record.occurrence, reservations);
 	}
-	return { kind: "durable_records", id: append.id, records };
+	return { kind: "durable_records", id: append.id, records: append.records };
 }
 
 // Every pending action's effect answers the log record that started its phase: invoke → run the
@@ -908,7 +896,7 @@ function dueActorBatchResolutions(state: MachineState): RecordAppend[] {
 	});
 }
 
-function actorCallResolutionAfterReply(state: MachineState, effect: ActorReplyEffect): DraftRecord[] {
+function actorCallResolutionAfterReply(state: MachineState, effect: ActorReplyEffect): DurableRecordDraft[] {
 	if (effect.callId === undefined || effect.callerState === undefined) return [];
 	const pending = state.projection.pendingActorCalls[effect.callId];
 	if (pending?.kind === "batch") {

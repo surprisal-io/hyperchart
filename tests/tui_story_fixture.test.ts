@@ -29,7 +29,7 @@ describe("Storybook production TUI fixture", () => {
 			expect(status).toMatchObject({
 				version: 1,
 				runId: item.runId,
-				runDir: item.runDir,
+				branchId: "main",				runDir: item.runDir,
 				chartId: fixture.ast.id,
 				state: item.state,
 			});

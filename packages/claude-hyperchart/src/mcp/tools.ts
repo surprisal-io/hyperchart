@@ -10,6 +10,9 @@ import {
 	claimTerminalNotificationReceipt,
 	claimUserInteractionReceipt,
 	createRunDir,
+	forkHyperchartRun,
+	initializeRunDir,
+	listHyperchartBranches,
 	listHyperchartFiles,
 	loadHostSettings,
 	loadRunMeta,
@@ -168,6 +171,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			inputSchema: {
 				chartPath: z.string().optional(),
 				runDir: z.string().optional().describe("Existing run id or directory to resume"),
+				branchId: z.string().min(1).describe("Explicit branch handle (use main for a new run)"),
 				args: z.record(z.string(), z.unknown()).optional(),
 				exportName: z.string().optional(),
 				ignoreReplayWarnings: z.boolean().optional(),
@@ -177,6 +181,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
+				const branchId = args.branchId as string;
 				const requestedRunDir = typeof args.runDir === "string" ? resolveRunDirArg(args.runDir, cwd) : undefined;
 				let meta: RunMeta | undefined;
 				let chartPath: string;
@@ -202,6 +207,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 
 				const runDir = requestedRunDir ?? createRunDir(workDir, parsed.ast.id, { rootDir: runsRoot() });
 				if (meta === undefined) {
+					if (requestedRunDir !== undefined) initializeRunDir(runDir);
 					saveRunMeta(runDir, {
 						chartPath,
 						...(exportName === undefined ? {} : { exportName }),
@@ -228,6 +234,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					runId,
 					chartId: parsed.ast.id,
 					state: "starting",
+					branchId,
 					attemptId,
 					heartbeatAt: Date.now(),
 					error: undefined,
@@ -249,6 +256,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					chartPath,
 					chartId: parsed.ast.id,
 					workDir,
+					branchId,
 					attemptId,
 					...(exportName === undefined ? {} : { exportName }),
 					...(isRecord(args.args) ? { args: args.args } : {}),
@@ -258,7 +266,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					...(Object.keys(toolsets).length === 0 ? {} : { toolsets }),
 				};
 				const pid = spawnDetachedRunner(config);
-				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, state: "running", pid, heartbeatAt: Date.now() });
+				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, branchId, state: "running", pid, heartbeatAt: Date.now() });
 				if (args.wait === true) {
 					const boundary = await watchClaudeRunBoundary(runDir, interactionOwner(cwd));
 					if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, runDir, chartId: parsed.ast.id });
@@ -282,6 +290,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				"Commit the real result of native AskUserQuestion to the exact active Hyperchart user gate. Never call this with an inferred or model-authored answer.",
 			inputSchema: {
 				runId: z.string().min(1),
+				branchId: z.string().min(1),
 				seqId: z.number().int().positive(),
 				event: z.string().min(1),
 				output: z.unknown().optional(),
@@ -293,6 +302,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					const owner = interactionOwner(cwd);
 					if (owner === undefined) return fail("CLAUDE_CODE_SESSION_ID is unavailable; user interaction ownership cannot be established");
 					const runId = args.runId as string;
+					const branchId = args.branchId as string;
 					const seqId = args.seqId as number;
 					if (args.event === "FAILED") return fail("FAILED is reserved and cannot be returned by a user");
 					const event = {
@@ -310,10 +320,10 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					// Identical retries are mailbox operations and remain valid even if the chart
 					// source was subsequently moved or made unparsable. The shared helper still
 					// enforces exact owner/cwd before its idempotent return.
-					const hasResolution = readUserInteractionResponse(runDir, seqId) !== undefined ||
-						readUserInteractionClose(runDir, seqId) !== undefined;
+					const hasResolution = readUserInteractionResponse(runDir, branchId, seqId) !== undefined ||
+						readUserInteractionClose(runDir, branchId, seqId) !== undefined;
 					if (hasResolution) {
-						const committed = await validateAndPersistUserInteractionResponse({ runDir, runId, seqId, event, owner });
+						const committed = await validateAndPersistUserInteractionResponse({ runDir, runId, branchId, seqId, event, owner });
 						return ok({ runId, seqId, event: event.type, committed: true, idempotent: committed.idempotent });
 					}
 					const active = acquireActiveUserInteraction(owner);
@@ -329,6 +339,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					const committed = await validateAndPersistUserInteractionResponse({
 						runDir,
 						runId,
+						branchId,
 						seqId,
 						event,
 						schemaRegistry: parsed.schemaRegistry,
@@ -346,6 +357,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				"Inspect one run and return only a bounded status/activity digest. Full runtime state, visits, schemas, and transcripts are available only through hyperchart_view.",
 			inputSchema: {
 				runDir: z.string().describe("Run id or directory"),
+				branchId: z.string().min(1),
 				verbose: z.boolean().optional().describe("Deprecated and rejected; use hyperchart_view for full inspection"),
 				...cwdField,
 			},
@@ -355,6 +367,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const runDir = resolveRunDirArg(args.runDir as string, cwd);
 				const meta = loadRunMeta(runDir);
 				const run = await hyperchartRunFromRunDir(runDir, {
+					branchId: args.branchId as string,
 					includeTranscripts: false,
 					agentDefaults: createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath),
 				});
@@ -398,23 +411,50 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 		},
 		{
+			name: "hyperchart_branches",
+			description: "List durable named branch heads for a run. This read-only operation does not select a branch or write the journal.",
+			inputSchema: { runDir: z.string(), ...cwdField },
+			handler: async (args) => {
+				const cwd = cwdOf(args);
+				const runDir = resolveRunDirArg(args.runDir as string, cwd);
+				return ok({ runDir, branches: await listHyperchartBranches(runDir) });
+			},
+		},
+		{
+			name: "hyperchart_fork",
+			description: "Create a durable named branch at a historical record without selecting or starting it.",
+			inputSchema: {
+				runDir: z.string(),
+				fromSeqId: z.number().int().positive(),
+				branchId: z.string().min(1),
+				sourceBranchId: z.string().min(1).optional(),
+				reason: z.string().optional(),
+				...cwdField,
+			},
+			handler: async (args) => {
+				const cwd = cwdOf(args);
+				const runDir = resolveRunDirArg(args.runDir as string, cwd);
+				return ok(await forkHyperchartRun({
+					runDir,
+					fromSeqId: args.fromSeqId as number,
+					branchId: args.branchId as string,
+					...(typeof args.sourceBranchId === "string" ? { sourceBranchId: args.sourceBranchId } : {}),
+					...(typeof args.reason === "string" ? { reason: args.reason } : {}),
+					cwd,
+				}));
+			},
+		},
+		{
 			name: "hyperchart_rewind",
 			description:
-				"Back up and truncate a stopped run's durable log so replay can continue from a specific state or seqId (recovery after a durably-recorded failure).",
+				"Append-only move of one stopped run branch head. All records, sessions, gates, notifications, and artifacts are preserved.",
 			inputSchema: {
 				runDir: z.string().describe("Existing run directory or run id to rewind"),
+				branchId: z.string().min(1),
 				state: z.string().optional().describe("State path to rewind to, e.g. plan.verify-beats#key.verify"),
 				seqId: z.number().optional().describe("Durable log seqId to rewind to"),
 				to: z.literal("compatible").optional().describe("Cut to the first prefix compatible with the current chart"),
-				mode: z.enum(["before", "after"]).optional().describe("Cut before or after the matching record. Default: before"),
-				cleanupSessions: z
-					.boolean()
-					.optional()
-					.describe("Remove downstream session progress and move downstream session dirs into the backup. Default: true"),
-				cleanupArtifacts: z
-					.boolean()
-					.optional()
-					.describe("Best-effort backup+remove artifact files declared by downstream actions. Default: false"),
+				mode: z.enum(["before", "after"]).optional().describe("Move the head before or after the matching record. Default: before"),
 				...cwdField,
 			},
 			handler: async (args) => {
@@ -422,12 +462,11 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const runDir = resolveRunDirArg(args.runDir as string, cwd);
 				const result = await rewindHyperchartRun({
 					runDir,
+					branchId: args.branchId as string,
 					...(typeof args.state === "string" ? { state: args.state } : {}),
 					...(typeof args.seqId === "number" ? { seqId: args.seqId } : {}),
 					...(args.to === "compatible" ? { to: "compatible" as const } : {}),
 					mode: args.mode === "after" ? "after" : "before",
-					cleanupSessions: args.cleanupSessions !== false,
-					cleanupArtifacts: args.cleanupArtifacts === true,
 					cwd,
 				});
 				return ok(compactRewindResult(result));
@@ -461,6 +500,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				"Open the localhost browser inspector and return its URL. Pass runDir for a live/finished run, or chartPath for a static view of a chart definition (reloads the chart on refresh).",
 			inputSchema: {
 				runDir: z.string().optional(),
+				branchId: z.string().min(1).optional().describe("Required with runDir; non-durable view selection"),
 				chartPath: z.string().optional().describe("Chart name or path to view statically (no run required)"),
 				open: z.boolean().optional().describe("Set false to return the URL without opening a browser"),
 				...cwdField,
@@ -470,6 +510,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				if ((typeof args.runDir === "string") === (typeof args.chartPath === "string")) {
 					return fail("hyperchart_view requires exactly one of runDir or chartPath");
 				}
+				if (typeof args.runDir === "string" && typeof args.branchId !== "string") return fail("hyperchart_view runDir requires branchId");
 				const openBrowser =
 					args.open === false
 						? { openBrowser: () => undefined }
@@ -499,7 +540,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const agentDefaults = createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath);
 				const { url } = await openRunInspector({
 					runId: basename(runDir),
-					loadRun: () => hyperchartRunFromRunDir(runDir, { agentDefaults, includeTranscripts: true }),
+					loadRun: () => hyperchartRunFromRunDir(runDir, { branchId: args.branchId as string, agentDefaults, includeTranscripts: true }),
 					steerSession: (actionKey, message) => {
 						queueSessionSteering(sessionsDir, actionKey, message);
 					},
@@ -542,7 +583,7 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 				if (active.presentation === "pending") {
 					// Pin only. The MCP tool result has not yet been delivered, so confirmation
 					// here would make a crash in the return window suppress recovery.
-					claimUserInteractionReceipt(active.runDir, active.request.seqId, "claude", owner.sessionId, {
+					claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", owner.sessionId, {
 						source: "wait",
 						leaseMs: USER_INTERACTION_WAIT_LEASE_MS,
 					});
@@ -570,7 +611,7 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 }
 
 function interactionCoordinateKey(interaction: OwnedUserInteraction): string {
-	return `${interaction.request.runId}\0${interaction.request.seqId}`;
+	return `${interaction.request.runId}\0${interaction.request.branchId}\0${interaction.request.seqId}`;
 }
 
 function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRun: { runId: string; runDir: string; chartId: string }): ToolResult {
@@ -584,10 +625,11 @@ function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRu
 		boundary: "user",
 		final: false,
 		runId: interaction.request.runId,
+		branchId: interaction.request.branchId,
 		runDir: interaction.runDir,
 		chartId: interaction.request.actionUid.chart,
 		interaction: summary,
-		instruction: "Call AskUserQuestion once for this delivery attempt using the bounded preview and output hint, then call hyperchart_respond with this runId/seqId and an allowed event.",
+		instruction: "Call AskUserQuestion once for this delivery attempt using the bounded preview and output hint, then call hyperchart_respond with this exact runId/branchId/seqId and an allowed event.",
 		waitedRun,
 		presentation: interaction.presentation === "confirmed" ? "confirmed-recovery" : "claimed-not-confirmed",
 	});
@@ -649,20 +691,11 @@ function compactRewindResult(result: Awaited<ReturnType<typeof rewindHyperchartR
 		runId: result.runId,
 		runDir: result.runDir,
 		chartId: result.chartId,
+		branchId: result.branchId,
 		targetLabel: truncateToolText(result.targetLabel, 400),
-		backupDir: result.backupDir,
-		keptRecords: result.keptRecords,
-		removedRecords: result.removedRecords,
-		...(result.cutSeqId === undefined ? {} : { cutSeqId: result.cutSeqId }),
-		removedByState: result.removedByState.slice(0, 40).map((entry) => ({ state: truncateToolText(entry.state), records: entry.records })),
-		...(result.removedByState.length <= 40 ? {} : { omittedRemovedByStateCount: result.removedByState.length - 40 }),
-		cleanup: {
-			sessionsRemoved: result.cleanup.sessionsRemoved,
-			artifactFilesRemoved: result.cleanup.artifactFilesRemoved,
-			artifactWarningCount: result.cleanup.artifactWarnings.length,
-			artifactWarnings: result.cleanup.artifactWarnings.slice(0, 20).map((warning) => truncateToolText(warning, 400)),
-			...(result.cleanup.artifactWarnings.length <= 20 ? {} : { omittedArtifactWarningCount: result.cleanup.artifactWarnings.length - 20 }),
-		},
+		previousHeadSeqId: result.previousHeadSeqId,
+		headSeqId: result.headSeqId,
+		preservedRecords: result.preservedRecords,
 	};
 }
 

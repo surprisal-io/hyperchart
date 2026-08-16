@@ -4,6 +4,11 @@ export interface HyperchartInspectorDialogProps {
 	runs: HyperchartRunInfo[];
 	selectedRunId?: string | null;
 	onSelectRun?: (runId: string | null) => void;
+	/** Non-durable checkout; hosts reload the selected branch snapshot without writing log.jsonl. */
+	onSelectBranch?: (runId: string, branchId: string) => void;
+	/** Durable actions are separate and must be explicitly confirmed by the UI. */
+	onForkBranch?: (runId: string, fromSeqId: number, branchId: string) => void | Promise<void>;
+	onRewindBranch?: (runId: string, branchId: string, seqId: number) => void | Promise<void>;
 	onClose: () => void;
 	onResume?: (runId: string) => void;
 	onAbort?: () => void;

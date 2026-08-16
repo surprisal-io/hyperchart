@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { actionUidKey } from "../../core/action_uid.js";
 import type { ActionUID } from "../../core/types.js";
+import type { BranchId } from "../../core/durable_events.js";
 
 export { actionUidKey };
 
@@ -10,6 +11,9 @@ export type HyperchartSessionStatus = "starting" | "running" | "completed" | "fa
 export type HyperchartSessionProgress = {
 	actionKey: string;
 	actionUid: ActionUID;
+	/** Durable producer coordinate; sibling visits never share this identity. */
+	branchId: BranchId;
+	invokeSeqId: number;
 	/** Durable state visit this session belongs to. Absent in legacy progress files. */
 	visit?: number;
 	actionName: string;
@@ -66,10 +70,10 @@ type SessionProgressPatch = {
 		| undefined;
 };
 
-export function sessionProgressKey(actionUid: ActionUID, effectId?: string): string {
+export function sessionProgressKey(actionUid: ActionUID, effectId?: string, branchId: BranchId = "main"): string {
 	const actionKey = actionUidKey(actionUid);
-	const visit = visitFromEffectId(actionKey, effectId);
-	return visit === undefined ? actionKey : `${actionKey}:visit:${visit}`;
+	const invokeSeqId = seqIdFromEffectId(actionKey, effectId);
+	return `${branchId}:${actionKey}:invoke:${invokeSeqId ?? "unknown"}`;
 }
 
 export function updateSessionProgress(
@@ -77,10 +81,12 @@ export function updateSessionProgress(
 	actionUid: ActionUID,
 	patch: SessionProgressPatch,
 	effectId?: string,
+	branchId: BranchId = "main",
 ): void {
 	const actionKey = actionUidKey(actionUid);
 	const visit = visitFromEffectId(actionKey, effectId);
-	const progressKey = sessionProgressKey(actionUid, effectId);
+	const invokeSeqId = seqIdFromEffectId(actionKey, effectId) ?? 0;
+	const progressKey = sessionProgressKey(actionUid, effectId, branchId);
 	const file = readSessionProgress(sessionsDir);
 	const now = Date.now();
 	const previous = file.sessions[progressKey];
@@ -102,6 +108,8 @@ export function updateSessionProgress(
 	const next: HyperchartSessionProgress = {
 		actionKey,
 		actionUid,
+		branchId,
+		invokeSeqId,
 		...(visit === undefined ? {} : { visit }),
 		actionName: valueFor("actionName", patch, previous) ?? actionUid.action,
 		status: valueFor("status", patch, previous) ?? "starting",
@@ -144,6 +152,8 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 		out[key] = {
 			actionKey: typeof entry.actionKey === "string" ? entry.actionKey : actionUidKey(entry.actionUid),
 			actionUid: entry.actionUid,
+			branchId: typeof entry.branchId === "string" ? entry.branchId : "main",
+			invokeSeqId: typeof entry.invokeSeqId === "number" ? entry.invokeSeqId : 0,
 			...(typeof entry.visit === "number" && Number.isInteger(entry.visit) && entry.visit > 0
 				? { visit: entry.visit }
 				: {}),
@@ -177,6 +187,12 @@ function visitFromEffectId(actionKey: string, effectId: string | undefined): num
 	if (effectId === undefined || !effectId.startsWith(`${actionKey}:`)) return undefined;
 	const visit = Number(effectId.slice(actionKey.length + 1).split(":", 1)[0]);
 	return Number.isInteger(visit) && visit > 0 ? visit : undefined;
+}
+
+function seqIdFromEffectId(actionKey: string, effectId: string | undefined): number | undefined {
+	if (effectId === undefined || !effectId.startsWith(`${actionKey}:`)) return undefined;
+	const seqId = Number(effectId.split(":").at(-1));
+	return Number.isSafeInteger(seqId) && seqId > 0 ? seqId : undefined;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -231,6 +247,7 @@ export function createThrottledProgressWriter(
 	actionUid: ActionUID,
 	actionName: string,
 	effectId?: string,
+	branchId: BranchId = "main",
 ): StreamingProgressWriter {
 	let currentText = "";
 	let currentReasoning = "";
@@ -253,6 +270,7 @@ export function createThrottledProgressWriter(
 				currentReasoning: currentReasoning.length === 0 ? undefined : currentReasoning.slice(-32_000),
 			},
 			effectId,
+			branchId,
 		);
 	};
 	const schedule = () => {

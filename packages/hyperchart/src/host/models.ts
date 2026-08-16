@@ -493,6 +493,13 @@ export interface HyperchartStateInfo {
 export interface HyperchartRunInfo {
 	runId: string;
 	chartName: string;
+	/** Non-durable branch selected for this snapshot. */
+	branchId?: string;
+	/** Durable named heads and full immutable tree metadata for branch navigation. */
+	branches?: Array<{ branchId: string; headSeqId: number | null; name?: string; reason?: string }>;
+	recordTree?: Array<{ seqId: number; parentId: number | null; branchId: string; type: string; timestamp: number }>;
+	/** Operational branch of the live runner, which may differ from the selected view. */
+	runnerBranchId?: string;
 	originSessionId?: string;
 	mode?: HyperchartInspectMode;
 	definitionSource?: string;

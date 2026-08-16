@@ -729,3 +729,7 @@ RunInspectSummary
 `HyperchartActorDeclarationInfo.kind` is `"actor" | "actorPool"` and pool declarations include `concurrency`. `HyperchartActorOccurrenceInfo` has the same discriminator plus optional `concurrency`, `activeCount`, `idleCount`, `workers`, and `batchCalls`. A `HyperchartActorPoolWorkerInfo` carries concrete `occurrencePath`, canonical navigable `currentStateId`, current/next message, worker-local messages, visits/session, and projected results. A `HyperchartActorBatchCallInfo` carries caller state, ordered ids/items, item `batchIndex`/status/worker, and settled/total progress.
 
 `HyperchartActorMessageInfo` preserves optional `batchIndex`, `workerIndex`, and `workerOccurrencePath`. `HyperchartStateType` and `actorMessageLink.kind` preserve `sendBatch` and `callBatch`; adapters do not collapse them into singleton operations. A self-send keeps `actorMessageLink.self: true` while `to` remains the navigable logical endpoint. Its message definition exposes `targetKind: "self"`, author-facing `to: "self()"`, and `resolvedTo` for the concrete static placement, allowing details and graph views to distinguish self-addressing without losing navigation.
+
+## Branch navigation metadata
+
+Runtime snapshots may expose `branchId` (non-durable selected view), `runnerBranchId` (operational live runner), durable `branches[]` heads, and full `recordTree[]` coordinates. Hosts must keep checkout separate from confirmed fork/rewind actions. Gate summaries preserve exact `(runId, branchId, seqId)` coordinates.

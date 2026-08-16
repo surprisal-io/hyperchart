@@ -7,7 +7,7 @@ import {
 	type HyperchartInspectAgentDefaults,
 } from "../core/inspect.js";
 import type { ActionUID, ChartAst } from "../core/types.js";
-import type { DurableLogRecord } from "../core/durable_events.js";
+import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
 import { hyperchartRunFromRuntime } from "../host/index.js";
 import type { HyperchartRunInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
@@ -19,6 +19,8 @@ import { readSessionProgress, sessionProgressKey } from "../runtime/generic/sess
 import { readNeutralSessionTranscript, type SessionTranscriptReader } from "./session_transcript.js";
 
 export type HyperchartRunFromRunDirOptions = {
+	/** Explicit non-durable branch selection; defaults only for internal/static callers. */
+	branchId?: BranchId;
 	meta?: RunMeta;
 	ast?: ChartAst;
 	records?: readonly DurableLogRecord[];
@@ -43,8 +45,11 @@ export async function hyperchartRunFromRunDir(
 		...(meta.exportName === undefined ? {} : { exportName: meta.exportName }),
 		...(agentDefaults === undefined ? {} : { agentDefaults }),
 	});
-	const records = options.records ?? await new JsonlLogStore(resolve(absoluteRunDir, "log.jsonl")).readAll();
 	const status = readRunStatus(absoluteRunDir);
+	const branchId = options.branchId ?? status?.branchId ?? "main";
+	const store = new JsonlLogStore(resolve(absoluteRunDir, "log.jsonl"), () => {}, branchId);
+	const normalized = options.records === undefined ? await store.read() : undefined;
+	const records = options.records ?? (normalized === undefined || normalized.mutations.length === 0 ? [] : normalized.ancestry(branchId));
 	const sessionsDir = resolve(absoluteRunDir, "sessions");
 	const readTranscript = options.readTranscript ?? readNeutralSessionTranscript;
 	const transcriptCache = new Map<string, ReturnType<SessionTranscriptReader>>();
@@ -60,7 +65,7 @@ export async function hyperchartRunFromRunDir(
 		? sessionProgressWithVisitTranscripts(sessionsDir, records, rawSessionProgress, readFullTranscript)
 		: rawSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
-	return hyperchartRunFromRuntime(inspect, ast, records, {
+	const run = hyperchartRunFromRuntime(inspect, ast, records, {
 		runId: status?.runId ?? basename(absoluteRunDir),
 		...(status === undefined ? {} : { status }),
 		sessionProgress,
@@ -68,6 +73,20 @@ export async function hyperchartRunFromRunDir(
 		...(Number.isNaN(createdAt) ? {} : { createdAt }),
 		...(options.now === undefined ? {} : { now: options.now }),
 	});
+	return {
+		...run,
+		branchId,
+		...(status?.branchId === undefined ? {} : { runnerBranchId: status.branchId }),
+		...(normalized === undefined ? {} : {
+			branches: [...normalized.branches.values()].map((branch) => ({
+				branchId: branch.branchId,
+				headSeqId: branch.headSeqId,
+				...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }),
+				...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }),
+			})),
+			recordTree: normalized.records.map((record) => ({ seqId: record.seqId, parentId: record.parentId, branchId: record.branchId, type: record.type, timestamp: record.timestamp })),
+		}),
+	};
 }
 
 function sessionProgressWithVisitTranscripts(
@@ -106,10 +125,13 @@ function sessionProgressWithVisitTranscripts(
 			const progressKey = sessionProgressKey(
 				invocation.actionUid,
 				`${invocation.actionKey}:${invocation.visit}:${invocation.invokeSeqId}`,
+				invocation.branchId,
 			);
 			sessions[progressKey] = {
 				...sessions[progressKey],
 				actionKey: invocation.actionKey,
+				branchId: invocation.branchId,
+				invokeSeqId: invocation.invokeSeqId,
 				actionUid: invocation.actionUid,
 				visit: invocation.visit,
 				actionName: invocation.actionName,
@@ -138,6 +160,7 @@ function sessionProgressWithVisitTranscripts(
 }
 
 type AgentInvocationVisit = {
+	branchId: string;
 	actionUid: ActionUID;
 	actionKey: string;
 	actionName: string;
@@ -153,6 +176,7 @@ function agentInvocationsByAction(records: readonly DurableLogRecord[]): Map<str
 		const actionKey = actionUidKey(record.actionUid);
 		const visits = byAction.get(actionKey) ?? [];
 		visits.push({
+			branchId: record.branchId,
 			actionUid: record.actionUid,
 			actionKey,
 			actionName: record.definition.name,

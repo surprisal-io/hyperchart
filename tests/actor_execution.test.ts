@@ -89,6 +89,7 @@ function actorChart() {
 }
 
 class ActorRuntime implements Runtime {
+	readonly branchId = "main";
 	readonly records: DurableLogRecord[] = [];
 	readonly queue = createAsyncQueue<MachineEvent>();
 	readonly effectsSeen: Effect[] = [];
@@ -101,8 +102,15 @@ class ActorRuntime implements Runtime {
 		this.effectsSeen.push(...effects);
 		for (const effect of effects) {
 			if (effect.kind === "durable_records") {
-				this.records.push(...effect.records);
-				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+				let seqId = this.records.at(-1)?.seqId ?? 0;
+				let parentId = seqId === 0 ? null : seqId;
+				const records = effect.records.map((draft) => {
+					const record = { ...draft, seqId: ++seqId, parentId, branchId: this.branchId, timestamp: Date.now() } as DurableLogRecord;
+					parentId = record.seqId;
+					return record;
+				});
+				this.records.push(...records);
+				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
 				const reply = this.agentReplies[effect.actionUid.state]?.shift();
 				if (reply !== undefined) this.queue.send({ kind: "agent", effectId: effect.id, event: typeof reply === "string" ? { type: reply } : reply });

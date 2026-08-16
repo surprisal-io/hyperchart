@@ -74,3 +74,7 @@ The published package includes `docs/`, runnable `examples/`, and the architectu
 - [React and host integration](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md)
 
 MIT · experimental `0.4.1`
+
+## Named branches
+
+The consolidated `hyperchart` tool accepts explicit `branchId` for run, run inspection, view, response, and rewind; `action: "branches"` lists heads and `action: "fork"` creates a head without selecting or starting it. Rewind preserves all history and downstream files.

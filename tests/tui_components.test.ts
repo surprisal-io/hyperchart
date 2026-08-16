@@ -13,7 +13,7 @@ beforeAll(() => initTheme("dark", false));
 const items: RunHistoryItem[] = [
 	{
 		runId: "first-run",
-		runDir: "/tmp/first-run",
+		branchId: "main",		runDir: "/tmp/first-run",
 		chartId: "demo",
 		state: "running",
 		live: true,
@@ -24,7 +24,7 @@ const items: RunHistoryItem[] = [
 	},
 	{
 		runId: "second-run",
-		runDir: "/tmp/second-run",
+		branchId: "main",		runDir: "/tmp/second-run",
 		chartId: "demo",
 		state: "complete",
 		live: false,
@@ -67,7 +67,7 @@ describe("minimal Hyperchart TUI", () => {
 	it("renders refresh failures instead of leaking an unhandled rejection", async () => {
 		const widget = new RunWidget(fakeTui(), testTheme, {
 			runId: "broken-run",
-			runDir: "/definitely-missing-hyperchart-run",
+			branchId: "main",			runDir: "/definitely-missing-hyperchart-run",
 			logPath: "/definitely-missing-hyperchart-run/log.jsonl",
 			ast: {} as never,
 		});

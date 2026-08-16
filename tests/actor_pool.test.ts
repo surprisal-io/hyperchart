@@ -55,6 +55,7 @@ function parsed(input: unknown) {
 }
 
 class PoolRuntime implements Runtime {
+	readonly branchId = "main";
 	readonly records: DurableLogRecord[] = [];
 	readonly effects: Effect[] = [];
 	readonly queue = createAsyncQueue<MachineEvent>();
@@ -63,8 +64,15 @@ class PoolRuntime implements Runtime {
 		this.effects.push(...effects);
 		for (const effect of effects) {
 			if (effect.kind === "durable_records") {
-				this.records.push(...effect.records);
-				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+				let seqId = this.records.at(-1)?.seqId ?? 0;
+				let parentId = seqId === 0 ? null : seqId;
+				const records = effect.records.map((draft) => {
+					const record = { ...draft, seqId: ++seqId, parentId, branchId: this.branchId, timestamp: Date.now() } as DurableLogRecord;
+					parentId = record.seqId;
+					return record;
+				});
+				this.records.push(...records);
+				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "actor_create") {
 				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "create", ok: true });
 			} else if (effect.kind === "actor_enqueue") {
@@ -162,7 +170,7 @@ describe("static actor pools", () => {
 		const firstAccepted = runtime.records.find((record) => record.type === "actor_message" && record.kind === "accepted" && record.occurrence === "@workers");
 		assert(firstAccepted?.type === "actor_message" && firstAccepted.kind === "accepted");
 		legalNonLowest.push({ ...structuredClone(firstAccepted), workerIndex: 1, receiveState: "@workers.$worker-1.idle" });
-		const restamp = (records: DurableLogRecord[]) => records.map((record, index) => ({ ...record, seqId: index + 1, parentId: index === 0 ? null : index, timestamp: index + 1 }));
+		const restamp = (records: DurableLogRecord[]) => records.map((record, index) => ({ ...record, seqId: index + 1, parentId: index === 0 ? null : index, branchId: "main", timestamp: index + 1 }));
 		expect(explainReplay(ast, restamp(legalNonLowest))).toMatchObject({ prefixEnd: legalNonLowest.length, stale: [], skipped: [] });
 
 		const duplicateWorker = structuredClone(runtime.records);

@@ -218,9 +218,19 @@ export type {
 export type {
 	ActorLogRecord,
 	ActorMessageEnvelope,
+	BranchCreateMutation,
+	BranchHead,
+	BranchId,
+	BranchMetadata,
+	BranchMoveMutation,
 	DurableLogRecord,
+	DurableRecordCoordinates,
+	DurableRecordDraft,
+	RecordBatchMutation,
+	SelectedBranchHandle,
 	StateActionInvokeLog,
 	FailureIntentLog,
+	StorageMutation,
 } from "./core/durable_events.js";
 export { explainReplay } from "./core/replay_check.js";
 export type { ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord, ReplayStaleRecord } from "./core/replay_check.js";

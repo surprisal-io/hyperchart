@@ -281,7 +281,7 @@ describe("React actor inspector structure", () => {
 		if (sendA.kind !== "send" || sendB.kind !== "send" || replyAContract.kind !== "named" || replyBContract.kind !== "named") throw new Error("expected send states and named replies");
 		const source = (definition: typeof sendA, event: "A" | "B") => ({ producerState: definition.id, kind: "send" as const, definition, targetDeclaration: "@worker", event, inputSchema: declaration.protocol[event]!.input });
 		const envelope = (producerState: string, event: "A" | "B", value: string) => ({ messageId: `${event}:1:0`, event, input: { value }, producerState, producerVisit: 1, batchIndex: 0 });
-		const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, timestamp: 1_700_100_000_000 + seqId });
+		const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: 1_700_100_000_000 + seqId });
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...stamp(1) },
 			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: { name: "worker" }, definition: declaration, ...stamp(2) },

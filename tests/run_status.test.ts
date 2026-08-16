@@ -21,7 +21,7 @@ describe("run status", () => {
 		const dir = await makeTempDir();
 		patchRunStatus(dir, {
 			runId: "run",
-			chartId: "chart",
+		branchId: "main",			chartId: "chart",
 			state: "failed",
 			attemptId: "attempt-a",
 			error: "boom",

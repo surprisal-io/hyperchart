@@ -100,93 +100,16 @@ Stopping does not guarantee that every child process, remote request, or agent-s
 
 ## Rewind a run
 
-Rewind truncates semantic history. It is a recovery operation, not ordinary navigation.
+Rewind is an append-only move of one durable named branch head. It is stopped-only and requires an explicit `branchId`. It never deletes, truncates, moves, backs up, or rewrites machine records, sessions, user-interaction mailboxes, terminal notifications, or artifacts.
 
-### 1. Stop and inspect
+1. Stop the runner and inspect the selected branch ancestry and full record tree.
+2. Choose exactly one selector: `state`, `seqId`, or `to: "compatible"`, plus `mode: "before" | "after"`.
+3. Confirm the branch name and target. An explicit `seqId` may point to a preserved sibling tip; state and compatibility selectors resolve within the selected branch ancestry.
+4. Move the head. The run remains stopped. To continue, start exactly the same `branchId` explicitly.
 
-```text
-/hyperchart stop <run-id>
-```
+The next append takes its parent from that durable head, receives a globally new `seqId` from the full journal, and advances only that branch. External side effects and artifact files are not rolled back. Artifact paths retain their authored mutable-file semantics, so sibling executions can overwrite the same path; preserving historical artifact values requires a separate artifact-versioning design.
 
-Then call:
-
-```json
-{ "runDir": "<run-id>" }
-```
-
-with `hyperchart` with `action: "run_inspect"`. Identify the target state or `seqId`, affected visits, downstream sessions, and artifacts.
-
-### 2. Make an independent backup
-
-The rewind tool writes a timestamped backup under the run's `rewind-backups/` directory. That protects against an interrupted edit, but the backup is still deleted if the whole run directory is deleted.
-
-For important runs, copy the complete run directory elsewhere first:
-
-```sh
-cp -R .pi/hypercharts/runs/<run-id> ../hyperchart-run-backups/<run-id>
-```
-
-### 3. Choose one target
-
-By state:
-
-```json
-{
-  "runDir": "<run-id>",
-  "state": "chapter-production#intro.write",
-  "mode": "before"
-}
-```
-
-By sequence id:
-
-```json
-{
-  "runDir": "<run-id>",
-  "seqId": 84,
-  "mode": "after"
-}
-```
-
-To remove the first incompatible suffix:
-
-```json
-{
-  "runDir": "<run-id>",
-  "to": "compatible"
-}
-```
-
-Exactly one of `state`, `seqId`, or `to` is required.
-
-### 4. Understand cleanup
-
-Defaults:
-
-- `cleanupSessions: true` moves only sessions belonging to removed durable visits into the rewind backup; earlier retained visits of the same action keep their progress and transcript directories, while legacy transcripts shared across a retained/resumed boundary are backed up and truncated at the first removed invocation;
-- `cleanupArtifacts: false` leaves artifact files in place.
-
-Artifact cleanup is best effort because paths may be dynamic or shared. Even when enabled, it cannot reverse external services or untracked files.
-
-### 5. Reinspect before starting
-
-Run `hyperchart` with `action: "run_inspect"` again. Verify:
-
-- the retained log ends where expected;
-- status is `stopped`;
-- removed visits and results are absent;
-- remaining replay issues are understood;
-- external outputs are in the state expected by the next action.
-
-Start separately unless you have a reason to combine rewind and start:
-
-```json
-{
-  "runDir": "<run-id>"
-}
-```
-
-Omit `chartPath`; the existing run metadata supplies the chart.
+Fork is different: it creates another named pointer at a historical record, but never changes selection and never starts a runner. Checkout/view is non-durable and writes nothing.
 
 ## Delete a run
 
@@ -200,7 +123,7 @@ Deletion recursively removes the run directory. That includes:
 - `log.jsonl`;
 - `status.json`;
 - agent sessions and progress;
-- rewind backups stored inside the run;
+- branch heads and preserved sibling histories in the append-only log;
 - any artifacts stored inside the run directory.
 
 Artifacts outside the run directory and remote effects are not deleted automatically.
@@ -217,7 +140,7 @@ Recommended release practice:
 - keep chart changes in version control;
 - record the source revision in surrounding project metadata;
 - do not edit `log.jsonl` manually;
-- use rewind so truncation is backed up and status is repaired consistently.
+- use rewind to move a stopped branch head while preserving every historical record.
 
 ## Related pages
 

@@ -6,7 +6,7 @@ import { agent, artifact, chart, contract, event, final, failed, hyperchartSourc
 import { arg, input, joinArtifactOf, json, key, item, result, t, visit } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, Templatable, ArtifactOfCst, JoinArtifactOfCst, SchemaRegistryLike, JsonSchema, SchemaAst } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
-import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 import { checkArtifactFile, resolveArtifactValue } from "../packages/hyperchart/src/runtime/generic/artifacts.js";
 
@@ -34,7 +34,7 @@ function parsed(config: ChartCst) {
 }
 
 async function run(ast: ChartAst, workDir: string, args?: Record<string, unknown>, executor = new FakeAgentExecutor(), schemaRegistry?: SchemaRegistryLike) {
-	const runtime = new ChartRuntime({ ast, logStore: new MemoryLogStore(), agentExecutor: executor, workDir, chartDir: workDir, ...(schemaRegistry === undefined ? {} : { schemaRegistry }) });
+	const runtime = new ChartRuntime({ ast, branchId: "main", logStore: new MemoryLogStore(), agentExecutor: executor, workDir, chartDir: workDir, ...(schemaRegistry === undefined ? {} : { schemaRegistry }) });
 	try {
 		return await start(runtime, args);
 	} finally {

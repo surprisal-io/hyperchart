@@ -70,10 +70,8 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 		"utf8",
 	);
 	const uid = { chart: "demo", state: "work", action: "agent" };
-	writeFileSync(
-		join(runDir, "log.jsonl"),
-		[
-			{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 },
+	const records = [
+			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
 			{
 				type: "state_action",
 				kind: "invoke",
@@ -81,7 +79,7 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 				definition: { kind: "agent", uid, name: "old-worker" },
 				parentId: 1,
 				seqId: 2,
-				timestamp: 2,
+				branchId: "main", timestamp: 2,
 			},
 			{
 				type: "state_action",
@@ -90,15 +88,16 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 				event: { type: "DONE" },
 				parentId: 2,
 				seqId: 3,
-				timestamp: 3,
+				branchId: "main", timestamp: 3,
 			},
-		]
-			.map((record) => JSON.stringify(record))
-			.join("\n") + "\n",
-		"utf8",
-	);
+		];
+	writeFileSync(join(runDir, "log.jsonl"), [
+		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
+		{ kind: "record_batch", branchId: "main", records, headSeqId: 3, committedAt: 3 },
+	].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n", "utf8");
 	const config: HyperchartRunnerConfig = {
 		runId: "run",
+		branchId: "main",
 		runDir,
 		chartPath,
 		chartId: "demo",

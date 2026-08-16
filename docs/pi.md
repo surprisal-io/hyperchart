@@ -158,7 +158,7 @@ Stopping requests process termination and changes operational status. It does no
 /hyperchart rm <run-id>
 ```
 
-Delete recursively removes the run directory, including its durable log, status, session data, and rewind backups stored inside that directory. Copy important runs outside the run directory before deletion. Deletion is not a rewind and has no built-in restore command.
+Delete recursively removes the run directory, including its durable log with every branch and preserved sibling history, status, session data, and run-local artifacts. Copy important runs outside the run directory before deletion. Deletion is not a rewind and has no built-in restore command.
 
 ## Agent tool
 
@@ -284,36 +284,15 @@ Stop every active run owned by current working directory:
 
 Exactly one of `runDir` or `all: true` required.
 
-### `hyperchart` with `action: "rewind"`
+### Branch actions and non-destructive rewind
 
-Back up and truncate a stopped run log.
+All run, run inspection, view, response, and rewind calls carry explicit `branchId`. Use `action: "branches"` to list durable named heads. `action: "fork"` requires `runDir`, a new `branchId`, and `fromSeqId`; it creates the pointer without selecting or starting it.
 
 ```json
-{
-  "action": "rewind",
-  "runDir": "review-20260711-142500",
-  "state": "review",
-  "mode": "before"
-}
+{ "action": "rewind", "runDir": "review-20260711-142500", "branchId": "main", "seqId": 42, "mode": "after" }
 ```
 
-Exactly one target is required:
-
-- `state` — state or runtime instance path;
-- `seqId` — durable record sequence id;
-- `to: "compatible"` — first prefix compatible with the current chart.
-
-Other parameters:
-
-| Parameter | Default | Meaning |
-|---|---|---|
-| `mode` | `before` | cut before or after the matching record |
-| `cleanupSessions` | `true` | move only removed visits' session directories/progress into the backup; retain earlier visits of the same action and truncate backed-up legacy transcripts shared across the cut |
-| `cleanupArtifacts` | `false` | best-effort backup and removal of downstream declared artifact files |
-| `start` | `false` | start the rewound run immediately |
-| `ignoreReplayWarnings` | `false` | when starting, allow stale/skipped records explicitly |
-
-A live run cannot be rewound. The operation moves the complete `user-interactions/` mailbox into its timestamped backup, so replay cannot consume an answer or receipt from before the cut. Read [Recovery and safety](safety.md#rewind-a-run) before using this tool.
+Rewind is stopped-only and appends a move of only that branch head. Select exactly one of `state`, `seqId`, or `to: "compatible"`. It preserves every record, session, gate, notification, and artifact. `start: true` starts exactly the named branch. Checkout/view is non-durable and never writes `log.jsonl`.
 
 ## Run files
 
@@ -326,13 +305,12 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 | Path | Owner | Meaning |
 |---|---|---|
 | `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
-| `log.jsonl` | core runtime | ordered semantic facts |
-| `status.json` | Pi runner | process state, pid, heartbeat, exit, error |
-| `user-interactions/<seqId>/` | runner + host | durable request, immutable response-or-close resolution, and presentation receipts |
-| `sessions/` | Pi executor | agent sessions and progress |
-| `rewind-backups/` | rewind tool | timestamped copies of truncated state |
+| `log.jsonl` | core runtime | append-only v2 record-batch and named-branch mutations |
+| `status.json` | Pi runner | process state, explicit runner branch, pid, heartbeat, exit, error |
+| `user-interactions/<branchId>/<seqId>/` | runner + host | exact branch-scoped request, immutable resolution, and receipts |
+| `sessions/` | Pi executor | branch/invocation-scoped agent sessions and progress |
 
-Only `log.jsonl` defines semantic history. The other files describe how the current process and host are doing.
+Only `log.jsonl` defines durable record history and named heads. Selected UI/view branch remains non-durable.
 
 ## Agent definitions
 

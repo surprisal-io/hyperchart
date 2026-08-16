@@ -65,11 +65,19 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 							events.push({ kind: "timer", effectId: effect.id });
 						}
 						break;
-					case "durable_records":
-						appended.push(...effect.records);
+					case "durable_records": {
+						let seqId = (options.logs?.at(-1)?.seqId ?? 0) + appended.length;
+						let parentId = seqId === 0 ? null : seqId;
+						const records = effect.records.map((draft) => {
+							const record = { ...draft, seqId: ++seqId, parentId, branchId: "main", timestamp: Date.now() } as DurableLogRecord;
+							parentId = record.seqId;
+							return record;
+						});
+						appended.push(...records);
 						appendBoundaries.push((options.logs?.length ?? 0) + appended.length);
-						events.push({ kind: "durable_records_added", effectId: effect.id, records: effect.records });
+						events.push({ kind: "durable_records_added", effectId: effect.id, records });
 						break;
+					}
 					case "actor_create":
 					case "actor_enqueue":
 					case "actor_reply":

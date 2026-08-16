@@ -173,7 +173,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 		throw new Error("actor inspector fixture did not normalize to the expected actor graph");
 	}
 	return [
-		{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: actorStoryTimestamp + 1 },
+		{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: actorStoryTimestamp + 1 },
 		{
 			type: "actor_created",
 			declaration: "@editor",
@@ -183,7 +183,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			definition: declaration,
 			parentId: 1,
 			seqId: 2,
-			timestamp: actorStoryTimestamp + 2,
+			branchId: "main", timestamp: actorStoryTimestamp + 2,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -207,7 +207,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			})),
 			parentId: 2,
 			seqId: 3,
-			timestamp: actorStoryTimestamp + 3,
+			branchId: "main", timestamp: actorStoryTimestamp + 3,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -224,7 +224,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			messages: [{ messageId: "queue-review:1:0", event: queueReview.event, input: queueReview.input, producerState: "queue-review", producerVisit: 1, batchIndex: 0 }],
 			parentId: 3,
 			seqId: 4,
-			timestamp: actorStoryTimestamp + 4,
+			branchId: "main", timestamp: actorStoryTimestamp + 4,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -241,7 +241,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			messages: [{ messageId: "queue-archive:1:0", event: queueArchive.event, input: queueArchive.input, producerState: "queue-archive", producerVisit: 1, batchIndex: 0 }],
 			parentId: 4,
 			seqId: 5,
-			timestamp: actorStoryTimestamp + 5,
+			branchId: "main", timestamp: actorStoryTimestamp + 5,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -266,7 +266,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			}],
 			parentId: 5,
 			seqId: 6,
-			timestamp: actorStoryTimestamp + 6,
+			branchId: "main", timestamp: actorStoryTimestamp + 6,
 		},
 		{
 			type: "actor_message",
@@ -276,7 +276,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			receiveState: "@editor.idle",
 			parentId: 6,
 			seqId: 7,
-			timestamp: actorStoryTimestamp + 7,
+			branchId: "main", timestamp: actorStoryTimestamp + 7,
 		},
 		{
 			type: "state_action",
@@ -285,7 +285,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 			definition: action.action,
 			parentId: 7,
 			seqId: 8,
-			timestamp: actorStoryTimestamp + 8,
+			branchId: "main", timestamp: actorStoryTimestamp + 8,
 		},
 	];
 }
@@ -366,7 +366,7 @@ export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
 		throw new Error("mailbox reentry fixture did not normalize to the expected graph");
 	}
 	const dispatchInputs = dispatch.inputs;
-	const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, timestamp: actorStoryTimestamp + 100 + seqId });
+	const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: actorStoryTimestamp + 100 + seqId });
 	const messages = (visit: number) => dispatchInputs.map((input, batchIndex) => ({
 		messageId: `phase.dispatch:message:${visit}:${batchIndex}`,
 		event: dispatch.event,

@@ -141,7 +141,7 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			definitionDirs: [agentsDir],
+			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -183,7 +183,7 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			definitionDirs: [agentsDir],
+			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -212,7 +212,7 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			definitionDirs: [agentsDir],
+			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -241,7 +241,7 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			definitionDirs: [agentsDir],
+			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 			maxFinishRetries: 5,
 		});
@@ -287,7 +287,7 @@ describe("ClaudeAgentExecutor", () => {
 		const first = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			definitionDirs: [agentsDir],
+			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fakeFirst.queryFn,
 			...resolution,
 		});
@@ -307,7 +307,7 @@ describe("ClaudeAgentExecutor", () => {
 		const second = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			definitionDirs: [agentsDir],
+			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fakeSecond.queryFn,
 			...resolution,
 		});
@@ -344,7 +344,7 @@ export default chart({ kind: "chart", id: "simple", initial: "done", states: { d
 			configPath,
 			JSON.stringify({
 				runId: "run-1",
-				runDir,
+				branchId: "main",				runDir,
 				chartPath,
 				chartId: "simple",
 				workDir: root,

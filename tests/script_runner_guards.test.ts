@@ -7,7 +7,8 @@ import { normalizeChartConfig, start, z } from "../packages/hyperchart/src/index
 import { chart, final, failed, script, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
-import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { runGuard } from "../packages/hyperchart/src/runtime/generic/guards.js";
 import { ScriptRunner } from "../packages/hyperchart/src/runtime/generic/script_runner.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
@@ -63,7 +64,7 @@ function scriptChart(action: ReturnType<typeof script>): ChartAst {
 
 async function runScriptChart(ast: ChartAst, workDir: string) {
 	const runtime = new ChartRuntime({
-		ast,
+		ast, branchId: "main",
 		logStore: new MemoryLogStore(),
 		agentExecutor: new FakeAgentExecutor(),
 		workDir,
@@ -227,7 +228,7 @@ process.stdin.on("end", () => {
 				definition: runState.action,
 				parentId: null,
 				seqId: 1,
-				timestamp: 1,
+				branchId: "main", timestamp: 1,
 			},
 			{
 				type: "state_action",
@@ -236,7 +237,7 @@ process.stdin.on("end", () => {
 				event: { type: "DONE", output: { ok: false, validationAttempt: 0, reason: null } },
 				parentId: 1,
 				seqId: 2,
-				timestamp: 2,
+				branchId: "main", timestamp: 2,
 			},
 			{
 				type: "state_action",
@@ -247,13 +248,14 @@ process.stdin.on("end", () => {
 				outcome: { ok: false, reason: "not ok" },
 				parentId: 2,
 				seqId: 3,
-				timestamp: 3,
+				branchId: "main", timestamp: 3,
 			},
 		];
 		const logStore = new JsonlLogStore(join(dir, "log.jsonl"));
-		logStore.append(rejectedLog);
+		logStore.initializeRootBranch();
+		logStore.appendDrafts(rejectedLog.map(({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft }) => draft));
 		const runtime = new ChartRuntime({
-			ast,
+			ast, branchId: "main",
 			logStore,
 			agentExecutor: new FakeAgentExecutor(),
 			workDir: dir,

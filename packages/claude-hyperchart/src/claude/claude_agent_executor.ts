@@ -60,6 +60,7 @@ export type QueryFn = (params: {
 export type ClaudeExecutorOptions = {
 	workDir: string;
 	sessionsDir: string;
+	branchId: string;
 	definitionDirs?: string[];
 	defaultModel?: string;
 	modelRoles?: Record<string, string>;
@@ -218,7 +219,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
 		const previousProgress = readSessionProgress(this.options.sessionsDir).sessions[
-			sessionProgressKey(effect.actionUid, effect.id)
+			sessionProgressKey(effect.actionUid, effect.id, this.options.branchId)
 		];
 		this.updateProgress(effect, {
 			actionName: effect.action.name,
@@ -300,6 +301,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			sink,
 			workDir: this.options.workDir,
 			sessionsDir: this.options.sessionsDir,
+			branchId: this.options.branchId,
 			sessionDir: dir,
 			...(this.options.schemaRegistry === undefined ? {} : { schemaRegistry: this.options.schemaRegistry }),
 			queryFn: this.queryFn,
@@ -356,7 +358,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 	}
 
 	private updateProgress(effect: AgentEffect, patch: Parameters<typeof updateSessionProgress>[2]): void {
-		updateSessionProgress(this.options.sessionsDir, effect.actionUid, patch, effect.id);
+		updateSessionProgress(this.options.sessionsDir, effect.actionUid, patch, effect.id, this.options.branchId);
 	}
 
 	private markProgressFailed(effect: AgentEffect, error: string): void {
@@ -377,6 +379,7 @@ type ClaudeSessionOptions = {
 	sink: CompletionSink;
 	workDir: string;
 	sessionsDir: string;
+	branchId: string;
 	sessionDir: string;
 	schemaRegistry?: SchemaRegistry;
 	queryFn: QueryFn;
@@ -410,6 +413,7 @@ class ClaudeSession {
 			options.effect.actionUid,
 			options.definition.name,
 			options.effect.id,
+			options.branchId,
 		);
 	}
 
@@ -688,6 +692,7 @@ class ClaudeSession {
 			this.options.effect.actionUid,
 			patch,
 			this.options.effect.id,
+			this.options.branchId,
 		);
 	}
 

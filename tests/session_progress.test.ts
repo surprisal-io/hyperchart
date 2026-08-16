@@ -45,7 +45,8 @@ describe("session progress", () => {
 			tokenCount: 1234,
 		});
 
-		const progress = readSessionProgress(dir).sessions["chart:review.correctness.scan:agent"];
+		const key = sessionProgressKey(actionUid);
+		const progress = readSessionProgress(dir).sessions[key];
 		expect(progress).toMatchObject({
 			actionName: "reviewer",
 			status: "running",
@@ -69,7 +70,7 @@ describe("session progress", () => {
 			toolset: undefined,
 			tools: undefined,
 		});
-		const restarted = readSessionProgress(dir).sessions["chart:review.correctness.scan:agent"];
+		const restarted = readSessionProgress(dir).sessions[key];
 		expect(restarted?.role).toBeUndefined();
 		expect(restarted?.model).toBeUndefined();
 		expect(restarted?.toolset).toBeUndefined();
@@ -96,15 +97,19 @@ describe("session progress", () => {
 		);
 
 		const progress = readSessionProgress(dir);
-		expect(sessionProgressKey(actionUid, firstEffect)).toBe("chart:work:agent:visit:1");
-		expect(progress.sessions["chart:work:agent:visit:1"]).toMatchObject({
+		expect(sessionProgressKey(actionUid, firstEffect)).toBe("main:chart:work:agent:invoke:2");
+		expect(progress.sessions["main:chart:work:agent:invoke:2"]).toMatchObject({
 			actionKey: "chart:work:agent",
+			branchId: "main",
+			invokeSeqId: 2,
 			visit: 1,
 			status: "completed",
 			sessionFile: "visit-1.jsonl",
 		});
-		expect(progress.sessions["chart:work:agent:visit:2"]).toMatchObject({
+		expect(progress.sessions["main:chart:work:agent:invoke:9"]).toMatchObject({
 			actionKey: "chart:work:agent",
+			branchId: "main",
+			invokeSeqId: 9,
 			visit: 2,
 			status: "running",
 			sessionFile: "visit-2.jsonl",

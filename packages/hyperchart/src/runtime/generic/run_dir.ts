@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sanitizeSegment } from "../../core/action_uid.js";
+import { JsonlLogStore } from "./log_store.js";
 
 export type RunMeta = {
 	chartPath: string;
@@ -21,8 +22,13 @@ export function createRunDir(workDir: string, chartId: string, options: { rootDi
 	while (existsSync(candidate)) {
 		candidate = join(root, `${base}-${suffix++}`);
 	}
-	mkdirSync(join(candidate, "sessions"), { recursive: true });
+	initializeRunDir(candidate);
 	return candidate;
+}
+
+export function initializeRunDir(runDir: string): void {
+	mkdirSync(join(runDir, "sessions"), { recursive: true });
+	new JsonlLogStore(join(runDir, "log.jsonl")).initializeRootBranch();
 }
 
 export function loadRunMeta(runDir: string): RunMeta {

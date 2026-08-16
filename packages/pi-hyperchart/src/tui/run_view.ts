@@ -38,6 +38,11 @@ export type GraphRow = {
 
 export type RunView = {
 	chartId: string;
+	branchId: string;
+	runnerBranchId?: string;
+	branches: Array<{ branchId: string; headSeqId: number | null }>;
+	/** Full immutable record-tree size, including sibling history outside the selected ancestry. */
+	recordCount: number;
 	final: boolean;
 	failedTerminal: boolean;
 	args?: Record<string, unknown>;
@@ -49,12 +54,21 @@ export type RunView = {
 	result?: unknown;
 };
 
-export function buildRunView(ast: ChartAst, log: readonly DurableLogRecord[], now: number): RunView {
+export function buildRunView(
+	ast: ChartAst,
+	log: readonly DurableLogRecord[],
+	now: number,
+	branch: { branchId?: string; runnerBranchId?: string; branches?: Array<{ branchId: string; headSeqId: number | null }>; recordCount?: number } = {},
+): RunView {
 	const projection = projectBranch(createBranchProjection(ast), ast, log);
 	const final = isFinalState(projection, ast);
 	const finalLeaf = projection.activeLeaves[0];
 	return {
 		chartId: ast.id,
+		branchId: branch.branchId ?? log.at(-1)?.branchId ?? "main",
+		...(branch.runnerBranchId === undefined ? {} : { runnerBranchId: branch.runnerBranchId }),
+		branches: branch.branches ?? [],
+		recordCount: branch.recordCount ?? log.length,
 		final,
 		failedTerminal: final && projection.activeLeaves.some((leaf) => ast.states[leaf]?.kind === "final" && ast.states[leaf]?.outcome === "failed"),
 		...(projection.args === undefined ? {} : { args: { ...projection.args } }),

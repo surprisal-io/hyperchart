@@ -302,7 +302,7 @@ describe("runtime Zod contracts", () => {
 				args: {},
 				parentId: null,
 				seqId: 1,
-				timestamp: 1,
+				branchId: "main", timestamp: 1,
 			},
 			{
 				type: "state_action",
@@ -311,7 +311,7 @@ describe("runtime Zod contracts", () => {
 				definition: oneState.action,
 				parentId: 1,
 				seqId: 2,
-				timestamp: 2,
+				branchId: "main", timestamp: 2,
 			},
 		]);
 		expect(explanation.stale.some((entry) => entry.reason === "action_definition_changed")).toBe(true);

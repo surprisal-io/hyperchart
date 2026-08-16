@@ -24,21 +24,21 @@ export const MAX_TOOL_PAYLOAD_BYTES = 64 * 1024;
  */
 const MODEL_ENVELOPE_FIELDS = new Set([
 	"actionKey", "actionName", "active", "additionalProperties", "additionalValue", "agent", "agentDefinitionUnavailable", "allowedEvents",
-	"allowedValueJson", "alternativeMode", "alternatives", "artifactFilesRemoved", "artifactWarningCount", "artifactWarnings", "artifacts", "attached", "attempts", "backupDir",
-	"boundary", "cacheRead", "cacheWrite", "chartId", "chartName", "chartPath", "charts", "cleanup", "committed", "constraints", "customType", "cutSeqId",
+	"allowedValueJson", "alternativeMode", "alternatives", "artifactWarningCount", "artifactWarnings", "artifacts", "attached", "attempts",
+	"boundary", "branchId", "branches", "cacheRead", "cacheWrite", "chartId", "chartName", "chartPath", "charts", "committed", "constraints", "customType",
 	"completedEvent", "concurrency", "content", "cost", "createdAt", "currentTool", "cwd", "defaultJson", "details",
 	"deliveryNotice", "description", "digest", "display", "done", "element", "error", "errorPreview", "event", "exitCode", "exportName", "failed", "fields", "final",
 	"finalOutputPreview", "format", "hasDefault", "id", "idempotent", "initial", "input", "instruction", "interaction", "isError", "issues",
-	"keptRecords", "kind", "lastMessage", "limitation", "literalJson", "mapKey", "maxBytes", "maxContains", "maxItems", "maxLength", "maximum", "maxProperties", "message", "minContains", "minItems", "minLength", "minimum", "minProperties", "mode", "model", "multipleOf", "name", "not", "nullable", "omittedAllowedEventCount",
+	"headSeqId", "kind", "lastMessage", "limitation", "literalJson", "mapKey", "maxBytes", "maxContains", "maxItems", "maxLength", "maximum", "maxProperties", "message", "minContains", "minItems", "minLength", "minimum", "minProperties", "mode", "model", "multipleOf", "name", "not", "nullable", "omittedAllowedEventCount",
 	"omittedArtifactCount", "omittedArtifactWarningCount", "omittedChartCount", "omittedIssueCount",
 	"omittedOptionCount", "omittedPendingStateCount", "omittedPromptChars", "omittedReadCount", "omittedRegionCount",
 	"omittedRemovedByStateCount", "omittedResolvedToolCount", "omittedRunCount", "omittedStateCount", "omittedStoppedCount",
 	"omittedToolCount", "omittedTransitionCount", "omittedUnavailableAgentCount", "omittedQueuedCount",
 	"onReject", "open", "optional", "options", "originalBytes", "originalChars", "omittedChars", "outcome", "output", "outputHint", "outputRequired", "over", "path", "pattern", "pendingStateIds",
-	"pid", "presentation", "preview", "projectChartsDir", "promptPreview", "propertyNames", "queued", "queuedCount", "reads", "records", "regions", "label",
-	"removedByState", "removedRecords", "replayWarningCount", "requestId", "required", "resolvedModel", "resolvedTools",
-	"retries", "role", "runDir", "runId", "runs", "running", "scope", "seqId", "sessionDigest", "sessionsRemoved",
-	"severity", "stale", "started", "state", "stateCount", "stateDigests", "stateId", "status", "stopped", "stoppedCount",
+	"pid", "presentation", "preservedRecords", "previousHeadSeqId", "preview", "projectChartsDir", "promptPreview", "propertyNames", "queued", "queuedCount", "reads", "records", "regions", "label",
+	"removedByState", "replayWarningCount", "requestId", "required", "resolvedModel", "resolvedTools",
+	"retries", "role", "runDir", "runId", "runs", "running", "scope", "seqId", "sessionDigest",
+	"selectedBranchChanged", "severity", "sourceBranchId", "stale", "started", "state", "stateCount", "stateDigests", "stateId", "status", "stopped", "stoppedCount",
 	"subProgress", "target", "targetLabel", "text", "thinking", "toolCount", "tools", "toolset", "total", "totalUsage", "tupleItems",
 	"tokenCount", "transitionDigests", "turnCount", "type", "types", "unavailableAgents", "uniqueItems", "updatedAt", "updates", "url", "userChartsDir", "userInteractions", "value",
 	"validationAttempts", "version", "visitCount", "waitedRun", "waiting", "exclusiveMinimum", "exclusiveMaximum", "contains", "minCount", "maxCount",
@@ -130,6 +130,7 @@ export type UserGateSummary = {
 	version: 1;
 	/** Exact public response coordinate. Never truncated. */
 	runId: string;
+	branchId: string;
 	seqId: number;
 	promptPreview: DisplayStringSummary;
 	options: UserGateOptionSummary[];
@@ -141,6 +142,7 @@ export type UserGateSummary = {
 
 export function summarizeUserGate(request: {
 	runId: string;
+	branchId: string;
 	seqId: number;
 	prompt: string;
 	options: readonly string[];
@@ -148,6 +150,7 @@ export function summarizeUserGate(request: {
 	reply?: SchemaAst;
 }): UserGateSummary {
 	assertGateIdentity(request.runId, "$/runId");
+	assertGateIdentity(request.branchId, "$/branchId");
 	if (!Number.isSafeInteger(request.seqId) || request.seqId <= 0) {
 		throw gateSummaryError(`Gate coordinate seqId must be a positive safe integer; received ${String(request.seqId)}`, "$/seqId", "identity");
 	}
@@ -161,6 +164,7 @@ export function summarizeUserGate(request: {
 	const summary: UserGateSummary = {
 		version: 1,
 		runId: request.runId,
+		branchId: request.branchId,
 		seqId: request.seqId,
 		promptPreview: displayString(request.prompt, 1_000),
 		options: request.options.map((value) => ({ label: displayString(value), value })),

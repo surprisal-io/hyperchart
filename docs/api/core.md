@@ -732,3 +732,7 @@ ProjectionSkippedRecord, AsyncQueue, MaybeAsyncIterable
 The root core API exports `ProjectedActorEndpointOccurrence`, `ProjectedActorPoolOccurrence`, and `ProjectedActorPoolWorker`. Pool occurrences expose the endpoint declaration/logical/concrete generation identity, aggregate mailbox/messages/status, and fixed `workers`; each worker exposes index, concrete occurrence, current state/message, and lifecycle status.
 
 `actorEndpointAdmission(ast, projection): ActorAdmissionView` is the pure machine/host contract. `assignments: ActorAdmissionAssignment[]` is a FIFO wave (`occurrence`, `messageId`, `receiveState`, optional `workerIndex`); a pool assignment may use any idle, receive-compatible worker, while `failure` describes an unsupported head only when no busy worker can later become eligible. Machine execution additionally supplies its pool-local in-flight reservations so unacknowledged accepted facts are treated as virtual dequeues and occupied workers. Durable actor records include four-way `ActorMessageSource`, optional pool `workerIndex`, and `ActorBatchCallResolvedLog`.
+
+## Branch-aware durable records (v2)
+
+Every new `DurableLogRecord` has mandatory `seqId`, `parentId`, `branchId`, and `timestamp`. The machine emits `DurableRecordDraft` payloads; only the serialized run writer stamps coordinates. Storage mutations are `RecordBatchMutation` (atomic records plus head advance) and branch `create`/`move` mutations. Branch mutations never enter `projectBranch()` or `explainReplay()`.

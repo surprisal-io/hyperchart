@@ -44,15 +44,15 @@ export function actionAt(ast: ChartAst, statePath: string) {
 }
 
 export function storyArgs(args: Record<string, unknown>, seqId = 1, timestamp = seqId): DurableLogRecord {
-	return { type: "args", args, parentId: null, seqId, timestamp };
+	return { type: "args", args, parentId: null, branchId: "main", seqId, timestamp };
 }
 
 export function storyInvoke(ast: ChartAst, statePath: string, seqId: number, timestamp = seqId): DurableLogRecord {
 	const action = actionAt(ast, statePath);
-	return { type: "state_action", kind: "invoke", actionUid: action.uid, definition: action, parentId: seqId - 1, seqId, timestamp };
+	return { type: "state_action", kind: "invoke", actionUid: action.uid, definition: action, parentId: seqId - 1, branchId: "main", seqId, timestamp };
 }
 
 export function storyComplete(ast: ChartAst, statePath: string, event: string, seqId: number, timestamp = seqId): DurableLogRecord {
 	const action = actionAt(ast, statePath);
-	return { type: "state_action", kind: "complete", actionUid: action.uid, event: { type: event }, parentId: seqId - 1, seqId, timestamp };
+	return { type: "state_action", kind: "complete", actionUid: action.uid, event: { type: event }, parentId: seqId - 1, branchId: "main", seqId, timestamp };
 }

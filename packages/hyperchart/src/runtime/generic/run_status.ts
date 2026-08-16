@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { BranchId } from "../../core/durable_events.js";
 
 export type HyperchartRunState = "starting" | "running" | "complete" | "failed" | "stopping" | "stopped";
 
@@ -9,6 +10,8 @@ export type HyperchartRunStatus = {
 	runDir: string;
 	chartId: string;
 	state: HyperchartRunState;
+	/** Branch owned by the live runner attempt; operational status, not durable selection. */
+	branchId?: BranchId;
 	/** Opaque identity of the runner launch that owns this process status. */
 	attemptId?: string;
 	pid?: number;
@@ -56,12 +59,14 @@ export function patchRunStatus(runDir: string, patch: RunStatusPatch): Hyperchar
 	const error = valueFor("error", patch, previous);
 	const replayWarnings = valueFor("replayWarnings", patch, previous);
 	const attemptId = valueFor("attemptId", patch, previous);
+	const branchId = valueFor("branchId", patch, previous);
 	const next: HyperchartRunStatus = {
 		version: 1,
 		runId: valueFor("runId", patch, previous) ?? "unknown",
 		runDir,
 		chartId: valueFor("chartId", patch, previous) ?? "unknown",
 		state: valueFor("state", patch, previous) ?? "starting",
+		...(branchId === undefined ? {} : { branchId }),
 		...(attemptId === undefined ? {} : { attemptId }),
 		startedAt: previous?.startedAt ?? now,
 		updatedAt: now,
@@ -117,6 +122,7 @@ function normalizeStatus(value: unknown, fallbackRunDir: string): HyperchartRunS
 		runDir: typeof value.runDir === "string" ? value.runDir : fallbackRunDir,
 		chartId: value.chartId,
 		state,
+		...(typeof value.branchId === "string" && value.branchId.length > 0 ? { branchId: value.branchId } : {}),
 		...(typeof value.attemptId === "string" ? { attemptId: value.attemptId } : {}),
 		startedAt: typeof value.startedAt === "number" ? value.startedAt : 0,
 		updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : 0,

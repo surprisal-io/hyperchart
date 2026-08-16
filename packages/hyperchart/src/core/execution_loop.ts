@@ -12,7 +12,7 @@ export async function start(runtime: Runtime, args?: Readonly<Record<string, unk
 			{
 				kind: "durable_records",
 				id: "args",
-				records: [{ type: "args", args, parentId: null, seqId: 1, timestamp: Date.now() }],
+				records: [{ type: "args", args }],
 			},
 		]);
 	}

@@ -57,9 +57,22 @@ export { ChartRuntime } from "./generic/chart_runtime.js";
 export type { ChartRuntimeOptions } from "./generic/chart_runtime.js";
 export { runGuard } from "./generic/guards.js";
 export type { GuardContext, RenderedGuardInvocation } from "./generic/guards.js";
-export { JsonlLogStore, MemoryLogStore } from "./generic/log_store.js";
+export {
+	CorruptRunLogError,
+	DEFAULT_BRANCH_ID,
+	JsonlLogStore,
+	NormalizedRunLog,
+	validateAndProjectJournal,
+} from "./generic/log_store.js";
 export type { LogStore } from "./generic/log_store.js";
-export { createRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
+export { MemoryLogStore } from "./generic/memory_log_store.js";
+export {
+	forkHyperchartRun,
+	getHyperchartBranch,
+	listHyperchartBranches,
+} from "./generic/branches.js";
+export type { ForkBranchOptions, ForkBranchResult } from "./generic/branches.js";
+export { createRunDir, initializeRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
 export type { RunMeta } from "./generic/run_dir.js";
 export { finalMachineFailureMessage, terminalStateForFinalMachine } from "./generic/run_outcome.js";
 export type { RunTerminalState } from "./generic/run_outcome.js";
@@ -119,7 +132,7 @@ export { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, createHostPaths, listHyperchartFil
 export type { HostPaths, HostPathsConfig } from "./generic/host_paths.js";
 export { SETTINGS_FILE_NAME, loadHostSettings } from "./generic/host_settings.js";
 export type { HyperchartHostSettings } from "./generic/host_settings.js";
-export { readDurableLogSync, rewindHyperchartRun, writeDurableLogSync } from "./generic/rewind.js";
+export { findRewindMatch, rewindHyperchartRun, semanticStatesForRecord } from "./generic/rewind.js";
 export type { RewindMode, RewindOptions, RewindResult } from "./generic/rewind.js";
 export {
 	createAgentDefaultsResolver,

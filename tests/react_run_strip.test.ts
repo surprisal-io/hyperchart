@@ -19,7 +19,7 @@ const chart: HyperchartSummaryInfo = {
 function run(index: number): HyperchartRunInfo {
 	return {
 		runId: `run-${index}`,
-		chartName: chart.name,
+		branchId: "main",		chartName: chart.name,
 		status: "completed",
 		cwd: "/workspace",
 		createdAt: index,
@@ -43,7 +43,7 @@ describe("HyperchartRunStrip", () => {
 			runs: [
 				{
 					runId: "summary-run",
-					chartName: "release",
+					branchId: "main",					chartName: "release",
 					status: "running",
 					cwd: "/workspace",
 					createdAt: 1,
@@ -81,7 +81,7 @@ describe("HyperchartRunStrip", () => {
 	it("hides progress when summary progress metadata is omitted but keeps known running state", () => {
 		const summary: HyperchartRunSummaryInfo = {
 			runId: "no-progress",
-			chartName: "release",
+			branchId: "main",			chartName: "release",
 			status: "running",
 			cwd: "/workspace",
 			createdAt: 1,
@@ -98,7 +98,7 @@ describe("HyperchartRunStrip", () => {
 	it("hides progress when summary progress metadata is only partial", () => {
 		const summary: HyperchartRunSummaryInfo = {
 			runId: "partial-progress",
-			chartName: "release",
+			branchId: "main",			chartName: "release",
 			status: "blocked",
 			cwd: "/workspace",
 			createdAt: 1,

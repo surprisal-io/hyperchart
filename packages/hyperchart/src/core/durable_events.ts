@@ -13,11 +13,36 @@ import type {
 	StatePath,
 } from "./types.js";
 
-type SessionParams = {
+/** Durable named branch (the storage lane). Branch ids are public, stable names. */
+export type BranchId = string;
+
+/** Explicit, non-durable checkout handle carried by a runner, command, or UI view. */
+export type SelectedBranchHandle = Readonly<{ branchId: BranchId }>;
+
+/** Optional durable branch provenance. It never represents an active/selected branch. */
+export type BranchMetadata = Readonly<{
+	name?: string;
+	reason?: string;
+	sourceBranchId?: BranchId;
+	sourceSeqId?: number;
+}>;
+
+/** Materialized durable head for one named branch. */
+export type BranchHead = Readonly<{
+	branchId: BranchId;
+	headSeqId: number | null;
+	createdAt: number;
+	metadata?: BranchMetadata;
+}>;
+
+export type DurableRecordCoordinates = {
 	seqId: number;
 	parentId: number | null;
+	branchId: BranchId;
 	timestamp: number;
 };
+
+type SessionParams = DurableRecordCoordinates;
 
 type SessionRefLog = {
 	type: "session_ref";
@@ -200,3 +225,39 @@ export type DurableLogRecord =
 	| StateAction
 	| FailureIntentLog
 	| ActorLogRecord;
+
+/** Machine payload before the storage writer assigns durable coordinates. */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type DurableRecordDraft = DistributiveOmit<DurableLogRecord, keyof DurableRecordCoordinates>;
+
+/**
+ * One atomic append commit. A batch is one JSONL mutation so a process crash can
+ * never expose records without the matching branch-head advance.
+ */
+export type RecordBatchMutation = Readonly<{
+	kind: "record_batch";
+	branchId: BranchId;
+	records: readonly DurableLogRecord[];
+	headSeqId: number;
+	committedAt: number;
+}>;
+
+export type BranchCreateMutation = Readonly<{
+	kind: "branch";
+	op: "create";
+	branchId: BranchId;
+	headSeqId: number | null;
+	metadata?: BranchMetadata;
+	committedAt: number;
+}>;
+
+export type BranchMoveMutation = Readonly<{
+	kind: "branch";
+	op: "move";
+	branchId: BranchId;
+	headSeqId: number | null;
+	committedAt: number;
+}>;
+
+/** Values accepted as lines in the current log.jsonl journal. */
+export type StorageMutation = RecordBatchMutation | BranchCreateMutation | BranchMoveMutation;

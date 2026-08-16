@@ -13,6 +13,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ActionUID, ChartEvent, SchemaAst } from "../../core/types.js";
+import type { BranchId } from "../../core/durable_events.js";
 import { checkSchemaAsync } from "./schema.js";
 import { loadRunMeta } from "./run_dir.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
@@ -29,11 +30,12 @@ export const USER_INTERACTION_ARBITER_DIR = ".user-interaction-arbiter";
 export const USER_INTERACTION_CLAIM_LEASE_MS = 30_000;
 export const USER_INTERACTION_WAIT_LEASE_MS = 5 * 60_000;
 
-export type UserInteractionCoordinate = Readonly<{ runId: string; seqId: number }>;
+export type UserInteractionCoordinate = Readonly<{ runId: string; branchId: BranchId; seqId: number }>;
 
 export type UserInteractionRequest = Readonly<{
 	version: 1;
 	runId: string;
+	branchId: BranchId;
 	seqId: number;
 	actionUid: ActionUID;
 	prompt: string;
@@ -51,6 +53,7 @@ export type UserInteractionRequest = Readonly<{
 export type UserInteractionResponse = Readonly<{
 	version: 1;
 	runId: string;
+	branchId: BranchId;
 	seqId: number;
 	event: ChartEvent;
 	createdAt: string;
@@ -59,6 +62,7 @@ export type UserInteractionResponse = Readonly<{
 export type UserInteractionClose = Readonly<{
 	version: 1;
 	runId: string;
+	branchId: BranchId;
 	seqId: number;
 	reason: string;
 	closedAt: string;
@@ -69,6 +73,7 @@ export type UserInteractionResolution =
 			version: 1;
 			kind: "response";
 			runId: string;
+			branchId: BranchId;
 			seqId: number;
 			event: ChartEvent;
 			createdAt: string;
@@ -77,6 +82,7 @@ export type UserInteractionResolution =
 			version: 1;
 			kind: "closed";
 			runId: string;
+			branchId: BranchId;
 			seqId: number;
 			reason: string;
 			closedAt: string;
@@ -85,6 +91,7 @@ export type UserInteractionResolution =
 export type UserInteractionReceipt = Readonly<{
 	version: 1;
 	runId: string;
+	branchId: BranchId;
 	seqId: number;
 	host: string;
 	sessionId: string;
@@ -118,39 +125,41 @@ export type UserInteractionArbiterRecord = Readonly<{
 	sessionId: string;
 	workDir: string;
 	runId: string;
+	branchId: BranchId;
 	seqId: number;
 	pinnedAt: string;
 }>;
 
 export type PersistUserInteractionRequestInput = Omit<UserInteractionRequest, "version" | "createdAt">;
 
-export function userInteractionDir(runDir: string, seqId: number): string {
+export function userInteractionDir(runDir: string, branchId: BranchId, seqId: number): string {
+	assertBranchId(branchId);
 	assertSeqId(seqId);
-	return join(runDir, USER_INTERACTIONS_DIR, String(seqId));
+	return join(runDir, USER_INTERACTIONS_DIR, branchId, String(seqId));
 }
 
-export function userInteractionRequestPath(runDir: string, seqId: number): string {
-	return join(userInteractionDir(runDir, seqId), USER_INTERACTION_REQUEST);
+export function userInteractionRequestPath(runDir: string, branchId: BranchId, seqId: number): string {
+	return join(userInteractionDir(runDir, branchId, seqId), USER_INTERACTION_REQUEST);
 }
 
-export function userInteractionResolutionPath(runDir: string, seqId: number): string {
-	return join(userInteractionDir(runDir, seqId), USER_INTERACTION_RESOLUTION);
+export function userInteractionResolutionPath(runDir: string, branchId: BranchId, seqId: number): string {
+	return join(userInteractionDir(runDir, branchId, seqId), USER_INTERACTION_RESOLUTION);
 }
 
-export function userInteractionResponsePath(runDir: string, seqId: number): string {
-	return userInteractionResolutionPath(runDir, seqId);
+export function userInteractionResponsePath(runDir: string, branchId: BranchId, seqId: number): string {
+	return userInteractionResolutionPath(runDir, branchId, seqId);
 }
 
-export function userInteractionClosePath(runDir: string, seqId: number): string {
-	return userInteractionResolutionPath(runDir, seqId);
+export function userInteractionClosePath(runDir: string, branchId: BranchId, seqId: number): string {
+	return userInteractionResolutionPath(runDir, branchId, seqId);
 }
 
 export function persistUserInteractionRequest(
 	runDir: string,
 	input: PersistUserInteractionRequestInput,
 ): UserInteractionRequest {
-	assertRunCoordinate(runDir, input.runId, input.seqId);
-	const existing = readUserInteractionRequest(runDir, input.seqId);
+	assertRunCoordinate(runDir, input.runId, input.branchId, input.seqId);
+	const existing = readUserInteractionRequest(runDir, input.branchId, input.seqId);
 	if (existing !== undefined) {
 		if (stableJson(requestComparable(existing)) !== stableJson(input)) {
 			throw new Error(`User interaction request conflict for (${input.runId}, ${input.seqId})`);
@@ -162,13 +171,13 @@ export function persistUserInteractionRequest(
 		...input,
 		createdAt: new Date().toISOString(),
 	};
-	mkdirSync(userInteractionDir(runDir, input.seqId), { recursive: true });
+	mkdirSync(userInteractionDir(runDir, input.branchId, input.seqId), { recursive: true });
 	try {
-		writeJsonExclusive(userInteractionRequestPath(runDir, input.seqId), request);
+		writeJsonExclusive(userInteractionRequestPath(runDir, input.branchId, input.seqId), request);
 		return request;
 	} catch (error) {
 		if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-		const raced = readUserInteractionRequest(runDir, input.seqId);
+		const raced = readUserInteractionRequest(runDir, input.branchId, input.seqId);
 		if (raced === undefined || stableJson(requestComparable(raced)) !== stableJson(input)) {
 			throw new Error(`User interaction request conflict for (${input.runId}, ${input.seqId})`);
 		}
@@ -176,45 +185,46 @@ export function persistUserInteractionRequest(
 	}
 }
 
-export function readUserInteractionRequest(runDir: string, seqId: number): UserInteractionRequest | undefined {
-	const path = userInteractionRequestPath(runDir, seqId);
+export function readUserInteractionRequest(runDir: string, branchId: BranchId, seqId: number): UserInteractionRequest | undefined {
+	const path = userInteractionRequestPath(runDir, branchId, seqId);
 	if (!existsSync(path)) return undefined;
 	const request = parseRequest(readJson(path), path);
-	assertEmbeddedCoordinate(runDir, seqId, request, path);
+	assertEmbeddedCoordinate(runDir, branchId, seqId, request, path);
 	return request;
 }
 
-export function readUserInteractionResolution(runDir: string, seqId: number): UserInteractionResolution | undefined {
-	const path = userInteractionResolutionPath(runDir, seqId);
+export function readUserInteractionResolution(runDir: string, branchId: BranchId, seqId: number): UserInteractionResolution | undefined {
+	const path = userInteractionResolutionPath(runDir, branchId, seqId);
 	if (!existsSync(path)) return undefined;
 	const resolution = parseResolution(readJson(path), path);
-	assertEmbeddedCoordinate(runDir, seqId, resolution, path);
+	assertEmbeddedCoordinate(runDir, branchId, seqId, resolution, path);
 	return resolution;
 }
 
-export function readUserInteractionResponse(runDir: string, seqId: number): UserInteractionResponse | undefined {
-	const resolution = readUserInteractionResolution(runDir, seqId);
+export function readUserInteractionResponse(runDir: string, branchId: BranchId, seqId: number): UserInteractionResponse | undefined {
+	const resolution = readUserInteractionResolution(runDir, branchId, seqId);
 	if (resolution?.kind !== "response") return undefined;
 	const { kind: _kind, ...response } = resolution;
 	return response;
 }
 
-export function readUserInteractionClose(runDir: string, seqId: number): UserInteractionClose | undefined {
-	const resolution = readUserInteractionResolution(runDir, seqId);
+export function readUserInteractionClose(runDir: string, branchId: BranchId, seqId: number): UserInteractionClose | undefined {
+	const resolution = readUserInteractionResolution(runDir, branchId, seqId);
 	if (resolution?.kind !== "closed") return undefined;
 	const { kind: _kind, ...close } = resolution;
 	return close;
 }
 
-export function readOpenUserInteractionRequest(runDir: string, seqId: number): UserInteractionRequest | undefined {
-	const request = readUserInteractionRequest(runDir, seqId);
-	if (request === undefined || readUserInteractionResolution(runDir, seqId) !== undefined) return undefined;
+export function readOpenUserInteractionRequest(runDir: string, branchId: BranchId, seqId: number): UserInteractionRequest | undefined {
+	const request = readUserInteractionRequest(runDir, branchId, seqId);
+	if (request === undefined || readUserInteractionResolution(runDir, branchId, seqId) !== undefined) return undefined;
 	return request;
 }
 
 /** Strict per-run scan. Malformed entries are isolated and omitted from the result. */
-export function scanOpenUserInteractions(runDir: string): UserInteractionRequest[] {
-	const root = join(runDir, USER_INTERACTIONS_DIR);
+export function scanOpenUserInteractions(runDir: string, branchId: BranchId): UserInteractionRequest[] {
+	assertBranchId(branchId);
+	const root = join(runDir, USER_INTERACTIONS_DIR, branchId);
 	if (!existsSync(root)) return [];
 	const requests: UserInteractionRequest[] = [];
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -222,7 +232,7 @@ export function scanOpenUserInteractions(runDir: string): UserInteractionRequest
 		const seqId = Number(entry.name);
 		if (!Number.isSafeInteger(seqId) || seqId <= 0) continue;
 		try {
-			const request = readOpenUserInteractionRequest(runDir, seqId);
+			const request = readOpenUserInteractionRequest(runDir, branchId, seqId);
 			if (request !== undefined) requests.push(request);
 		} catch {
 			// One malformed or concurrently-created phase must not hide other gates.
@@ -240,10 +250,10 @@ export function closeUserInteraction(
 	coordinate: UserInteractionCoordinate,
 	reason: string,
 ): UserInteractionClose | undefined {
-	assertRunCoordinate(runDir, coordinate.runId, coordinate.seqId);
-	const request = readUserInteractionRequest(runDir, coordinate.seqId);
+	assertRunCoordinate(runDir, coordinate.runId, coordinate.branchId, coordinate.seqId);
+	const request = readUserInteractionRequest(runDir, coordinate.branchId, coordinate.seqId);
 	if (request === undefined) throw new Error(`No user interaction exists for (${coordinate.runId}, ${coordinate.seqId})`);
-	const existing = readUserInteractionResolution(runDir, coordinate.seqId);
+	const existing = readUserInteractionResolution(runDir, coordinate.branchId, coordinate.seqId);
 	if (existing?.kind === "closed") return closeFromResolution(existing);
 	if (existing?.kind === "response") return undefined;
 	const resolution: Extract<UserInteractionResolution, { kind: "closed" }> = {
@@ -254,43 +264,46 @@ export function closeUserInteraction(
 		closedAt: new Date().toISOString(),
 	};
 	try {
-		writeJsonExclusive(userInteractionResolutionPath(runDir, coordinate.seqId), resolution);
+		writeJsonExclusive(userInteractionResolutionPath(runDir, coordinate.branchId, coordinate.seqId), resolution);
 		return closeFromResolution(resolution);
 	} catch (error) {
 		if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-		const raced = readUserInteractionResolution(runDir, coordinate.seqId);
+		const raced = readUserInteractionResolution(runDir, coordinate.branchId, coordinate.seqId);
 		return raced?.kind === "closed" ? closeFromResolution(raced) : undefined;
 	}
 }
 
 export function userInteractionReceiptPath(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): string {
 	const key = createHash("sha256").update(`${host}\0${sessionId}`).digest("hex");
-	return join(userInteractionDir(runDir, seqId), "receipts", `${key}.claim.json`);
+	return join(userInteractionDir(runDir, branchId, seqId), "receipts", `${key}.claim.json`);
 }
 
 function userInteractionConfirmationPath(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): string {
-	return userInteractionReceiptPath(runDir, seqId, host, sessionId).replace(/\.claim\.json$/, ".confirmed.json");
+	return userInteractionReceiptPath(runDir, branchId, seqId, host, sessionId).replace(/\.claim\.json$/, ".confirmed.json");
 }
 
 export function hasUserInteractionReceipt(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): boolean {
-	const request = readUserInteractionRequest(runDir, seqId);
+	const request = readUserInteractionRequest(runDir, branchId, seqId);
 	if (request === undefined) return false;
-	const receipt = readConfirmedReceipt(runDir, seqId, host, sessionId);
+	const receipt = readConfirmedReceipt(runDir, branchId, seqId, host, sessionId);
 	return receipt !== undefined && sameReceiptCoordinate(receipt, request, host, sessionId);
 }
 
@@ -301,19 +314,20 @@ export function hasUserInteractionReceipt(
  */
 export function claimUserInteractionReceipt(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 	options: { now?: number; leaseMs?: number; source?: string } = {},
 ): boolean {
-	const request = readOpenUserInteractionRequest(runDir, seqId);
+	const request = readOpenUserInteractionRequest(runDir, branchId, seqId);
 	if (request === undefined) return false;
-	const confirmedPath = userInteractionConfirmationPath(runDir, seqId, host, sessionId);
-	if (readConfirmedReceipt(runDir, seqId, host, sessionId) !== undefined) {
+	const confirmedPath = userInteractionConfirmationPath(runDir, branchId, seqId, host, sessionId);
+	if (readConfirmedReceipt(runDir, branchId, seqId, host, sessionId) !== undefined) {
 		writePublicationMarker(confirmedPath);
 		return false;
 	}
-	const path = userInteractionReceiptPath(runDir, seqId, host, sessionId);
+	const path = userInteractionReceiptPath(runDir, branchId, seqId, host, sessionId);
 	const now = options.now ?? Date.now();
 	const leaseMs = options.leaseMs ?? USER_INTERACTION_CLAIM_LEASE_MS;
 	const existing = readReceipt(path);
@@ -332,6 +346,7 @@ export function claimUserInteractionReceipt(
 	const claim: UserInteractionReceipt = {
 		version: 1,
 		runId: request.runId,
+		branchId: request.branchId,
 		seqId,
 		host,
 		sessionId,
@@ -340,7 +355,7 @@ export function claimUserInteractionReceipt(
 		claimedAt: new Date(now).toISOString(),
 		leaseUntil: new Date(now + leaseMs).toISOString(),
 	};
-	mkdirSync(join(userInteractionDir(runDir, seqId), "receipts"), { recursive: true });
+	mkdirSync(join(userInteractionDir(runDir, branchId, seqId), "receipts"), { recursive: true });
 	try {
 		writeJsonExclusive(path, claim);
 		writePublicationMarker(path);
@@ -353,59 +368,63 @@ export function claimUserInteractionReceipt(
 
 export function markUserInteractionReceipt(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): UserInteractionReceipt {
-	const request = readOpenUserInteractionRequest(runDir, seqId);
+	const request = readOpenUserInteractionRequest(runDir, branchId, seqId);
 	if (request === undefined) throw new Error(`No open user interaction exists for ${runDir} seqId ${seqId}`);
-	const existing = readConfirmedReceipt(runDir, seqId, host, sessionId);
+	const existing = readConfirmedReceipt(runDir, branchId, seqId, host, sessionId);
 	if (existing !== undefined) {
 		if (!sameReceiptCoordinate(existing, request, host, sessionId)) {
 			throw new Error(`Presentation receipt does not match user interaction (${request.runId}, ${seqId})`);
 		}
-		writePublicationMarker(userInteractionConfirmationPath(runDir, seqId, host, sessionId));
+		writePublicationMarker(userInteractionConfirmationPath(runDir, branchId, seqId, host, sessionId));
 		return existing;
 	}
 	const receipt: UserInteractionReceipt = {
 		version: 1,
 		runId: request.runId,
+		branchId: request.branchId,
 		seqId,
 		host,
 		sessionId,
 		state: "confirmed",
 		deliveredAt: new Date().toISOString(),
 	};
-	const path = userInteractionConfirmationPath(runDir, seqId, host, sessionId);
-	mkdirSync(join(userInteractionDir(runDir, seqId), "receipts"), { recursive: true });
+	const path = userInteractionConfirmationPath(runDir, branchId, seqId, host, sessionId);
+	mkdirSync(join(userInteractionDir(runDir, branchId, seqId), "receipts"), { recursive: true });
 	try {
 		writeJsonExclusive(path, receipt);
 		writePublicationMarker(path);
 		return receipt;
 	} catch (error) {
 		if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-		return readConfirmedReceipt(runDir, seqId, host, sessionId) ?? receipt;
+		return readConfirmedReceipt(runDir, branchId, seqId, host, sessionId) ?? receipt;
 	}
 }
 
 export function readUserInteractionReceipt(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): UserInteractionReceipt | undefined {
-	return readConfirmedReceipt(runDir, seqId, host, sessionId) ??
-		readReceipt(userInteractionReceiptPath(runDir, seqId, host, sessionId));
+	return readConfirmedReceipt(runDir, branchId, seqId, host, sessionId) ??
+		readReceipt(userInteractionReceiptPath(runDir, branchId, seqId, host, sessionId));
 }
 
 export function removeUserInteractionReceipt(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): void {
-	const claimPath = userInteractionReceiptPath(runDir, seqId, host, sessionId);
-	const confirmationPath = userInteractionConfirmationPath(runDir, seqId, host, sessionId);
+	const claimPath = userInteractionReceiptPath(runDir, branchId, seqId, host, sessionId);
+	const confirmationPath = userInteractionConfirmationPath(runDir, branchId, seqId, host, sessionId);
 	rmSync(claimPath, { force: true });
 	rmSync(`${claimPath}.published`, { force: true });
 	rmSync(confirmationPath, { force: true });
@@ -441,7 +460,7 @@ export function releaseActiveUserInteraction(
 	coordinate: UserInteractionCoordinate,
 ): boolean {
 	const active = readActiveUserInteraction(ownerInput);
-	return active === undefined || active.request.runId !== coordinate.runId || active.request.seqId !== coordinate.seqId;
+	return active === undefined || active.request.runId !== coordinate.runId || active.request.branchId !== coordinate.branchId || active.request.seqId !== coordinate.seqId;
 }
 
 export function scanOwnedOpenUserInteractions(ownerInput: UserInteractionOwner): OwnedUserInteraction[] {
@@ -454,8 +473,9 @@ export function scanOwnedOpenUserInteractions(ownerInput: UserInteractionOwner):
 		try {
 			const meta = loadRunMeta(runDir);
 			if (meta.originSessionId !== owner.sessionId || canonicalPath(meta.workDir) !== owner.workDir) continue;
-			if (!isRunLive(readRunStatus(runDir))) continue;
-			for (const request of scanOpenUserInteractions(runDir)) {
+			const status = readRunStatus(runDir);
+			if (!isRunLive(status) || status?.branchId === undefined) continue;
+			for (const request of scanOpenUserInteractions(runDir, status.branchId)) {
 				if (request.runId !== entry.name) continue;
 				const receipt = receiptState(runDir, request, owner.host, owner.sessionId);
 				pending.push({
@@ -475,6 +495,7 @@ export function scanOwnedOpenUserInteractions(ownerInput: UserInteractionOwner):
 export type PersistUserInteractionResponseOptions = Readonly<{
 	runDir: string;
 	runId: string;
+	branchId: BranchId;
 	seqId: number;
 	event: ChartEvent;
 	schemaRegistry?: SchemaRegistryLike;
@@ -484,9 +505,9 @@ export type PersistUserInteractionResponseOptions = Readonly<{
 export async function validateAndPersistUserInteractionResponse(
 	options: PersistUserInteractionResponseOptions,
 ): Promise<{ response: UserInteractionResponse; idempotent: boolean }> {
-	assertRunCoordinate(options.runDir, options.runId, options.seqId);
+	assertRunCoordinate(options.runDir, options.runId, options.branchId, options.seqId);
 	if (options.owner !== undefined) assertUserInteractionOwner(options.owner, options.runDir, options.runId);
-	const existing = readUserInteractionResolution(options.runDir, options.seqId);
+	const existing = readUserInteractionResolution(options.runDir, options.branchId, options.seqId);
 	if (existing?.kind === "response") {
 		if (sameEvent(existing.event, options.event)) return { response: responseFromResolution(existing), idempotent: true };
 		throw new Error(`Conflicting response for user interaction (${options.runId}, ${options.seqId})`);
@@ -495,8 +516,8 @@ export async function validateAndPersistUserInteractionResponse(
 		throw new Error(`User interaction (${options.runId}, ${options.seqId}) is stale or closed`);
 	}
 	if (options.owner !== undefined) assertOwnedActiveCoordinate(options.owner, options.runDir, options);
-	if (!isRunLive(readRunStatus(options.runDir))) throw new Error(`Run '${options.runId}' is not live`);
-	const request = readOpenUserInteractionRequest(options.runDir, options.seqId);
+	assertLiveRunnerBranch(options.runDir, options.runId, options.branchId);
+	const request = readOpenUserInteractionRequest(options.runDir, options.branchId, options.seqId);
 	if (request === undefined || request.runId !== options.runId) {
 		throw new Error(`User interaction (${options.runId}, ${options.seqId}) is stale, closed, or missing`);
 	}
@@ -505,24 +526,25 @@ export async function validateAndPersistUserInteractionResponse(
 	// the exclusive resolution publish below then arbitrates a concurrent close/response.
 	await validateUserInteractionEvent(request, options.event, options.schemaRegistry);
 	if (options.owner !== undefined) assertOwnedActiveCoordinate(options.owner, options.runDir, options);
-	if (!isRunLive(readRunStatus(options.runDir))) throw new Error(`Run '${options.runId}' is not live`);
-	if (readOpenUserInteractionRequest(options.runDir, options.seqId) === undefined) {
+	assertLiveRunnerBranch(options.runDir, options.runId, options.branchId);
+	if (readOpenUserInteractionRequest(options.runDir, options.branchId, options.seqId) === undefined) {
 		throw new Error(`User interaction (${options.runId}, ${options.seqId}) is stale, closed, or missing`);
 	}
 	const resolution: Extract<UserInteractionResolution, { kind: "response" }> = {
 		version: 1,
 		kind: "response",
 		runId: options.runId,
+		branchId: options.branchId,
 		seqId: options.seqId,
 		event: options.event,
 		createdAt: new Date().toISOString(),
 	};
 	try {
-		writeJsonExclusive(userInteractionResolutionPath(options.runDir, options.seqId), resolution);
+		writeJsonExclusive(userInteractionResolutionPath(options.runDir, options.branchId, options.seqId), resolution);
 		return { response: responseFromResolution(resolution), idempotent: false };
 	} catch (error) {
 		if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-		const raced = readUserInteractionResolution(options.runDir, options.seqId);
+		const raced = readUserInteractionResolution(options.runDir, options.branchId, options.seqId);
 		if (raced?.kind === "response" && sameEvent(raced.event, options.event)) {
 			return { response: responseFromResolution(raced), idempotent: true };
 		}
@@ -585,7 +607,7 @@ function assertOwnedActiveCoordinate(
 	const owner = normalizeOwner(ownerInput);
 	assertUserInteractionOwner(owner, runDir, coordinate.runId);
 	const active = acquireActiveUserInteraction(owner);
-	if (active === undefined || active.request.runId !== coordinate.runId || active.request.seqId !== coordinate.seqId) {
+	if (active === undefined || active.request.runId !== coordinate.runId || active.request.branchId !== coordinate.branchId || active.request.seqId !== coordinate.seqId) {
 		throw new Error(`User interaction (${coordinate.runId}, ${coordinate.seqId}) is not the active gate`);
 	}
 }
@@ -596,13 +618,13 @@ function receiptState(
 	host: string,
 	sessionId: string,
 ): { presentation: OwnedUserInteraction["presentation"]; order?: bigint } {
-	const confirmationPath = userInteractionConfirmationPath(runDir, request.seqId, host, sessionId);
-	const confirmed = readConfirmedReceipt(runDir, request.seqId, host, sessionId);
+	const confirmationPath = userInteractionConfirmationPath(runDir, request.branchId, request.seqId, host, sessionId);
+	const confirmed = readConfirmedReceipt(runDir, request.branchId, request.seqId, host, sessionId);
 	const confirmedOrder = receiptPublicationOrder(confirmationPath);
 	if (confirmed !== undefined && confirmedOrder !== undefined && sameReceiptCoordinate(confirmed, request, host, sessionId)) {
 		return { presentation: "confirmed", order: confirmedOrder };
 	}
-	const claimPath = userInteractionReceiptPath(runDir, request.seqId, host, sessionId);
+	const claimPath = userInteractionReceiptPath(runDir, request.branchId, request.seqId, host, sessionId);
 	const claim = readReceipt(claimPath);
 	// A claim pins this coordinate even after its delivery lease expires. Expiry permits
 	// at-least-once redelivery of the SAME gate; it must never promote another branch's gate.
@@ -635,13 +657,14 @@ function writePublicationMarker(path: string): void {
 
 function readConfirmedReceipt(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	host: string,
 	sessionId: string,
 ): UserInteractionReceipt | undefined {
-	const confirmed = readReceipt(userInteractionConfirmationPath(runDir, seqId, host, sessionId));
+	const confirmed = readReceipt(userInteractionConfirmationPath(runDir, branchId, seqId, host, sessionId));
 	if (confirmed?.state === "confirmed") return confirmed;
-	const legacy = readReceipt(userInteractionReceiptPath(runDir, seqId, host, sessionId));
+	const legacy = readReceipt(userInteractionReceiptPath(runDir, branchId, seqId, host, sessionId));
 	return legacy?.state === "confirmed" ? legacy : undefined;
 }
 
@@ -652,6 +675,7 @@ function readReceipt(path: string): UserInteractionReceipt | undefined {
 		if (!isRecord(value) || value.version !== 1) return undefined;
 		if (
 			typeof value.runId !== "string" ||
+			typeof value.branchId !== "string" || value.branchId.length === 0 ||
 			!isPositiveInteger(value.seqId) ||
 			typeof value.host !== "string" ||
 			typeof value.sessionId !== "string" ||
@@ -672,6 +696,7 @@ function sameReceiptCoordinate(
 	sessionId: string,
 ): boolean {
 	return receipt.runId === coordinate.runId &&
+		receipt.branchId === coordinate.branchId &&
 		receipt.seqId === coordinate.seqId &&
 		receipt.host === host &&
 		receipt.sessionId === sessionId;
@@ -697,11 +722,12 @@ function canonicalPath(path: string): string {
 
 function parseRequest(value: unknown, path: string): UserInteractionRequest {
 	const allowed = new Set([
-		"version", "runId", "seqId", "actionUid", "prompt", "options", "events", "reply", "rejection", "createdAt",
+		"version", "runId", "branchId", "seqId", "actionUid", "prompt", "options", "events", "reply", "rejection", "createdAt",
 	]);
 	if (!isRecord(value) || value.version !== 1 || hasUnexpectedKeys(value, allowed)) invalid(path);
 	if (
 		typeof value.runId !== "string" ||
+		typeof value.branchId !== "string" || value.branchId.length === 0 ||
 		!isPositiveInteger(value.seqId) ||
 		!isActionUid(value.actionUid) ||
 		typeof value.prompt !== "string" ||
@@ -717,10 +743,11 @@ function parseRequest(value: unknown, path: string): UserInteractionRequest {
 function parseResolution(value: unknown, path: string): UserInteractionResolution {
 	if (!isRecord(value) || value.version !== 1 || (value.kind !== "response" && value.kind !== "closed")) invalid(path);
 	if (value.kind === "response") {
-		const allowed = new Set(["version", "kind", "runId", "seqId", "event", "createdAt"]);
+		const allowed = new Set(["version", "kind", "runId", "branchId", "seqId", "event", "createdAt"]);
 		if (hasUnexpectedKeys(value, allowed)) invalid(path);
 		if (
 			typeof value.runId !== "string" ||
+			typeof value.branchId !== "string" || value.branchId.length === 0 ||
 			!isPositiveInteger(value.seqId) ||
 			!isChartEvent(value.event) ||
 			typeof value.createdAt !== "string"
@@ -729,10 +756,11 @@ function parseResolution(value: unknown, path: string): UserInteractionResolutio
 		if (event.type === "FAILED" || Object.keys(event).some((key) => key !== "type" && key !== "output")) invalid(path);
 		return value as Extract<UserInteractionResolution, { kind: "response" }>;
 	}
-	const allowed = new Set(["version", "kind", "runId", "seqId", "reason", "closedAt"]);
+	const allowed = new Set(["version", "kind", "runId", "branchId", "seqId", "reason", "closedAt"]);
 	if (hasUnexpectedKeys(value, allowed)) invalid(path);
 	if (
 		typeof value.runId !== "string" ||
+		typeof value.branchId !== "string" || value.branchId.length === 0 ||
 		!isPositiveInteger(value.seqId) ||
 		typeof value.reason !== "string" ||
 		typeof value.closedAt !== "string"
@@ -742,11 +770,12 @@ function parseResolution(value: unknown, path: string): UserInteractionResolutio
 
 function assertEmbeddedCoordinate(
 	runDir: string,
+	branchId: BranchId,
 	seqId: number,
 	value: UserInteractionCoordinate,
 	path: string,
 ): void {
-	if (value.runId !== basename(resolve(runDir)) || value.seqId !== seqId) invalid(path);
+	if (value.runId !== basename(resolve(runDir)) || value.branchId !== branchId || value.seqId !== seqId) invalid(path);
 }
 
 function requestComparable(request: UserInteractionRequest): PersistUserInteractionRequestInput {
@@ -776,11 +805,24 @@ function validateUserEventShape(event: ChartEvent): void {
 	if (unexpected.length > 0) throw new Error(`Unexpected user response field(s): ${unexpected.join(", ")}`);
 }
 
-function assertRunCoordinate(runDir: string, runId: string, seqId: number): void {
+function assertLiveRunnerBranch(runDir: string, runId: string, branchId: BranchId): void {
+	const status = readRunStatus(runDir);
+	if (!isRunLive(status)) throw new Error(`Run '${runId}' is not live`);
+	if (status?.branchId !== branchId) {
+		throw new Error(`User interaction branch '${branchId}' does not match live runner branch '${status?.branchId ?? "unknown"}'`);
+	}
+}
+
+function assertRunCoordinate(runDir: string, runId: string, branchId: BranchId, seqId: number): void {
+	assertBranchId(branchId);
 	assertSeqId(seqId);
 	if (basename(resolve(runDir)) !== runId) {
 		throw new Error(`Run coordinate mismatch: expected '${basename(resolve(runDir))}', received '${runId}'`);
 	}
+}
+
+function assertBranchId(branchId: BranchId): void {
+	if (typeof branchId !== "string" || branchId.length === 0 || /[\0/\\]/.test(branchId)) throw new Error(`Invalid user interaction branchId ${branchId}`);
 }
 
 function assertSeqId(seqId: number): void {
@@ -788,7 +830,7 @@ function assertSeqId(seqId: number): void {
 }
 
 function compareCoordinates(left: UserInteractionCoordinate, right: UserInteractionCoordinate): number {
-	return left.runId.localeCompare(right.runId) || left.seqId - right.seqId;
+	return left.runId.localeCompare(right.runId) || left.branchId.localeCompare(right.branchId) || left.seqId - right.seqId;
 }
 
 /**

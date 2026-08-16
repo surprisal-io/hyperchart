@@ -20,7 +20,7 @@ Hypercharts are durable, typed statechart workflows. Each agent action of a char
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Steer a live agent session of a run | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
-| Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
+| Move a stopped named branch head without deleting history | `hyperchart_rewind` |
 | Open the browser inspector for a run | `hyperchart_view` |
 
 Pass `cwd` explicitly when working outside the session's starting directory.
@@ -88,7 +88,7 @@ Multiple gates from parallel/map branches and separate owned runs are serialized
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
 4. Resume with `hyperchart_run` and `runDir`. Create a different run with `chartPath` and no `runDir`.
-5. If a `failure_intent` was durably recorded, plain resume replays back into global failure quiescence or the failed outcome. Recover with `hyperchart_rewind`: stop the run, rewind to before the failure intent (`state` or `seqId`), then resume. Rewind backs up the log, status, and downstream sessions under `rewind-backups/` before truncating.
+5. If a `failure_intent` was durably recorded, plain resume replays back into global failure quiescence or the failed outcome. Recover with `hyperchart_rewind`: stop the run, rewind to before the failure intent (`state` or `seqId`), then resume. Rewind appends a move of the explicit branch head; all records and downstream files remain.
 6. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
 ## Safety rules

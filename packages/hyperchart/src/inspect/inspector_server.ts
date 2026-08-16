@@ -9,6 +9,8 @@ import type { HyperchartRunInfo } from "../host/index.js";
 
 export type RunInspectorSource = {
 	runId: string;
+	/** Initial non-durable branch view registered for this inspector source. */
+	branchId?: string;
 	loadRun: () => Promise<HyperchartRunInfo>;
 	steerSession?: (actionKey: string, message: string) => void | Promise<void>;
 };

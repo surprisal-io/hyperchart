@@ -60,9 +60,10 @@ function createRequest(
 		createdAt: new Date().toISOString(),
 		originSessionId: sessionId,
 	});
-	patchRunStatus(runDir, { runId: name, chartId: "chart", state: "running", heartbeatAt: Date.now() });
+	patchRunStatus(runDir, { runId: name,branchId: "main", chartId: "chart", state: "running", heartbeatAt: Date.now() });
 	persistTerminalNotificationRequest(runDir, {
 		runId: payloadRunId,
+		branchId: "main",
 		runDir,
 		chartId: "chart",
 		outcome: "complete",
@@ -89,9 +90,10 @@ function createUserGate(
 		createdAt: new Date().toISOString(),
 		originSessionId: sessionId,
 	});
-	patchRunStatus(runDir, { runId, chartId: "chart", state: "running", pid: process.pid, heartbeatAt: Date.now() });
+	patchRunStatus(runDir, { runId, branchId: "main", chartId: "chart", state: "running", pid: process.pid, heartbeatAt: Date.now() });
 	persistUserInteractionRequest(runDir, {
 		runId,
+		branchId: "main",
 		seqId,
 		actionUid: { chart: "chart", state: "review", action: "user" },
 		prompt: `Review ${runId}?`,
@@ -162,7 +164,7 @@ describe("Claude terminal monitor", () => {
 				patchRunStatus(runDir, { state: "starting" });
 				archiveTerminalNotificationGeneration(runDir);
 				persistTerminalNotificationRequest(runDir, {
-					runId: "delivery-race", runDir, chartId: "chart", outcome: "complete", prompt: "replacement", artifacts: [],
+					runId: "delivery-race", branchId: "main", runDir, chartId: "chart", outcome: "complete", prompt: "replacement", artifacts: [],
 				});
 				patchRunStatus(runDir, { state: "complete" });
 			},
@@ -212,7 +214,7 @@ describe("Claude terminal monitor", () => {
 		expect(emitted).toMatchObject({
 			customType: "hyperchart-user-request",
 			runId: "run-a",
-			seqId: 2,
+			branchId: "main",			seqId: 2,
 			details: {
 				runId: "run-a", seqId: 2,
 				promptPreview: { text: "Review run-a?", originalChars: 13, omittedChars: 0 },
@@ -229,13 +231,13 @@ describe("Claude terminal monitor", () => {
 		expect(emitted.content).toContain("AskUserQuestion once for this delivery attempt");
 		expect(emitted.content).toContain("Never infer");
 		expect(emitted.content).toContain("hyperchart_respond");
-		expect(hasUserInteractionReceipt(activeDir, 2, "claude", "session-a")).toBe(true);
+		expect(hasUserInteractionReceipt(activeDir, "main", 2, "claude", "session-a")).toBe(true);
 		expect(emitPendingClaudeUserInteraction({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(0);
 
 		const summary = ownedClaudeUserInteractionSummary({ runsRoot, cwd, sessionId: "session-a" });
-		expect(summary.active).toMatchObject({ runId: "run-a", seqId: 2, presentation: "confirmed" });
+		expect(summary.active).toMatchObject({ runId: "run-a", branchId: "main", seqId: 2, presentation: "confirmed" });
 		expect(summary.queued.map((gate) => [gate.runId, gate.seqId])).toEqual([["run-b", 1]]);
-		closeUserInteraction(activeDir, { runId: "run-a", seqId: 2 }, "test");
+		closeUserInteraction(activeDir, { runId: "run-a", branchId: "main", seqId: 2 }, "test");
 		expect(ownedClaudeUserInteractionSummary({ runsRoot, cwd, sessionId: "session-a" }).active).toMatchObject({ runId: "run-b", seqId: 1 });
 	});
 
@@ -243,11 +245,11 @@ describe("Claude terminal monitor", () => {
 		const { runsRoot, cwd } = world();
 		const runDir = createUserGate(runsRoot, cwd, "unrepresentable-gate", 1);
 		persistUserInteractionRequest(runDir, {
-			runId: "unrepresentable-gate", seqId: 2,
+			runId: "unrepresentable-gate", branchId: "main", seqId: 2,
 			actionUid: { chart: "chart", state: "review", action: "user" }, prompt: "Choose", options: [], events: ["DONE"],
 			reply: { kind: "jsonSchema", schema: { type: "string", enum: Array.from({ length: 41 }, (_, index) => `value-${index}`) } },
 		});
-		closeUserInteraction(runDir, { runId: "unrepresentable-gate", seqId: 1 }, "superseded");
+		closeUserInteraction(runDir, { runId: "unrepresentable-gate", branchId: "main", seqId: 1 }, "superseded");
 		const lines: string[] = [];
 		expect(emitPendingClaudeUserInteraction({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
 		expect(JSON.parse(lines[0]!)).toMatchObject({ customType: "hyperchart-boundary-error", details: { error: "user-gate-summary-unavailable", seqId: 2 } });
@@ -259,7 +261,7 @@ describe("Claude terminal monitor", () => {
 		vi.setSystemTime(100_000);
 		const { runsRoot, cwd } = world();
 		const runDir = createUserGate(runsRoot, cwd, "waited-gate", 1);
-		expect(claimUserInteractionReceipt(runDir, 1, "claude", "session-a", {
+		expect(claimUserInteractionReceipt(runDir, "main", 1, "claude", "session-a", {
 			now: 1,
 			leaseMs: 100_000,
 			source: "wait",
@@ -284,12 +286,12 @@ describe("Claude terminal monitor", () => {
 			sessionId: "session-a",
 			writeLine: () => { throw new Error("stdout closed"); },
 		})).toThrow("stdout closed");
-		expect(hasUserInteractionReceipt(runDir, 1, "claude", "session-a")).toBe(false);
+		expect(hasUserInteractionReceipt(runDir, "main", 1, "claude", "session-a")).toBe(false);
 		vi.setSystemTime(131_000);
 		const lines: string[] = [];
 		expect(emitPendingClaudeNotifications({ runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
 		expect(JSON.parse(lines[0]!).content).toContain("free-text question");
-		expect(hasUserInteractionReceipt(runDir, 1, "claude", "session-a")).toBe(true);
+		expect(hasUserInteractionReceipt(runDir, "main", 1, "claude", "session-a")).toBe(true);
 	});
 
 	it("the dead-run watcher preserves a request written before the status crash", async () => {

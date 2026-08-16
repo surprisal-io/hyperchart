@@ -26,18 +26,18 @@ The [API index](api/README.md) lists every supported package entry point and the
 ├── runner.stdout.log
 ├── runner.stderr.log
 ├── user-interactions/
-│   └── <seqId>/
-│       ├── request.json
-│       ├── resolution.json
-│       └── receipts/
-├── sessions/
-│   └── progress.json
-└── rewind-backups/
+│   └── <branchId>/
+│       └── <seqId>/
+│           ├── request.json
+│           ├── resolution.json
+│           └── receipts/
+└── sessions/
+    └── progress.json
 ```
 
-Only `meta.json`, `log.jsonl`, and the run directory itself are fundamental. Status, runner logs, user-interaction mailboxes, session progress, and rewind backups appear when the corresponding host/runtime behavior is used. `runner.config.json` snapshots the host's role/model and toolset/tool mappings for that run; `sessions/progress.json` may additionally record each launched session's declared role/toolset and actual model/tool allowlist. A user interaction's external identity is only `(runId, seqId)`; `resolution.json` is mutually exclusive response-or-close state, and receipts record host delivery rather than a second gate id.
+Only `meta.json`, the append-only v2 mutation journal `log.jsonl`, and the run directory itself are fundamental. Status and the selected UI branch are operational/non-durable; named branch heads are reconstructed from journal mutations. `sessions/progress.json` records `branchId` and producing invocation `seqId`. A user interaction's exact external identity is `(runId, branchId, seqId)`; older two-component identities are rejected.
 
-Artifacts may live anywhere inside the run working directory according to the chart declaration; they are not required to live under `<run-dir>`.
+Artifact paths keep their authored mutable-file semantics. Branching the durable machine log does not version artifact contents: sibling executions may overwrite the same path, and historical artifact restoration remains a separate artifact-versioning problem.
 
 ### Process states
 
@@ -57,8 +57,7 @@ These `status.json` values are different from canonical host run statuses and pe
 
 - Interactive delivery requires a supported owning host session (currently Pi or Claude Code); otherwise open gates remain inspectable and resumable through their file mailbox.
 - Rewind cannot reverse external effects.
-- Artifact cleanup during rewind is best effort.
-- General agent-session identity for partial map/parallel re-entry is not defined.
+- Shared/static external effects require application-specific idempotency and reconciliation.
 - Missing agent definitions are execution errors.
 - Loading a chart executes its top-level TypeScript.
 - Important durable runs should pin exact package versions.

@@ -6,7 +6,8 @@ import { normalizeChartConfig, start } from "../packages/hyperchart/src/index.js
 import { agent, arg, chart, final, map, user } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, DurableLogRecord, Effect } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
-import { JsonlLogStore, MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
 import {
 	readUserInteractionRequest,
@@ -133,15 +134,15 @@ describe("ChartRuntime", () => {
 	it("appends and acknowledges durable effects in supplied order", async () => {
 		const store = new MemoryLogStore();
 		const runtime = new ChartRuntime({
-			ast: linearChart(),
+			ast: linearChart(), branchId: "main",
 			logStore: store,
 			agentExecutor: new FakeAgentExecutor(),
 			workDir: process.cwd(),
 			chartDir: process.cwd(),
 		});
 		const effects: Effect[] = [
-			{ kind: "durable_records", id: "first", records: [{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 }] },
-			{ kind: "durable_records", id: "second", records: [{ type: "failure_intent", origin: "work", error: "test", parentId: 1, seqId: 2, timestamp: 2 }] },
+			{ kind: "durable_records", id: "first", records: [{ type: "args", args: {} }] },
+			{ kind: "durable_records", id: "second", records: [{ type: "failure_intent", origin: "work", error: "test" }] },
 		];
 
 		runtime.runEffects(effects);
@@ -156,7 +157,7 @@ describe("ChartRuntime", () => {
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE", output: { ok: true } }] });
 		const store = new MemoryLogStore();
 		const runtime = new ChartRuntime({
-			ast: linearChart(),
+			ast: linearChart(), branchId: "main",
 			logStore: store,
 			agentExecutor: executor,
 			workDir: process.cwd(),
@@ -177,7 +178,7 @@ describe("ChartRuntime", () => {
 			"fanout#1.work": [{ type: "OK" }],
 		});
 		const runtime = new ChartRuntime({
-			ast: fanoutChart(),
+			ast: fanoutChart(), branchId: "main",
 			logStore: new MemoryLogStore(),
 			agentExecutor: executor,
 			workDir: process.cwd(),
@@ -195,11 +196,12 @@ describe("ChartRuntime", () => {
 		const root = await makeTempDir();
 		const runDir = join(root, "run");
 		await mkdir(runDir);
-		patchRunStatus(runDir, { runId: "run", chartId: ast.id, state: "running", pid: process.pid, heartbeatAt: Date.now() });
+		patchRunStatus(runDir, { runId: "run",branchId: "main", chartId: ast.id, state: "running", pid: process.pid, heartbeatAt: Date.now() });
 		const logStore = new JsonlLogStore(join(runDir, "log.jsonl"));
-		const firstUserExecutor = new FileUserExecutor({ runId: "run", runDir, pollMs: 5 });
+		logStore.initializeRootBranch();
+		const firstUserExecutor = new FileUserExecutor({ runId: "run", runDir, branchId: "main", pollMs: 5 });
 		const firstRuntime = new ChartRuntime({
-			ast,
+			ast, branchId: "main",
 			logStore,
 			agentExecutor: new FakeAgentExecutor(),
 			userExecutor: firstUserExecutor,
@@ -207,23 +209,23 @@ describe("ChartRuntime", () => {
 			chartDir: root,
 		});
 		const firstRun = start(firstRuntime).catch(() => undefined);
-		await waitUntil(() => readUserInteractionRequest(runDir, 1) !== undefined);
+		await waitUntil(() => readUserInteractionRequest(runDir, "main", 1) !== undefined);
 
 		await firstRuntime.dispose();
 		await firstRun;
-		expect(readUserInteractionRequest(runDir, 1)).toBeDefined();
+		expect(readUserInteractionRequest(runDir, "main", 1)).toBeDefined();
 		await validateAndPersistUserInteractionResponse({
 			runDir,
 			runId: "run",
-			seqId: 1,
+			branchId: "main",			seqId: 1,
 			event: { type: "APPROVED" },
 		});
 
 		const secondRuntime = new ChartRuntime({
-			ast,
+			ast, branchId: "main",
 			logStore,
 			agentExecutor: new FakeAgentExecutor(),
-			userExecutor: new FileUserExecutor({ runId: "run", runDir, pollMs: 5 }),
+			userExecutor: new FileUserExecutor({ runId: "run", runDir, branchId: "main", pollMs: 5 }),
 			workDir: root,
 			chartDir: root,
 		});
@@ -238,7 +240,7 @@ describe("ChartRuntime", () => {
 	it("fires timers and cancels the timed-out action", async () => {
 		const executor = new FakeAgentExecutor({ work: [undefined] });
 		const runtime = new ChartRuntime({
-			ast: timedChart(),
+			ast: timedChart(), branchId: "main",
 			logStore: new MemoryLogStore(),
 			agentExecutor: executor,
 			workDir: process.cwd(),
@@ -257,9 +259,10 @@ describe("ChartRuntime", () => {
 		const ast = linearChart();
 		const dir = await makeTempDir();
 		const logStore = new JsonlLogStore(join(dir, "log.jsonl"));
+		logStore.initializeRootBranch();
 		const firstExecutor = new FakeAgentExecutor({ work: [undefined] });
 		const firstRuntime = new ChartRuntime({
-			ast,
+			ast, branchId: "main",
 			logStore,
 			agentExecutor: firstExecutor,
 			workDir: dir,
@@ -272,7 +275,7 @@ describe("ChartRuntime", () => {
 
 		const secondExecutor = new FakeAgentExecutor({ work: [{ type: "DONE" }] });
 		const secondRuntime = new ChartRuntime({
-			ast,
+			ast, branchId: "main",
 			logStore,
 			agentExecutor: secondExecutor,
 			workDir: dir,

@@ -1,5 +1,6 @@
 import { actionUidKey } from "../../core/action_uid.js";
 import type { ActionUID } from "../../core/types.js";
+import type { BranchId } from "../../core/durable_events.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { RejectedEffect, UserEffect } from "../../core/machine.js";
 import type { EmitCompletion } from "./agent_executor.js";
@@ -23,6 +24,7 @@ export interface UserExecutor {
 export type FileUserExecutorOptions = Readonly<{
 	runId: string;
 	runDir: string;
+	branchId: BranchId;
 	pollMs?: number;
 	schemaRegistry?: SchemaRegistryLike;
 	onWarn?: (message: string) => void;
@@ -86,7 +88,7 @@ export class FileUserExecutor implements UserExecutor {
 			try {
 				closeUserInteraction(
 					this.options.runDir,
-					{ runId: this.options.runId, seqId },
+					{ runId: this.options.runId, branchId: this.options.branchId, seqId },
 					"machine_abandoned",
 				);
 			} catch (error) {
@@ -117,6 +119,7 @@ export class FileUserExecutor implements UserExecutor {
 		if (this.live.has(effect.seqId)) return;
 		persistUserInteractionRequest(this.options.runDir, {
 			runId: this.options.runId,
+			branchId: this.options.branchId,
 			seqId: effect.seqId,
 			actionUid: effect.actionUid,
 			prompt: effect.prompt,
@@ -152,17 +155,17 @@ export class FileUserExecutor implements UserExecutor {
 		if (phase.emitted || phase.checking || this.disposed || this.live.get(phase.seqId) !== phase) return;
 		phase.checking = true;
 		try {
-			if (readUserInteractionClose(this.options.runDir, phase.seqId) !== undefined) {
+			if (readUserInteractionClose(this.options.runDir, this.options.branchId, phase.seqId) !== undefined) {
 				clearInterval(phase.timer);
 				this.live.delete(phase.seqId);
 				return;
 			}
-			const response = readUserInteractionResponse(this.options.runDir, phase.seqId);
+			const response = readUserInteractionResponse(this.options.runDir, this.options.branchId, phase.seqId);
 			if (response === undefined) return;
-			if (response.runId !== this.options.runId || response.seqId !== phase.seqId) {
+			if (response.runId !== this.options.runId || response.branchId !== this.options.branchId || response.seqId !== phase.seqId) {
 				throw new Error("response coordinate does not match its mailbox directory");
 			}
-			const request = readUserInteractionRequest(this.options.runDir, phase.seqId);
+			const request = readUserInteractionRequest(this.options.runDir, this.options.branchId, phase.seqId);
 			if (request === undefined) throw new Error("response has no matching request");
 			await validateUserInteractionEvent(request, response.event, this.options.schemaRegistry);
 			if (this.disposed || this.live.get(phase.seqId) !== phase) return;

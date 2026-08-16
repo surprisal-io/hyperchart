@@ -5,6 +5,7 @@ import type { ChartAst, DurableLogRecord, Effect, MachineEvent } from "../packag
 type MaybeAsyncIterable<T> = Iterable<T> | AsyncIterable<T>;
 
 export class MockRuntime implements Runtime {
+	readonly branchId = "main";
 	readonly calls: string[] = [];
 	readonly effectBatches: Effect[][] = [];
 
@@ -32,7 +33,13 @@ export class MockRuntime implements Runtime {
 		// the loop (e.g. start()'s args fact) show up in loadLogs.
 		for (const effect of effects) {
 			if (effect.kind === "durable_records") {
-				this.logs.push(...effect.records);
+				let seqId = this.logs.at(-1)?.seqId ?? 0;
+				let parentId = seqId === 0 ? null : seqId;
+				for (const draft of effect.records) {
+					const record = { ...draft, seqId: ++seqId, parentId, branchId: this.branchId, timestamp: Date.now() } as DurableLogRecord;
+					this.logs.push(record);
+					parentId = record.seqId;
+				}
 			}
 		}
 		this.onRunEffects?.(effects);

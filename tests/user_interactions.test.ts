@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { rewindHyperchartRun } from "../packages/hyperchart/src/runtime/generic/rewind.js";
 import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
 import {
@@ -57,6 +58,7 @@ function createRun(
 	});
 	patchRunStatus(runDir, {
 		runId,
+		branchId: "main",
 		chartId: "chart",
 		state: "running",
 		pid: process.pid,
@@ -68,6 +70,7 @@ function createRun(
 function persist(runDir: string, runId: string, seqId: number, reply = false) {
 	return persistUserInteractionRequest(runDir, {
 		runId,
+		branchId: "main",
 		seqId,
 		actionUid: { chart: "chart", state: `branch-${seqId}`, action: "user" },
 		prompt: `Question ${seqId}?`,
@@ -94,16 +97,16 @@ function owner(runsRoot: string, workDir: string, sessionId = "session-a"): User
 }
 
 describe("user interaction mailbox", () => {
-	it("uses only runId and seqId as persisted gate identity and persists once", () => {
+	it("uses runId, branchId, and seqId as persisted gate identity and persists once", () => {
 		const { runsRoot, workDir } = world();
 		const runDir = createRun(runsRoot, workDir, "run-a");
 		const first = persist(runDir, "run-a", 7);
 		const second = persist(runDir, "run-a", 7);
 
 		expect(second).toEqual(first);
-		expect(userInteractionRequestPath(runDir, 7)).toBe(join(runDir, "user-interactions", "7", "request.json"));
-		const raw = JSON.parse(readFileSync(userInteractionRequestPath(runDir, 7), "utf8"));
-		expect(raw).toMatchObject({ runId: "run-a", seqId: 7 });
+		expect(userInteractionRequestPath(runDir, "main", 7)).toBe(join(runDir, "user-interactions", "main", "7", "request.json"));
+		const raw = JSON.parse(readFileSync(userInteractionRequestPath(runDir, "main", 7), "utf8"));
+		expect(raw).toMatchObject({ runId: "run-a", branchId: "main", seqId: 7 });
 		expect(raw).not.toHaveProperty("effectId");
 		expect(raw).not.toHaveProperty("requestId");
 		expect(() => persistUserInteractionRequest(runDir, { ...first, prompt: "different" } as never)).toThrow(/conflict/);
@@ -113,12 +116,13 @@ describe("user interaction mailbox", () => {
 		const { runsRoot, workDir } = world();
 		const runDir = createRun(runsRoot, workDir, "run-a");
 		persist(runDir, "run-a", 3);
-		mkdirSync(join(runDir, "user-interactions", "1"), { recursive: true });
-		writeFileSync(join(runDir, "user-interactions", "1", "request.json"), "{broken\n");
-		mkdirSync(join(runDir, "user-interactions", "2"), { recursive: true });
-		writeFileSync(join(runDir, "user-interactions", "2", "request.json"), JSON.stringify({
+		mkdirSync(join(runDir, "user-interactions", "main", "1"), { recursive: true });
+		writeFileSync(join(runDir, "user-interactions", "main", "1", "request.json"), "{broken\n");
+		mkdirSync(join(runDir, "user-interactions", "main", "2"), { recursive: true });
+		writeFileSync(join(runDir, "user-interactions", "main", "2", "request.json"), JSON.stringify({
 			version: 1,
 			runId: "run-a",
+			branchId: "main",
 			seqId: 99,
 			actionUid: { chart: "chart", state: "wrong", action: "user" },
 			prompt: "wrong directory",
@@ -127,8 +131,8 @@ describe("user interaction mailbox", () => {
 			createdAt: new Date().toISOString(),
 		}));
 
-		expect(scanOpenUserInteractions(runDir).map((request) => request.seqId)).toEqual([3]);
-		expect(() => readUserInteractionRequest(runDir, 2)).toThrow(/Invalid user interaction record/);
+		expect(scanOpenUserInteractions(runDir, "main").map((request) => request.seqId)).toEqual([3]);
+		expect(() => readUserInteractionRequest(runDir, "main", 2)).toThrow(/Invalid user interaction record/);
 	});
 
 	it("validates events and reply schema before commit", async () => {
@@ -137,26 +141,26 @@ describe("user interaction mailbox", () => {
 		persist(runDir, "run-a", 1, true);
 
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "FAILED", error: "no" },
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "FAILED", error: "no" },
 		})).rejects.toThrow(/FAILED is reserved/);
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "OTHER" },
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "OTHER" },
 		})).rejects.toThrow(/not allowed/);
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "APPROVED", output: { nope: true } },
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED", output: { nope: true } },
 		})).rejects.toThrow(/reply schema/);
-		expect(readUserInteractionResponse(runDir, 1)).toBeUndefined();
+		expect(readUserInteractionResponse(runDir, "main", 1)).toBeUndefined();
 
 		const committed = await validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "APPROVED", output: { note: "yes" } },
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED", output: { note: "yes" } },
 		});
 		expect(committed.idempotent).toBe(false);
 		const identical = await validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { output: { note: "yes" }, type: "APPROVED" },
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { output: { note: "yes" }, type: "APPROVED" },
 		});
 		expect(identical.idempotent).toBe(true);
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "REJECTED", output: { note: "no" } },
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "REJECTED", output: { note: "no" } },
 		})).rejects.toThrow(/Conflicting response/);
 	});
 
@@ -168,15 +172,16 @@ describe("user interaction mailbox", () => {
 		const committing = validateAndPersistUserInteractionResponse({
 			runDir,
 			runId: "run-a",
+			branchId: "main",
 			seqId: 1,
 			event: { type: "APPROVED", output: { note: "yes" } },
 		});
-		const closed = closeUserInteraction(runDir, { runId: "run-a", seqId: 1 }, "timeout");
+		const closed = closeUserInteraction(runDir, { runId: "run-a", branchId: "main", seqId: 1 }, "timeout");
 
 		expect(closed?.reason).toBe("timeout");
 		await expect(committing).rejects.toThrow(/stale, closed, or missing|closed before response commit/);
-		expect(readUserInteractionClose(runDir, 1)?.reason).toBe("timeout");
-		expect(readUserInteractionResponse(runDir, 1)).toBeUndefined();
+		expect(readUserInteractionClose(runDir, "main", 1)?.reason).toBe("timeout");
+		expect(readUserInteractionResponse(runDir, "main", 1)).toBeUndefined();
 	});
 
 	it("pins and promotes gates strictly by lexical runId then numeric seqId", async () => {
@@ -193,12 +198,13 @@ describe("user interaction mailbox", () => {
 			["run-a", 10],
 			["run-b", 1],
 		]);
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", seqId: 2 });
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", seqId: 2 });
+		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 2 });
+		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 2 });
 
 		await validateAndPersistUserInteractionResponse({
 			runDir: runA,
 			runId: "run-a",
+			branchId: "main",
 			seqId: 2,
 			event: { type: "APPROVED" },
 			owner: owned,
@@ -206,12 +212,13 @@ describe("user interaction mailbox", () => {
 		expect((await validateAndPersistUserInteractionResponse({
 			runDir: runA,
 			runId: "run-a",
+			branchId: "main",
 			seqId: 2,
 			event: { type: "APPROVED" },
 			owner: owned,
 		})).idempotent).toBe(true);
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", seqId: 10 });
-		closeUserInteraction(runA, { runId: "run-a", seqId: 10 }, "scope_exit");
+		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 10 });
+		closeUserInteraction(runA, { runId: "run-a", branchId: "main", seqId: 10 }, "scope_exit");
 		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-b", seqId: 1 });
 	});
 
@@ -227,9 +234,9 @@ describe("user interaction mailbox", () => {
 		persist(runA, "run-a", 1);
 		// Another presenter can now select run-a while the stale run-b presenter is paused.
 		expect(acquireActiveUserInteraction(owned)?.request.runId).toBe("run-a");
-		claimUserInteractionReceipt(runB, 1, "test", "session-a", { source: "first-published-claim" });
+		claimUserInteractionReceipt(runB, "main", 1, "test", "session-a", { source: "first-published-claim" });
 		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
-		claimUserInteractionReceipt(runA, 1, "test", "session-a", { source: "later-published-claim" });
+		claimUserInteractionReceipt(runA, "main", 1, "test", "session-a", { source: "later-published-claim" });
 
 		// Once run-b wins the first immutable claim it remains the sole active gate. The
 		// lexically lower run-a is queued rather than preempting a gate that may be presented.
@@ -245,13 +252,13 @@ describe("user interaction mailbox", () => {
 		expect(acquireActiveUserInteraction(activeOwner)?.request.seqId).toBe(1);
 
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 2, event: { type: "APPROVED" }, owner: activeOwner,
+			runDir, runId: "run-a", branchId: "main", seqId: 2, event: { type: "APPROVED" }, owner: activeOwner,
 		})).rejects.toThrow(/not the active gate/);
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "APPROVED" }, owner: owner(runsRoot, workDir, "session-b"),
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED" }, owner: owner(runsRoot, workDir, "session-b"),
 		})).rejects.toThrow(/not owned/);
 		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", seqId: 1, event: { type: "APPROVED" }, owner: owner(runsRoot, join(root, "elsewhere")),
+			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED" }, owner: owner(runsRoot, join(root, "elsewhere")),
 		})).rejects.toThrow(/another working directory/);
 	});
 
@@ -261,14 +268,15 @@ describe("user interaction mailbox", () => {
 		const runB = createRun(runsRoot, workDir, "run-b");
 		persist(runA, "run-a", 1);
 		persist(runB, "run-b", 1);
-		claimUserInteractionReceipt(runB, 1, "test", "session-a", { now: 1, leaseMs: 1 });
+		claimUserInteractionReceipt(runB, "main", 1, "test", "session-a", { now: 1, leaseMs: 1 });
 
 		// Even an expired claim may only redeliver run-b; it cannot promote run-a.
 		expect(acquireActiveUserInteraction(owner(runsRoot, workDir))?.request).toMatchObject({
 			runId: "run-b",
+			branchId: "main",
 			seqId: 1,
 		});
-		markUserInteractionReceipt(runB, 1, "test", "session-a");
+		markUserInteractionReceipt(runB, "main", 1, "test", "session-a");
 		expect(acquireActiveUserInteraction(owner(runsRoot, workDir))?.request.runId).toBe("run-b");
 	});
 
@@ -277,13 +285,13 @@ describe("user interaction mailbox", () => {
 		const runDir = createRun(runsRoot, workDir, "run-a");
 		persist(runDir, "run-a", 1);
 
-		expect(claimUserInteractionReceipt(runDir, 1, "test", "session-a", { now: 1_000, leaseMs: 100 })).toBe(true);
-		expect(claimUserInteractionReceipt(runDir, 1, "test", "session-a", { now: 1_050, leaseMs: 100 })).toBe(false);
-		expect(claimUserInteractionReceipt(runDir, 1, "test", "session-a", { now: 1_101, leaseMs: 100 })).toBe(true);
-		expect(hasUserInteractionReceipt(runDir, 1, "test", "session-a")).toBe(false);
-		markUserInteractionReceipt(runDir, 1, "test", "session-a");
-		expect(hasUserInteractionReceipt(runDir, 1, "test", "session-a")).toBe(true);
-		expect(claimUserInteractionReceipt(runDir, 1, "test", "session-a", { now: 9_000, leaseMs: 100 })).toBe(false);
+		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 1_000, leaseMs: 100 })).toBe(true);
+		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 1_050, leaseMs: 100 })).toBe(false);
+		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 1_101, leaseMs: 100 })).toBe(true);
+		expect(hasUserInteractionReceipt(runDir, "main", 1, "test", "session-a")).toBe(false);
+		markUserInteractionReceipt(runDir, "main", 1, "test", "session-a");
+		expect(hasUserInteractionReceipt(runDir, "main", 1, "test", "session-a")).toBe(true);
+		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 9_000, leaseMs: 100 })).toBe(false);
 	});
 
 	it("preserves phases on dispose, closes on cancel, and creates a new rejected-phase request", async () => {
@@ -299,19 +307,19 @@ describe("user interaction mailbox", () => {
 			prompt: "Approve?",
 			events: ["APPROVED"],
 		};
-		const first = new FileUserExecutor({ runId: "run-a", runDir, pollMs: 1_000 });
+		const first = new FileUserExecutor({ runId: "run-a", runDir, branchId: "main", pollMs: 1_000 });
 		first.start(invocation, () => undefined);
 		await first.dispose();
-		expect(readUserInteractionRequest(runDir, 1)).toBeDefined();
-		expect(readUserInteractionClose(runDir, 1)).toBeUndefined();
+		expect(readUserInteractionRequest(runDir, "main", 1)).toBeDefined();
+		expect(readUserInteractionClose(runDir, "main", 1)).toBeUndefined();
 
-		const canceling = new FileUserExecutor({ runId: "run-a", runDir, pollMs: 1_000 });
+		const canceling = new FileUserExecutor({ runId: "run-a", runDir, branchId: "main", pollMs: 1_000 });
 		canceling.start({ ...invocation, id: "private-effect-2", seqId: 2 }, () => undefined);
 		await canceling.cancel(uid);
-		expect(readUserInteractionClose(runDir, 2)?.reason).toBe("machine_abandoned");
+		expect(readUserInteractionClose(runDir, "main", 2)?.reason).toBe("machine_abandoned");
 		await canceling.dispose();
 
-		const rejecting = new FileUserExecutor({ runId: "run-a", runDir, pollMs: 1_000 });
+		const rejecting = new FileUserExecutor({ runId: "run-a", runDir, branchId: "main", pollMs: 1_000 });
 		rejecting.reject({
 			kind: "rejected",
 			id: "private-rejected-effect",
@@ -323,7 +331,7 @@ describe("user interaction mailbox", () => {
 			reason: "needs confirmation",
 			invocation,
 		}, () => undefined);
-		expect(readUserInteractionRequest(runDir, 3)?.rejection).toEqual({
+		expect(readUserInteractionRequest(runDir, "main", 3)?.rejection).toEqual({
 			attempt: 1,
 			onReject: "resume",
 			reason: "needs confirmation",
@@ -331,7 +339,7 @@ describe("user interaction mailbox", () => {
 		await rejecting.dispose();
 	});
 
-	it("moves the whole mailbox into rewind backup", async () => {
+	it("preserves the whole mailbox during append-only rewind", async () => {
 		const { root, runsRoot, workDir } = world();
 		const runDir = createRun(runsRoot, workDir, "run-a");
 		const chartPath = join(root, "rewind-chart.mjs");
@@ -344,25 +352,28 @@ describe("user interaction mailbox", () => {
 			originSessionId: "session-a",
 		});
 		const uid = { chart: "chart", state: "ask", action: "user" } as const;
-		writeFileSync(join(runDir, "log.jsonl"), [
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "user", uid, prompt: { kind: "template", strings: ["Approve?"], refs: [] }, options: ["APPROVED"] }, parentId: null, seqId: 1, timestamp: 1 },
-			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "APPROVED" }, parentId: 1, seqId: 2, timestamp: 2 },
-		].map((record) => JSON.stringify(record)).join("\n") + "\n");
+		const logStore = new JsonlLogStore(join(runDir, "log.jsonl"));
+		logStore.initializeRootBranch();
+		logStore.appendDrafts([
+			{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "user", uid, prompt: { kind: "template", strings: ["Approve?"], refs: [] }, options: ["APPROVED"] } },
+			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "APPROVED" } },
+		]);
 		persist(runDir, "run-a", 1);
-		closeUserInteraction(runDir, { runId: "run-a", seqId: 1 }, "test");
+		closeUserInteraction(runDir, { runId: "run-a", branchId: "main", seqId: 1 }, "test");
+		const mailboxPath = userInteractionRequestPath(runDir, "main", 1);
+		const mailboxBefore = readFileSync(mailboxPath, "utf8");
 		patchRunStatus(runDir, { state: "stopped", pid: undefined, heartbeatAt: undefined });
 
 		const result = await rewindHyperchartRun({
 			runDir,
+			branchId: "main",
 			state: "ask",
 			mode: "before",
-			cleanupSessions: true,
-			cleanupArtifacts: false,
 			cwd: workDir,
 		});
 
-		expect(readFileSync(join(result.backupDir, "user-interactions", "1", "request.json"), "utf8")).toContain("Question 1?");
-		expect(() => readFileSync(join(runDir, "user-interactions", "1", "request.json"), "utf8")).toThrow();
+		expect(result).toMatchObject({ branchId: "main", previousHeadSeqId: 2, headSeqId: null, preservedRecords: 2 });
+		expect(readFileSync(mailboxPath, "utf8")).toBe(mailboxBefore);
 	});
 
 	it("ignores obsolete mutable arbiter files and derives the real lowest gate", () => {
@@ -373,9 +384,9 @@ describe("user interaction mailbox", () => {
 		mkdirSync(join(runsRoot, ".user-interaction-arbiter"), { recursive: true });
 		writeFileSync(userInteractionArbiterPath(owned), "{broken\n");
 
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", seqId: 1 });
-		expect(releaseActiveUserInteraction(owned, { runId: "run-a", seqId: 1 })).toBe(false);
-		closeUserInteraction(runDir, { runId: "run-a", seqId: 1 }, "done");
-		expect(releaseActiveUserInteraction(owned, { runId: "run-a", seqId: 1 })).toBe(true);
+		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 1 });
+		expect(releaseActiveUserInteraction(owned, { runId: "run-a", branchId: "main", seqId: 1 })).toBe(false);
+		closeUserInteraction(runDir, { runId: "run-a", branchId: "main", seqId: 1 }, "done");
+		expect(releaseActiveUserInteraction(owned, { runId: "run-a", branchId: "main", seqId: 1 })).toBe(true);
 	});
 });

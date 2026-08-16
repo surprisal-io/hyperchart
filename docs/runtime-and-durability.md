@@ -28,37 +28,15 @@ The machine returns one of:
 
 Effect interpreters live in the runtime. This boundary keeps transition semantics testable without Pi.
 
-## Durable records
+## Append-only branch storage
 
-`log.jsonl` is an ordered stream of `DurableLogRecord` values. Every record has:
+`log.jsonl` is a v2 journal of typed storage mutations, not a flat machine-record list. A record-batch mutation contains immutable `DurableLogRecord` values with globally monotonic `seqId`, ancestry `parentId`, mandatory durable provenance `branchId`, and `timestamp`. A branch mutation creates or moves a named durable pointer `{ branchId, headSeqId }`. Branch mutations never enter chart projection.
 
-- `seqId` — monotonically increasing sequence id;
-- `parentId` — branch parent, or `null`;
-- `timestamp` — append time;
-- a record-specific payload.
+A new run creates `main` before its first record. Legacy linear logs and mixed formats are rejected explicitly; there is no implicit branch or migration path.
 
-Record kinds:
+The storage reader repairs only an unterminated final JSONL tail and normalizes the journal once. That boundary validates mutation shape, unique/global numbering, parent references, branch create/move legality, and append-from-head. It exposes the full immutable tree, named head registry, and root-to-head ancestry queries. Replay and projection receive only the explicitly selected ancestry and do not repeat structural checks.
 
-| Record | Meaning |
-|---|---|
-| `args` | run arguments for a fresh log |
-| `session_ref` | Pi session file associated with an action invocation |
-| `spawned` | pinned key/item set for one map entry |
-| `state_action / invoke` | action identity and full normalized action definition |
-| `state_action / complete` | completion event claimed by the action |
-| `state_action / validated` | validator reference and stored verdict for a completion claim |
-| `state_action / timer_fired` | deadline expired for an invocation |
-| `actor_created` | immutable endpoint occurrence input, generation, ordinary/pool definition, and concurrency provenance |
-| `actor_messages_enqueued` | one exact-validated atomic FIFO enqueue plus exact `send`/`sendBatch`/`call`/`callBatch` source, symbolic-self provenance when authored, resolved target declaration, and item correlation |
-| `actor_message` | receive acceptance, validated reply, or settlement; pool facts carry the durable `workerIndex` assignment |
-| `actor_call_resolved` | singleton caller wake-up |
-| `actor_batch_call_resolved` | batch caller wake-up with exact ordered `messageIds` membership |
-| `actor_scope` | endpoint closing/drain/stop |
-| `failure_intent` | durable fact of reserved global fail-fast; terminalizes the run without a successor |
-
-Transitions are deliberately absent. The projection reads accepted facts and asks the current chart where control leads.
-
-Scope-exit, deadline, and global-failure cancellation are best-effort runtime effects, not durable facts. A `failure_intent` blocks all successors and terminalizes the run immediately; the final output carries cancellation effects for pending actions so the runtime can stop local work without delaying the failed outcome.
+Every append/fork/rewind uses one exclusive run-writer claim. A record batch and its head advance are one JSONL commit, so concurrent writers cannot reuse ids or lose a head. Fork creates a head without selection; checkout/view is a non-durable handle; rewind appends a head move and preserves every prior record and downstream file.
 
 ## Why store facts instead of current state
 
@@ -166,7 +144,7 @@ The generic runtime receives a host `AgentExecutor`. It owns effect interpretati
 
 Terminal notification metadata is a runner/host outbox protocol, not a durable machine transition or log fact. Delivery waits until `status.json` matches the request outcome. Each host launch opens a fresh opaque runner-attempt identity, and terminal requests record that identity. A new runner attempt archives any prior attempt's complete outbox, so a recovered run may publish a different eventual outcome without rewriting the old request; stale recovery also rejects a predecessor request if the process dies before archival. Receipt claims and confirmations are fenced by the caller's observed request UUID, preventing an in-flight old generation from confirming and suppressing its replacement. User interactions are a second file-backed rendezvous: the runner persists every open request immediately and remains alive while waiting, but only the containing branch blocks. Hosts select one owned request across parallel/map branches and runs by lexical `runId`, then numeric `seqId`, pinning it until response or close. Exact `originSessionId + canonical workDir` checks prevent another session or checkout from answering it.
 
-A host validates the exact active coordinate, non-`FAILED` allowed event, and optional reply schema before atomically publishing a resolution. Identical responses are idempotent; divergent ones conflict. Machine cancellation closes an abandoned phase, while executor disposal on operator stop preserves it for resume. Rewind moves both the complete terminal outbox and the complete `user-interactions/` mailbox into its backup before replay resumes, preventing pre-rewind answers or receipts from matching reused sequence ids.
+A host validates the exact active `(runId, branchId, seqId)` coordinate, non-`FAILED` allowed event, and optional reply schema before atomically publishing a resolution. Identical responses are idempotent; divergent ones conflict. Machine cancellation closes an abandoned phase, while executor disposal on operator stop preserves it for resume. Gate files remain inspectable; only the exact live runner branch may accept a response, and global sequence ids are never reused.
 
 ## Agent executor contract
 

@@ -67,3 +67,7 @@ The core package includes statically placed, event-sourced actors with explicit 
 MIT · experimental `0.4.1`
 
 Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; actor templates may target their current endpoint with send-only `self()`. See the canonical [explicit actors guide](../../docs/explicit-actors.md).
+
+## Branch storage
+
+The runtime exports v2 storage mutation/branch types, normalized tree queries, `JsonlLogStore`, `listHyperchartBranches`, `getHyperchartBranch`, `forkHyperchartRun`, and append-only `rewindHyperchartRun`. Every runner/inspection uses an explicit branch handle.

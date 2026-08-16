@@ -381,81 +381,34 @@ Stop one run or every active run owned by current working directory. Exactly one
 
 Live runners receive `SIGTERM`. Stale active statuses become `stopped` without signaling unrelated processes.
 
-### `action: "rewind"`
+### `action: "branches"`
 
-Backs up and truncates a stopped run.
+Lists durable named heads for a run. This is read-only and does not change the selected view.
+
+### `action: "fork"`
+
+```ts
+{ action: "fork", runDir: string, branchId: string, fromSeqId: number, sourceBranchId?: string, reason?: string }
+```
+
+Creates a durable named branch pointer. Fork never selects or starts it and rejects duplicate names or missing records.
+
+### `action: "rewind"`
 
 ```ts
 {
   action: "rewind";
   runDir: string;
+  branchId: string;
   state?: string;
   seqId?: number;
   to?: "compatible";
   mode?: "before" | "after";
-  cleanupSessions?: boolean;
-  cleanupArtifacts?: boolean;
   start?: boolean;
-  ignoreReplayWarnings?: boolean;
 }
 ```
 
-Exactly one of `state`, `seqId`, or `to` is required.
-
-| Parameter | Default | Meaning |
-|---|---:|---|
-| `mode` | `before` | Keep records before or through the matched record. `to: "compatible"` always cuts before the first incompatible record. |
-| `cleanupSessions` | `true` | Remove session progress/directories only for durable visits removed by the cut; retained earlier visits of the same action stay active, and a legacy transcript shared with a removed resumed visit is backed up and truncated at that visit's invocation. |
-| `cleanupArtifacts` | `false` | Best-effort backup and removal of downstream declared artifact files. |
-| `start` | `false` | Start the rewound run after truncation. |
-| `ignoreReplayWarnings` | `false` | Applied only when `start` is true. |
-
-State target:
-
-```json
-{
-  "action": "rewind",
-  "runDir": "review-20260711-180000",
-  "state": "pipeline.review",
-  "mode": "before"
-}
-```
-
-Compatibility target:
-
-```json
-{
-  "action": "rewind",
-  "runDir": "review-20260711-180000",
-  "to": "compatible"
-}
-```
-
-Result details:
-
-```ts
-{
-  runId: string;
-  runDir: string;
-  chartId: string;
-  targetLabel: string;
-  backupDir: string;
-  keptRecords: number;
-  removedRecords: number;
-  removedByState: Array<{ state: string; records: number }>;
-  cutSeqId?: number;
-  cleanup: {
-    sessionsRemoved: number;
-    artifactFilesRemoved: number;
-    artifactWarnings: string[];
-  };
-  started?: { runId: string; runDir: string; chartId: string };
-}
-```
-
-The tool rejects live runs, foreign-working-directory runs, targets matching no record, and cuts that would remove zero records. Rewind moves the whole `user-interactions/` mailbox into the backup, so replay cannot consume answers or receipts from before the cut even when a `seqId` is reused.
-
-Rewind does not undo arbitrary external effects. Its backups are inside the run directory; copy important evidence elsewhere before deleting the run.
+Moves only the named durable head by appending a branch mutation. All records and downstream files remain. `start: true` starts exactly `branchId` after a successful move. Run, run inspection, and run view likewise require an explicit branch handle.
 
 ## Process status values
 

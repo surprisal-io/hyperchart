@@ -29,7 +29,7 @@ function actionUid(chartAst: ChartAst, statePath: StatePath) {
 }
 
 function baseRecord(seqId: number, timestamp = seqId * 1000) {
-	return { seqId, parentId: seqId === 1 ? null : seqId - 1, timestamp };
+	return { seqId, parentId: seqId === 1 ? null : seqId - 1, branchId: "main", timestamp };
 }
 
 describe("React runtime adapter", () => {
@@ -1000,7 +1000,7 @@ describe("React runtime adapter", () => {
 			{
 				status: {
 					runId: "run",
-					state: "failed",
+					branchId: "main",					state: "failed",
 					error: "runner crashed",
 					exitCode: 1,
 					replayWarnings: ["Replay warning: stale provenance"],

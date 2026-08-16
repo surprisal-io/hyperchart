@@ -60,7 +60,7 @@ function deckLog(ast: ChartAst, variant: "single" | "many" = "single"): DurableL
 	const push = (record: Record<string, unknown> & { type: DurableLogRecord["type"]; timestamp: number }) => {
 		const parentId = seq === 0 ? null : seq;
 		seq += 1;
-		records.push({ ...record, seqId: seq, parentId } as DurableLogRecord);
+		records.push({ ...record, seqId: seq, parentId, branchId: "main" } as DurableLogRecord);
 	};
 	push({
 		type: "args",
@@ -226,6 +226,8 @@ function session(
 	return {
 		actionKey: key,
 		actionUid: uid,
+		branchId: "main",
+		invokeSeqId: options.startedAgo,
 		actionName: options.name,
 		status: options.status,
 		startedAt: RUNTIME_NOW - options.startedAgo,
@@ -259,14 +261,18 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 					: "deck-director-20260712-093000";
 	const runDir = join(root, runId);
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
-	writeJsonl(join(runDir, "log.jsonl"), deckLog(ast, variant === "many-running" ? "many" : "single"));
+	const records = deckLog(ast, variant === "many-running" ? "many" : "single");
+	writeJsonl(join(runDir, "log.jsonl"), [
+		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, metadata: { name: "main" }, committedAt: RUNTIME_NOW - 721_000 },
+		{ kind: "record_batch", branchId: "main", records, headSeqId: records.at(-1)?.seqId ?? null, committedAt: RUNTIME_NOW - 5_000 },
+	]);
 	writeFileSync(
 		join(runDir, "meta.json"),
 		`${JSON.stringify({ chartId: ast.id, chartPath: "examples/deck-director.chart.ts", workDir: "/Users/demo/Work/pi-hyperchart", createdAt: new Date(STORY_NOW - 720_000).toISOString() }, null, 2)}\n`,
 	);
 	writeFileSync(
 		join(runDir, "status.json"),
-		`${JSON.stringify({ version: 1, runId, runDir, chartId: ast.id, state: variant === "stale" ? "stopped" : variant === "many-running" ? "running" : variant, startedAt: STORY_NOW - 720_000, updatedAt: STORY_NOW - 5_000, ...(variant === "stale" ? { replayWarnings: ["Runner heartbeat expired; durable state remains resumable."] } : {}) }, null, 2)}\n`,
+		`${JSON.stringify({ version: 1, runId, branchId: "main", runDir, chartId: ast.id, state: variant === "stale" ? "stopped" : variant === "many-running" ? "running" : variant, startedAt: STORY_NOW - 720_000, updatedAt: STORY_NOW - 5_000, ...(variant === "stale" ? { replayWarnings: ["Runner heartbeat expired; durable state remains resumable."] } : {}) }, null, 2)}\n`,
 	);
 	const planUid = action(ast, "plan").uid;
 	const officialUid = action(ast, "research#official.scout").uid;
@@ -330,7 +336,7 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 	const progress: HyperchartSessionProgressFile = {
 		version: 1,
 		updatedAt: STORY_NOW - 5_000,
-		sessions: Object.fromEntries(sessions.map((item) => [item.actionKey, item])),
+		sessions: Object.fromEntries(sessions.map((item) => [`${item.branchId}:${item.actionKey}:invoke:${item.invokeSeqId}`, item])),
 	};
 	writeFileSync(join(runDir, "sessions", "progress.json"), `${JSON.stringify(progress, null, 2)}\n`, "utf8");
 	return { runId, runDir };
@@ -346,6 +352,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 	const history: RunHistoryItem[] = [
 		{
 			runId: running.runId,
+			branchId: "main",
 			runDir: running.runDir,
 			chartId: ast.id,
 			state: "running",
@@ -357,6 +364,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		},
 		{
 			runId: stopped.runId,
+			branchId: "main",
 			runDir: stopped.runDir,
 			chartId: ast.id,
 			state: "stopped",
@@ -368,6 +376,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		},
 		{
 			runId: stale.runId,
+			branchId: "main",
 			runDir: stale.runDir,
 			chartId: ast.id,
 			state: "stopped",
@@ -386,6 +395,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 			runDir: running.runDir,
 			logPath: join(running.runDir, "log.jsonl"),
 			ast,
+			branchId: "main",
 			live: true,
 			cwd: "/Users/demo/Work/pi-hyperchart",
 		},
@@ -394,6 +404,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 			runDir: manyRunning.runDir,
 			logPath: join(manyRunning.runDir, "log.jsonl"),
 			ast,
+			branchId: "main",
 			live: true,
 			cwd: "/Users/demo/Work/pi-hyperchart",
 		},

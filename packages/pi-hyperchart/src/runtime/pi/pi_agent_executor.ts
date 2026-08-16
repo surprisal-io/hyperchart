@@ -46,6 +46,7 @@ export type PiExecutorOptions = {
 	agentDir?: string;
 	definitionDirs?: string[];
 	sessionsDir: string;
+	branchId: string;
 	modelRuntime: ModelRuntime;
 	defaultModel?: string;
 	modelRoles?: Record<string, string>;
@@ -377,7 +378,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		let turnCount = 0;
 		let toolCount = 0;
 		let tokenCount = 0;
-		const stream = createThrottledProgressWriter(this.options.sessionsDir, effect.actionUid, definition.name, effect.id);
+		const stream = createThrottledProgressWriter(this.options.sessionsDir, effect.actionUid, definition.name, effect.id, this.options.branchId);
 		const clearStreamFields = { currentText: undefined, currentReasoning: undefined };
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "turn_start") {
@@ -454,7 +455,7 @@ export class PiAgentExecutor implements AgentExecutor {
 	}
 
 	private updateProgress(effect: AgentEffect, patch: Parameters<typeof updateSessionProgress>[2]): void {
-		updateSessionProgress(this.options.sessionsDir, effect.actionUid, patch, effect.id);
+		updateSessionProgress(this.options.sessionsDir, effect.actionUid, patch, effect.id, this.options.branchId);
 	}
 
 	private markProgressFailed(effect: AgentEffect, error: string): void {

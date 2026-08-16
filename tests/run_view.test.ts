@@ -53,7 +53,7 @@ function fanoutChart(): ChartAst {
 }
 
 function invoke(seqId: number, actionUid: ActionUID, timestamp = seqId * 100): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", actionUid, definition: definitionForUid(actionUid), parentId: seqId - 1, seqId, timestamp };
+	return { type: "state_action", kind: "invoke", actionUid, definition: definitionForUid(actionUid), parentId: seqId - 1, seqId, branchId: "main", timestamp };
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
@@ -64,7 +64,7 @@ describe("buildRunView", () => {
 	it("shows active rows, pending work and tail", () => {
 		const uid = { chart: "view-linear", state: "work", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "args", args: { topic: "demo" }, parentId: null, seqId: 1, timestamp: 100 },
+			{ type: "args", args: { topic: "demo" }, parentId: null, seqId: 1, branchId: "main", timestamp: 100 },
 			invoke(2, uid, 200),
 		];
 
@@ -94,7 +94,7 @@ describe("buildRunView", () => {
 				event: { type: "DONE" },
 				parentId: 1,
 				seqId: 2,
-				timestamp: 200,
+				branchId: "main", timestamp: 200,
 			},
 			{
 				type: "state_action",
@@ -105,7 +105,7 @@ describe("buildRunView", () => {
 				outcome: { ok: false, reason: "try again" },
 				parentId: 2,
 				seqId: 3,
-				timestamp: 300,
+				branchId: "main", timestamp: 300,
 			},
 		];
 
@@ -123,8 +123,8 @@ describe("buildRunView", () => {
 	it("expands spawned map instances", () => {
 		const uid = { chart: "view-map", state: "fanout#a.work", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "args", args: { items: { a: 1, b: 2 } }, parentId: null, seqId: 1, timestamp: 100 },
-			{ type: "spawned", path: "fanout", instances: { a: 1, b: 2 }, parentId: 1, seqId: 2, timestamp: 200 },
+			{ type: "args", args: { items: { a: 1, b: 2 } }, parentId: null, seqId: 1, branchId: "main", timestamp: 100 },
+			{ type: "spawned", path: "fanout", instances: { a: 1, b: 2 }, parentId: 1, seqId: 2, branchId: "main", timestamp: 200 },
 			invoke(3, uid, 300),
 		];
 

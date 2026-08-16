@@ -11,6 +11,14 @@ import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generi
 
 const tempDirs: string[] = [];
 
+function v2Jsonl(records: readonly Record<string, unknown>[]): string {
+	const headSeqId = typeof records.at(-1)?.seqId === "number" ? records.at(-1)!.seqId as number : null;
+	return `${[
+		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
+		{ kind: "record_batch", branchId: "main", records, headSeqId, committedAt: headSeqId ?? 0 },
+	].map((mutation) => JSON.stringify(mutation)).join("\n")}\n`;
+}
+
 async function tempDir(prefix: string): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), prefix));
 	tempDirs.push(dir);
@@ -143,7 +151,7 @@ describe("Pi Hyperchart host adapter", () => {
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
 			version: 1,
 			runId: "side-effect-run",
-			runDir,
+			branchId: "main",			runDir,
 			chartId: "side-effect",
 			state: "complete",
 			startedAt: 1,
@@ -261,7 +269,7 @@ describe("Pi Hyperchart host adapter", () => {
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
 			version: 1,
 			runId: "generated-run",
-			runDir,
+			branchId: "main",			runDir,
 			chartId: "generated",
 			state: "complete",
 			startedAt: 1,
@@ -312,13 +320,13 @@ console.log(JSON.stringify(snapshot.runs));`;
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
 			version: 1,
 			runId: "sample-run",
-			runDir,
+			branchId: "main",			runDir,
 			chartId: "sample",
 			state: "running",
 			startedAt: 1,
 			updatedAt: 2,
 		}), "utf8");
-		await writeFile(join(runDir, "log.jsonl"), `${JSON.stringify({ type: "args", args: { topic: "native" }, seqId: 1, parentId: null, timestamp: 1 })}\n`, "utf8");
+		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([{ type: "args", args: { topic: "native" }, seqId: 1, parentId: null, branchId: "main", timestamp: 1 }]), "utf8");
 		await writeFile(join(malformedDir, "meta.json"), "not json", "utf8");
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -331,7 +339,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 		expect(snapshot.runs).toHaveLength(1);
 		expect(snapshot.runs[0]).toMatchObject({
 			runId: "sample-run",
-			chartName: "sample",
+			branchId: "main",			chartName: "sample",
 			status: "running",
 			cwd: projectDir,
 			originSessionId: "session-a",
@@ -356,9 +364,9 @@ console.log(JSON.stringify(snapshot.runs));`;
 			createdAt: "2026-07-10T00:00:00.000Z",
 		}), "utf8");
 		const actionUid = { chart: "waiting-map", state: "items#a.work", action: "agent" };
-		await writeFile(join(runDir, "log.jsonl"), [
-			{ type: "args", args: { items: { a: "Alpha", b: "Beta", c: "Gamma" } }, parentId: null, seqId: 1, timestamp: 1 },
-			{ type: "spawned", path: "items", instances: { a: "Alpha", b: "Beta", c: "Gamma" }, parentId: 1, seqId: 2, timestamp: 2 },
+		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
+			{ type: "args", args: { items: { a: "Alpha", b: "Beta", c: "Gamma" } }, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "spawned", path: "items", instances: { a: "Alpha", b: "Beta", c: "Gamma" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 			{
 				type: "state_action",
 				kind: "invoke",
@@ -370,9 +378,9 @@ console.log(JSON.stringify(snapshot.runs));`;
 				},
 				parentId: 2,
 				seqId: 3,
-				timestamp: 3,
+				branchId: "main", timestamp: 3,
 			},
-		].map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+		]), "utf8");
 
 		const host = createPiHyperchartHost({ agentDir });
 		const snapshot = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
@@ -400,10 +408,10 @@ console.log(JSON.stringify(snapshot.runs));`;
 			createdAt: "2026-07-10T00:00:00.000Z",
 		}), "utf8");
 		const actionUid = { chart: "sample", state: "work", action: "agent" };
-		await writeFile(join(runDir, "log.jsonl"), [
-			{ type: "args", args: {}, parentId: null, seqId: 1, timestamp: 1 },
-			{ type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, timestamp: 2 },
-		].map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
+			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+		]), "utf8");
 		const transcriptFile = join(sessionsDir, "transcript.jsonl");
 		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload" } })}\n`, "utf8");
 		updateSessionProgress(sessionsDir, actionUid, {
@@ -440,7 +448,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
 			version: 1,
 			runId: "missing-chart-run",
-			runDir,
+			branchId: "main",			runDir,
 			chartId: "deleted-chart",
 			state: "complete",
 			startedAt: 10,
@@ -457,7 +465,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 		expect(snapshot.runs).toEqual([
 			expect.objectContaining({
 				runId: "missing-chart-run",
-				chartName: "deleted-chart",
+				branchId: "main",				chartName: "deleted-chart",
 				status: "completed",
 				cwd: projectDir,
 			}),

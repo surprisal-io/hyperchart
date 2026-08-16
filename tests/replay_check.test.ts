@@ -68,11 +68,11 @@ function definitionForUid(uid: ActionUID): StateActionAst {
 }
 
 function meta(seqId: number) {
-	return { parentId: seqId - 1, seqId, timestamp: seqId };
+	return { parentId: seqId - 1, seqId, branchId: "main", timestamp: seqId };
 }
 
 function args(seqId = 1): DurableLogRecord {
-	return { type: "args", args: {}, parentId: null, seqId, timestamp: seqId };
+	return { type: "args", args: {}, parentId: null, seqId, branchId: "main", timestamp: seqId };
 }
 
 function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst = definitionForUid(uid)): DurableLogRecord {
@@ -579,7 +579,7 @@ describe("explainReplay", () => {
 			}),
 		);
 		const log: DurableLogRecord[] = [
-			{ type: "args", args: { items: { a: { id: "a" } } }, parentId: null, seqId: 1, timestamp: 1 },
+			{ type: "args", args: { items: { a: { id: "a" } } }, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
 			{ type: "spawned", path: "fan", instances: { a: { id: "a" } }, ...meta(2) },
 		];
 

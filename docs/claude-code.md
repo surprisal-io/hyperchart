@@ -25,7 +25,7 @@ The bundled MCP server exposes nine tools. Claude picks them up through the `hyp
 | Inspect durable state for one run | `hyperchart_run_inspect` |
 | Queue a steering message for a live agent session | `hyperchart_steer` |
 | Stop one or all active runs | `hyperchart_stop` |
-| Back up and truncate a stopped run's log for recovery | `hyperchart_rewind` |
+| Move a stopped named branch head without deleting history | `hyperchart_rewind` |
 | Open the browser inspector and return its URL | `hyperchart_view` |
 
 All MCP responses are hard-bounded digests. `hyperchart_inspect` and `hyperchart_run_inspect` never return full definitions, schemas, runtime states, visit histories, or transcripts; the deprecated `verbose: true` input is rejected. `hyperchart_run` returns only identifiers, the absolute run directory, compact status/boundary fields, and bounded diagnostics. `hyperchart_view` is the only full inspection surface and returns exactly `{ "url": string }` while the browser fetches complete data on demand, so full inspection payloads never enter Claude session logs.
@@ -55,7 +55,7 @@ A `role` in frontmatter names a symbolic model tier and a `toolset` a symbolic t
 
 ## Durable user-gate layout and recovery
 
-A gate lives at `<runDir>/user-interactions/<seqId>/`: persist-once `request.json`, mutually exclusive response-or-close `resolution.json`, and host presentation `receipts/`. Stopping or disposing the detached runner preserves an unanswered request so resume can reuse it; machine cancellation closes an abandoned phase. Rewind moves the complete mailbox into its backup before replay, preventing old answers or receipts from matching reused sequence ids.
+A gate lives at `<runDir>/user-interactions/<branchId>/<seqId>/` with exact identity `(runId, branchId, seqId)`: persist-once `request.json`, mutually exclusive response-or-close `resolution.json`, and host presentation `receipts/`. Stopping preserves an unanswered request; machine cancellation closes an abandoned phase. Rewind preserves the mailbox, and only the exact live runner branch can accept a response.
 
 The SessionStart hook scans the same exact session/cwd ownership scope and recovers the pinned gate before queued gates. If no interactive host is available, the request remains durably inspectable and the run can be stopped/resumed; operators should not edit mailbox files manually.
 

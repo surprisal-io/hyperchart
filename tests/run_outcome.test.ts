@@ -37,8 +37,8 @@ describe("run outcome", () => {
 		);
 		const uid = { chart: "failure-route", state: "work", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition: definitionForUid(uid), parentId: 0, seqId: 1, timestamp: 1 },
-			{ type: "failure_intent", origin: "work", error: "boom", parentId: 1, seqId: 2, timestamp: 2 },
+			{ type: "state_action", kind: "invoke", actionUid: uid, definition: definitionForUid(uid), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "failure_intent", origin: "work", error: "boom", parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 		];
 
 		const state = stateFromLog(machineAst, log);
@@ -57,7 +57,7 @@ describe("run outcome", () => {
 			event: { type: "FAILED", error: { message: "boom", code: 7 } },
 			parentId: 0,
 			seqId: 1,
-			timestamp: 1,
+			branchId: "main", timestamp: 1,
 		}];
 
 		expect(finalMachineFailureMessage(stateFromLog(failedAst, []), log)).toBe("chart reached failed terminal state 'failed'");
@@ -80,10 +80,10 @@ describe("run outcome", () => {
 		const work = { chart: "stale-error-route", state: "work", action: "agent" };
 		const recover = { chart: "stale-error-route", state: "recover", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, timestamp: 1 },
-			{ type: "state_action", kind: "complete", actionUid: work, event: { type: "NEEDS_RECOVERY" }, parentId: 1, seqId: 2, timestamp: 2 },
-			{ type: "state_action", kind: "invoke", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, timestamp: 3 },
-			{ type: "state_action", kind: "complete", actionUid: recover, event: { type: "DONE" }, parentId: 3, seqId: 4, timestamp: 4 },
+			{ type: "state_action", kind: "invoke", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "complete", actionUid: work, event: { type: "NEEDS_RECOVERY" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
+			{ type: "state_action", kind: "complete", actionUid: recover, event: { type: "DONE" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 4 },
 		];
 
 		expect(finalMachineFailureMessage(stateFromLog(machineAst, log), log)).toBe("chart reached failed terminal state 'failed'");
@@ -106,7 +106,7 @@ describe("run outcome", () => {
 		const work = { chart: "recovered-route", state: "work", action: "agent" };
 		const recover = { chart: "recovered-route", state: "recover", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, timestamp: 1 },
+			{ type: "state_action", kind: "invoke", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
 			{
 				type: "state_action",
 				kind: "complete",
@@ -114,9 +114,9 @@ describe("run outcome", () => {
 				event: { type: "NEEDS_RECOVERY" },
 				parentId: 1,
 				seqId: 2,
-				timestamp: 2,
+				branchId: "main", timestamp: 2,
 			},
-			{ type: "state_action", kind: "invoke", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, timestamp: 3 },
+			{ type: "state_action", kind: "invoke", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
 			{
 				type: "state_action",
 				kind: "complete",
@@ -124,7 +124,7 @@ describe("run outcome", () => {
 				event: { type: "DONE" },
 				parentId: 3,
 				seqId: 4,
-				timestamp: 4,
+				branchId: "main", timestamp: 4,
 			},
 		];
 

@@ -87,7 +87,7 @@ async function main() {
 		const owner = { runsRoot, host: "claude", sessionId, workDir: cwd };
 		active = acquireActiveUserInteraction(owner);
 		if (active?.presentation === "pending") {
-			claimUserInteractionReceipt(active.runDir, active.request.seqId, "claude", sessionId, { source: "session-start" });
+			claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", sessionId, { source: "session-start" });
 		}
 		// Re-arbitrate after claiming so a concurrent lower coordinate cannot also be
 		// presented by the monitor/wait path.
@@ -122,7 +122,7 @@ async function main() {
 	// same pinned gate remains recoverable by the monitor or another SessionStart.
 	if (active !== undefined && sessionId !== undefined) {
 		try {
-			markUserInteractionReceipt(active.runDir, active.request.seqId, "claude", sessionId);
+			markUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", sessionId);
 		} catch {
 			// A concurrent machine close/response won after context was constructed.
 		}

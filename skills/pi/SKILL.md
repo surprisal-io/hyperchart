@@ -21,7 +21,7 @@ Use the consolidated `hyperchart` tool directly. `/hyperchart` is a human-facing
 | Inspect durable state for one run | `hyperchart` with `action: "run_inspect"` |
 | Open the browser inspector for a run | `hyperchart` with `action: "view"` |
 | Stop one or all active runs | `hyperchart` with `action: "stop"` |
-| Back up and truncate a stopped run | `hyperchart` with `action: "rewind"` |
+| Move a stopped named branch head without deleting history | `hyperchart` with `action: "rewind"` |
 
 ## Discover available charts
 
@@ -198,15 +198,13 @@ Read [Recovery and safety](../../docs/safety.md), then:
 4. Resume with `hyperchart({ action: "run", runDir })`. Create a different run with `chartPath` and no existing `runDir`.
 5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
-## Rewind a run
+## Rewind and branch navigation
 
-Read [Recovery and safety](../../docs/safety.md), then:
-
-1. Inspect the run and confirm it is stopped.
-2. Choose exactly one target: `state`, `seqId`, or `to: "compatible"`.
-3. Explain which durable facts will be removed, that the complete user-interaction mailbox moves into the rewind backup, and that external effects will not be undone.
-4. Call `hyperchart` with `action: "rewind"`. Keep `cleanupArtifacts: false` unless the user explicitly requests best-effort artifact cleanup.
-5. Inspect the rewound run again before starting it.
+1. Inspect a stopped run with an explicit branch handle and list its durable heads.
+2. Use view/checkout freely; it is non-durable and must not change journal bytes.
+3. Fork only when a new named head is wanted. Fork does not select or start it.
+4. For rewind, confirm `branchId` and exactly one selector (`state`, `seqId`, or `to: "compatible"`). Explain that the existing head moves while all records and downstream files remain.
+5. Start exactly that branch only when requested. External effects still require idempotency/reconciliation.
 
 ## Safety rules
 

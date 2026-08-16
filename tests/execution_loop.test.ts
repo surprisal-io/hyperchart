@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
 	agent,
 	artifact,
@@ -21,6 +21,7 @@ import type {
 	ActionUID,
 	ChartAst,
 	DurableLogRecord,
+	DurableRecordDraft,
 	Effect,
 	GuardOutcome,
 	MachineEvent,
@@ -276,7 +277,7 @@ function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 }
 
 function meta(seqId: number) {
-	return { seqId, parentId: null, timestamp: seqId };
+	return { seqId, parentId: null, branchId: "main", timestamp: seqId };
 }
 
 function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecord {
@@ -309,11 +310,28 @@ function validated(uid: ActionUID, eventType: string, outcome: GuardOutcome, seq
 	};
 }
 
-function durableRecordsAdded(records: readonly DurableLogRecord[], effectId = "durable-log"): MachineEvent {
-	return { kind: "durable_records_added", effectId, records };
+let nextAckSeqId = 0;
+function durableRecordsAdded(records: readonly (DurableLogRecord | DurableRecordDraft)[], effectId = "durable-log"): MachineEvent {
+	if (records.some((record) => record.type === "state_action" && record.kind !== "invoke")) {
+		const sourceSeqId = Number(effectId.match(/:(\d+)$/)?.[1]);
+		if (Number.isSafeInteger(sourceSeqId)) nextAckSeqId = Math.max(nextAckSeqId, sourceSeqId);
+	}
+	let parentId: number | null = nextAckSeqId === 0 ? null : nextAckSeqId;
+	const stamped = records.map((record) => {
+		if ("seqId" in record) {
+			nextAckSeqId = Math.max(nextAckSeqId, record.seqId);
+			parentId = record.seqId;
+			return record;
+		}
+		const durable = { ...record, seqId: ++nextAckSeqId, parentId, branchId: "main", timestamp: Date.now() } as DurableLogRecord;
+		parentId = durable.seqId;
+		return durable;
+	});
+	return { kind: "durable_records_added", effectId, records: stamped };
 }
 
 describe("execution loop", () => {
+	beforeEach(() => { nextAckSeqId = 0; });
 	it("returns immediately when the initial state is final", async () => {
 		const runtime = new MockRuntime({ ast: finalAst(), events: failOnPullEvents() });
 
@@ -387,9 +405,6 @@ describe("execution loop", () => {
 								kind: "complete",
 								actionUid: uid,
 								event: doneEvent,
-								parentId: 1,
-								seqId: 2,
-								timestamp: expect.any(Number),
 							}),
 						]);
 						events.push(durableRecordsAdded(effect.records, effect.id));

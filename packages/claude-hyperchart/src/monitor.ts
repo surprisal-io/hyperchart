@@ -84,7 +84,7 @@ export function claudeUserInteractionDetails(interaction: OwnedUserInteraction) 
 export function claudeUserInteractionInstruction(interaction: OwnedUserInteraction): string {
 	const details = claudeUserInteractionDetails(interaction);
 	return [
-		`Hyperchart is waiting for real user input at (${details.runId}, ${details.seqId}).`,
+		`Hyperchart is waiting for real user input at (${details.runId}, ${details.branchId}, ${details.seqId}).`,
 		`Question preview: ${details.promptPreview.text}`,
 		details.options.length === 0
 			? "This is a free-text question: use AskUserQuestion with an appropriate free-text/Other path and preserve the user's actual answer."
@@ -93,8 +93,8 @@ export function claudeUserInteractionInstruction(interaction: OwnedUserInteracti
 		details.outputRequired ? `Structured output is required. Bounded shape hint: ${JSON.stringify(details.outputHint)}.` : undefined,
 		"Finish the current safe action first and start no unrelated work.",
 		"Then call native AskUserQuestion once for this delivery attempt. If the same gate already has an in-flight question, do not open a concurrent duplicate; after interrupted-session recovery, ask it again. Never infer, fabricate, or supply the answer yourself.",
-		`Immediately after the human answers, call hyperchart_respond with runId=${JSON.stringify(details.runId)}, seqId=${details.seqId}, one allowed event, and output when required by the bounded shape hint.`,
-		"Do not continue the workflow until hyperchart_respond confirms the durable commit. Repeated delivery of this same (runId, seqId) is recovery, not a second question.",
+		`Immediately after the human answers, call hyperchart_respond with runId=${JSON.stringify(details.runId)}, branchId=${JSON.stringify(details.branchId)}, seqId=${details.seqId}, one allowed event, and output when required by the bounded shape hint.`,
+		"Do not continue the workflow until hyperchart_respond confirms the durable commit. Repeated delivery of this same (runId, branchId, seqId) is recovery, not a second question.",
 	].filter((line): line is string => line !== undefined).join("\n");
 }
 
@@ -103,6 +103,7 @@ export function claudeUserInteractionNotification(interaction: OwnedUserInteract
 	return {
 		customType: "hyperchart-user-request",
 		runId: details.runId,
+		branchId: details.branchId,
 		seqId: details.seqId,
 		content: claudeUserInteractionInstruction(interaction),
 		details,
@@ -142,7 +143,7 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 	if (options.sessionId === undefined) return 0;
 	const active = activeOwnedClaudeUserInteraction(options);
 	if (active === undefined || active.presentation === "confirmed") return 0;
-	const existingClaim = readUserInteractionReceipt(active.runDir, active.request.seqId, "claude", options.sessionId);
+	const existingClaim = readUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId);
 	// A waited MCP result is already the delivery path into this Claude turn. Do not
 	// re-notify it after the normal monitor lease while AskUserQuestion is still open;
 	// SessionStart recovery will re-surface it if that turn/session is interrupted.
@@ -157,7 +158,7 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 	// Defense in depth around the shared owner's canonical/session checks.
 	const meta = loadRunMeta(active.runDir);
 	if (meta.originSessionId !== options.sessionId || canonicalPath(meta.workDir) !== canonicalPath(options.cwd)) return 0;
-	if (!claimUserInteractionReceipt(active.runDir, active.request.seqId, "claude", options.sessionId, { source: "monitor" })) return 0;
+	if (!claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId, { source: "monitor" })) return 0;
 	// Claim and selection are separate filesystem operations. Re-arbitrate after the
 	// exclusive claim so a concurrently-created lower coordinate cannot be presented too.
 	const current = activeOwnedClaudeUserInteraction(options);
@@ -175,7 +176,7 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 		};
 	}
 	writeLine(serializeMonitorEnvelope(notification));
-	markUserInteractionReceipt(current.runDir, current.request.seqId, "claude", options.sessionId);
+	markUserInteractionReceipt(current.runDir, current.request.branchId, current.request.seqId, "claude", options.sessionId);
 	return 1;
 }
 
@@ -203,7 +204,7 @@ function serializeMonitorEnvelope(value: ClaudeMonitorEnvelope): string {
 }
 
 function interactionKey(interaction: OwnedUserInteraction): string {
-	return `${interaction.request.runId}\0${interaction.request.seqId}`;
+	return `${interaction.request.runId}\0${interaction.request.branchId}\0${interaction.request.seqId}`;
 }
 
 function canonicalPath(path: string): string {

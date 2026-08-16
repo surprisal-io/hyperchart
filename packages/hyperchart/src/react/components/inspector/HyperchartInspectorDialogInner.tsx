@@ -92,6 +92,9 @@ export function HyperchartInspectorDialogInner({
 	runs,
 	selectedRunId,
 	onSelectRun,
+	onSelectBranch,
+	onForkBranch,
+	onRewindBranch,
 	onClose,
 	onResume,
 	onAbort,
@@ -123,7 +126,7 @@ export function HyperchartInspectorDialogInner({
 		void run?.runId;
 		setSelectedStateId(null);
 		setScopeStack([]);
-	}, [run?.runId]);
+	}, [run?.runId, run?.branchId]);
 
 	const currentScopeId = scopeStack.at(-1) ?? null;
 	const visibleIds = useMemo(
@@ -211,6 +214,44 @@ export function HyperchartInspectorDialogInner({
 								/>
 							</div>
 						</div>
+						{run.branches && run.branches.length > 0 && (
+							<div className="flex items-center gap-1" data-testid="hyperchart-branch-navigation">
+								{run.branches.map((branch) => (
+									<button
+										type="button"
+										key={branch.branchId}
+										onClick={() => onSelectBranch?.(run.runId, branch.branchId)}
+										className={`rounded border px-2 py-1 text-xs ${branch.branchId === run.branchId ? "border-blue-500/60 bg-blue-500/10 text-[var(--hc-blue-text)]" : "border-[var(--border-secondary)] text-[var(--text-secondary)]"}`}
+										title={`Head ${branch.headSeqId ?? "empty"}${branch.branchId === run.runnerBranchId ? " · live runner" : ""}`}
+									>
+										{branch.branchId}{branch.branchId === run.runnerBranchId ? " ▶" : ""}
+									</button>
+								))}
+								{run.recordTree && run.recordTree.length > 0 && (
+									<details className="relative">
+										<summary className="cursor-pointer rounded border border-[var(--border-secondary)] px-2 py-1 text-xs">Tree {run.recordTree.length}</summary>
+										<div className="absolute right-0 z-20 mt-1 max-h-64 min-w-72 overflow-auto rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 font-mono text-[11px] shadow-xl">
+											{run.recordTree.map((record) => <div key={record.seqId}>#{record.seqId} ← {record.parentId ?? "root"} · {record.branchId} · {record.type}</div>)}
+										</div>
+									</details>
+								)}
+								{onForkBranch && run.branchId && (
+									<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => {
+										const head = run.branches?.find((branch) => branch.branchId === run.branchId)?.headSeqId;
+										if (head === null || head === undefined) return;
+										const branchId = window.prompt("New branch name");
+										if (branchId && window.confirm(`Create branch ${branchId} at seqId ${head}? This will not select or start it.`)) void onForkBranch(run.runId, head, branchId);
+									}}>Fork…</button>
+								)}
+								{onRewindBranch && run.branchId && (
+									<button type="button" className="rounded border border-amber-500/35 px-2 py-1 text-xs" onClick={() => {
+										const value = window.prompt(`Move ${run.branchId} head to seqId`);
+										const seqId = Number(value);
+										if (Number.isSafeInteger(seqId) && seqId > 0 && window.confirm(`Move only branch ${run.branchId} to seqId ${seqId}? All records stay preserved.`)) void onRewindBranch(run.runId, run.branchId!, seqId);
+									}}>Rewind…</button>
+								)}
+							</div>
+						)}
 						{run.status === "running" && onAbort && (
 							<button
 								type="button"

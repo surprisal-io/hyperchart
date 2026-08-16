@@ -57,7 +57,7 @@ describe("PiAgentExecutor cancellation", () => {
 		const target = effect();
 		const sessionsDir = join(dir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
-		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir, modelRuntime: {} as never });
+		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir, branchId: "main", modelRuntime: {} as never });
 		const internal = executor as unknown as {
 			generations: { next(key: string): number };
 			live: Map<string, { session: { abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number }>;
@@ -351,7 +351,7 @@ describe("pi executor helpers", () => {
 		await writeFile(join(definitions, "worker.md"), "---\ndescription: worker\n---\nworker\n", "utf8");
 		const sessionsDir = join(dir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
-		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [definitions], sessionsDir, modelRuntime: {} as never });
+		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [definitions], sessionsDir, branchId: "main", modelRuntime: {} as never });
 		await expect((executor as unknown as { run: Function }).run(effect({ reads: [{ path: "https://example.com/data.json" }] }), () => undefined, runOptions, 1)).rejects.toThrow("not a local artifact");
 		expect(() => validateDeclaredReadPaths([{ path: "https://example.com/data.json" }])).toThrow("not a local artifact");
 	});

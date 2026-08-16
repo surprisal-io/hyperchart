@@ -12,6 +12,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		return new ClaudeAgentExecutor({
 			workDir: runnerConfig.workDir,
 			sessionsDir,
+			branchId: runnerConfig.branchId,
 			definitionDirs: resolveClaudeSubagentDefinitionDirs(runnerConfig.workDir, runnerConfig.chartPath),
 			...(runnerConfig.defaultModel === undefined ? {} : { defaultModel: runnerConfig.defaultModel }),
 			...(runnerConfig.modelRoles === undefined ? {} : { modelRoles: runnerConfig.modelRoles }),

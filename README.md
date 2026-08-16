@@ -135,3 +135,7 @@ Hyperchart is experimental. Pin exact package versions for durable runs and keep
 ### Explicit event-sourced actors
 
 Use static actor templates and durable FIFO mailboxes to serialize side-effecting workflows globally or per finite map item. Delivery is receive-only, `send` is fire-and-forget, `call` awaits an exact typed reply, and normal exit drains actor scopes. See [docs/explicit-actors.md](docs/explicit-actors.md).
+
+### Named branches and non-destructive rewind
+
+Runs use an append-only v2 tree journal with mandatory record `branchId`, multiple durable named heads, non-durable checkout/view, fork-without-activation, and rewind as an append-only head move. Old linear logs are intentionally unsupported.

@@ -35,7 +35,7 @@ describe("model-facing tool payload boundary", () => {
 		};
 		const run: HyperchartRunInfo = {
 			runId: "large-run",
-			chartName: "large-chart",
+			branchId: "main",			chartName: "large-chart",
 			mode: "run",
 			status: "running",
 			cwd: "/tmp/project",
@@ -129,7 +129,7 @@ describe("model-facing tool payload boundary", () => {
 
 	it("recursively summarizes every construct needed to produce a constrained gate answer", () => {
 		const summary = summarizeUserGate({
-			runId: "gate", seqId: 1, prompt: "Choose and explain", options: Array.from({ length: 25 }, (_, index) => `option-${index}`),
+			runId: "gate", branchId: "main", seqId: 1, prompt: "Choose and explain", options: Array.from({ length: 25 }, (_, index) => `option-${index}`),
 			events: Array.from({ length: 25 }, (_, index) => `EVENT_${index}`),
 			reply: { kind: "jsonSchema", schema: {
 				type: "object",
@@ -179,7 +179,7 @@ describe("model-facing tool payload boundary", () => {
 		const event = `EVENT_${"e".repeat(180)}`;
 		const option = `Option ${"o".repeat(180)}`;
 		const prompt = `Question ${"q".repeat(1_200)}`;
-		const summary = summarizeUserGate({ runId, seqId: Number.MAX_SAFE_INTEGER, prompt, options: [option], events: [event, "FAILED"] });
+		const summary = summarizeUserGate({ runId, branchId: "main", seqId: Number.MAX_SAFE_INTEGER, prompt, options: [option], events: [event, "FAILED"] });
 
 		expect(summary.runId).toBe(runId);
 		expect(summary.seqId).toBe(Number.MAX_SAFE_INTEGER);
@@ -200,16 +200,16 @@ describe("model-facing tool payload boundary", () => {
 	it("fails closed rather than truncating an unsafe response identity", () => {
 		const oversized = "x".repeat(2_001);
 		for (const request of [
-			{ runId: oversized, seqId: 1, prompt: "answer", options: [], events: ["DONE"] },
-			{ runId: "run", seqId: 1, prompt: "answer", options: [], events: [oversized] },
-			{ runId: "run", seqId: 1, prompt: "answer", options: [oversized], events: ["DONE"] },
+			{ runId: oversized, branchId: "main", seqId: 1, prompt: "answer", options: [], events: ["DONE"] },
+			{ runId: "run", branchId: "main", seqId: 1, prompt: "answer", options: [], events: [oversized] },
+			{ runId: "run", branchId: "main", seqId: 1, prompt: "answer", options: [oversized], events: ["DONE"] },
 		]) {
 			expect(() => summarizeUserGate(request)).toThrow(/identity.*cannot be truncated.*browser inspector/i);
 		}
 	});
 
 	it("fails closed with omission metadata when depth, node, collection, or byte caps prevent a sufficient contract", () => {
-		const summarize = (schema: Record<string, unknown>) => summarizeUserGate({ runId: "capped", seqId: 1, prompt: "answer", options: [], events: ["DONE"], reply: { kind: "jsonSchema", schema } });
+		const summarize = (schema: Record<string, unknown>) => summarizeUserGate({ runId: "capped", branchId: "main", seqId: 1, prompt: "answer", options: [], events: ["DONE"], reply: { kind: "jsonSchema", schema } });
 		try {
 			summarize({ type: "string", enum: Array.from({ length: 41 }, (_, index) => `value-${index}`) });
 			throw new Error("expected summary cap failure");
@@ -232,7 +232,7 @@ describe("model-facing tool payload boundary", () => {
 	});
 
 	it("resolves local schema references and reports self-reference as recursion, not depth overflow", () => {
-		const summarize = (schema: Record<string, unknown>) => summarizeUserGate({ runId: "ref", seqId: 1, prompt: "answer", options: [], events: ["DONE"], reply: { kind: "jsonSchema", schema } });
+		const summarize = (schema: Record<string, unknown>) => summarizeUserGate({ runId: "ref", branchId: "main", seqId: 1, prompt: "answer", options: [], events: ["DONE"], reply: { kind: "jsonSchema", schema } });
 		const resolved = summarize({
 			$schema: "https://json-schema.org/draft/2020-12/schema",
 			$defs: { decision: { type: "string", enum: ["approve", "reject"] } },

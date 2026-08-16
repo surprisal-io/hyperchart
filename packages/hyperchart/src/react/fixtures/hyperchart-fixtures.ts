@@ -74,7 +74,7 @@ function actionRecord(
 	const session = {
 		parentId: seqId === 1 ? null : seqId - 1,
 		seqId,
-		timestamp: timestamp(seqId),
+		branchId: "main", timestamp: timestamp(seqId),
 	};
 	if (kind === "invoke") {
 		return {
@@ -96,7 +96,7 @@ function actionRecord(
 }
 
 const commonRecords: DurableLogRecord[] = [
-	{ type: "args", args, parentId: null, seqId: 1, timestamp: timestamp(1) },
+	{ type: "args", args, parentId: null, seqId: 1, branchId: "main", timestamp: timestamp(1) },
 	actionRecord("research-plan", "invoke", 2),
 	actionRecord("research-plan", "complete", 3, "DONE"),
 	actionRecord("source-research", "invoke", 4),
@@ -135,7 +135,7 @@ export const failedRunRecords: DurableLogRecord[] = [
 		error: "Visual validation rejected unsupported evidence.",
 		parentId: 8,
 		seqId: 9,
-		timestamp: timestamp(9),
+		branchId: "main", timestamp: timestamp(9),
 	},
 ];
 

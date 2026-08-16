@@ -33,6 +33,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 			definitionDirs: resolvePiSubagentDefinitionDirs(runnerConfig.workDir, agentDir, runnerConfig.chartPath),
 			modelRuntime,
 			sessionsDir,
+			branchId: runnerConfig.branchId,
 			...(runnerConfig.defaultModel === undefined ? {} : { defaultModel: runnerConfig.defaultModel }),
 			...(runnerConfig.modelRoles === undefined ? {} : { modelRoles: runnerConfig.modelRoles }),
 			...(runnerConfig.toolsets === undefined ? {} : { toolsets: runnerConfig.toolsets }),
