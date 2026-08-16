@@ -1,10 +1,9 @@
-import { ArchiveBoxIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo, HyperchartVisitInvocationInfo } from "../../../types.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { schemaTypeText } from "../helpers/schema.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
-import { TypeTooltip } from "../ui/TypeTooltip.js";
+import { ArtifactRow } from "./ArtifactRow.js";
 
 export function VisitInvocationDetails({ invocation, state, allStates, onHighlightArtifact }: { invocation: HyperchartVisitInvocationInfo; state: HyperchartStateInfo; allStates: HyperchartStateInfo[]; onHighlightArtifact?: (stateId: string, artifactName: string) => void }) {
 	if (invocation.kind === "actor") return null;
@@ -67,28 +66,17 @@ export function VisitInvocationDetails({ invocation, state, allStates, onHighlig
 						{invocation.reads.map((read, index) => {
 							const artifactBacked = read.sourceState !== undefined && read.name !== undefined;
 							const joined = read.readKind === "join";
-							const ReadIcon = joined ? RectangleStackIcon : ArchiveBoxIcon;
-							const label = artifactBacked ? `${read.sourceState} → ${read.name}` : read.path;
 							const typeName = (read.name ?? `read-${index + 1}`).split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Read";
-							const type = read.schema === undefined ? undefined : `type ${typeName} = ${schemaTypeText(read.schema)};`;
-							const labelNode = <span>{label}</span>;
-							const content = (
-								<>
-									<span className={`flex w-max items-center gap-1 whitespace-nowrap font-mono text-[10px] ${artifactBacked ? "text-[var(--hc-purple-text)]" : "text-[var(--text-secondary)]"}`}>
-										{artifactBacked && <TypeTooltip text={joined ? "joined artifact" : "artifact"}><span data-hyperchart-tooltip-isolated data-artifact-read-kind={joined ? "join" : "single"} className="inline-flex"><ReadIcon className="h-3 w-3 shrink-0" aria-hidden="true" /></span></TypeTooltip>}
-										{labelNode}
-									</span>
-									{artifactBacked && <span className="w-max whitespace-nowrap font-mono text-[9px] text-[var(--text-muted)]">{read.path}{read.select === undefined ? "" : ` · select ${read.select}`}</span>}
-								</>
+							return (
+								<ArtifactRow
+									key={`${read.path}:${index}`}
+									{...(artifactBacked ? { kind: joined ? "join" as const : "single" as const } : {})}
+									label={artifactBacked ? `${read.sourceState} → ${read.name}` : read.path}
+									{...(artifactBacked ? { detail: `${read.path}${read.select === undefined ? "" : ` · select ${read.select}`}` } : {})}
+									{...(read.schema === undefined ? {} : { typeText: `type ${typeName} = ${schemaTypeText(read.schema)};` })}
+									{...(artifactBacked && onHighlightArtifact !== undefined ? { onClick: () => onHighlightArtifact(read.sourceState!, read.name!) } : {})}
+								/>
 							);
-							const trigger = artifactBacked && onHighlightArtifact !== undefined ? (
-								<button type="button" onClick={() => onHighlightArtifact(read.sourceState!, read.name!)} className="flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-left hover:bg-purple-500/10">{content}</button>
-							) : (
-								<div className="flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border border-[var(--border-secondary)] bg-[var(--bg-tertiary)] px-2 py-1.5">{content}</div>
-							);
-							return type === undefined
-								? <div key={`${read.path}:${index}`}>{trigger}</div>
-								: <TypeTooltip key={`${read.path}:${index}`} text={type}>{trigger}</TypeTooltip>;
 						})}
 					</div>
 				</div>

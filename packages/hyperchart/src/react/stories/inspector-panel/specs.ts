@@ -23,7 +23,7 @@ import {
 } from "../../../core/dsl.js";
 import { templatePath } from "../../../core/paths.js";
 import type { ActionUID, ChartAst, ChartCst, ChartEvent, StateAst, StatePath } from "../../../core/types.js";
-import type { DurableLogRecord } from "../../../core/durable_events.js";
+import type { ArtifactPin, DurableLogRecord } from "../../../core/durable_events.js";
 import type { HyperchartRuntimeSessionProgressFile } from "../../../host/index.js";
 import type { HyperchartRunStatus } from "../../types.js";
 import {
@@ -261,21 +261,22 @@ function pushInvoke(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePat
 	return actionUid;
 }
 
-function pushComplete(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event: ChartEvent): void {
+function pushComplete(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event: ChartEvent, artifacts?: Readonly<Record<string, ArtifactPin>>): void {
 	builder.records.push({
 		type: "state_action",
 		kind: "complete",
 		actionUid: storyActionUid(ast, statePath),
 		event,
+		...(artifacts === undefined ? {} : { artifacts }),
 		parentId: builder.seq,
 		seqId: ++builder.seq,
 		branchId: "main", timestamp: storyTimestamp(builder.seq),
 	});
 }
 
-function pushAction(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event?: ChartEvent): void {
+function pushAction(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event?: ChartEvent, artifacts?: Readonly<Record<string, ArtifactPin>>): void {
 	pushInvoke(builder, ast, statePath);
-	if (event !== undefined) pushComplete(builder, ast, statePath, event);
+	if (event !== undefined) pushComplete(builder, ast, statePath, event, artifacts);
 }
 
 function pushFailure(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, error: unknown): void {
@@ -601,6 +602,36 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				return b.records;
 			},
 			sessionProgress: (ast) => storyLiveSession(ast, "rich-agent"),
+		},
+	},
+	{
+		group: "agent",
+		title: "Pinned deliverables",
+		description: "Completed visit showing the immutable content revisions (path, sha256, size) accepted with the completion.",
+		chart: panelChart("inspector-pinned-artifacts", "report-writer", {
+			"report-writer": {
+				kind: "state",
+				action: agent("writer", {
+					task: "Write the findings report and its machine-readable summary.",
+					artifacts: {
+						report: artifact("artifacts/findings-report.md"),
+						summary: artifact("artifacts/findings-summary.json", z.object({ findings: z.number() })),
+					},
+				}),
+				transitions: { DONE: "done" },
+			},
+			done: final(),
+		}),
+		runtime: {
+			selectedStateId: "report-writer",
+			records: (ast) => {
+				const b = storyLog();
+				pushAction(b, ast, "report-writer", { type: "DONE" }, {
+					"artifacts/findings-report.md": { hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", size: 18_324 },
+					"artifacts/findings-summary.json": { hash: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae", size: 96 },
+				});
+				return b.records;
+			},
 		},
 	},
 	{

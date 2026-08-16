@@ -5,6 +5,7 @@ import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models
 import { AgentInfoCard } from "../packages/hyperchart/src/react/components/inspector/details/AgentInfoCard.js";
 import { MapResolvedInputList } from "../packages/hyperchart/src/react/components/inspector/details/MapResolvedInputList.js";
 import { MapVisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/MapVisitHistory.js";
+import { VisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/VisitHistory.js";
 import { RuntimeSection } from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
 import { agentStatesForSelection } from "../packages/hyperchart/src/react/components/inspector/helpers/state.js";
 import { createTextPreview } from "../packages/hyperchart/src/react/components/inspector/helpers/textPreview.js";
@@ -29,6 +30,40 @@ const runtimeState: HyperchartStateInfo = {
 };
 
 describe("Runtime inspector section", () => {
+	it("renders pinned deliverables with path, hash, and size", () => {
+		const state: HyperchartStateInfo = {
+			...runtimeState,
+			artifacts: [{
+				name: "report",
+				path: "artifacts/report.md",
+				schema: { schema: { type: "object", properties: { title: { type: "string" } } } },
+			}],
+		};
+		const markup = renderToStaticMarkup(
+			createElement(VisitHistory, {
+				state,
+				allStates: [state],
+				visits: [
+					{
+						visit: 1,
+						invokeSeqId: 2,
+						startedAt: 1000,
+						endedAt: 2000,
+						status: "done",
+						completedEvent: "DONE",
+						artifactPins: [{ path: "artifacts/report.md", hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", size: 18324 }],
+						invocation: { kind: "agent", task: "Write the report" },
+					},
+				],
+			}),
+		);
+		expect(markup).toContain("pinned deliverables");
+		expect(markup).toContain("artifacts/report.md");
+		expect(markup).toContain("sha256:9f86d081884c");
+		expect(markup).toContain("17.9 KB");
+		// TypeTooltip content is portal-rendered on hover and intentionally absent from SSR.
+	});
+
 	it("is collapsed by default and hides verbose visit data", () => {
 		const markup = renderToStaticMarkup(createElement(RuntimeSection, { state: runtimeState }));
 		expect(markup).toContain("Runtime");

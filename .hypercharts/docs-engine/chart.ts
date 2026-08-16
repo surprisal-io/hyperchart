@@ -122,7 +122,6 @@ export default chart({
 			}),
 			transitions: {
 				INVENTORY_READY: { target: "audit", input: { auditItems: event("items") } },
-				FAILED: "failed",
 			},
 		},
 
@@ -143,14 +142,14 @@ export default chart({
 						artifacts: {
 							findings: artifact(t`artifacts/docs-engine/findings/${key("audit")}.json`, Findings),
 						},
-					}),
+		}),
 					validate: script("node", [file("scripts/guard-findings.mjs")], {
 						env: {
 							FINDINGS_FILE: artifactOf("audit.review"),
 							UNIT_JSON: t`${json(item("audit"))}`,
 						},
 						reply: GuardReply,
-					}),
+		}),
 					onReject: "resume",
 					retries: 2,
 					transitions: { AUDITED: "done" },
@@ -158,7 +157,6 @@ export default chart({
 				done: final(),
 			},
 			onDone: "prepare-gate",
-			transitions: { FAILED: "failed" },
 		}),
 
 		"prepare-gate": {
@@ -178,7 +176,7 @@ export default chart({
 				},
 				reply: PrepareGateReply,
 			}),
-			transitions: { GATE_BATCHES_READY: "gate", FAILED: "failed" },
+			transitions: { GATE_BATCHES_READY: "gate" },
 		},
 
 		gate: map({
@@ -196,14 +194,14 @@ export default chart({
 								BatchVerdict,
 							),
 						},
-					}),
+		}),
 					validate: script("node", [file("scripts/guard-gate-batch.mjs")], {
 						env: {
 							BATCH_JSON: t`${json(item("gate"))}`,
 							VERDICT_FILE: artifactOf("gate.review", { artifact: "verdict" }),
 						},
 						reply: GuardReply,
-					}),
+		}),
 					onReject: "resume",
 					retries: 2,
 					transitions: { CLASSIFIED: "done" },
@@ -211,7 +209,6 @@ export default chart({
 				done: final(),
 			},
 			onDone: "gate-route",
-			transitions: { FAILED: "failed" },
 		}),
 
 		"gate-route": {
@@ -233,7 +230,6 @@ export default chart({
 			transitions: {
 				GATE_APPROVED: "route",
 				GATE_REWORK_REQUIRED: { target: "audit", input: { auditItems: event("auditItems") } },
-				FAILED: "failed",
 			},
 		},
 
@@ -252,7 +248,6 @@ export default chart({
 				DRIFT_REPORTED: "done",
 				DOCS_CLEAN: "propagate",
 				REWRITE_REQUIRED: { target: "rewrite", input: { patchItems: event("rewriteItems") } },
-				FAILED: "failed",
 			},
 		},
 
@@ -271,14 +266,14 @@ export default chart({
 						task: t`Apply the audit findings to one canonical documentation unit.\n\nUnit: ${json(item("rewrite"))}\n\nRead the unit file and the findings artifact at findingsPath, apply each correction surgically, and keep the unit's structure and frontmatter intact. Edit only the canonical unit file. Finish with PATCHED.`,
 						reads: [t`${item("rewrite", "path")}`, t`${item("rewrite", "findingsPath")}`],
 						artifacts: { unit: artifact(t`${item("rewrite", "path")}`) },
-					}),
+		}),
 					validate: script("node", [file("scripts/guard-unit.mjs")], {
 						env: {
 							UNIT_JSON: t`${json(item("rewrite"))}`,
 							REGISTRY_FILE: artifactOf("inventory", { artifact: "registry" }),
 						},
 						reply: GuardReply,
-					}),
+		}),
 					onReject: "resume",
 					retries: 2,
 					transitions: { PATCHED: "done" },
@@ -286,7 +281,6 @@ export default chart({
 				done: final(),
 			},
 			onDone: "propagate",
-			transitions: { FAILED: "failed" },
 		}),
 
 		propagate: {
@@ -298,7 +292,7 @@ export default chart({
 				},
 				reply: SyncReply,
 			}),
-			transitions: { DOCS_SYNCED: "done", FAILED: "failed" },
+			transitions: { DOCS_SYNCED: "done" },
 		},
 
 		done: final(),

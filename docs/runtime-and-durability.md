@@ -101,6 +101,22 @@ A validation verdict is durable. Replay reads the stored verdict; it does not ru
 
 Because validator identity is stored, changing the validator can make replay stale or broken. This is intentional: the same accepted fact must not acquire a new meaning silently.
 
+## Artifact pins
+
+A declared deliverable file is mutable on disk, but the state the workflow *accepted* is a fact. When a run directory is configured, completion admission snapshots each declared artifact into a content-addressable store inside the run directory and records a pin on the completion fact:
+
+- the file is copied first and the copy is hashed, so the pin references exactly the stored bytes even if the working file keeps changing;
+- schema checks at admission run against the snapshotted bytes, so the accepted revision is the validated one;
+- the completion fact stores `artifacts: { <renderedPath>: { hash, size } }`; the pin is provenance — replay never re-hashes;
+- store objects live at `<runDir>/artifact_store/objects/<aa>/<rest-of-sha256>` and are externally verifiable with `sha256sum`;
+- identical content across branches or retries maps to one object.
+
+On action entry the runtime restores each declared read to its pinned revision: if the file at the authored path no longer hashes to the producer's pin (a sibling branch overwrote it, or it was edited out of band), the pinned bytes are copied back before the action starts. Reads whose producer completion carries no pin keep current-file semantics. Files touched outside declared channels are outside the guarantee.
+
+Completions recorded without pins — pre-versioning logs or runtimes without a run directory — are reported by `explainReplay()` as `unpinned` diagnostics: valid history whose historical artifact values are unverifiable.
+
+Authored paths keep their public semantics: the working file stays where the chart declared it; the store is an append-only shadow, never a replacement.
+
 ## Map durability
 
 A map appends `spawned` with the exact keys and items resolved on entry. Replay uses that record rather than re-reading a changed upstream value.

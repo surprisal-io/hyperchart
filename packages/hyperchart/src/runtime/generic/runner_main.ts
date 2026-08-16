@@ -190,6 +190,7 @@ export async function runHyperchartRunner(
 			userExecutor,
 			workDir: config.workDir,
 			chartDir: dirname(config.chartPath),
+			runDir: config.runDir,
 			schemaRegistry: parsed.schemaRegistry,
 			onWarn: (message) => console.warn(message),
 		});

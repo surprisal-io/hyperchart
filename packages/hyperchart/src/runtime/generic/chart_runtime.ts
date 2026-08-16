@@ -1,8 +1,12 @@
+import { promises as fsp } from "node:fs";
+import { dirname } from "node:path";
 import type { Runtime } from "../runtime.js";
-import type { ChartAst, GuardOutcome } from "../../core/types.js";
+import type { ChartAst, ChartEvent, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
-import type { BranchId, DurableLogRecord } from "../../core/durable_events.js";
-import type { Effect, MachineEvent, RejectedEffect } from "../../core/machine.js";
+import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
+import type { Effect, MachineEvent, RejectedEffect, RenderedArtifact } from "../../core/machine.js";
+import { ArtifactStore, hashFile } from "./artifact_store.js";
+import { checkArtifactContent, renderedArtifactPath } from "./artifacts.js";
 import { actorContextForState } from "../../core/actors.js";
 import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
@@ -24,6 +28,8 @@ export type ChartRuntimeOptions = {
 	userExecutor?: UserExecutor;
 	workDir: string;
 	chartDir: string;
+	/** Enables artifact pinning: accepted deliverables are snapshotted into `<runDir>/artifact_store`. */
+	runDir?: string;
 	schemaRegistry?: SchemaRegistryLike;
 	now?: () => number;
 	onWarn?: (msg: string) => void;
@@ -34,6 +40,7 @@ export class ChartRuntime implements Runtime {
 	private readonly queue: AsyncQueue<MachineEvent> = createAsyncQueue<MachineEvent>();
 	private readonly timers = new Map<string, NodeJS.Timeout>();
 	private readonly scripts: ScriptRunner;
+	private readonly artifactStore?: ArtifactStore;
 	private readonly now: () => number;
 	private readonly onWarn: (msg: string) => void;
 
@@ -46,6 +53,7 @@ export class ChartRuntime implements Runtime {
 			workDir: options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
 		});
+		if (options.runDir !== undefined) this.artifactStore = new ArtifactStore(options.runDir);
 		this.now = options.now ?? Date.now;
 		this.onWarn = options.onWarn ?? (() => {});
 	}
@@ -96,14 +104,22 @@ export class ChartRuntime implements Runtime {
 					});
 					break;
 				case "agent":
-					this.options.agentExecutor.start(effect, (event) => {
-						this.queue.send({ kind: "agent", effectId: effect.id, event });
-					});
+					void this.restorePinnedReads(effect.reads)
+						.then(() => {
+							this.options.agentExecutor.start(effect, (event) => {
+								void this.admitCompletion(event, effect.artifacts).then((admitted) =>
+									this.queue.send({ kind: "agent", effectId: effect.id, ...admitted }));
+							});
+						})
+						.catch((error: unknown) =>
+							this.queue.send({ kind: "agent", effectId: effect.id, event: toFailedEvent(error) }),
+						);
 					break;
 				case "script":
-					void this.scripts
-						.run(effect)
-						.then((event) => this.queue.send({ kind: "script", effectId: effect.id, event }))
+					void this.restorePinnedReads(envArtifacts(effect.env))
+						.then(() => this.scripts.run(effect))
+						.then((event) => this.admitCompletion(event, effect.artifacts))
+						.then((admitted) => this.queue.send({ kind: "script", effectId: effect.id, ...admitted }))
 						.catch((error: unknown) =>
 							this.queue.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) }),
 						);
@@ -184,6 +200,60 @@ export class ChartRuntime implements Runtime {
 		this.queue.close();
 	}
 
+	/**
+	 * Action entry: restore each declared read to its pinned revision. The runtime cannot control
+	 * how agents read files, so the guarantee is placed on entry — whatever overwrote the authored
+	 * path (a sibling branch, an out-of-band edit), the action sees the accepted state its chart
+	 * channel declared. Reads whose producer completion carries no pin keep current-file semantics.
+	 */
+	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {
+		const store = this.artifactStore;
+		if (store === undefined || reads === undefined || reads.length === 0) return;
+		let pins: ReadonlyMap<string, ArtifactPin> | undefined;
+		for (const artifact of reads) {
+			pins ??= latestPinsByPath(this.options.logStore.snapshot().ancestry(this.branchId));
+			const pin = pins.get(artifact.path);
+			if (pin === undefined) continue;
+			const path = renderedArtifactPath(artifact, this.options.workDir);
+			if (await matchesHash(path, pin.hash)) continue;
+			const source = await store.get(pin.hash);
+			await fsp.mkdir(dirname(path), { recursive: true });
+			await fsp.copyFile(source, path);
+		}
+	}
+
+	/**
+	 * Completion admission: snapshot each declared deliverable into the artifact store (copy, then
+	 * hash the copy) and re-check the stored bytes, so the pinned revision — not the still-mutable
+	 * working file — is what the log accepts. Without a store the completion is admitted unpinned.
+	 */
+	private async admitCompletion(
+		event: ChartEvent,
+		artifacts: readonly RenderedArtifact[] | undefined,
+	): Promise<{ event: ChartEvent; artifacts?: Readonly<Record<string, ArtifactPin>> }> {
+		const store = this.artifactStore;
+		if (event.type === "FAILED" || store === undefined || artifacts === undefined || artifacts.length === 0) {
+			return { event };
+		}
+		try {
+			const pins: Record<string, ArtifactPin> = {};
+			for (const artifact of artifacts) {
+				const pin = await store.put(renderedArtifactPath(artifact, this.options.workDir));
+				if (artifact.shape !== undefined) {
+					const content = await fsp.readFile(store.objectPath(pin.hash), "utf8");
+					const check = await checkArtifactContent(artifact, content, this.options.schemaRegistry);
+					if (!check.ok) {
+						throw new Error(`Artifact ${artifact.path}: snapshotted content is invalid: ${check.errors.join("; ")}`);
+					}
+				}
+				pins[artifact.path] = pin;
+			}
+			return { event, artifacts: pins };
+		} catch (error) {
+			return { event: toFailedEvent(error) };
+		}
+	}
+
 	private dispatchRejected(effect: RejectedEffect): void {
 		const mainState = nodeAt(this.options.ast, effect.actionUid.state);
 		const actorState = actorContextForState(this.options.ast, effect.actionUid.state)?.node;
@@ -197,8 +267,10 @@ export class ChartRuntime implements Runtime {
 			return;
 		}
 		if (state.action.kind === "agent") {
+			const artifacts = effect.invocation.kind === "agent" ? effect.invocation.artifacts : undefined;
 			this.options.agentExecutor.reject(effect, (event) => {
-				this.queue.send({ kind: "agent", effectId: effect.id, event });
+				void this.admitCompletion(event, artifacts).then((admitted) =>
+					this.queue.send({ kind: "agent", effectId: effect.id, ...admitted }));
 			});
 			return;
 		}
@@ -217,7 +289,8 @@ export class ChartRuntime implements Runtime {
 					n: effect.validationAttempts,
 					...(effect.reason === undefined ? {} : { reason: effect.reason }),
 				})
-				.then((event) => this.queue.send({ kind: "script", effectId: effect.id, event }))
+				.then((event) => this.admitCompletion(event, scriptEffect.artifacts))
+				.then((admitted) => this.queue.send({ kind: "script", effectId: effect.id, ...admitted }))
 				.catch((error: unknown) =>
 					this.queue.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) }),
 				);
@@ -246,4 +319,26 @@ export class ChartRuntime implements Runtime {
 
 function toFailedEvent(error: unknown): { type: "FAILED"; error: string } {
 	return { type: "FAILED", error: errorMessage(error) };
+}
+
+function envArtifacts(env: Readonly<Record<string, string | RenderedArtifact>> | undefined): RenderedArtifact[] {
+	return Object.values(env ?? {}).filter((value): value is RenderedArtifact => typeof value !== "string");
+}
+
+/** Latest accepted revision per rendered path along the branch ancestry. */
+function latestPinsByPath(ancestry: readonly DurableLogRecord[]): ReadonlyMap<string, ArtifactPin> {
+	const pins = new Map<string, ArtifactPin>();
+	for (const record of ancestry) {
+		if (record.type !== "state_action" || record.kind !== "complete" || record.artifacts === undefined) continue;
+		for (const [path, pin] of Object.entries(record.artifacts)) pins.set(path, pin);
+	}
+	return pins;
+}
+
+async function matchesHash(path: string, hash: string): Promise<boolean> {
+	try {
+		return (await hashFile(path)) === hash;
+	} catch {
+		return false;
+	}
 }

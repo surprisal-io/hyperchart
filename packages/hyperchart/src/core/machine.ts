@@ -26,7 +26,7 @@ import type {
 	ValueAst,
 } from "./types.js";
 import { isInputRef } from "./types.js";
-import type { ActorMessageEnvelope, ActorMessageSource, DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
+import type { ActorMessageEnvelope, ActorMessageSource, ArtifactPin, DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import { declaredArtifactsForState } from "./normalize.js";
@@ -262,12 +262,15 @@ export type AgentMachineEvent = Readonly<{
 	kind: "agent";
 	effectId: EffectId;
 	event: ChartEvent;
+	/** Revisions of the declared deliverables snapshotted at admission, keyed by rendered path. */
+	artifacts?: Readonly<Record<string, ArtifactPin>>;
 }>;
 
 export type UserMachineEvent = Readonly<{
 	kind: "user";
 	effectId: EffectId;
 	event: ChartEvent;
+	artifacts?: Readonly<Record<string, ArtifactPin>>;
 }>;
 
 // A script's completion: same shape and handling as an agent's — the runtime maps the process
@@ -276,6 +279,7 @@ export type ScriptMachineEvent = Readonly<{
 	kind: "script";
 	effectId: EffectId;
 	event: ChartEvent;
+	artifacts?: Readonly<Record<string, ArtifactPin>>;
 }>;
 
 export type DurableRecordsAddedMachineEvent = Readonly<{
@@ -745,7 +749,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 				{
 					kind: "append",
 					id: event.effectId,
-					records: [{ type: "state_action", kind: "complete", actionUid: pending.actionUid, event: event.event }],
+					records: [{ type: "state_action", kind: "complete", actionUid: pending.actionUid, event: event.event, ...(event.artifacts === undefined ? {} : { artifacts: event.artifacts }) }],
 				},
 			]);
 		}

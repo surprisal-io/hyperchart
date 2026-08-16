@@ -352,6 +352,13 @@ export type HyperchartVisitInvocationInfo =
 	| { kind: "user"; prompt: string }
 	| { kind: "actor" };
 
+/** Immutable revision of a deliverable accepted with a completion: rendered path plus content pin. */
+export interface HyperchartArtifactPinInfo {
+	path: string;
+	hash: string;
+	size: number;
+}
+
 export interface HyperchartVisitInfo {
 	visit: number;
 	invokeSeqId: number;
@@ -363,6 +370,8 @@ export interface HyperchartVisitInfo {
 	validationAttempts?: number;
 	inputs?: Record<string, unknown>;
 	mapItem?: { key: string; value?: unknown };
+	/** Pinned revisions recorded on this visit's accepted completion; absent when unpinned. */
+	artifactPins?: HyperchartArtifactPinInfo[];
 	invocation: HyperchartVisitInvocationInfo;
 	/** Agent session associated with this durable visit, when the action is an agent. */
 	session?: HyperchartAgentSessionInfo;

@@ -77,6 +77,9 @@ export type StateActionInvokeLog = {
 	definition: StateActionAst;
 } & SessionParams;
 
+/** Immutable content revision of an accepted artifact: sha256 of the full content plus byte size. */
+export type ArtifactPin = Readonly<{ hash: string; size: number }>;
+
 // The emitted event is the fact; transitions are never logged — the projection recomputes the
 // route from the chart AST, so a log stays applicable to a modified chart.
 type StateActionCompleteLog = {
@@ -84,6 +87,10 @@ type StateActionCompleteLog = {
 	kind: "complete";
 	actionUid: ActionUID;
 	event: ChartEvent;
+	// Revisions of the declared deliverables observed when this completion was admitted, keyed by
+	// rendered path. The pin is provenance: replay never re-hashes. Absent on pre-versioning logs
+	// and on runtimes without an artifact store — such completions are unpinned, not invalid.
+	artifacts?: Readonly<Record<string, ArtifactPin>>;
 } & SessionParams;
 
 // Validation verdict for a completion claim. Stored like any other fact: replay reads the

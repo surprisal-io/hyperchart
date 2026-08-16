@@ -4,7 +4,9 @@ import type { HyperchartStateInfo, HyperchartVisitInfo } from "../../../types.js
 import { formatHyperchartDateTime } from "../../../hyperchart-display.js";
 import { StatusPill } from "../../ui/StatusPill.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
+import { schemaTypeText } from "../helpers/schema.js";
 import { AgentSessionDialog } from "./AgentSessionDialog.js";
+import { ArtifactRow } from "./ArtifactRow.js";
 import { VisitInvocationDetails } from "./VisitInvocationDetails.js";
 
 export function VisitHistory({
@@ -79,6 +81,27 @@ export function VisitHistory({
 									validation attempts: {visit.validationAttempts}
 								</div>
 							)}
+							{visit.artifactPins !== undefined && visit.artifactPins.length > 0 && (
+								<div>
+									<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">pinned deliverables</div>
+									<div className="grid gap-1.5">
+										{visit.artifactPins.map((pin) => {
+											const artifact = state.artifacts?.find((candidate) => candidate.path === pin.path);
+											const typeName = (artifact?.name ?? "artifact").split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Artifact";
+											return (
+												<ArtifactRow
+													key={pin.path}
+													kind="pin"
+													label={pin.path}
+													detail={`sha256:${pin.hash.slice(0, 12)} · ${formatPinSize(pin.size)}`}
+													{...(artifact?.schema === undefined ? {} : { typeText: `type ${typeName} = ${schemaTypeText(artifact.schema)};` })}
+													{...(artifact !== undefined && onHighlightArtifact !== undefined ? { onClick: () => onHighlightArtifact(state.id, artifact.name) } : {})}
+												/>
+											);
+										})}
+									</div>
+								</div>
+							)}
 							{visit.inputs !== undefined && (
 								<div>
 									<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved inputs</div>
@@ -120,4 +143,10 @@ function visitSessionIdentity(visit: HyperchartVisitInfo): string | undefined {
 
 function isLiveSession(status: string): boolean {
 	return status === "running" || status === "starting";
+}
+
+function formatPinSize(size: number): string {
+	if (size < 1024) return `${size} B`;
+	if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+	return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

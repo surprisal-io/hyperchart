@@ -60,6 +60,15 @@ export async function checkArtifactFile(
 		return { ok: false, errors: [`${artifact.path}: cannot read ${filePath}: ${errorMessage(error)}`] };
 	}
 
+	return checkArtifactContent(artifact, content, registry);
+}
+
+/** Schema check against explicit content bytes — used to validate a snapshotted revision. */
+export async function checkArtifactContent(
+	artifact: RenderedArtifact,
+	content: string,
+	registry?: SchemaRegistry,
+): Promise<SchemaCheck> {
 	if (artifact.shape === undefined) {
 		return { ok: true };
 	}
@@ -73,6 +82,11 @@ export async function checkArtifactFile(
 
 	const check = await checkSchemaAsync(artifact.shape, parsed, registry);
 	return check.ok ? check : { ok: false, errors: check.errors.map((message) => `${artifact.path}: ${message}`) };
+}
+
+/** Resolve a rendered artifact path inside workDir, rejecting URLs and workDir escapes. */
+export function renderedArtifactPath(artifact: RenderedArtifact, workDir: string): string {
+	return artifactPath(artifact, workDir);
 }
 
 function artifactPath(artifact: RenderedArtifact, workDir: string): string {

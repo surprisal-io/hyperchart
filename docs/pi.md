@@ -309,6 +309,7 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 | `status.json` | Pi runner | process state, explicit runner branch, pid, heartbeat, exit, error |
 | `user-interactions/<branchId>/<seqId>/` | runner + host | exact branch-scoped request, immutable resolution, and receipts |
 | `sessions/` | Pi executor | branch/invocation-scoped agent sessions and progress |
+| `artifact_store/objects/` | core runtime | content-addressable snapshots of accepted deliverables, referenced by completion-fact pins |
 
 Only `log.jsonl` defines durable record history and named heads. Selected UI/view branch remains non-durable.
 

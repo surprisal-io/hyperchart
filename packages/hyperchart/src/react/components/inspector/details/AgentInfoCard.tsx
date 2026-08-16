@@ -1,10 +1,9 @@
-import { ArchiveBoxIcon, RectangleStackIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo } from "../../../types.js";
 import { hasInterpolation } from "../helpers/interpolation.js";
 import { schemaLabel, schemaTypeText } from "../helpers/schema.js";
+import { ArtifactRow } from "./ArtifactRow.js";
 import { PathChip } from "./PathChip.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
-import { TypeTooltip } from "../ui/TypeTooltip.js";
 
 export function AgentInfoCard({
 	state,
@@ -123,25 +122,16 @@ export function AgentInfoCard({
 					<div className="grid min-w-0 gap-1.5">
 						{state.readArtifacts?.map((artifact) => {
 							const typeName = artifact.name.split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Artifact";
-							const type = `type ${typeName} = ${schemaTypeText(artifact.schema)};`;
-							const label = `${artifact.sourceState ?? "artifact"} → ${artifact.name}`;
-							const joined = artifact.readKind === "join";
-							const ReadIcon = joined ? RectangleStackIcon : ArchiveBoxIcon;
-							const content = (
-								<>
-									<span className="flex w-max items-center gap-1 whitespace-nowrap font-mono text-[10px] text-[var(--hc-purple-text)]">
-										<TypeTooltip text={joined ? "joined artifacts" : "artifact"}><span data-hyperchart-tooltip-isolated data-artifact-read-kind={joined ? "join" : "single"} className="inline-flex"><ReadIcon className="h-3 w-3 shrink-0" aria-hidden="true" /></span></TypeTooltip>
-										<span>{label}</span>
-									</span>
-									{artifact.path && <span className="w-max whitespace-nowrap font-mono text-[9px] text-[var(--text-muted)]">{artifact.path}</span>}
-								</>
+							return (
+								<ArtifactRow
+									key={`${artifact.sourceState ?? ""}:${artifact.name}`}
+									kind={artifact.readKind === "join" ? "join" : "single"}
+									label={`${artifact.sourceState ?? "artifact"} → ${artifact.name}`}
+									{...(artifact.path ? { detail: artifact.path } : {})}
+									typeText={`type ${typeName} = ${schemaTypeText(artifact.schema)};`}
+									{...(artifact.sourceState !== undefined && onHighlightArtifact !== undefined ? { onClick: () => onHighlightArtifact(artifact.sourceState!, artifact.name) } : {})}
+								/>
 							);
-							const trigger = artifact.sourceState !== undefined && onHighlightArtifact !== undefined ? (
-								<button type="button" onClick={() => onHighlightArtifact(artifact.sourceState!, artifact.name)} className="flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-left hover:bg-purple-500/10">{content}</button>
-							) : (
-								<div className="flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5">{content}</div>
-							);
-							return <TypeTooltip key={`${artifact.sourceState ?? ""}:${artifact.name}`} text={type}>{trigger}</TypeTooltip>;
 						})}
 						{state.reads.filter((read) => !/^(?:artifactOf|joinArtifactOf)\(/.test(read)).map((read) =>
 							hasInterpolation(read) ? (

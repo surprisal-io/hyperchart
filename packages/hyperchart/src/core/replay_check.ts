@@ -1,6 +1,7 @@
 import { actionUidKey } from "./action_uid.js";
 import type { DurableLogRecord } from "./durable_events.js";
 import { actorContextForState, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath } from "./actors.js";
+import { declaredArtifactsForState } from "./normalize.js";
 import { nodeAt, templatePath } from "./paths.js";
 import {
 	createBranchProjection,
@@ -42,6 +43,17 @@ export type ReplayStaleRecord = Readonly<{
 	invokeSeqId?: number;
 }>;
 
+// A completion admitted for a state that declares deliverables, but recorded without artifact
+// pins: a pre-versioning log or a runtime without an artifact store. The historical artifact
+// values of such completions are unverifiable — a diagnostic, never an error.
+export type ReplayUnpinnedRecord = Readonly<{
+	index: number;
+	seqId: number;
+	record: DurableLogRecord;
+	state: StatePath;
+	message: string;
+}>;
+
 export type ReplayExplanation = Readonly<{
 	// Number of records that applied before the first structurally broken record. If there is no
 	// broken record this equals log.length. This is an array prefix end, not a durable seqId.
@@ -51,16 +63,20 @@ export type ReplayExplanation = Readonly<{
 	broken?: ReplayBrokenRecord;
 	skipped: readonly ReplaySkippedRecord[];
 	stale: readonly ReplayStaleRecord[];
+	unpinned: readonly ReplayUnpinnedRecord[];
 }>;
 
 export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): ReplayExplanation {
 	const projection = createBranchProjection(ast);
 	const skipped: ReplaySkippedRecord[] = [];
 	const stale: ReplayStaleRecord[] = [];
+	const unpinned: ReplayUnpinnedRecord[] = [];
 	for (let index = 0; index < log.length; index++) {
 		const record = log[index];
 		if (record === undefined) continue;
 		stale.push(...staleRecordsFor(ast, projection, index, record));
+		const unpinnedRecord = unpinnedRecordFor(ast, index, record);
+		if (unpinnedRecord !== undefined) unpinned.push(unpinnedRecord);
 		const skippedForRecord: ProjectionSkippedRecord[] = [];
 		try {
 			projectBranch(projection, ast, [record], [], skippedForRecord);
@@ -72,6 +88,7 @@ export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): 
 				broken: brokenRecordFor(projection, log, index, record, error),
 				skipped,
 				stale,
+				unpinned,
 			};
 		}
 		for (const entry of skippedForRecord) {
@@ -84,6 +101,22 @@ export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): 
 		...(last === undefined ? {} : { seqId: last.seqId }),
 		skipped,
 		stale,
+		unpinned,
+	};
+}
+
+function unpinnedRecordFor(ast: ChartAst, index: number, record: DurableLogRecord): ReplayUnpinnedRecord | undefined {
+	if (record.type !== "state_action" || record.kind !== "complete") return undefined;
+	if (record.artifacts !== undefined || record.event.type === "FAILED") return undefined;
+	const state = record.actionUid.state;
+	const node = actorContextForState(ast, state)?.node ?? nodeAt(ast, state);
+	if (node?.kind !== "state" || declaredArtifactsForState(node) === undefined) return undefined;
+	return {
+		index,
+		seqId: record.seqId,
+		record,
+		state,
+		message: `Completion for state ${state} has declared deliverables but no artifact pins; historical artifact values are unverifiable`,
 	};
 }
 

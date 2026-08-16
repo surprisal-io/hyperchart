@@ -1338,6 +1338,9 @@ function runtimeVisitHistories(
 		const visit = histories.get(stateId)?.at(-1);
 		if (visit === undefined) continue;
 		if (record.kind === "complete") {
+			if (record.artifacts !== undefined) {
+				visit.artifactPins = Object.entries(record.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size }));
+			}
 			const state = nodeAt(ast, stateId);
 			const requiresValidation =
 				state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED";
