@@ -732,4 +732,4 @@ RunInspectSummary
 
 ## Branch navigation metadata
 
-Runtime snapshots may expose `branchId` (non-durable selected view), `runnerBranchId` (operational live runner), durable `branches[]` heads, and full `recordTree[]` coordinates. Hosts must keep checkout separate from confirmed fork/rewind actions. Gate summaries preserve exact `(runId, branchId, seqId)` coordinates.
+Runtime snapshots may expose `branchId` (non-durable selected view), `runnerBranchIds` (the operational runner's dynamic live set), durable `branches[]` heads, and full `recordTree[]` coordinates. Hosts must keep checkout separate from confirmed fork/rewind actions. Gate summaries preserve exact `(runId, branchId, seqId)` coordinates.

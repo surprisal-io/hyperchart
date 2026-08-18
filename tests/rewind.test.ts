@@ -27,7 +27,7 @@ async function createStoppedRun() {
 		chartId: "quickstart",
 		createdAt: new Date().toISOString(),
 	});
-	patchRunStatus(runDir, { runId: "run", branchId: "main", chartId: "quickstart", state: "stopped" });
+	patchRunStatus(runDir, { runId: "run", branchIds: ["main"], chartId: "quickstart", state: "stopped" });
 	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 	store.initializeRootBranch();
 	return { root, runDir, store };
@@ -49,13 +49,16 @@ describe("append-only branch rewind", () => {
 
 		const rewind = await rewindHyperchartRun({ runDir, branchId: "main", seqId: 2, mode: "after", cwd: root });
 		expect(rewind).toMatchObject({ branchId: "main", previousHeadSeqId: 3, headSeqId: 2, preservedRecords: 3 });
-		const replacement = store.appendDrafts([{ type: "session_ref", index: 3, file: "replacement.jsonl" }]);
+		// Reopen after a separate host operation; an opened journal never rereads itself.
+		const replacementStore = new JsonlLogStore(join(runDir, "log.jsonl"));
+		const replacement = replacementStore.appendDrafts([{ type: "session_ref", index: 3, file: "replacement.jsonl" }]);
 		expect(replacement[0]).toMatchObject({ seqId: 4, parentId: 2, branchId: "main" });
 
 		await rewindHyperchartRun({ runDir, branchId: "main", seqId: 3, mode: "after", cwd: root });
-		const oldTailContinuation = store.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
+		const continuationStore = new JsonlLogStore(join(runDir, "log.jsonl"));
+		const oldTailContinuation = continuationStore.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
 		expect(oldTailContinuation[0]).toMatchObject({ seqId: 5, parentId: 3, branchId: "main" });
-		const normalized = await store.read();
+		const normalized = await continuationStore.read();
 		expect(normalized.records.map((record) => record.seqId)).toEqual([1, 2, 3, 4, 5]);
 		expect(normalized.ancestry("main").map((record) => record.seqId)).toEqual([1, 2, 3, 5]);
 		expect(normalized.ancestry("experiment").map((record) => record.seqId)).toEqual([1, 2]);

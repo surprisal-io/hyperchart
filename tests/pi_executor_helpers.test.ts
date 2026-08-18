@@ -9,7 +9,7 @@ import type { AgentActionAst, ChartEvent, JsonSchema, SchemaAst } from "../packa
 import { createAgentDefaultsResolver, loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
 import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
-import { runAcceptanceLoop } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
+import { actionSessionDir, branchSessionSegment, runAcceptanceLoop } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,
@@ -48,7 +48,110 @@ function effect(overrides: Partial<AgentEffect> = {}, actionOverrides: Partial<A
 	};
 }
 
+describe("branch-scoped action sessions", () => {
+	it("separates identical action visits by branch", async () => {
+		const dir = await makeTempDir();
+		const sessionsDir = join(dir, "sessions");
+		const target = effect();
+		const main = actionSessionDir(sessionsDir, "main", target);
+		const experiment = actionSessionDir(sessionsDir, "experiment", target);
+		expect(main).not.toBe(experiment);
+		expect(main).toContain(join("sessions", branchSessionSegment("main")));
+		expect(experiment).toContain(join("sessions", branchSessionSegment("experiment")));
+	});
+
+	it("keeps branch ids with colliding sanitized forms in distinct directories", async () => {
+		const dir = await makeTempDir();
+		const target = effect();
+		const colon = actionSessionDir(join(dir, "sessions"), "review:a", target);
+		const question = actionSessionDir(join(dir, "sessions"), "review?a", target);
+		expect(branchSessionSegment("review:a")).not.toBe(branchSessionSegment("review?a"));
+		expect(colon).not.toBe(question);
+	});
+});
+
+describe("PiAgentExecutor live delivery", () => {
+	it("delivers steering only to the exact durable invocation", async () => {
+		const dir = await makeTempDir();
+		const target = effect({ id: "chart:work:worker:2:2" });
+		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir: join(dir, "sessions"), branchId: "main", modelRuntime: {} as never });
+		const steered: string[] = [];
+		const internal = executor as unknown as {
+			live: Map<string, { session: { steer(message: string): Promise<void> }; effect: AgentEffect }>;
+		};
+		internal.live.set(actionUidKey(target.actionUid), {
+			session: { steer: async (message) => { steered.push(message); } },
+			effect: target,
+		});
+
+		expect(await executor.steer(actionUidKey(target.actionUid), 1, "stale visit")).toBe(false);
+		expect(await executor.steer(actionUidKey(target.actionUid), 2, "current visit")).toBe(true);
+		expect(steered).toEqual(["current visit"]);
+	});
+});
+
 describe("PiAgentExecutor cancellation", () => {
+	it("waits for delayed session construction and cleans up the late session during disposal", async () => {
+		const dir = await makeTempDir();
+		const definitions = join(dir, "agents");
+		const sessionsDir = join(dir, "sessions");
+		await mkdir(definitions, { recursive: true });
+		await mkdir(sessionsDir, { recursive: true });
+		await writeFile(join(definitions, "worker.md"), "---\ndescription: worker\n---\nworker\n", "utf8");
+		const executor = new PiAgentExecutor({
+			workDir: dir,
+			agentDir: dir,
+			definitionDirs: [definitions],
+			sessionsDir,
+			branchId: "main",
+			modelRuntime: {} as never,
+		});
+		let releaseConstruction!: () => void;
+		const constructionGate = new Promise<void>((resolve) => { releaseConstruction = resolve; });
+		let constructionStarted = false;
+		let aborts = 0;
+		let disposals = 0;
+		let prompts = 0;
+		const lateSession = {
+			abort: async () => { aborts++; },
+			dispose: () => { disposals++; },
+			prompt: async () => { prompts++; },
+		};
+		const internal = executor as unknown as {
+			createSession: (...args: unknown[]) => Promise<unknown>;
+			live: Map<string, unknown>;
+			runs: Map<string, unknown>;
+			cancellations: Map<string, unknown>;
+		};
+		internal.createSession = async () => {
+			constructionStarted = true;
+			await constructionGate;
+			return lateSession;
+		};
+		const emitted: ChartEvent[] = [];
+		executor.start(effect(), (event) => emitted.push(event));
+		await expect.poll(() => constructionStarted).toBe(true);
+
+		const disposal = executor.dispose();
+		expect(executor.dispose()).toBe(disposal);
+		let settled = false;
+		void disposal.then(() => { settled = true; });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(settled).toBe(false);
+
+		releaseConstruction();
+		await expect(disposal).resolves.toBeUndefined();
+		expect({ aborts, disposals, prompts }).toEqual({ aborts: 1, disposals: 1, prompts: 0 });
+		expect(emitted).toEqual([]);
+		expect(internal.live.size).toBe(0);
+		expect(internal.runs.size).toBe(0);
+		expect(internal.cancellations.size).toBe(0);
+
+		const afterDispose: ChartEvent[] = [];
+		executor.start(effect(), (event) => afterDispose.push(event));
+		expect(afterDispose).toEqual([{ type: "FAILED", error: "Pi agent executor is disposed" }]);
+	});
+
 	it("shares repeated cancellation and resolves only after asynchronous abort", async () => {
 		const dir = await makeTempDir();
 		let finishAbort!: () => void;
@@ -352,7 +455,9 @@ describe("pi executor helpers", () => {
 		const sessionsDir = join(dir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
 		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [definitions], sessionsDir, branchId: "main", modelRuntime: {} as never });
-		await expect((executor as unknown as { run: Function }).run(effect({ reads: [{ path: "https://example.com/data.json" }] }), () => undefined, runOptions, 1)).rejects.toThrow("not a local artifact");
+		const internal = executor as unknown as { run: Function; generations: { next(key: string): number } };
+		const generation = internal.generations.next(actionUidKey(effect().actionUid));
+		await expect(internal.run(effect({ reads: [{ path: "https://example.com/data.json" }] }), () => undefined, runOptions, generation)).rejects.toThrow("not a local artifact");
 		expect(() => validateDeclaredReadPaths([{ path: "https://example.com/data.json" }])).toThrow("not a local artifact");
 	});
 

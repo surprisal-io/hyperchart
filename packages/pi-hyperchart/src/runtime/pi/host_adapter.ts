@@ -295,7 +295,8 @@ async function readRunSummary(
 	return {
 		runId: persistedStatus?.runId ?? basename(runDir),
 		chartName: persistedStatus?.chartId ?? meta.chartId,
-		...(persistedStatus?.branchId === undefined ? {} : { branchId: persistedStatus.branchId }),
+		branchId: "main",
+		...(persistedStatus === undefined ? {} : { runnerBranchIds: persistedStatus.branchIds }),
 		...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
 		status: summaryRunStatus(persistedStatus),
 		cwd: resolve(meta.workDir),
@@ -351,7 +352,8 @@ async function readRun(
 		return {
 			runId: persistedStatus?.runId ?? basename(runDir),
 			chartName: persistedStatus?.chartId ?? meta.chartId,
-			...(persistedStatus?.branchId === undefined ? {} : { branchId: persistedStatus.branchId }),
+			branchId: "main",
+			...(persistedStatus === undefined ? {} : { runnerBranchIds: persistedStatus.branchIds }),
 			...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
 			description: meta.chartPath,
 			status: metadataOnlyStatus(persistedStatus),

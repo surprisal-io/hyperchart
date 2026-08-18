@@ -474,16 +474,18 @@ export function scanOwnedOpenUserInteractions(ownerInput: UserInteractionOwner):
 			const meta = loadRunMeta(runDir);
 			if (meta.originSessionId !== owner.sessionId || canonicalPath(meta.workDir) !== owner.workDir) continue;
 			const status = readRunStatus(runDir);
-			if (!isRunLive(status) || status?.branchId === undefined) continue;
-			for (const request of scanOpenUserInteractions(runDir, status.branchId)) {
-				if (request.runId !== entry.name) continue;
-				const receipt = receiptState(runDir, request, owner.host, owner.sessionId);
-				pending.push({
-					runDir,
-					request,
-					presentation: receipt.presentation,
-					...(receipt.order === undefined ? {} : { presentationOrder: receipt.order }),
-				});
+			if (!isRunLive(status) || status === undefined) continue;
+			for (const branchId of status.branchIds) {
+				for (const request of scanOpenUserInteractions(runDir, branchId)) {
+					if (request.runId !== entry.name) continue;
+					const receipt = receiptState(runDir, request, owner.host, owner.sessionId);
+					pending.push({
+						runDir,
+						request,
+						presentation: receipt.presentation,
+						...(receipt.order === undefined ? {} : { presentationOrder: receipt.order }),
+					});
+				}
 			}
 		} catch {
 			// Malformed, foreign, or concurrently-created runs are isolated.
@@ -808,8 +810,8 @@ function validateUserEventShape(event: ChartEvent): void {
 function assertLiveRunnerBranch(runDir: string, runId: string, branchId: BranchId): void {
 	const status = readRunStatus(runDir);
 	if (!isRunLive(status)) throw new Error(`Run '${runId}' is not live`);
-	if (status?.branchId !== branchId) {
-		throw new Error(`User interaction branch '${branchId}' does not match live runner branch '${status?.branchId ?? "unknown"}'`);
+	if (status === undefined || !status.branchIds.includes(branchId)) {
+		throw new Error(`User interaction branch '${branchId}' is not owned by live runner branches '${status?.branchIds.join(", ") ?? "unknown"}'`);
 	}
 }
 

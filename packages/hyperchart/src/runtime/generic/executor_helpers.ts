@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { actionUidDirName, sanitizeSegment } from "../../core/action_uid.js";
 import type { ChartEvent } from "../../core/types.js";
 import type { AgentEffect } from "../../core/machine.js";
+import type { BranchId } from "../../core/durable_events.js";
 import type { SchemaRegistryLike as SchemaRegistry } from "../../core/schema_registry.js";
 import { checkArtifactFile, resolveArtifactValue } from "./artifacts.js";
 import { buildArtifactFeedbackPrompt, buildErrorRetryPrompt, buildNudgePrompt, type ResolvedRead } from "./agent_prompts.js";
@@ -189,9 +191,16 @@ export async function runAcceptanceLoop(options: AcceptanceLoopOptions): Promise
 	}
 }
 
-/** Session state directory for one action invocation; created because session managers require it. */
-export function actionSessionDir(sessionsDir: string, effect: AgentEffect): string {
-	const dir = join(sessionsDir, actionUidDirName(effect.actionUid), sanitizeSegment(sessionKey(effect.id)));
+/** Stable readable filesystem segment that cannot alias another valid branch id. */
+export function branchSessionSegment(branchId: BranchId): string {
+	const prefix = sanitizeSegment(branchId).slice(0, 48) || "branch";
+	const hash = createHash("sha256").update(branchId).digest("hex").slice(0, 16);
+	return `${prefix}-${hash}`;
+}
+
+/** Branch-scoped session directory for one action invocation. */
+export function actionSessionDir(sessionsDir: string, branchId: BranchId, effect: AgentEffect): string {
+	const dir = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid), sanitizeSegment(sessionKey(effect.id)));
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}
@@ -201,6 +210,12 @@ export function actionSessionDir(sessionsDir: string, effect: AgentEffect): stri
 /** The effect id minus its trailing seqId: stable across retries of the same invocation. */
 export function sessionKey(effectId: string): string {
 	return effectId.split(":").slice(0, -1).join(":");
+}
+
+/** Durable invocation coordinate encoded as the final segment of every action effect id. */
+export function effectInvokeSeqId(effectId: string): number | undefined {
+	const value = Number(effectId.split(":").at(-1));
+	return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 export function previewText(text: string, limit = 240): string | undefined {

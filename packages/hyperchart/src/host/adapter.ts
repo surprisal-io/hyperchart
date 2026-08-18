@@ -16,6 +16,7 @@ export interface HyperchartRunSummaryInfo {
 	runId: string;
 	chartName: string;
 	branchId?: string;
+	runnerBranchIds?: string[];
 	originSessionId?: string;
 	status: HyperchartRunStatus;
 	cwd: string;

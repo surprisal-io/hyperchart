@@ -105,9 +105,12 @@ export class FileUserExecutor implements UserExecutor {
 
 	async dispose(): Promise<void> {
 		this.disposed = true;
-		for (const phase of this.live.values()) clearInterval(phase.timer);
+		const phases = [...this.live.values()];
+		for (const phase of phases) clearInterval(phase.timer);
 		this.live.clear();
 		// Deliberately do not close mailbox phases: operator stop/dispose is resumable.
+		// Validation already in flight must still quiesce before the owning runtime closes its queue.
+		await Promise.allSettled(phases.map((phase) => phase.polling));
 	}
 
 	private begin(

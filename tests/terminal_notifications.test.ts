@@ -98,15 +98,16 @@ describe("terminal notification outbox", () => {
 		const ast = normalized(chart({ kind: "chart", id: "done", initial: "done", states: { done: final() } }));
 		const state = createMachine(ast, projectBranch(createBranchProjection(ast), ast, []));
 		const payload = renderTerminalNotificationPayload(state, { runId: "run", branchId: "main", runDir, workDir: runDir, outcome: "complete" });
+		patchRunStatus(runDir, { runId: "run", branchIds: ["main"], chartId: "done", state: "starting", attemptId: "attempt-current" });
 		const first = persistTerminalNotificationRequest(runDir, payload);
 		expect(persistTerminalNotificationRequest(runDir, payload)).toEqual(first);
 		expect(() => persistTerminalNotificationRequest(runDir, { ...payload, prompt: "different" })).toThrow(/conflict/);
 
-		patchRunStatus(runDir, { runId: "run",branchId: "main", chartId: "done", state: "running", heartbeatAt: Date.now() });
+		patchRunStatus(runDir, { state: "running", heartbeatAt: Date.now() });
 		expect(readDeliverableTerminalNotificationRequest(runDir)).toBeUndefined();
 		patchRunStatus(runDir, { state: "failed" });
 		expect(readDeliverableTerminalNotificationRequest(runDir)).toBeUndefined();
-		patchRunStatus(runDir, { state: "complete" });
+		patchRunStatus(runDir, { state: "complete", branchIds: [] });
 		expect(readDeliverableTerminalNotificationRequest(runDir)?.requestId).toBe(first.requestId);
 
 		expect(hasTerminalNotificationReceipt(runDir, "pi", "session")).toBe(false);
@@ -122,7 +123,7 @@ describe("terminal notification outbox", () => {
 			runId: "run", branchId: "main", runDir, chartId: "chart", outcome: "failed", prompt: "first attempt failed", artifacts: [], error: "stale provenance",
 		});
 		markTerminalNotificationReceipt(runDir, failed.requestId, "pi", "session");
-		patchRunStatus(runDir, { runId: "run",branchId: "main", chartId: "chart", state: "starting" });
+		patchRunStatus(runDir, { runId: "run",branchIds: ["main"], chartId: "chart", state: "starting" });
 
 		const archiveDir = archiveTerminalNotificationGeneration(runDir);
 		expect(archiveDir).toBeDefined();
@@ -145,7 +146,7 @@ describe("terminal notification outbox", () => {
 		const oldRequest = persistTerminalNotificationRequest(runDir, {
 			runId: "run", branchId: "main", runDir, chartId: "chart", outcome: "failed", prompt: "old failure", artifacts: [], error: "old failure",
 		});
-		patchRunStatus(runDir, { runId: "run",branchId: "main", chartId: "chart", state: "starting" });
+		patchRunStatus(runDir, { runId: "run",branchIds: ["main"], chartId: "chart", state: "starting" });
 		archiveTerminalNotificationGeneration(runDir);
 		const newRequest = persistTerminalNotificationRequest(runDir, {
 			runId: "run", branchId: "main", runDir, chartId: "chart", outcome: "complete", prompt: "new success", artifacts: [],
@@ -206,7 +207,7 @@ describe("terminal notification outbox", () => {
 		mkdirSync(runDir);
 		patchRunStatus(runDir, {
 			runId: "run",
-		branchId: "main",
+		branchIds: ["main"],
 			chartId: "chart",
 			state: "running",
 			heartbeatAt: 1,
@@ -225,7 +226,7 @@ describe("terminal notification outbox", () => {
 		mkdirSync(runDir);
 		patchRunStatus(runDir, {
 			runId: "run",
-		branchId: "main",
+		branchIds: ["main"],
 			chartId: "chart",
 			state: "running",
 			pid: 999_999_999,
@@ -249,7 +250,7 @@ describe("terminal notification outbox", () => {
 	it("fails a dead resumed attempt instead of inheriting its predecessor before archival", () => {
 		const runDir = join(tempRoot(), "run");
 		mkdirSync(runDir);
-		patchRunStatus(runDir, { runId: "run",branchId: "main", chartId: "chart", state: "complete", attemptId: "attempt-old" });
+		patchRunStatus(runDir, { runId: "run",branchIds: ["main"], chartId: "chart", state: "complete", attemptId: "attempt-old" });
 		const previous = persistTerminalNotificationRequest(runDir, {
 			runId: "run", branchId: "main", runDir, chartId: "chart", outcome: "complete", prompt: "previous success", artifacts: [],
 		});

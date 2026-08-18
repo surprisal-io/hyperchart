@@ -128,10 +128,10 @@ Add `--wait` when the command should remain blocked; the waited call uses the sa
 The browser inspector and integrated hosts use the same command transport:
 
 ```text
-/hyperchart steer <run-id> <action-key> <message>
+/hyperchart steer <run-id> <branch-id> <action-key> <message>
 ```
 
-The command validates run ownership and requires the matching session to be `starting` or `running`, then writes the message to the run-scoped steering queue. Normal users should use the session window composer rather than copying action keys manually.
+The command requires an explicit branch, validates run ownership, and requires exactly one matching session to be `starting` or `running`. The queued request records that session's durable invocation seqId, and the branch executor rejects delivery if the action has advanced to a later visit. Normal users should use the branch-selected session window composer rather than copying action keys manually.
 
 ### View status
 
@@ -223,13 +223,14 @@ After Pi displays a gate, the user's next normal prompt is treated as the answer
 {
   "action": "respond",
   "runId": "review-20260723-120000",
+  "branchId": "main",
   "seqId": 14,
   "event": "APPROVED",
   "output": { "note": "Ship it." }
 }
 ```
 
-`event` must be one of the gate's exact allowed non-`FAILED` events and `output` must satisfy its reply contract when present. Copy `runId`, `seqId`, event names, and option values exactly; only display labels/previews may be shortened, and their metadata states the original and omitted character counts. The delivered non-executable summary recursively covers allowed values, nested required/optional fields, arrays, alternatives, defaults, nullability, and supported constraints. If an identity or the contract cannot be represented within its field/collection/depth/node/value/byte caps, Pi fails delivery closed and directs the operator to the browser inspector instead of showing a partial gate. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate `requestId`.
+`event` must be one of the gate's exact allowed non-`FAILED` events and `output` must satisfy its reply contract when present. Copy `runId`, `branchId`, `seqId`, event names, and option values exactly; only display labels/previews may be shortened, and their metadata states the original and omitted character counts. The delivered non-executable summary recursively covers allowed values, nested required/optional fields, arrays, alternatives, defaults, nullability, and supported constraints. If an identity or the contract cannot be represented within its field/collection/depth/node/value/byte caps, Pi fails delivery closed and directs the operator to the browser inspector instead of showing a partial gate. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate `requestId`.
 
 ### `hyperchart` with `action: "run_inspect"`
 
@@ -286,7 +287,7 @@ Exactly one of `runDir` or `all: true` required.
 
 ### Branch actions and non-destructive rewind
 
-All run, run inspection, view, response, and rewind calls carry explicit `branchId`. Use `action: "branches"` to list durable named heads. `action: "fork"` requires `runDir`, a new `branchId`, and `fromSeqId`; it creates the pointer without selecting or starting it.
+Run accepts exactly one of singleton `branchId` or a non-empty unique `branchIds` array. A fresh chart must resolve to exactly the singleton selection `main`; start it, fork durable branch heads, then resume the existing run with `branchId` or `branchIds` to launch the selected initial seeds. Attaching to an already-live run never spawns another process. Run inspection, view, response, rewind, and steering still select one explicit `branchId`. Use `action: "branches"` to list durable named heads. `action: "fork"` requires `runDir`, a new `branchId`, and `fromSeqId`; it creates the pointer without selecting or starting it.
 
 ```json
 { "action": "rewind", "runDir": "review-20260711-142500", "branchId": "main", "seqId": 42, "mode": "after" }
@@ -306,9 +307,10 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 |---|---|---|
 | `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
 | `log.jsonl` | core runtime | append-only v2 record-batch and named-branch mutations |
-| `status.json` | Pi runner | process state, explicit runner branch, pid, heartbeat, exit, error |
+| `status.json` | Pi runner | v2 process state, current live `branchIds`, pid, heartbeat, exit, aggregate error |
 | `user-interactions/<branchId>/<seqId>/` | runner + host | exact branch-scoped request, immutable resolution, and receipts |
-| `sessions/` | Pi executor | branch/invocation-scoped agent sessions and progress |
+| `sessions/<sanitized-branch-prefix>-<hash>/...` | Pi executor | collision-resistant branch/invocation-scoped agent sessions (no migration from the former unscoped layout) |
+| `sessions/steering/` | host + runner | branch-addressed steering queue routed only to the selected branch executor |
 | `artifact_store/objects/` | core runtime | content-addressable snapshots of accepted deliverables, referenced by completion-fact pins |
 
 Only `log.jsonl` defines durable record history and named heads. Selected UI/view branch remains non-durable.

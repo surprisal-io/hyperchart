@@ -39,7 +39,7 @@ export type GraphRow = {
 export type RunView = {
 	chartId: string;
 	branchId: string;
-	runnerBranchId?: string;
+	runnerBranchIds?: string[];
 	branches: Array<{ branchId: string; headSeqId: number | null }>;
 	/** Full immutable record-tree size, including sibling history outside the selected ancestry. */
 	recordCount: number;
@@ -58,7 +58,7 @@ export function buildRunView(
 	ast: ChartAst,
 	log: readonly DurableLogRecord[],
 	now: number,
-	branch: { branchId?: string; runnerBranchId?: string; branches?: Array<{ branchId: string; headSeqId: number | null }>; recordCount?: number } = {},
+	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; recordCount?: number } = {},
 ): RunView {
 	const projection = projectBranch(createBranchProjection(ast), ast, log);
 	const final = isFinalState(projection, ast);
@@ -66,7 +66,7 @@ export function buildRunView(
 	return {
 		chartId: ast.id,
 		branchId: branch.branchId ?? log.at(-1)?.branchId ?? "main",
-		...(branch.runnerBranchId === undefined ? {} : { runnerBranchId: branch.runnerBranchId }),
+		...(branch.runnerBranchIds === undefined ? {} : { runnerBranchIds: branch.runnerBranchIds }),
 		branches: branch.branches ?? [],
 		recordCount: branch.recordCount ?? log.length,
 		final,

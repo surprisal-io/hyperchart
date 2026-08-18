@@ -507,8 +507,8 @@ export interface HyperchartRunInfo {
 	/** Durable named heads and full immutable tree metadata for branch navigation. */
 	branches?: Array<{ branchId: string; headSeqId: number | null; name?: string; reason?: string }>;
 	recordTree?: Array<{ seqId: number; parentId: number | null; branchId: string; type: string; timestamp: number }>;
-	/** Operational branch of the live runner, which may differ from the selected view. */
-	runnerBranchId?: string;
+	/** Dynamic operational branches of the live runner, which may differ from the selected view. */
+	runnerBranchIds?: string[];
 	originSessionId?: string;
 	mode?: HyperchartInspectMode;
 	definitionSource?: string;

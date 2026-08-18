@@ -80,7 +80,7 @@ if (!handled) {
 }
 ```
 
-This bridge is for other Pi extensions. Integrated React hosts may send `steer <run-id> <action-key> <message>` when handling `onSteerSession`; the extension validates ownership and live-session status before queueing. Agents should use the consolidated `hyperchart` tool instead of constructing command strings.
+This bridge is for other Pi extensions. Integrated React hosts may send `steer <run-id> <branch-id> <action-key> <message>` when handling `onSteerSession`; the extension validates ownership and live-session status before queueing the exact durable invocation. Agents should use the consolidated `hyperchart` tool instead of constructing command strings.
 
 ## Pi host adapter
 
@@ -203,6 +203,8 @@ Starts a new run, attaches to a live run, or resumes an existing stopped run.
   chartPath?: string;
   args?: Record<string, unknown>;
   runDir?: string;
+  branchId?: string;
+  branchIds?: string[];
   exportName?: string;
   wait?: boolean;
   ignoreReplayWarnings?: boolean;
@@ -215,6 +217,7 @@ Rules:
 - A resume can provide only `runDir`; `meta.json` supplies chart path, export name, and working directory.
 - `runDir` may be a run id or path resolved by the extension.
 - A run must belong to the current Pi working directory.
+- Exactly one of `branchId` or a non-empty unique `branchIds` is required by the tool. A fresh chart must select exactly the singleton `main`; after forking durable heads, resume the existing run with `branchId` or `branchIds` to run the selected initial seeds concurrently in one detached process.
 - `wait` defaults to `false`.
 - `ignoreReplayWarnings` defaults to `false` and only bypasses stale/skipped replay warnings; it is not a structural repair.
 
@@ -252,7 +255,7 @@ Terminal details contain compact status and identifiers only:
 }
 ```
 
-A user boundary has `boundary: "user"`, `final: false`, `interaction: { version, runId, seqId, promptPreview, options, allowedEvents, outputRequired, outputHint? }`, and `waitedRun` identifying the run whose wait was interrupted. `promptPreview` is `{ text, originalChars, omittedChars }`; each option is `{ label: { text, originalChars, omittedChars }, value }`, separating bounded human display text from the exact authored value. `runId`, `seqId`, every `value`, and every allowed event name are exact and are never ellipsized or dropped. `outputHint` is a recursively bounded, non-executable contract: types/nullability; JSON-encoded enum, literal, and default values; recursively required/optional object fields and additional-property policy; array elements/tuples; union alternatives; and supported validation bounds, pattern, and format. It never contains the normalized or executable schema. The same summary is used by visible/hidden gate delivery and is sufficient to translate structured user input into `respond`. If an identity, depth, node, collection, exact-value, gate-summary, or envelope limit would make that impossible, delivery fails closed with an instruction to use the browser inspector rather than exposing a partial gate. The public gate identity is only `(runId, seqId)`; it has no runtime `effectId`.
+A user boundary has `boundary: "user"`, `final: false`, `interaction: { version, runId, branchId, seqId, promptPreview, options, allowedEvents, outputRequired, outputHint? }`, and `waitedRun` identifying the run whose wait was interrupted. `promptPreview` is `{ text, originalChars, omittedChars }`; each option is `{ label: { text, originalChars, omittedChars }, value }`, separating bounded human display text from the exact authored value. `runId`, `branchId`, `seqId`, every `value`, and every allowed event name are exact and are never ellipsized or dropped. `outputHint` is a recursively bounded, non-executable contract: types/nullability; JSON-encoded enum, literal, and default values; recursively required/optional object fields and additional-property policy; array elements/tuples; union alternatives; and supported validation bounds, pattern, and format. It never contains the normalized or executable schema. The same summary is used by visible/hidden gate delivery and is sufficient to translate structured user input into `respond`. If an identity, depth, node, collection, exact-value, gate-summary, or envelope limit would make that impossible, delivery fails closed with an instruction to use the browser inspector rather than exposing a partial gate. The public gate identity is only `(runId, seqId)`; it has no runtime `effectId`.
 
 A terminal result text is a compact boundary notice directing the operator to `view`; it never copies the durable terminal prompt or inspector snapshot. Pi recovery checks persisted `hyperchart-terminal` custom messages by request id before re-sending the same compact notice.
 
@@ -310,6 +313,7 @@ Commits the real user's answer to the exact active gate:
 {
   action: "respond";
   runId: string;
+  branchId: string;
   seqId: number;
   event: string;
   output?: unknown;
@@ -318,12 +322,13 @@ Commits the real user's answer to the exact active gate:
 
 Pi normally creates this call from the user's next ordinary prompt after the visible gate. The extension injects hidden context instructing the model to translate that prompt into one allowed event and optional output, then call `respond` immediately; the model must not answer or infer consent itself.
 
-The host requires the exact originating Pi session and canonical working directory, the exact globally active `(runId, seqId)`, a non-`FAILED` allowed event, and schema-valid output when declared. A byte-for-byte equivalent semantic retry is idempotent; a different answer for the same phase conflicts. Closed, stale, queued, foreign-session, and foreign-cwd coordinates are rejected.
+The host requires the exact originating Pi session and canonical working directory, the exact globally active `(runId, branchId, seqId)`, a non-`FAILED` allowed event, and schema-valid output when declared. A byte-for-byte equivalent semantic retry is idempotent; a different answer for the same phase conflicts. Closed, stale, queued, foreign-session, and foreign-cwd coordinates are rejected.
 
 ```json
 {
   "action": "respond",
   "runId": "review-20260723-120000",
+  "branchId": "main",
   "seqId": 14,
   "event": "BLOCK",
   "output": { "feedback": "Clarify the risks." }
@@ -412,7 +417,7 @@ Moves only the named durable head by appending a branch mutation. All records an
 
 ## Process status values
 
-Pi writes these process states to `status.json`:
+Pi writes schema-v2 process status with a live `branchIds: string[]` (terminal states use `[]`) to `status.json`:
 
 ```ts
 type HyperchartRunState =

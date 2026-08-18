@@ -110,7 +110,19 @@ export function readDeliverableTerminalNotificationRequest(runDir: string): Term
 	const request = readTerminalNotificationRequest(runDir);
 	if (request === undefined) return undefined;
 	const status = readRunStatus(runDir);
-	return status?.state === request.payload.outcome && status.branchId === request.payload.branchId ? request : undefined;
+	if (status?.state !== request.payload.outcome) return undefined;
+	// Current runners close with an empty live set, so attempt identity is the
+	// authoritative generation match. Branch identity remains legacy fallback.
+	if (status.attemptId !== undefined && request.attemptId !== undefined) {
+		return status.attemptId === request.attemptId ? request : undefined;
+	}
+	return status.branchIds.includes(request.payload.branchId) || (
+		status.branchIds.length === 0 &&
+		status.attemptId === undefined &&
+		request.attemptId === undefined &&
+		status.runId === request.payload.runId &&
+		status.chartId === request.payload.chartId
+	) ? request : undefined;
 }
 
 /**
@@ -122,7 +134,7 @@ export function recoverStaleRunTerminalNotification(
 	now = Date.now(),
 ): TerminalNotificationRequest | undefined {
 	const status = readRunStatus(runDir);
-	if (status === undefined || status.branchId === undefined || (status.state !== "starting" && status.state !== "running") || isRunLive(status, now)) {
+	if (status === undefined || (status.state !== "starting" && status.state !== "running") || isRunLive(status, now)) {
 		return undefined;
 	}
 	let request = readTerminalNotificationRequest(runDir);
@@ -138,7 +150,7 @@ export function recoverStaleRunTerminalNotification(
 			runDir,
 			defaultFailedTerminalNotificationPayload({
 				runId: status.runId,
-				branchId: status.branchId,
+				branchId: status.branchIds[0] ?? request?.payload.branchId ?? "main",
 				runDir,
 				chartId: status.chartId,
 				error,
@@ -148,6 +160,7 @@ export function recoverStaleRunTerminalNotification(
 	if (request === undefined) throw new Error(`Failed to recover terminal notification request for ${runDir}`);
 	patchRunStatus(runDir, {
 		state: request.payload.outcome,
+		branchIds: [],
 		pid: undefined,
 		heartbeatAt: undefined,
 		exitCode: request.payload.outcome === "complete" ? 0 : 1,

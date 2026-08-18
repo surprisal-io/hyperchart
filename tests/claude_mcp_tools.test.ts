@@ -17,7 +17,7 @@ import {
 	persistUserInteractionRequest,
 	readUserInteractionResponse,
 } from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
-import { sessionProgressKey, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
+import { actionUidKey, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { closeRunInspectorServer } from "../packages/hyperchart/src/inspect/inspector_server.js";
 import {
 	createHyperchartMcpTools,
@@ -117,7 +117,7 @@ function createUserGate(
 		createdAt: new Date().toISOString(),
 		originSessionId: options.sessionId ?? "session-a",
 	});
-	patchRunStatus(runDir, { runId, branchId: "main", chartId: "simple", state: "running", pid: process.pid, heartbeatAt: Date.now() });
+	patchRunStatus(runDir, { runId, branchIds: ["main"], chartId: "simple", state: "running", pid: process.pid, heartbeatAt: Date.now() });
 	persistUserInteractionRequest(runDir, {
 		runId,
 		branchId: "main",
@@ -171,6 +171,15 @@ describe("hyperchart MCP tools", () => {
 		expect(runDigest.status).toBe("completed");
 		expect(runDigest.stateDigests.every((state: object) => !("definitionSource" in state))).toBe(true);
 	}, 30_000);
+
+	it("requires fresh runs to select exactly main", async () => {
+		const { tools } = makeWorld();
+		for (const selector of [{ branchId: "experiment" }, { branchIds: ["main", "experiment"] }]) {
+			const result = await tools.get("hyperchart_run")!.handler({ chartPath: "simple", ...selector });
+			expect(result.isError).toBe(true);
+			expect(text(result)).toMatch(/fresh run must select exactly branch 'main'.*fork durable branches.*resume/i);
+		}
+	});
 
 	it("returns only bounded startup coordinates for wait=false", async () => {
 		const { tools } = makeWorld();
@@ -547,6 +556,16 @@ export default chart({
 		]);
 	});
 
+	it("rejects multi-branch selection for a fresh chart with fork/resume guidance", async () => {
+		const { tools } = makeWorld();
+		const result = await tools.get("hyperchart_run")!.handler({
+			chartPath: "simple",
+			branchIds: ["main", "experiment"],
+		});
+		expect(result).toMatchObject({ isError: true });
+		expect(text(result)).toMatch(/start main, fork durable branches, then resume/);
+	});
+
 	it("passes merged model roles and toolsets from settings into the runner config", async () => {
 		const { tools, chartsDir, userChartsDir } = makeWorld();
 		mkdirSync(userChartsDir, { recursive: true });
@@ -572,24 +591,39 @@ export default chart({
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
 		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
 		const actionUid = { chart: "simple", state: "work", action: "agent" };
-		updateSessionProgress(join(runDir, "sessions"), actionUid, { actionName: "worker", status: "running" });
+		const actionKey = actionUidKey(actionUid);
+		updateSessionProgress(join(runDir, "sessions"), actionUid, { actionName: "worker", status: "running" }, `${actionKey}:1:7`);
 
-		const progressKey = sessionProgressKey(actionUid);
 		const queued = await tools.get("hyperchart_steer")!.handler({
 			runDir: "steer-run",
-			actionKey: progressKey,
+			branchId: "main",
+			actionKey,
 			message: "focus",
 		});
 		expect(queued.isError).toBeUndefined();
-		expect(readdirSync(join(runDir, "sessions", "steering"))).toHaveLength(1);
+		const queuedFiles = readdirSync(join(runDir, "sessions", "steering"));
+		expect(queuedFiles).toHaveLength(1);
+		expect(JSON.parse(readFileSync(join(runDir, "sessions", "steering", queuedFiles[0]!), "utf8"))).toMatchObject({ branchId: "main", actionKey, invokeSeqId: 7, message: "focus" });
 
-		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "completed" });
+		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "completed" }, `${actionKey}:1:7`);
 		const rejected = await tools.get("hyperchart_steer")!.handler({
 			runDir: "steer-run",
-			actionKey: progressKey,
+			branchId: "main",
+			actionKey,
 			message: "late",
 		});
 		expect(rejected.isError).toBe(true);
+
+		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "running" }, `${actionKey}:2:8`);
+		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "running" }, `${actionKey}:3:9`);
+		const ambiguous = await tools.get("hyperchart_steer")!.handler({
+			runDir: "steer-run",
+			branchId: "main",
+			actionKey,
+			message: "which one",
+		});
+		expect(ambiguous).toMatchObject({ isError: true });
+		expect(text(ambiguous)).toMatch(/ambiguous/);
 	});
 
 	it("stops a run that is not live by marking it stopped", async () => {
@@ -597,7 +631,7 @@ export default chart({
 		const runDir = join(runsRoot, "stop-run");
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
 		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
-		patchRunStatus(runDir, { runId: "stop-run", branchId: "main", chartId: "simple", state: "running" });
+		patchRunStatus(runDir, { runId: "stop-run", branchIds: ["main"], chartId: "simple", state: "running" });
 
 		const stopped = JSON.parse(text(await tools.get("hyperchart_stop")!.handler({ runDir: "stop-run" })));
 		expect(stopped.stopped).toHaveLength(1);
@@ -621,7 +655,7 @@ export default chart({
 			actionName: "worker",
 			status: "running",
 			sessionFile: transcriptFile,
-		});
+		}, `${actionUidKey(actionUid)}:1:11`, "main");
 
 		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ runDir: "view-run", branchId: "main", open: false })));
 		expect(viewed.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/runs\/[A-Za-z0-9_-]+$/);
@@ -639,7 +673,7 @@ export default chart({
 		const steer = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/steer`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ actionKey: "simple:work:agent", message: "from inspector" }),
+			body: JSON.stringify({ actionKey: actionUidKey(actionUid), message: "from inspector" }),
 		});
 		expect(steer.status).toBe(202);
 		expect(readdirSync(join(runDir, "sessions", "steering"))).toHaveLength(1);

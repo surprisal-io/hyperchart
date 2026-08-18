@@ -77,4 +77,4 @@ MIT · experimental `0.4.1`
 
 ## Named branches
 
-The consolidated `hyperchart` tool accepts explicit `branchId` for run, run inspection, view, response, and rewind; `action: "branches"` lists heads and `action: "fork"` creates a head without selecting or starting it. Rewind preserves all history and downstream files.
+The consolidated `hyperchart` tool accepts exactly one of `branchId` or non-empty unique `branchIds` for run. A fresh chart must select exactly the singleton `main`; start it, fork durable heads, then resume the existing run with `branchId` or `branchIds` to execute the fixed set concurrently in one detached runner with a separate Pi executor per branch. Run inspection, view, response, steering, and rewind select one explicit `branchId`; `action: "branches"` lists heads and `action: "fork"` creates a head without selecting or starting it. Rewind preserves all history and downstream files. `status.json` v2 persists stable `branchIds`, and session state is stored under collision-resistant `sessions/<sanitized-branch-prefix>-<hash>/...` paths.

@@ -40,9 +40,8 @@ import {
 	isPidAlive,
 	isRunLive,
 	patchRunStatus,
-	queueSessionSteering,
+	queueLiveSessionSteering,
 	readRunStatus,
-	readSessionProgress,
 } from "@surprisal/hyperchart/sessions";
 import { claudeHostPaths, claudeRunsRoot, claudeUserChartsDir } from "../claude/paths.js";
 import { createClaudeAgentDefaultsResolver } from "../claude/agent_definitions.js";
@@ -171,7 +170,8 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			inputSchema: {
 				chartPath: z.string().optional(),
 				runDir: z.string().optional().describe("Existing run id or directory to resume"),
-				branchId: z.string().min(1).describe("Explicit branch handle (use main for a new run)"),
+				branchId: z.string().min(1).optional().describe("Singleton branch handle"),
+				branchIds: z.array(z.string().min(1)).min(1).optional().describe("Initial branches to run concurrently"),
 				args: z.record(z.string(), z.unknown()).optional(),
 				exportName: z.string().optional(),
 				ignoreReplayWarnings: z.boolean().optional(),
@@ -181,7 +181,10 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				const branchId = args.branchId as string;
+				if ((typeof args.branchId === "string") === (Array.isArray(args.branchIds))) return fail("hyperchart_run requires exactly one of branchId or branchIds");
+				const branchIds = Array.isArray(args.branchIds) ? args.branchIds as string[] : [args.branchId as string];
+				if (new Set(branchIds).size !== branchIds.length) return fail("branchIds must be unique");
+				const branchId = branchIds[0]!;
 				const requestedRunDir = typeof args.runDir === "string" ? resolveRunDirArg(args.runDir, cwd) : undefined;
 				let meta: RunMeta | undefined;
 				let chartPath: string;
@@ -199,6 +202,9 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					chartPath = claudeHostPaths().resolveChartPath(args.chartPath, cwd);
 				} else {
 					return fail("hyperchart_run requires chartPath unless runDir points at an existing run");
+				}
+				if (meta === undefined && (branchIds.length !== 1 || branchIds[0] !== "main")) {
+					return fail("A fresh run must select exactly branch 'main'; start main, fork durable branches, then resume the existing run with branchId or branchIds");
 				}
 
 				await assertChartPreflight(chartPath);
@@ -234,7 +240,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					runId,
 					chartId: parsed.ast.id,
 					state: "starting",
-					branchId,
+					branchIds,
 					attemptId,
 					heartbeatAt: Date.now(),
 					error: undefined,
@@ -256,7 +262,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					chartPath,
 					chartId: parsed.ast.id,
 					workDir,
-					branchId,
+					...(Array.isArray(args.branchIds) ? { branchIds } : { branchId }),
 					attemptId,
 					...(exportName === undefined ? {} : { exportName }),
 					...(isRecord(args.args) ? { args: args.args } : {}),
@@ -266,7 +272,8 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					...(Object.keys(toolsets).length === 0 ? {} : { toolsets }),
 				};
 				const pid = spawnDetachedRunner(config);
-				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, branchId, state: "running", pid, heartbeatAt: Date.now() });
+				// The child runner alone promotes starting -> running after every replay gate passes.
+				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, branchIds, pid, heartbeatAt: Date.now() });
 				if (args.wait === true) {
 					const boundary = await watchClaudeRunBoundary(runDir, interactionOwner(cwd));
 					if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, runDir, chartId: parsed.ast.id });
@@ -477,6 +484,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			description: "Queue a steering message for a live agent session of a run (delivered after its current tool call).",
 			inputSchema: {
 				runDir: z.string(),
+				branchId: z.string().min(1).describe("Branch owning the live session"),
 				actionKey: z.string().describe("Action key of the live session, as shown by hyperchart_run_inspect"),
 				message: z.string(),
 				...cwdField,
@@ -485,13 +493,12 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const cwd = cwdOf(args);
 				const runDir = resolveRunDirArg(args.runDir as string, cwd);
 				const sessionsDir = resolve(runDir, "sessions");
-				const session = readSessionProgress(sessionsDir).sessions[args.actionKey as string];
-				if (session === undefined) return fail(`Agent session '${String(args.actionKey)}' was not found in this run`);
-				if (session.status !== "starting" && session.status !== "running") {
-					return fail(`Agent session '${session.actionName}' is ${session.status} and cannot be steered`);
+				try {
+					const { request, session } = queueLiveSessionSteering(sessionsDir, args.branchId as string, args.actionKey as string, args.message as string);
+					return ok({ queued: true, requestId: truncateToolText(request.id), actionName: truncateToolText(session.actionName) });
+				} catch (error) {
+					return fail(error instanceof Error ? error.message : String(error));
 				}
-				const request = queueSessionSteering(sessionsDir, args.actionKey as string, args.message as string);
-				return ok({ queued: true, requestId: truncateToolText(request.id), actionName: truncateToolText(session.actionName) });
 			},
 		},
 		{
@@ -542,7 +549,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					runId: basename(runDir),
 					loadRun: () => hyperchartRunFromRunDir(runDir, { branchId: args.branchId as string, agentDefaults, includeTranscripts: true }),
 					steerSession: (actionKey, message) => {
-						queueSessionSteering(sessionsDir, actionKey, message);
+						queueLiveSessionSteering(sessionsDir, args.branchId as string, actionKey, message);
 					},
 					...openBrowser,
 				});
@@ -665,6 +672,7 @@ function compactRunStatus(status: ReturnType<typeof readRunStatus>) {
 	if (status === undefined) return { state: "unknown" as const };
 	return {
 		state: status.state,
+		branchIds: status.branchIds,
 		...(status.pid === undefined ? {} : { pid: status.pid }),
 		...(status.updatedAt === undefined ? {} : { updatedAt: status.updatedAt }),
 		...(status.exitCode === undefined ? {} : { exitCode: status.exitCode }),

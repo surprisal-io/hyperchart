@@ -58,7 +58,7 @@ describe("JsonlLogStore branch journal", () => {
 		main.initializeRootBranch();
 		main.appendDrafts([argsDraft(), invokeDraft()]); // 1 -> 2, main
 		main.createBranch("experiment", 1, { reason: "try sibling", sourceBranchId: "main", sourceSeqId: 1 });
-		const experiment = new JsonlLogStore(file, () => {}, "experiment");
+		const experiment = main.forBranch("experiment");
 		const [sibling] = experiment.appendDrafts([invokeDraft()]); // 3, experiment
 		main.moveBranch("main", 1);
 		const [replacement] = main.appendDrafts([invokeDraft()]); // 4, main
@@ -82,10 +82,11 @@ describe("JsonlLogStore branch journal", () => {
 		const dir = await makeTempDir();
 		const warnings: string[] = [];
 		const file = join(dir, "log.jsonl");
-		const store = new JsonlLogStore(file);
-		store.initializeRootBranch();
-		store.appendDrafts([argsDraft()]);
-		await writeFile(file, `${await readFile(file, "utf8")}{"kind":"branch"`, "utf8");
+		const record = { type: "args", args: { topic: "test" }, seqId: 1, parentId: null, branchId: "main", timestamp: 1 };
+		await writeFile(file, [
+			JSON.stringify({ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 1 }),
+			JSON.stringify({ kind: "record_batch", branchId: "main", records: [record], headSeqId: 1, committedAt: 1 }),
+		].join("\n") + "\n{\"kind\":\"branch\"", "utf8");
 		const repaired = new JsonlLogStore(file, (message) => warnings.push(message));
 		expect((await repaired.read()).records).toHaveLength(1);
 		expect(warnings).toHaveLength(1);
@@ -106,16 +107,92 @@ describe("JsonlLogStore branch journal", () => {
 		expect(() => validateAndProjectJournal(mutations)).toThrow(/parentId 99 does not match branch head/);
 	});
 
-	it("serializes competing store instances without reusing ids or losing the head", async () => {
+	it("serializes shared branch handles without reusing ids or losing the head", async () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const left = new JsonlLogStore(file);
-		const right = new JsonlLogStore(file);
+		const right = left.forBranch("main");
 		left.initializeRootBranch();
 		left.appendDrafts([argsDraft()]);
 		const [a] = left.appendDrafts([invokeDraft()]);
 		const [b] = right.appendDrafts([invokeDraft()]);
 		expect([a?.seqId, b?.seqId]).toEqual([2, 3]);
 		expect((await left.read()).branch("main").headSeqId).toBe(3);
+	});
+
+	it("rejects an independently opened stale writer before append and leaves a valid journal", async () => {
+		const dir = await makeTempDir();
+		const file = join(dir, "log.jsonl");
+		const current = new JsonlLogStore(file);
+		current.initializeRootBranch();
+		current.appendDrafts([argsDraft()]);
+		const stale = new JsonlLogStore(file);
+		expect(stale.snapshot().nextSeqId).toBe(2);
+
+		current.appendDrafts([invokeDraft()]);
+		expect(() => stale.appendDrafts([invokeDraft()])).toThrow(/Stale Hyperchart journal writer/);
+
+		const values = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as unknown);
+		const final = validateAndProjectJournal(values);
+		expect(final.records.map((record) => record.seqId)).toEqual([1, 2]);
+		expect(final.branch("main").headSeqId).toBe(2);
+	});
+
+	it("opens once and incrementally updates one shared projection without snapshot cloning", async () => {
+		const dir = await makeTempDir();
+		const file = join(dir, "log.jsonl");
+		const main = new JsonlLogStore(file);
+		main.initializeRootBranch();
+		const projection = main.snapshot();
+		const records = projection.records;
+		const recordsBySeqId = projection.recordsBySeqId;
+		const experiment = main.forBranch("main");
+		for (let index = 0; index < 50; index++) experiment.appendDrafts([invokeDraft()]);
+		const after = main.snapshot();
+		expect(main.fullReadCount()).toBe(1);
+		expect(after).toBe(projection);
+		expect(after.records).toBe(records);
+		expect(after.recordsBySeqId).toBe(recordsBySeqId);
+		expect(projection.recordsBySeqId.size).toBe(50);
+		expect(projection.records).toHaveLength(50);
+	});
+
+	it("keeps opened snapshots one-read while independent readers can reopen detached-writer bytes", async () => {
+		const dir = await makeTempDir();
+		const file = join(dir, "log.jsonl");
+		const writer = new JsonlLogStore(file);
+		writer.initializeRootBranch();
+		writer.appendDrafts([argsDraft()]);
+		const reader = new JsonlLogStore(file);
+		expect(reader.snapshot().records).toHaveLength(1);
+		writer.appendDrafts([invokeDraft()]);
+		expect(reader.snapshot().records).toHaveLength(1);
+		expect(reader.fullReadCount()).toBe(1);
+		expect(new JsonlLogStore(file).snapshot().records).toHaveLength(2);
+	});
+
+	it("concurrently appends through branch handles with global ids and independent heads", async () => {
+		const dir = await makeTempDir();
+		const file = join(dir, "log.jsonl");
+		const main = new JsonlLogStore(file);
+		main.initializeRootBranch();
+		main.appendDrafts([argsDraft()]);
+		main.createBranch("experiment", 1);
+		const experiment = main.forBranch("experiment");
+		await Promise.all([
+			Promise.resolve().then(() => main.appendDrafts([invokeDraft()])),
+			Promise.resolve().then(() => experiment.appendDrafts([invokeDraft()])),
+		]);
+		const beforeMove = main.snapshot();
+		const experimentHead = beforeMove.branch("experiment").headSeqId;
+		main.moveBranch("main", 1);
+		const finalSnapshot = main.snapshot();
+		expect(finalSnapshot.records.map((record) => record.seqId)).toEqual([1, 2, 3]);
+		expect(finalSnapshot.ancestry("main").map((record) => record.seqId)).toEqual([1]);
+		expect(finalSnapshot.branch("experiment").headSeqId).toBe(experimentHead);
+		expect(finalSnapshot.ancestry("experiment").map((record) => record.seqId)).toEqual([1, experimentHead]);
+		const values = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as unknown);
+		expect(validateAndProjectJournal(values).records.map((record) => record.seqId)).toEqual([1, 2, 3]);
+		expect(main.fullReadCount()).toBe(1);
 	});
 });

@@ -222,9 +222,9 @@ export function HyperchartInspectorDialogInner({
 										key={branch.branchId}
 										onClick={() => onSelectBranch?.(run.runId, branch.branchId)}
 										className={`rounded border px-2 py-1 text-xs ${branch.branchId === run.branchId ? "border-blue-500/60 bg-blue-500/10 text-[var(--hc-blue-text)]" : "border-[var(--border-secondary)] text-[var(--text-secondary)]"}`}
-										title={`Head ${branch.headSeqId ?? "empty"}${branch.branchId === run.runnerBranchId ? " · live runner" : ""}`}
+										title={`Head ${branch.headSeqId ?? "empty"}${run.runnerBranchIds?.includes(branch.branchId) === true ? " · live runner" : ""}`}
 									>
-										{branch.branchId}{branch.branchId === run.runnerBranchId ? " ▶" : ""}
+										{branch.branchId}{run.runnerBranchIds?.includes(branch.branchId) === true ? " ▶" : ""}
 									</button>
 								))}
 								{run.recordTree && run.recordTree.length > 0 && (

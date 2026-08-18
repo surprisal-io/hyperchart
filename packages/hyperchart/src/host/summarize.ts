@@ -25,7 +25,7 @@ export const MAX_TOOL_PAYLOAD_BYTES = 64 * 1024;
 const MODEL_ENVELOPE_FIELDS = new Set([
 	"actionKey", "actionName", "active", "additionalProperties", "additionalValue", "agent", "agentDefinitionUnavailable", "allowedEvents",
 	"allowedValueJson", "alternativeMode", "alternatives", "artifactWarningCount", "artifactWarnings", "artifacts", "attached", "attempts",
-	"boundary", "branchId", "branches", "cacheRead", "cacheWrite", "chartId", "chartName", "chartPath", "charts", "committed", "constraints", "customType",
+	"boundary", "branchId", "branchIds", "branches", "cacheRead", "cacheWrite", "chartId", "chartName", "chartPath", "charts", "committed", "constraints", "customType",
 	"completedEvent", "concurrency", "content", "cost", "createdAt", "currentTool", "cwd", "defaultJson", "details",
 	"deliveryNotice", "description", "digest", "display", "done", "element", "error", "errorPreview", "event", "exitCode", "exportName", "failed", "fields", "final",
 	"finalOutputPreview", "format", "hasDefault", "id", "idempotent", "initial", "input", "instruction", "interaction", "isError", "issues",
@@ -37,7 +37,7 @@ const MODEL_ENVELOPE_FIELDS = new Set([
 	"onReject", "open", "optional", "options", "originalBytes", "originalChars", "omittedChars", "outcome", "output", "outputHint", "outputRequired", "over", "path", "pattern", "pendingStateIds",
 	"pid", "presentation", "preservedRecords", "previousHeadSeqId", "preview", "projectChartsDir", "promptPreview", "propertyNames", "queued", "queuedCount", "reads", "records", "regions", "label",
 	"removedByState", "replayWarningCount", "requestId", "required", "resolvedModel", "resolvedTools",
-	"retries", "role", "runDir", "runId", "runs", "running", "scope", "seqId", "sessionDigest",
+	"retries", "role", "runDir", "runId", "runnerBranchIds", "runs", "running", "scope", "seqId", "sessionDigest",
 	"selectedBranchChanged", "severity", "sourceBranchId", "stale", "started", "state", "stateCount", "stateDigests", "stateId", "status", "stopped", "stoppedCount",
 	"subProgress", "target", "targetLabel", "text", "thinking", "toolCount", "tools", "toolset", "total", "totalUsage", "tupleItems",
 	"tokenCount", "transitionDigests", "turnCount", "type", "types", "unavailableAgents", "uniqueItems", "updatedAt", "updates", "url", "userChartsDir", "userInteractions", "value",

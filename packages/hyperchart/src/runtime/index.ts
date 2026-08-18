@@ -52,6 +52,7 @@ export type {
 	UserInteractionResponse,
 } from "./generic/user_interactions.js";
 export { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./generic/artifacts.js";
+export { latestPinsByPath, materializeWorkspace } from "./generic/artifact_workspace.js";
 export type { RenderedArtifact } from "../core/machine.js";
 export { ChartRuntime } from "./generic/chart_runtime.js";
 export type { ChartRuntimeOptions } from "./generic/chart_runtime.js";
@@ -148,8 +149,10 @@ export type { FrontmatterParser, ParsedFrontmatter } from "./generic/frontmatter
 export {
 	GenerationTracker,
 	actionSessionDir,
+	branchSessionSegment,
 	buildSessionPlan,
 	checkEffectArtifacts,
+	effectInvokeSeqId,
 	previewText,
 	resolveReads,
 	runAcceptanceLoop,
@@ -159,5 +162,14 @@ export {
 	validateDeclaredReadPaths,
 } from "./generic/executor_helpers.js";
 export type { AcceptanceLoopOptions, SessionPlan } from "./generic/executor_helpers.js";
-export { readRunnerConfig, runHyperchartRunner } from "./generic/runner_main.js";
-export type { ExecutorContext, HyperchartRunnerConfig, SteerableAgentExecutor } from "./generic/runner_main.js";
+export { createHyperchartRunnerController, readRunnerConfig, runnerBranchIds, runHyperchartRunner } from "./generic/runner_main.js";
+export type {
+	BranchHyperchartRunnerConfig,
+	ExecutorContext,
+	HyperchartRunnerConfig,
+	HyperchartRunnerController,
+	RunnerBranchOutcome,
+	RunnerForkOptions,
+	RunnerHold,
+	SteerableAgentExecutor,
+} from "./generic/runner_main.js";

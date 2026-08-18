@@ -18,13 +18,13 @@
 
 | Export | Purpose |
 |---|---|
-| `readSessionProgress(sessionsDir)` / `updateSessionProgress(sessionsDir, actionUid, patch, effectId?)` | The `sessions/progress.json` protocol: per-visit agent sessions with status, launch plan, transcript file, counts, and current streamed activity. Pass the machine effect id so repeated visits retain independent records; legacy callers without it keep the per-action key. |
-| `sessionProgressKey(actionUid, effectId?)` | Returns the storage key for an action visit (`<actionKey>:visit:<n>`) or the legacy action key when no visit can be derived. |
-| `createThrottledProgressWriter(sessionsDir, actionUid, actionName, effectId?)` | Buffers streaming text/thinking deltas and writes them at most every 250ms while preserving visit identity. |
-| `queueSessionSteering(sessionsDir, actionKey, message)` / `watchSessionSteering(sessionsDir, deliver)` | The `sessions/steering/` file queue: hosts enqueue, the runner drains into the live executor session. |
-| `readRunStatus` / `patchRunStatus` / `writeRunStatus` / `markRunHeartbeat` | The `status.json` protocol with atomic writes and heartbeats. |
+| `readSessionProgress(sessionsDir)` / `updateSessionProgress(sessionsDir, actionUid, patch, effectId?, branchId?)` | The `sessions/progress.json` protocol: branch-scoped, per-invocation agent sessions with status, launch plan, transcript file, counts, and current streamed activity. Pass the machine effect id and branch id so repeated visits and sibling branches retain independent records. |
+| `sessionProgressKey(actionUid, effectId?, branchId?)` | Returns the storage key `<branchId>:<actionKey>:invoke:<invokeSeqId>` (`unknown` when the effect id has no durable seqId). This storage key is not the public semantic `session.actionKey`. |
+| `createThrottledProgressWriter(sessionsDir, actionUid, actionName, effectId?, branchId?)` | Buffers streaming text/thinking deltas and writes them at most every 250ms while preserving branch/invocation identity. |
+| `queueLiveSessionSteering(sessionsDir, branchId, actionKey, message)` / `queueSessionSteering(sessionsDir, branchId, actionKey, message)` / `watchSessionSteering(sessionsDir, deliver)` | Resolve a public semantic action key to exactly one live session before queueing; the low-level queue writes branch-addressed requests, and the runner drains each only into that branch-scoped executor. |
+| `readRunStatus` / `patchRunStatus` / `writeRunStatus` / `markRunHeartbeat` | The atomic `status.json` v2 protocol with dynamic live `branchIds` and heartbeats. |
 | `isRunLive` / `isTerminalRunState` / `isPidAlive` | Liveness checks used by hosts to attach, stop, or fail runs. |
 | `actionUidKey` / `sessionProgressPath` / `runStatusPath` | Key and path helpers. |
 | Types | `HyperchartSessionProgress` (including optional durable `visit` identity), `HyperchartSessionProgressFile`, `HyperchartSessionStatus`, `SessionSteeringRequest`, `HyperchartRunStatus`, `HyperchartRunState`, `StreamingProgressWriter`. |
 
-Executor-building blocks (`AgentExecutor`, the finish protocol, prompt builders, `runAcceptanceLoop`, `GenerationTracker`, `runHyperchartRunner`, agent-definition loading, `createHostPaths`) are exported from [`@surprisal/hyperchart/runtime`](runtime.md).
+Executor-building blocks (`AgentExecutor`, the finish protocol, prompt builders, `runAcceptanceLoop`, `GenerationTracker`, `createHyperchartRunnerController`, `runHyperchartRunner`, agent-definition loading, `createHostPaths`) are exported from [`@surprisal/hyperchart/runtime`](runtime.md). Dynamic branch admission is available only through the in-process controller API.

@@ -167,7 +167,9 @@ export class RunWidget implements Component {
 			accent(this.theme, `branch:${view.branchId}`),
 			view.branches.length > 1 ? dim(this.theme, `${view.branches.length} heads`) : undefined,
 			dim(this.theme, `tree:${view.recordCount}`),
-			view.runnerBranchId !== undefined && view.runnerBranchId !== view.branchId ? dim(this.theme, `runner:${view.runnerBranchId}`) : undefined,
+			view.runnerBranchIds !== undefined && (view.runnerBranchIds.length !== 1 || view.runnerBranchIds[0] !== view.branchId)
+				? dim(this.theme, `runners:${view.runnerBranchIds.join(",")}`)
+				: undefined,
 			accent(this.theme, `${this.progressPercent}%`),
 			activeCount > 0 ? accent(this.theme, `${activeCount} active`) : undefined,
 		]);
@@ -209,7 +211,7 @@ export class RunWidget implements Component {
 		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId, records });
 		this.view = buildRunView(this.opts.ast, records, Date.now(), {
 			branchId,
-			...(run.runnerBranchId === undefined ? {} : { runnerBranchId: run.runnerBranchId }),
+			...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
 			branches: [...normalized.branches.values()].map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
 			recordCount: normalized.records.length,
 		});

@@ -5,12 +5,15 @@ import { start } from "../../core/execution_loop.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
 import { explainReplay, type ReplayExplanation } from "../../core/replay_check.js";
 import type { ChartAst } from "../../core/types.js";
-import type { BranchId } from "../../core/durable_events.js";
+import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_events.js";
 import type { SchemaRegistry } from "../../core/schema_registry.js";
+import type { MachineState } from "../../core/machine.js";
 import { ChartRuntime } from "./chart_runtime.js";
+import { ArtifactStore } from "./artifact_store.js";
+import { materializeWorkspace } from "./artifact_workspace.js";
 import { FileUserExecutor } from "./user_executor.js";
 import { JsonlLogStore } from "./log_store.js";
-import { finalMachineFailureMessage, terminalStateForFinalMachine } from "./run_outcome.js";
+import { finalMachineFailureMessage, terminalStateForFinalMachine, type RunTerminalState } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
 import {
 	archiveTerminalNotificationGeneration,
@@ -21,59 +24,123 @@ import {
 import { watchSessionSteering } from "./session_steering.js";
 import { assertChartPreflight } from "./chart_typecheck.js";
 import type { AgentExecutor } from "./agent_executor.js";
+import { errorMessage } from "../../utils/errors.js";
 
-export type HyperchartRunnerConfig = {
+export type RunnerCommonConfig = {
 	runId: string;
 	runDir: string;
-	/** Explicit non-durable branch handle executed by this runner. */
-	branchId: BranchId;
 	chartPath: string;
 	chartId: string;
 	exportName?: string;
 	workDir: string;
-	/** Opaque identity shared by host admission, status, and this attempt's outbox. */
 	attemptId?: string;
 	args?: Record<string, unknown>;
 	defaultModel?: string;
-	/** Role name -> model ref (in the host's model format) applied to agent definitions declaring `role`. */
 	modelRoles?: Record<string, string>;
-	/** Toolset name -> tool names (in the host's tool vocabulary) applied to agent definitions declaring `toolset`. */
 	toolsets?: Record<string, string[]>;
 	ignoreReplayWarnings?: boolean;
-	/** Host-specific configuration directory; interpretation belongs to the host's executor factory. */
 	agentDir?: string;
 };
 
-export type SteerableAgentExecutor = AgentExecutor & {
-	steer(actionKey: string, message: string): Promise<boolean>;
+/** Legacy singleton input remains accepted; branchIds are initial runner seeds. */
+export type HyperchartRunnerConfig = RunnerCommonConfig & (
+	| { branchId: BranchId; branchIds?: never }
+	| { branchIds: BranchId[]; branchId?: never }
+);
+
+export type BranchHyperchartRunnerConfig = RunnerCommonConfig & {
+	branchId: BranchId;
+	/** Launch provenance only. This is not the controller's changing live set. */
+	initialBranchIds: readonly BranchId[];
 };
 
+export type SteerableAgentExecutor = AgentExecutor & { steer(actionKey: string, invokeSeqId: number, message: string): Promise<boolean> };
 export type ExecutorContext = {
-	config: HyperchartRunnerConfig;
+	/** Branch-scoped config; hosts must construct one executor from each callback. */
+	config: BranchHyperchartRunnerConfig;
 	ast: ChartAst;
 	schemaRegistry: SchemaRegistry;
 	sessionsDir: string;
 };
 
+export type RunnerBranchOutcome = Readonly<{
+	branchId: BranchId;
+	outcome: "complete" | "failed";
+	state?: MachineState;
+	error?: string;
+}>;
+
+export type RunnerForkOptions = Readonly<{
+	branchId: BranchId;
+	fromSeqId: number;
+	sourceBranchId?: BranchId;
+	reason?: string;
+}>;
+
+export interface RunnerHold {
+	/** Idempotently release this hold. If no branches remain, aggregate termination begins. */
+	release(): void;
+}
+
+export interface HyperchartRunnerController {
+	readonly liveBranchIds: readonly BranchId[];
+	/** Launch the reserved initial branches and resolve at aggregate termination. */
+	start(): Promise<void>;
+	/** Keep an accepting controller alive across idle gaps with no live branches. */
+	acquireHold(): RunnerHold;
+	/** Create only a durable branch head. No executor or runtime is started. */
+	forkBranch(options: RunnerForkOptions): BranchHead;
+	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. */
+	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
+}
+
+type RunnerPhase = "accepting" | "closing" | "closed";
+type Deferred<T> = { promise: Promise<T>; resolve(value: T): void };
+type BranchSetupState = "reserved" | "replaying" | "building" | "running";
+type BranchEntry = {
+	branchId: BranchId;
+	store: JsonlLogStore;
+	ready: Deferred<void>;
+	outcome: Deferred<RunnerBranchOutcome>;
+	setupState: BranchSetupState;
+	setup?: Promise<void>;
+	executor?: SteerableAgentExecutor;
+	runtime?: ChartRuntime;
+	disposal?: Promise<void>;
+};
+type ReplayGate = { warnings: string[]; error?: string };
+type ExecutorFactory = (context: ExecutorContext) => Promise<SteerableAgentExecutor> | SteerableAgentExecutor;
+
+export function runnerBranchIds(config: Pick<HyperchartRunnerConfig, "branchId" | "branchIds">): BranchId[] {
+	if (config.branchId !== undefined && config.branchIds !== undefined) throw new Error("Hyperchart runner config accepts branchId or branchIds, not both");
+	const branchIds = config.branchIds ?? (config.branchId === undefined ? undefined : [config.branchId]);
+	if (branchIds === undefined || branchIds.length === 0) throw new Error("Hyperchart runner config requires branchId or non-empty branchIds");
+	const seen = new Set<string>();
+	for (const branchId of branchIds) {
+		assertRunnerBranchId(branchId);
+		if (seen.has(branchId)) throw new Error(`Duplicate Hyperchart runner branchId '${branchId}'`);
+		seen.add(branchId);
+	}
+	return [...branchIds];
+}
+
 export function readRunnerConfig(path: string): HyperchartRunnerConfig {
-	const value = JSON.parse(readFileSync(path, "utf8")) as Partial<HyperchartRunnerConfig>;
-	if (
-		typeof value.runId !== "string" ||
-		typeof value.runDir !== "string" ||
-		typeof value.branchId !== "string" || value.branchId.length === 0 ||
-		typeof value.chartPath !== "string" ||
-		typeof value.chartId !== "string" ||
-		typeof value.workDir !== "string"
-	) {
+	const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+	if (typeof value.runId !== "string" || typeof value.runDir !== "string" || typeof value.chartPath !== "string" || typeof value.chartId !== "string" || typeof value.workDir !== "string") {
 		throw new Error(`Invalid hyperchart runner config: ${path}`);
 	}
-	return {
-		runId: value.runId,
-		runDir: value.runDir,
-		branchId: value.branchId,
-		chartPath: value.chartPath,
-		chartId: value.chartId,
-		workDir: value.workDir,
+	const hasBranchId = Object.hasOwn(value, "branchId");
+	const hasBranchIds = Object.hasOwn(value, "branchIds");
+	if ((hasBranchId && typeof value.branchId !== "string") || (hasBranchIds && (!Array.isArray(value.branchIds) || !value.branchIds.every((entry) => typeof entry === "string")))) {
+		throw new Error(`Invalid hyperchart runner config: ${path} (branch selectors must be strings)`);
+	}
+	const branchInput = {
+		...(hasBranchId ? { branchId: value.branchId as string } : {}),
+		...(hasBranchIds ? { branchIds: value.branchIds as string[] } : {}),
+	} as Pick<HyperchartRunnerConfig, "branchId" | "branchIds">;
+	try { runnerBranchIds(branchInput); } catch (error) { throw new Error(`Invalid hyperchart runner config: ${path} (${error instanceof Error ? error.message : String(error)})`); }
+	const common: RunnerCommonConfig = {
+		runId: value.runId, runDir: value.runDir, chartPath: value.chartPath, chartId: value.chartId, workDir: value.workDir,
 		...(typeof value.attemptId === "string" ? { attemptId: value.attemptId } : {}),
 		...(typeof value.agentDir === "string" ? { agentDir: value.agentDir } : {}),
 		...(typeof value.exportName === "string" ? { exportName: value.exportName } : {}),
@@ -83,230 +150,472 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 		...(isRecord(value.toolsets) ? { toolsets: stringArrayEntries(value.toolsets) } : {}),
 		...(value.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
 	};
+	return hasBranchId
+		? { ...common, branchId: value.branchId as string }
+		: { ...common, branchIds: value.branchIds as string[] };
 }
 
-/**
- * The host-agnostic runner main: status/heartbeat/signal lifecycle, chart
- * preflight and parse, replay-compatibility gate, steering watcher, and
- * ChartRuntime execution. Hosts supply only the agent-executor factory.
- */
-export async function runHyperchartRunner(
-	config: HyperchartRunnerConfig,
-	buildExecutor: (context: ExecutorContext) => Promise<SteerableAgentExecutor> | SteerableAgentExecutor,
-): Promise<void> {
-	let runtime: ChartRuntime | undefined;
-	let heartbeat: NodeJS.Timeout | undefined;
-	let stopSteering: (() => void) | undefined;
-	let stopping = false;
+class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
+	private phase: RunnerPhase = "accepting";
+	private readonly live = new Map<BranchId, BranchEntry>();
+	private readonly admitted = new Set<BranchId>();
+	private readonly outcomes: RunnerBranchOutcome[] = [];
+	private readonly executors = new Map<BranchId, SteerableAgentExecutor>();
+	private readonly completion = deferred<void>();
+	private readonly initialReplayBarrier = deferred<void>();
+	private readonly initialSetupTurns: Deferred<void>[];
+	private readonly artifactStore: ArtifactStore;
+	private holdCount = 0;
+	private started = false;
+	private heartbeat: NodeJS.Timeout | undefined;
+	private stopSteering: (() => void) | undefined;
+	private shutdownSignal: NodeJS.Signals | undefined;
+	private readonly onSigterm = () => void this.close("SIGTERM");
+	private readonly onSigint = () => void this.close("SIGINT");
 
-	process.chdir(config.workDir);
-	mkdirSync(join(config.runDir, "sessions"), { recursive: true });
-	const attemptId = config.attemptId ?? randomUUID();
-	patchRunStatus(config.runDir, {
-		runId: config.runId,
-		chartId: config.chartId,
-		state: "starting",
-		branchId: config.branchId,
-		attemptId,
-		pid: process.pid,
-		heartbeatAt: Date.now(),
-		error: undefined,
-		exitCode: undefined,
-	});
-	const stop = async (signal: NodeJS.Signals) => {
-		if (stopping) return;
-		stopping = true;
-		if (heartbeat !== undefined) clearInterval(heartbeat);
-		stopSteering?.();
-		const exitCode = signal === "SIGTERM" ? 143 : 130;
-		patchRunStatus(config.runDir, {
-			state: "stopped",
-			pid: process.pid,
-			heartbeatAt: Date.now(),
-			exitCode,
-		});
-		await runtime?.dispose().catch(() => undefined);
-		process.exit(exitCode);
-	};
-	process.on("SIGTERM", () => void stop("SIGTERM"));
-	process.on("SIGINT", () => void stop("SIGINT"));
-	heartbeat = setInterval(() => markRunHeartbeat(config.runDir), 2_000);
-	heartbeat.unref();
+	constructor(
+		private readonly config: HyperchartRunnerConfig,
+		private readonly initialBranchIds: readonly BranchId[],
+		private readonly attemptId: string,
+		private readonly ast: ChartAst,
+		private readonly schemaRegistry: SchemaRegistry,
+		private readonly rootStore: JsonlLogStore,
+		private readonly sessionsDir: string,
+		private readonly buildExecutor: ExecutorFactory,
+	) {
+		this.artifactStore = new ArtifactStore(config.runDir);
+		this.initialSetupTurns = Array.from({ length: initialBranchIds.length + 1 }, () => deferred<void>());
+		this.initialSetupTurns[0]!.resolve();
+		for (const branchId of initialBranchIds) this.reserve(branchId);
+		this.stopSteering = watchSessionSteering(sessionsDir, (request) => this.executors.get(request.branchId)?.steer(request.actionKey, request.invokeSeqId, request.message) ?? false);
+		this.heartbeat = setInterval(() => markRunHeartbeat(config.runDir), 2_000);
+		this.heartbeat.unref();
+		process.on("SIGTERM", this.onSigterm);
+		process.on("SIGINT", this.onSigint);
+	}
 
-	try {
-		// A terminal request belongs to the runner attempt that produced it. Retire it
-		// only after status is non-terminal, then let this attempt publish its own
-		// result. This preserves the old receipt while allowing failed recovery to
-		// resume and later complete successfully.
-		archiveTerminalNotificationGeneration(config.runDir);
-		await assertChartPreflight(config.chartPath);
-		const parsed = parseChartModuleSync(
-			config.chartPath,
-			config.exportName === undefined ? {} : { exportName: config.exportName },
-		);
-		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-		const logStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message), config.branchId);
-		const existingLog = await logStore.readAll();
-		const replayExplanation = existingLog.length === 0 ? undefined : explainReplay(parsed.ast, existingLog);
-		if (replayExplanation?.broken !== undefined) {
-			throw new Error(formatReplayCompatibilityError(config.runDir, replayExplanation));
+	get liveBranchIds(): readonly BranchId[] { return [...this.live.keys()]; }
+
+	start(): Promise<void> {
+		if (!this.started) {
+			this.started = true;
+			if (this.phase === "accepting") void this.launchInitialBranches();
 		}
-		const replayWarnings = replayExplanation === undefined ? [] : formatReplayWarnings(replayExplanation);
-		if (replayWarnings.length > 0 && config.ignoreReplayWarnings !== true) {
-			throw new Error(formatReplayWarningsError(config.runDir, replayWarnings));
+		return this.completion.promise;
+	}
+
+	acquireHold(): RunnerHold {
+		this.assertAccepting("acquire a hold");
+		this.holdCount++;
+		let released = false;
+		return {
+			release: () => {
+				if (released) return;
+				released = true;
+				if (this.holdCount > 0) this.holdCount--;
+				this.finishIfDrained();
+			},
+		};
+	}
+
+	forkBranch(options: RunnerForkOptions): BranchHead {
+		this.assertAccepting("fork a branch");
+		assertRunnerBranchId(options.branchId);
+		const normalized = this.rootStore.snapshot();
+		if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
+		const metadata: BranchMetadata = {
+			name: options.branchId,
+			...(options.reason === undefined ? {} : { reason: options.reason }),
+			...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
+			sourceSeqId: options.fromSeqId,
+		};
+		return this.rootStore.createBranch(options.branchId, options.fromSeqId, metadata);
+	}
+
+	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {
+		this.assertAccepting("start a branch");
+		if (!this.started) throw new Error("Hyperchart runner must be started before starting a dynamic branch; call controller.start() first");
+		assertRunnerBranchId(branchId);
+		if (this.admitted.has(branchId)) throw new Error(`Hyperchart branch '${branchId}' was already admitted to this runner attempt`);
+		this.rootStore.snapshot().branch(branchId);
+		const entry = this.reserve(branchId);
+		this.publishLiveStatus();
+		entry.setup = this.setupDynamicEntry(entry);
+		return entry.outcome.promise;
+	}
+
+	private reserve(branchId: BranchId): BranchEntry {
+		const entry: BranchEntry = {
+			branchId,
+			store: branchId === this.rootStore.branchId ? this.rootStore : this.rootStore.forBranch(branchId),
+			ready: deferred<void>(),
+			outcome: deferred<RunnerBranchOutcome>(),
+			setupState: "reserved",
+		};
+		this.admitted.add(branchId);
+		this.live.set(branchId, entry);
+		return entry;
+	}
+
+	private async launchInitialBranches(): Promise<void> {
+		const entries = this.initialBranchIds.map((branchId) => this.live.get(branchId)!);
+		const gatePromises = entries.map((entry) => {
+			entry.setupState = "replaying";
+			return this.replayGate(entry);
+		});
+		for (const [index, entry] of entries.entries()) entry.setup = this.setupInitialEntry(entry, gatePromises[index]!);
+		try {
+			const gates = await Promise.all(gatePromises);
+			if (this.phase !== "accepting") return;
+			const warnings = gates.flatMap((gate) => gate.warnings);
+			patchRunStatus(this.config.runDir, {
+				runId: this.config.runId, chartId: this.ast.id, state: "running", branchIds: [...this.liveBranchIds],
+				pid: process.pid, heartbeatAt: Date.now(), error: undefined, exitCode: undefined,
+				...(warnings.length === 0 ? { replayWarnings: undefined } : { replayWarnings: warnings }),
+			});
+		} finally {
+			// Dynamic admissions may reserve immediately after start(), but cannot
+			// inspect or execute their branch until every initial replay has gated.
+			this.initialReplayBarrier.resolve();
 		}
-		for (const warning of replayWarnings) console.warn(warning);
-		patchRunStatus(config.runDir, {
-			runId: config.runId,
-			chartId: parsed.ast.id,
-			state: "running",
-			branchId: config.branchId,
-			pid: process.pid,
-			heartbeatAt: Date.now(),
-			error: undefined,
-			exitCode: undefined,
-			...(replayWarnings.length === 0 ? { replayWarnings: undefined } : { replayWarnings }),
-		});
-		const sessionsDir = join(config.runDir, "sessions");
-		const executor = await buildExecutor({
-			config,
-			ast: parsed.ast,
-			schemaRegistry: parsed.schemaRegistry,
-			sessionsDir,
-		});
-		const userExecutor = new FileUserExecutor({
-			runId: config.runId,
-			runDir: config.runDir,
-			branchId: config.branchId,
-			schemaRegistry: parsed.schemaRegistry,
-			onWarn: (message) => console.warn(message),
-		});
-		stopSteering = watchSessionSteering(sessionsDir, (request) => executor.steer(request.actionKey, request.message));
-		runtime = new ChartRuntime({
-			ast: parsed.ast,
-			branchId: config.branchId,
-			logStore,
-			agentExecutor: executor,
-			userExecutor,
-			workDir: config.workDir,
-			chartDir: dirname(config.chartPath),
-			runDir: config.runDir,
-			schemaRegistry: parsed.schemaRegistry,
-			onWarn: (message) => console.warn(message),
-		});
-		const finalState = await start(runtime, config.args);
-		if (!stopping) {
-			const log = await logStore.readAll();
-			const terminalState = terminalStateForFinalMachine(finalState, log);
-			const error = terminalState === "failed" ? finalMachineFailureMessage(finalState, log) : undefined;
-			persistTerminalNotificationRequest(
-				config.runDir,
-				renderTerminalNotificationPayload(finalState, {
-					runId: config.runId,
-					branchId: config.branchId,
-					runDir: config.runDir,
-					workDir: config.workDir,
-					outcome: terminalState,
-					...(error === undefined ? {} : { error }),
-				}),
-			);
-			patchRunStatus(config.runDir, {
-				runId: config.runId,
-				chartId: parsed.ast.id,
-				state: terminalState,
-				branchId: config.branchId,
-				pid: process.pid,
-				heartbeatAt: Date.now(),
-				exitCode: terminalState === "failed" ? 1 : 0,
-				error,
+	}
+
+	private async setupInitialEntry(entry: BranchEntry, gatePromise: Promise<ReplayGate>): Promise<void> {
+		const gate = await gatePromise;
+		await this.initialReplayBarrier.promise;
+		const index = this.initialBranchIds.indexOf(entry.branchId);
+		await this.initialSetupTurns[index]!.promise;
+		try {
+			await this.setupGatedEntry(entry, gate);
+		} finally {
+			this.initialSetupTurns[index + 1]!.resolve();
+		}
+	}
+
+	private async setupDynamicEntry(entry: BranchEntry): Promise<void> {
+		await this.initialReplayBarrier.promise;
+		if (!this.isRunnable(entry)) {
+			entry.ready.resolve();
+			return;
+		}
+		entry.setupState = "replaying";
+		const gate = await this.replayGate(entry);
+		await this.setupGatedEntry(entry, gate);
+	}
+
+	private async setupGatedEntry(entry: BranchEntry, gate: ReplayGate): Promise<void> {
+		if (!this.isRunnable(entry)) {
+			entry.ready.resolve();
+			return;
+		}
+		if (gate.error !== undefined) {
+			entry.ready.resolve();
+			await this.settle(entry, { branchId: entry.branchId, outcome: "failed", error: gate.error });
+			return;
+		}
+		for (const warning of gate.warnings) console.warn(warning);
+		await this.buildEntry(entry);
+	}
+
+	private async replayGate(entry: BranchEntry): Promise<ReplayGate> {
+		try {
+			const existingLog = await entry.store.readAll();
+			const explanation = existingLog.length === 0 ? undefined : explainReplay(this.ast, existingLog);
+			if (explanation?.broken !== undefined) {
+				return { warnings: [], error: `[branch ${entry.branchId}] ${formatReplayCompatibilityError(this.config.runDir, explanation)}` };
+			}
+			const warnings = explanation === undefined ? [] : formatReplayWarnings(explanation).map((warning) => `[branch ${entry.branchId}] ${warning}`);
+			if (warnings.length > 0 && this.config.ignoreReplayWarnings !== true) {
+				return { warnings: [], error: formatReplayWarningsError(this.config.runDir, warnings) };
+			}
+			return { warnings };
+		} catch (error) {
+			return { warnings: [], error: `[branch ${entry.branchId}] Replay gate failed: ${error instanceof Error ? error.message : String(error)}` };
+		}
+	}
+
+	private async buildEntry(entry: BranchEntry): Promise<void> {
+		entry.setupState = "building";
+		const workDir = join(this.config.runDir, "workspaces", entry.branchId);
+		const branchConfig: BranchHyperchartRunnerConfig = {
+			...commonRunnerConfig(this.config),
+			workDir,
+			branchId: entry.branchId,
+			initialBranchIds: this.initialBranchIds,
+		};
+		let executor: SteerableAgentExecutor;
+		try {
+			const normalized = entry.store.snapshot();
+			const ancestry = normalized.mutations.length === 0 ? [] : normalized.ancestry(entry.branchId);
+			await materializeWorkspace(ancestry, this.artifactStore, workDir);
+			if (!this.isRunnable(entry)) {
+				entry.ready.resolve();
+				return;
+			}
+			executor = await this.buildExecutor({ config: branchConfig, ast: this.ast, schemaRegistry: this.schemaRegistry, sessionsDir: this.sessionsDir });
+		} catch (error) {
+			entry.ready.resolve();
+			if (this.isRunnable(entry)) await this.settle(entry, { branchId: entry.branchId, outcome: "failed", error: error instanceof Error ? error.message : String(error) });
+			return;
+		}
+		if (!this.isRunnable(entry)) {
+			try {
+				await executor.dispose();
+			} finally {
+				entry.ready.resolve();
+			}
+			return;
+		}
+		try {
+			entry.executor = executor;
+			this.executors.set(entry.branchId, executor);
+			const userExecutor = new FileUserExecutor({ runId: this.config.runId, runDir: this.config.runDir, branchId: entry.branchId, schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message) });
+			entry.runtime = new ChartRuntime({
+				ast: this.ast, branchId: entry.branchId, logStore: entry.store, agentExecutor: executor, userExecutor,
+				workDir, chartDir: dirname(this.config.chartPath), runDir: this.config.runDir,
+				schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message),
+			});
+		} catch (error) {
+			entry.ready.resolve();
+			if (this.isRunnable(entry)) await this.settle(entry, { branchId: entry.branchId, outcome: "failed", error: error instanceof Error ? error.message : String(error) });
+			return;
+		}
+		entry.setupState = "running";
+		entry.ready.resolve();
+		void this.runEntry(entry);
+	}
+
+	private async runEntry(entry: BranchEntry): Promise<void> {
+		try {
+			if (!this.isRunnable(entry) || entry.runtime === undefined) return;
+			const state = await start(entry.runtime, this.config.args);
+			if (!this.isRunnable(entry)) return;
+			const log = await entry.store.readAll();
+			if (!this.isRunnable(entry)) return;
+			const outcome = terminalStateForFinalMachine(state, log);
+			const error = outcome === "failed" ? finalMachineFailureMessage(state, log) : undefined;
+			await this.settle(entry, { branchId: entry.branchId, state, outcome, ...(error === undefined ? {} : { error }) });
+		} catch (error) {
+			if (this.isRunnable(entry)) await this.settle(entry, { branchId: entry.branchId, outcome: "failed", error: error instanceof Error ? error.message : String(error) });
+		}
+	}
+
+	private disposeEntry(entry: BranchEntry): Promise<void> {
+		entry.disposal ??= (async () => {
+			await entry.ready.promise;
+			try {
+				if (entry.runtime !== undefined) await entry.runtime.dispose();
+				else if (entry.executor !== undefined) await entry.executor.dispose();
+			} finally {
+				this.executors.delete(entry.branchId);
+			}
+		})();
+		return entry.disposal;
+	}
+
+	private async settle(entry: BranchEntry, outcome: RunnerBranchOutcome): Promise<void> {
+		if (!this.isRunnable(entry)) return;
+		let settledOutcome = outcome;
+		try {
+			await this.disposeEntry(entry);
+		} catch (error) {
+			const disposalError = error instanceof Error ? error.message : String(error);
+			settledOutcome = {
+				...outcome,
+				outcome: "failed",
+				error: outcome.error === undefined ? `Executor disposal failed: ${disposalError}` : `${outcome.error}; executor disposal failed: ${disposalError}`,
+			};
+		}
+		if (!this.isRunnable(entry)) return;
+		this.outcomes.push(settledOutcome);
+		entry.outcome.resolve(settledOutcome);
+		this.live.delete(entry.branchId);
+		if (this.live.size > 0 || this.holdCount > 0) {
+			this.publishLiveStatus();
+			return;
+		}
+		// This synchronous phase claim is the deterministic admission/last-settlement boundary.
+		this.phase = "closing";
+		await this.finishAggregate(settledOutcome);
+	}
+
+	private finishIfDrained(): void {
+		if (this.phase !== "accepting" || this.live.size > 0 || this.holdCount > 0) return;
+		const representative = this.outcomes.at(-1);
+		if (representative === undefined) return;
+		this.phase = "closing";
+		void this.finishAggregate(representative);
+	}
+
+	private async finishAggregate(finalOutcome: RunnerBranchOutcome): Promise<void> {
+		if (this.shutdownSignal !== undefined) return;
+		const failed = this.outcomes.filter((entry) => entry.outcome === "failed");
+		const terminalState: RunTerminalState = failed.length === 0 ? "complete" : "failed";
+		const representative = failed[0] ?? this.outcomes[0] ?? finalOutcome;
+		const error = failed.length === 0 ? undefined : failed.map((entry) => `${entry.branchId}: ${entry.error ?? "machine failed"}`).join("; ");
+		this.stopLifetimeResources();
+		try {
+			persistTerminalNotificationRequest(this.config.runDir, representative.state === undefined
+				? defaultFailedTerminalNotificationPayload({ runId: this.config.runId, branchId: representative.branchId, runDir: this.config.runDir, chartId: this.ast.id, error: representative.error ?? "branch runtime failed" })
+				: renderTerminalNotificationPayload(representative.state, { runId: this.config.runId, branchId: representative.branchId, runDir: this.config.runDir, workDir: join(this.config.runDir, "workspaces", representative.branchId), outcome: terminalState, ...(error === undefined ? {} : { error }) }));
+			patchRunStatus(this.config.runDir, {
+				runId: this.config.runId, chartId: this.ast.id, state: terminalState, branchIds: [],
+				pid: process.pid, heartbeatAt: Date.now(), exitCode: terminalState === "failed" ? 1 : 0, error,
 			});
 			if (terminalState === "failed") process.exitCode = 1;
-		}
-	} catch (error) {
-		if (!stopping) {
-			const message = error instanceof Error ? error.message : String(error);
-			try {
-				persistTerminalNotificationRequest(
-					config.runDir,
-					defaultFailedTerminalNotificationPayload({
-						runId: config.runId,
-						branchId: config.branchId,
-						runDir: config.runDir,
-						chartId: config.chartId,
-						error: message,
-					}),
-				);
-			} catch (notificationError) {
-				console.error(notificationError);
-			}
-			patchRunStatus(config.runDir, {
-				runId: config.runId,
-				state: "failed",
-				branchId: config.branchId,
-				pid: process.pid,
-				heartbeatAt: Date.now(),
-				exitCode: 1,
-				error: message,
-			});
+		} catch (terminalError) {
+			const message = terminalError instanceof Error ? terminalError.message : String(terminalError);
+			patchRunStatus(this.config.runDir, { state: "failed", branchIds: [], exitCode: 1, error: message });
 			process.exitCode = 1;
 		}
-	} finally {
-		if (heartbeat !== undefined) clearInterval(heartbeat);
-		stopSteering?.();
-		await runtime?.dispose().catch(() => undefined);
+		this.phase = "closed";
+		this.completion.resolve();
+	}
+
+	private publishLiveStatus(): void {
+		if (this.phase !== "accepting") return;
+		patchRunStatus(this.config.runDir, { branchIds: [...this.liveBranchIds], pid: process.pid, heartbeatAt: Date.now() });
+	}
+
+	private isRunnable(entry: BranchEntry): boolean {
+		return this.phase === "accepting" && this.live.get(entry.branchId) === entry;
+	}
+
+	private assertAccepting(operation: string): void {
+		if (this.phase !== "accepting") throw new Error(`Hyperchart runner is ${this.phase}; cannot ${operation}`);
+	}
+
+	/** The second argument is an internal test seam; production signal handlers always exit. */
+	private async close(signal: NodeJS.Signals, exitProcess = true): Promise<void> {
+		if (this.phase !== "accepting") return;
+		this.shutdownSignal = signal;
+		this.phase = "closing";
+		this.holdCount = 0;
+		this.stopLifetimeResources();
+		// Wake dynamic reservations parked behind the initial replay barrier. Initial
+		// entries still await their own in-flight replay before reporting setup done.
+		this.initialReplayBarrier.resolve();
+		const entries = [...this.live.values()];
+		const stoppedOutcome = (entry: BranchEntry): RunnerBranchOutcome => ({
+			branchId: entry.branchId,
+			outcome: "failed",
+			error: `Runner stopped by ${signal}`,
+		});
+		for (const entry of entries) {
+			// A reservation with no replay/build in flight has nothing to quiesce.
+			if (entry.setupState === "reserved") entry.ready.resolve();
+			entry.outcome.resolve(stoppedOutcome(entry));
+		}
+		const disposals = entries.map((entry) => this.disposeEntry(entry));
+		const [setupResults, disposalResults] = await Promise.all([
+			Promise.allSettled(entries.map((entry) => entry.setup ?? Promise.resolve())),
+			Promise.allSettled(disposals),
+		]);
+		if (this.phase !== "closing" || this.shutdownSignal !== signal) return;
+		this.live.clear();
+		const cleanupErrors = [
+			...setupResults.flatMap((result, index) => result.status === "rejected"
+				? [`${entries[index]!.branchId} setup: ${errorMessage(result.reason)}`]
+				: []),
+			...disposalResults.flatMap((result, index) => result.status === "rejected"
+				? [`${entries[index]!.branchId} disposal: ${errorMessage(result.reason)}`]
+				: []),
+		];
+		const exitCode = signal === "SIGTERM" ? 143 : 130;
+		patchRunStatus(this.config.runDir, {
+			state: "stopped", branchIds: [], pid: process.pid, heartbeatAt: Date.now(), exitCode,
+			...(cleanupErrors.length === 0 ? { error: undefined } : { error: `Runner stopped by ${signal}; cleanup failed: ${cleanupErrors.join("; ")}` }),
+		});
+		this.phase = "closed";
+		this.completion.resolve();
+		if (exitProcess) process.exit(exitCode);
+	}
+
+	private stopLifetimeResources(): void {
+		if (this.heartbeat !== undefined) clearInterval(this.heartbeat);
+		this.heartbeat = undefined;
+		this.stopSteering?.();
+		this.stopSteering = undefined;
+		process.off("SIGTERM", this.onSigterm);
+		process.off("SIGINT", this.onSigint);
 	}
 }
 
-function formatReplayWarningsError(runDir: string, warnings: readonly string[]): string {
-	return [
-		"Replay over the current chart produced warning-level compatibility issues.",
-		...warnings,
-		`Resolve them by rewinding, or explicitly confirm continuing with: hyperchart action=run runDir=${runDir} ignoreReplayWarnings=true`,
-	].join("\n");
+/** Prepare a shared journal and reserve initial branches without launching them. */
+export async function createHyperchartRunnerController(
+	config: HyperchartRunnerConfig,
+	buildExecutor: ExecutorFactory,
+): Promise<HyperchartRunnerController> {
+	const initialBranchIds = runnerBranchIds(config);
+	const attemptId = config.attemptId ?? randomUUID();
+	process.chdir(config.workDir);
+	mkdirSync(join(config.runDir, "sessions"), { recursive: true });
+	patchRunStatus(config.runDir, {
+		runId: config.runId, chartId: config.chartId, state: "starting", branchIds: initialBranchIds, attemptId,
+		pid: process.pid, heartbeatAt: Date.now(), error: undefined, exitCode: undefined,
+	});
+	try {
+		archiveTerminalNotificationGeneration(config.runDir);
+		await assertChartPreflight(config.chartPath);
+		const parsed = parseChartModuleSync(config.chartPath, config.exportName === undefined ? {} : { exportName: config.exportName });
+		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		const rootStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message), initialBranchIds[0]);
+		rootStore.snapshot();
+		return new HyperchartRunnerControllerImpl(config, initialBranchIds, attemptId, parsed.ast, parsed.schemaRegistry, rootStore, join(config.runDir, "sessions"), buildExecutor);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		try {
+			persistTerminalNotificationRequest(config.runDir, defaultFailedTerminalNotificationPayload({ runId: config.runId, branchId: initialBranchIds[0]!, runDir: config.runDir, chartId: config.chartId, error: message }));
+		} catch (notificationError) { console.error(notificationError); }
+		patchRunStatus(config.runDir, { runId: config.runId, state: "failed", branchIds: [], pid: process.pid, heartbeatAt: Date.now(), exitCode: 1, error: message });
+		process.exitCode = 1;
+		throw error;
+	}
 }
 
+/** Compatibility wrapper: create a controller, launch its initial seeds, and await closure. */
+export async function runHyperchartRunner(config: HyperchartRunnerConfig, buildExecutor: ExecutorFactory): Promise<void> {
+	try {
+		const controller = await createHyperchartRunnerController(config, buildExecutor);
+		await controller.start();
+	} catch {
+		// Factory failures are already durably reported through status and the outbox.
+	}
+}
+
+function commonRunnerConfig(config: HyperchartRunnerConfig): RunnerCommonConfig {
+	const { branchId: _branchId, branchIds: _branchIds, ...common } = config;
+	return common;
+}
+function deferred<T>(): Deferred<T> {
+	let resolve!: (value: T) => void;
+	const promise = new Promise<T>((done) => { resolve = done; });
+	return { promise, resolve };
+}
+function assertRunnerBranchId(branchId: string): void {
+	if (typeof branchId !== "string" || branchId.trim().length === 0 || branchId.length > 128 || /[\0/\\]/.test(branchId)) throw new Error("Invalid Hyperchart runner branchId");
+}
+function formatReplayWarningsError(runDir: string, warnings: readonly string[]): string {
+	return ["Replay over the current chart produced warning-level compatibility issues.", ...warnings, `Resolve them by rewinding, or explicitly confirm continuing with: hyperchart action=run runDir=${runDir} ignoreReplayWarnings=true`].join("\n");
+}
 function formatReplayCompatibilityError(runDir: string, explanation: ReplayExplanation): string {
 	const broken = explanation.broken;
 	if (broken === undefined) return "Replay compatibility check failed";
 	const target = broken.invokeSeqId ?? broken.seqId;
-	return [
-		`Replay over the current chart is incompatible at seqId ${broken.seqId}${broken.state === undefined ? "" : ` (${broken.state})`}.`,
-		`Original error: ${broken.error}`,
-		`Rewind to the compatible prefix explicitly before resuming: hyperchart action=rewind runDir=${runDir} seqId=${target} mode=before`,
-		`Or use: hyperchart action=rewind runDir=${runDir} to=compatible`,
-	].join("\n");
+	return [`Replay over the current chart is incompatible at seqId ${broken.seqId}${broken.state === undefined ? "" : ` (${broken.state})`}.`, `Original error: ${broken.error}`, `Rewind to the compatible prefix explicitly before resuming: hyperchart action=rewind runDir=${runDir} seqId=${target} mode=before`, `Or use: hyperchart action=rewind runDir=${runDir} to=compatible`].join("\n");
 }
-
 function formatReplayWarnings(explanation: ReplayExplanation): string[] {
 	const warnings: string[] = [];
 	if (explanation.skipped.length > 0) {
 		const states = [...new Set(explanation.skipped.map((entry) => entry.state))].slice(0, 8).join(", ");
-		warnings.push(
-			`Replay warning: ${explanation.skipped.length} durable record(s) were skipped because their states were inactive under the current chart${states.length === 0 ? "" : ` (${states})`}.`,
-		);
+		warnings.push(`Replay warning: ${explanation.skipped.length} durable record(s) were skipped because their states were inactive under the current chart${states.length === 0 ? "" : ` (${states})`}.`);
 	}
 	if (explanation.stale.length > 0) {
 		const states = [...new Set(explanation.stale.map((entry) => entry.state))].slice(0, 8).join(", ");
-		warnings.push(
-			`Replay warning: ${explanation.stale.length} durable record(s) have stale provenance under the current chart${states.length === 0 ? "" : ` (${states})`}.`,
-		);
+		warnings.push(`Replay warning: ${explanation.stale.length} durable record(s) have stale provenance under the current chart${states.length === 0 ? "" : ` (${states})`}.`);
 	}
 	return warnings;
 }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function stringEntries(value: Record<string, unknown>): Record<string, string> {
-	return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-}
-
-function stringArrayEntries(value: Record<string, unknown>): Record<string, string[]> {
-	return Object.fromEntries(
-		Object.entries(value).filter(
-			(entry): entry is [string, string[]] =>
-				Array.isArray(entry[1]) && entry[1].every((item) => typeof item === "string"),
-		),
-	);
-}
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function stringEntries(value: Record<string, unknown>): Record<string, string> { return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")); }
+function stringArrayEntries(value: Record<string, unknown>): Record<string, string[]> { return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((item) => typeof item === "string"))); }

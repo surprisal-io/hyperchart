@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
+import { branchSessionSegment } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { hyperchartRunFromRunDir } from "../packages/hyperchart/src/inspect/run_inspect.js";
@@ -110,7 +111,7 @@ describe("run inspection transcript seam", () => {
 		expect(readNeutralSessionTranscript(sessionsDir, file, { limit: false })).toHaveLength(130);
 	});
 
-	it("reconstructs every legacy visit session from persisted invocation directories", async () => {
+	it("reconstructs every visit session from branch-scoped invocation directories", async () => {
 		const root = mkdtempSync(join(tmpdir(), "hyperchart-visit-sessions-"));
 		roots.push(root);
 		const chartPath = join(root, "visits.chart.ts");
@@ -141,7 +142,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 			{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 900 },
 			{ kind: "record_batch", branchId: "main", records, headSeqId: 6, committedAt: 6000 },
 		].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n");
-		const actionDir = join(sessionsDir, actionUidDirName(actionUid));
+		const actionDir = join(sessionsDir, branchSessionSegment("main"), actionUidDirName(actionUid));
 		const firstFile = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:1`), "first.jsonl");
 		// Visits 2 and 3 resume the first session, so their own invocation directories have no transcript.
 		const thirdVisitDir = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:3`));

@@ -32,10 +32,12 @@ The [API index](api/README.md) lists every supported package entry point and the
 │           ├── resolution.json
 │           └── receipts/
 └── sessions/
-    └── progress.json
+    ├── progress.json
+    ├── steering/
+    └── <branchId>/<actionUid>/<invocation>/
 ```
 
-Only `meta.json`, the append-only v2 mutation journal `log.jsonl`, and the run directory itself are fundamental. Status and the selected UI branch are operational/non-durable; named branch heads are reconstructed from journal mutations. `sessions/progress.json` records `branchId` and producing invocation `seqId`. A user interaction's exact external identity is `(runId, branchId, seqId)`; older two-component identities are rejected.
+Only `meta.json`, the append-only v2 mutation journal `log.jsonl`, and the run directory itself are fundamental. Status and the selected UI branch are operational/non-durable; named branch heads are reconstructed from journal mutations. Persisted `status.json` schema v2 contains the runner's current live `branchIds` array (empty at terminal status) (legacy v1 is read for host delivery compatibility and upgraded on the next write). `sessions/progress.json` records `branchId` and producing invocation `seqId`; session directories are branch-separated with no migration of the old layout. Steering requests also carry `branchId`. A user interaction's exact external identity is `(runId, branchId, seqId)`; older two-component identities are rejected.
 
 Artifact paths keep their authored mutable-file semantics. Branching the durable machine log does not version artifact contents: sibling executions may overwrite the same path, and historical artifact restoration remains a separate artifact-versioning problem.
 

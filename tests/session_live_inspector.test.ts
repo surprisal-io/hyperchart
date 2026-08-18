@@ -70,11 +70,29 @@ describe("live inspector sessions", () => {
 		const sessions = tempSessions();
 		const delivered: string[] = [];
 		const stop = watchSessionSteering(sessions, (request) => {
-			delivered.push(`${request.actionKey}:${request.message}`);
+			delivered.push(`${request.branchId}:${request.actionKey}:${request.invokeSeqId}:${request.message}`);
 			return true;
 		});
-		queueSessionSteering(sessions, "agent-key", "Change direction");
-		await expect.poll(() => delivered).toEqual(["agent-key:Change direction"]);
+		queueSessionSteering(sessions, "main", "agent-key", 17, "Change direction");
+		await expect.poll(() => delivered).toEqual(["main:agent-key:17:Change direction"]);
+		stop();
+	});
+
+	it("does not route a request to an executor for another branch", async () => {
+		const sessions = tempSessions();
+		const main: string[] = [];
+		const experiment: string[] = [];
+		const executors = new Map([
+			["main", (message: string) => main.push(message)],
+			["experiment", (message: string) => experiment.push(message)],
+		]);
+		const stop = watchSessionSteering(sessions, (request) => {
+			executors.get(request.branchId)?.(request.message);
+			return true;
+		});
+		queueSessionSteering(sessions, "experiment", "same-action", 22, "only experiment");
+		await expect.poll(() => experiment).toEqual(["only experiment"]);
+		expect(main).toEqual([]);
 		stop();
 	});
 });

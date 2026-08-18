@@ -149,9 +149,10 @@ describe("Pi Hyperchart host adapter", () => {
 			createdAt: "2026-07-10T00:00:00.000Z",
 		}), "utf8");
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 1,
+			version: 2,
 			runId: "side-effect-run",
-			branchId: "main",			runDir,
+			branchIds: ["main"],
+			runDir,
 			chartId: "side-effect",
 			state: "complete",
 			startedAt: 1,
@@ -267,9 +268,10 @@ describe("Pi Hyperchart host adapter", () => {
 			createdAt: "2026-07-10T00:00:00.000Z",
 		}), "utf8");
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 1,
+			version: 2,
 			runId: "generated-run",
-			branchId: "main",			runDir,
+			branchIds: ["main"],
+			runDir,
 			chartId: "generated",
 			state: "complete",
 			startedAt: 1,
@@ -318,9 +320,10 @@ console.log(JSON.stringify(snapshot.runs));`;
 			originSessionId: "session-a",
 		}), "utf8");
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 1,
+			version: 2,
 			runId: "sample-run",
-			branchId: "main",			runDir,
+			branchIds: ["main"],
+			runDir,
 			chartId: "sample",
 			state: "running",
 			startedAt: 1,
@@ -446,9 +449,10 @@ console.log(JSON.stringify(snapshot.runs));`;
 			createdAt: "2026-07-10T00:00:00.000Z",
 		}), "utf8");
 		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 1,
+			version: 2,
 			runId: "missing-chart-run",
-			branchId: "main",			runDir,
+			branchIds: [],
+			runDir,
 			chartId: "deleted-chart",
 			state: "complete",
 			startedAt: 10,

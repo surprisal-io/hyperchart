@@ -34,9 +34,11 @@ Effect interpreters live in the runtime. This boundary keeps transition semantic
 
 A new run creates `main` before its first record. Legacy linear logs and mixed formats are rejected explicitly; there is no implicit branch or migration path.
 
-The storage reader repairs only an unterminated final JSONL tail and normalizes the journal once. That boundary validates mutation shape, unique/global numbering, parent references, branch create/move legality, and append-from-head. It exposes the full immutable tree, named head registry, and root-to-head ancestry queries. Replay and projection receive only the explicitly selected ancestry and do not repeat structural checks.
+The shared storage reader repairs only an unterminated final JSONL tail and fully reads, validates, and normalizes the journal once when it opens. That boundary validates mutation shape, unique/global numbering, parent references, branch create/move legality, and append-from-head. A root `JsonlLogStore` creates branch-scoped handles with `forBranch()`; those handles share its incremental snapshot and ancestry pointers. Independent readers open independent one-read snapshots, so live inspection can reopen and observe a detached runner's latest durable bytes. Commits allocate the next global id from that shared state, prepare the next projection, append only the new mutation under the writer claim, and publish the projection only after append succeeds; append and snapshot do not reread the journal. Replay and projection receive only the explicitly selected ancestry.
 
-Every append/fork/rewind uses one exclusive run-writer claim. A record batch and its head advance are one JSONL commit, so concurrent writers cannot reuse ids or lose a head. Fork creates a head without selection; checkout/view is a non-durable handle; rewind appends a head move and preserves every prior record and downstream file.
+Every append/fork/rewind uses one exclusive run-writer claim. A record batch and its head advance are one JSONL commit, so concurrently executing branch runtimes cannot reuse ids or lose a head. Fork creates a head without selection; checkout/view is a non-durable handle; rewind appends a head move and preserves every prior record and downstream file.
+
+One detached runner process may execute a dynamic, non-empty set of live branch reservations concurrently. It replay-gates all initial branch seeds before starting any initial runtime; dynamically admitted branches gate independently. Each admitted branch gets one `ChartRuntime` and one host executor over the shared journal. Executor instances are deliberately branch-scoped: Pi/Claude live-session maps cannot collide across branches. The process is failed if any branch fails; `status.json` v2 publishes current live `branchIds` and terminal states use `[]`. A singleton `branchId` runner config remains accepted and is normalized to one branch.
 
 ## Why store facts instead of current state
 
@@ -131,7 +133,7 @@ The Pi package adds files that are useful but not semantic history:
 
 | File | Meaning |
 |---|---|
-| `status.json` | pid, heartbeat, process state, opaque runner-attempt identity, terminal error, timestamps |
+| `status.json` | v2 pid, heartbeat, process state, current live `branchIds`, opaque runner-attempt identity, terminal error, timestamps |
 | `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-attempt UUID, written before terminal status |
 | `terminal-notification/receipts/<request-hash>/*.json` | generation-isolated, recoverable per-host/session terminal-delivery leases and confirmed receipts |
 | `terminal-notification-history/<generation>/` | complete outboxes archived when a terminal run starts another attempt; prior requests and receipts remain auditable but are no longer deliverable |
@@ -139,8 +141,9 @@ The Pi package adds files that are useful but not semantic history:
 | `user-interactions/<seqId>/resolution.json` | immutable response-or-close winner; a committed response contains the validated chart event |
 | `user-interactions/<seqId>/receipts/*.json` | per-host/session claims and presentation confirmations; never a second gate identity |
 | `user-interactions/<seqId>/receipts/*.published` | internal immutable publication-order markers used only for cross-process presentation arbitration |
-| `sessions/progress.json` | optional agent progress summaries |
-| agent session files | host conversation state and usage |
+| `sessions/progress.json` | optional branch-tagged agent progress summaries |
+| `sessions/<sanitized-branch-prefix>-<hash>/<actionUid>/<invocation>/` | collision-resistant branch-separated host conversation state and usage; there is no legacy-directory migration |
+| `sessions/steering/*.json` | requests carrying `branchId`; the runner routes each only to that branch's executor |
 
 A run may have a valid log and a stale process status. Conversely, a process can be alive while replay is incompatible. Operators must inspect both.
 

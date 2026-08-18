@@ -58,7 +58,7 @@ function createRun(
 	});
 	patchRunStatus(runDir, {
 		runId,
-		branchId: "main",
+		branchIds: ["main"],
 		chartId: "chart",
 		state: "running",
 		pid: process.pid,

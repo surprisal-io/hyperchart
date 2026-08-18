@@ -27,9 +27,10 @@ describe("Storybook production TUI fixture", () => {
 		for (const item of fixture.history) {
 			const status = readRunStatus(item.runDir);
 			expect(status).toMatchObject({
-				version: 1,
+				version: 2,
 				runId: item.runId,
-				branchId: "main",				runDir: item.runDir,
+				branchIds: ["main"],
+				runDir: item.runDir,
 				chartId: fixture.ast.id,
 				state: item.state,
 			});

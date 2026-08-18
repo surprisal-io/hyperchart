@@ -66,7 +66,7 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	patchRunStatus(opts.runDir, {
 		runId: basename(opts.runDir),
 		chartId: parsed.ast.id,
-		branchId: opts.branchId,
+		branchIds: [opts.branchId],
 		state: "stopped",
 		pid: undefined,
 		heartbeatAt: undefined,

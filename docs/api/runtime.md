@@ -87,6 +87,8 @@ type ChartRuntimeOptions = {
 
 Detached runners provide `FileUserExecutor`. A custom in-process runtime that can reach `user()` must also provide a `UserExecutor`; without one, `ChartRuntime` throws when the user effect is dispatched rather than inventing an answer.
 
+`dispose()` is idempotent and begins by refusing new effects and callbacks. It clears timers, concurrently disposes script, agent, and user executors, drains effect preparation and completion-admission work already in flight, then closes the event queue. Cleanup failures are reported only after every component and tracked continuation has had a chance to quiesce. `FileUserExecutor` preserves unanswered mailbox requests while waiting for any active response validation to finish.
+
 ```ts
 import { loop } from "@surprisal/hyperchart";
 import { ChartRuntime, JsonlLogStore } from "@surprisal/hyperchart/runtime";
@@ -105,6 +107,28 @@ try {
   await runtime.dispose();
 }
 ```
+
+## In-process runner controller
+
+`createHyperchartRunnerController()` prepares one parsed chart and shared journal, reserves the configured `branchId` or `branchIds` as initial seeds, and returns before launching them. `start()` launches those seeds only after their all-initial replay barrier and resolves when the aggregate runner terminates. `runHyperchartRunner()` is the compatibility wrapper that creates the controller and awaits `start()`. Signal shutdown waits for every branch disposal; cleanup failures are recorded in stopped status while the process still uses the signal-derived exit code.
+
+```ts
+const controller = await createHyperchartRunnerController(config, buildExecutor);
+const completion = controller.start();
+
+const fork = controller.forkBranch({
+  branchId: "experiment",
+  sourceBranchId: "main",
+  fromSeqId: 42,
+}); // durable head only; no runtime starts
+
+const outcome = await controller.startBranch(fork.branchId); // explicit admission
+await completion;
+```
+
+`startBranch()` synchronously reserves a durable branch before its replay gate or executor construction, then returns a promise for that branch's `complete` or `failed` outcome. Each admitted branch owns a branch-scoped executor, user executor, and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
+
+`liveBranchIds` and status-v2 `branchIds` are current live reservations, not durable branch selection. Forking does not add a reservation. The final reservation is removed only after disposal, terminal notification persistence publishes `branchIds: []`, and the controller rejects fork/admission after it begins closing. Keep an existing reservation live while admitting more work; there is intentionally no filesystem, Pi-command, or MCP control plane for dynamic admission.
 
 ## `UserExecutor` and `FileUserExecutor`
 
@@ -193,17 +217,22 @@ interface LogStore {
 
 ```ts
 class JsonlLogStore implements LogStore {
-  constructor(filePath: string, onWarn?: (message: string) => void);
+  constructor(filePath: string, onWarn?: (message: string) => void, branchId?: string);
   readonly filePath: string;
-  append(records: readonly DurableLogRecord[]): void;
+  readonly branchId: string;
+  appendDrafts(records: readonly DurableRecordDraft[]): readonly DurableLogRecord[];
+  forBranch(branchId: string): JsonlLogStore;
+  snapshot(): NormalizedRunLog;
   readAll(): Promise<readonly DurableLogRecord[]>;
+  fullReadCount(): number;
 }
 ```
 
-- creates the parent directory on append;
-- writes one JSON object per line;
-- ignores an incomplete final line and calls `onWarn`;
-- throws for malformed JSON before the final line.
+- `forBranch()` creates explicit branch handles over one opened journal; independent readers reopen independently;
+- repairs an incomplete final mutation and fully validates the v2 journal once at open;
+- allocates global ids and appends only each new mutation under the writer lock;
+- incrementally publishes snapshots sharing the record index and ancestry pointers, without rereading on append/snapshot;
+- returns only the selected branch ancestry from `readAll()`; public singleton use defaults to `main`.
 
 ```ts
 const store = new JsonlLogStore("/absolute/run/log.jsonl", console.warn);

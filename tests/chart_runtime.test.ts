@@ -1,11 +1,12 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeChartConfig, start } from "../packages/hyperchart/src/index.js";
 import { agent, arg, chart, final, map, user } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, DurableLogRecord, Effect } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
+import { ArtifactStore } from "../packages/hyperchart/src/runtime/generic/artifact_store.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
@@ -25,6 +26,7 @@ async function makeTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -153,6 +155,99 @@ describe("ChartRuntime", () => {
 		await runtime.dispose();
 	});
 
+	it("quiesces delayed pinned-read restoration without starting an executor after disposal", async () => {
+		const root = await makeTempDir();
+		const runDir = join(root, "run");
+		await mkdir(runDir);
+		const source = join(root, "pinned-source.txt");
+		await writeFile(source, "pinned");
+		const ast = linearChart();
+		const state = ast.states.work;
+		if (state?.kind !== "state" || state.action.kind !== "agent") throw new Error("expected agent state");
+		const pin = { hash: "a".repeat(64), size: 6 };
+		const store = new MemoryLogStore();
+		store.appendDrafts([{
+			type: "state_action",
+			kind: "complete",
+			actionUid: state.action.uid,
+			event: { type: "DONE" },
+			artifacts: { "input.txt": pin },
+		}]);
+		let releaseRead!: () => void;
+		const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+		let readEntered!: () => void;
+		const entered = new Promise<void>((resolve) => { readEntered = resolve; });
+		vi.spyOn(ArtifactStore.prototype, "get").mockImplementation(async () => {
+			readEntered();
+			await readGate;
+			return source;
+		});
+		const executor = new FakeAgentExecutor();
+		const runtime = new ChartRuntime({
+			ast, branchId: "main", logStore: store, agentExecutor: executor,
+			workDir: root, chartDir: root, runDir,
+		});
+		runtime.runEffects([{
+			kind: "agent",
+			id: "delayed-read",
+			actionUid: state.action.uid,
+			action: state.action,
+			reads: [{ path: "input.txt" }],
+			events: ["DONE"],
+		}]);
+		await entered;
+
+		let disposed = false;
+		const disposal = runtime.dispose().then(() => { disposed = true; });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(disposed).toBe(false);
+		expect(executor.starts).toHaveLength(0);
+		releaseRead();
+		await disposal;
+		runtime.runEffects([{
+			kind: "agent",
+			id: "after-disposal",
+			actionUid: state.action.uid,
+			action: state.action,
+			events: ["DONE"],
+		}]);
+
+		expect(executor.starts).toHaveLength(0);
+		expect(await runtime.eventsQueue()[Symbol.asyncIterator]().next()).toEqual({ done: true, value: undefined });
+	});
+
+	it("runs every component cleanup and surfaces failures from idempotent disposal", async () => {
+		const calls: string[] = [];
+		const agentExecutor = {
+			start: () => undefined,
+			reject: () => undefined,
+			cancel: async () => undefined,
+			dispose: async () => {
+				calls.push("agent");
+				throw new Error("agent cleanup failed");
+			},
+		};
+		const userExecutor = {
+			start: () => undefined,
+			reject: () => undefined,
+			cancel: async () => undefined,
+			dispose: async () => {
+				calls.push("user");
+			},
+		};
+		const runtime = new ChartRuntime({
+			ast: linearChart(), branchId: "main", logStore: new MemoryLogStore(),
+			agentExecutor, userExecutor, workDir: process.cwd(), chartDir: process.cwd(),
+		});
+
+		const first = runtime.dispose();
+		const second = runtime.dispose();
+		expect(second).toBe(first);
+		await expect(first).rejects.toThrow(/agent cleanup failed/);
+		expect(calls).toEqual(expect.arrayContaining(["agent", "user"]));
+		expect(calls).toHaveLength(2);
+	});
+
 	it("runs a linear agent chart through the real execution loop", async () => {
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE", output: { ok: true } }] });
 		const store = new MemoryLogStore();
@@ -196,7 +291,7 @@ describe("ChartRuntime", () => {
 		const root = await makeTempDir();
 		const runDir = join(root, "run");
 		await mkdir(runDir);
-		patchRunStatus(runDir, { runId: "run",branchId: "main", chartId: ast.id, state: "running", pid: process.pid, heartbeatAt: Date.now() });
+		patchRunStatus(runDir, { runId: "run",branchIds: ["main"], chartId: ast.id, state: "running", pid: process.pid, heartbeatAt: Date.now() });
 		const logStore = new JsonlLogStore(join(runDir, "log.jsonl"));
 		logStore.initializeRootBranch();
 		const firstUserExecutor = new FileUserExecutor({ runId: "run", runDir, branchId: "main", pollMs: 5 });

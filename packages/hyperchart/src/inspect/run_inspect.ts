@@ -11,6 +11,7 @@ import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
 import { hyperchartRunFromRuntime } from "../host/index.js";
 import type { HyperchartRunInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
+import { branchSessionSegment } from "../runtime/generic/executor_helpers.js";
 import { JsonlLogStore } from "../runtime/generic/log_store.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
@@ -46,7 +47,7 @@ export async function hyperchartRunFromRunDir(
 		...(agentDefaults === undefined ? {} : { agentDefaults }),
 	});
 	const status = readRunStatus(absoluteRunDir);
-	const branchId = options.branchId ?? status?.branchId ?? "main";
+	const branchId = options.branchId ?? "main";
 	const store = new JsonlLogStore(resolve(absoluteRunDir, "log.jsonl"), () => {}, branchId);
 	const normalized = options.records === undefined ? await store.read() : undefined;
 	const records = options.records ?? (normalized === undefined || normalized.mutations.length === 0 ? [] : normalized.ancestry(branchId));
@@ -61,9 +62,15 @@ export async function hyperchartRunFromRunDir(
 		return messages;
 	};
 	const rawSessionProgress = readSessionProgress(sessionsDir);
+	const branchSessionProgress = {
+		...rawSessionProgress,
+		sessions: Object.fromEntries(
+			Object.entries(rawSessionProgress.sessions).filter(([, session]) => session.branchId === branchId),
+		),
+	};
 	const sessionProgress = options.includeTranscripts === true
-		? sessionProgressWithVisitTranscripts(sessionsDir, records, rawSessionProgress, readFullTranscript)
-		: rawSessionProgress;
+		? sessionProgressWithVisitTranscripts(sessionsDir, records, branchSessionProgress, readFullTranscript)
+		: branchSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
 	const run = hyperchartRunFromRuntime(inspect, ast, records, {
 		runId: status?.runId ?? basename(absoluteRunDir),
@@ -76,7 +83,7 @@ export async function hyperchartRunFromRunDir(
 	return {
 		...run,
 		branchId,
-		...(status?.branchId === undefined ? {} : { runnerBranchId: status.branchId }),
+		...(status === undefined ? {} : { runnerBranchIds: status.branchIds }),
 		...(normalized === undefined ? {} : {
 			branches: [...normalized.branches.values()].map((branch) => ({
 				branchId: branch.branchId,
@@ -118,7 +125,7 @@ function sessionProgressWithVisitTranscripts(
 	for (const visits of invocations.values()) {
 		for (const invocation of visits) {
 			if (knownVisits.has(`${invocation.actionKey}:${invocation.visit}`)) continue;
-			const sessionFile = latestVisitTranscript(sessionsDir, invocation.actionUid, invocation.actionKey, invocation.visit);
+			const sessionFile = latestVisitTranscript(sessionsDir, invocation.branchId, invocation.actionUid, invocation.actionKey, invocation.visit);
 			if (sessionFile === undefined) continue;
 			const messages = readTranscript(sessionsDir, sessionFile);
 			if (messages === undefined) continue;
@@ -191,11 +198,12 @@ function agentInvocationsByAction(records: readonly DurableLogRecord[]): Map<str
 
 function latestVisitTranscript(
 	sessionsDir: string,
+	branchId: string,
 	actionUid: ActionUID,
 	actionKey: string,
 	visit: number,
 ): string | undefined {
-	const root = join(sessionsDir, actionUidDirName(actionUid), sanitizeSegment(`${actionKey}:${visit}`));
+	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(actionUid), sanitizeSegment(`${actionKey}:${visit}`));
 	if (!existsSync(root)) return undefined;
 	const candidates = transcriptFiles(root);
 	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];

@@ -17,11 +17,13 @@ import type { SchemaRegistryLike as SchemaRegistry } from "@surprisal/hyperchart
 import {
 	GenerationTracker,
 	actionSessionDir,
+	branchSessionSegment,
 	buildRejectPrompt,
 	buildResumePrompt,
 	buildSessionPlan,
 	buildTaskPrompt,
 	checkEffectArtifacts,
+	effectInvokeSeqId,
 	loadAgentDefinition,
 	previewText,
 	resolveReads,
@@ -77,6 +79,8 @@ type RunOptions = {
 	resumeSessionFile?: string;
 };
 
+class SessionCleanupError extends AggregateError {}
+
 type LiveAgent = {
 	session: ClaudeSession;
 	effect: AgentEffect;
@@ -84,14 +88,20 @@ type LiveAgent = {
 	generation: number;
 };
 
+type TerminalEmitState = { emitted: boolean };
+
 export class ClaudeAgentExecutor implements AgentExecutor {
 	private readonly live = new Map<string, LiveAgent>();
 	private readonly runs = new Map<string, Map<number, Promise<void>>>();
 	private readonly cancellations = new Map<string, Promise<void>>();
+	private readonly cleanupTasks = new Set<Promise<void>>();
 	private readonly generations = new GenerationTracker();
+	private readonly cleanupFailures: unknown[] = [];
 	private readonly definitionDirs: string[];
 	private readonly maxFinishRetries: number;
 	private readonly queryFn: QueryFn;
+	private disposed = false;
+	private disposal: Promise<void> | undefined;
 
 	constructor(private readonly options: ClaudeExecutorOptions) {
 		this.definitionDirs = options.definitionDirs ?? resolveClaudeSubagentDefinitionDirs(options.workDir);
@@ -100,8 +110,13 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 	}
 
 	start(effect: AgentEffect, emit: EmitCompletion): void {
+		if (this.disposed) {
+			emit({ type: "FAILED", error: "Claude agent executor is disposed" });
+			return;
+		}
 		const key = actionUidKey(effect.actionUid);
 		const generation = this.generations.next(key);
+		const terminal: TerminalEmitState = { emitted: false };
 		this.launch(key, generation, this.run(
 			effect,
 			emit,
@@ -112,13 +127,15 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 					: { resumePrompt: effect.resume.message, resumeSessionFile: effect.resume.session }),
 			},
 			generation,
-		).catch((error: unknown) => {
-			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(effect, errorMessage(error));
-			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
-		}));
+			terminal,
+		).catch((error: unknown) => this.handleRunFailure(key, generation, effect, emit, error, terminal)));
 	}
 
 	reject(effect: RejectedEffect, emit: EmitCompletion): void {
+		if (this.disposed) {
+			emit({ type: "FAILED", error: "Claude agent executor is disposed" });
+			return;
+		}
 		const key = actionUidKey(effect.actionUid);
 		const retryEffect = effect.invocation.kind === "agent" ? { ...effect.invocation, id: effect.id } : undefined;
 		if (retryEffect === undefined) {
@@ -133,27 +150,28 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		if (live !== undefined) {
 			this.generations.markCancelled(key, live.generation);
 			this.live.delete(key);
-			live.session.abort();
+			this.trackCleanup(this.cleanupSession(live.session));
 		}
 		const generation = this.generations.next(key);
+		const terminal: TerminalEmitState = { emitted: false };
 		const runOptions: RunOptions =
 			effect.onReject === "restart"
 				? { forceNewSession: true, ...(effect.reason === undefined ? {} : { rejectReason: effect.reason }) }
 				: { forceNewSession: false, resumePrompt: buildRejectPrompt(effect) };
-		this.launch(key, generation, this.run(retryEffect, emit, runOptions, generation).catch((error: unknown) => {
-			if (!this.generations.isCancelled(key, generation)) this.markProgressFailed(retryEffect, errorMessage(error));
-			this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
-		}));
+		this.launch(key, generation, this.run(retryEffect, emit, runOptions, generation, terminal)
+			.catch((error: unknown) => this.handleRunFailure(key, generation, retryEffect, emit, error, terminal)));
 	}
 
-	async steer(actionKey: string, message: string): Promise<boolean> {
+	async steer(actionKey: string, invokeSeqId: number, message: string): Promise<boolean> {
+		if (this.disposed) return false;
 		const live = this.live.get(actionKey);
-		if (live === undefined) return false;
+		if (live === undefined || effectInvokeSeqId(live.effect.id) !== invokeSeqId) return false;
 		live.session.steer(message);
 		return true;
 	}
 
 	cancel(actionUid: ActionUID): Promise<void> {
+		if (this.disposed) return this.disposal ?? Promise.resolve();
 		const key = actionUidKey(actionUid);
 		const existing = this.cancellations.get(key);
 		if (existing !== undefined) return existing;
@@ -164,11 +182,10 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		if (live !== undefined) {
 			this.live.delete(key);
 			this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
-			live.session.abort();
 		}
 		const run = this.runs.get(key)?.get(generation);
 		const cancellation = (async () => {
-			if (live !== undefined) await live.session.settled();
+			if (live !== undefined) await this.cleanupSession(live.session);
 			await run;
 		})();
 		this.cancellations.set(key, cancellation);
@@ -180,19 +197,43 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		return cancellation;
 	}
 
-	async dispose(): Promise<void> {
-		await Promise.all(
-			[...this.live.entries()].map(async ([key, live]) => {
-				this.generations.markCancelled(key, live.generation);
-				this.updateProgress(live.effect, {
-					status: "cancelled",
-					completedAt: Date.now(),
-				});
-				live.session.abort();
-				await live.session.settled().catch(() => undefined);
-			}),
-		);
+	dispose(): Promise<void> {
+		if (this.disposal !== undefined) return this.disposal;
+		this.disposed = true;
+		this.disposal = this.disposeTrackedWork();
+		return this.disposal;
+	}
+
+	private async disposeTrackedWork(): Promise<void> {
+		for (const [key, runs] of this.runs) {
+			for (const generation of runs.keys()) this.generations.markCancelled(key, generation);
+		}
+		const cleanup = [...this.live.entries()].map(([key, live]) => {
+			this.generations.markCancelled(key, live.generation);
+			try {
+				this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
+			} catch (error) {
+				this.cleanupFailures.push(error);
+			}
+			return this.cleanupSession(live.session);
+		});
+		const pending = [
+			...cleanup,
+			...[...this.runs.values()].flatMap((runs) => [...runs.values()]),
+			...this.cancellations.values(),
+			...this.cleanupTasks,
+		];
+		const results = await Promise.allSettled(pending);
+		const failures = [
+			...results.filter((result): result is PromiseRejectedResult => result.status === "rejected").map((result) => result.reason),
+			...this.cleanupFailures,
+		];
 		this.live.clear();
+		this.runs.clear();
+		this.cancellations.clear();
+		this.cleanupTasks.clear();
+		this.cleanupFailures.length = 0;
+		if (failures.length > 0) throw new AggregateError(failures, "Failed to dispose Claude agent executor cleanly");
 	}
 
 	private launch(key: string, generation: number, run: Promise<void>): void {
@@ -216,8 +257,10 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		emit: EmitCompletion,
 		runOptions: RunOptions,
 		generation: number,
+		terminal: TerminalEmitState,
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
+		if (this.isStopped(key, generation)) return;
 		const previousProgress = readSessionProgress(this.options.sessionsDir).sessions[
 			sessionProgressKey(effect.actionUid, effect.id, this.options.branchId)
 		];
@@ -236,11 +279,13 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			error: undefined,
 		});
 		const definition = loadAgentDefinition(effect.action.name, this.definitionDirs);
+		if (this.isStopped(key, generation)) return;
 		// Validate every declared read before considering any restored session. A resumed session
 		// must not bypass the local-artifact/URL boundary that a fresh run enforces.
 		const reads = await resolveReads(effect, this.options.workDir, this.options.schemaRegistry);
-		const dir = actionSessionDir(this.options.sessionsDir, effect);
-		const restored = restoredTranscript(this.options.sessionsDir, dir, effect, runOptions);
+		if (this.isStopped(key, generation)) return;
+		const dir = actionSessionDir(this.options.sessionsDir, this.options.branchId, effect);
+		const restored = restoredTranscript(this.options.sessionsDir, this.options.branchId, dir, effect, runOptions);
 		const plan = buildSessionPlan(definition, effect, {
 			...(this.options.defaultModel === undefined ? {} : { defaultModel: this.options.defaultModel }),
 			...(this.options.modelRoles === undefined ? {} : { modelRoles: this.options.modelRoles }),
@@ -256,6 +301,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 				this.options.schemaRegistry,
 			);
 			const validated = await captured;
+			if (this.isStopped(key, generation)) return;
 			if (validated !== undefined) {
 				sink.captured = validated;
 				this.updateProgress(effect, {
@@ -288,13 +334,13 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 					prompt: async () => undefined,
 					lastAssistantText: () => undefined,
 					checkArtifacts: () => checkEffectArtifacts(effect, this.options.workDir, this.options.schemaRegistry),
-					emit: (event) => this.safeEmit(key, generation, emit, event),
+					emit: (event) => this.safeEmit(key, generation, emit, event, terminal),
 				});
 				return;
 			}
 		}
 
-		const session = new ClaudeSession({
+		const session = await this.createSession({
 			effect,
 			definition,
 			plan,
@@ -307,12 +353,20 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			queryFn: this.queryFn,
 			...(restored === undefined ? {} : { resumeSessionId: restored.sessionId }),
 		});
+		if (this.isStopped(key, generation)) {
+			await this.cleanupSession(session);
+			return;
+		}
 		session.begin();
-		if (this.generations.isCancelled(key, generation)) {
-			session.abort();
+		if (this.isStopped(key, generation)) {
+			await this.cleanupSession(session);
 			return;
 		}
 		const live: LiveAgent = { session, effect, sink, generation };
+		if (this.isStopped(key, generation)) {
+			await this.cleanupSession(session);
+			return;
+		}
 		this.live.set(key, live);
 
 		const initialPrompt =
@@ -328,33 +382,42 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 						.filter((part): part is string => part !== undefined)
 						.join("\n\n");
 		try {
+			if (this.isStopped(key, generation)) return;
 			await session.prompt(initialPrompt);
+			if (this.isStopped(key, generation)) return;
 			await runAcceptanceLoop({
 				effect,
 				sink,
 				maxRetries: this.maxFinishRetries,
 				isCancelled: () => this.generations.isCancelled(key, generation),
-				prompt: (text) => session.prompt(text),
+				prompt: (text) => this.isStopped(key, generation) ? Promise.resolve() : session.prompt(text),
 				lastAssistantText: () => session.lastAssistantText(),
 				checkArtifacts: () => checkEffectArtifacts(effect, this.options.workDir, this.options.schemaRegistry),
-				emit: (event) => this.safeEmit(key, generation, emit, event),
+				emit: (event) => this.safeEmit(key, generation, emit, event, terminal),
 			});
 		} finally {
 			if (this.live.get(key) === live) this.live.delete(key);
 			session.end();
-			await session.settled().catch(() => undefined);
-			if (!this.generations.isCancelled(key, generation)) {
-				this.updateProgress(effect, {
-					status: sink.captured === undefined ? "failed" : "completed",
-					completedAt: Date.now(),
-					currentTool: undefined,
-					currentToolArgs: undefined,
-					currentToolStartedAt: undefined,
-					currentText: undefined,
-					currentReasoning: undefined,
-				});
+			try {
+				await session.settled();
+			} finally {
+				if (!this.isStopped(key, generation)) {
+					this.updateProgress(effect, {
+						status: sink.captured === undefined ? "failed" : "completed",
+						completedAt: Date.now(),
+						currentTool: undefined,
+						currentToolArgs: undefined,
+						currentToolStartedAt: undefined,
+						currentText: undefined,
+						currentReasoning: undefined,
+					});
+				}
 			}
 		}
+	}
+
+	private async createSession(options: ClaudeSessionOptions): Promise<ClaudeSession> {
+		return new ClaudeSession(options);
 	}
 
 	private updateProgress(effect: AgentEffect, patch: Parameters<typeof updateSessionProgress>[2]): void {
@@ -365,10 +428,58 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		this.updateProgress(effect, { status: "failed", error, completedAt: Date.now() });
 	}
 
-	private safeEmit(key: string, generation: number, emit: EmitCompletion, event: ChartEvent): void {
-		if (!this.generations.isCancelled(key, generation)) {
-			emit(event);
+	private isStopped(key: string, generation: number): boolean {
+		return this.disposed || this.generations.isCancelled(key, generation);
+	}
+
+	private handleRunFailure(
+		key: string,
+		generation: number,
+		effect: AgentEffect,
+		emit: EmitCompletion,
+		error: unknown,
+		terminal: TerminalEmitState,
+	): void {
+		if (terminal.emitted) {
+			this.cleanupFailures.push(error);
+			return;
 		}
+		if (this.disposed && error instanceof SessionCleanupError) this.cleanupFailures.push(error);
+		if (!this.isStopped(key, generation)) this.markProgressFailed(effect, errorMessage(error));
+		this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) }, terminal);
+	}
+
+	private trackCleanup(cleanup: Promise<void>): void {
+		const tracked = cleanup.finally(() => this.cleanupTasks.delete(tracked));
+		this.cleanupTasks.add(tracked);
+		void tracked.catch((error: unknown) => this.cleanupFailures.push(error));
+	}
+
+	private async cleanupSession(session: ClaudeSession): Promise<void> {
+		const failures: unknown[] = [];
+		try {
+			session.abort();
+		} catch (error) {
+			failures.push(error);
+		}
+		try {
+			await session.settled();
+		} catch (error) {
+			failures.push(error);
+		}
+		if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to clean up Claude agent session");
+	}
+
+	private safeEmit(
+		key: string,
+		generation: number,
+		emit: EmitCompletion,
+		event: ChartEvent,
+		terminal: TerminalEmitState,
+	): void {
+		if (terminal.emitted || this.isStopped(key, generation)) return;
+		terminal.emitted = true;
+		emit(event);
 	}
 }
 
@@ -459,6 +570,8 @@ class ClaudeSession {
 
 	/** Closes the input stream so the query can finish draining. */
 	end(): void {
+		this.muted = true;
+		this.stream.dispose();
 		this.input.close();
 	}
 
@@ -578,6 +691,7 @@ class ClaudeSession {
 	}
 
 	private onInit(sessionId: string, model: string): void {
+		if (this.muted) return;
 		if (this.writer === undefined) {
 			this.writer = createNeutralTranscriptWriter(join(this.options.sessionDir, `${sessionId}.jsonl`), sessionId);
 			for (const record of this.pendingRecords.splice(0)) this.writer.append(record);
@@ -687,6 +801,7 @@ class ClaudeSession {
 	}
 
 	private updateProgress(patch: Parameters<typeof updateSessionProgress>[2]): void {
+		if (this.muted) return;
 		updateSessionProgress(
 			this.options.sessionsDir,
 			this.options.effect.actionUid,
@@ -750,11 +865,12 @@ export async function findCapturedFinishInTranscript(
 
 function restoredTranscript(
 	sessionsDir: string,
+	branchId: string,
 	dir: string,
 	effect: AgentEffect,
 	runOptions: RunOptions,
 ): { path: string; sessionId: string } | undefined {
-	const candidate = restoredTranscriptPath(sessionsDir, dir, effect, runOptions);
+	const candidate = restoredTranscriptPath(sessionsDir, branchId, dir, effect, runOptions);
 	if (candidate === undefined) return undefined;
 	const sessionId = transcriptSessionId(candidate);
 	return sessionId === undefined ? undefined : { path: candidate, sessionId };
@@ -762,6 +878,7 @@ function restoredTranscript(
 
 function restoredTranscriptPath(
 	sessionsDir: string,
+	branchId: string,
 	dir: string,
 	effect: AgentEffect,
 	runOptions: RunOptions,
@@ -771,7 +888,7 @@ function restoredTranscriptPath(
 		return runOptions.resumeSessionFile;
 	}
 	if (runOptions.resumePrompt !== undefined) {
-		return latestTranscriptForPreviousActionSession(sessionsDir, effect);
+		return latestTranscriptForPreviousActionSession(sessionsDir, branchId, effect);
 	}
 	return latestTranscript(dir);
 }
@@ -796,8 +913,8 @@ function latestTranscript(dir: string): string | undefined {
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
 }
 
-function latestTranscriptForPreviousActionSession(sessionsDir: string, effect: AgentEffect): string | undefined {
-	const root = join(sessionsDir, actionUidDirName(effect.actionUid));
+function latestTranscriptForPreviousActionSession(sessionsDir: string, branchId: string, effect: AgentEffect): string | undefined {
+	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid));
 	if (!existsSync(root)) return undefined;
 	const currentKey = sanitizeSegment(sessionKey(effect.id));
 	const candidates: string[] = [];

@@ -60,7 +60,7 @@ function createRequest(
 		createdAt: new Date().toISOString(),
 		originSessionId: sessionId,
 	});
-	patchRunStatus(runDir, { runId: name,branchId: "main", chartId: "chart", state: "running", heartbeatAt: Date.now() });
+	patchRunStatus(runDir, { runId: name,branchIds: ["main"], chartId: "chart", state: "running", heartbeatAt: Date.now() });
 	persistTerminalNotificationRequest(runDir, {
 		runId: payloadRunId,
 		branchId: "main",
@@ -90,7 +90,7 @@ function createUserGate(
 		createdAt: new Date().toISOString(),
 		originSessionId: sessionId,
 	});
-	patchRunStatus(runDir, { runId, branchId: "main", chartId: "chart", state: "running", pid: process.pid, heartbeatAt: Date.now() });
+	patchRunStatus(runDir, { runId, branchIds: ["main"], chartId: "chart", state: "running", pid: process.pid, heartbeatAt: Date.now() });
 	persistUserInteractionRequest(runDir, {
 		runId,
 		branchId: "main",

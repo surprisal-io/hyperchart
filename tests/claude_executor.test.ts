@@ -59,7 +59,7 @@ type FakeQuery = {
 	options: () => Record<string, unknown>;
 };
 
-function fakeQuery(turns: TurnScript[]): FakeQuery {
+function fakeQuery(turns: TurnScript[], afterInputClosed?: () => void): FakeQuery {
 	const prompts: string[] = [];
 	const steered: string[] = [];
 	let capturedOptions: Record<string, unknown> = {};
@@ -100,6 +100,7 @@ function fakeQuery(turns: TurnScript[]): FakeQuery {
 					usage: { input_tokens: 10, output_tokens: 5 },
 				} as never;
 			}
+			afterInputClosed?.();
 		}
 		return generate();
 	};
@@ -177,6 +178,34 @@ describe("ClaudeAgentExecutor", () => {
 		await executor.dispose();
 	});
 
+	it("emits only the accepted completion when stream finalization fails afterward", async () => {
+		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
+		const fake = fakeQuery(
+			[
+				async (_prompt, finish) => {
+					await finish({ event: "DONE" });
+					return [];
+				},
+			],
+			() => { throw new Error("late stream finalization failure"); },
+		);
+		const executor = new ClaudeAgentExecutor({
+			workDir,
+			sessionsDir,
+			branchId: "main",
+			definitionDirs: [agentsDir],
+			queryFn: fake.queryFn,
+		});
+		const emitted: ChartEvent[] = [];
+
+		executor.start(effect(), (event) => emitted.push(event));
+
+		await expect.poll(() => Object.values(readSessionProgress(sessionsDir).sessions)[0]?.status).toBe("completed");
+		expect(emitted).toEqual([{ type: "DONE" }]);
+		await expect(executor.dispose()).rejects.toThrow("Failed to dispose Claude agent executor cleanly");
+		expect(emitted).toEqual([{ type: "DONE" }]);
+	});
+
 	it("nudges a silent agent and fails after the retry budget", async () => {
 		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
 		const fake = fakeQuery([() => [], () => [], () => []]);
@@ -216,15 +245,114 @@ describe("ClaudeAgentExecutor", () => {
 			queryFn: fake.queryFn,
 		});
 
-		const done = startAndAwait(executor, effect());
+		const done = startAndAwait(executor, effect({ id: "chart:work:worker:2:2" }));
 		await expect.poll(() => fake.prompts.length).toBe(1);
-		expect(await executor.steer("chart:work:worker", "focus on tests")).toBe(true);
+		expect(await executor.steer("chart:work:worker", 1, "stale visit")).toBe(false);
+		expect(await executor.steer("chart:work:worker", 2, "focus on tests")).toBe(true);
 		releaseTurn?.();
 		await done;
-		expect(fake.steered).toContain("focus on tests");
-		await expect.poll(async () => executor.steer("chart:work:worker", "too late")).toBe(false);
+		expect(fake.steered).toEqual(["focus on tests"]);
+		await expect.poll(async () => executor.steer("chart:work:worker", 2, "too late")).toBe(false);
 		await executor.dispose();
 	});
+
+	it("waits for delayed session construction and never begins the late session during disposal", async () => {
+		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
+		const executor = new ClaudeAgentExecutor({
+			workDir,
+			sessionsDir,
+			branchId: "main",
+			definitionDirs: [agentsDir],
+			queryFn: fakeQuery([]).queryFn,
+		});
+		let releaseConstruction!: () => void;
+		const constructionGate = new Promise<void>((resolve) => { releaseConstruction = resolve; });
+		let constructionStarted = false;
+		let begins = 0;
+		let aborts = 0;
+		let prompts = 0;
+		const lateSession = {
+			begin: () => { begins++; },
+			abort: () => { aborts++; },
+			settled: async () => undefined,
+			prompt: async () => { prompts++; },
+			end: () => undefined,
+		};
+		const internal = executor as unknown as {
+			createSession: (...args: unknown[]) => Promise<unknown>;
+			live: Map<string, unknown>;
+			runs: Map<string, unknown>;
+			cancellations: Map<string, unknown>;
+		};
+		internal.createSession = async () => {
+			constructionStarted = true;
+			await constructionGate;
+			return lateSession;
+		};
+		const emitted: ChartEvent[] = [];
+		executor.start(effect(), (event) => emitted.push(event));
+		await expect.poll(() => constructionStarted).toBe(true);
+
+		const disposal = executor.dispose();
+		expect(executor.dispose()).toBe(disposal);
+		let settled = false;
+		void disposal.then(() => { settled = true; });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(settled).toBe(false);
+
+		releaseConstruction();
+		await expect(disposal).resolves.toBeUndefined();
+		expect({ begins, aborts, prompts }).toEqual({ begins: 0, aborts: 1, prompts: 0 });
+		expect(emitted).toEqual([]);
+		expect(internal.live.size).toBe(0);
+		expect(internal.runs.size).toBe(0);
+		expect(internal.cancellations.size).toBe(0);
+
+		const afterDispose: ChartEvent[] = [];
+		executor.start(effect(), (event) => afterDispose.push(event));
+		expect(afterDispose).toEqual([{ type: "FAILED", error: "Claude agent executor is disposed" }]);
+	});
+
+	it.each(["cancel", "dispose"] as const)(
+		"ignores a delayed init progress callback after %s",
+		async (shutdownMode) => {
+			const { workDir, sessionsDir, agentsDir } = makeWorkspace();
+			let releaseInit!: () => void;
+			const initGate = new Promise<void>((resolve) => { releaseInit = resolve; });
+			const queryFn: QueryFn = () => (async function* () {
+				await initGate;
+				yield {
+					type: "system",
+					subtype: "init",
+					session_id: "late-sdk-session",
+					model: "late-model",
+				} as never;
+			})();
+			const executor = new ClaudeAgentExecutor({
+				workDir,
+				sessionsDir,
+				branchId: "main",
+				definitionDirs: [agentsDir],
+				queryFn,
+			});
+			const target = effect();
+			const emitted: ChartEvent[] = [];
+			const internal = executor as unknown as { live: Map<string, unknown> };
+			executor.start(target, (event) => emitted.push(event));
+			await expect.poll(() => internal.live.size).toBe(1);
+
+			const shutdown = shutdownMode === "cancel" ? executor.cancel(target.actionUid) : executor.dispose();
+			releaseInit();
+			await expect(shutdown).resolves.toBeUndefined();
+
+			const progress = Object.values(readSessionProgress(sessionsDir).sessions)[0];
+			expect(progress).toMatchObject({ status: "cancelled" });
+			expect(progress?.model).toBeUndefined();
+			expect(progress?.sessionFile).toBeUndefined();
+			expect(emitted).toEqual([]);
+			if (shutdownMode === "cancel") await executor.dispose();
+		},
+	);
 
 	it("suppresses emission when the action is cancelled mid-run", async () => {
 		const { workDir, sessionsDir, agentsDir } = makeWorkspace();

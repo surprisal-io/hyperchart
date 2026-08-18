@@ -62,7 +62,7 @@ Under SSH the plugin does not try to open a server-side browser; `hyperchart_vie
 
 ## Run layout
 
-Each run directory contains `meta.json`, `status.json` (heartbeat + terminal state), `log.jsonl` (the durable event log), `terminal-notification/` (persist-once request plus per-session receipts), `user-interactions/<seqId>/` (`request.json`, immutable response-or-close `resolution.json`, and presentation receipts), `runner.config.json`, runner stdout/stderr logs, and `sessions/` with per-action session progress, neutral JSONL transcripts, and the steering queue. Stop/resume preserves open gates; rewind preserves the branch-scoped mailbox and every prior record.
+Each run directory contains `meta.json`, `status.json` v2 (heartbeat, terminal state, and current live `branchIds`), `log.jsonl` (the shared incremental durable journal), `terminal-notification/`, `user-interactions/<branchId>/<seqId>/`, `runner.config.json`, runner stdout/stderr logs, and collision-resistant `sessions/<sanitized-branch-prefix>-<hash>/...` paths with branch-separated agent state plus the branch-addressed steering queue. `hyperchart_run` accepts exactly one of singleton `branchId` or non-empty unique `branchIds`; a fresh chart must select exactly the singleton `main`, after which durable heads can be forked and the existing run resumed with `branchId` or `branchIds` so one detached process runs the selected static set concurrently with one Claude executor per branch. Stop/resume preserves open gates; rewind preserves every prior record. The old unscoped session layout is not migrated.
 
 ## Testing
 
