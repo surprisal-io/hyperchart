@@ -47,7 +47,7 @@
 	},
 	"dependencies": {
 		"@anthropic-ai/claude-agent-sdk": "^0.3.215",
-		"@modelcontextprotocol/sdk": "^1.29.0",
+		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@surprisal/hyperchart": "0.4.1",
 		"jiti": "^2.7.0",
 		"typescript": "5.9.3",
