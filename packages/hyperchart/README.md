@@ -64,7 +64,7 @@ The core package has no Pi dependency. React integrations use the optional peer 
 
 The core package includes statically placed, event-sourced actors with explicit `receive()`, FIFO `send`, typed `call`, and graph-inferred `reply()`. See the canonical [explicit actor guide](../../docs/explicit-actors.md).
 
-MIT · experimental `0.4.1`
+MIT · experimental `0.5.0`
 
 Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; actor templates may target their current endpoint with send-only `self()`. See the canonical [explicit actors guide](../../docs/explicit-actors.md).
 
