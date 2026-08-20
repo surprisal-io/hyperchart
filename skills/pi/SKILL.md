@@ -20,6 +20,8 @@ Use the consolidated `hyperchart` tool directly. `/hyperchart` is a human-facing
 | Commit the user's answer to an active gate | `hyperchart` with `action: "respond"` |
 | Inspect durable state for one run | `hyperchart` with `action: "run_inspect"` |
 | Open the browser inspector for a run | `hyperchart` with `action: "view"` |
+| List durable branch heads for a run | `hyperchart` with `action: "branches"` |
+| Fork a new durable branch head | `hyperchart` with `action: "fork"` |
 | Stop one or all active runs | `hyperchart` with `action: "stop"` |
 | Move a stopped named branch head without deleting history | `hyperchart` with `action: "rewind"` |
 
@@ -157,45 +159,48 @@ After editing this pattern, call `hyperchart` with `action: "inspect"`; do not r
 
 ## Start a run
 
-1. Inspect the chart first with `hyperchart` with `action: "inspect"`. The result is always a bounded digest; full inspection is browser-only through `action: "view"`.
+1. Inspect the chart first with `hyperchart` with `action: "inspect"`. It runs the same TypeScript/source-lint preflight as `run` and returns a bounded digest; full inspection is browser-only through `action: "view"`.
 2. Verify every named agent definition is available.
 3. Call `hyperchart({ action: "run", chartPath, args })`.
 4. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; Pi routes owned gates and the terminal prompt to that exact originating session/canonical working directory. Do not start a polling watcher.
 5. A waited call can return terminal status **or** `boundary: "user"` for the globally active owned gate, possibly from another run that sorts earlier. Handle the gate before waiting again.
-6. Inspect concrete result with `hyperchart` with `action: "run_inspect"` before reporting completion.
+6. Inspect the concrete result with `hyperchart({ action: "run_inspect", runId, branchId })` before reporting completion. `branchId` may be omitted only for a run with exactly one durable branch.
+
+A run's owning repository/project directory is not its action cwd. Each branch executes in `<runDir>/workspaces/<branchId>`, materialized from Hyperchart artifacts rather than checked out from the repository. Agent context and Inspector metadata expose both paths; scripts receive `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE`. If work must touch the repository, use the explicit project path and treat those edits as outside branch isolation.
 
 ## Answer a user gate
 
 Pi may first deliver hidden steering asking you to finish the current safe action/tool batch and yield. Do not answer the gate, continue unrelated work, or call a tool based only on that steering. On idle, Pi displays the real question without triggering another model turn.
 
-The user's next ordinary prompt is the answer. Hidden context supplies the exact `(runId, seqId)`, a bounded question preview, options with bounded display labels separated from exact values, exact allowed events, and a recursively bounded non-executable output contract. Display strings include `originalChars`/`omittedChars`; never copy an ellipsized label in place of an option `value`, event, or coordinate. Read `types`/`nullable`, JSON-decode `literalJson`, `allowedValueJson`, and `defaultJson`, recurse through required/optional `fields`, `element`/`tupleItems`, and `alternatives`, and obey `additionalProperties` and `constraints`. It never supplies the full prompt or raw reply schema. If Pi reports that the gate cannot be represented safely, do not guess or submit a partial identity/shape; direct the user to the browser inspector/user interaction. Translate only real user input, then immediately call:
+The extension does not answer automatically. Hidden context supplies the exact `(runId, branchId, seqId)`, a bounded question preview, options with bounded display labels separated from exact values, exact allowed events, and a recursively bounded non-executable output contract. Call `respond` only if the current prompt actually answers the displayed question. If it is unrelated, continue that request and leave the gate open; do not call `respond`. Display strings include `originalChars`/`omittedChars`; never copy an ellipsized label in place of an option `value`, event, or coordinate. Read `types`/`nullable`, JSON-decode `literalJson`, `allowedValueJson`, and `defaultJson`, recurse through required/optional `fields`, `element`/`tupleItems`, and `alternatives`, and obey `additionalProperties` and `constraints`. It never supplies the full prompt or raw reply schema. If Pi reports that the gate cannot be represented safely, do not guess or submit a partial identity/shape; direct the user to the browser inspector/user interaction. Translate only real user input, then immediately call:
 
 ```json
 {
   "action": "respond",
   "runId": "<exact run id>",
+  "branchId": "<exact branch id>",
   "seqId": 14,
   "event": "<allowed non-FAILED event>",
   "output": "<only when required by the reply contract>"
 }
 ```
 
-Do not infer consent, invent content, expose or ask for an `effectId`/`requestId`, or continue the workflow until the durable commit succeeds. The host rejects a queued, stale, closed, wrong-session, wrong-cwd, unsupported, or schema-invalid answer. Fix a validation error using the same user input when possible; otherwise ask the user for the missing data. Repeating the identical response is idempotent; never replace it with a divergent answer.
+When the prompt answers the gate, do not infer consent, invent content, expose or ask for an `effectId`/`requestId`, or continue that workflow until the durable commit succeeds. The host rejects a queued, stale, closed, wrong-session, wrong-cwd, unsupported, or schema-invalid answer. Fix a validation error using the same user input when possible; otherwise ask the user for the missing data. Repeating the identical response is idempotent; never replace it with a divergent answer.
 
 Multiple gates are serialized across parallel/map branches and owned runs by lexical `runId`, then numeric `seqId`. Presentation can repeat during recovery, but the same unanswered coordinate is not a new question. If an ordinary prompt arrives without gate-binding context, do not guess that it answers a gate.
 
 ## View a run
 
-Call `hyperchart({ action: "view", runDir })` to open the localhost browser inspector and receive exactly `{ url }`. Pass `open: false` when only the URL should be returned. The inspector shows the live graph, declared role/toolset names with resolved model/tool allowlists, per-state runtime details, session transcripts, and steering controls for the selected run. This is the only full inspection surface: tool responses are capped digests and never place definitions, schemas, runtime snapshots, visit histories, or transcripts into session logs.
+Call `hyperchart({ action: "view", runId, branchId })` to open the localhost browser inspector and receive exactly `{ url }`. `runDir` is an equivalent run-coordinate alias; omit `branchId` only for a single-branch run. Pass `open: false` when only the URL should be returned. The inspector shows the live graph, declared role/toolset names with resolved model/tool allowlists, per-state runtime details, session transcripts, and steering controls for the selected run. This is the only full inspection surface: tool responses are capped digests and never place definitions, schemas, runtime snapshots, visit histories, or transcripts into session logs.
 
 ## Resume a run
 
 Read [Recovery and safety](../../docs/safety.md), then:
 
-1. Call `hyperchart({ action: "run_inspect", runDir })` with existing run id or directory.
+1. Call `hyperchart({ action: "run_inspect", runId, branchId })` with the existing run id/directory and selected branch. `runDir` is an equivalent alias; a single durable branch can be inferred.
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
-4. Resume with `hyperchart({ action: "run", runDir })`. Create a different run with `chartPath` and no existing `runDir`.
+4. Resume with `hyperchart({ action: "run", runId, branchId })`. The branch may be omitted only when the run has exactly one durable head. Create a different run with `chartPath`; it defaults to fresh branch `main`.
 5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
 ## Rewind and branch navigation

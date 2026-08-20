@@ -136,7 +136,7 @@ Singleton created with default options.
 
 ## Agent tool
 
-The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, `stop`, or `respond`. The schema is not a JavaScript export.
+The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `branches`, `fork`, `rewind`, `stop`, or `respond`. The schema is not a JavaScript export. Run-target actions accept either `runDir` or `runId` as equivalent coordinates and reject conflicting simultaneous values; `respond` deliberately accepts only its exact durable `runId` identity.
 
 ### `action: "list"`
 
@@ -162,7 +162,7 @@ Bundle `agents/` overrides project and user agent definitions for that chart. Bu
 
 ### `action: "inspect"`
 
-Loads and normalizes a chart without dispatching workflow actions.
+Runs the same TypeScript/source-lint preflight as `run`, then loads and normalizes a chart without dispatching workflow actions.
 
 ```ts
 {
@@ -203,6 +203,7 @@ Starts a new run, attaches to a live run, or resumes an existing stopped run.
   chartPath?: string;
   args?: Record<string, unknown>;
   runDir?: string;
+  runId?: string;
   branchId?: string;
   branchIds?: string[];
   exportName?: string;
@@ -213,15 +214,14 @@ Starts a new run, attaches to a live run, or resumes an existing stopped run.
 
 Rules:
 
-- A new run requires `chartPath`.
-- A resume can provide only `runDir`; `meta.json` supplies chart path, export name, and working directory.
-- `runDir` may be a run id or path resolved by the extension.
+- A new run requires `chartPath`. When both branch selectors are omitted, it starts singleton branch `main`.
+- A resume can provide `runDir` or `runId`; `meta.json` supplies chart path, export name, and working directory. Both names accept a run id or path resolved by the extension, but conflicting simultaneous values are rejected.
 - A run must belong to the current Pi working directory.
-- Exactly one of `branchId` or a non-empty unique `branchIds` is required by the tool. A fresh chart must select exactly the singleton `main`; after forking durable heads, resume the existing run with `branchId` or `branchIds` to run the selected initial seeds concurrently in one detached process.
+- `branchId` and `branchIds` are mutually exclusive. `branchIds` must be non-empty and unique. A fresh chart can select only singleton `main`; after forking durable heads, resume the existing run with an explicit `branchId` or `branchIds`. Omission is accepted only when the existing run has exactly one durable branch, which is inferred; a multi-branch run fails closed rather than silently selecting a head.
 - `wait` defaults to `false`.
 - `ignoreReplayWarnings` defaults to `false` and only bypasses stale/skipped replay warnings; it is not a structural repair.
 
-Without `wait`, result details contain only the bounded startup result below. The owned terminal boundary is later injected as a compact model-facing follow-up only into the originating session/workDir and is receipted by request id; its durable full prompt payload is not copied into session JSONL.
+Without `wait`, result details contain only the bounded startup result below. The owned terminal boundary is later injected as a compact model-facing follow-up only into the originating session/workDir and is receipted by request id; its durable full prompt payload is not copied into session JSONL. If an owned user gate is active, that gate wins: terminal delivery remains unclaimed in its durable outbox and is retried after the gate resolves and Pi settles.
 
 ```ts
 {
@@ -255,7 +255,7 @@ Terminal details contain compact status and identifiers only:
 }
 ```
 
-A user boundary has `boundary: "user"`, `final: false`, `interaction: { version, runId, branchId, seqId, promptPreview, options, allowedEvents, outputRequired, outputHint? }`, and `waitedRun` identifying the run whose wait was interrupted. `promptPreview` is `{ text, originalChars, omittedChars }`; each option is `{ label: { text, originalChars, omittedChars }, value }`, separating bounded human display text from the exact authored value. `runId`, `branchId`, `seqId`, every `value`, and every allowed event name are exact and are never ellipsized or dropped. `outputHint` is a recursively bounded, non-executable contract: types/nullability; JSON-encoded enum, literal, and default values; recursively required/optional object fields and additional-property policy; array elements/tuples; union alternatives; and supported validation bounds, pattern, and format. It never contains the normalized or executable schema. The same summary is used by visible/hidden gate delivery and is sufficient to translate structured user input into `respond`. If an identity, depth, node, collection, exact-value, gate-summary, or envelope limit would make that impossible, delivery fails closed with an instruction to use the browser inspector rather than exposing a partial gate. The public gate identity is only `(runId, seqId)`; it has no runtime `effectId`.
+A user boundary has `boundary: "user"`, `final: false`, `interaction: { version, runId, branchId, seqId, promptPreview, options, allowedEvents, outputRequired, outputHint? }`, and `waitedRun` identifying the run whose wait was interrupted. `promptPreview` is `{ text, originalChars, omittedChars }`; each option is `{ label: { text, originalChars, omittedChars }, value }`, separating bounded human display text from the exact authored value. `runId`, `branchId`, `seqId`, every `value`, and every allowed event name are exact and are never ellipsized or dropped. `outputHint` is a recursively bounded, non-executable contract: types/nullability; JSON-encoded enum, literal, and default values; recursively required/optional object fields and additional-property policy; array elements/tuples; union alternatives; and supported validation bounds, pattern, and format. It never contains the normalized or executable schema. The same summary is used by visible/hidden gate delivery and is sufficient to translate structured user input into `respond`. If an identity, depth, node, collection, exact-value, gate-summary, or envelope limit would make that impossible, delivery fails closed with an instruction to use the browser inspector rather than exposing a partial gate. The public gate identity is `(runId, branchId, seqId)`; it has no runtime `effectId`.
 
 A terminal result text is a compact boundary notice directing the operator to `view`; it never copies the durable terminal prompt or inspector snapshot. Pi recovery checks persisted `hyperchart-terminal` custom messages by request id before re-sending the same compact notice.
 
@@ -272,14 +272,16 @@ Start example:
 }
 ```
 
-Resume example:
+Resume example for a single-branch run (the equivalent `runDir` spelling is also accepted):
 
 ```json
 {
   "action": "run",
-  "runDir": "review-20260711-180000"
+  "runId": "review-20260711-180000"
 }
 ```
+
+For a multi-branch run, add `"branchId": "main"` or a non-empty unique `branchIds` list.
 
 The extension type-checks the chart, normalizes it, creates or loads run metadata, records the creating Pi session for new runs, starts a detached runner, and writes process status. It attaches instead of spawning a second process when the run is already live.
 
@@ -288,18 +290,21 @@ The extension type-checks the chart, normalizes it, creates or loads run metadat
 ```ts
 {
   action: "run_inspect";
-  runDir: string;
+  runDir?: string;
+  runId?: string;
+  branchId?: string;
   /** Deprecated: true is rejected; use action: "view". */
   verbose?: boolean;
 }
 ```
 
-The tool always returns a bounded `RunInspectSummary`; `verbose: true` is rejected. Its collections use digest names such as `stateDigests`, `pendingStateIds`, and `sessionDigest`, and every capped collection carries its corresponding omission count. Full runtime states, visit histories, schemas, and transcripts are fetched only by the browser inspector and never returned in tool `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
+Pass one of `runDir` or `runId`. `branchId` may be omitted only when the run has exactly one durable branch; multi-branch inspection requires it. The tool always returns a bounded `RunInspectSummary`, including the selected `branchId`; `verbose: true` is rejected. Its collections use digest names such as `stateDigests`, `pendingStateIds`, and `sessionDigest`, and every capped collection carries its corresponding omission count. Full runtime states, visit histories, schemas, and transcripts are fetched only by the browser inspector and never returned in tool `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
 
 ```json
 {
   "action": "run_inspect",
-  "runDir": "review-20260711-180000"
+  "runId": "review-20260711-180000",
+  "branchId": "main"
 }
 ```
 
@@ -320,7 +325,7 @@ Commits the real user's answer to the exact active gate:
 }
 ```
 
-Pi normally creates this call from the user's next ordinary prompt after the visible gate. The extension injects hidden context instructing the model to translate that prompt into one allowed event and optional output, then call `respond` immediately; the model must not answer or infer consent itself.
+Pi never commits a response automatically. After a visible gate, hidden context tells the model to call `respond` only when the current user prompt actually answers that gate. An unrelated request proceeds normally and leaves the gate open. When the prompt does answer, the model translates it into one allowed event and optional output and calls `respond` with the exact three-part coordinate; it must not answer the gate itself or infer consent.
 
 The host requires the exact originating Pi session and canonical working directory, the exact globally active `(runId, branchId, seqId)`, a non-`FAILED` allowed event, and schema-valid output when declared. A byte-for-byte equivalent semantic retry is idempotent; a different answer for the same phase conflicts. Closed, stale, queued, foreign-session, and foreign-cwd coordinates are rejected.
 
@@ -341,12 +346,14 @@ The host requires the exact originating Pi session and canonical working directo
 {
   action: "view";
   runDir?: string;
+  runId?: string;
+  branchId?: string;
   chartPath?: string;
   open?: boolean;
 }
 ```
 
-Use exactly one of `runDir` or `chartPath`; they are mutually exclusive. Starts or reuses the Pi process's localhost inspector server, registers the selected run when viewing a run, or loads a static chart view when `chartPath` is provided.
+Use exactly one of `runDir`/`runId` or `chartPath`; they are mutually exclusive. A run view may omit `branchId` only when the run has one durable branch; multi-branch views require an explicit branch. Starts or reuses the Pi process's localhost inspector server, registers the selected run when viewing a run, or loads a static chart view when `chartPath` is provided.
 
 For both run and static views, result details are exactly URL-only:
 
@@ -354,7 +361,7 @@ For both run and static views, result details are exactly URL-only:
 { url: string }
 ```
 
-`runDir` must identify a run belonging to the current working directory. `open` defaults to `true`; set it to `false` to return the URL without opening the system browser. The inspector polls current run/session data and its composer writes to the same run-scoped steering queue as the human command.
+The run coordinate must identify a run belonging to the current working directory. `open` defaults to `true`; set it to `false` to return the URL without opening the system browser. The inspector polls current run/session data and its composer writes to the same run-scoped steering queue as the human command.
 
 ```json
 {
@@ -369,12 +376,13 @@ For both run and static views, result details are exactly URL-only:
 ```ts
 {
   action: "stop";
-  runDir: string;
+  runDir?: string;
+  runId?: string;
   all?: boolean;
 }
 ```
 
-Stop one run or every active run owned by current working directory. Exactly one of `runDir` or `all: true` required.
+Stop one run or every active run owned by current working directory. Exactly one of `runDir`/`runId` or `all: true` is required.
 
 ```json
 { "action": "stop", "runDir": "review-20260711-180000" }
@@ -388,12 +396,12 @@ Live runners receive `SIGTERM`. Stale active statuses become `stopped` without s
 
 ### `action: "branches"`
 
-Lists durable named heads for a run. This is read-only and does not change the selected view.
+Lists durable named heads for a run. Pass either `runDir` or `runId`. This is read-only and does not change the selected view.
 
 ### `action: "fork"`
 
 ```ts
-{ action: "fork", runDir: string, branchId: string, fromSeqId: number, sourceBranchId?: string, reason?: string }
+{ action: "fork", runDir?: string, runId?: string, branchId: string, fromSeqId: number, sourceBranchId?: string, reason?: string }
 ```
 
 Creates a durable named branch pointer. Fork never selects or starts it and rejects duplicate names or missing records.
@@ -403,7 +411,8 @@ Creates a durable named branch pointer. Fork never selects or starts it and reje
 ```ts
 {
   action: "rewind";
-  runDir: string;
+  runDir?: string;
+  runId?: string;
   branchId: string;
   state?: string;
   seqId?: number;
@@ -413,7 +422,7 @@ Creates a durable named branch pointer. Fork never selects or starts it and reje
 }
 ```
 
-Moves only the named durable head by appending a branch mutation. All records and downstream files remain. `start: true` starts exactly `branchId` after a successful move. Run, run inspection, and run view likewise require an explicit branch handle.
+Moves only the named durable head by appending a branch mutation. All records and downstream files remain. `start: true` starts exactly `branchId` after a successful move. Run, run inspection, and run view infer a branch only for an unambiguous single-branch run; multi-branch operations require an explicit handle.
 
 ## Process status values
 

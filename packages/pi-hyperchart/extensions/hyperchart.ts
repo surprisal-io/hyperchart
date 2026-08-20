@@ -182,7 +182,7 @@ const RUN_OPTION_COMPLETIONS: AutocompleteItem[] = [
 	{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" },
 ];
 const HYPERCHART_USAGE =
-	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--wait] [--ignore-replay-warnings] | resume <runId> [--ignore-replay-warnings] | steer <runId> <branchId> <actionKey> <message> | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
+	"Usage: /hyperchart [runId|--limit N] | run <name|chart.ts> [--args JSON] [--run-dir RUN_ID|DIR] [--export NAME] [--wait] [--ignore-replay-warnings] | resume <runId> [--branch BRANCH_ID]... [--ignore-replay-warnings] | steer <runId> <branchId> <actionKey> <message> | restart <runId> | status | stop <runId> | delete <runId> | view [runId]";
 
 function completeHyperchartArgs(argumentPrefix: string): AutocompleteItem[] | null {
 	const parsed = parseCompletionPrefix(argumentPrefix);
@@ -215,13 +215,17 @@ function completeTopLevelArgs(current: string): AutocompleteItem[] | null {
 }
 
 function completeResumeArgs(previous: string[], current: string): AutocompleteItem[] | null {
+	if (previous.at(-1) === "--branch") return null;
 	if (current.startsWith("--")) {
 		return filterCompletions(
-			[{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" }],
+			[
+				{ value: "--branch", label: "--branch", description: "durable branch to resume; repeat for multiple branches" },
+				{ value: "--ignore-replay-warnings", label: "--ignore-replay-warnings", description: "explicitly continue despite stale/skipped replay warnings" },
+			],
 			current,
 		);
 	}
-	const hasRunId = previous.some((token) => !token.startsWith("--"));
+	const hasRunId = previous.some((token, index) => !token.startsWith("--") && previous[index - 1] !== "--branch");
 	if (hasRunId) return current.length === 0 ? completeResumeArgs([], "--") : null;
 	return filterCompletions(runIdCompletions(process.cwd()), current);
 }
@@ -323,9 +327,10 @@ export default function register(pi: ExtensionAPI) {
 		currentCtx = ctx;
 		if (event.reason === "reload" || event.reason === "startup" || event.reason === "resume") {
 			await restoreRunWidgets(ctx);
-			await recoverPiTerminalNotifications(pi, ctx);
 		}
 		interactions.start();
+		// One arbitration scan presents an owned gate first, or recovers terminals when
+		// no gate is active. Do not run a separate terminal pass ahead of the gate.
 		await interactions.scan();
 	});
 	pi.on("agent_settled", async () => {
@@ -394,12 +399,14 @@ class PiUserInteractionCoordinator {
 			message: boundedPiMessage({
 				customType: "hyperchart-user-response-context",
 				content: [
-					`The user's just-submitted prompt is their answer to Hyperchart interaction (${details.runId}, ${details.seqId}).`,
+					`Hyperchart interaction (${details.runId}, ${details.branchId}, ${details.seqId}) is awaiting the user's answer.`,
 					`Question preview: ${details.promptPreview.text}`,
 					`Allowed events: ${details.allowedEvents.join(", ")}`,
 					details.outputRequired ? `Structured output is required. Bounded shape hint: ${JSON.stringify(details.outputHint)}.` : undefined,
-					`Translate the current user prompt into one allowed event and optional output, then immediately call hyperchart with action=\"respond\", runId=${JSON.stringify(details.runId)}, seqId=${details.seqId}, event, and output when required.`,
-					"Do not answer the gate yourself, infer consent without this user input, or continue unrelated work before the response is committed.",
+					"The extension does not answer automatically; the model calls hyperchart action=\"respond\" only when the user's just-submitted prompt actually answers the displayed gate.",
+					"If the prompt is unrelated, continue that request and leave the gate open; do not call action=\"respond\".",
+					`If it answers the gate, translate it into one allowed event and optional output, then call hyperchart with action=\"respond\", runId=${JSON.stringify(details.runId)}, branchId=${JSON.stringify(details.branchId)}, seqId=${details.seqId}, event, and output when required.`,
+					"Do not answer the gate yourself or infer consent without real user input.",
 				].filter((line): line is string => line !== undefined).join("\n"),
 				display: false,
 				details: safeToolDetails(details),
@@ -413,6 +420,8 @@ class PiUserInteractionCoordinator {
 		const active = acquireActiveUserInteraction(interactionOwner(ctx));
 		if (active === undefined) {
 			this.state = { phase: "pending" };
+			const idle = typeof ctx.isIdle !== "function" || ctx.isIdle();
+			if (idle) await recoverPiTerminalNotifications(this.pi, ctx);
 			return;
 		}
 		const key = interactionKey(active);
@@ -682,7 +691,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 	return defineTool({
 	name: "hyperchart",
 	label: "Hyperchart",
-	description: "List, inspect, run, view, fork, and move durable named Hyperchart branches.",
+	description: "List, inspect, run, and manage Hyperchart workflows. Fresh runs default to branch main. Run-target actions accept runDir or runId aliases and reject conflicting coordinates; respond requires its exact runId, branchId, and seqId.",
 	parameters: Type.Object({
 		action: Type.Union([
 			Type.Literal("list"),
@@ -696,27 +705,27 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 			Type.Literal("stop"),
 			Type.Literal("respond"),
 		]),
-		chartPath: Type.Optional(Type.String()),
-		args: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-		runDir: Type.Optional(Type.String()),
-		branchId: Type.Optional(Type.String()),
-		branchIds: Type.Optional(Type.Array(Type.String())),
-		fromSeqId: Type.Optional(Type.Number()),
-		sourceBranchId: Type.Optional(Type.String()),
-		reason: Type.Optional(Type.String()),
-		exportName: Type.Optional(Type.String()),
-		wait: Type.Optional(Type.Boolean()),
-		open: Type.Optional(Type.Boolean()),
-		ignoreReplayWarnings: Type.Optional(Type.Boolean()),
-		state: Type.Optional(Type.String()),
-		runId: Type.Optional(Type.String()),
-		seqId: Type.Optional(Type.Number()),
-		event: Type.Optional(Type.String()),
-		output: Type.Optional(Type.Unknown()),
-		to: Type.Optional(Type.Literal("compatible")),
-		mode: Type.Optional(Type.Union([Type.Literal("before"), Type.Literal("after")])),
-		start: Type.Optional(Type.Boolean()),
-		all: Type.Optional(Type.Boolean()),
+		chartPath: Type.Optional(Type.String({ description: "Chart name or module path for inspect, fresh run, or static view" })),
+		args: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Fresh/resumed run arguments" })),
+		runDir: Type.Optional(Type.String({ description: "Run id or directory for run-target actions; not accepted by respond" })),
+		branchId: Type.Optional(Type.String({ description: "Durable branch; inferred only when a run has exactly one branch" })),
+		branchIds: Type.Optional(Type.Array(Type.String(), { description: "Non-empty unique branches to run concurrently" })),
+		fromSeqId: Type.Optional(Type.Number({ description: "Existing durable record at which fork creates a branch" })),
+		sourceBranchId: Type.Optional(Type.String({ description: "Optional source branch asserted by fork" })),
+		reason: Type.Optional(Type.String({ description: "Optional durable fork reason" })),
+		exportName: Type.Optional(Type.String({ description: "Named chart export; defaults to default" })),
+		wait: Type.Optional(Type.Boolean({ description: "For run, wait for terminal status or an owned user boundary" })),
+		open: Type.Optional(Type.Boolean({ description: "For view, set false to return the URL without opening a browser" })),
+		ignoreReplayWarnings: Type.Optional(Type.Boolean({ description: "Explicitly continue despite stale/skipped replay warnings" })),
+		state: Type.Optional(Type.String({ description: "State selector for rewind" })),
+		runId: Type.Optional(Type.String({ description: "Alias for runDir on safe run-target actions; exact run identity for respond" })),
+		seqId: Type.Optional(Type.Number({ description: "Exact positive user-interaction sequence id for respond" })),
+		event: Type.Optional(Type.String({ description: "Exact allowed non-FAILED user-interaction event for respond" })),
+		output: Type.Optional(Type.Unknown({ description: "Schema-valid structured gate output for respond" })),
+		to: Type.Optional(Type.Literal("compatible", { description: "Rewind to the compatible replay prefix" })),
+		mode: Type.Optional(Type.Union([Type.Literal("before"), Type.Literal("after")], { description: "Rewind before or after the selected record" })),
+		start: Type.Optional(Type.Boolean({ description: "Start the selected branch after rewind" })),
+		all: Type.Optional(Type.Boolean({ description: "For stop, stop every active run owned by this working directory" })),
 		verbose: Type.Optional(Type.Boolean({ description: "Deprecated and rejected; use action=view for full browser inspection" })),
 	}),
 	async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -729,45 +738,69 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 			return hyperchartInspectTool.execute(toolCallId, { chartPath: params.chartPath, exportName: params.exportName, verbose: params.verbose }, signal, onUpdate, ctx);
 		}
 		if (params.action === "run") {
-			if (params.chartPath === undefined && params.runDir === undefined) throw new Error("hyperchart action=run requires chartPath or runDir");
-			if ((params.branchId === undefined) === (params.branchIds === undefined)) throw new Error("hyperchart action=run requires exactly one of branchId or branchIds");
-			return createHyperchartRunTool(delivery).execute(toolCallId, params, signal, onUpdate, ctx);
+			const runDir = actionRunCoordinate(params, "run", false);
+			if (params.chartPath === undefined && runDir === undefined) throw new Error("hyperchart action=run requires chartPath for a fresh run, or runDir/runId to resume");
+			if (params.branchId !== undefined && params.branchIds !== undefined) throw new Error("hyperchart action=run accepts branchId or branchIds, not both; omit both only for fresh main or an existing single-branch run");
+			return createHyperchartRunTool(delivery).execute(toolCallId, { ...params, runDir }, signal, onUpdate, ctx);
 		}
 		if (params.action === "run_inspect") {
 			if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
-			if (params.runDir === undefined) throw new Error("hyperchart action=run_inspect requires runDir");
-			if (params.branchId === undefined) throw new Error("hyperchart action=run_inspect requires branchId");
-			return hyperchartRunInspectTool.execute(toolCallId, { runDir: params.runDir, branchId: params.branchId, verbose: params.verbose }, signal, onUpdate, ctx);
+			const runDir = actionRunCoordinate(params, "run_inspect");
+			const branchId = params.branchId ?? await unambiguousRunBranch("run_inspect", runDir, ctx);
+			return hyperchartRunInspectTool.execute(toolCallId, { runDir, branchId, verbose: params.verbose }, signal, onUpdate, ctx);
 		}
 		if (params.action === "view") {
-			if ((params.runDir === undefined) === (params.chartPath === undefined)) {
-				throw new Error("hyperchart action=view requires exactly one of runDir or chartPath");
+			const runDir = actionRunCoordinate(params, "view", false);
+			if ((runDir === undefined) === (params.chartPath === undefined)) {
+				throw new Error("hyperchart action=view requires exactly one of chartPath or runDir/runId");
 			}
-			if (params.runDir !== undefined && params.branchId === undefined) throw new Error("hyperchart action=view with runDir requires branchId");
+			const branchId = runDir === undefined ? undefined : params.branchId ?? await unambiguousRunBranch("view", runDir, ctx);
 			return hyperchartViewTool.execute(
 				toolCallId,
-				{ runDir: params.runDir, branchId: params.branchId, chartPath: params.chartPath, open: params.open },
+				{ runDir, branchId, chartPath: params.chartPath, open: params.open },
 				signal,
 				onUpdate,
 				ctx,
 			);
 		}
-		if (params.action === "stop") return stopHyperchartRuns(params, ctx);
-		if (params.action === "respond") return respondToUserInteraction(params, ctx, delivery.interactions);
+		if (params.action === "stop") {
+			const runDir = params.all === true
+				? actionRunCoordinate(params, "stop", false)
+				: actionRunCoordinate(params, "stop");
+			return stopHyperchartRuns({
+				...(runDir === undefined ? {} : { runDir }),
+				...(params.all === undefined ? {} : { all: params.all }),
+			}, ctx);
+		}
+		if (params.action === "respond") {
+			if (params.runDir !== undefined) throw new Error("hyperchart action=respond accepts the exact runId only; runDir is not a response coordinate");
+			return respondToUserInteraction(params, ctx, delivery.interactions);
+		}
 		if (params.action === "branches") {
-			if (params.runDir === undefined) throw new Error("hyperchart action=branches requires runDir");
-			const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
+			const runSpec = actionRunCoordinate(params, "branches");
+			const runDir = ownedRunDir("branches", runSpec, ctx);
 			return { content: [{ type: "text" as const, text: `Branches for ${basename(runDir)}` }], details: safeToolDetails({ runDir, branches: await listHyperchartBranches(runDir) }) };
 		}
 		if (params.action === "fork") {
-			if (params.runDir === undefined || params.branchId === undefined || !Number.isSafeInteger(params.fromSeqId)) throw new Error("hyperchart action=fork requires runDir, branchId, and fromSeqId");
-			const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
+			const runSpec = actionRunCoordinate(params, "fork");
+			if (params.branchId === undefined || !Number.isSafeInteger(params.fromSeqId)) throw new Error("hyperchart action=fork requires branchId and integer fromSeqId, plus runDir or runId");
+			const runDir = resolveHyperchartRunDir(runSpec, ctx.cwd);
 			const result = await forkHyperchartRun({ runDir, branchId: params.branchId, fromSeqId: params.fromSeqId as number, ...(params.sourceBranchId === undefined ? {} : { sourceBranchId: params.sourceBranchId }), ...(params.reason === undefined ? {} : { reason: params.reason }), cwd: ctx.cwd });
-			return { content: [{ type: "text" as const, text: `Created branch ${result.branch.branchId} at seqId ${result.branch.headSeqId}; selection unchanged.` }], details: safeToolDetails(result) };
+			return {
+				content: [{ type: "text" as const, text: `Created branch ${result.branch.branchId} at seqId ${result.branch.headSeqId}; selection unchanged.` }],
+				details: safeToolDetails({
+					runId: result.runId,
+					runDir: result.runDir,
+					branchId: result.branch.branchId,
+					headSeqId: result.branch.headSeqId,
+					selectedBranchChanged: result.selectedBranchChanged,
+					started: result.started,
+				}),
+			};
 		}
-		if (params.runDir === undefined) throw new Error("hyperchart action=rewind requires runDir");
-		if (params.branchId === undefined) throw new Error("hyperchart action=rewind requires branchId");
-		return hyperchartRewindTool.execute(toolCallId, params, signal, onUpdate, ctx);
+		const runDir = actionRunCoordinate(params, "rewind");
+		if (params.branchId === undefined) throw new Error("hyperchart action=rewind requires branchId, plus runDir or runId");
+		return hyperchartRewindTool.execute(toolCallId, { ...params, runDir }, signal, onUpdate, ctx);
 			})());
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -775,6 +808,42 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		}
 	},
 	});
+}
+
+type RunCoordinateParams = { runDir?: string; runId?: string };
+
+function actionRunCoordinate(params: RunCoordinateParams, action: string): string;
+function actionRunCoordinate(params: RunCoordinateParams, action: string, required: true): string;
+function actionRunCoordinate(params: RunCoordinateParams, action: string, required: false): string | undefined;
+function actionRunCoordinate(
+	params: RunCoordinateParams,
+	action: string,
+	required = true,
+): string | undefined {
+	if (params.runDir !== undefined && params.runId !== undefined && params.runDir !== params.runId) {
+		throw new Error(`hyperchart action=${action} received conflicting runDir and runId values; pass one run coordinate`);
+	}
+	const coordinate = params.runDir ?? params.runId;
+	if (required && coordinate === undefined) {
+		throw new Error(`hyperchart action=${action} requires runDir or runId`);
+	}
+	return coordinate;
+}
+
+function ownedRunDir(action: string, runSpec: string, ctx: HyperchartContext): string {
+	const runDir = resolveHyperchartRunDir(runSpec, ctx.cwd);
+	if (loadRunMetaForCurrentWorkDir(runDir, ctx.cwd) === undefined) {
+		throw new Error(`hyperchart action=${action} requires a run owned by the current working directory`);
+	}
+	return runDir;
+}
+
+async function unambiguousRunBranch(action: string, runSpec: string, ctx: HyperchartContext): Promise<string> {
+	const runDir = ownedRunDir(action, runSpec, ctx);
+	const branches = await listHyperchartBranches(runDir);
+	if (branches.length === 1) return branches[0]!.branchId;
+	const available = branches.map((branch) => branch.branchId).join(", ") || "none";
+	throw new Error(`hyperchart action=${action} requires branchId because run '${basename(runDir)}' has ${branches.length} durable branches (${available})`);
 }
 
 async function respondToUserInteraction(
@@ -947,10 +1016,10 @@ function createHyperchartRunTool(delivery: PiTerminalDelivery) {
 		runDir: Type.Optional(
 			Type.String({ description: "Existing run directory to resume, or destination run directory" }),
 		),
-		branchId: Type.Optional(Type.String({ description: "Singleton branch to run" })),
-		branchIds: Type.Optional(Type.Array(Type.String(), { description: "Initial branches to run concurrently" })),
+		branchId: Type.Optional(Type.String({ description: "Singleton branch to run; fresh omission defaults to main" })),
+		branchIds: Type.Optional(Type.Array(Type.String(), { description: "Non-empty unique initial branches to run concurrently" })),
 		exportName: Type.Optional(Type.String({ description: "Named export to load from the chart module" })),
-		wait: Type.Optional(Type.Boolean({ description: "Wait for the run to finish before returning" })),
+		wait: Type.Optional(Type.Boolean({ description: "Wait for terminal status or an owned user boundary before returning" })),
 		ignoreReplayWarnings: Type.Optional(Type.Boolean({ description: "Explicitly continue despite stale/skipped replay warnings. Default: false" })),
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -1035,6 +1104,7 @@ const hyperchartInspectTool = defineTool({
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		const chartPath = resolveHyperchartPath(params.chartPath, ctx.cwd);
+		await assertChartPreflight(chartPath);
 		const agentDefaults = createAgentDefaultsResolver(
 		ctx.cwd,
 		getAgentDir(),
@@ -1068,12 +1138,13 @@ const hyperchartRunInspectTool = defineTool({
 	description: "Load a concrete Hyperchart run and return only a bounded status/activity digest; use hyperchart view for full inspection.",
 	parameters: Type.Object({
 		runDir: Type.String({ description: "Run id or run directory to inspect" }),
+		branchId: Type.String({ description: "Durable branch to inspect" }),
 		verbose: Type.Optional(Type.Boolean({ description: "Deprecated and rejected; use hyperchart view" })),
 	}),
 	async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 		if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
 		const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
-		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx, { includeTranscripts: false });
+		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx, { branchId: params.branchId, includeTranscripts: false });
 		const issueCount = (inspector.issues?.length ?? 0) + inspector.states.reduce((count, state) => count + (state.issues?.length ?? 0), 0);
 		const payload = safeToolDetails({ ...summarizeRunInspect(inspector), userInteractions: compactPiUserInteractions(inspectOwnedUserInteractions(ctx)) });
 		return {
@@ -1355,9 +1426,7 @@ async function executeRunHistoryAction(action: RunHistoryAction, ctx: Hyperchart
 
 async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext): Promise<RunStartResult> {
 	if (opts.branchId !== undefined && opts.branchIds !== undefined) throw new Error("run accepts branchId or branchIds, not both");
-	const branchIds = opts.branchIds ?? [opts.branchId ?? "main"];
-	if (branchIds.length === 0 || new Set(branchIds).size !== branchIds.length || branchIds.some((entry) => entry.trim().length === 0)) throw new Error("branchIds must be non-empty and unique");
-	const branchId = branchIds[0]!;
+	let branchIds = opts.branchIds ?? (opts.branchId === undefined ? undefined : [opts.branchId]);
 	const requestedRunDir = opts.runDir === undefined ? undefined : resolveHyperchartRunDir(opts.runDir, ctx.cwd);
 	let meta: RunMeta | undefined;
 	let chartPath: string;
@@ -1378,7 +1447,16 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	} else {
 		throw new Error("hyperchart action=run requires chartPath unless runDir points at an existing run");
 	}
-	if (meta === undefined && (branchIds.length !== 1 || branchIds[0] !== "main")) {
+	if (branchIds === undefined) {
+		if (meta === undefined) branchIds = ["main"];
+		else {
+			if (requestedRunDir === undefined) throw new Error("Existing run metadata requires a run directory");
+			branchIds = [await unambiguousRunBranch("run", requestedRunDir, ctx)];
+		}
+	}
+	if (branchIds.length === 0 || new Set(branchIds).size !== branchIds.length || branchIds.some((entry) => entry.trim().length === 0)) throw new Error("branchIds must be non-empty and unique");
+	const branchId = branchIds[0]!;
+	if (meta === undefined && (branchIds.length !== 1 || branchId !== "main")) {
 		throw new Error("A fresh run must select exactly branch 'main'; start main, fork durable branches, then resume the existing run with branchId or branchIds");
 	}
 
@@ -1502,6 +1580,9 @@ function deliverPendingPiTerminalNotification(pi: ExtensionAPI, ctx: HyperchartC
 	const meta = loadRunMetaIfPresent(runDir);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return false;
+	// A visible or queued owned gate is the current conversational boundary. Leave the
+	// terminal outbox unclaimed so it remains recoverable after the gate is resolved.
+	if (acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return false;
 	recoverStaleRunTerminalNotification(runDir);
 	const request = readDeliverableTerminalNotificationRequest(runDir);
 	if (request === undefined) return false;
@@ -1608,6 +1689,7 @@ function receiptWaitedPiTerminalNotification(runDir: string, ctx: HyperchartCont
 	const meta = loadRunMetaIfPresent(runDir);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return undefined;
+	if (acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return undefined;
 	const request = readDeliverableTerminalNotificationRequest(runDir);
 	if (request === undefined || !claimTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId)) return undefined;
 	return request;

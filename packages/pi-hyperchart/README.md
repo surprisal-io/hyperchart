@@ -26,14 +26,16 @@ Place a chart in `.pi/hypercharts/name.chart.ts`, then run:
 /hyperchart run name --wait   # synchronous
 ```
 
-The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Agent cards show declared role/toolset names and their resolved model/tool allowlists; the selected state's run-specific `Runtime` section shows the actual launch plan plus transcript/current-tool polling and steering.
+The TUI stays compact: it shows active states and path-aware percentage progress. Run `/hyperchart` to select recent runs; Enter opens the selected run in the full localhost browser inspector. Map actions held behind a `concurrency` limit appear as `waiting`; only admitted work appears as `running` and can expose an active session. Agent cards show declared role/toolset names and their resolved model/tool allowlists; the selected state's run-specific `Runtime` section shows the actual launch plan plus transcript/current-tool polling and steering. Run metadata and every agent system context distinguish the owning repository/project directory from the isolated branch action workspace; the latter is not an implicit repository checkout.
 
-Asynchronous runs inject only a compact terminal boundary notice into the exact originating Pi session/workDir.
+The consolidated tool runs the same TypeScript/source-lint preflight for `inspect` and `run`. Fresh runs default to branch `main`; existing single-branch runs can infer their only head, while multi-branch run inspection/view/resume requires an explicit selector. Safe run-target actions accept either `runDir` or `runId` and reject conflicts; `respond` keeps exact `(runId, branchId, seqId)` identity. See the canonical [Pi tool API](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/pi.md).
+
+Asynchronous runs inject only a compact terminal boundary notice into the exact originating Pi session/workDir. An active owned user gate defers terminal delivery without receipting it. The extension never answers a gate automatically: hidden context tells the model to call `respond` only when the current prompt actually answers the displayed question; unrelated requests leave it open.
 `--wait`/`wait: true` waits for terminal status or a user boundary and returns bounded identifiers/status only. Gate response identities remain exact; bounded prompt/option labels carry original/omitted character counts and are separate from exact option values. Structured user gates carry a bounded recursive, non-executable output contract; if any identity or contract cannot remain sufficient within its caps, delivery fails closed and directs the operator to the browser inspector.
-Delivery uses at-least-once semantics.
-Durable request IDs and recoverable claims prevent permanent suppression after crash.
-Host may redeliver same request after crash between delivery and confirmation.
-Treat each `requestId` idempotently.
+Terminal-notification delivery uses at-least-once semantics.
+Durable terminal request IDs and recoverable claims prevent permanent suppression after crash.
+The host may redeliver the same terminal notification after a crash between delivery and confirmation.
+Treat each terminal `requestId` idempotently; user gates instead use exact `(runId, branchId, seqId)` coordinates.
 
 ## Pi agent tool
 
@@ -46,8 +48,11 @@ Supported actions:
 - `action: "run"`
 - `action: "run_inspect"`
 - `action: "view"` — open the localhost inspector and return its URL; pass `open: false` to return the URL only
-- `action: "stop"`
+- `action: "branches"`
+- `action: "fork"`
 - `action: "rewind"`
+- `action: "stop"`
+- `action: "respond"`
 
 ## Application entry points
 
@@ -77,4 +82,4 @@ MIT · experimental `0.5.0`
 
 ## Named branches
 
-The consolidated `hyperchart` tool accepts exactly one of `branchId` or non-empty unique `branchIds` for run. A fresh chart must select exactly the singleton `main`; start it, fork durable heads, then resume the existing run with `branchId` or `branchIds` to execute the fixed set concurrently in one detached runner with a separate Pi executor per branch. Run inspection, view, response, steering, and rewind select one explicit `branchId`; `action: "branches"` lists heads and `action: "fork"` creates a head without selecting or starting it. Rewind preserves all history and downstream files. `status.json` v2 persists stable `branchIds`, and session state is stored under collision-resistant `sessions/<sanitized-branch-prefix>-<hash>/...` paths.
+The consolidated `hyperchart` tool accepts `branchId`, non-empty unique `branchIds`, or omission for run. Omission starts fresh `main` or infers an existing run's only durable branch; multi-branch resume requires an explicit selector. Start `main`, fork durable heads, then resume with `branchId` or `branchIds` to execute the fixed set concurrently in one detached runner with a separate Pi executor per branch. Run inspection and view also infer only a single unambiguous branch; response, steering, and rewind select one explicit `branchId`. `action: "branches"` lists heads and `action: "fork"` creates a head without selecting or starting it. Rewind preserves all history and downstream files. `status.json` v2 persists stable `branchIds`, and session state is stored under collision-resistant `sessions/<sanitized-branch-prefix>-<hash>/...` paths.

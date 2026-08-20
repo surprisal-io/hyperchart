@@ -46,6 +46,60 @@ describe("chart preflight", () => {
 		}
 	});
 
+	it("explains that omitted artifact schemas infer unknown in typed registries", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "hyperchart-registry-guidance-"));
+		const chartPath = join(dir, "registry-guidance.chart.ts");
+		writeFileSync(
+			chartPath,
+			`import { refs } from "@surprisal/hyperchart";\nconst { chart } = refs<Record<string, never>, Record<string, never>, { work: { report: string } }>();\nexport default chart({\n\tkind: "chart",\n\tid: "registry-guidance",\n\tinitial: "work",\n\tstates: {\n\t\twork: { kind: "state", action: { kind: "script", command: "echo", artifacts: { report: "report.txt" } }, transitions: { DONE: "done" } },\n\t\tdone: { kind: "final" },\n\t},\n});\n`,
+			"utf8",
+		);
+
+		const result = await preflightChartModule(chartPath);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.diagnostics).toContain("files registry is out of sync with the chart");
+			expect(result.diagnostics).toContain("omitted schema is inferred as unknown");
+			expect(result.diagnostics).toContain("Declare the artifact schema");
+		}
+	});
+
+	it("explains how action reply schemas populate the results registry", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "hyperchart-results-guidance-"));
+		const chartPath = join(dir, "results-guidance.chart.ts");
+		writeFileSync(
+			chartPath,
+			`import { refs } from "@surprisal/hyperchart";\nconst { chart } = refs<Record<string, never>, { work: string }>();\nexport default chart({\n\tkind: "chart",\n\tid: "results-guidance",\n\tinitial: "work",\n\tstates: {\n\t\twork: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },\n\t\tdone: { kind: "final" },\n\t},\n});\n`,
+			"utf8",
+		);
+
+		const result = await preflightChartModule(chartPath);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.diagnostics).toContain("results registry is out of sync with the chart");
+			expect(result.diagnostics).toContain("actions that declare a reply schema");
+			expect(result.diagnostics).toContain("remove the state from the results registry");
+		}
+	});
+
+	it("explains that untyped map sources infer unknown item types", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "hyperchart-maps-guidance-"));
+		const chartPath = join(dir, "maps-guidance.chart.ts");
+		writeFileSync(
+			chartPath,
+			`import { refs } from "@surprisal/hyperchart";\nconst { chart } = refs<Record<string, never>, Record<string, never>, Record<never, Record<string, unknown>>, { research: string }>();\nexport default chart({\n\tkind: "chart",\n\tid: "maps-guidance",\n\tinitial: "research",\n\tstates: {\n\t\tresearch: { kind: "map", over: { kind: "result", state: "source" }, initial: "done", onDone: "done", states: { done: { kind: "final" } } },\n\t\tdone: { kind: "final" },\n\t},\n});\n`,
+			"utf8",
+		);
+
+		const result = await preflightChartModule(chartPath);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.diagnostics).toContain("maps registry is out of sync with the chart");
+			expect(result.diagnostics).toContain("untyped source is inferred as unknown");
+			expect(result.diagnostics).toContain("declare its schema");
+		}
+	});
+
 	it("lints deprecated zod passthrough and unsafe type escapes", () => {
 		const dir = mkdtempSync(join(tmpdir(), "hyperchart-lint-"));
 		const chartPath = join(dir, "lint.chart.ts");

@@ -136,9 +136,28 @@ function formatPreflightDiagnostics(
 		].join("\n"));
 	}
 	if (!typecheck.ok) {
-		sections.push(`TypeScript typecheck failed:\n${typecheck.diagnostics}\n\nCommand:\n${typecheck.command}`);
+		const registryHints = registryMismatchHints(typecheck.diagnostics);
+		sections.push([
+			...(registryHints.length === 0 ? [] : [`Hyperchart registry guidance:\n${registryHints.join("\n")}`]),
+			`TypeScript typecheck failed:\n${typecheck.diagnostics}`,
+			`Command:\n${typecheck.command}`,
+		].join("\n\n"));
 	}
 	return sections.join("\n\n");
+}
+
+function registryMismatchHints(diagnostics: string): string[] {
+	const hints: string[] = [];
+	if (diagnostics.includes("files registry is out of sync with the chart")) {
+		hints.push("- Artifact output types come from the schema declared on the chart action or validator. An omitted schema is inferred as unknown, so a concrete files-registry type (for example string) is incompatible. Declare the artifact schema on the chart action, or make the registry entry unknown if the output is intentionally untyped.");
+	}
+	if (diagnostics.includes("results registry is out of sync with the chart")) {
+		hints.push("- Results-registry entries come only from actions that declare a reply schema. Declare the action reply schema with the intended output type, or remove the state from the results registry if it produces no structured result.");
+	}
+	if (diagnostics.includes("maps registry is out of sync with the chart")) {
+		hints.push("- Map item types come from the mapped source schema. An untyped source is inferred as unknown; declare its schema or use unknown in the maps registry.");
+	}
+	return hints;
 }
 
 function resolveTypeScriptCompiler(): string {

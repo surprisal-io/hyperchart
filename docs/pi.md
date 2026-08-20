@@ -102,9 +102,11 @@ Options:
 
 Runs are asynchronous by default. Pi shows a compact live widget with active states and the same path-aware percentage used by the React inspector: completed visits on the actual run path versus the shortest remaining transition path. On startup or session resume, Pi restores widgets only for non-terminal runs created by that exact Pi session; terminal runs and older runs without ownership metadata remain available through run history but do not appear as active widgets.
 
-When an owned background run reaches matching `complete`/`failed` status, Pi injects a compact terminal notice as a model-facing follow-up into the exact originating session and working directory; the durable terminal prompt stays out of the session log. Pi sends before confirming the terminal request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery.
+The directory that owns the run and the agent cwd are different. The owning repository/project is the Pi launch cwd recorded in `meta.workDir`. Every branch action runs in `<runDir>/workspaces/<branchId>`, an isolated workspace materialized from Hyperchart artifacts rather than a project checkout. Pi injects both absolute paths into every chart-agent system context and warns about the isolation boundary. Scripts receive `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE`. The browser Inspector shows both paths under Run metadata.
 
-A durable `user()` action is routed through the same exact session/canonical-cwd ownership boundary. Every branch persists its gate immediately, while Pi presents only one across all owned runs in lexical `runId`, then numeric `seqId` order. If Pi is busy, a hidden steering message asks it to finish the current safe action/tool batch and yield; on idle or `agent_settled`, Pi rechecks and displays the question without triggering a model turn. The user's next ordinary prompt is bound to that gate and the model must immediately translate it into an explicit `action: "respond"` call instead of answering the gate itself. Only that branch waits; the detached runner and other parallel/map branches continue.
+When an owned background run reaches matching `complete`/`failed` status, Pi injects a compact terminal notice as a model-facing follow-up into the exact originating session and working directory; the durable terminal prompt stays out of the session log. Pi sends before confirming the terminal request id; session recovery checks both confirmed receipts and already-persisted custom messages before sending. An active owned user gate takes priority: terminal notices remain unclaimed in their durable outboxes and are retried after the gate resolves and Pi settles. A stale dead runner is terminalized through the durable outbox recovery operation and surfaced on recovery.
+
+A durable `user()` action is routed through the same exact session/canonical-cwd ownership boundary. Every branch persists its gate immediately, while Pi presents only one across all owned runs in lexical `runId`, then numeric `seqId` order. If Pi is busy, a hidden steering message asks it to finish the current safe action/tool batch and yield; on idle or `agent_settled`, Pi rechecks and displays the question without triggering a model turn. The extension never responds automatically. For each later prompt, hidden context tells the model to call `action: "respond"` only if that prompt actually answers the displayed gate; unrelated requests proceed and leave it open. Only that branch waits; the detached runner and other parallel/map branches continue.
 
 Add `--wait` when the command should remain blocked; the waited call uses the same arbiter and returns either terminal status or the globally active user gate, even when that gate belongs to a different owned run. Do not start a polling watcher.
 
@@ -117,11 +119,13 @@ Add `--wait` when the command should remain blocked; the waited call uses the sa
 
 ```text
 /hyperchart resume <run-id>
+/hyperchart resume <run-id> --branch <branch-id>
+/hyperchart resume <run-id> --branch <branch-id> --branch <branch-id>
 /hyperchart resume <run-id> --ignore-replay-warnings
 /hyperchart restart <run-id>
 ```
 
-`resume` continues in the existing run directory. `restart` creates a new run using the old run's chart metadata and arguments; it does not mutate the old log.
+`resume` continues in the existing run directory. Omit `--branch` only when the run has exactly one durable branch; a multi-branch run requires one or more repeated `--branch` selectors and fails closed when they are omitted. `restart` creates a new run using the old run's chart metadata and arguments; it does not mutate the old log.
 
 ### Steer a live agent
 
@@ -162,7 +166,7 @@ Delete recursively removes the run directory, including its durable log with eve
 
 ## Agent tool
 
-The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `rewind`, `stop`, or `respond`. The slash command remains the direct human interface.
+The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `branches`, `fork`, `rewind`, `stop`, or `respond`. Run-target actions accept either `runDir` or `runId` and reject conflicting values; `respond` requires its exact `runId`. The slash command remains the direct human interface.
 
 ### `hyperchart` with `action: "list"`
 
@@ -174,7 +178,7 @@ List project and user definitions without executing chart modules. Each result i
 
 ### `hyperchart` with `action: "inspect"`
 
-Load a chart module and return its static inspector model without starting a run.
+Run the same TypeScript/source-lint preflight as `run`, then load a chart module and return its static inspector digest without starting a run.
 
 ```json
 {
@@ -207,17 +211,18 @@ Start or resume a run.
 |---|---:|---|
 | `chartPath` | no | chart name or module path; omit when `runDir` identifies an existing run |
 | `args` | no | run arguments object |
-| `runDir` | no | existing run directory/id or destination directory |
+| `runDir` / `runId` | no | existing run directory/id or destination directory; aliases, not conflicting coordinates |
+| `branchId` / `branchIds` | no | one branch or non-empty unique branch list; fresh omission defaults to `main`, existing omission requires exactly one durable branch |
 | `exportName` | no | named export |
 | `wait` | no | wait for terminal status or the shared active user gate before returning |
 | `ignoreReplayWarnings` | no | explicitly continue despite stale/skipped replay records |
 
-When `wait` is false or omitted, the tool returns after startup with `final: false`, chart/run ids, the absolute run directory, and compact status only. Owned user gates and eventual terminal boundaries are delivered asynchronously to the exact originating Pi session and canonical working directory.
-When `wait` is true, the tool participates in the same cross-run arbiter and returns a compact terminal status or a `boundary: "user"` with a bounded prompt preview, options whose bounded labels are separate from exact values, exact allowed events, a non-executable structured-output hint, and the original `waitedRun` coordinate. Every display string includes `originalChars` and `omittedChars`. Response coordinates and identities are never ellipsized; an unsafe identity or total gate envelope fails closed and routes completion to the browser inspector. It never embeds a run inspector model, terminal prompt payload, transcript, full prompt, or raw reply schema. User-gate identity is exactly `(runId, seqId)`. Presentation is at least once across recovery; response persistence is idempotent.
+When `wait` is false or omitted, the tool returns after startup with `final: false`, chart/run ids, the absolute run directory, and compact status only. Fresh runs default to branch `main`; explicit non-main fresh selectors are rejected. Existing single-branch runs can infer their only head, while multi-branch resume requires `branchId` or `branchIds`. Owned user gates and eventual terminal boundaries are delivered asynchronously to the exact originating Pi session and canonical working directory, with an active gate taking priority over deferred terminal notices.
+When `wait` is true, the tool participates in the same cross-run arbiter and returns a compact terminal status or a `boundary: "user"` with a bounded prompt preview, options whose bounded labels are separate from exact values, exact allowed events, a non-executable structured-output hint, and the original `waitedRun` coordinate. Every display string includes `originalChars` and `omittedChars`. Response coordinates and identities are never ellipsized; an unsafe identity or total gate envelope fails closed and routes completion to the browser inspector. It never embeds a run inspector model, terminal prompt payload, transcript, full prompt, or raw reply schema. User-gate identity is exactly `(runId, branchId, seqId)`. Presentation is at least once across recovery; response persistence is idempotent.
 
 ### `hyperchart` with `action: "respond"`
 
-After Pi displays a gate, the user's next normal prompt is treated as the answer. Pi injects hidden context requiring an immediate explicit call:
+After Pi displays a gate, the extension still does not answer automatically. Pi injects hidden context containing exact `(runId, branchId, seqId)` coordinates. The model makes the explicit call below only when the current prompt actually answers the gate; an unrelated prompt proceeds normally and leaves the gate open:
 
 ```json
 {
@@ -239,20 +244,22 @@ Load a concrete run and return the runtime-enriched inspector model.
 ```json
 {
   "action": "run_inspect",
-  "runDir": "review-20260711-142500"
+  "runId": "review-20260711-142500",
+  "branchId": "main"
 }
 ```
 
 | Parameter | Required | Meaning |
 |---|---:|---|
-| `runDir` | yes | existing run directory/id |
+| `runDir` / `runId` | yes | existing run directory/id; equivalent aliases |
+| `branchId` | conditionally | inferred for exactly one durable branch; required when multiple branches exist |
 | `verbose` | no | deprecated; `true` is rejected with a direction to `hyperchart view` |
 
-The result is always a bounded digest: run identity/status, capped state activity, concise issues, session counters/current-activity previews, and artifact paths. Full runtime states, visits, invocations, map histories, schemas, and transcripts never enter tool results or session JSONL; they are available only through `view`.
+The result is always a bounded digest: run identity and selected branch/status, capped state activity, concise issues, session counters/current-activity previews, and artifact paths. Full runtime states, visits, invocations, map histories, schemas, and transcripts never enter tool results or session JSONL; they are available only through `view`.
 
 ### `hyperchart` with `action: "view"`
 
-Open the localhost browser inspector and return exactly `{ "url": string }`. Pass exactly one of `runDir` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run.
+Open the localhost browser inspector and return exactly `{ "url": string }`. Pass exactly one of `runDir`/`runId` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run. A single run branch is inferred; a multi-branch run requires `branchId`.
 
 ```json
 {
@@ -283,11 +290,11 @@ Stop every active run owned by current working directory:
 { "action": "stop", "all": true }
 ```
 
-Exactly one of `runDir` or `all: true` required.
+Exactly one of `runDir`/`runId` or `all: true` is required.
 
 ### Branch actions and non-destructive rewind
 
-Run accepts exactly one of singleton `branchId` or a non-empty unique `branchIds` array. A fresh chart must resolve to exactly the singleton selection `main`; start it, fork durable branch heads, then resume the existing run with `branchId` or `branchIds` to launch the selected initial seeds. Attaching to an already-live run never spawns another process. Run inspection, view, response, rewind, and steering still select one explicit `branchId`. Use `action: "branches"` to list durable named heads. `action: "fork"` requires `runDir`, a new `branchId`, and `fromSeqId`; it creates the pointer without selecting or starting it.
+Run accepts either singleton `branchId`, a non-empty unique `branchIds` array, or omission. Omission starts fresh `main` or infers the only branch of an existing run; a multi-branch run requires an explicit selector. Explicit fresh selection can only be singleton `main`. Attaching to an already-live run never spawns another process. Run inspection and view likewise infer only an unambiguous single branch; response, rewind, and steering keep exact explicit `branchId` coordinates. Use `action: "branches"` with `runDir` or `runId` to list durable named heads. `action: "fork"` accepts either run-coordinate spelling plus a new `branchId` and `fromSeqId`; it creates the pointer without selecting or starting it.
 
 ```json
 { "action": "rewind", "runDir": "review-20260711-142500", "branchId": "main", "seqId": 42, "mode": "after" }
