@@ -438,7 +438,7 @@ describe("multi-branch process runner", () => {
 		const mainHead = store.snapshot().branch("main").headSeqId;
 		expect(mainHead).not.toBeNull();
 
-		const fork = controller.forkBranch({ branchId: "experiment", fromSeqId: mainHead!, sourceBranchId: "main" });
+		const fork = await controller.forkBranch({ branchId: "experiment", fromSeqId: mainHead!, sourceBranchId: "main" });
 		expect(fork.branchId).toBe("experiment");
 		expect(executors.has("experiment")).toBe(false);
 		expect(controller.liveBranchIds).toEqual(["main"]);
@@ -457,7 +457,7 @@ describe("multi-branch process runner", () => {
 		executors.get("main")!.complete();
 		await completion;
 		expect(readRunStatus(runDir)).toMatchObject({ state: "complete", branchIds: [] });
-		expect(() => controller.forkBranch({ branchId: "late", fromSeqId: mainHead! })).toThrow(/closed/);
+		await expect(controller.forkBranch({ branchId: "late", fromSeqId: mainHead! })).rejects.toThrow(/closed/);
 		expect(() => controller.startBranch("main")).toThrow(/closed/);
 		const normalized = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot();
 		expect(normalized.records.map((record) => record.seqId)).toEqual(normalized.records.map((_, index) => index + 1));
@@ -625,6 +625,7 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 			runId: "run", runDir, chartPath, chartId: "workspace-isolation", workDir, branchIds: ["left", "right"],
 		}, ({ config }) => {
 			workspaceByBranch.set(config.branchId, config.workDir);
+			expect(config.projectDir).toBe(workDir);
 			expect(config.workDir).toBe(join(runDir, "workspaces", config.branchId));
 			expect(existsSync(config.workDir)).toBe(true);
 			return new class extends ControlledExecutor {

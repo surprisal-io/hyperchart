@@ -227,14 +227,6 @@ export function HyperchartInspectorDialogInner({
 										{branch.branchId}{run.runnerBranchIds?.includes(branch.branchId) === true ? " ▶" : ""}
 									</button>
 								))}
-								{run.recordTree && run.recordTree.length > 0 && (
-									<details className="relative">
-										<summary className="cursor-pointer rounded border border-[var(--border-secondary)] px-2 py-1 text-xs">Tree {run.recordTree.length}</summary>
-										<div className="absolute right-0 z-20 mt-1 max-h-64 min-w-72 overflow-auto rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 font-mono text-[11px] shadow-xl">
-											{run.recordTree.map((record) => <div key={record.seqId}>#{record.seqId} ← {record.parentId ?? "root"} · {record.branchId} · {record.type}</div>)}
-										</div>
-									</details>
-								)}
 								{onForkBranch && run.branchId && (
 									<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => {
 										const head = run.branches?.find((branch) => branch.branchId === run.branchId)?.headSeqId;

@@ -25,7 +25,7 @@ import type {
 } from "@surprisal/hyperchart/host";
 ```
 
-`HyperchartInfo` describes a full discovered chart model, including optional serializable launch argument metadata. `HyperchartRunInfo` combines static chart information with optional runtime overlays and keeps that definition metadata in `launchArgs`, separate from concrete run `args`. `HyperchartRunSummaryInfo` is the graph-free scalar list/card model returned in `HyperchartSessionSnapshot`. Its optional `originSessionId` lets harnesses isolate runs by creating session. UI components consume these models instead of reading `log.jsonl` directly.
+`HyperchartInfo` describes a full discovered chart model, including optional serializable launch argument metadata. `HyperchartRunInfo` combines static chart information with optional runtime overlays and keeps that definition metadata in `launchArgs`, separate from concrete run `args`. Its `cwd` is the owning repository/project directory; optional `branchWorkspace` is the selected branch's isolated action cwd. The Inspector shows both and warns when actions are not running in the repository. `HyperchartRunSummaryInfo` is the graph-free scalar list/card model returned in `HyperchartSessionSnapshot`. Its optional `originSessionId` lets harnesses isolate runs by creating session. UI components consume these models instead of reading `log.jsonl` directly.
 
 The boundary is intentional:
 

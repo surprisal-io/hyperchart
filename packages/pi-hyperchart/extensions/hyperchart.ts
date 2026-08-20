@@ -1386,9 +1386,9 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	const parsed = parseChartModuleSync(chartPath, exportName === undefined ? {} : { exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 
-	const actualRunDir = requestedRunDir ?? createRunDir(workDir, parsed.ast.id, { rootDir: getHyperchartRunsRoot() });
+	const actualRunDir = requestedRunDir ?? (await createRunDir(workDir, parsed.ast.id, { rootDir: getHyperchartRunsRoot() }));
 	if (meta === undefined) {
-		if (requestedRunDir !== undefined) initializeRunDir(actualRunDir);
+		if (requestedRunDir !== undefined) await initializeRunDir(actualRunDir);
 		saveRunMeta(actualRunDir, {
 			chartPath,
 			...(exportName === undefined ? {} : { exportName }),
@@ -1715,7 +1715,7 @@ async function statusCommand(ctx: HyperchartContext): Promise<void> {
 	);
 }
 
-function stopHyperchartRuns(
+async function stopHyperchartRuns(
 	params: { runDir?: string; all?: boolean },
 	ctx: HyperchartContext,
 ) {
@@ -1725,7 +1725,7 @@ function stopHyperchartRuns(
 	const targets = params.all === true
 		? activeRunDirsForWorkDir(ctx.cwd)
 		: [resolveHyperchartRunDir(params.runDir as string, ctx.cwd)];
-	const stopped = targets.map((runDir) => stopRunDirectory(runDir, ctx));
+	const stopped = await Promise.all(targets.map((runDir) => stopRunDirectory(runDir, ctx)));
 	const stoppedDigest = stopped.slice(0, 20).map((run) => ({
 		runId: truncateToolText(run.runId),
 		runDir: truncateToolText(run.runDir, 1_000),
@@ -1757,21 +1757,30 @@ function activeRunDirsForWorkDir(cwd: string): string[] {
 	});
 }
 
-function stopRunDirectory(runDir: string, ctx: HyperchartContext): { runId: string; runDir: string; pid?: number } {
+async function stopRunDirectory(runDir: string, ctx: HyperchartContext): Promise<{ runId: string; runDir: string; pid?: number }> {
 	const meta = loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 		throw new Error(`Run '${basename(runDir)}' belongs to ${meta.workDir}; open that directory first`);
 	}
+	const runId = basename(runDir);
+	const active = runs.get(runId);
 	const status = readRunStatus(runDir);
 	patchRunStatus(runDir, { state: "stopping" });
 	const pid = status?.pid !== undefined && isPidAlive(status.pid) ? status.pid : undefined;
 	if (pid === undefined) patchRunStatus(runDir, { state: "stopped", exitCode: 0, error: "runner was not live" });
 	else process.kill(pid, "SIGTERM");
-	const runId = basename(runDir);
+	// A successful stop boundary means the runner has quiesced and cannot race a
+	// caller that immediately removes, rewinds, or reuses its run directory.
+	if (active !== undefined) await active.done;
+	else if (pid !== undefined) await waitForRunProcessExit(pid);
 	runs.remove(runId);
 	ctx.ui.setWidget(`hyperchart:${runId}`, undefined);
 	ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
 	return { runId, runDir, ...(pid === undefined ? {} : { pid }) };
+}
+
+async function waitForRunProcessExit(pid: number): Promise<void> {
+	while (isPidAlive(pid)) await new Promise<void>((resolve) => setTimeout(resolve, 25));
 }
 
 async function stopCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
@@ -1781,7 +1790,7 @@ async function stopCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 async function stopRun(runId: string | undefined, ctx: HyperchartContext): Promise<void> {
 	const target = runs.get(runId) ?? (await resolveRunForView(runId, ctx.cwd));
 	if (target === undefined) throw new Error(`Run '${runId ?? "<last>"}' was not found`);
-	const result = stopRunDirectory(target.runDir, ctx);
+	const result = await stopRunDirectory(target.runDir, ctx);
 	ctx.ui.notify(
 		result.pid === undefined
 			? `Marked hyperchart run ${target.runId} stopped`

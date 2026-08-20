@@ -60,7 +60,10 @@ export type QueryFn = (params: {
 }) => AsyncIterable<SDKMessage>;
 
 export type ClaudeExecutorOptions = {
+	/** Branch-isolated workspace used as the agent cwd. */
 	workDir: string;
+	/** Repository/project directory that owns the run. */
+	projectDir?: string;
 	sessionsDir: string;
 	branchId: string;
 	definitionDirs?: string[];
@@ -346,6 +349,7 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			plan,
 			sink,
 			workDir: this.options.workDir,
+			projectDir: this.options.projectDir ?? this.options.workDir,
 			sessionsDir: this.options.sessionsDir,
 			branchId: this.options.branchId,
 			sessionDir: dir,
@@ -489,6 +493,7 @@ type ClaudeSessionOptions = {
 	plan: SessionPlan;
 	sink: CompletionSink;
 	workDir: string;
+	projectDir: string;
 	sessionsDir: string;
 	branchId: string;
 	sessionDir: string;
@@ -592,14 +597,20 @@ class ClaudeSession {
 		const plan = this.options.plan;
 		const definition = this.options.definition;
 		const toolsWithoutFinish = plan.tools?.filter((name) => name !== "finish");
-		const systemPrompt = definition.systemPrompt.trim();
-		// A replaced system prompt drops Claude Code's environment block, so the
-		// session would not know its working directory; restate it explicitly or
-		// agents guess absolute paths and write outside the run's workDir.
-		const environmentNote = [
-			`Working directory: ${this.options.workDir}`,
-			"Create and reference files relative to this working directory; do not write outside it unless the task names an absolute path inside it.",
-		].join("\n");
+		const projectDir = this.options.projectDir ?? this.options.workDir;
+		const environmentNote = projectDir === this.options.workDir
+			? [
+					`Project/repository directory: ${projectDir}`,
+					`Branch workspace (current working directory): ${this.options.workDir}`,
+					`Working directory: ${this.options.workDir}`,
+				].join("\n")
+			: [
+					`Project/repository directory: ${projectDir}`,
+					`Branch workspace (current working directory): ${this.options.workDir}`,
+					`Working directory: ${this.options.workDir}`,
+					"The branch workspace is an isolated Hyperchart artifact workspace, not a checkout of the project repository. Do not assume project files are present in it. If the task requires project files, use the project/repository path explicitly; edits there are outside branch-workspace isolation.",
+				].join("\n");
+		const systemPrompt = [definition.systemPrompt.trim(), environmentNote].filter((part) => part.length > 0).join("\n\n");
 		return {
 			cwd: this.options.workDir,
 			abortController: this.abortController,
@@ -612,14 +623,10 @@ class ClaudeSession {
 			// settings or CLAUDE.md leakage into their context.
 			settingSources: [],
 			mcpServers: { hyperchart: this.createFinishServer() },
-			...(systemPrompt.length === 0
-				? {}
-				: {
-						systemPrompt:
-							plan.promptMode === "append"
-								? { type: "preset", preset: "claude_code", append: systemPrompt }
-								: `${systemPrompt}\n\n${environmentNote}`,
-					}),
+			systemPrompt:
+				plan.promptMode === "append"
+					? { type: "preset", preset: "claude_code", append: systemPrompt }
+					: systemPrompt,
 			...(plan.modelRef === undefined ? {} : { model: plan.modelRef }),
 			...thinkingOptions(plan.thinkingLevel),
 			...(toolsWithoutFinish === undefined ? {} : { tools: toolsWithoutFinish }),

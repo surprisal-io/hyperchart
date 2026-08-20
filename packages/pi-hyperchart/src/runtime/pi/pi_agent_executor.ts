@@ -43,8 +43,28 @@ import { createThrottledProgressWriter, updateSessionProgress } from "@surprisal
 export { buildSessionPlan, shouldRecoverRestoredFinish, validateDeclaredReadPaths };
 export type { SessionPlan };
 
+export type PiSessionOverridesContext = Readonly<{
+	branchId: string;
+	actionUid: ActionUID;
+	agentName: string;
+	declaredRole?: string;
+	declaredToolset?: string;
+}>;
+
+export type PiSessionOverrides = Readonly<{
+	/** Concrete model reference for this invocation. */
+	model?: string;
+	/** Concrete allowlist for this invocation; replaces the declared toolset. */
+	tools?: string[];
+	/** Invocation-scoped context appended to the agent definition's system prompt. */
+	appendSystemPrompt?: string;
+}>;
+
 export type PiExecutorOptions = {
+	/** Branch-isolated workspace used as the agent cwd. */
 	workDir: string;
+	/** Repository/project directory that owns the run. */
+	projectDir?: string;
 	agentDir?: string;
 	definitionDirs?: string[];
 	sessionsDir: string;
@@ -53,9 +73,25 @@ export type PiExecutorOptions = {
 	defaultModel?: string;
 	modelRoles?: Record<string, string>;
 	toolsets?: Record<string, string[]>;
+	/** Resolve mutable host configuration immediately before a Pi session starts. */
+	resolveSessionOverrides?: (context: PiSessionOverridesContext) => Promise<PiSessionOverrides | undefined>;
 	maxFinishRetries?: number;
 	schemaRegistry?: SchemaRegistry;
 };
+
+function workspaceContextNote(projectDir: string, branchWorkspace: string): string {
+	if (projectDir === branchWorkspace) return [
+		`Project/repository directory: ${projectDir}`,
+		`Branch workspace (current working directory): ${branchWorkspace}`,
+		`Working directory: ${branchWorkspace}`,
+	].join("\n");
+	return [
+		`Project/repository directory: ${projectDir}`,
+		`Branch workspace (current working directory): ${branchWorkspace}`,
+		`Working directory: ${branchWorkspace}`,
+		"The branch workspace is an isolated Hyperchart artifact workspace, not a checkout of the project repository. Do not assume project files are present in it. If the task requires project files, use the project/repository path explicitly; edits there are outside branch-workspace isolation.",
+	].join("\n");
+}
 
 type LiveAgent = {
 	session: AgentSession;
@@ -345,14 +381,31 @@ export class PiAgentExecutor implements AgentExecutor {
 			...(this.options.modelRoles === undefined ? {} : { modelRoles: this.options.modelRoles }),
 			...(this.options.toolsets === undefined ? {} : { toolsets: this.options.toolsets }),
 		});
-		const model = plan.modelRef === undefined ? undefined : resolveModel(this.options.modelRuntime, plan.modelRef);
+		const overrides = await this.options.resolveSessionOverrides?.({
+			branchId: this.options.branchId,
+			actionUid: effect.actionUid,
+			agentName: definition.name,
+			...(definition.role === undefined ? {} : { declaredRole: definition.role }),
+			...(definition.toolset === undefined ? {} : { declaredToolset: definition.toolset }),
+		});
+		if (isStopped()) return undefined;
+		const modelRef = overrides?.model ?? plan.modelRef;
+		const tools = overrides?.tools ?? plan.tools;
+		const invocationSystemPrompt = [
+			definition.systemPrompt,
+			overrides?.appendSystemPrompt,
+			workspaceContextNote(this.options.projectDir ?? this.options.workDir, this.options.workDir),
+		]
+			.filter((part): part is string => part !== undefined && part.trim().length > 0)
+			.join("\n\n");
+		const model = modelRef === undefined ? undefined : resolveModel(this.options.modelRuntime, modelRef);
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: this.options.workDir,
 			agentDir: this.agentDir,
 			...(plan.promptMode === "append"
-				? { appendSystemPromptOverride: (base: string[]) => [...base, definition.systemPrompt] }
+				? { appendSystemPromptOverride: (base: string[]) => [...base, invocationSystemPrompt] }
 				: {
-						systemPromptOverride: () => definition.systemPrompt,
+						systemPromptOverride: () => invocationSystemPrompt,
 						appendSystemPromptOverride: () => [],
 					}),
 		});
@@ -368,7 +421,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			modelRuntime: this.options.modelRuntime,
 			...(model === undefined ? {} : { model }),
 			...(plan.thinkingLevel === undefined ? {} : { thinkingLevel: plan.thinkingLevel }),
-			...(plan.tools === undefined ? {} : { tools: plan.tools }),
+			...(tools === undefined ? {} : { tools }),
 			customTools: [createFinishTool(effect, sink, this.options.schemaRegistry)],
 			resourceLoader,
 			sessionManager,
@@ -383,10 +436,10 @@ export class PiAgentExecutor implements AgentExecutor {
 			status: "running",
 			...(sessionFile === undefined ? {} : { sessionFile }),
 			...(definition.role === undefined ? {} : { role: definition.role }),
-			...(plan.modelRef === undefined ? {} : { model: plan.modelRef }),
+			...(modelRef === undefined ? {} : { model: modelRef }),
 			...(plan.thinkingLevel === undefined ? {} : { thinking: plan.thinkingLevel }),
 			...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
-			...(plan.tools === undefined ? {} : { tools: plan.tools }),
+			...(tools === undefined ? {} : { tools }),
 		});
 		return session;
 	}

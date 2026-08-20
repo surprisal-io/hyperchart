@@ -60,7 +60,7 @@ class PoolRuntime implements Runtime {
 	readonly effects: Effect[] = [];
 	readonly queue = createAsyncQueue<MachineEvent>();
 	constructor(readonly ast: ReturnType<typeof parsed>) {}
-	runEffects(effects: Effect[]): void {
+	async runEffects(effects: Effect[]): Promise<void> {
 		this.effects.push(...effects);
 		for (const effect of effects) {
 			if (effect.kind === "durable_records") {

@@ -1,4 +1,4 @@
-import { basename, resolve } from "node:path";
+import { basename } from "node:path";
 import { actorPoolWorkerOccurrencePath } from "../../core/actors.js";
 import type { BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
@@ -6,7 +6,8 @@ import { templatePath } from "../../core/paths.js";
 import { explainReplay } from "../../core/replay_check.js";
 import type { ChartAst, StatePath } from "../../core/types.js";
 import { assertRunOwnership, assertStoppedRun } from "./branches.js";
-import { JsonlLogStore, type NormalizedRunLog } from "./log_store.js";
+import type { NormalizedRunLog } from "./log_store.js";
+import { openRunLogStore } from "./log_store_factory.js";
 import { loadRunMeta } from "./run_dir.js";
 import { patchRunStatus } from "./run_status.js";
 
@@ -55,14 +56,23 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 
-	const store = new JsonlLogStore(resolve(opts.runDir, "log.jsonl"), () => {}, opts.branchId);
-	const normalized = await store.read();
-	const previous = normalized.branch(opts.branchId);
-	const match = findRewindMatch(normalized, opts, parsed.ast);
-	if (match.targetHeadSeqId === previous.headSeqId) {
-		throw new Error(`Rewind would not move branch '${opts.branchId}'; choose a different target`);
+	const store = await openRunLogStore(opts.runDir, { branchId: opts.branchId, access: "writer" });
+	let match: RewindMatch;
+	let previousHeadSeqId: number | null;
+	let preservedRecords: number;
+	try {
+		const normalized = await store.read();
+		const previous = normalized.branch(opts.branchId);
+		match = findRewindMatch(normalized, opts, parsed.ast);
+		if (match.targetHeadSeqId === previous.headSeqId) {
+			throw new Error(`Rewind would not move branch '${opts.branchId}'; choose a different target`);
+		}
+		await store.moveBranch(opts.branchId, match.targetHeadSeqId);
+		previousHeadSeqId = previous.headSeqId;
+		preservedRecords = normalized.records.length;
+	} finally {
+		await store.close();
 	}
-	store.moveBranch(opts.branchId, match.targetHeadSeqId);
 	patchRunStatus(opts.runDir, {
 		runId: basename(opts.runDir),
 		chartId: parsed.ast.id,
@@ -79,9 +89,9 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 		chartId: parsed.ast.id,
 		branchId: opts.branchId,
 		targetLabel: match.label,
-		previousHeadSeqId: previous.headSeqId,
+		previousHeadSeqId,
 		headSeqId: match.targetHeadSeqId,
-		preservedRecords: normalized.records.length,
+		preservedRecords,
 	};
 }
 

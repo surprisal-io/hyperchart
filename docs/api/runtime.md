@@ -257,7 +257,7 @@ The constructor and `readAll()` copy their arrays. Use this store for tests and 
 
 ```ts
 class ScriptRunner {
-  constructor(options: { workDir: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number });
+  constructor(options: { workDir: string; projectDir?: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number });
   run(
     effect: ScriptEffect,
     validationAttempt?: { n: number; reason?: string },
@@ -283,6 +283,8 @@ class ScriptRunner {
 4. maps a non-zero exit to `FAILED`;
 5. reads the last non-empty stdout line as a JSON completion envelope when present;
 6. validates the event type, reply schema, and declared artifacts.
+
+`workDir` is the action cwd. Detached runners supply the isolated branch workspace there and pass the owning repository separately as `projectDir`. Every process receives authoritative `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE` variables after authored env rendering. Direct/custom runtimes that omit `projectDir` expose `workDir` as both values.
 
 Completion envelope:
 

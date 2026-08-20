@@ -70,4 +70,4 @@ Static actor pools are available through `actorPool()`. Use singleton `send()`/`
 
 ## Branch storage
 
-The runtime exports v2 storage mutation/branch types, normalized tree queries, `JsonlLogStore`, `listHyperchartBranches`, `getHyperchartBranch`, `forkHyperchartRun`, and append-only `rewindHyperchartRun`. Every runner/inspection uses an explicit branch handle.
+The runtime exports v2 storage mutation/branch types, normalized tree queries, `JsonlLogStore`, `listHyperchartBranches`, `getHyperchartBranch`, `forkHyperchartRun`, and append-only `rewindHyperchartRun`. Every runner/inspection uses an explicit branch handle. Detached runners distinguish the owning repository `projectDir` from each isolated `<runDir>/workspaces/<branchId>` action cwd; scripts receive both as `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE`.

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { start } from "../../core/execution_loop.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
 import { explainReplay, type ReplayExplanation } from "../../core/replay_check.js";
@@ -12,7 +12,8 @@ import { ChartRuntime } from "./chart_runtime.js";
 import { ArtifactStore } from "./artifact_store.js";
 import { materializeWorkspace } from "./artifact_workspace.js";
 import { FileUserExecutor } from "./user_executor.js";
-import { JsonlLogStore } from "./log_store.js";
+import type { RunLogStore } from "./log_store.js";
+import { openRunLogStore } from "./log_store_factory.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine, type RunTerminalState } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
 import {
@@ -50,6 +51,8 @@ export type HyperchartRunnerConfig = RunnerCommonConfig & (
 
 export type BranchHyperchartRunnerConfig = RunnerCommonConfig & {
 	branchId: BranchId;
+	/** Repository/project directory that owns the run. Unlike workDir, this is not branch-isolated. */
+	projectDir: string;
 	/** Launch provenance only. This is not the controller's changing live set. */
 	initialBranchIds: readonly BranchId[];
 };
@@ -86,10 +89,12 @@ export interface HyperchartRunnerController {
 	readonly liveBranchIds: readonly BranchId[];
 	/** Launch the reserved initial branches and resolve at aggregate termination. */
 	start(): Promise<void>;
+	/** Stop every live branch and close the controller without terminating the host process. */
+	stop(): Promise<void>;
 	/** Keep an accepting controller alive across idle gaps with no live branches. */
 	acquireHold(): RunnerHold;
 	/** Create only a durable branch head. No executor or runtime is started. */
-	forkBranch(options: RunnerForkOptions): BranchHead;
+	forkBranch(options: RunnerForkOptions): Promise<BranchHead>;
 	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. */
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
 }
@@ -99,7 +104,7 @@ type Deferred<T> = { promise: Promise<T>; resolve(value: T): void };
 type BranchSetupState = "reserved" | "replaying" | "building" | "running";
 type BranchEntry = {
 	branchId: BranchId;
-	store: JsonlLogStore;
+	store: RunLogStore;
 	ready: Deferred<void>;
 	outcome: Deferred<RunnerBranchOutcome>;
 	setupState: BranchSetupState;
@@ -179,7 +184,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		private readonly attemptId: string,
 		private readonly ast: ChartAst,
 		private readonly schemaRegistry: SchemaRegistry,
-		private readonly rootStore: JsonlLogStore,
+		private readonly rootStore: RunLogStore,
 		private readonly sessionsDir: string,
 		private readonly buildExecutor: ExecutorFactory,
 	) {
@@ -218,7 +223,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		};
 	}
 
-	forkBranch(options: RunnerForkOptions): BranchHead {
+	async forkBranch(options: RunnerForkOptions): Promise<BranchHead> {
 		this.assertAccepting("fork a branch");
 		assertRunnerBranchId(options.branchId);
 		const normalized = this.rootStore.snapshot();
@@ -339,6 +344,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		const workDir = join(this.config.runDir, "workspaces", entry.branchId);
 		const branchConfig: BranchHyperchartRunnerConfig = {
 			...commonRunnerConfig(this.config),
+			projectDir: this.config.workDir,
 			workDir,
 			branchId: entry.branchId,
 			initialBranchIds: this.initialBranchIds,
@@ -372,7 +378,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			const userExecutor = new FileUserExecutor({ runId: this.config.runId, runDir: this.config.runDir, branchId: entry.branchId, schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message) });
 			entry.runtime = new ChartRuntime({
 				ast: this.ast, branchId: entry.branchId, logStore: entry.store, agentExecutor: executor, userExecutor,
-				workDir, chartDir: dirname(this.config.chartPath), runDir: this.config.runDir,
+				projectDir: this.config.workDir, workDir, chartDir: dirname(this.config.chartPath), runDir: this.config.runDir,
 				schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message),
 			});
 		} catch (error) {
@@ -468,6 +474,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			patchRunStatus(this.config.runDir, { state: "failed", branchIds: [], exitCode: 1, error: message });
 			process.exitCode = 1;
 		}
+		await this.rootStore.close().catch((error: unknown) => console.warn(`Hyperchart journal close failed: ${errorMessage(error)}`));
 		this.phase = "closed";
 		this.completion.resolve();
 	}
@@ -485,7 +492,11 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		if (this.phase !== "accepting") throw new Error(`Hyperchart runner is ${this.phase}; cannot ${operation}`);
 	}
 
-	/** The second argument is an internal test seam; production signal handlers always exit. */
+	async stop(): Promise<void> {
+		await this.close("SIGTERM", false);
+	}
+
+	/** Signal handlers exit the standalone runner; embedded hosts use stop(). */
 	private async close(signal: NodeJS.Signals, exitProcess = true): Promise<void> {
 		if (this.phase !== "accepting") return;
 		this.shutdownSignal = signal;
@@ -526,6 +537,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			state: "stopped", branchIds: [], pid: process.pid, heartbeatAt: Date.now(), exitCode,
 			...(cleanupErrors.length === 0 ? { error: undefined } : { error: `Runner stopped by ${signal}; cleanup failed: ${cleanupErrors.join("; ")}` }),
 		});
+		await this.rootStore.close().catch((error: unknown) => console.warn(`Hyperchart journal close failed: ${errorMessage(error)}`));
 		this.phase = "closed";
 		this.completion.resolve();
 		if (exitProcess) process.exit(exitCode);
@@ -559,8 +571,7 @@ export async function createHyperchartRunnerController(
 		await assertChartPreflight(config.chartPath);
 		const parsed = parseChartModuleSync(config.chartPath, config.exportName === undefined ? {} : { exportName: config.exportName });
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-		const rootStore = new JsonlLogStore(resolve(config.runDir, "log.jsonl"), (message) => console.warn(message), initialBranchIds[0]);
-		rootStore.snapshot();
+		const rootStore = await openRunLogStore(config.runDir, { ...(initialBranchIds[0] === undefined ? {} : { branchId: initialBranchIds[0] }), onWarn: (message) => console.warn(message), access: "writer" });
 		return new HyperchartRunnerControllerImpl(config, initialBranchIds, attemptId, parsed.ast, parsed.schemaRegistry, rootStore, join(config.runDir, "sessions"), buildExecutor);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

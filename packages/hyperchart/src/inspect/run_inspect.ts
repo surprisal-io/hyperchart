@@ -12,7 +12,8 @@ import { hyperchartRunFromRuntime } from "../host/index.js";
 import type { HyperchartRunInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
 import { branchSessionSegment } from "../runtime/generic/executor_helpers.js";
-import { JsonlLogStore } from "../runtime/generic/log_store.js";
+import type { NormalizedRunLog } from "../runtime/generic/log_store.js";
+import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
 import { readRunnerConfig } from "../runtime/generic/runner_main.js";
@@ -48,9 +49,17 @@ export async function hyperchartRunFromRunDir(
 	});
 	const status = readRunStatus(absoluteRunDir);
 	const branchId = options.branchId ?? "main";
-	const store = new JsonlLogStore(resolve(absoluteRunDir, "log.jsonl"), () => {}, branchId);
-	const normalized = options.records === undefined ? await store.read() : undefined;
-	const records = options.records ?? (normalized === undefined || normalized.mutations.length === 0 ? [] : normalized.ancestry(branchId));
+	let records = options.records;
+	let normalized: NormalizedRunLog | undefined;
+	if (records === undefined) {
+		const store = await openRunLogStore(absoluteRunDir, { branchId });
+		try {
+			normalized = await store.read();
+			records = normalized.mutations.length === 0 ? [] : normalized.ancestry(branchId);
+		} finally {
+			await store.close();
+		}
+	}
 	const sessionsDir = resolve(absoluteRunDir, "sessions");
 	const readTranscript = options.readTranscript ?? readNeutralSessionTranscript;
 	const transcriptCache = new Map<string, ReturnType<SessionTranscriptReader>>();
@@ -77,6 +86,7 @@ export async function hyperchartRunFromRunDir(
 		...(status === undefined ? {} : { status }),
 		sessionProgress,
 		cwd: meta.workDir,
+		branchWorkspace: join(absoluteRunDir, "workspaces", branchId),
 		...(Number.isNaN(createdAt) ? {} : { createdAt }),
 		...(options.now === undefined ? {} : { now: options.now }),
 	});

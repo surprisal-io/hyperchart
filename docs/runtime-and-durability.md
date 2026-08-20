@@ -40,6 +40,8 @@ Every append/fork/rewind uses one exclusive run-writer claim. A record batch and
 
 One detached runner process may execute a dynamic, non-empty set of live branch reservations concurrently. It replay-gates all initial branch seeds before starting any initial runtime; dynamically admitted branches gate independently. Each admitted branch gets one `ChartRuntime` and one host executor over the shared journal. Executor instances are deliberately branch-scoped: Pi/Claude live-session maps cannot collide across branches. The process is failed if any branch fails; `status.json` v2 publishes current live `branchIds` and terminal states use `[]`. A singleton `branchId` runner config remains accepted and is normalized to one branch.
 
+The run owns two different filesystem locations. `projectDir` is the repository/project directory recorded as `meta.workDir`; it scopes discovery and ownership but is not an action cwd. Each branch executes in `branchWorkspace = <runDir>/workspaces/<branchId>`, materialized only from pinned Hyperchart artifacts. Agent system context names both paths and warns that the branch workspace is not a repository checkout. Scripts receive authoritative `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE` variables while retaining the branch workspace as `cwd`. Editing `projectDir` explicitly is outside branch-workspace isolation.
+
 ## Why store facts instead of current state
 
 A mutable checkpoint answers “where did the old program say it was?” A fact log lets Hyperchart ask “what state follows from these accepted facts under this chart?”

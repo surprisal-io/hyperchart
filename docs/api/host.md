@@ -128,7 +128,10 @@ interface HyperchartRunInfo {
   definitionSource?: string;
   description?: string;
   status: HyperchartRunStatus;
+  /** Repository/project directory that owns the run. */
   cwd: string;
+  /** Isolated action cwd for the selected branch. */
+  branchWorkspace?: string;
   createdAt: number;
   updatedAt: number;
   pid?: number;
@@ -146,6 +149,8 @@ interface HyperchartRunInfo {
 ```
 
 `originSessionId` identifies the harness session that created a run when the host can provide it. Consumers may use exact matching for per-session views; absence means ownership is unknown. `launchArgs` carries the chart's display metadata through static and runtime full models; `args` remains the concrete argument values supplied to that run. Static inspection has empty concrete `args` unless the adapter caller explicitly supplies values.
+
+`cwd` is the owning repository/project directory. `branchWorkspace` is the selected branch's action cwd (`<runDir>/workspaces/<branchId>`). The workspace contains materialized Hyperchart artifacts, not an implicit checkout of the repository; explicit edits under `cwd` are outside branch isolation.
 
 `mode: "static"` represents a definition with no durable run overlay. `mode: "run"` represents a concrete run.
 

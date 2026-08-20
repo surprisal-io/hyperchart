@@ -8,6 +8,7 @@ import {
 	DEFAULT_BRANCH_ID,
 	type LogStore,
 	type NormalizedRunLog,
+	stampDrafts,
 	validateAndProjectJournal,
 } from "./log_store.js";
 
@@ -25,24 +26,11 @@ export class MemoryLogStore implements LogStore {
 		validateAndProjectJournal(this.mutations);
 	}
 
-	appendDrafts(drafts: readonly DurableRecordDraft[]): readonly DurableLogRecord[] {
+	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
 		const normalized = validateAndProjectJournal(this.mutations);
-		const now = Date.now();
-		const branch = normalized.branches.get(this.branchId);
-		if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${this.branchId}'`);
-		let nextSeqId = normalized.nextSeqId;
-		let parentId = branch.headSeqId;
-		const records = drafts.map((draft) => {
-			assertDraft(draft);
-			const record = { ...draft, seqId: nextSeqId++, parentId, branchId: this.branchId, timestamp: now } as DurableLogRecord;
-			parentId = record.seqId;
-			return record;
-		});
-		const tail = records.at(-1);
-		if (tail !== undefined) {
-			this.mutations.push({ kind: "record_batch", branchId: this.branchId, records, headSeqId: tail.seqId, committedAt: now });
-		}
+		const { records, mutation } = stampDrafts(normalized, this.branchId, drafts, Date.now());
+		this.mutations.push(mutation);
 		return records;
 	}
 
@@ -68,14 +56,5 @@ export class MemoryLogStore implements LogStore {
 function assertBranchId(value: BranchId): void {
 	if (value.trim().length === 0 || value.length > 128 || /[\0/\\]/.test(value)) {
 		throw new Error("selected branch must be a non-empty branch id without path separators");
-	}
-}
-
-function assertDraft(value: DurableRecordDraft): void {
-	if (typeof value !== "object" || value === null || Array.isArray(value) || typeof value.type !== "string") {
-		throw new Error("Durable record draft must contain a machine record type");
-	}
-	if ("seqId" in value || "parentId" in value || "branchId" in value || "timestamp" in value) {
-		throw new Error("Durable record coordinates are assigned only by the run writer");
 	}
 }

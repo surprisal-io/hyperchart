@@ -11,9 +11,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 	await runHyperchartRunner(config, ({ config: runnerConfig, schemaRegistry, sessionsDir }) => {
 		return new ClaudeAgentExecutor({
 			workDir: runnerConfig.workDir,
+			projectDir: runnerConfig.projectDir,
 			sessionsDir,
 			branchId: runnerConfig.branchId,
-			definitionDirs: resolveClaudeSubagentDefinitionDirs(runnerConfig.workDir, runnerConfig.chartPath),
+			definitionDirs: resolveClaudeSubagentDefinitionDirs(runnerConfig.projectDir, runnerConfig.chartPath),
 			...(runnerConfig.defaultModel === undefined ? {} : { defaultModel: runnerConfig.defaultModel }),
 			...(runnerConfig.modelRoles === undefined ? {} : { modelRoles: runnerConfig.modelRoles }),
 			...(runnerConfig.toolsets === undefined ? {} : { toolsets: runnerConfig.toolsets }),

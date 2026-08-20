@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sanitizeSegment } from "../../core/action_uid.js";
-import { JsonlLogStore } from "./log_store.js";
+import { openRunLogStore } from "./log_store_factory.js";
 
 export type RunMeta = {
 	chartPath: string;
@@ -12,7 +12,7 @@ export type RunMeta = {
 	originSessionId?: string;
 };
 
-export function createRunDir(workDir: string, chartId: string, options: { rootDir?: string } = {}): string {
+export async function createRunDir(workDir: string, chartId: string, options: { rootDir?: string } = {}): Promise<string> {
 	const root = options.rootDir ?? join(workDir, ".hyperchart", "runs");
 	mkdirSync(root, { recursive: true });
 	const stamp = formatTimestamp(new Date());
@@ -22,13 +22,18 @@ export function createRunDir(workDir: string, chartId: string, options: { rootDi
 	while (existsSync(candidate)) {
 		candidate = join(root, `${base}-${suffix++}`);
 	}
-	initializeRunDir(candidate);
+	await initializeRunDir(candidate);
 	return candidate;
 }
 
-export function initializeRunDir(runDir: string): void {
+export async function initializeRunDir(runDir: string): Promise<void> {
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
-	new JsonlLogStore(join(runDir, "log.jsonl")).initializeRootBranch();
+	const store = await openRunLogStore(runDir, { access: "writer" });
+	try {
+		await store.initializeRootBranch();
+	} finally {
+		await store.close();
+	}
 }
 
 export function loadRunMeta(runDir: string): RunMeta {

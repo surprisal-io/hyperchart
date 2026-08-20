@@ -25,7 +25,7 @@ export const MAX_TOOL_PAYLOAD_BYTES = 64 * 1024;
 const MODEL_ENVELOPE_FIELDS = new Set([
 	"actionKey", "actionName", "active", "additionalProperties", "additionalValue", "agent", "agentDefinitionUnavailable", "allowedEvents",
 	"allowedValueJson", "alternativeMode", "alternatives", "artifactWarningCount", "artifactWarnings", "artifacts", "attached", "attempts",
-	"boundary", "branchId", "branchIds", "branches", "cacheRead", "cacheWrite", "chartId", "chartName", "chartPath", "charts", "committed", "constraints", "customType",
+	"boundary", "branchId", "branchIds", "branchWorkspace", "branches", "cacheRead", "cacheWrite", "chartId", "chartName", "chartPath", "charts", "committed", "constraints", "customType",
 	"completedEvent", "concurrency", "content", "cost", "createdAt", "currentTool", "cwd", "defaultJson", "details",
 	"deliveryNotice", "description", "digest", "display", "done", "element", "error", "errorPreview", "event", "exitCode", "exportName", "failed", "fields", "final",
 	"finalOutputPreview", "format", "hasDefault", "id", "idempotent", "initial", "input", "instruction", "interaction", "isError", "issues",
@@ -608,7 +608,7 @@ export type RunInspectStateSummary = {
 	issues?: IssueSummary[]; omittedIssueCount?: number;
 };
 export type RunInspectSummary = {
-	runId: string; chartName: string; mode?: HyperchartRunInfo["mode"]; status: HyperchartRunInfo["status"]; cwd: string;
+	runId: string; branchId?: string; chartName: string; mode?: HyperchartRunInfo["mode"]; status: HyperchartRunInfo["status"]; cwd: string;
 	createdAt: number; updatedAt: number; pid?: number; stateCount: number; omittedStateCount?: number; finalOutputPreview?: string;
 	totalUsage?: HyperchartRunInfo["totalUsage"]; issues?: IssueSummary[]; omittedIssueCount?: number; stateDigests: RunInspectStateSummary[];
 	pendingStateIds?: string[]; omittedPendingStateCount?: number;
@@ -626,7 +626,7 @@ export function summarizeRunInspect(run: HyperchartRunInfo): RunInspectSummary {
 	}
 	const issues = run.issues?.slice(0, MAX_NESTED_ITEMS).map(summarizeIssue);
 	const summary: RunInspectSummary = {
-		runId: truncate(run.runId), chartName: truncate(run.chartName), ...(run.mode === undefined ? {} : { mode: run.mode }), status: run.status,
+		runId: truncate(run.runId), ...(run.branchId === undefined ? {} : { branchId: truncate(run.branchId) }), chartName: truncate(run.chartName), ...(run.mode === undefined ? {} : { mode: run.mode }), status: run.status,
 		cwd: truncate(run.cwd, 1000), createdAt: run.createdAt, updatedAt: run.updatedAt, ...(run.pid === undefined ? {} : { pid: run.pid }),
 		stateCount: run.stateCount, ...(omittedActive === 0 ? {} : { omittedStateCount: omittedActive }),
 		...(run.finalOutput === undefined ? {} : { finalOutputPreview: truncate(run.finalOutput, 400) }),

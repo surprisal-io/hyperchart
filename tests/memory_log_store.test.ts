@@ -14,7 +14,7 @@ function invokeDraft(): DurableRecordDraft {
 describe("MemoryLogStore", () => {
 	it("stamps drafts from the selected durable head", async () => {
 		const store = new MemoryLogStore();
-		const first = store.appendDrafts([argsDraft(), invokeDraft()]);
+		const first = await store.appendDrafts([argsDraft(), invokeDraft()]);
 		expect(first.map(({ seqId, parentId, branchId }) => ({ seqId, parentId, branchId }))).toEqual([
 			{ seqId: 1, parentId: null, branchId: "main" },
 			{ seqId: 2, parentId: 1, branchId: "main" },

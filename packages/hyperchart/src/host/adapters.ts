@@ -226,6 +226,7 @@ export type HyperchartRunFromRuntimeOptions = {
 	status?: RuntimeStatusInfo;
 	sessionProgress?: HyperchartRuntimeSessionProgressFile;
 	cwd?: string;
+	branchWorkspace?: string;
 	createdAt?: number;
 	updatedAt?: number;
 	description?: string;
@@ -244,6 +245,7 @@ export function hyperchartRunFromRuntime(
 		runId: options.runId ?? options.status?.runId ?? `run:${ast.id}`,
 		status: runtimeRunStatus(options.status?.state),
 		cwd: options.cwd ?? "",
+		...(options.branchWorkspace === undefined ? {} : { branchWorkspace: options.branchWorkspace }),
 		createdAt: options.createdAt ?? options.status?.startedAt ?? firstTimestamp(records) ?? options.now ?? Date.now(),
 		updatedAt: options.updatedAt ?? options.status?.updatedAt ?? lastTimestamp(records) ?? options.now ?? Date.now(),
 		args: projection.args === undefined ? {} : { ...projection.args },

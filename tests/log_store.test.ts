@@ -34,15 +34,15 @@ describe("JsonlLogStore branch journal", () => {
 	it("rejects append before explicit root-branch initialization", async () => {
 		const dir = await makeTempDir();
 		const store = new JsonlLogStore(join(dir, "log.jsonl"));
-		expect(() => store.appendDrafts([argsDraft()])).toThrow(/Unknown Hyperchart branch 'main'/);
+		await expect(store.appendDrafts([argsDraft()])).rejects.toThrow(/Unknown Hyperchart branch 'main'/);
 	});
 
 	it("creates main and atomically commits a stamped record batch", async () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "runs", "log.jsonl");
 		const store = new JsonlLogStore(file);
-		store.initializeRootBranch();
-		const records = store.appendDrafts([argsDraft(), invokeDraft()]);
+		await store.initializeRootBranch();
+		const records = await store.appendDrafts([argsDraft(), invokeDraft()]);
 		const normalized = await store.read();
 
 		expect(normalized.branch("main").headSeqId).toBe(2);
@@ -55,13 +55,13 @@ describe("JsonlLogStore branch journal", () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const main = new JsonlLogStore(file);
-		main.initializeRootBranch();
-		main.appendDrafts([argsDraft(), invokeDraft()]); // 1 -> 2, main
-		main.createBranch("experiment", 1, { reason: "try sibling", sourceBranchId: "main", sourceSeqId: 1 });
+		await main.initializeRootBranch();
+		await main.appendDrafts([argsDraft(), invokeDraft()]); // 1 -> 2, main
+		await main.createBranch("experiment", 1, { reason: "try sibling", sourceBranchId: "main", sourceSeqId: 1 });
 		const experiment = main.forBranch("experiment");
-		const [sibling] = experiment.appendDrafts([invokeDraft()]); // 3, experiment
-		main.moveBranch("main", 1);
-		const [replacement] = main.appendDrafts([invokeDraft()]); // 4, main
+		const [sibling] = await experiment.appendDrafts([invokeDraft()]); // 3, experiment
+		await main.moveBranch("main", 1);
+		const [replacement] = await main.appendDrafts([invokeDraft()]); // 4, main
 		const normalized = await main.read();
 
 		expect(sibling).toMatchObject({ seqId: 3, parentId: 1, branchId: "experiment" });
@@ -112,10 +112,10 @@ describe("JsonlLogStore branch journal", () => {
 		const file = join(dir, "log.jsonl");
 		const left = new JsonlLogStore(file);
 		const right = left.forBranch("main");
-		left.initializeRootBranch();
-		left.appendDrafts([argsDraft()]);
-		const [a] = left.appendDrafts([invokeDraft()]);
-		const [b] = right.appendDrafts([invokeDraft()]);
+		await left.initializeRootBranch();
+		await left.appendDrafts([argsDraft()]);
+		const [a] = await left.appendDrafts([invokeDraft()]);
+		const [b] = await right.appendDrafts([invokeDraft()]);
 		expect([a?.seqId, b?.seqId]).toEqual([2, 3]);
 		expect((await left.read()).branch("main").headSeqId).toBe(3);
 	});
@@ -124,13 +124,13 @@ describe("JsonlLogStore branch journal", () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const current = new JsonlLogStore(file);
-		current.initializeRootBranch();
-		current.appendDrafts([argsDraft()]);
+		await current.initializeRootBranch();
+		await current.appendDrafts([argsDraft()]);
 		const stale = new JsonlLogStore(file);
 		expect(stale.snapshot().nextSeqId).toBe(2);
 
-		current.appendDrafts([invokeDraft()]);
-		expect(() => stale.appendDrafts([invokeDraft()])).toThrow(/Stale Hyperchart journal writer/);
+		await current.appendDrafts([invokeDraft()]);
+		await expect(stale.appendDrafts([invokeDraft()])).rejects.toThrow(/Stale Hyperchart journal writer/);
 
 		const values = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as unknown);
 		const final = validateAndProjectJournal(values);

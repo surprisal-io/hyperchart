@@ -36,7 +36,7 @@ describe("materializeWorkspace", () => {
 		const pin = await store.put(source);
 		const logStore = new JsonlLogStore(join(dir, "run", "log.jsonl"));
 		logStore.initializeRootBranch();
-		const [accepted] = logStore.appendDrafts([{
+		const [accepted] = await logStore.appendDrafts([{
 			type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" },
 			artifacts: { "nested/report.md": pin },
 		}]);

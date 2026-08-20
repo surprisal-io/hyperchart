@@ -29,8 +29,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 		const modelRuntime = await createModelRuntime(agentDir);
 		return new PiAgentExecutor({
 			workDir: runnerConfig.workDir,
+			projectDir: runnerConfig.projectDir,
 			agentDir,
-			definitionDirs: resolvePiSubagentDefinitionDirs(runnerConfig.workDir, agentDir, runnerConfig.chartPath),
+			definitionDirs: resolvePiSubagentDefinitionDirs(runnerConfig.projectDir, agentDir, runnerConfig.chartPath),
 			modelRuntime,
 			sessionsDir,
 			branchId: runnerConfig.branchId,

@@ -39,6 +39,10 @@
 			"types": "./dist/runtime/pi/host_adapter.d.ts",
 			"import": "./dist/runtime/pi/host_adapter.js"
 		},
+		"./pi-runner": {
+			"types": "./dist/runtime/pi/pi_runner.d.ts",
+			"import": "./dist/runtime/pi/pi_runner.js"
+		},
 		"./react": {
 			"types": "./dist/react/index.d.ts",
 			"import": "./dist/react/index.js"

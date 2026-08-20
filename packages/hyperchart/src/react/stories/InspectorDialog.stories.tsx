@@ -36,7 +36,7 @@ export const Running: Story = {
 	},
 	render: (args) => <InteractiveInspector {...args} />,
 	parameters: {
-		docs: { description: { story: "Live runtime inspector with controlled selection between durable runs." } },
+		docs: { description: { story: "Live runtime inspector with controlled selection between durable runs and explicit repository versus branch-workspace metadata." } },
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement.ownerDocument.body);

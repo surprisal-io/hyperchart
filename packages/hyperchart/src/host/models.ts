@@ -514,7 +514,10 @@ export interface HyperchartRunInfo {
 	definitionSource?: string;
 	description?: string;
 	status: HyperchartRunStatus;
+	/** Repository/project directory that owns the run. */
 	cwd: string;
+	/** Isolated workspace used as the selected branch's action cwd. */
+	branchWorkspace?: string;
 	createdAt: number;
 	updatedAt: number;
 	pid?: number;

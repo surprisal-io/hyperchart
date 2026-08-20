@@ -51,12 +51,12 @@ describe("append-only branch rewind", () => {
 		expect(rewind).toMatchObject({ branchId: "main", previousHeadSeqId: 3, headSeqId: 2, preservedRecords: 3 });
 		// Reopen after a separate host operation; an opened journal never rereads itself.
 		const replacementStore = new JsonlLogStore(join(runDir, "log.jsonl"));
-		const replacement = replacementStore.appendDrafts([{ type: "session_ref", index: 3, file: "replacement.jsonl" }]);
+		const replacement = await replacementStore.appendDrafts([{ type: "session_ref", index: 3, file: "replacement.jsonl" }]);
 		expect(replacement[0]).toMatchObject({ seqId: 4, parentId: 2, branchId: "main" });
 
 		await rewindHyperchartRun({ runDir, branchId: "main", seqId: 3, mode: "after", cwd: root });
 		const continuationStore = new JsonlLogStore(join(runDir, "log.jsonl"));
-		const oldTailContinuation = continuationStore.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
+		const oldTailContinuation = await continuationStore.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
 		expect(oldTailContinuation[0]).toMatchObject({ seqId: 5, parentId: 3, branchId: "main" });
 		const normalized = await continuationStore.read();
 		expect(normalized.records.map((record) => record.seqId)).toEqual([1, 2, 3, 4, 5]);

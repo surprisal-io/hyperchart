@@ -16,6 +16,17 @@ describe("StateDetails", () => {
 		expect(markup).not.toContain("No state running right now");
 	});
 
+	it("distinguishes the owning repository from the selected branch action workspace", () => {
+		const markup = renderToStaticMarkup(createElement(RunOverview, {
+			run: { ...runningRun, cwd: "/project/repo", branchWorkspace: "/runs/example/workspaces/main" },
+		}));
+		expect(markup).toContain("project / repository");
+		expect(markup).toContain("/project/repo");
+		expect(markup).toContain("branch workspace (action cwd)");
+		expect(markup).toContain("/runs/example/workspaces/main");
+		expect(markup).toContain("not in the project repository");
+	});
+
 	it("reveals an artifact contract contextually without a generic Refs section", () => {
 		const producer: HyperchartStateInfo = {
 			id: "prepare",

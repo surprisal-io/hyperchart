@@ -27,6 +27,9 @@ export type ChartRuntimeOptions = {
 	agentExecutor: AgentExecutor;
 	/** Required only when this runtime may execute user actions; detached runners always provide it. */
 	userExecutor?: UserExecutor;
+	/** Repository/project directory that owns the run. Scripts remain cwd-scoped to workDir. */
+	projectDir?: string;
+	/** Branch-isolated workspace used as the action cwd. */
 	workDir: string;
 	chartDir: string;
 	/** Enables artifact pinning: accepted deliverables are snapshotted into `<runDir>/artifact_store`. */
@@ -46,6 +49,8 @@ export class ChartRuntime implements Runtime {
 	private readonly onWarn: (msg: string) => void;
 	private readonly pending = new Set<Promise<void>>();
 	private readonly backgroundErrors: unknown[] = [];
+	/** While set, completions are held back so they cannot overtake a pending durable append. */
+	private sendBuffer: MachineEvent[] | undefined;
 	private disposed = false;
 	private disposal?: Promise<void>;
 
@@ -56,6 +61,7 @@ export class ChartRuntime implements Runtime {
 		this.branchId = options.branchId;
 		this.scripts = new ScriptRunner({
 			workDir: options.workDir,
+			projectDir: options.projectDir ?? options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
 		});
 		if (options.runDir !== undefined) this.artifactStore = new ArtifactStore(options.runDir);
@@ -63,14 +69,19 @@ export class ChartRuntime implements Runtime {
 		this.onWarn = options.onWarn ?? (() => {});
 	}
 
-	runEffects(effects: Effect[]): void {
+	async runEffects(effects: Effect[]): Promise<void> {
 		if (this.disposed) return;
-		for (const effect of effects) {
-			if (this.disposed) return;
-			switch (effect.kind) {
+		// The machine drops completions whose invoke facts it has not projected yet, so no
+		// event may be delivered between dispatching this batch and enqueueing its
+		// durable_records_added acknowledgements. Buffer sends until the batch settles.
+		this.sendBuffer = [];
+		try {
+			for (const effect of effects) {
+				if (this.disposed) return;
+				switch (effect.kind) {
 				case "durable_records": {
-					const records = this.options.logStore.appendDrafts(effect.records);
-					this.send({ kind: "durable_records_added", effectId: effect.id, records });
+					const records = await this.options.logStore.appendDrafts(effect.records);
+					if (!this.disposed) this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 					break;
 				}
 				case "actor_create":
@@ -196,7 +207,12 @@ export class ChartRuntime implements Runtime {
 						});
 					}
 					break;
+				}
 			}
+		} finally {
+			const buffered = this.sendBuffer;
+			this.sendBuffer = undefined;
+			if (buffered !== undefined) for (const event of buffered) this.send(event);
 		}
 	}
 
@@ -258,7 +274,12 @@ export class ChartRuntime implements Runtime {
 	}
 
 	private send(event: MachineEvent): void {
-		if (!this.disposed) this.queue.send(event);
+		if (this.disposed) return;
+		if (this.sendBuffer !== undefined) {
+			this.sendBuffer.push(event);
+			return;
+		}
+		this.queue.send(event);
 	}
 
 	private dispatchAgentCompletion(effect: AgentEffect, event: ChartEvent): void {

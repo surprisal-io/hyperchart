@@ -124,6 +124,7 @@ function startAndAwait(executor: ClaudeAgentExecutor, target: AgentEffect): Prom
 describe("ClaudeAgentExecutor", () => {
 	it("runs a session to a validated finish and records progress and transcript", async () => {
 		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
+		const projectDir = join(workDir, "..", "project");
 		const fake = fakeQuery([
 			async (_prompt, finish) => {
 				const rejected = (await finish({ event: "NOPE" })) as { isError?: boolean };
@@ -141,6 +142,7 @@ describe("ClaudeAgentExecutor", () => {
 		]);
 		const executor = new ClaudeAgentExecutor({
 			workDir,
+			projectDir,
 			sessionsDir,
 			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
@@ -158,6 +160,9 @@ describe("ClaudeAgentExecutor", () => {
 		expect(options.tools).toEqual(["Read", "Bash"]);
 		expect(options.allowedTools).toEqual(["Read", "Bash", FINISH_TOOL_NAME]);
 		expect(options.systemPrompt).toContain("Do the assigned work.");
+		expect(options.systemPrompt).toContain(`Project/repository directory: ${projectDir}`);
+		expect(options.systemPrompt).toContain(`Branch workspace (current working directory): ${workDir}`);
+		expect(options.systemPrompt).toContain("not a checkout of the project repository");
 		expect(options.systemPrompt).toContain(`Working directory: ${workDir}`);
 		expect(options.thinking).toEqual({ type: "adaptive" });
 		expect(options.effort).toBe("medium");

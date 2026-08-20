@@ -98,7 +98,7 @@ class ActorRuntime implements Runtime {
 		readonly fail?: "create" | "enqueue" | "reply",
 		readonly agentReplies: Record<string, Array<string | { type: string; output?: unknown }>> = {},
 	) {}
-	runEffects(effects: Effect[]): void {
+	async runEffects(effects: Effect[]): Promise<void> {
 		this.effectsSeen.push(...effects);
 		for (const effect of effects) {
 			if (effect.kind === "durable_records") {

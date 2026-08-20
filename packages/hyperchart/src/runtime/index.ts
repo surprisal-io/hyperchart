@@ -63,10 +63,15 @@ export {
 	DEFAULT_BRANCH_ID,
 	JsonlLogStore,
 	NormalizedRunLog,
+	stampDrafts,
 	validateAndProjectJournal,
 } from "./generic/log_store.js";
-export type { LogStore } from "./generic/log_store.js";
+export type { LogStore, RunLogStore } from "./generic/log_store.js";
 export { MemoryLogStore } from "./generic/memory_log_store.js";
+export { openRunLogStore } from "./generic/log_store_factory.js";
+export type { OpenRunLogStoreOptions } from "./generic/log_store_factory.js";
+export { JOURNAL_CHANNEL, JOURNAL_TABLE, PostgresLogStore } from "./generic/postgres_log_store.js";
+export type { OpenPostgresLogStoreOptions, PostgresLogAccess } from "./generic/postgres_log_store.js";
 export {
 	forkHyperchartRun,
 	getHyperchartBranch,

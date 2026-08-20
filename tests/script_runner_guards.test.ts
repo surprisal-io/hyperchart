@@ -62,11 +62,12 @@ function scriptChart(action: ReturnType<typeof script>): ChartAst {
 	);
 }
 
-async function runScriptChart(ast: ChartAst, workDir: string) {
+async function runScriptChart(ast: ChartAst, workDir: string, projectDir?: string) {
 	const runtime = new ChartRuntime({
 		ast, branchId: "main",
 		logStore: new MemoryLogStore(),
 		agentExecutor: new FakeAgentExecutor(),
+		...(projectDir === undefined ? {} : { projectDir }),
 		workDir,
 		chartDir: workDir,
 	});
@@ -74,6 +75,19 @@ async function runScriptChart(ast: ChartAst, workDir: string) {
 }
 
 describe("ScriptRunner via ChartRuntime", () => {
+	it("exposes the owning project and isolated branch workspace as distinct environment variables", async () => {
+		const projectDir = await makeTempDir();
+		const workspace = await makeTempDir();
+		const source = [
+			`if (process.env.HYPERCHART_PROJECT_DIR !== ${JSON.stringify(projectDir)}) process.exit(2);`,
+			`if (process.env.HYPERCHART_BRANCH_WORKSPACE !== ${JSON.stringify(workspace)}) process.exit(3);`,
+			'console.log(JSON.stringify({type:"DONE"}));',
+		].join("\n");
+		const state = await runScriptChart(scriptChart(script(node, ["-e", source])), workspace, projectDir);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+	});
+
 	it("uses the last JSON stdout line as the completion event", async () => {
 		const dir = await makeTempDir();
 		const ast = scriptChart(

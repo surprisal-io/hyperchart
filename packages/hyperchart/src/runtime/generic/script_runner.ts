@@ -26,7 +26,7 @@ type LiveScript = {
 export class ScriptRunner {
 	private readonly live = new Map<string, LiveScript>();
 
-	constructor(private readonly opts: { workDir: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number }) {}
+	constructor(private readonly opts: { workDir: string; projectDir?: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number }) {}
 
 	async run(effect: ScriptEffect, validationAttempt?: { n: number; reason?: string }): Promise<ChartEvent> {
 		const key = actionUidKey(effect.actionUid);
@@ -197,6 +197,8 @@ export class ScriptRunner {
 		for (const [name, value] of Object.entries(renderedEnv ?? {})) {
 			env[name] = typeof value === "string" ? value : serializeEnvValue(await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry));
 		}
+		env.HYPERCHART_PROJECT_DIR = this.opts.projectDir ?? this.opts.workDir;
+		env.HYPERCHART_BRANCH_WORKSPACE = this.opts.workDir;
 		if (validationAttempt !== undefined) {
 			env.HYPERCHART_VALIDATION_ATTEMPT = String(validationAttempt.n);
 			if (validationAttempt.reason !== undefined) env.HYPERCHART_REJECT_REASON = validationAttempt.reason;

@@ -116,11 +116,42 @@ export class NormalizedRunLog {
 
 export interface LogStore {
 	readonly branchId: BranchId;
-	appendDrafts(drafts: readonly DurableRecordDraft[]): readonly DurableLogRecord[];
+	/** Resolves only after the mutation is durable in the backend; the in-memory snapshot is published at the same boundary. */
+	appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
 	/** Synchronous already-normalized snapshot for effect addressing in the serialized runtime. */
 	snapshot(): NormalizedRunLog;
 	read(): Promise<NormalizedRunLog>;
 	readAll(): Promise<readonly DurableLogRecord[]>;
+}
+
+/** Full run-journal handle: branch mutations plus lifecycle, shared across branch handles. */
+export interface RunLogStore extends LogStore {
+	forBranch(branchId: BranchId): RunLogStore;
+	initializeRootBranch(metadata?: BranchMetadata): Promise<BranchHead>;
+	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
+	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
+	close(): Promise<void>;
+}
+
+/** Stamp drafts with global seqIds/parent linkage for one branch of an already-normalized journal. */
+export function stampDrafts(
+	normalized: NormalizedRunLog,
+	branchId: BranchId,
+	drafts: readonly DurableRecordDraft[],
+	now: number,
+): { records: DurableLogRecord[]; mutation: RecordBatchMutation } {
+	const branch = normalized.branches.get(branchId);
+	if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
+	let nextSeqId = normalized.nextSeqId;
+	let parentId = branch.headSeqId;
+	const records = drafts.map((draft) => {
+		assertDraft(draft);
+		const record = { ...draft, seqId: nextSeqId++, parentId, branchId, timestamp: now } as DurableLogRecord;
+		parentId = record.seqId;
+		return record;
+	});
+	const tail = records.at(-1)!;
+	return { records, mutation: { kind: "record_batch", branchId, records, headSeqId: tail.seqId, committedAt: now } };
 }
 
 export function validateAndProjectJournal(values: readonly unknown[]): NormalizedRunLog {
@@ -211,7 +242,7 @@ function newJournal(filePath: string, onWarn: (message: string) => void): Shared
 	return { filePath: resolve(filePath), onWarn, fullReadCount: 0 };
 }
 
-export class JsonlLogStore implements LogStore {
+export class JsonlLogStore implements RunLogStore {
 	private journal: SharedJournalState;
 
 	constructor(
@@ -233,7 +264,7 @@ export class JsonlLogStore implements LogStore {
 	/** Number of full-file reads performed by this shared journal. */
 	fullReadCount(): number { return this.journal.fullReadCount; }
 
-	initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }): BranchHead {
+	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }): Promise<BranchHead> {
 		const normalized = this.snapshot();
 		if (normalized.mutations.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
 		const committedAt = Date.now();
@@ -242,22 +273,12 @@ export class JsonlLogStore implements LogStore {
 		return { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata };
 	}
 
-	appendDrafts(drafts: readonly DurableRecordDraft[]): readonly DurableLogRecord[] {
+	// The async signature is the LogStore contract; the body is synchronous, so the
+	// fs append still completes before the snapshot is published and before return.
+	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
-		const normalized = this.snapshot();
-		const now = Date.now();
-		const branch = normalized.branches.get(this.branchId);
-		if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${this.branchId}'`);
-		let nextSeqId = normalized.nextSeqId;
-		let parentId = branch.headSeqId;
-		const records = drafts.map((draft) => {
-			assertDraft(draft);
-			const record = { ...draft, seqId: nextSeqId++, parentId, branchId: this.branchId, timestamp: now } as DurableLogRecord;
-			parentId = record.seqId;
-			return record;
-		});
-		const tail = records.at(-1)!;
-		this.commitMutation({ kind: "record_batch", branchId: this.branchId, records, headSeqId: tail.seqId, committedAt: now });
+		const { records, mutation } = stampDrafts(this.snapshot(), this.branchId, drafts, Date.now());
+		this.commitMutation(mutation);
 		return records;
 	}
 
@@ -268,12 +289,13 @@ export class JsonlLogStore implements LogStore {
 	}
 	async read(): Promise<NormalizedRunLog> { return this.snapshot(); }
 	readSync(): NormalizedRunLog { return this.snapshot(); }
+	async close(): Promise<void> {}
 	async readAll(): Promise<readonly DurableLogRecord[]> {
 		const normalized = await this.read();
 		return normalized.mutations.length === 0 ? [] : normalized.ancestry(this.branchId);
 	}
 
-	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): BranchHead {
+	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
 		const normalized = this.snapshot();
 		if (normalized.branches.has(branchId)) throw new Error(`Hyperchart branch '${branchId}' already exists`);
@@ -283,7 +305,7 @@ export class JsonlLogStore implements LogStore {
 		return { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) };
 	}
 
-	moveBranch(branchId: BranchId, headSeqId: number | null): BranchHead {
+	async moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
 		const normalized = this.snapshot();
 		const branch = normalized.branches.get(branchId);

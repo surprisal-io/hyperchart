@@ -8,7 +8,7 @@ import { createBranchProjection, projectBranch } from "./projection.js";
 export async function start(runtime: Runtime, args?: Readonly<Record<string, unknown>>): Promise<MachineState> {
 	const existing = await runtime.loadLogs();
 	if (existing.length === 0 && args !== undefined) {
-		runtime.runEffects([
+		await runtime.runEffects([
 			{
 				kind: "durable_records",
 				id: "args",
@@ -36,11 +36,11 @@ export async function loop(runtime: Runtime): Promise<MachineState> {
 		const output = stepMachine(state, event);
 		switch (output.kind) {
 			case "effect":
-				runtime.runEffects(output.effects);
+				await runtime.runEffects(output.effects);
 				break;
 			case "final":
 				if (output.effects.length > 0) {
-					runtime.runEffects(output.effects);
+					await runtime.runEffects(output.effects);
 				}
 				return output.state;
 			case "error":

@@ -159,6 +159,7 @@ export const runningRun = inspectorDialogScenario.runtimeRun(
 			updatedAt: timestamp(8),
 		},
 		cwd: "/Users/demo/Work/pi-hyperchart",
+		branchWorkspace: "/Users/demo/.pi/hyperchart-runs/deck-director-20260707-224500/workspaces/main",
 		createdAt: STARTED_AT,
 		updatedAt: timestamp(8),
 		description: "Google I/O 2026 announcement narrative deck",

@@ -36,8 +36,12 @@ export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo;
 								<dd className="break-all font-mono">{run.runId}</dd>
 							</div>
 							<div>
-								<dt className="text-[var(--text-muted)]">cwd</dt>
-								<dd className="break-all">{run.cwd || "—"}</dd>
+								<dt className="text-[var(--text-muted)]">project / repository</dt>
+								<dd className="break-all font-mono">{run.cwd || "—"}</dd>
+							</div>
+							<div>
+								<dt className="text-[var(--text-muted)]">branch workspace (action cwd)</dt>
+								<dd className="break-all font-mono">{(run.branchWorkspace ?? run.cwd) || "—"}</dd>
 							</div>
 							<div>
 								<dt className="text-[var(--text-muted)]">created</dt>
@@ -56,6 +60,11 @@ export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo;
 								<dd>{run.detached ? "yes" : "no"}</dd>
 							</div>
 						</dl>
+						{run.branchWorkspace !== undefined && run.cwd !== "" && run.branchWorkspace !== run.cwd && (
+							<div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-[var(--hc-amber-text)]">
+								Actions run in the isolated branch workspace, not in the project repository. Project files are not copied there unless they were materialized as Hyperchart artifacts.
+							</div>
+						)}
 						{run.totalUsage && (
 							<div className="rounded-lg bg-[var(--bg-tertiary)] p-2 text-[11px]">
 								usage: {formatHyperchartUsage(run.totalUsage) ?? JSON.stringify(run.totalUsage)}

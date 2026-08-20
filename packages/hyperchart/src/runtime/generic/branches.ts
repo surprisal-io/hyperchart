@@ -2,7 +2,8 @@ import { basename, resolve } from "node:path";
 import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_events.js";
 import { loadRunMeta } from "./run_dir.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
-import { JsonlLogStore, type NormalizedRunLog } from "./log_store.js";
+import type { NormalizedRunLog } from "./log_store.js";
+import { openRunLogStore } from "./log_store_factory.js";
 
 export type ForkBranchOptions = Readonly<{
 	runDir: string;
@@ -24,35 +25,50 @@ export type ForkBranchResult = Readonly<{
 }>;
 
 export async function listHyperchartBranches(runDir: string): Promise<readonly BranchHead[]> {
-	const normalized = await new JsonlLogStore(resolve(runDir, "log.jsonl")).read();
-	return [...normalized.branches.values()].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
+	const store = await openRunLogStore(runDir);
+	try {
+		const normalized = await store.read();
+		return [...normalized.branches.values()].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
+	} finally {
+		await store.close();
+	}
 }
 
 export async function getHyperchartBranch(runDir: string, branchId: BranchId): Promise<BranchHead> {
-	const normalized = await new JsonlLogStore(resolve(runDir, "log.jsonl")).read();
-	return normalized.branch(branchId);
+	const store = await openRunLogStore(runDir);
+	try {
+		const normalized = await store.read();
+		return normalized.branch(branchId);
+	} finally {
+		await store.close();
+	}
 }
 
 /** Create a durable named pointer without selecting it and without starting a runner. */
 export async function forkHyperchartRun(options: ForkBranchOptions): Promise<ForkBranchResult> {
 	assertStoppedRun(options.runDir, "forking");
 	assertRunOwnership(options.runDir, options.cwd);
-	const store = new JsonlLogStore(resolve(options.runDir, "log.jsonl"));
-	const normalized = await store.read();
-	if (!normalized.recordsBySeqId.has(options.fromSeqId)) {
-		throw new Error(`No durable log record with seqId ${options.fromSeqId}`);
+	const store = await openRunLogStore(options.runDir, { access: "writer" });
+	let branch: BranchHead;
+	try {
+		const normalized = await store.read();
+		if (!normalized.recordsBySeqId.has(options.fromSeqId)) {
+			throw new Error(`No durable log record with seqId ${options.fromSeqId}`);
+		}
+		if (normalized.branches.has(options.branchId)) {
+			throw new Error(`Hyperchart branch '${options.branchId}' already exists`);
+		}
+		if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
+		const metadata: BranchMetadata = {
+			name: options.branchId,
+			...(options.reason === undefined ? {} : { reason: options.reason }),
+			...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
+			sourceSeqId: options.fromSeqId,
+		};
+		branch = await store.createBranch(options.branchId, options.fromSeqId, metadata);
+	} finally {
+		await store.close();
 	}
-	if (normalized.branches.has(options.branchId)) {
-		throw new Error(`Hyperchart branch '${options.branchId}' already exists`);
-	}
-	if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
-	const metadata: BranchMetadata = {
-		name: options.branchId,
-		...(options.reason === undefined ? {} : { reason: options.reason }),
-		...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
-		sourceSeqId: options.fromSeqId,
-	};
-	const branch = store.createBranch(options.branchId, options.fromSeqId, metadata);
 	return {
 		runId: basename(options.runDir),
 		runDir: options.runDir,

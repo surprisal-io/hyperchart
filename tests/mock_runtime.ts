@@ -26,7 +26,7 @@ export class MockRuntime implements Runtime {
 		this.onRunEffects = options.onRunEffects;
 	}
 
-	runEffects(effects: Effect[]): void {
+	async runEffects(effects: Effect[]): Promise<void> {
 		this.calls.push("runEffects");
 		this.effectBatches.push(effects);
 		// A real runtime persists appended records; the mock does too, so records seeded before
