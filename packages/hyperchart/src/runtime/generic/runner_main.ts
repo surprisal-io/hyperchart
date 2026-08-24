@@ -13,6 +13,10 @@ import { ArtifactStore } from "./artifact_store.js";
 import { materializeWorkspace } from "./artifact_workspace.js";
 import type { RunLogStore, UserInteractionResponseCommit } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
+import {
+	supportsSqlTransactions,
+	type SqlCommitParticipant,
+} from "./postgres_log_store.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine, type RunTerminalState } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
 import {
@@ -80,13 +84,29 @@ export type RunnerForkOptions = Readonly<{
 	reason?: string;
 }>;
 
+export type RunnerCommitUserInteractionOptions = Readonly<{
+	branchId: BranchId;
+	gateSeqId: number;
+	event: ChartEvent;
+}>;
+
+export type RunnerForkAndCommitUserInteractionOptions = RunnerForkOptions & Readonly<{
+	responseBranchId: BranchId;
+	gateSeqId: number;
+	event: ChartEvent;
+}>;
+
 export interface RunnerHold {
 	/** Idempotently release this hold. If no branches remain, aggregate termination begins. */
 	release(): void;
 }
 
 export interface HyperchartRunnerController {
+	/** Every durable branch in the controller's already-loaded journal snapshot. */
+	readonly durableBranchIds: readonly BranchId[];
 	readonly liveBranchIds: readonly BranchId[];
+	/** Live branches currently executing/setup, excluding journal-native open user gates. */
+	readonly activeBranchIds: readonly BranchId[];
 	/** Launch the reserved initial branches and resolve at aggregate termination. */
 	start(): Promise<void>;
 	/** Stop every live branch and close the controller without terminating the host process. */
@@ -97,6 +117,10 @@ export interface HyperchartRunnerController {
 	forkBranch(options: RunnerForkOptions): Promise<BranchHead>;
 	/** Commit one response through this runtime's sole journal writer. */
 	respondToUserInteraction(branchId: BranchId, gateSeqId: number, event: ChartEvent): Promise<UserInteractionResponseCommit>;
+	/** Atomically commit one response and trusted application SQL. PostgreSQL only. */
+	commitUserInteraction<T>(options: RunnerCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }>;
+	/** Atomically fork, commit the selected response, and run trusted application SQL. PostgreSQL only. */
+	forkAndCommitUserInteraction<T>(options: RunnerForkAndCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }>;
 	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. */
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
 }
@@ -204,7 +228,16 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		process.on("SIGINT", this.onSigint);
 	}
 
+	get durableBranchIds(): readonly BranchId[] { return [...this.rootStore.snapshot().branches.keys()]; }
 	get liveBranchIds(): readonly BranchId[] { return [...this.live.keys()]; }
+	get activeBranchIds(): readonly BranchId[] {
+		const normalized = this.rootStore.snapshot();
+		return [...this.live.keys()].filter((branchId) => {
+			const headSeqId = normalized.branch(branchId).headSeqId;
+			const head = headSeqId === null ? undefined : normalized.recordsBySeqId.get(headSeqId);
+			return head?.type !== "user_interaction" || head.kind !== "opened";
+		});
+	}
 
 	start(): Promise<void> {
 		if (!this.started) {
@@ -233,13 +266,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		assertRunnerBranchId(options.branchId);
 		const normalized = this.rootStore.snapshot();
 		if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
-		const metadata: BranchMetadata = {
-			name: options.branchId,
-			...(options.reason === undefined ? {} : { reason: options.reason }),
-			...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
-			sourceSeqId: options.fromSeqId,
-		};
-		return this.rootStore.createBranch(options.branchId, options.fromSeqId, metadata);
+		return this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options));
 	}
 
 	async respondToUserInteraction(branchId: BranchId, gateSeqId: number, event: ChartEvent): Promise<UserInteractionResponseCommit> {
@@ -252,13 +279,49 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			event,
 			schemaRegistry: this.schemaRegistry,
 		});
-		if (!committed.idempotent) {
-			this.live.get(branchId)?.runtime?.acknowledgeCommittedRecords(
-				[committed.record],
-				`control:user-response:${gateSeqId}:${committed.record.seqId}`,
-			);
-		}
+		this.acknowledgeUserInteraction(branchId, gateSeqId, committed, "control:user-response");
 		return committed;
+	}
+
+	async commitUserInteraction<T>(options: RunnerCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }> {
+		this.assertAccepting("atomically commit a user interaction");
+		if (!supportsSqlTransactions(this.rootStore)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
+		this.rootStore.snapshot().branch(options.branchId);
+		const committed = await this.rootStore.commitUserInteraction(
+			options.branchId,
+			{ ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
+			participate,
+		);
+		this.acknowledgeUserInteraction(options.branchId, options.gateSeqId, committed.response, "control:atomic-user-response");
+		return committed;
+	}
+
+	async forkAndCommitUserInteraction<T>(options: RunnerForkAndCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }> {
+		this.assertAccepting("atomically fork and commit a user interaction");
+		assertRunnerBranchId(options.branchId);
+		assertRunnerBranchId(options.responseBranchId);
+		if (!supportsSqlTransactions(this.rootStore)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
+		const committed = await this.rootStore.forkAndCommitUserInteraction(
+			{
+				sourceBranchId: options.sourceBranchId ?? this.rootStore.branchId,
+				newBranchId: options.branchId,
+				fromSeqId: options.fromSeqId,
+				responseBranchId: options.responseBranchId,
+				metadata: forkMetadata(options),
+				response: { ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
+			},
+			participate,
+		);
+		this.acknowledgeUserInteraction(options.responseBranchId, options.gateSeqId, committed.response, "control:atomic-fork-response");
+		return committed;
+	}
+
+	private acknowledgeUserInteraction(branchId: BranchId, gateSeqId: number, committed: UserInteractionResponseCommit, source: string): void {
+		if (committed.idempotent) return;
+		this.live.get(branchId)?.runtime?.acknowledgeCommittedRecords(
+			[committed.record],
+			`${source}:${gateSeqId}:${committed.record.seqId}`,
+		);
 	}
 
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {
@@ -622,6 +685,14 @@ export async function runHyperchartRunner(config: HyperchartRunnerConfig, buildE
 function commonRunnerConfig(config: HyperchartRunnerConfig): RunnerCommonConfig {
 	const { branchId: _branchId, branchIds: _branchIds, ...common } = config;
 	return common;
+}
+function forkMetadata(options: RunnerForkOptions): BranchMetadata {
+	return {
+		name: options.branchId,
+		...(options.reason === undefined ? {} : { reason: options.reason }),
+		...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
+		sourceSeqId: options.fromSeqId,
+	};
 }
 function deferred<T>(): Deferred<T> {
 	let resolve!: (value: T) => void;

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { BranchHead, BranchId, BranchMetadata, DurableLogRecord, DurableRecordDraft, StorageMutation } from "../../core/durable_events.js";
 import { DEFAULT_BRANCH_ID, type NormalizedRunLog, type RunLogStore, stampDrafts, validateAndProjectJournal, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./log_store.js";
 import { prepareUserInteractionResponse } from "./user_interaction_admission.js";
@@ -32,15 +33,20 @@ type SharedPgJournal = {
 	closed: boolean;
 };
 
-export type PostgresRunTransaction = Readonly<{
+export type SqlCommitTransaction = Readonly<{
 	query(text: string, values?: readonly unknown[]): Promise<PgQueryResult>;
+}>;
+
+export type SqlCommitParticipant<T> = (tx: SqlCommitTransaction) => Promise<T>;
+
+export type PostgresRunTransaction = SqlCommitTransaction & Readonly<{
 	appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
 	respondToUserInteraction(branchId: BranchId, input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit>;
 }>;
 
-export type PostgresForkAndRespondInput = Readonly<{
+export type PostgresForkAndCommitInput = Readonly<{
 	sourceBranchId: BranchId;
 	newBranchId: BranchId;
 	fromSeqId: number;
@@ -48,6 +54,11 @@ export type PostgresForkAndRespondInput = Readonly<{
 	metadata?: BranchMetadata;
 	response: RespondToUserInteractionInput;
 }>;
+
+export interface SqlTransactionalRunLogStore extends RunLogStore {
+	commitUserInteraction<T>(branchId: BranchId, response: RespondToUserInteractionInput, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }>;
+	forkAndCommitUserInteraction<T>(input: PostgresForkAndCommitInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }>;
+}
 
 export class PostgresLogStore implements RunLogStore {
 	private constructor(private readonly journal: SharedPgJournal, readonly branchId: BranchId) {}
@@ -104,18 +115,27 @@ export class PostgresLogStore implements RunLogStore {
 		});
 	}
 
-	/** Forks from the pre-response head, then resolves the explicitly selected branch. */
-	forkAndRespond<T = void>(input: PostgresForkAndRespondInput, domain?: (tx: PostgresRunTransaction) => Promise<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; domain: T | undefined }> {
+	commitUserInteraction<T>(branchId: BranchId, response: RespondToUserInteractionInput, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }> {
+		return this.transaction(async (tx) => ({
+			response: await tx.respondToUserInteraction(branchId, response),
+			participant: await participate(restrictTransaction(tx)),
+		}));
+	}
+
+	/** Atomically creates or verifies a fork, commits its response, and joins trusted SQL. */
+	forkAndCommitUserInteraction<T>(input: PostgresForkAndCommitInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }> {
 		if (input.responseBranchId !== input.sourceBranchId && input.responseBranchId !== input.newBranchId) {
 			return Promise.reject(new Error("responseBranchId must be the source branch or the newly created branch"));
 		}
 		return this.transaction(async (tx) => {
-			const source = (tx as TransactionImpl).snapshot.branch(input.sourceBranchId);
-			if (source.headSeqId !== input.fromSeqId) throw new Error(`Source branch '${input.sourceBranchId}' moved from expected pre-response head ${input.fromSeqId}`);
-			const branch = await tx.createBranch(input.newBranchId, input.fromSeqId, input.metadata);
+			const impl = tx as TransactionImpl;
+			const sourceContainsForkPoint = impl.snapshot.ancestry(input.sourceBranchId)
+				.some((record) => record.seqId === input.fromSeqId);
+			if (!sourceContainsForkPoint) throw new Error(`Fork point ${input.fromSeqId} is not in source branch '${input.sourceBranchId}' ancestry`);
+			const branch = await impl.ensureExactBranch(input.newBranchId, input.fromSeqId, input.metadata);
 			const response = await tx.respondToUserInteraction(input.responseBranchId, input.response);
-			const domainResult = domain === undefined ? undefined : await domain(tx);
-			return { branch, response, domain: domainResult };
+			const participant = await participate(restrictTransaction(tx));
+			return { branch, response, participant };
 		});
 	}
 
@@ -143,6 +163,15 @@ class TransactionImpl implements PostgresRunTransaction {
 		if (!this.snapshot.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
 		const committedAt = Date.now(); await this.commitMutation({ kind: "branch", op: "create", branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt });
 		return { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) };
+	}
+	async ensureExactBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
+		const existing = this.snapshot.branches.get(branchId);
+		if (existing === undefined) return this.createBranch(branchId, headSeqId, metadata);
+		const ancestryContainsSource = existing.headSeqId === headSeqId || this.snapshot.ancestry(branchId).some((record) => record.seqId === headSeqId);
+		if (!ancestryContainsSource || !isDeepStrictEqual(existing.metadata, metadata)) {
+			throw new Error(`Conflicting retry for Hyperchart branch '${branchId}'`);
+		}
+		return existing;
 	}
 	async moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> {
 		const branch = this.snapshot.branches.get(branchId); if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
@@ -172,7 +201,20 @@ async function readJournalMutations(client: PgClientLike, runId: string, access:
 	try { const result = await client.query(`SELECT mutation FROM ${JOURNAL_TABLE} WHERE run_id = $1 ORDER BY seq`, [runId]); return result.rows.map((row) => row.mutation); }
 	catch (error) { if (access === "read" && isUndefinedTable(error)) return []; throw error; }
 }
-function normalizeUnique(error: unknown, runId: string): unknown { return pgErrorCode(error) === "23505" ? new Error(`Stale Hyperchart journal writer for run '${runId}'; retry the serialized transaction`) : error; }
+function restrictTransaction(tx: PostgresRunTransaction): SqlCommitTransaction {
+	return { query: (text, values) => tx.query(text, values) };
+}
+
+export function supportsSqlTransactions(store: RunLogStore): store is SqlTransactionalRunLogStore {
+	return store instanceof PostgresLogStore;
+}
+
+function normalizeUnique(error: unknown, runId: string): unknown {
+	return pgErrorCode(error) === "23505" && pgErrorConstraint(error) === "hyperchart_journal_pkey"
+		? new Error(`Stale Hyperchart journal writer for run '${runId}'; retry the serialized transaction`)
+		: error;
+}
 function pgErrorCode(error: unknown): string | undefined { return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined; }
+function pgErrorConstraint(error: unknown): string | undefined { return typeof error === "object" && error !== null && "constraint" in error && typeof error.constraint === "string" ? error.constraint : undefined; }
 function isUndefinedTable(error: unknown): boolean { return pgErrorCode(error) === "42P01"; }
 function isDuplicateObject(error: unknown): boolean { const code = pgErrorCode(error); return code === "42P07" || code === "23505"; }

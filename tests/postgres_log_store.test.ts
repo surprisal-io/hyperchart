@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import type { DurableRecordDraft } from "../packages/hyperchart/src/index.js";
+import { normalizeChartConfig, type ChartAst, type ChartCst, type DurableRecordDraft } from "../packages/hyperchart/src/index.js";
+import { chart, final, user } from "../packages/hyperchart/src/core/dsl.js";
 import { CorruptRunLogError } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import {
 	JOURNAL_CHANNEL,
@@ -41,6 +42,49 @@ function invokeDraft(): DurableRecordDraft {
 	return { type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" } };
 }
 
+function userAst(): ChartAst {
+	const config: ChartCst = chart({
+		kind: "chart",
+		id: "postgres-user",
+		initial: "ask",
+		states: {
+			ask: { kind: "state", action: user({ prompt: "Select", options: ["SELECTED"] }), transitions: { SELECTED: "done" } },
+			done: final(),
+		},
+	});
+	const result = normalizeChartConfig(config);
+	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	return result.ast;
+}
+
+async function appendOpenGate(store: PostgresLogStore, ast: ChartAst): Promise<number> {
+	const state = ast.states.ask;
+	if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("invalid user chart fixture");
+	await store.appendDrafts([{ type: "args", args: {} }]);
+	const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+	const [opened] = await store.appendDrafts([{
+		type: "user_interaction",
+		kind: "opened",
+		actionUid: state.action.uid,
+		phaseSeqId: invoke!.seqId,
+		prompt: "Select",
+		options: ["SELECTED"],
+		events: ["SELECTED"],
+	}]);
+	return opened!.seqId;
+}
+
+async function ensureClaimTable(store: PostgresLogStore): Promise<void> {
+	await store.transaction(async (tx) => {
+		await tx.query(`CREATE TABLE IF NOT EXISTS hyperchart_test_claims (
+		  run_id text NOT NULL,
+		  candidate integer NOT NULL,
+		  branch_id text NOT NULL,
+		  PRIMARY KEY (run_id, candidate)
+		)`);
+	});
+}
+
 afterEach(async () => {
 	await Promise.all(openStores.splice(0).map((store) => store.close().catch(() => {})));
 });
@@ -51,6 +95,7 @@ afterAll(async () => {
 	const client = new Client({ connectionString: dsn });
 	await client.connect();
 	await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
+	await client.query("DELETE FROM hyperchart_test_claims WHERE run_id = ANY($1)", [usedRunIds]).catch(() => {});
 	await client.end();
 });
 
@@ -133,13 +178,146 @@ describePg("PostgresLogStore", () => {
 		expect((await store.read()).records).toHaveLength(0);
 	});
 
+	it("atomically commits a fork, response, and participating SQL", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		await ensureClaimTable(store);
+		const ast = userAst();
+		const gateSeqId = await appendOpenGate(store, ast);
+
+		const committed = await store.forkAndCommitUserInteraction({
+			sourceBranchId: "main",
+			newBranchId: "experiment",
+			fromSeqId: gateSeqId,
+			responseBranchId: "experiment",
+			metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: gateSeqId },
+			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+		}, async (tx) => {
+			await tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 1, "experiment"]);
+			return "claimed";
+		});
+
+		expect(committed.participant).toBe("claimed");
+		expect(committed.response.idempotent).toBe(false);
+		expect(store.snapshot().branch("experiment").headSeqId).toBe(committed.response.record.seqId);
+		expect(store.snapshot().ancestry("experiment").at(-1)).toEqual(committed.response.record);
+		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 1", [runId]));
+		expect(claims.rows).toEqual([{ branch_id: "experiment" }]);
+
+		const retried = await store.forkAndCommitUserInteraction({
+			sourceBranchId: "main",
+			newBranchId: "experiment",
+			fromSeqId: gateSeqId,
+			responseBranchId: "experiment",
+			metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: gateSeqId },
+			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+		}, async (tx) => {
+			await tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [runId, 1, "experiment"]);
+			return "existing";
+		});
+		expect(retried.response.idempotent).toBe(true);
+		expect(retried.branch.branchId).toBe("experiment");
+	});
+
+	it("forks atomically from a historical gate after the source branch advances", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		await ensureClaimTable(store);
+		const ast = userAst();
+		const gateSeqId = await appendOpenGate(store, ast);
+		await store.respondToUserInteraction({ ast, gateSeqId, event: { type: "SELECTED" } });
+		expect(store.snapshot().branch("main").headSeqId).not.toBe(gateSeqId);
+
+		const committed = await store.forkAndCommitUserInteraction({
+			sourceBranchId: "main",
+			newBranchId: "historical-fork",
+			fromSeqId: gateSeqId,
+			responseBranchId: "historical-fork",
+			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+		}, (tx) => tx.query(
+			"INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)",
+			[runId, 9, "historical-fork"],
+		));
+
+		expect(committed.branch.branchId).toBe("historical-fork");
+		expect(store.snapshot().ancestry("historical-fork").at(-1)).toEqual(committed.response.record);
+	});
+
+	it("rejects a fork point outside the selected source ancestry", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		const ast = userAst();
+		const gateSeqId = await appendOpenGate(store, ast);
+		await expect(store.forkAndCommitUserInteraction({
+			sourceBranchId: "main",
+			newBranchId: "invalid-fork",
+			fromSeqId: gateSeqId + 1000,
+			responseBranchId: "invalid-fork",
+			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+		}, async () => undefined)).rejects.toThrow(/not in source branch 'main' ancestry/);
+	});
+
+	it("rolls back fork and response when participating SQL fails", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		await ensureClaimTable(store);
+		const ast = userAst();
+		const gateSeqId = await appendOpenGate(store, ast);
+		const before = store.snapshot().mutations.length;
+
+		await expect(store.forkAndCommitUserInteraction({
+			sourceBranchId: "main",
+			newBranchId: "rolled-back",
+			fromSeqId: gateSeqId,
+			responseBranchId: "rolled-back",
+			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+		}, async (tx) => {
+			await tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 2, "rolled-back"]);
+			throw new Error("participant failed");
+		})).rejects.toThrow("participant failed");
+
+		expect(store.snapshot().branches.has("rolled-back")).toBe(false);
+		expect(store.snapshot().mutations).toHaveLength(before);
+		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 2", [runId]));
+		expect(claims.rows).toEqual([]);
+	});
+
+	it("preserves host uniqueness errors and rolls back their fork", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		await ensureClaimTable(store);
+		const ast = userAst();
+		const gateSeqId = await appendOpenGate(store, ast);
+		await store.transaction((tx) => tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 3, "winner"]));
+
+		let failure: unknown;
+		try {
+			await store.forkAndCommitUserInteraction({
+				sourceBranchId: "main",
+				newBranchId: "loser",
+				fromSeqId: gateSeqId,
+				responseBranchId: "loser",
+				response: { ast, gateSeqId, event: { type: "SELECTED" } },
+			}, (tx) => tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 3, "loser"]));
+		} catch (error) {
+			failure = error;
+		}
+		expect(failure).toMatchObject({ code: "23505", constraint: "hyperchart_test_claims_pkey" });
+		expect(String(failure)).not.toContain("Stale Hyperchart journal writer");
+		expect(store.snapshot().branches.has("loser")).toBe(false);
+	});
+
 	it("rejects a composite response branch unrelated to source or new fork", async () => {
 		const store = await openWriter(newRunId());
 		await store.initializeRootBranch();
-		await expect(store.forkAndRespond({
+		await expect(store.forkAndCommitUserInteraction({
 			sourceBranchId: "main", newBranchId: "experiment", fromSeqId: 1, responseBranchId: "unrelated",
 			response: { ast: {} as never, gateSeqId: 1, event: { type: "OK" } },
-		})).rejects.toThrow(/source branch or the newly created branch/);
+		}, async () => undefined)).rejects.toThrow(/source branch or the newly created branch/);
 	});
 
 	it("rejects writes through a read-only handle", async () => {
