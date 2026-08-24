@@ -259,7 +259,7 @@ A user boundary has `boundary: "user"`, `final: false`, `interaction: { version,
 
 A terminal result text is a compact boundary notice directing the operator to `view`; it never copies the durable terminal prompt or inspector snapshot. Pi recovery checks persisted `hyperchart-terminal` custom messages by request id before re-sending the same compact notice.
 
-For a background gate, Pi scans only requests owned by the exact session and canonical cwd. While the agent is busy, it sends a hidden `hyperchart-yield` steering message and lets the current safe action/tool batch finish. On idle or `agent_settled`, it rechecks the shared arbiter and displays the active request once without `triggerTurn`. State is `pending → yielding → awaiting-user → answered/closed`; reload/session-start recovery reconstructs it from mailbox receipts. Simultaneous requests remain queued in lexical `runId`, then numeric `seqId` order.
+For a background gate, Pi scans only requests owned by the exact session and canonical cwd. While the agent is busy, it sends a hidden `hyperchart-yield` steering message and lets the current safe action/tool batch finish. On idle or `agent_settled`, it rechecks the shared arbiter and displays the active request once without `triggerTurn`. State is `pending → yielding → awaiting-user → answered/closed`; reload/session-start recovery reconstructs semantic openness from journal ancestry and presentation state from receipts. Simultaneous requests remain queued in lexical `runId`, then numeric `seqId` order.
 
 Start example:
 
@@ -308,7 +308,7 @@ Pass one of `runDir` or `runId`. `branchId` may be omitted only when the run has
 }
 ```
 
-Use this tool before resume, replay override, rewind, or recovery after a crash. Open user requests remain visible through persisted run state/mailbox inspection even when no interactive session can present them.
+Use this tool before resume, replay override, rewind, or recovery after a crash. Open user requests remain visible through journal inspection even when no interactive session can present them; stopped runs may be answered through the same high-level response API.
 
 ### `action: "respond"`
 
@@ -327,7 +327,7 @@ Commits the real user's answer to the exact active gate:
 
 Pi never commits a response automatically. After a visible gate, hidden context tells the model to call `respond` only when the current user prompt actually answers that gate. An unrelated request proceeds normally and leaves the gate open. When the prompt does answer, the model translates it into one allowed event and optional output and calls `respond` with the exact three-part coordinate; it must not answer the gate itself or infer consent.
 
-The host requires the exact originating Pi session and canonical working directory, the exact globally active `(runId, branchId, seqId)`, a non-`FAILED` allowed event, and schema-valid output when declared. A byte-for-byte equivalent semantic retry is idempotent; a different answer for the same phase conflicts. Closed, stale, queued, foreign-session, and foreign-cwd coordinates are rejected.
+The host requires the exact originating Pi session and canonical working directory, the exact globally active `(runId, branchId, seqId)`, a non-`FAILED` allowed event, and schema-valid output when declared. For a live run it sends a typed attempt-fenced command to the owning detached runtime, which performs the sole journal write and acknowledges the commit; only a stopped run opens the writer temporarily. A byte-for-byte equivalent semantic retry is idempotent; a different answer for the same phase conflicts. Closed, stale, queued, foreign-session, and foreign-cwd coordinates are rejected.
 
 ```json
 {

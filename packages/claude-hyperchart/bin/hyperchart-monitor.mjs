@@ -11,17 +11,22 @@ const options = {
 };
 const intervalMs = positiveInteger(process.env.HYPERCHART_MONITOR_INTERVAL_MS) ?? 1_000;
 
-function scan() {
+let scanning = false;
+async function scan() {
+	if (scanning) return;
+	scanning = true;
 	try {
-		emitPendingClaudeNotifications(options);
+		await emitPendingClaudeNotifications(options);
 	} catch (error) {
 		// stdout is reserved for one-line Claude monitor notifications.
 		process.stderr.write(`[hyperchart-monitor] ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+	} finally {
+		scanning = false;
 	}
 }
 
-scan();
-setInterval(scan, intervalMs);
+void scan();
+setInterval(() => void scan(), intervalMs);
 
 function positiveInteger(value) {
 	if (value === undefined) return undefined;

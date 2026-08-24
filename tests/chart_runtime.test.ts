@@ -9,12 +9,6 @@ import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_r
 import { ArtifactStore } from "../packages/hyperchart/src/runtime/generic/artifact_store.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
-import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
-import {
-	readUserInteractionRequest,
-	validateAndPersistUserInteractionResponse,
-} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
-import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];
@@ -166,7 +160,7 @@ describe("ChartRuntime", () => {
 		if (state?.kind !== "state" || state.action.kind !== "agent") throw new Error("expected agent state");
 		const pin = { hash: "a".repeat(64), size: 6 };
 		const store = new MemoryLogStore();
-		store.appendDrafts([{
+		await store.appendDrafts([{
 			type: "state_action",
 			kind: "complete",
 			actionUid: state.action.uid,
@@ -227,25 +221,16 @@ describe("ChartRuntime", () => {
 				throw new Error("agent cleanup failed");
 			},
 		};
-		const userExecutor = {
-			start: () => undefined,
-			reject: () => undefined,
-			cancel: async () => undefined,
-			dispose: async () => {
-				calls.push("user");
-			},
-		};
 		const runtime = new ChartRuntime({
 			ast: linearChart(), branchId: "main", logStore: new MemoryLogStore(),
-			agentExecutor, userExecutor, workDir: process.cwd(), chartDir: process.cwd(),
+			agentExecutor, workDir: process.cwd(), chartDir: process.cwd(),
 		});
 
 		const first = runtime.dispose();
 		const second = runtime.dispose();
 		expect(second).toBe(first);
 		await expect(first).rejects.toThrow(/agent cleanup failed/);
-		expect(calls).toEqual(expect.arrayContaining(["agent", "user"]));
-		expect(calls).toHaveLength(2);
+		expect(calls).toEqual(["agent"]);
 	});
 
 	it("runs a linear agent chart through the real execution loop", async () => {
@@ -286,50 +271,41 @@ describe("ChartRuntime", () => {
 		expect(executor.starts.map((effect) => effect.actionUid.state).sort()).toEqual(["fanout#0.work", "fanout#1.work"]);
 	});
 
-	it("preserves a pending user gate on dispose and consumes its response after restart", async () => {
+	it("preserves a journal gate on dispose and consumes its resolved fact after restart", async () => {
 		const ast = userChart();
 		const root = await makeTempDir();
-		const runDir = join(root, "run");
-		await mkdir(runDir);
-		patchRunStatus(runDir, { runId: "run",branchIds: ["main"], chartId: ast.id, state: "running", pid: process.pid, heartbeatAt: Date.now() });
-		const logStore = new JsonlLogStore(join(runDir, "log.jsonl"));
-		logStore.initializeRootBranch();
-		const firstUserExecutor = new FileUserExecutor({ runId: "run", runDir, branchId: "main", pollMs: 5 });
-		const firstRuntime = new ChartRuntime({
-			ast, branchId: "main",
-			logStore,
-			agentExecutor: new FakeAgentExecutor(),
-			userExecutor: firstUserExecutor,
-			workDir: root,
-			chartDir: root,
-		});
+		const logStore = new JsonlLogStore(join(root, "log.jsonl"));
+		await logStore.initializeRootBranch();
+		const firstRuntime = new ChartRuntime({ ast, branchId: "main", logStore, agentExecutor: new FakeAgentExecutor(), workDir: root, chartDir: root });
 		const firstRun = start(firstRuntime).catch(() => undefined);
-		await waitUntil(() => readUserInteractionRequest(runDir, "main", 1) !== undefined);
-
-		await firstRuntime.dispose();
-		await firstRun;
-		expect(readUserInteractionRequest(runDir, "main", 1)).toBeDefined();
-		await validateAndPersistUserInteractionResponse({
-			runDir,
-			runId: "run",
-			branchId: "main",			seqId: 1,
-			event: { type: "APPROVED" },
-		});
-
-		const secondRuntime = new ChartRuntime({
-			ast, branchId: "main",
-			logStore,
-			agentExecutor: new FakeAgentExecutor(),
-			userExecutor: new FileUserExecutor({ runId: "run", runDir, branchId: "main", pollMs: 5 }),
-			workDir: root,
-			chartDir: root,
-		});
-		const state = await withTimeout(start(secondRuntime));
-		await secondRuntime.dispose();
-
+		await waitUntil(() => logStore.snapshot().ancestry("main").some((record) => record.type === "user_interaction" && record.kind === "opened"));
+		const opened = logStore.snapshot().ancestry("main").find((record) => record.type === "user_interaction" && record.kind === "opened");
+		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
+		await firstRuntime.dispose(); await firstRun;
+		await logStore.respondToUserInteraction({ ast, gateSeqId: opened.seqId, event: { type: "APPROVED" } });
+		const secondRuntime = new ChartRuntime({ ast, branchId: "main", logStore, agentExecutor: new FakeAgentExecutor(), workDir: root, chartDir: root });
+		const state = await withTimeout(start(secondRuntime)); await secondRuntime.dispose();
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(invokeRecords(await logStore.readAll())).toHaveLength(1);
-		expect((await logStore.readAll()).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(1);
+		expect((await logStore.readAll()).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);
+		expect((await logStore.readAll()).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(0);
+	});
+
+	it("applies a control-API response committed by its own writer exactly once", async () => {
+		const ast = userChart();
+		const root = await makeTempDir();
+		const runtimeStore = new JsonlLogStore(join(root, "log.jsonl"));
+		await runtimeStore.initializeRootBranch();
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: runtimeStore, agentExecutor: new FakeAgentExecutor(), workDir: root, chartDir: root });
+		const running = start(runtime);
+		await waitUntil(() => runtimeStore.snapshot().ancestry("main").some((record) => record.type === "user_interaction" && record.kind === "opened"));
+		const opened = runtimeStore.snapshot().ancestry("main").find((record) => record.type === "user_interaction" && record.kind === "opened");
+		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
+		const committed = await runtimeStore.respondToUserInteraction({ ast, gateSeqId: opened.seqId, event: { type: "APPROVED" } });
+		runtime.acknowledgeCommittedRecords([committed.record], `test-control:${committed.record.seqId}`);
+		const state = await withTimeout(running); await runtime.dispose();
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect((await runtimeStore.readAll()).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);
 	});
 
 	it("fires timers and cancels the timed-out action", async () => {

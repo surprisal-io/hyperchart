@@ -17,8 +17,6 @@ import {
 	loadHostSettings,
 	loadRunMeta,
 	readDeliverableTerminalNotificationRequest,
-	readUserInteractionClose,
-	readUserInteractionResponse,
 	rewindHyperchartRun,
 	saveRunMeta,
 	validateAndPersistUserInteractionResponse,
@@ -324,32 +322,12 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					if (meta.originSessionId !== owner.sessionId) return fail(`Run '${runId}' is not owned by this session`);
 					if (canonicalPath(meta.workDir) !== canonicalPath(cwd)) return fail(`Run '${runId}' belongs to another working directory`);
 
-					// Identical retries are mailbox operations and remain valid even if the chart
-					// source was subsequently moved or made unparsable. The shared helper still
-					// enforces exact owner/cwd before its idempotent return.
-					const hasResolution = readUserInteractionResponse(runDir, branchId, seqId) !== undefined ||
-						readUserInteractionClose(runDir, branchId, seqId) !== undefined;
-					if (hasResolution) {
-						const committed = await validateAndPersistUserInteractionResponse({ runDir, runId, branchId, seqId, event, owner });
-						return ok({ runId, seqId, event: event.type, committed: true, idempotent: committed.idempotent });
-					}
-					const active = acquireActiveUserInteraction(owner);
-					if (active === undefined || active.request.runId !== runId || active.request.seqId !== seqId) {
-						return fail(`User interaction (${runId}, ${seqId}) is not the active gate`);
-					}
-
-					const parsed = parseChartModuleSync(
-						meta.chartPath,
-						meta.exportName === undefined ? {} : { exportName: meta.exportName },
-					);
-					if (!parsed.ok) return fail(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 					const committed = await validateAndPersistUserInteractionResponse({
 						runDir,
 						runId,
 						branchId,
 						seqId,
 						event,
-						schemaRegistry: parsed.schemaRegistry,
 						owner,
 					});
 					return ok({ runId, seqId, event: event.type, committed: true, idempotent: committed.idempotent });
@@ -380,7 +358,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				});
 				return ok({
 					...summarizeRunInspect(run),
-					userInteractions: boundedUserInteractions(ownedClaudeUserInteractionSummary({
+					userInteractions: boundedUserInteractions(await ownedClaudeUserInteractionSummary({
 						runsRoot: runsRoot(),
 						cwd,
 						...(deps.sessionId === undefined ? {} : { sessionId: deps.sessionId }),
@@ -583,9 +561,12 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 			clearInterval(timer);
 			resolveBoundary(boundary);
 		};
-		const inspectInteraction = () => {
+		let inspecting = false;
+		const inspectInteraction = async () => {
+			if (inspecting || settled) return;
+			inspecting = true;
 			try {
-				const active = acquireActiveUserInteraction(owner);
+				const active = await acquireActiveUserInteraction(owner);
 				if (active === undefined) return;
 				if (active.presentation === "pending") {
 					// Pin only. The MCP tool result has not yet been delivered, so confirmation
@@ -595,14 +576,16 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 						leaseMs: USER_INTERACTION_WAIT_LEASE_MS,
 					});
 				}
-				const current = acquireActiveUserInteraction(owner);
+				const current = await acquireActiveUserInteraction(owner);
 				if (current === undefined || interactionCoordinateKey(current) !== interactionCoordinateKey(active)) return;
 				finish({ kind: "user", interaction: current });
 			} catch {
-				// Isolate malformed/concurrently-created mailboxes and keep watching.
+				// Isolate malformed/concurrently-created journals and keep watching.
+			} finally {
+				inspecting = false;
 			}
 		};
-		const timer = setInterval(inspectInteraction, 100);
+		const timer = setInterval(() => void inspectInteraction(), 100);
 		timer.unref();
 		watchRun(runDir).then(
 			(status) => finish({ kind: "terminal", status }),
@@ -613,7 +596,7 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 				rejectBoundary(error);
 			},
 		);
-		inspectInteraction();
+		void inspectInteraction();
 	});
 }
 
@@ -686,7 +669,7 @@ function compactUserInteraction(interaction: OwnedUserInteraction) {
 }
 
 /** Entries are already bounded gate summaries; only the queue length still needs a cap. */
-function boundedUserInteractions(summary: ReturnType<typeof ownedClaudeUserInteractionSummary>) {
+function boundedUserInteractions(summary: Awaited<ReturnType<typeof ownedClaudeUserInteractionSummary>>) {
 	return {
 		...(summary.active === undefined ? {} : { active: summary.active }),
 		queued: summary.queued.slice(0, 20),

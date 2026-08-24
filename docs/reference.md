@@ -28,9 +28,7 @@ The [API index](api/README.md) lists every supported package entry point and the
 ├── user-interactions/
 │   └── <branchId>/
 │       └── <seqId>/
-│           ├── request.json
-│           ├── resolution.json
-│           └── receipts/
+│           └── receipts/        # presentation only; gates and answers are journal facts
 └── sessions/
     ├── progress.json
     ├── steering/
@@ -57,7 +55,7 @@ These `status.json` values are different from canonical host run statuses and pe
 
 ## Current limitations
 
-- Interactive delivery requires a supported owning host session (currently Pi or Claude Code); otherwise open gates remain inspectable and resumable through their file mailbox.
+- Interactive presentation requires a supported owning host session (currently Pi or Claude Code); journal-open gates remain inspectable and may be answered while the runner is stopped.
 - Rewind cannot reverse external effects.
 - Shared/static external effects require application-specific idempotency and reconciliation.
 - Missing agent definitions are execution errors.

@@ -55,19 +55,19 @@ export function pendingOwnedClaudeTerminalRequests(options: ClaudeMonitorOptions
 	return pending.sort((left, right) => left.request.createdAt.localeCompare(right.request.createdAt));
 }
 
-export function activeOwnedClaudeUserInteraction(options: ClaudeMonitorOptions): OwnedUserInteraction | undefined {
+export async function activeOwnedClaudeUserInteraction(options: ClaudeMonitorOptions): Promise<OwnedUserInteraction | undefined> {
 	if (options.sessionId === undefined) return undefined;
 	return acquireActiveUserInteraction(claudeInteractionOwner({ ...options, sessionId: options.sessionId }));
 }
 
-export function ownedClaudeUserInteractionSummary(options: ClaudeMonitorOptions): {
+export async function ownedClaudeUserInteractionSummary(options: ClaudeMonitorOptions): Promise<{
 	active?: ReturnType<typeof claudeUserInteractionDetails> & { presentation: OwnedUserInteraction["presentation"] };
 	queued: Array<ReturnType<typeof claudeUserInteractionDetails> & { presentation: OwnedUserInteraction["presentation"] }>;
-} {
+}> {
 	if (options.sessionId === undefined) return { queued: [] };
 	const owner = claudeInteractionOwner({ ...options, sessionId: options.sessionId });
-	const interactions = scanOwnedOpenUserInteractions(owner);
-	const active = acquireActiveUserInteraction(owner);
+	const interactions = await scanOwnedOpenUserInteractions(owner);
+	const active = await acquireActiveUserInteraction(owner);
 	const activeKey = active === undefined ? undefined : interactionKey(active);
 	return {
 		...(active === undefined ? {} : { active: { ...claudeUserInteractionDetails(active), presentation: active.presentation } }),
@@ -139,9 +139,9 @@ export function emitPendingClaudeTerminalNotifications(options: ClaudeMonitorOpt
 }
 
 /** Emit at most the arbiter's one pinned user gate, never a queued branch request. */
-export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions): number {
+export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions): Promise<number> {
 	if (options.sessionId === undefined) return 0;
-	const active = activeOwnedClaudeUserInteraction(options);
+	const active = await activeOwnedClaudeUserInteraction(options);
 	if (active === undefined || active.presentation === "confirmed") return 0;
 	const existingClaim = readUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId);
 	// A waited MCP result is already the delivery path into this Claude turn. Do not
@@ -161,7 +161,7 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 	if (!claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId, { source: "monitor" })) return 0;
 	// Claim and selection are separate filesystem operations. Re-arbitrate after the
 	// exclusive claim so a concurrently-created lower coordinate cannot be presented too.
-	const current = activeOwnedClaudeUserInteraction(options);
+	const current = await activeOwnedClaudeUserInteraction(options);
 	if (current === undefined || interactionKey(current) !== interactionKey(active)) return 0;
 	const writeLine = options.writeLine ?? ((line: string) => { writeSync(process.stdout.fd, `${line}\n`); });
 	let notification: ClaudeMonitorEnvelope;
@@ -181,8 +181,8 @@ export function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions):
 }
 
 /** Combined persistent-monitor scan for terminal notifications and the one active user gate. */
-export function emitPendingClaudeNotifications(options: ClaudeMonitorOptions): number {
-	return emitPendingClaudeTerminalNotifications(options) + emitPendingClaudeUserInteraction(options);
+export async function emitPendingClaudeNotifications(options: ClaudeMonitorOptions): Promise<number> {
+	return emitPendingClaudeTerminalNotifications(options) + await emitPendingClaudeUserInteraction(options);
 }
 
 type ClaudeMonitorEnvelope = {

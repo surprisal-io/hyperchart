@@ -120,7 +120,7 @@ describe("JsonlLogStore branch journal", () => {
 		expect((await left.read()).branch("main").headSeqId).toBe(3);
 	});
 
-	it("rejects an independently opened stale writer before append and leaves a valid journal", async () => {
+	it("rejects an independently opened stale writer instead of catching it up", async () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const current = new JsonlLogStore(file);
@@ -142,12 +142,12 @@ describe("JsonlLogStore branch journal", () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const main = new JsonlLogStore(file);
-		main.initializeRootBranch();
+		await main.initializeRootBranch();
 		const projection = main.snapshot();
 		const records = projection.records;
 		const recordsBySeqId = projection.recordsBySeqId;
 		const experiment = main.forBranch("main");
-		for (let index = 0; index < 50; index++) experiment.appendDrafts([invokeDraft()]);
+		for (let index = 0; index < 50; index++) await experiment.appendDrafts([invokeDraft()]);
 		const after = main.snapshot();
 		expect(main.fullReadCount()).toBe(1);
 		expect(after).toBe(projection);
@@ -157,15 +157,15 @@ describe("JsonlLogStore branch journal", () => {
 		expect(projection.records).toHaveLength(50);
 	});
 
-	it("keeps opened snapshots one-read while independent readers can reopen detached-writer bytes", async () => {
+	it("keeps an opened reader snapshot stable until the journal is reopened", async () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const writer = new JsonlLogStore(file);
-		writer.initializeRootBranch();
-		writer.appendDrafts([argsDraft()]);
+		await writer.initializeRootBranch();
+		await writer.appendDrafts([argsDraft()]);
 		const reader = new JsonlLogStore(file);
 		expect(reader.snapshot().records).toHaveLength(1);
-		writer.appendDrafts([invokeDraft()]);
+		await writer.appendDrafts([invokeDraft()]);
 		expect(reader.snapshot().records).toHaveLength(1);
 		expect(reader.fullReadCount()).toBe(1);
 		expect(new JsonlLogStore(file).snapshot().records).toHaveLength(2);
@@ -175,9 +175,9 @@ describe("JsonlLogStore branch journal", () => {
 		const dir = await makeTempDir();
 		const file = join(dir, "log.jsonl");
 		const main = new JsonlLogStore(file);
-		main.initializeRootBranch();
-		main.appendDrafts([argsDraft()]);
-		main.createBranch("experiment", 1);
+		await main.initializeRootBranch();
+		await main.appendDrafts([argsDraft()]);
+		await main.createBranch("experiment", 1);
 		const experiment = main.forBranch("experiment");
 		await Promise.all([
 			Promise.resolve().then(() => main.appendDrafts([invokeDraft()])),
@@ -185,7 +185,7 @@ describe("JsonlLogStore branch journal", () => {
 		]);
 		const beforeMove = main.snapshot();
 		const experimentHead = beforeMove.branch("experiment").headSeqId;
-		main.moveBranch("main", 1);
+		await main.moveBranch("main", 1);
 		const finalSnapshot = main.snapshot();
 		expect(finalSnapshot.records.map((record) => record.seqId)).toEqual([1, 2, 3]);
 		expect(finalSnapshot.ancestry("main").map((record) => record.seqId)).toEqual([1]);
@@ -194,5 +194,14 @@ describe("JsonlLogStore branch journal", () => {
 		const values = (await readFile(file, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as unknown);
 		expect(validateAndProjectJournal(values).records.map((record) => record.seqId)).toEqual([1, 2, 3]);
 		expect(main.fullReadCount()).toBe(1);
+	});
+
+	it("rejects unknown and malformed user-interaction journal records", () => {
+		const root = { kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 1 };
+		const mutation = (record: Record<string, unknown>) => ({ kind: "record_batch", branchId: "main", records: [{ ...record, seqId: 1, parentId: null, branchId: "main", timestamp: 2 }], headSeqId: 1, committedAt: 2 });
+		expect(() => validateAndProjectJournal([root, mutation({ type: "mystery" })])).toThrow(/known machine record type/);
+		expect(() => validateAndProjectJournal([root, mutation({ type: "user_interaction", kind: "opened", actionUid: { chart: "c", state: "s", action: "user" }, phaseSeqId: 1, prompt: 42, options: [], events: ["OK"] })])).toThrow(/prompt must be a string/);
+		expect(() => validateAndProjectJournal([root, mutation({ type: "user_interaction", kind: "resolved", actionUid: { chart: "c", state: "s", action: "user" }, gateSeqId: 1, event: {} })])).toThrow(/non-empty event type/);
+		expect(() => validateAndProjectJournal([root, mutation({ type: "user_interaction", kind: "opened", actionUid: { chart: "c", state: "s", action: "user" }, phaseSeqId: 1, prompt: "p", options: [], events: ["FAILED"] })])).toThrow(/non-FAILED/);
 	});
 });

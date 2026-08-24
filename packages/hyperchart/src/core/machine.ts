@@ -266,13 +266,6 @@ export type AgentMachineEvent = Readonly<{
 	artifacts?: Readonly<Record<string, ArtifactPin>>;
 }>;
 
-export type UserMachineEvent = Readonly<{
-	kind: "user";
-	effectId: EffectId;
-	event: ChartEvent;
-	artifacts?: Readonly<Record<string, ArtifactPin>>;
-}>;
-
 // A script's completion: same shape and handling as an agent's — the runtime maps the process
 // outcome (exit code, parsed stdout) into a chart event.
 export type ScriptMachineEvent = Readonly<{
@@ -316,7 +309,6 @@ export type MachineStartEvent = Readonly<{
 export type MachineEvent =
 	| MachineStartEvent
 	| AgentMachineEvent
-	| UserMachineEvent
 	| ScriptMachineEvent
 	| DurableRecordsAddedMachineEvent
 	| ValidatedMachineEvent
@@ -384,6 +376,7 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 		...dueActorEnqueues(state),
 		...dueActorAccepts(state),
 		...dueInvokes(state).map((actionUid) => invokeAppend(state, actionUid)),
+		...dueUserInteractionOpens(state),
 		...dueActorReplies(state),
 		...dueActorBatchResolutions(state),
 		...dueActorScopeFacts(state),
@@ -437,13 +430,54 @@ function actionEffectId(actionUid: ActionUID, visitId: number, seqId: number): E
 	return `${actionUidKey(actionUid)}:${visitId}:${seqId}`;
 }
 
+function dueUserInteractionOpens(state: MachineState): RecordAppend[] {
+	return state.projection.pendingActions.flatMap((pending): RecordAppend[] => {
+		if (pending.phase === "validating" || pending.gateSeqId !== undefined) return [];
+		const draft = userInteractionOpenedDraft(state, pending);
+		if (draft === undefined) return [];
+		return [{ kind: "append", id: `user:open:${pendingEffectId(pending)}`, records: [draft] }];
+	});
+}
+
+/** Exact durable rendering shared by fresh execution and replay provenance checks. */
+export function userInteractionOpenedDraft(
+	state: Pick<MachineState, "ast" | "projection">,
+	pending: PendingAction,
+): Extract<DurableRecordDraft, { type: "user_interaction"; kind: "opened" }> | undefined {
+	if (pending.phase === "validating") return undefined;
+	const node = actionStateAtMachine(state.ast, pending.actionUid.state);
+	if (node?.action.kind !== "user") return undefined;
+	return {
+		type: "user_interaction",
+		kind: "opened",
+		actionUid: pending.actionUid,
+		phaseSeqId: pending.seqId,
+		prompt: renderTemplate(state as MachineState, node.action.prompt, pending.actionUid.state),
+		options: node.action.options,
+		events: allowedEventsForAction(state.ast, pending.actionUid.state).filter((event) => event !== "FAILED"),
+		...(node.action.reply === undefined ? {} : { reply: node.action.reply }),
+		...(pending.phase === "rejected" ? {
+			rejection: {
+				attempt: pending.validationAttempts,
+				onReject: node.onReject ?? "resume",
+				...(pending.reason === undefined ? {} : { reason: pending.reason }),
+			},
+		} : {}),
+	};
+}
+
 // All effects a pending action currently wants: its phase effect, plus — while running under a
 // deadline — the timer racing it.
 function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 	const ast = state.ast;
-	const effects = [pendingEffect(state, pending)];
+	const node = actionStateAtMachine(ast, pending.actionUid.state);
+	// User phases are represented and completed exclusively by journal facts. They never
+	// dispatch a live executor effect; validation after a resolved fact remains ordinary.
+	const effects: Effect[] = node?.action.kind === "user" && pending.phase !== "validating"
+		? []
+		: [pendingEffect(state, pending)];
 	if (pending.phase === "running") {
-		const node = actionStateAtMachine(ast, pending.actionUid.state);
+
 		if (node?.after !== undefined) {
 			effects.push({
 				kind: "timer",
@@ -716,8 +750,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 	) return createMachineOutput(state, []);
 	switch (event.kind) {
 		case "agent":
-		case "script":
-		case "user": {
+		case "script": {
 			const pending = findPendingAction(state, event.effectId);
 			if (pending === null) {
 				// The action is no longer pending — it lost a race (e.g. its timer fired first).

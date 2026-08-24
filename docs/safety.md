@@ -100,7 +100,7 @@ Stopping does not guarantee that every child process, remote request, or agent-s
 
 ## Rewind a run
 
-Rewind is an append-only move of one durable named branch head. It is stopped-only and requires an explicit `branchId`. It never deletes, truncates, moves, backs up, or rewrites machine records, sessions, user-interaction mailboxes, terminal notifications, or artifacts.
+Rewind is an append-only move of one durable named branch head. It is stopped-only and requires an explicit `branchId`. It never deletes, truncates, moves, backs up, or rewrites machine records, sessions, presentation receipts, terminal notifications, or artifacts. Selected ancestry alone determines whether user-interaction opened/resolved facts apply.
 
 1. Stop the runner and inspect the selected branch ancestry and full record tree.
 2. Choose exactly one selector: `state`, `seqId`, or `to: "compatible"`, plus `mode: "before" | "after"`.

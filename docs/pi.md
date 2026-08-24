@@ -235,7 +235,7 @@ After Pi displays a gate, the extension still does not answer automatically. Pi 
 }
 ```
 
-`event` must be one of the gate's exact allowed non-`FAILED` events and `output` must satisfy its reply contract when present. Copy `runId`, `branchId`, `seqId`, event names, and option values exactly; only display labels/previews may be shortened, and their metadata states the original and omitted character counts. The delivered non-executable summary recursively covers allowed values, nested required/optional fields, arrays, alternatives, defaults, nullability, and supported constraints. If an identity or the contract cannot be represented within its field/collection/depth/node/value/byte caps, Pi fails delivery closed and directs the operator to the browser inspector instead of showing a partial gate. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate `requestId`.
+`event` must be one of the gate's exact allowed non-`FAILED` events and `output` must satisfy its reply contract when present. Copy `runId`, `branchId`, `seqId`, event names, and option values exactly; only display labels/previews may be shortened, and their metadata states the original and omitted character counts. The delivered non-executable summary recursively covers allowed values, nested required/optional fields, arrays, alternatives, defaults, nullability, and supported constraints. If an identity or the contract cannot be represented within its field/collection/depth/node/value/byte caps, Pi fails delivery closed and directs the operator to the browser inspector instead of showing a partial gate. For a live run, the extension sends an attempt-fenced control command to the detached runtime that already owns the journal; only a stopped run opens the writer temporarily. The extension rejects wrong-session, wrong-cwd, non-active, stale, closed, or conflicting responses. Repeating the identical answer succeeds idempotently. Gate messages never expose an `effectId` or separate semantic `requestId`.
 
 ### `hyperchart` with `action: "run_inspect"`
 
@@ -315,7 +315,9 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 | `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
 | `log.jsonl` | core runtime | append-only v2 record-batch and named-branch mutations |
 | `status.json` | Pi runner | v2 process state, current live `branchIds`, pid, heartbeat, exit, aggregate error |
-| `user-interactions/<branchId>/<seqId>/` | runner + host | exact branch-scoped request, immutable resolution, and receipts |
+| journal `user_interaction/*` | sole runtime writer | rendered gate and validated external response facts |
+| `user-interactions/<branchId>/<seqId>/receipts/` | host | non-semantic presentation claims and confirmations |
+| `runner-control/user-responses/` | host + runtime | attempt-fenced non-semantic command acknowledgements; only the runtime writes a live journal |
 | `sessions/<sanitized-branch-prefix>-<hash>/...` | Pi executor | collision-resistant branch/invocation-scoped agent sessions (no migration from the former unscoped layout) |
 | `sessions/steering/` | host + runner | branch-addressed steering queue routed only to the selected branch executor |
 | `artifact_store/objects/` | core runtime | content-addressable snapshots of accepted deliverables, referenced by completion-fact pins |

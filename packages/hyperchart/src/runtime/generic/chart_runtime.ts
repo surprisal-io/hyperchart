@@ -13,7 +13,6 @@ import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { AgentExecutor } from "./agent_executor.js";
-import type { UserExecutor } from "./user_executor.js";
 import type { LogStore } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
@@ -25,8 +24,6 @@ export type ChartRuntimeOptions = {
 	branchId: BranchId;
 	logStore: LogStore;
 	agentExecutor: AgentExecutor;
-	/** Required only when this runtime may execute user actions; detached runners always provide it. */
-	userExecutor?: UserExecutor;
 	/** Repository/project directory that owns the run. Scripts remain cwd-scoped to workDir. */
 	projectDir?: string;
 	/** Branch-isolated workspace used as the action cwd. */
@@ -187,7 +184,6 @@ export class ChartRuntime implements Runtime {
 				case "cancel": {
 					const cancellations = [
 						this.options.agentExecutor.cancel(effect.actionUid),
-						...(this.options.userExecutor === undefined ? [] : [this.options.userExecutor.cancel(effect.actionUid)]),
 						this.scripts.cancel(effect.actionUid),
 					];
 					this.track(Promise.allSettled(cancellations).then((results) => {
@@ -197,16 +193,7 @@ export class ChartRuntime implements Runtime {
 					}));
 					break;
 				}
-				case "user":
-					if (this.options.userExecutor === undefined) {
-						throw new Error("ChartRuntime requires a userExecutor to execute user actions");
-					}
-					if (!this.disposed) {
-						this.options.userExecutor.start(effect, (event) => {
-							this.send({ kind: "user", effectId: effect.id, event });
-						});
-					}
-					break;
+
 				}
 			}
 		} finally {
@@ -214,6 +201,12 @@ export class ChartRuntime implements Runtime {
 			this.sendBuffer = undefined;
 			if (buffered !== undefined) for (const event of buffered) this.send(event);
 		}
+	}
+
+	/** Apply records committed by this runtime's own control API without a storage watcher. */
+	acknowledgeCommittedRecords(records: readonly DurableLogRecord[], effectId: string): void {
+		if (records.length === 0 || this.disposed) return;
+		this.send({ kind: "durable_records_added", effectId, records });
 	}
 
 	eventsQueue(): AsyncIterable<MachineEvent> {
@@ -241,7 +234,6 @@ export class ChartRuntime implements Runtime {
 		const cleanups = [
 			Promise.resolve().then(() => this.scripts.dispose()),
 			Promise.resolve().then(() => this.options.agentExecutor.dispose()),
-			...(this.options.userExecutor === undefined ? [] : [Promise.resolve().then(() => this.options.userExecutor!.dispose())]),
 		];
 		const cleanupResults = await Promise.allSettled(cleanups);
 		await this.drainPending();
@@ -398,26 +390,6 @@ export class ChartRuntime implements Runtime {
 						this.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) });
 					}),
 			);
-			return;
-		}
-		if (state.action.kind === "user") {
-			if (this.options.userExecutor === undefined) {
-				this.send({
-					kind: "user",
-					effectId: effect.id,
-					event: toFailedEvent("ChartRuntime requires a userExecutor to retry user actions"),
-				});
-				return;
-			}
-			try {
-				if (!this.disposed) {
-					this.options.userExecutor.reject(effect, (event) => {
-						this.send({ kind: "user", effectId: effect.id, event });
-					});
-				}
-			} catch (error) {
-				this.send({ kind: "user", effectId: effect.id, event: toFailedEvent(error) });
-			}
 			return;
 		}
 	}

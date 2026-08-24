@@ -4,15 +4,14 @@ import { dirname, join } from "node:path";
 import { start } from "../../core/execution_loop.js";
 import { parseChartModuleSync } from "../../core/inspect.js";
 import { explainReplay, type ReplayExplanation } from "../../core/replay_check.js";
-import type { ChartAst } from "../../core/types.js";
+import type { ChartAst, ChartEvent } from "../../core/types.js";
 import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_events.js";
 import type { SchemaRegistry } from "../../core/schema_registry.js";
 import type { MachineState } from "../../core/machine.js";
 import { ChartRuntime } from "./chart_runtime.js";
 import { ArtifactStore } from "./artifact_store.js";
 import { materializeWorkspace } from "./artifact_workspace.js";
-import { FileUserExecutor } from "./user_executor.js";
-import type { RunLogStore } from "./log_store.js";
+import type { RunLogStore, UserInteractionResponseCommit } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import { finalMachineFailureMessage, terminalStateForFinalMachine, type RunTerminalState } from "./run_outcome.js";
 import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
@@ -23,6 +22,7 @@ import {
 	renderTerminalNotificationPayload,
 } from "./terminal_notifications.js";
 import { watchSessionSteering } from "./session_steering.js";
+import { watchRunnerUserResponses } from "./runner_control.js";
 import { assertChartPreflight } from "./chart_typecheck.js";
 import type { AgentExecutor } from "./agent_executor.js";
 import { errorMessage } from "../../utils/errors.js";
@@ -95,6 +95,8 @@ export interface HyperchartRunnerController {
 	acquireHold(): RunnerHold;
 	/** Create only a durable branch head. No executor or runtime is started. */
 	forkBranch(options: RunnerForkOptions): Promise<BranchHead>;
+	/** Commit one response through this runtime's sole journal writer. */
+	respondToUserInteraction(branchId: BranchId, gateSeqId: number, event: ChartEvent): Promise<UserInteractionResponseCommit>;
 	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. */
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
 }
@@ -174,6 +176,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	private started = false;
 	private heartbeat: NodeJS.Timeout | undefined;
 	private stopSteering: (() => void) | undefined;
+	private stopControl: (() => void) | undefined;
 	private shutdownSignal: NodeJS.Signals | undefined;
 	private readonly onSigterm = () => void this.close("SIGTERM");
 	private readonly onSigint = () => void this.close("SIGINT");
@@ -193,6 +196,8 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		this.initialSetupTurns[0]!.resolve();
 		for (const branchId of initialBranchIds) this.reserve(branchId);
 		this.stopSteering = watchSessionSteering(sessionsDir, (request) => this.executors.get(request.branchId)?.steer(request.actionKey, request.invokeSeqId, request.message) ?? false);
+		this.stopControl = watchRunnerUserResponses(config.runDir, attemptId, (request) =>
+			this.respondToUserInteraction(request.branchId, request.gateSeqId, request.event));
 		this.heartbeat = setInterval(() => markRunHeartbeat(config.runDir), 2_000);
 		this.heartbeat.unref();
 		process.on("SIGTERM", this.onSigterm);
@@ -235,6 +240,25 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			sourceSeqId: options.fromSeqId,
 		};
 		return this.rootStore.createBranch(options.branchId, options.fromSeqId, metadata);
+	}
+
+	async respondToUserInteraction(branchId: BranchId, gateSeqId: number, event: ChartEvent): Promise<UserInteractionResponseCommit> {
+		this.assertAccepting("respond to a user interaction");
+		const store = branchId === this.rootStore.branchId ? this.rootStore : this.rootStore.forBranch(branchId);
+		store.snapshot().branch(branchId);
+		const committed = await store.respondToUserInteraction({
+			ast: this.ast,
+			gateSeqId,
+			event,
+			schemaRegistry: this.schemaRegistry,
+		});
+		if (!committed.idempotent) {
+			this.live.get(branchId)?.runtime?.acknowledgeCommittedRecords(
+				[committed.record],
+				`control:user-response:${gateSeqId}:${committed.record.seqId}`,
+			);
+		}
+		return committed;
 	}
 
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {
@@ -375,9 +399,8 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		try {
 			entry.executor = executor;
 			this.executors.set(entry.branchId, executor);
-			const userExecutor = new FileUserExecutor({ runId: this.config.runId, runDir: this.config.runDir, branchId: entry.branchId, schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message) });
 			entry.runtime = new ChartRuntime({
-				ast: this.ast, branchId: entry.branchId, logStore: entry.store, agentExecutor: executor, userExecutor,
+				ast: this.ast, branchId: entry.branchId, logStore: entry.store, agentExecutor: executor,
 				projectDir: this.config.workDir, workDir, chartDir: dirname(this.config.chartPath), runDir: this.config.runDir,
 				schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message),
 			});
@@ -548,6 +571,8 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		this.heartbeat = undefined;
 		this.stopSteering?.();
 		this.stopSteering = undefined;
+		this.stopControl?.();
+		this.stopControl = undefined;
 		process.off("SIGTERM", this.onSigterm);
 		process.off("SIGINT", this.onSigint);
 	}

@@ -1,54 +1,34 @@
 export type { Runtime } from "./runtime.js";
 export type { AgentExecutor, EmitCompletion } from "./generic/agent_executor.js";
-export { FileUserExecutor } from "./generic/user_executor.js";
-export type { FileUserExecutorOptions, UserExecutor } from "./generic/user_executor.js";
 export {
 	USER_INTERACTIONS_DIR,
 	USER_INTERACTION_ARBITER_DIR,
 	USER_INTERACTION_CLAIM_LEASE_MS,
 	USER_INTERACTION_WAIT_LEASE_MS,
-	USER_INTERACTION_CLOSE,
-	USER_INTERACTION_REQUEST,
-	USER_INTERACTION_RESOLUTION,
-	USER_INTERACTION_RESPONSE,
 	acquireActiveUserInteraction,
 	claimUserInteractionReceipt,
-	closeUserInteraction,
 	hasUserInteractionReceipt,
 	markUserInteractionReceipt,
-	persistUserInteractionRequest,
 	readActiveUserInteraction,
-	readOpenUserInteractionRequest,
-	readUserInteractionClose,
 	readUserInteractionReceipt,
-	readUserInteractionRequest,
-	readUserInteractionResolution,
 	readUserInteractionResponse,
 	releaseActiveUserInteraction,
 	removeUserInteractionReceipt,
 	scanOpenUserInteractions,
 	scanOwnedOpenUserInteractions,
 	userInteractionArbiterPath,
-	userInteractionClosePath,
 	userInteractionDir,
 	userInteractionReceiptPath,
-	userInteractionRequestPath,
-	userInteractionResolutionPath,
-	userInteractionResponsePath,
 	validateAndPersistUserInteractionResponse,
-	validateUserInteractionEvent,
 } from "./generic/user_interactions.js";
 export type {
 	OwnedUserInteraction,
-	PersistUserInteractionRequestInput,
 	PersistUserInteractionResponseOptions,
 	UserInteractionArbiterRecord,
-	UserInteractionClose,
 	UserInteractionCoordinate,
 	UserInteractionOwner,
 	UserInteractionReceipt,
 	UserInteractionRequest,
-	UserInteractionResolution,
 	UserInteractionResponse,
 } from "./generic/user_interactions.js";
 export { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./generic/artifacts.js";
@@ -66,12 +46,12 @@ export {
 	stampDrafts,
 	validateAndProjectJournal,
 } from "./generic/log_store.js";
-export type { LogStore, RunLogStore } from "./generic/log_store.js";
+export type { LogStore, RunLogStore, RespondToUserInteractionInput, UserInteractionResponseCommit } from "./generic/log_store.js";
 export { MemoryLogStore } from "./generic/memory_log_store.js";
 export { openRunLogStore } from "./generic/log_store_factory.js";
 export type { OpenRunLogStoreOptions } from "./generic/log_store_factory.js";
 export { JOURNAL_CHANNEL, JOURNAL_TABLE, PostgresLogStore } from "./generic/postgres_log_store.js";
-export type { OpenPostgresLogStoreOptions, PostgresLogAccess } from "./generic/postgres_log_store.js";
+export type { OpenPostgresLogStoreOptions, PostgresLogAccess, PostgresRunTransaction, PostgresForkAndRespondInput, PgClientLike, PgQueryResult } from "./generic/postgres_log_store.js";
 export {
 	forkHyperchartRun,
 	getHyperchartBranch,

@@ -11,6 +11,7 @@ import {
 	type ProjectionSkippedRecord,
 } from "./projection.js";
 import type { ActionUID, ChartAst, StatePath } from "./types.js";
+import { userInteractionOpenedDraft } from "./machine.js";
 
 export type ReplayBrokenRecord = Readonly<{
 	index: number;
@@ -38,7 +39,8 @@ export type ReplayStaleRecord = Readonly<{
 		| "actor_definition_changed"
 		| "actor_placement_changed"
 		| "actor_message_source_changed"
-		| "actor_reply_contract_changed";
+		| "actor_reply_contract_changed"
+		| "user_interaction_contract_changed";
 	message: string;
 	invokeSeqId?: number;
 }>;
@@ -126,6 +128,25 @@ function staleRecordsFor(
 	index: number,
 	record: DurableLogRecord,
 ): ReplayStaleRecord[] {
+	if (record.type === "user_interaction" && record.kind === "opened") {
+		const pending = projection.pendingActions.find((entry) =>
+			sameActionUid(entry.actionUid, record.actionUid) &&
+			entry.seqId === record.phaseSeqId &&
+			(entry.phase === "running" || entry.phase === "rejected"),
+		);
+		if (pending === undefined) return [];
+		const expected = userInteractionOpenedDraft({ ast, projection }, pending);
+		if (expected !== undefined && stableStringify(expected) === stableStringify(openedComparable(record))) return [];
+		return [{
+			index,
+			seqId: record.seqId,
+			record,
+			state: record.actionUid.state,
+			reason: "user_interaction_contract_changed",
+			message: `Rendered user interaction contract for ${record.actionUid.state} changed since gate seqId ${record.seqId}`,
+			invokeSeqId: pending.invokeSeqId,
+		}];
+	}
 	if (record.type === "actor_created") {
 		const actor = ast.actors[record.declaration];
 		if (actor === undefined) return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor declaration ${record.declaration} was removed or moved` }];
@@ -216,6 +237,14 @@ function brokenRecordFor(
 		error: error instanceof Error ? error.message : String(error),
 	};
 	if (record.type !== "state_action") {
+		if (record.type === "user_interaction") {
+			const pending = projection.pendingActions.find((entry) => sameActionUid(entry.actionUid, record.actionUid));
+			return {
+				...base,
+				state: record.actionUid.state,
+				...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
+			};
+		}
 		if (record.type === "spawned") return { ...base, state: record.path };
 		if (record.type === "actor_created") return { ...base, state: record.occurrence };
 		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope") return { ...base, state: record.occurrence };
@@ -257,6 +286,11 @@ function sameActionUid(left: ActionUID, right: ActionUID): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function openedComparable(record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "opened" }>) {
+	const { seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft } = record;
+	return draft;
 }
 
 function stableStringify(value: unknown): string {

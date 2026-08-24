@@ -214,7 +214,7 @@ Read [Recovery and safety](../../docs/safety.md), then:
 ## Safety rules
 
 - Chart modules are executable TypeScript. Loading one can execute top-level code even when no workflow action is dispatched.
-- Never edit `log.jsonl` or `user-interactions/` mailbox files manually.
+- Never edit journal files or presentation receipt sidecars manually; answer gates only through `action="respond"`.
 - Never rewind a live run.
 - Never treat a missing agent definition as an unrestricted default.
 - Stop, rewind, replay, and deletion do not undo arbitrary external effects.

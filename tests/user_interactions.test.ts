@@ -1,392 +1,137 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
+import type { ChartAst } from "../packages/hyperchart/src/core/types.js";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
-import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
-import { rewindHyperchartRun } from "../packages/hyperchart/src/runtime/generic/rewind.js";
-import { FileUserExecutor } from "../packages/hyperchart/src/runtime/generic/user_executor.js";
+import { watchRunnerUserResponses } from "../packages/hyperchart/src/runtime/generic/runner_control.js";
 import {
 	acquireActiveUserInteraction,
 	claimUserInteractionReceipt,
-	closeUserInteraction,
 	hasUserInteractionReceipt,
 	markUserInteractionReceipt,
-	persistUserInteractionRequest,
-	readUserInteractionClose,
-	readUserInteractionRequest,
 	readUserInteractionResponse,
-	releaseActiveUserInteraction,
 	scanOpenUserInteractions,
 	scanOwnedOpenUserInteractions,
-	userInteractionArbiterPath,
-	userInteractionRequestPath,
+	userInteractionDir,
 	validateAndPersistUserInteractionResponse,
 	type UserInteractionOwner,
 } from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
 
 const roots: string[] = [];
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-});
-
-function world() {
-	const root = mkdtempSync(join(tmpdir(), "hyperchart-user-interactions-"));
-	roots.push(root);
-	const runsRoot = join(root, "runs");
-	const workDir = join(root, "project");
-	mkdirSync(runsRoot);
-	mkdirSync(workDir);
-	return { root, runsRoot, workDir };
+async function fixture(reply = false) {
+	const root = mkdtempSync(join(tmpdir(), "hyperchart-journal-input-")); roots.push(root);
+	const runsRoot = join(root, "runs"), workDir = join(root, "project"), runDir = join(runsRoot, "run-a"), chartPath = join(workDir, "chart.ts");
+	mkdirSync(runsRoot); mkdirSync(workDir);
+	writeFileSync(chartPath, `
+		import { chart, final, user } from "@surprisal/hyperchart";
+		export default chart({ id: "chart", initial: "ask", states: {
+			ask: { kind: "state", action: user({ prompt: "Approve?", options: ["APPROVED"] }), transitions: { APPROVED: "done" } },
+			done: final(),
+		} });
+	`);
+	const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error(parsed.diagnostics.map((d) => d.message).join("\n"));
+	saveRunMeta(runDir, { chartPath, workDir, chartId: "chart", createdAt: new Date().toISOString(), originSessionId: "session-a" });
+	const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.initializeRootBranch();
+	const state = parsed.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
+	await store.appendDrafts([{ type: "args", args: {} }]);
+	const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+	const replySchema = reply ? { kind: "jsonSchema" as const, schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false } } : undefined;
+	const [opened] = await store.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"], ...(replySchema === undefined ? {} : { reply: replySchema }) }]);
+	return { root, runsRoot, workDir, runDir, ast: parsed.ast, store, gateSeqId: opened!.seqId };
 }
+function owner(runsRoot: string, workDir: string): UserInteractionOwner { return { runsRoot, workDir, sessionId: "session-a", host: "test" }; }
 
-function createRun(
-	runsRoot: string,
-	workDir: string,
-	runId: string,
-	sessionId = "session-a",
-): string {
-	const runDir = join(runsRoot, runId);
-	saveRunMeta(runDir, {
-		chartPath: join(workDir, "chart.ts"),
-		workDir,
-		chartId: "chart",
-		createdAt: new Date().toISOString(),
-		originSessionId: sessionId,
-	});
-	patchRunStatus(runDir, {
-		runId,
-		branchIds: ["main"],
-		chartId: "chart",
-		state: "running",
-		pid: process.pid,
-		heartbeatAt: Date.now(),
-	});
-	return runDir;
-}
-
-function persist(runDir: string, runId: string, seqId: number, reply = false) {
-	return persistUserInteractionRequest(runDir, {
-		runId,
-		branchId: "main",
-		seqId,
-		actionUid: { chart: "chart", state: `branch-${seqId}`, action: "user" },
-		prompt: `Question ${seqId}?`,
-		options: ["APPROVED", "REJECTED"],
-		events: ["APPROVED", "REJECTED", "FAILED"],
-		...(reply
-			? {
-					reply: {
-						kind: "jsonSchema" as const,
-						schema: {
-							type: "object",
-							properties: { note: { type: "string" } },
-							required: ["note"],
-							additionalProperties: false,
-						},
-					},
-				}
-			: {}),
-	});
-}
-
-function owner(runsRoot: string, workDir: string, sessionId = "session-a"): UserInteractionOwner {
-	return { runsRoot, workDir, sessionId, host: "test" };
-}
-
-describe("user interaction mailbox", () => {
-	it("uses runId, branchId, and seqId as persisted gate identity and persists once", () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		const first = persist(runDir, "run-a", 7);
-		const second = persist(runDir, "run-a", 7);
-
-		expect(second).toEqual(first);
-		expect(userInteractionRequestPath(runDir, "main", 7)).toBe(join(runDir, "user-interactions", "main", "7", "request.json"));
-		const raw = JSON.parse(readFileSync(userInteractionRequestPath(runDir, "main", 7), "utf8"));
-		expect(raw).toMatchObject({ runId: "run-a", branchId: "main", seqId: 7 });
-		expect(raw).not.toHaveProperty("effectId");
-		expect(raw).not.toHaveProperty("requestId");
-		expect(() => persistUserInteractionRequest(runDir, { ...first, prompt: "different" } as never)).toThrow(/conflict/);
+describe("journal-native user interactions", () => {
+	it("derives an open rendered gate from selected journal ancestry without request.json", async () => {
+		const f = await fixture();
+		const requests = await scanOpenUserInteractions(f.runDir, "main");
+		expect(requests).toEqual([expect.objectContaining({ version: 2, runId: "run-a", branchId: "main", seqId: f.gateSeqId, prompt: "Approve?", events: ["APPROVED"] })]);
+		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "request.json"))).toBe(false);
 	});
 
-	it("isolates malformed and directory-coordinate-mismatched phases during scans", () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		persist(runDir, "run-a", 3);
-		mkdirSync(join(runDir, "user-interactions", "main", "1"), { recursive: true });
-		writeFileSync(join(runDir, "user-interactions", "main", "1", "request.json"), "{broken\n");
-		mkdirSync(join(runDir, "user-interactions", "main", "2"), { recursive: true });
-		writeFileSync(join(runDir, "user-interactions", "main", "2", "request.json"), JSON.stringify({
-			version: 1,
-			runId: "run-a",
-			branchId: "main",
-			seqId: 99,
-			actionUid: { chart: "chart", state: "wrong", action: "user" },
-			prompt: "wrong directory",
-			options: [],
-			events: ["OK"],
-			createdAt: new Date().toISOString(),
-		}));
-
-		expect(scanOpenUserInteractions(runDir, "main").map((request) => request.seqId)).toEqual([3]);
-		expect(() => readUserInteractionRequest(runDir, "main", 2)).toThrow(/Invalid user interaction record/);
+	it("commits one resolved journal fact, retries identically, and conflicts divergently", async () => {
+		const f = await fixture();
+		const input = { runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) } as const;
+		expect((await validateAndPersistUserInteractionResponse(input)).idempotent).toBe(false);
+		expect((await validateAndPersistUserInteractionResponse(input)).idempotent).toBe(true);
+		await expect(validateAndPersistUserInteractionResponse({ ...input, event: { type: "APPROVED", output: "different" } })).rejects.toThrow(/Conflicting response/);
+		expect((await readUserInteractionResponse(f.runDir, "main", f.gateSeqId))?.event).toEqual({ type: "APPROVED" });
+		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "resolution.json"))).toBe(false);
 	});
 
-	it("validates events and reply schema before commit", async () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		persist(runDir, "run-a", 1, true);
-
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "FAILED", error: "no" },
-		})).rejects.toThrow(/FAILED is reserved/);
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "OTHER" },
-		})).rejects.toThrow(/not allowed/);
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED", output: { nope: true } },
-		})).rejects.toThrow(/reply schema/);
-		expect(readUserInteractionResponse(runDir, "main", 1)).toBeUndefined();
-
-		const committed = await validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED", output: { note: "yes" } },
+	it("routes a live response through the owning runner control API", async () => {
+		const f = await fixture();
+		const attemptId = "attempt-live";
+		patchRunStatus(f.runDir, {
+			runId: "run-a", chartId: "chart", state: "running", branchIds: ["main"], attemptId,
+			pid: process.pid, heartbeatAt: Date.now(),
 		});
-		expect(committed.idempotent).toBe(false);
-		const identical = await validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { output: { note: "yes" }, type: "APPROVED" },
-		});
-		expect(identical.idempotent).toBe(true);
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "REJECTED", output: { note: "no" } },
-		})).rejects.toThrow(/Conflicting response/);
+		const stop = watchRunnerUserResponses(f.runDir, attemptId, (request) =>
+			f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: request.gateSeqId, event: request.event }));
+		try {
+			const committed = await validateAndPersistUserInteractionResponse({
+				runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId,
+				event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir),
+			});
+			expect(committed.idempotent).toBe(false);
+			expect((await readUserInteractionResponse(f.runDir, "main", f.gateSeqId))?.event).toEqual({ type: "APPROVED" });
+		} finally { stop(); }
 	});
 
-	it("makes close and response compete for one atomic resolution fact", async () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		persist(runDir, "run-a", 1, true);
-
-		const committing = validateAndPersistUserInteractionResponse({
-			runDir,
-			runId: "run-a",
-			branchId: "main",
-			seqId: 1,
-			event: { type: "APPROVED", output: { note: "yes" } },
-		});
-		const closed = closeUserInteraction(runDir, { runId: "run-a", branchId: "main", seqId: 1 }, "timeout");
-
-		expect(closed?.reason).toBe("timeout");
-		await expect(committing).rejects.toThrow(/stale, closed, or missing|closed before response commit/);
-		expect(readUserInteractionClose(runDir, "main", 1)?.reason).toBe("timeout");
-		expect(readUserInteractionResponse(runDir, "main", 1)).toBeUndefined();
+	it("validates reply schema before append", async () => {
+		const f = await fixture(true);
+		const base = { runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, owner: owner(f.runsRoot, f.workDir) } as const;
+		await expect(validateAndPersistUserInteractionResponse({ ...base, event: { type: "APPROVED", output: { note: 1 } } })).rejects.toThrow(/reply schema/);
+		expect((await validateAndPersistUserInteractionResponse({ ...base, event: { type: "APPROVED", output: { note: "ok" } } })).idempotent).toBe(false);
 	});
 
-	it("pins and promotes gates strictly by lexical runId then numeric seqId", async () => {
-		const { runsRoot, workDir } = world();
-		const runB = createRun(runsRoot, workDir, "run-b");
-		const runA = createRun(runsRoot, workDir, "run-a");
-		persist(runB, "run-b", 1);
-		persist(runA, "run-a", 10);
-		persist(runA, "run-a", 2);
-		const owned = owner(runsRoot, workDir);
+	it("allows offline response and treats timeout as a closed gate", async () => {
+		const f = await fixture();
+		await f.store.appendDrafts([{ type: "failure_intent", origin: "ask", error: "closed" }]);
+		await expect(f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: f.gateSeqId, event: { type: "APPROVED" } })).rejects.toThrow(/stale or closed/);
+	});
 
-		expect(scanOwnedOpenUserInteractions(owned).map(({ request }) => [request.runId, request.seqId])).toEqual([
-			["run-a", 2],
-			["run-a", 10],
-			["run-b", 1],
+	it("uses only selected ancestry for idempotency after rewind", async () => {
+		const f = await fixture();
+		await f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: f.gateSeqId, event: { type: "APPROVED" } });
+		await f.store.moveBranch("main", f.gateSeqId);
+		const second = await f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: f.gateSeqId, event: { type: "APPROVED", output: "alternate" } });
+		expect(second.idempotent).toBe(false);
+		expect(second.record.parentId).toBe(f.gateSeqId);
+	});
+
+	it("serializes concurrent in-process memory responses to one winner", async () => {
+		const f = await fixture();
+		const memory = new MemoryLogStore();
+		const state = f.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
+		const [invoke] = await memory.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+		const [opened] = await memory.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"] }]);
+		const mem = await Promise.allSettled([
+			memory.respondToUserInteraction({ ast: f.ast, gateSeqId: opened!.seqId, event: { type: "APPROVED", output: "left" } }),
+			memory.respondToUserInteraction({ ast: f.ast, gateSeqId: opened!.seqId, event: { type: "APPROVED", output: "right" } }),
 		]);
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 2 });
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 2 });
-
-		await validateAndPersistUserInteractionResponse({
-			runDir: runA,
-			runId: "run-a",
-			branchId: "main",
-			seqId: 2,
-			event: { type: "APPROVED" },
-			owner: owned,
-		});
-		expect((await validateAndPersistUserInteractionResponse({
-			runDir: runA,
-			runId: "run-a",
-			branchId: "main",
-			seqId: 2,
-			event: { type: "APPROVED" },
-			owner: owned,
-		})).idempotent).toBe(true);
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 10 });
-		closeUserInteraction(runA, { runId: "run-a", branchId: "main", seqId: 10 }, "scope_exit");
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-b", seqId: 1 });
+		expect(mem.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
 	});
 
-	it("keeps the first immutable claim pinned when a lower coordinate appears later", () => {
-		const { runsRoot, workDir } = world();
-		const runB = createRun(runsRoot, workDir, "run-b");
-		persist(runB, "run-b", 1);
-		const owned = owner(runsRoot, workDir);
-		const staleSelection = acquireActiveUserInteraction(owned);
-		expect(staleSelection?.request.runId).toBe("run-b");
-
-		const runA = createRun(runsRoot, workDir, "run-a");
-		persist(runA, "run-a", 1);
-		// Another presenter can now select run-a while the stale run-b presenter is paused.
-		expect(acquireActiveUserInteraction(owned)?.request.runId).toBe("run-a");
-		claimUserInteractionReceipt(runB, "main", 1, "test", "session-a", { source: "first-published-claim" });
-		Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
-		claimUserInteractionReceipt(runA, "main", 1, "test", "session-a", { source: "later-published-claim" });
-
-		// Once run-b wins the first immutable claim it remains the sole active gate. The
-		// lexically lower run-a is queued rather than preempting a gate that may be presented.
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-b", seqId: 1 });
+	it("does not expose gates after durable failure", async () => {
+		const f = await fixture();
+		await f.store.appendDrafts([{ type: "failure_intent", origin: "ask", error: "failed" }]);
+		expect(await scanOpenUserInteractions(f.runDir, "main")).toEqual([]);
 	});
 
-	it("enforces exact owner/cwd and exact active coordinates", async () => {
-		const { root, runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		persist(runDir, "run-a", 1);
-		persist(runDir, "run-a", 2);
-		const activeOwner = owner(runsRoot, workDir);
-		expect(acquireActiveUserInteraction(activeOwner)?.request.seqId).toBe(1);
-
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 2, event: { type: "APPROVED" }, owner: activeOwner,
-		})).rejects.toThrow(/not the active gate/);
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED" }, owner: owner(runsRoot, workDir, "session-b"),
-		})).rejects.toThrow(/not owned/);
-		await expect(validateAndPersistUserInteractionResponse({
-			runDir, runId: "run-a", branchId: "main", seqId: 1, event: { type: "APPROVED" }, owner: owner(runsRoot, join(root, "elsewhere")),
-		})).rejects.toThrow(/another working directory/);
-	});
-
-	it("keeps an already-presented unanswered gate pinned ahead of lower pending coordinates", () => {
-		const { runsRoot, workDir } = world();
-		const runA = createRun(runsRoot, workDir, "run-a");
-		const runB = createRun(runsRoot, workDir, "run-b");
-		persist(runA, "run-a", 1);
-		persist(runB, "run-b", 1);
-		claimUserInteractionReceipt(runB, "main", 1, "test", "session-a", { now: 1, leaseMs: 1 });
-
-		// Even an expired claim may only redeliver run-b; it cannot promote run-a.
-		expect(acquireActiveUserInteraction(owner(runsRoot, workDir))?.request).toMatchObject({
-			runId: "run-b",
-			branchId: "main",
-			seqId: 1,
-		});
-		markUserInteractionReceipt(runB, "main", 1, "test", "session-a");
-		expect(acquireActiveUserInteraction(owner(runsRoot, workDir))?.request.runId).toBe("run-b");
-	});
-
-	it("recovers presentation claims and confirmations without changing gate identity", () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		persist(runDir, "run-a", 1);
-
-		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 1_000, leaseMs: 100 })).toBe(true);
-		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 1_050, leaseMs: 100 })).toBe(false);
-		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 1_101, leaseMs: 100 })).toBe(true);
-		expect(hasUserInteractionReceipt(runDir, "main", 1, "test", "session-a")).toBe(false);
-		markUserInteractionReceipt(runDir, "main", 1, "test", "session-a");
-		expect(hasUserInteractionReceipt(runDir, "main", 1, "test", "session-a")).toBe(true);
-		expect(claimUserInteractionReceipt(runDir, "main", 1, "test", "session-a", { now: 9_000, leaseMs: 100 })).toBe(false);
-	});
-
-	it("preserves phases on dispose, closes on cancel, and creates a new rejected-phase request", async () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		const uid = { chart: "chart", state: "ask", action: "user" } as const;
-		const invocation = {
-			kind: "user" as const,
-			id: "private-effect",
-			seqId: 1,
-			actionUid: uid,
-			action: { kind: "user" as const, uid, prompt: { kind: "template" as const, strings: ["Approve?"], refs: [] }, options: ["APPROVED"] },
-			prompt: "Approve?",
-			events: ["APPROVED"],
-		};
-		const first = new FileUserExecutor({ runId: "run-a", runDir, branchId: "main", pollMs: 1_000 });
-		first.start(invocation, () => undefined);
-		await first.dispose();
-		expect(readUserInteractionRequest(runDir, "main", 1)).toBeDefined();
-		expect(readUserInteractionClose(runDir, "main", 1)).toBeUndefined();
-
-		const canceling = new FileUserExecutor({ runId: "run-a", runDir, branchId: "main", pollMs: 1_000 });
-		canceling.start({ ...invocation, id: "private-effect-2", seqId: 2 }, () => undefined);
-		await canceling.cancel(uid);
-		expect(readUserInteractionClose(runDir, "main", 2)?.reason).toBe("machine_abandoned");
-		await canceling.dispose();
-
-		const rejecting = new FileUserExecutor({ runId: "run-a", runDir, branchId: "main", pollMs: 1_000 });
-		rejecting.reject({
-			kind: "rejected",
-			id: "private-rejected-effect",
-			seqId: 3,
-			actionUid: uid,
-			event: { type: "APPROVED" },
-			onReject: "resume",
-			validationAttempts: 1,
-			reason: "needs confirmation",
-			invocation,
-		}, () => undefined);
-		expect(readUserInteractionRequest(runDir, "main", 3)?.rejection).toEqual({
-			attempt: 1,
-			onReject: "resume",
-			reason: "needs confirmation",
-		});
-		await rejecting.dispose();
-	});
-
-	it("preserves the whole mailbox during append-only rewind", async () => {
-		const { root, runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		const chartPath = join(root, "rewind-chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "chart", initial: "ask", states: { ask: { kind: "state", action: { kind: "user", prompt: "Approve?", options: ["APPROVED"] }, transitions: { APPROVED: "done" } }, done: { kind: "final" } } };\n`);
-		saveRunMeta(runDir, {
-			chartPath,
-			workDir,
-			chartId: "chart",
-			createdAt: new Date().toISOString(),
-			originSessionId: "session-a",
-		});
-		const uid = { chart: "chart", state: "ask", action: "user" } as const;
-		const logStore = new JsonlLogStore(join(runDir, "log.jsonl"));
-		logStore.initializeRootBranch();
-		logStore.appendDrafts([
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "user", uid, prompt: { kind: "template", strings: ["Approve?"], refs: [] }, options: ["APPROVED"] } },
-			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "APPROVED" } },
-		]);
-		persist(runDir, "run-a", 1);
-		closeUserInteraction(runDir, { runId: "run-a", branchId: "main", seqId: 1 }, "test");
-		const mailboxPath = userInteractionRequestPath(runDir, "main", 1);
-		const mailboxBefore = readFileSync(mailboxPath, "utf8");
-		patchRunStatus(runDir, { state: "stopped", pid: undefined, heartbeatAt: undefined });
-
-		const result = await rewindHyperchartRun({
-			runDir,
-			branchId: "main",
-			state: "ask",
-			mode: "before",
-			cwd: workDir,
-		});
-
-		expect(result).toMatchObject({ branchId: "main", previousHeadSeqId: 2, headSeqId: null, preservedRecords: 2 });
-		expect(readFileSync(mailboxPath, "utf8")).toBe(mailboxBefore);
-	});
-
-	it("ignores obsolete mutable arbiter files and derives the real lowest gate", () => {
-		const { runsRoot, workDir } = world();
-		const runDir = createRun(runsRoot, workDir, "run-a");
-		persist(runDir, "run-a", 1);
-		const owned = owner(runsRoot, workDir);
-		mkdirSync(join(runsRoot, ".user-interaction-arbiter"), { recursive: true });
-		writeFileSync(userInteractionArbiterPath(owned), "{broken\n");
-
-		expect(acquireActiveUserInteraction(owned)?.request).toMatchObject({ runId: "run-a", branchId: "main", seqId: 1 });
-		expect(releaseActiveUserInteraction(owned, { runId: "run-a", branchId: "main", seqId: 1 })).toBe(false);
-		closeUserInteraction(runDir, { runId: "run-a", branchId: "main", seqId: 1 }, "done");
-		expect(releaseActiveUserInteraction(owned, { runId: "run-a", branchId: "main", seqId: 1 })).toBe(true);
+	it("keeps presentation receipts as sidecars without changing semantic openness", async () => {
+		const f = await fixture(); const owned = owner(f.runsRoot, f.workDir);
+		const active = await acquireActiveUserInteraction(owned); expect(active?.request.seqId).toBe(f.gateSeqId);
+		expect(claimUserInteractionReceipt(f.runDir, "main", f.gateSeqId, "test", "session-a")).toBe(true);
+		markUserInteractionReceipt(f.runDir, "main", f.gateSeqId, "test", "session-a");
+		expect(hasUserInteractionReceipt(f.runDir, "main", f.gateSeqId, "test", "session-a")).toBe(true);
+		const scanned = await scanOwnedOpenUserInteractions(owned); expect(scanned[0]?.presentation).toBe("confirmed");
 	});
 });

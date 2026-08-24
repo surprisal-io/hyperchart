@@ -139,10 +139,11 @@ The Pi package adds files that are useful but not semantic history:
 | `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-attempt UUID, written before terminal status |
 | `terminal-notification/receipts/<request-hash>/*.json` | generation-isolated, recoverable per-host/session terminal-delivery leases and confirmed receipts |
 | `terminal-notification-history/<generation>/` | complete outboxes archived when a terminal run starts another attempt; prior requests and receipts remain auditable but are no longer deliverable |
-| `user-interactions/<seqId>/request.json` | persist-once rendered user gate identified externally only by `(runId, seqId)` |
-| `user-interactions/<seqId>/resolution.json` | immutable response-or-close winner; a committed response contains the validated chart event |
-| `user-interactions/<seqId>/receipts/*.json` | per-host/session claims and presentation confirmations; never a second gate identity |
-| `user-interactions/<seqId>/receipts/*.published` | internal immutable publication-order markers used only for cross-process presentation arbitration |
+| journal `user_interaction/opened` | fully rendered durable gate; its record seqId is the external gate identity |
+| journal `user_interaction/resolved` | validated external input that directly completes the user action |
+| `user-interactions/<branchId>/<seqId>/receipts/*.json` | non-semantic per-host/session presentation claims and confirmations |
+| `user-interactions/<branchId>/<seqId>/receipts/*.published` | internal immutable publication-order markers used only for cross-process presentation arbitration |
+| `runner-control/user-responses/{requests,results}/*.json` | attempt-fenced, non-semantic command/ack transport to the sole live runtime writer; journal facts remain authoritative |
 | `sessions/progress.json` | optional branch-tagged agent progress summaries |
 | `sessions/<sanitized-branch-prefix>-<hash>/<actionUid>/<invocation>/` | collision-resistant branch-separated host conversation state and usage; there is no legacy-directory migration |
 | `sessions/steering/*.json` | requests carrying `branchId`; the runner routes each only to that branch's executor |
@@ -155,7 +156,7 @@ A run may have a valid log and a stale process status. Conversely, a process can
 
 - the `Runtime` effect-interpreter interface;
 - `ChartRuntime`;
-- `AgentExecutor` and the file-backed `UserExecutor`;
+- `AgentExecutor` and journal-native user-input admission;
 - `ScriptRunner`;
 - `JsonlLogStore`;
 - run-directory and metadata helpers;

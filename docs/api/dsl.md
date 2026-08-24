@@ -497,7 +497,7 @@ Each reached user phase receives a durable numeric `seqId`. The public coordinat
 
 The event must be an allowed non-`FAILED` event, and `output` must satisfy `reply` when a schema is declared. An invalid claim is rejected without consuming the gate so the human can retry. An identical committed retry is idempotent; a different retry conflicts. Timeouts and cancellation still participate in normal machine ordering: whichever completion wins closes the phase, and later duplicate responses cannot resume it.
 
-The detached runner remains alive while waiting, and only the branch containing the gate blocks. Other `parallel` regions and admitted `map` instances continue. Pi and Claude Code implement this protocol; a custom host can use the generic file-backed user executor and mailbox APIs.
+The detached runner remains alive while waiting, and only the branch containing the journal-open gate blocks. Other `parallel` regions and admitted `map` instances continue. Pi and Claude Code route live answers through the owning runner control API; only a stopped run opens the serialized writer temporarily. Custom hosts use the same high-level response API and never open a second writer for a live run.
 
 ## Transitions and inputs
 

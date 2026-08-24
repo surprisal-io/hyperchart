@@ -19,6 +19,7 @@ import {
 	reply,
 	send,
 	tsImport,
+	user,
 	z,
 	t,
 	type ActionUID,
@@ -587,5 +588,21 @@ describe("explainReplay", () => {
 
 		expect(explanation.broken).toBeUndefined();
 		expect(explanation.skipped).toEqual([]);
+	});
+
+	it("validates opened provenance and resolved user-event legality", () => {
+		const current = ast(chart({ kind: "chart", id: "user-replay", initial: "ask", states: {
+			ask: { kind: "state", action: user({ prompt: "Approve?", options: ["OK"] }), transitions: { OK: "done" } },
+			done: final(),
+		} }));
+		const uid = actionUid(current, "ask");
+		const opened: DurableLogRecord = { type: "user_interaction", kind: "opened", actionUid: uid, phaseSeqId: 2, prompt: "Approve?", options: ["OK"], events: ["OK"], ...meta(3) };
+		const resolved: DurableLogRecord = { type: "user_interaction", kind: "resolved", gateSeqId: 3, actionUid: uid, event: { type: "OK" }, ...meta(4) };
+		const prefix = [args(), invoke(uid, 2, definition(current, "ask"))];
+		expect(explainReplay(current, [...prefix, opened, resolved])).toMatchObject({ prefixEnd: 4, stale: [] });
+		const stale = explainReplay(current, [...prefix, { ...opened, prompt: "Changed" }]);
+		expect(stale.stale).toEqual([expect.objectContaining({ reason: "user_interaction_contract_changed", state: "ask" })]);
+		const broken = explainReplay(current, [...prefix, opened, { ...resolved, event: { type: "NOPE" } }]);
+		expect(broken.broken?.error).toContain("not allowed");
 	});
 });

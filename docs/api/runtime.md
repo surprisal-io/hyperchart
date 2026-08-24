@@ -5,7 +5,6 @@ Import the generic runtime from `@surprisal/hyperchart/runtime`:
 ```ts
 import {
   ChartRuntime,
-  FileUserExecutor,
   JsonlLogStore,
   MemoryLogStore,
   ScriptRunner,
@@ -66,7 +65,6 @@ type ChartRuntimeOptions = {
   ast: ChartAst;
   logStore: LogStore;
   agentExecutor: AgentExecutor;
-  userExecutor?: UserExecutor;
   workDir: string;
   chartDir: string;
   schemaRegistry?: SchemaRegistryLike;
@@ -83,11 +81,11 @@ type ChartRuntimeOptions = {
 - timers and cancellation;
 - validation rejection dispatch;
 - a pluggable agent executor;
-- a pluggable user executor for durable host-mediated input.
+- journal-native durable user gates.
 
-Detached runners provide `FileUserExecutor`. A custom in-process runtime that can reach `user()` must also provide a `UserExecutor`; without one, `ChartRuntime` throws when the user effect is dispatched rather than inventing an answer.
+User actions do not dispatch an executor. The machine appends a rendered `user_interaction/opened` fact and waits. For a live run, the typed runner-control API sends the answer to the detached runtime that already owns the journal; that sole writer appends `user_interaction/resolved` and acknowledges the committed record directly to its machine. A stopped run temporarily opens the same writer API and consumes the fact on later replay. Storage is not an event bus and `LogStore` has no subscription/watch contract.
 
-`dispose()` is idempotent and begins by refusing new effects and callbacks. It clears timers, concurrently disposes script, agent, and user executors, drains effect preparation and completion-admission work already in flight, then closes the event queue. Cleanup failures are reported only after every component and tracked continuation has had a chance to quiesce. `FileUserExecutor` preserves unanswered mailbox requests while waiting for any active response validation to finish.
+`dispose()` is idempotent and begins by refusing new effects and callbacks. It clears timers, disposes script and agent executors, drains effect preparation and completion-admission work already in flight, then closes the event queue.
 
 ```ts
 import { loop } from "@surprisal/hyperchart";
@@ -126,32 +124,15 @@ const outcome = await controller.startBranch(fork.branchId); // explicit admissi
 await completion;
 ```
 
-`startBranch()` synchronously reserves a durable branch before its replay gate or executor construction, then returns a promise for that branch's `complete` or `failed` outcome. Each admitted branch owns a branch-scoped executor, user executor, and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
+`startBranch()` synchronously reserves a durable branch before its replay gate or executor construction, then returns a promise for that branch's `complete` or `failed` outcome. Each admitted branch owns a branch-scoped agent executor and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
 
 `liveBranchIds` and status-v2 `branchIds` are current live reservations, not durable branch selection. Forking does not add a reservation. The final reservation is removed only after disposal, terminal notification persistence publishes `branchIds: []`, and the controller rejects fork/admission after it begins closing. Keep an existing reservation live while admitting more work; there is intentionally no filesystem, Pi-command, or MCP control plane for dynamic admission.
 
-## `UserExecutor` and `FileUserExecutor`
+## Journal-native user input
 
-```ts
-interface UserExecutor {
-  start(effect: UserEffect, emit: EmitCompletion): void;
-  reject(effect: RejectedEffect, emit: EmitCompletion): void;
-  cancel(actionUid: ActionUID): void;
-  dispose(): Promise<void>;
-}
+`RunLogStore.respondToUserInteraction({ ast, gateSeqId, event, schemaRegistry? })` is the sole-writer admission primitive. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
 
-new FileUserExecutor({
-  runId,
-  runDir,
-  pollMs?: number,
-  schemaRegistry?: SchemaRegistryLike,
-  onWarn?: (message: string) => void,
-});
-```
-
-`FileUserExecutor` is the durable rendezvous used by detached runners. `start()` persists or reuses `user-interactions/<seqId>/request.json`, polls for a response resolution, validates it, and emits the resulting chart event exactly once to the normal action-completion path. `reject()` creates the next durable phase with its own `seqId` and rejection metadata. Its referenced poll interval keeps the runner alive even when every active branch is waiting for human input; other parallel/map work remains runnable.
-
-`cancel()` writes a close resolution for a phase abandoned by the machine, so a timeout or competing completion cannot be answered later. `dispose()` stops local polling but deliberately preserves open requests: an operator stop and later resume reuses the mailbox. Restart also consumes a response that was persisted before its completion reached `log.jsonl`.
+JSONL validates and appends against its already-open snapshot under the writer lock and rejects a stale byte boundary. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected. Its managed transaction callback can combine journal operations with host-domain SQL only while that sole writer owns the run.
 
 ## `AgentExecutor`
 
@@ -511,24 +492,15 @@ function finalMachineFailureMessage(
 
 For global failure, returns the error stored on durable `failure_intent` (structured payloads are JSON-stringified). For an authored failed terminal without global failure, it describes the reached terminal. It returns `undefined` for complete terminals.
 
-## User-interaction mailbox
+## Journal-native user interactions
 
-Each user phase is stored under its run directory:
+Each user phase appends `user_interaction/opened` with its fully rendered prompt, options, allowed events, reply schema, action identity, and rejection metadata. The opened record's global `seqId` is the public `(runId, branchId, seqId)` gate coordinate. An accepted external answer appends one `user_interaction/resolved` referencing that `gateSeqId`; projection applies it directly as the completion.
 
-```text
-user-interactions/<seqId>/
-├── request.json
-├── resolution.json
-└── receipts/
-```
+Host scans derive open gates from selected journal ancestries and require exact `originSessionId` and canonical `workDir`. Presentation arbitration remains lexical by run, branch, and opened seqId, with claimed/confirmed gates pinned. The only files under `user-interactions/<branchId>/<seqId>/` are non-semantic delivery receipts and publication markers.
 
-`request.json` is versioned and persist-once. It contains the public `(runId, branchId, seqId)` coordinate, rendered prompt, allowed events/options, optional reply contract, machine action identity, and rejection metadata. Runtime `effectId` values never cross this boundary, and there is no second request/gate identifier. Hosts accept `{ runId, branchId, seqId, event: "APPROVED", output? }`; `resolution.json` stores that as an atomically published immutable union with a normalized chart event `{ type, output? }`, or stores a close marker. Response and close therefore race for one winner. Malformed, mismatched, or foreign files are isolated and do not become active requests.
+`validateAndPersistUserInteractionResponse()` performs ownership checks and selects one of two modes. A live status with an exact runner-attempt identity queues a typed non-semantic control command; the owning runtime commits and acknowledges it. Only a stopped run opens a temporary writer directly. Allowed non-`FAILED` events and reply payloads are validated before append. Identical selected-ancestry retries are idempotent, divergent retries conflict, and closed or off-ancestry gates are stale. A crash between commit and acknowledgement is safe because retry observes the same resolved fact.
 
-Host scans require an exact `originSessionId` and canonical `workDir`. All open requests are persisted immediately, but one presentation boundary is selected across the runs root for each `host + session + workDir`. A confirmed or claimed live request stays pinned; otherwise selection is lexical `runId`, then branch id and numeric `seqId`. This serializes simultaneous gates from parallel/map branches and separate runs without blocking their execution.
-
-`validateAndPersistUserInteractionResponse()` requires the exact active `(runId, branchId, seqId)`, an allowed non-`FAILED` event, and schema-valid output when a reply contract exists. Identical retries return idempotently; divergent responses conflict. Receipt claims and confirmations provide recoverable, at-least-once presentation without making presentation itself a semantic log fact; internal `.published` sidecars make immutable receipt publication order stable for cross-process arbitration. Key helpers include `persistUserInteractionRequest()`, `scanOpenUserInteractions()`, `scanOwnedOpenUserInteractions()`, `acquireActiveUserInteraction()`, `claimUserInteractionReceipt()`, `markUserInteractionReceipt()`, `validateAndPersistUserInteractionResponse()`, and `closeUserInteraction()`.
-
-Rewind never moves this directory. Global ids are never reused, and only the exact live runner branch accepts a response; sibling gates remain inspectable.
+Rewind changes selected ancestry only. A resolved fact outside that ancestry neither answers nor conflicts with the selected gate.
 
 ## Terminal notification outbox
 
@@ -552,29 +524,22 @@ Notification artifact entries are authoritative absolute paths under `workDir`; 
 ```text
 Runtime
 AgentExecutor, EmitCompletion
-UserExecutor, FileUserExecutor, FileUserExecutorOptions
 AgentDefinition, AgentDefinitionResolution, ThinkingLevel,
 createAgentDefaultsResolver, resolveAgentDefaults, loadAgentDefinition, parseAgentFile
 RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry, SchemaRegistryLike
 ChartRuntime, ChartRuntimeOptions
 USER_INTERACTIONS_DIR, USER_INTERACTION_ARBITER_DIR,
 USER_INTERACTION_CLAIM_LEASE_MS, USER_INTERACTION_WAIT_LEASE_MS,
-USER_INTERACTION_REQUEST,
-USER_INTERACTION_RESOLUTION, USER_INTERACTION_RESPONSE, USER_INTERACTION_CLOSE,
 UserInteractionCoordinate, UserInteractionOwner, UserInteractionRequest,
-UserInteractionResponse, UserInteractionClose, UserInteractionResolution,
-UserInteractionReceipt, UserInteractionArbiterRecord, OwnedUserInteraction,
-PersistUserInteractionRequestInput, PersistUserInteractionResponseOptions,
-userInteractionDir, userInteractionRequestPath, userInteractionResolutionPath,
-userInteractionResponsePath, userInteractionClosePath, userInteractionReceiptPath,
-userInteractionArbiterPath, persistUserInteractionRequest,
-readUserInteractionRequest, readOpenUserInteractionRequest,
-readUserInteractionResponse, readUserInteractionClose, readUserInteractionResolution,
+UserInteractionResponse, UserInteractionReceipt, UserInteractionArbiterRecord,
+OwnedUserInteraction, PersistUserInteractionResponseOptions,
+userInteractionDir, userInteractionReceiptPath, userInteractionArbiterPath,
+readUserInteractionResponse,
 scanOpenUserInteractions, scanOwnedOpenUserInteractions, acquireActiveUserInteraction,
 readActiveUserInteraction, releaseActiveUserInteraction,
 claimUserInteractionReceipt, markUserInteractionReceipt, hasUserInteractionReceipt,
-readUserInteractionReceipt, removeUserInteractionReceipt, validateUserInteractionEvent,
-validateAndPersistUserInteractionResponse, closeUserInteraction
+readUserInteractionReceipt, removeUserInteractionReceipt,
+validateAndPersistUserInteractionResponse
 LogStore, JsonlLogStore, MemoryLogStore
 ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue

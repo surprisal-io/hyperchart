@@ -422,94 +422,79 @@ describe("execution loop", () => {
 		expect(state.projection.pendingActions).toEqual([]);
 	});
 
-	it("routes a user reply through the normal durable completion path", async () => {
+	it("commits a journal-native user gate and applies its resolved fact directly", async () => {
 		const ast = userAst();
 		const uid = actionUid(ast, "ask");
 		const events: MachineEvent[] = [];
-		let userEffect: Extract<Effect, { kind: "user" }> | undefined;
+		const gateSeqIds: number[] = [];
 		const runtime = new MockRuntime({
-			ast,
-			logs: [invoke(uid)],
-			events,
+			ast, logs: [invoke(uid)], events,
 			onRunEffects(effects) {
 				for (const effect of effects) {
-					if (effect.kind === "user") {
-						userEffect = effect;
-						events.push({ kind: "user", effectId: effect.id, event: { type: "APPROVED" } });
-					} else if (effect.kind === "durable_records") {
-						events.push(durableRecordsAdded(effect.records, effect.id));
+					if (effect.kind !== "durable_records") continue;
+					const ack = durableRecordsAdded(effect.records, effect.id);
+					if (ack.kind !== "durable_records_added") throw new Error("expected durable ack");
+					events.push(ack);
+					const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
+					if (opened?.type === "user_interaction" && opened.kind === "opened") {
+						gateSeqIds.push(opened.seqId);
+						events.push(durableRecordsAdded([{ type: "user_interaction", kind: "resolved", gateSeqId: opened.seqId, actionUid: opened.actionUid, event: { type: "APPROVED" } }], `external:${opened.seqId}`));
 					}
 				}
 			},
 		});
-
 		const state = await loop(runtime);
-
-		expect(userEffect).toEqual(expect.objectContaining({
-			kind: "user",
-			seqId: 1,
-			prompt: "Approve?",
-			events: ["APPROVED"],
-		}));
+		expect(gateSeqIds).toHaveLength(1);
+		expect(gateSeqIds[0]).toBeGreaterThan(0);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(runtime.effectBatches.flat().find((effect) => effect.kind === "durable_records" && effect.records.some((record) => record.type === "state_action" && record.kind === "complete"))).toBeDefined();
+		expect(runtime.effectBatches.flat().some((effect) => effect.kind === "user")).toBe(false);
+		expect(runtime.effectBatches.flat().some((effect) => effect.kind === "durable_records" && effect.records.some((record) => record.type === "state_action" && record.kind === "complete"))).toBe(false);
 	});
 
-	it("rejects an unsupported user event through the shared machine defense", async () => {
+	it("rejects an unsupported journal-native user event", async () => {
 		const ast = userAst();
 		const uid = actionUid(ast, "ask");
 		const events: MachineEvent[] = [];
 		const runtime = new MockRuntime({
-			ast,
-			logs: [invoke(uid)],
-			events,
+			ast, logs: [invoke(uid)], events,
 			onRunEffects(effects) {
-				for (const effect of effects) {
-					if (effect.kind === "user") events.push({ kind: "user", effectId: effect.id, event: { type: "NOPE" } });
+				for (const effect of effects) if (effect.kind === "durable_records") {
+					const ack = durableRecordsAdded(effect.records, effect.id); if (ack.kind !== "durable_records_added") throw new Error("expected durable ack"); events.push(ack);
+					const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
+					if (opened?.type === "user_interaction" && opened.kind === "opened") events.push(durableRecordsAdded([{ type: "user_interaction", kind: "resolved", gateSeqId: opened.seqId, actionUid: opened.actionUid, event: { type: "NOPE" } }], "external"));
 				}
 			},
 		});
-
-		await expect(loop(runtime)).rejects.toThrow("No transition found for event type NOPE");
+		await expect(loop(runtime)).rejects.toThrow("Event 'NOPE' is not allowed");
 	});
 
-	it("gives each validation-retry user gate the rejected fact seqId", async () => {
+	it("gives each validation-retry user phase a fresh opened-fact gate seqId", async () => {
 		const ast = userAst(true);
 		const uid = actionUid(ast, "ask");
 		const events: MachineEvent[] = [];
-		const userSeqIds: number[] = [];
+		const gateSeqIds: number[] = [];
 		let validationRound = 0;
 		const runtime = new MockRuntime({
-			ast,
-			logs: [invoke(uid)],
-			events,
+			ast, logs: [invoke(uid)], events,
 			onRunEffects(effects) {
 				for (const effect of effects) {
-					switch (effect.kind) {
-						case "user":
-							userSeqIds.push(effect.seqId);
-							events.push({ kind: "user", effectId: effect.id, event: { type: "APPROVED" } });
-							break;
-						case "validate":
-							validationRound++;
-							events.push({ kind: "validated", effectId: effect.id, outcome: validationRound === 1 ? { ok: false, reason: "not yet" } : true });
-							break;
-						case "rejected":
-							expect(effect.seqId).toBe(3);
-							expect(effect.invocation.kind === "user" ? effect.invocation.seqId : undefined).toBe(1);
-							events.push({ kind: "user", effectId: effect.id, event: { type: "APPROVED" } });
-							userSeqIds.push(effect.seqId);
-							break;
-						case "durable_records":
-							events.push(durableRecordsAdded(effect.records, effect.id));
-							break;
+					if (effect.kind === "validate") {
+						validationRound++;
+						events.push({ kind: "validated", effectId: effect.id, outcome: validationRound === 1 ? { ok: false, reason: "not yet" } : true });
+					} else if (effect.kind === "durable_records") {
+						const ack = durableRecordsAdded(effect.records, effect.id); if (ack.kind !== "durable_records_added") throw new Error("expected durable ack"); events.push(ack);
+						const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
+						if (opened?.type === "user_interaction" && opened.kind === "opened") {
+							gateSeqIds.push(opened.seqId);
+							events.push(durableRecordsAdded([{ type: "user_interaction", kind: "resolved", gateSeqId: opened.seqId, actionUid: opened.actionUid, event: { type: "APPROVED" } }], `external:${opened.seqId}`));
+						}
 					}
 				}
 			},
 		});
-
 		const state = await loop(runtime);
-		expect(userSeqIds).toEqual([1, 3]);
+		expect(gateSeqIds).toHaveLength(2);
+		expect(gateSeqIds[1]).toBeGreaterThan(gateSeqIds[0]!);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 	});
 
@@ -1625,22 +1610,16 @@ describe("execution loop", () => {
 		const ast = parsed.ast;
 		const uid = actionUid(ast, "work");
 		const events: MachineEvent[] = [];
-		let userEffectId = "";
 		const runtime = new MockRuntime({
 			ast,
 			logs: [invoke(uid)],
 			events,
 			onRunEffects(effects) {
 				for (const effect of effects) {
-					if (effect.kind === "user") userEffectId = effect.id;
 					if (effect.kind === "agent" && effect.actionUid.state === "escalated") {
 						events.push({ kind: "agent", effectId: effect.id, event: { type: "HANDLED" } });
 					}
 					if (effect.kind === "timer") events.push({ kind: "timer", effectId: effect.id });
-					if (effect.kind === "cancel") {
-						events.push({ kind: "user", effectId: userEffectId, event: { type: "APPROVED" } });
-						events.push({ kind: "user", effectId: userEffectId, event: { type: "APPROVED" } });
-					}
 					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
 				}
 			},
@@ -1652,7 +1631,7 @@ describe("execution loop", () => {
 			.flat()
 			.flatMap((effect) => (effect.kind === "durable_records" ? [...effect.records] : []));
 		expect(records.map((record) => record.type === "state_action" ? `${record.kind}:${record.actionUid.state}` : record.type))
-			.toEqual(["timer_fired:work", "invoke:escalated", "complete:escalated"]);
+			.toEqual(["user_interaction", "timer_fired:work", "invoke:escalated", "complete:escalated"]);
 	});
 
 	it("replays a timer expiry without waiting", async () => {

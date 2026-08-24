@@ -15,7 +15,6 @@ import {
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isDeepStrictEqual } from "node:util";
 import {
 	defineTool,
 	type ExtensionAPI,
@@ -50,7 +49,6 @@ import {
 	markTerminalNotificationReceipt,
 	markUserInteractionReceipt,
 	readDeliverableTerminalNotificationRequest,
-	readUserInteractionResponse,
 	removeTerminalNotificationReceipt,
 	recoverStaleRunTerminalNotification,
 	rewindHyperchartRun,
@@ -383,10 +381,10 @@ class PiUserInteractionCoordinator {
 		return this.scanning;
 	}
 
-	beforeAgentStart(_userPrompt: string) {
+	async beforeAgentStart(_userPrompt: string) {
 		const ctx = this.currentContext();
 		if (ctx === undefined) return undefined;
-		const active = acquireActiveUserInteraction(interactionOwner(ctx));
+		const active = await acquireActiveUserInteraction(interactionOwner(ctx));
 		if (active === undefined || active.presentation !== "confirmed") return undefined;
 		this.state = { key: interactionKey(active), phase: "awaiting-user" };
 		let details: ReturnType<typeof compactPiUserInteraction>;
@@ -417,7 +415,7 @@ class PiUserInteractionCoordinator {
 	private async scanOnce(): Promise<void> {
 		const ctx = this.currentContext();
 		if (ctx === undefined) return;
-		const active = acquireActiveUserInteraction(interactionOwner(ctx));
+		const active = await acquireActiveUserInteraction(interactionOwner(ctx));
 		if (active === undefined) {
 			this.state = { phase: "pending" };
 			const idle = typeof ctx.isIdle !== "function" || ctx.isIdle();
@@ -459,7 +457,7 @@ class PiUserInteractionCoordinator {
 				"pi",
 				ctx.sessionManager.getSessionId(),
 			)) return;
-			if (!this.isStillActive(ctx, key)) return;
+			if (!await this.isStillActive(ctx, key)) return;
 			this.pi.sendMessage(boundedPiMessage({
 				customType: "hyperchart-yield",
 				content: `Hyperchart reached user interaction (${active.request.runId}, ${active.request.seqId}). Finish the current safe action/tool batch, do not answer it yourself, and yield so the real user can respond.`,
@@ -477,7 +475,7 @@ class PiUserInteractionCoordinator {
 			"pi",
 			ctx.sessionManager.getSessionId(),
 		)) return;
-		if (!this.isStillActive(ctx, key)) return;
+		if (!await this.isStillActive(ctx, key)) return;
 		this.pi.sendMessage(boundedPiMessage({
 			customType: "hyperchart-user-request",
 			content: formatCompactUserInteraction(active),
@@ -488,8 +486,8 @@ class PiUserInteractionCoordinator {
 		this.state = { key, phase: "awaiting-user" };
 	}
 
-	private isStillActive(ctx: HyperchartContext, expectedKey: string): boolean {
-		const current = acquireActiveUserInteraction(interactionOwner(ctx));
+	private async isStillActive(ctx: HyperchartContext, expectedKey: string): Promise<boolean> {
+		const current = await acquireActiveUserInteraction(interactionOwner(ctx));
 		if (current !== undefined && interactionKey(current) === expectedKey) return true;
 		this.state = current === undefined
 			? { phase: "pending" }
@@ -525,9 +523,9 @@ function interactionKey(active: OwnedUserInteraction): string {
 	return `${active.request.runId}\0${active.request.branchId}\0${active.request.seqId}`;
 }
 
-function inspectOwnedUserInteractions(ctx: HyperchartContext) {
-	const interactions = scanOwnedOpenUserInteractions(interactionOwner(ctx));
-	const active = acquireActiveUserInteraction(interactionOwner(ctx));
+async function inspectOwnedUserInteractions(ctx: HyperchartContext) {
+	const interactions = await scanOwnedOpenUserInteractions(interactionOwner(ctx));
+	const active = await acquireActiveUserInteraction(interactionOwner(ctx));
 	const activeKey = active === undefined ? undefined : interactionKey(active);
 	return {
 		active: active === undefined ? undefined : { ...interactionDetails(active), presentation: active.presentation },
@@ -565,7 +563,7 @@ function undeliverablePiGateMessage(active: OwnedUserInteraction, error: unknown
 	});
 }
 
-function compactPiUserInteractions(summary: ReturnType<typeof inspectOwnedUserInteractions>) {
+function compactPiUserInteractions(summary: Awaited<ReturnType<typeof inspectOwnedUserInteractions>>) {
 	const compact = (entry: NonNullable<typeof summary.active>) => ({
 		...summarizeUserGate({
 			runId: entry.runId,
@@ -876,27 +874,12 @@ async function respondToUserInteraction(
 		type: params.event,
 		...(params.output === undefined ? {} : { output: params.output }),
 	};
-	// Identical retries are durable mailbox operations and must not depend on the chart source
-	// still parsing after the first commit. Owner/cwd checks above remain mandatory.
-	const existing = readUserInteractionResponse(runDir, params.branchId, seqId);
-	if (existing !== undefined) {
-		if (!isDeepStrictEqual(existing.event, event)) {
-			throw new Error(`Conflicting response for user interaction (${params.runId}, ${seqId})`);
-		}
-		return userInteractionRespondResult(params.runId, seqId, event, true);
-	}
-	const parsed = parseChartModuleSync(
-		meta.chartPath,
-		meta.exportName === undefined ? {} : { exportName: meta.exportName },
-	);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const committed = await validateAndPersistUserInteractionResponse({
 		runDir,
 		runId: params.runId,
 		branchId: params.branchId,
 		seqId,
 		event,
-		schemaRegistry: parsed.schemaRegistry,
 		owner: interactionOwner(ctx),
 	});
 	await coordinator?.scan();
@@ -1054,7 +1037,7 @@ function createHyperchartRunTool(delivery: PiTerminalDelivery) {
 					details,
 				};
 			}
-			receiptWaitedPiTerminalNotification(result.runDir, ctx);
+			await receiptWaitedPiTerminalNotification(result.runDir, ctx);
 			const details = safeToolDetails({
 				runId: result.runId,
 				runDir: result.runDir,
@@ -1146,7 +1129,7 @@ const hyperchartRunInspectTool = defineTool({
 		const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
 		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx, { branchId: params.branchId, includeTranscripts: false });
 		const issueCount = (inspector.issues?.length ?? 0) + inspector.states.reduce((count, state) => count + (state.issues?.length ?? 0), 0);
-		const payload = safeToolDetails({ ...summarizeRunInspect(inspector), userInteractions: compactPiUserInteractions(inspectOwnedUserInteractions(ctx)) });
+		const payload = safeToolDetails({ ...summarizeRunInspect(inspector), userInteractions: compactPiUserInteractions(await inspectOwnedUserInteractions(ctx)) });
 		return {
 			content: [
 				{
@@ -1321,7 +1304,7 @@ async function runCommand(tokens: string[], ctx: HyperchartContext, delivery?: P
 			ctx.ui.notify(formatUserInteraction(boundary.interaction), "info");
 			return;
 		}
-		const notification = receiptWaitedPiTerminalNotification(result.runDir, ctx);
+		const notification = await receiptWaitedPiTerminalNotification(result.runDir, ctx);
 		if (notification !== undefined) ctx.ui.notify(notification.payload.prompt, notification.payload.outcome === "failed" ? "error" : "info");
 	}
 }
@@ -1492,8 +1475,8 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 		runs.add(active);
 		setRunWidget(ctx, active);
 		ctx.ui.notify(`Attached to live hyperchart run ${runId}`, "info");
-		void done.then(() => {
-			if (opts.wait !== true && opts.delivery !== undefined) deliverToCurrentPiSession(opts.delivery, actualRunDir);
+		void done.then(async () => {
+			if (opts.wait !== true && opts.delivery !== undefined) await deliverToCurrentPiSession(opts.delivery, actualRunDir);
 		}).finally(() => {
 			runs.remove(runId);
 			ctx.ui.setWidget(`hyperchart:${runId}`, undefined);
@@ -1557,11 +1540,11 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	ctx.ui.setStatus("hyperchart", `▶ ${runs.active.size} run${runs.active.size === 1 ? "" : "s"}`);
 	ctx.ui.notify(`Started hyperchart run ${runId} (pid ${pid})`, "info");
 	void done
-		.then((status) => {
+		.then(async (status) => {
 			if (status.state === "complete") ctx.ui.notify(`Hyperchart run ${runId} finished`, "info");
 			else if (status.state === "failed")
 				ctx.ui.notify(`Hyperchart run ${runId} failed: ${status.error ?? "unknown"}`, "error");
-			if (opts.wait !== true && opts.delivery !== undefined) deliverToCurrentPiSession(opts.delivery, actualRunDir);
+			if (opts.wait !== true && opts.delivery !== undefined) await deliverToCurrentPiSession(opts.delivery, actualRunDir);
 		})
 		.finally(() => {
 			runs.remove(runId);
@@ -1571,18 +1554,18 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	return { runId, runDir: actualRunDir, chartId: parsed.ast.id, done };
 }
 
-function deliverToCurrentPiSession(delivery: PiTerminalDelivery, runDir: string): boolean {
+async function deliverToCurrentPiSession(delivery: PiTerminalDelivery, runDir: string): Promise<boolean> {
 	const ctx = delivery.currentContext();
 	return ctx === undefined ? false : deliverPendingPiTerminalNotification(delivery.api, ctx, runDir);
 }
 
-function deliverPendingPiTerminalNotification(pi: ExtensionAPI, ctx: HyperchartContext, runDir: string): boolean {
+async function deliverPendingPiTerminalNotification(pi: ExtensionAPI, ctx: HyperchartContext, runDir: string): Promise<boolean> {
 	const meta = loadRunMetaIfPresent(runDir);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return false;
 	// A visible or queued owned gate is the current conversational boundary. Leave the
 	// terminal outbox unclaimed so it remains recoverable after the gate is resolved.
-	if (acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return false;
+	if (await acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return false;
 	recoverStaleRunTerminalNotification(runDir);
 	const request = readDeliverableTerminalNotificationRequest(runDir);
 	if (request === undefined) return false;
@@ -1645,9 +1628,12 @@ function waitForPiRunBoundary(result: RunStartResult, ctx: HyperchartContext): P
 			clearInterval(timer);
 			resolveBoundary(boundary);
 		};
-		const inspectInteraction = () => {
+		let inspecting = false;
+		const inspectInteraction = async () => {
+			if (inspecting || settled) return;
+			inspecting = true;
 			try {
-				const active = acquireActiveUserInteraction(interactionOwner(ctx));
+				const active = await acquireActiveUserInteraction(interactionOwner(ctx));
 				if (active === undefined) return;
 				if (active.presentation === "pending") {
 					// Claim pins this coordinate, but do not confirm it here: the tool result has not
@@ -1662,15 +1648,17 @@ function waitForPiRunBoundary(result: RunStartResult, ctx: HyperchartContext): P
 						{ source: "wait", leaseMs: USER_INTERACTION_WAIT_LEASE_MS },
 					);
 				}
-				const current = acquireActiveUserInteraction(interactionOwner(ctx));
+				const current = await acquireActiveUserInteraction(interactionOwner(ctx));
 				if (current === undefined || interactionKey(current) !== interactionKey(active)) return;
 				finish({ kind: "user", interaction: current });
 			} catch {
-				// A concurrently-created/malformed phase is isolated; retry until another
+				// A concurrently-created/malformed journal is isolated; retry until another
 				// valid gate or terminal run status becomes observable.
+			} finally {
+				inspecting = false;
 			}
 		};
-		const timer = setInterval(inspectInteraction, 100);
+		const timer = setInterval(() => void inspectInteraction(), 100);
 		timer.unref();
 		result.done.then(
 			(status) => finish({ kind: "terminal", status }),
@@ -1681,15 +1669,15 @@ function waitForPiRunBoundary(result: RunStartResult, ctx: HyperchartContext): P
 				rejectBoundary(error);
 			},
 		);
-		inspectInteraction();
+		void inspectInteraction();
 	});
 }
 
-function receiptWaitedPiTerminalNotification(runDir: string, ctx: HyperchartContext) {
+async function receiptWaitedPiTerminalNotification(runDir: string, ctx: HyperchartContext) {
 	const meta = loadRunMetaIfPresent(runDir);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return undefined;
-	if (acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return undefined;
+	if (await acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return undefined;
 	const request = readDeliverableTerminalNotificationRequest(runDir);
 	if (request === undefined || !claimTerminalNotificationReceipt(runDir, request.requestId, "pi", sessionId)) return undefined;
 	return request;
@@ -1700,7 +1688,7 @@ async function recoverPiTerminalNotifications(pi: ExtensionAPI, ctx: HyperchartC
 	if (!existsSync(root)) return;
 	for (const runDir of runDirs(root)) {
 		try {
-			deliverPendingPiTerminalNotification(pi, ctx, runDir);
+			await deliverPendingPiTerminalNotification(pi, ctx, runDir);
 		} catch {
 			// One concurrently-created, malformed, or temporarily unavailable run must not
 			// prevent recovery of other runs owned by this session.

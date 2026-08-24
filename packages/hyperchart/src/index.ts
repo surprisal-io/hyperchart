@@ -213,7 +213,6 @@ export type {
 	ActorAdmissionView,
 	RenderedArtifact,
 	UserEffect,
-	UserMachineEvent,
 } from "./core/machine.js";
 export type {
 	ActorLogRecord,
@@ -231,6 +230,9 @@ export type {
 	StateActionInvokeLog,
 	FailureIntentLog,
 	StorageMutation,
+	UserInteractionLog,
+	UserInteractionOpenedLog,
+	UserInteractionResolvedLog,
 } from "./core/durable_events.js";
 export { explainReplay } from "./core/replay_check.js";
 export type { ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord, ReplayStaleRecord } from "./core/replay_check.js";
@@ -245,6 +247,7 @@ export type {
 	ProjectedActorPoolWorker,
 	ProjectedActorEndpointOccurrence,
 	ProjectionSkippedRecord,
+	ProjectedUserInteraction,
 } from "./core/projection.js";
 export { actorEndpointAdmission, createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";

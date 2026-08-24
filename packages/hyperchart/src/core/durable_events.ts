@@ -115,6 +115,36 @@ type StateActionTimerFiredLog = {
 
 type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog | StateActionTimerFiredLog;
 
+/** Durable, fully-rendered host boundary for one exact user-action phase. */
+export type UserInteractionOpenedLog = {
+	type: "user_interaction";
+	kind: "opened";
+	actionUid: ActionUID;
+	/** Record that started the running/rejected phase represented by this gate. */
+	phaseSeqId: number;
+	prompt: string;
+	options: readonly string[];
+	events: readonly string[];
+	reply?: SchemaAst;
+	rejection?: Readonly<{
+		attempt: number;
+		onReject: "resume" | "restart";
+		reason?: string;
+	}>;
+} & SessionParams;
+
+/** The sole durable external-input fact; projection applies it as the user completion. */
+export type UserInteractionResolvedLog = {
+	type: "user_interaction";
+	kind: "resolved";
+	/** seqId of the exact UserInteractionOpenedLog being answered. */
+	gateSeqId: number;
+	actionUid: ActionUID;
+	event: ChartEvent;
+} & SessionParams;
+
+export type UserInteractionLog = UserInteractionOpenedLog | UserInteractionResolvedLog;
+
 /** First durable fact of global fail-fast. No successor state may start after this record. */
 export type FailureIntentLog = {
 	type: "failure_intent";
@@ -230,6 +260,7 @@ export type DurableLogRecord =
 	| ArgsLog
 	| SpawnedLog
 	| StateAction
+	| UserInteractionLog
 	| FailureIntentLog
 	| ActorLogRecord;
 

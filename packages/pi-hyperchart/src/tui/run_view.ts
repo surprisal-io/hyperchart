@@ -338,6 +338,10 @@ function recordText(record: DurableLogRecord): string {
 			return `actor batch ${record.callId} resolved [${record.messageIds.join(", ")}]`;
 		case "actor_scope":
 			return `actor ${record.occurrence} ${record.kind}`;
+		case "user_interaction":
+			return record.kind === "opened"
+				? `user gate ${record.seqId} opened ${record.actionUid.state}`
+				: `user gate ${record.gateSeqId} resolved → ${record.event.type}`;
 		case "state_action":
 			switch (record.kind) {
 				case "invoke":

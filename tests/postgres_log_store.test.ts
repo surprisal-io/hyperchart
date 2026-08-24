@@ -116,14 +116,30 @@ describePg("PostgresLogStore", () => {
 		expect(normalized.nextSeqId).toBe(3);
 	});
 
-	it("refuses a second live writer for the same run", async () => {
+	it("rejects a second live writer for the same run", async () => {
 		const runId = newRunId();
 		const first = await openWriter(runId);
 		await first.initializeRootBranch();
+		await expect(PostgresLogStore.open({ dsn: dsn as string, runId, access: "writer" })).rejects.toThrow(/Another live writer/);
+	});
 
-		await expect(PostgresLogStore.open({ dsn: dsn as string, runId, access: "writer" })).rejects.toThrow(
-			/Another live writer holds Hyperchart run/,
-		);
+	it("rolls journal writes back with host-domain SQL failure", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		await expect(store.transaction(async (tx) => {
+			await tx.appendDrafts("main", [argsDraft()]);
+			await tx.query("SELECT * FROM hyperchart_table_that_does_not_exist");
+		})).rejects.toBeDefined();
+		expect((await store.read()).records).toHaveLength(0);
+	});
+
+	it("rejects a composite response branch unrelated to source or new fork", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		await expect(store.forkAndRespond({
+			sourceBranchId: "main", newBranchId: "experiment", fromSeqId: 1, responseBranchId: "unrelated",
+			response: { ast: {} as never, gateSeqId: 1, event: { type: "OK" } },
+		})).rejects.toThrow(/source branch or the newly created branch/);
 	});
 
 	it("rejects writes through a read-only handle", async () => {
@@ -159,25 +175,21 @@ describePg("PostgresLogStore", () => {
 		await expect(PostgresLogStore.open({ dsn: dsn as string, runId })).rejects.toThrow(CorruptRunLogError);
 	});
 
-	it("notifies listeners on every committed mutation", async () => {
+	it("publishes the existing PostgreSQL commit notification without using it as a runtime subscription", async () => {
 		const runId = newRunId();
 		const { Client } = await import("pg");
 		const listener = new Client({ connectionString: dsn });
 		await listener.connect();
 		const received: string[] = [];
 		listener.on("notification", (message: { channel: string; payload?: string | undefined }) => {
-			if (message.channel === JOURNAL_CHANNEL && message.payload?.startsWith(`${runId}:`)) {
-				received.push(message.payload);
-			}
+			if (message.channel === JOURNAL_CHANNEL && message.payload?.startsWith(`${runId}:`)) received.push(message.payload);
 		});
 		await listener.query(`LISTEN ${JOURNAL_CHANNEL}`);
-
 		const writer = await openWriter(runId);
 		await writer.initializeRootBranch();
 		await writer.appendDrafts([argsDraft()]);
 		await new Promise((resolve) => setTimeout(resolve, 250));
 		await listener.end();
-
 		expect(received).toEqual([`${runId}:1`, `${runId}:2`]);
 	});
 });

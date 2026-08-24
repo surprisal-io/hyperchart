@@ -1,6 +1,6 @@
 import assert from "./assert.js";
 import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
-import type { ActorMessageEnvelope, DurableLogRecord } from "./durable_events.js";
+import type { ActorMessageEnvelope, DurableLogRecord, UserInteractionOpenedLog } from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
@@ -32,13 +32,14 @@ export type PendingAction =
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
 	// validationAttempts counts the rejected rounds of this invoke cycle — derived from validated(false)
 	// facts, it decides when the retry budget (state.retries) is exhausted.
-	| { actionUid: ActionUID; visitId: number; seqId: number; invokeSeqId: number; timestamp: number; phase: "running" }
+	| { actionUid: ActionUID; visitId: number; seqId: number; invokeSeqId: number; timestamp: number; phase: "running"; gateSeqId?: number }
 	| {
 			actionUid: ActionUID;
 			visitId: number;
 			seqId: number;
 			invokeSeqId: number;
 			phase: "validating";
+			gateSeqId?: number;
 			event: ChartEvent;
 			validationAttempts: number;
 	  }
@@ -48,6 +49,7 @@ export type PendingAction =
 			seqId: number;
 			invokeSeqId: number;
 			phase: "rejected";
+			gateSeqId?: number;
 			event: ChartEvent;
 			validationAttempts: number;
 			reason?: string;
@@ -118,12 +120,20 @@ export type PendingActorCall =
 		status: "enqueued" | "accepted" | "partial";
 	};
 
+export type ProjectedUserInteraction = {
+	opened: UserInteractionOpenedLog;
+	status: "open" | "resolved" | "closed";
+	resolvedEvent?: ChartEvent;
+};
+
 export type BranchProjection = {
 	// The active configuration: one leaf normally, one per region while a parallel is active.
 	// Always leaves — compounds drill down to their initial, parallels expand to their regions.
 	activeLeaves: StatePath[];
 	seqId: number;
 	pendingActions: PendingAction[];
+	/** Journal-native user gates keyed by their opened-record seqId. */
+	userInteractions: Record<number, ProjectedUserInteraction>;
 	// The run's input arguments; undefined until the args fact lands in the log.
 	args?: Readonly<Record<string, unknown>>;
 	// Pinned fan-outs: map instance-path → { key → item }, written by spawned facts. Entries stay
@@ -159,6 +169,7 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		activeLeaves: enterState(ast, ast.initial),
 		seqId: 0,
 		pendingActions: [],
+		userInteractions: {},
 		spawns: {},
 		inputs: {},
 		results: {},
@@ -201,6 +212,9 @@ export function projectBranch(
 			case "failure_intent":
 				assertFailureIntent(projection);
 				projection.failure = { origin: record.origin, error: record.error, seqId: record.seqId };
+				for (const interaction of Object.values(projection.userInteractions)) {
+					if (interaction.status === "open") interaction.status = "closed";
+				}
 				break;
 			case "actor_created": {
 				const { liveDefinition, logicalOccurrence } = assertActorCreated(projection, ast, record);
@@ -372,6 +386,45 @@ export function projectBranch(
 				completeParallels(projection, ast);
 				break;
 			}
+			case "user_interaction": {
+				if (record.kind === "opened") {
+					const pending = projection.pendingActions.find((entry) =>
+						sameActionUid(entry.actionUid, record.actionUid) &&
+						(entry.phase === "running" || entry.phase === "rejected"),
+					);
+					if (pending === undefined || pending.seqId !== record.phaseSeqId) {
+						throw new Error(`No matching pending user phase for opened gate in state ${record.actionUid.state}`);
+					}
+					const node = actionStateAt(ast, record.actionUid.state);
+					if (node?.kind !== "state" || node.action.kind !== "user") {
+						throw new Error(`Opened user interaction for non-user state ${record.actionUid.state}`);
+					}
+					if (pending.gateSeqId !== undefined) throw new Error(`User phase in state ${record.actionUid.state} already has an opened gate`);
+					pending.gateSeqId = record.seqId;
+					projection.userInteractions[record.seqId] = { opened: record, status: "open" };
+					break;
+				}
+				const gate = projection.userInteractions[record.gateSeqId];
+				const pending = projection.pendingActions.find((entry) =>
+					sameActionUid(entry.actionUid, record.actionUid) &&
+					(entry.phase === "running" || entry.phase === "rejected") &&
+					entry.gateSeqId === record.gateSeqId,
+				);
+				if (gate === undefined || gate.status !== "open" || pending === undefined || !sameActionUid(gate.opened.actionUid, record.actionUid)) {
+					throw new Error(`No open user interaction ${record.gateSeqId} for state ${record.actionUid.state}`);
+				}
+				const node = actionStateAt(ast, record.actionUid.state);
+				if (node?.kind !== "state" || node.action.kind !== "user") {
+					throw new Error(`Resolved user interaction for non-user state ${record.actionUid.state}`);
+				}
+				if (record.event.type === "FAILED" || !gate.opened.events.includes(record.event.type)) {
+					throw new Error(`Event '${record.event.type}' is not allowed for user interaction ${record.gateSeqId}`);
+				}
+				gate.status = "resolved";
+				gate.resolvedEvent = record.event;
+				applyActionCompletion(projection, ast, record.actionUid, record.event, record.seqId, abandoned);
+				break;
+			}
 			case "state_action":
 				switch (record.kind) {
 					case "invoke":
@@ -396,34 +449,7 @@ export function projectBranch(
 						}
 						break;
 					case "complete":
-						if (isActionActive(projection, ast, record.actionUid.state)) {
-							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "complete");
-							const state = actionStateAt(ast, record.actionUid.state);
-							if (state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED") {
-								// The completion goes into validation, restarting the cycle if a previous round was
-								// rejected; the validation-attempt count survives the retry.
-								const previous = projection.pendingActions.find((pending) =>
-									sameActionUid(pending.actionUid, record.actionUid),
-								);
-								const validationAttempts = previous?.phase === "rejected" ? previous.validationAttempts : 0;
-								removePendingAction(projection, record.actionUid);
-								projection.pendingActions.push({
-									actionUid: record.actionUid,
-									visitId: previous?.visitId ?? projection.stateVisits[actionUidKey(record.actionUid)] ?? 1,
-									seqId: record.seqId,
-									invokeSeqId: previous?.invokeSeqId ?? record.seqId,
-									phase: "validating",
-									event: record.event,
-									validationAttempts,
-								});
-								break;
-							}
-							recordResult(projection, record.actionUid.state, record.event);
-							removePendingAction(projection, record.actionUid);
-							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
-						} else {
-							recordSkipped(skipped, projection, record, record.actionUid.state);
-						}
+						applyActionCompletion(projection, ast, record.actionUid, record.event, record.seqId, abandoned, skipped, record);
 						break;
 					case "timer_fired":
 						// The active-leaf guard makes race losers no-ops: a completion logged after the
@@ -530,6 +556,43 @@ function refreshPendingBatchStatus(projection: BranchProjection, callId: string)
 	pending.status = settled > 0 || (accepted > 0 && accepted < messages.length) ? "partial" : accepted === messages.length ? "accepted" : "enqueued";
 }
 
+function applyActionCompletion(
+	projection: BranchProjection,
+	ast: ChartAst,
+	actionUid: ActionUID,
+	event: ChartEvent,
+	seqId: number,
+	abandoned: PendingAction[],
+	skipped?: ProjectionSkippedRecord[],
+	record?: DurableLogRecord,
+): void {
+	if (!isActionActive(projection, ast, actionUid.state)) {
+		if (skipped !== undefined && record !== undefined) recordSkipped(skipped, projection, record, actionUid.state);
+		else throw new Error(`User interaction completion for inactive state ${actionUid.state}`);
+		return;
+	}
+	assertActiveActionUid(ast, actionUid.state, actionUid, "complete");
+	const state = actionStateAt(ast, actionUid.state);
+	if (state?.kind === "state" && state.validate !== undefined && event.type !== "FAILED") {
+		const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
+		const validationAttempts = previous?.phase === "rejected" ? previous.validationAttempts : 0;
+		removePendingAction(projection, actionUid);
+		projection.pendingActions.push({
+			actionUid,
+			visitId: previous?.visitId ?? projection.stateVisits[actionUidKey(actionUid)] ?? 1,
+			seqId,
+			invokeSeqId: previous?.invokeSeqId ?? seqId,
+			phase: "validating",
+			event,
+			validationAttempts,
+		});
+		return;
+	}
+	recordResult(projection, actionUid.state, event);
+	removePendingAction(projection, actionUid);
+	applyTransition(projection, ast, actionUid.state, event.type, abandoned, event);
+}
+
 // A result exists once the completion is accepted (directly, or by a positive verdict).
 function recordResult(projection: BranchProjection, state: StatePath, event: ChartEvent): void {
 	if ("output" in event && event.output !== undefined) {
@@ -549,7 +612,11 @@ function recordSkipped(
 function removePendingAction(projection: BranchProjection, actionUid: ActionUID): void {
 	const index = projection.pendingActions.findIndex((pending) => sameActionUid(pending.actionUid, actionUid));
 	if (index !== -1) {
-		projection.pendingActions.splice(index, 1);
+		const [removed] = projection.pendingActions.splice(index, 1);
+		if (removed?.gateSeqId !== undefined) {
+			const interaction = projection.userInteractions[removed.gateSeqId];
+			if (interaction?.status === "open") interaction.status = "closed";
+		}
 	}
 }
 
@@ -700,6 +767,10 @@ function exitAndEnter(
 			kept.push(pending);
 		} else {
 			abandoned.push(pending);
+			if (pending.gateSeqId !== undefined) {
+				const interaction = projection.userInteractions[pending.gateSeqId];
+				if (interaction?.status === "open") interaction.status = "closed";
+			}
 		}
 	}
 	projection.pendingActions = kept;

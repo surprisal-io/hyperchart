@@ -7,6 +7,7 @@ import {
 	getAgentDir,
 	SessionManager,
 	type ModelRuntime,
+	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "@surprisal/hyperchart/internal/core/action_uid";
 import type { ActionUID, ChartEvent } from "@surprisal/hyperchart/internal/core/types";
@@ -58,6 +59,8 @@ export type PiSessionOverrides = Readonly<{
 	tools?: string[];
 	/** Invocation-scoped context appended to the agent definition's system prompt. */
 	appendSystemPrompt?: string;
+	/** Custom tools registered only for this invocation. */
+	customTools?: ToolDefinition[];
 }>;
 
 export type PiExecutorOptions = {
@@ -78,6 +81,15 @@ export type PiExecutorOptions = {
 	maxFinishRetries?: number;
 	schemaRegistry?: SchemaRegistry;
 };
+
+export function createInvocationCustomTools(
+	effect: AgentEffect,
+	sink: CompletionSink,
+	registry: SchemaRegistry | undefined,
+	customTools: readonly ToolDefinition[] | undefined,
+): ToolDefinition[] {
+	return [...(customTools ?? []), createFinishTool(effect, sink, registry)];
+}
 
 function workspaceContextNote(projectDir: string, branchWorkspace: string): string {
 	if (projectDir === branchWorkspace) return [
@@ -422,7 +434,12 @@ export class PiAgentExecutor implements AgentExecutor {
 			...(model === undefined ? {} : { model }),
 			...(plan.thinkingLevel === undefined ? {} : { thinkingLevel: plan.thinkingLevel }),
 			...(tools === undefined ? {} : { tools }),
-			customTools: [createFinishTool(effect, sink, this.options.schemaRegistry)],
+			customTools: createInvocationCustomTools(
+				effect,
+				sink,
+				this.options.schemaRegistry,
+				overrides?.customTools,
+			),
 			resourceLoader,
 			sessionManager,
 		});

@@ -18,6 +18,7 @@ import type {
 	RecordBatchMutation,
 	StorageMutation,
 } from "../../core/durable_events.js";
+import { prepareUserInteractionResponse, prepareUserInteractionResponseSync, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
 export const DEFAULT_BRANCH_ID: BranchId = "main";
 
@@ -130,8 +131,11 @@ export interface RunLogStore extends LogStore {
 	initializeRootBranch(metadata?: BranchMetadata): Promise<BranchHead>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
+	respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit>;
 	close(): Promise<void>;
 }
+
+export type { RespondToUserInteractionInput, UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
 /** Stamp drafts with global seqIds/parent linkage for one branch of an already-normalized journal. */
 export function stampDrafts(
@@ -265,21 +269,20 @@ export class JsonlLogStore implements RunLogStore {
 	fullReadCount(): number { return this.journal.fullReadCount; }
 
 	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }): Promise<BranchHead> {
-		const normalized = this.snapshot();
-		if (normalized.mutations.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
-		const committedAt = Date.now();
-		const mutation: StorageMutation = { kind: "branch", op: "create", branchId: this.branchId, headSeqId: null, metadata, committedAt };
-		this.commitMutation(mutation);
-		return { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata };
+		return this.commitBuilt((normalized) => {
+			if (normalized.mutations.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
+			const committedAt = Date.now();
+			const mutation: StorageMutation = { kind: "branch", op: "create", branchId: this.branchId, headSeqId: null, metadata, committedAt };
+			return { mutation, result: { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata } };
+		});
 	}
 
-	// The async signature is the LogStore contract; the body is synchronous, so the
-	// fs append still completes before the snapshot is published and before return.
 	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
-		const { records, mutation } = stampDrafts(this.snapshot(), this.branchId, drafts, Date.now());
-		this.commitMutation(mutation);
-		return records;
+		return this.commitBuilt((normalized) => {
+			const { records, mutation } = stampDrafts(normalized, this.branchId, drafts, Date.now());
+			return { mutation, result: records };
+		});
 	}
 
 	snapshot(): NormalizedRunLog {
@@ -297,49 +300,76 @@ export class JsonlLogStore implements RunLogStore {
 
 	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
-		const normalized = this.snapshot();
-		if (normalized.branches.has(branchId)) throw new Error(`Hyperchart branch '${branchId}' already exists`);
-		if (!normalized.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
-		const committedAt = Date.now();
-		this.commitMutation({ kind: "branch", op: "create", branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt });
-		return { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) };
+		return this.commitBuilt((normalized) => {
+			if (normalized.branches.has(branchId)) throw new Error(`Hyperchart branch '${branchId}' already exists`);
+			if (!normalized.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
+			const committedAt = Date.now();
+			return {
+				mutation: { kind: "branch", op: "create", branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt },
+				result: { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) },
+			};
+		});
 	}
 
 	async moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
-		const normalized = this.snapshot();
-		const branch = normalized.branches.get(branchId);
-		if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
-		if (headSeqId !== null && !normalized.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
-		this.commitMutation({ kind: "branch", op: "move", branchId, headSeqId, committedAt: Date.now() });
-		return { ...branch, headSeqId };
+		return this.commitBuilt((normalized) => {
+			const branch = normalized.branches.get(branchId);
+			if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
+			if (headSeqId !== null && !normalized.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
+			return {
+				mutation: { kind: "branch", op: "move", branchId, headSeqId, committedAt: Date.now() },
+				result: { ...branch, headSeqId },
+			};
+		});
+	}
+
+	async respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit> {
+		// Runtime-schema validation may await, so serialize the final prefix check and append
+		// with every other in-process writer operation. No second live process may own this store.
+		await prepareUserInteractionResponse(this.snapshot(), this.branchId, input);
+		return enqueueJsonlWrite(this.journal.filePath, async () => {
+			const release = acquireWriterLock(this.journal.filePath);
+			try {
+				const normalized = this.snapshot();
+				const prepared = prepareUserInteractionResponseSync(normalized, this.branchId, input);
+				if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
+				const { records, mutation } = stampDrafts(normalized, this.branchId, [prepared.draft], Date.now());
+				this.appendLocked(mutation);
+				return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
+			} finally { release(); }
+		});
 	}
 
 	private openJournal(): void {
 		if (this.journal.snapshot !== undefined) return;
 		const opened = readMutationValues(this.journal.filePath, this.journal.onWarn);
-		const normalized = validateAndProjectJournal(opened.values);
 		this.journal.fullReadCount++;
 		this.journal.expectedByteLength = opened.byteLength;
-		this.journal.snapshot = normalized;
+		this.journal.snapshot = validateAndProjectJournal(opened.values);
 	}
 
-	private commitMutation(mutation: StorageMutation): void {
+	private commitBuilt<T>(builder: (normalized: NormalizedRunLog) => { mutation: StorageMutation; result: T }): T {
+		this.openJournal();
+		const release = acquireWriterLock(this.journal.filePath);
+		try {
+			const built = builder(this.snapshot());
+			this.appendLocked(built.mutation);
+			return built.result;
+		} finally { release(); }
+	}
+
+	private appendLocked(mutation: StorageMutation): void {
 		const snapshot = this.journal.snapshot;
 		const expectedByteLength = this.journal.expectedByteLength;
 		if (snapshot === undefined || expectedByteLength === undefined) throw new Error("Hyperchart journal is not open");
+		const currentByteLength = journalByteLength(this.journal.filePath);
+		if (currentByteLength !== expectedByteLength) {
+			throw new Error(`Stale Hyperchart journal writer: expected ${expectedByteLength} bytes but found ${currentByteLength}; reopen the run before writing`);
+		}
 		const line = `${JSON.stringify(mutation)}\n`;
-		// Disk is the publication boundary: mutate shared arrays/maps/pointer nodes only
-		// after the append succeeds, so readers never observe an undurable record.
-		const release = acquireWriterLock(this.journal.filePath);
-		try {
-			const currentByteLength = journalByteLength(this.journal.filePath);
-			if (currentByteLength !== expectedByteLength) {
-				throw new Error(`Stale Hyperchart journal writer: expected ${expectedByteLength} bytes but found ${currentByteLength}; reopen the run before writing`);
-			}
-			appendMutationLine(this.journal.filePath, line);
-			this.journal.expectedByteLength = expectedByteLength + Buffer.byteLength(line, "utf8");
-		} finally { release(); }
+		appendMutationLine(this.journal.filePath, line);
+		this.journal.expectedByteLength = expectedByteLength + Buffer.byteLength(line, "utf8");
 		snapshot.applyMutation(mutation);
 	}
 }
@@ -395,6 +425,18 @@ function buildAncestryNodes(records: readonly DurableLogRecord[]): Map<number, A
 	return nodes;
 }
 
+const jsonlWriteChains = new Map<string, Promise<void>>();
+
+function enqueueJsonlWrite<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+	const key = resolve(filePath);
+	const previous = jsonlWriteChains.get(key) ?? Promise.resolve();
+	const result = previous.then(task);
+	const settled = result.then(() => undefined, () => undefined);
+	jsonlWriteChains.set(key, settled);
+	void settled.finally(() => { if (jsonlWriteChains.get(key) === settled) jsonlWriteChains.delete(key); });
+	return result;
+}
+
 function acquireWriterLock(filePath: string): () => void {
 	const lockDir = `${filePath}.writer-lock`;
 	mkdirSync(dirname(filePath), { recursive: true });
@@ -429,7 +471,59 @@ function normalizeDurableRecord(value: unknown, coordinate: string): DurableLogR
 	const parentId = requireNullableSeqId(value.parentId, `${coordinate}.parentId`);
 	const branchId = requireBranchId(value.branchId, `${coordinate}.branchId`);
 	const timestamp = requireTimestamp(value.timestamp, `${coordinate}.timestamp`);
+	const knownSimple = new Set(["session_ref", "args", "spawned", "failure_intent", "actor_created", "actor_messages_enqueued", "actor_call_resolved", "actor_batch_call_resolved"]);
+	if (value.type === "state_action") {
+		if (value.kind !== "invoke" && value.kind !== "complete" && value.kind !== "validated" && value.kind !== "timer_fired") {
+			throw new CorruptRunLogError(`${coordinate}.kind is not a state-action record kind`);
+		}
+		requireActionUid(value.actionUid, `${coordinate}.actionUid`);
+		if ((value.kind === "complete" || value.kind === "validated") && value.event !== undefined) requireChartEvent(value.event, `${coordinate}.event`);
+	} else if (value.type === "user_interaction") {
+		if (value.kind !== "opened" && value.kind !== "resolved") throw new CorruptRunLogError(`${coordinate}.kind is not a user-interaction record kind`);
+		requireActionUid(value.actionUid, `${coordinate}.actionUid`);
+		if (value.kind === "opened") {
+			requireSeqId(value.phaseSeqId, `${coordinate}.phaseSeqId`);
+			if (typeof value.prompt !== "string") throw new CorruptRunLogError(`${coordinate}.prompt must be a string`);
+			if (!isStringArray(value.options)) throw new CorruptRunLogError(`${coordinate}.options must be an array of strings`);
+			if (!isStringArray(value.events) || value.events.length === 0 || value.events.some((event) => event.length === 0 || event === "FAILED") || new Set(value.events).size !== value.events.length) {
+				throw new CorruptRunLogError(`${coordinate}.events must contain unique non-empty non-FAILED event names`);
+			}
+			if (value.reply !== undefined) requireSchema(value.reply, `${coordinate}.reply`);
+			if (value.rejection !== undefined) {
+				if (!isRecord(value.rejection) || !Number.isSafeInteger(value.rejection.attempt) || (value.rejection.attempt as number) < 1 || (value.rejection.onReject !== "resume" && value.rejection.onReject !== "restart") || (value.rejection.reason !== undefined && typeof value.rejection.reason !== "string")) {
+					throw new CorruptRunLogError(`${coordinate}.rejection is malformed`);
+				}
+			}
+		} else {
+			requireSeqId(value.gateSeqId, `${coordinate}.gateSeqId`);
+			requireChartEvent(value.event, `${coordinate}.event`);
+		}
+	} else if (value.type === "actor_message") {
+		if (value.kind !== "accepted" && value.kind !== "replied" && value.kind !== "settled") throw new CorruptRunLogError(`${coordinate}.kind is not an actor-message record kind`);
+	} else if (value.type === "actor_scope") {
+		if (value.kind !== "closing" && value.kind !== "stopped") throw new CorruptRunLogError(`${coordinate}.kind is not an actor-scope record kind`);
+	} else if (!knownSimple.has(value.type)) {
+		throw new CorruptRunLogError(`${coordinate}.type '${value.type}' is not a known machine record type`);
+	}
 	return { ...value, seqId, parentId, branchId, timestamp } as DurableLogRecord;
+}
+
+function requireActionUid(value: unknown, coordinate: string): void {
+	if (!isRecord(value) || typeof value.chart !== "string" || value.chart.length === 0 || typeof value.state !== "string" || value.state.length === 0 || typeof value.action !== "string" || value.action.length === 0) {
+		throw new CorruptRunLogError(`${coordinate} must contain non-empty chart/state/action strings`);
+	}
+}
+
+function requireChartEvent(value: unknown, coordinate: string): void {
+	if (!isRecord(value) || typeof value.type !== "string" || value.type.length === 0) throw new CorruptRunLogError(`${coordinate} must contain a non-empty event type`);
+}
+
+function requireSchema(value: unknown, coordinate: string): void {
+	if (!isRecord(value) || value.kind !== "jsonSchema" || !isRecord(value.schema)) throw new CorruptRunLogError(`${coordinate} must be a normalized jsonSchema`);
+}
+
+function isStringArray(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function assertDraft(value: DurableRecordDraft): void {

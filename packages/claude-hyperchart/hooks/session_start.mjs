@@ -85,13 +85,13 @@ async function main() {
 	let active;
 	if (sessionId !== undefined) {
 		const owner = { runsRoot, host: "claude", sessionId, workDir: cwd };
-		active = acquireActiveUserInteraction(owner);
+		active = await acquireActiveUserInteraction(owner);
 		if (active?.presentation === "pending") {
 			claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", sessionId, { source: "session-start" });
 		}
 		// Re-arbitrate after claiming so a concurrent lower coordinate cannot also be
 		// presented by the monitor/wait path.
-		active = acquireActiveUserInteraction(owner);
+		active = await acquireActiveUserInteraction(owner);
 		if (active !== undefined) lines.push(gateContext(active));
 	}
 	const liveLines = [];

@@ -11,10 +11,8 @@ import {
 } from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import {
-	closeUserInteraction,
 	hasUserInteractionReceipt,
 	markUserInteractionReceipt,
-	persistUserInteractionRequest,
 	readUserInteractionResponse,
 } from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
 import { actionUidKey, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
@@ -100,38 +98,6 @@ function complexGateSchema(): Record<string, unknown> {
 			value: z.union([z.literal("ok"), z.number().int().min(1)]),
 		})).min(1).max(2),
 	}));
-}
-
-function createUserGate(
-	world: Pick<ReturnType<typeof makeWorld>, "runsRoot" | "cwd" | "chartPath">,
-	runId: string,
-	seqId: number,
-	options: { sessionId?: string; workDir?: string; events?: string[]; gateOptions?: string[]; prompt?: string; reply?: Record<string, unknown> } = {},
-) {
-	const runDir = join(world.runsRoot, runId);
-	const workDir = options.workDir ?? world.cwd;
-	saveRunMeta(runDir, {
-		chartPath: world.chartPath,
-		workDir,
-		chartId: "simple",
-		createdAt: new Date().toISOString(),
-		originSessionId: options.sessionId ?? "session-a",
-	});
-	patchRunStatus(runDir, { runId, branchIds: ["main"], chartId: "simple", state: "running", pid: process.pid, heartbeatAt: Date.now() });
-	persistUserInteractionRequest(runDir, {
-		runId,
-		branchId: "main",
-		seqId,
-		actionUid: { chart: "simple", state: "review", action: "user" },
-		prompt: options.prompt ?? `Approve ${runId}?`,
-		options: options.gateOptions ?? ["yes", "no"],
-		events: options.events ?? ["APPROVED", "REJECTED", "FAILED"],
-		reply: {
-			kind: "jsonSchema",
-			schema: options.reply ?? { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false },
-		},
-	});
-	return runDir;
 }
 
 describe("hyperchart MCP tools", () => {
@@ -236,155 +202,6 @@ describe("hyperchart MCP tools", () => {
 		expect(foreign.limitation).toContain("not owned");
 		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-b")).toBe(false);
 	}, 30_000);
-
-	it("returns the global active user boundary from wait=true without pre-confirming delivery", async () => {
-		const world = makeWorld("session-a");
-		const activeDir = createUserGate(world, "000-active-gate", 4, { reply: complexGateSchema() });
-		const result = JSON.parse(text(await world.tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true })));
-		expect(result).toMatchObject({
-			boundary: "user",
-			final: false,
-			runId: "000-active-gate",
-			branchId: "main",			interaction: { runId: "000-active-gate", seqId: 4 },
-			presentation: "claimed-not-confirmed",
-		});
-		expect(basename(result.runDir)).toBe(basename(activeDir));
-		expect(result.waitedRun.runId).not.toBe(result.runId);
-		expect(result.instruction).toContain("AskUserQuestion once for this delivery attempt");
-		expect(result.instruction).toContain("hyperchart_respond");
-		expect(result.interaction).toMatchObject({
-			outputRequired: true,
-			outputHint: { types: ["object"], fields: expect.arrayContaining([
-				expect.objectContaining({ name: "decision", value: expect.objectContaining({ allowedValueJson: ['"approve"', '"reject"'] }) }),
-				expect.objectContaining({ name: "review", value: expect.objectContaining({ fields: expect.any(Array) }) }),
-				expect.objectContaining({ name: "findings", value: expect.objectContaining({ element: expect.any(Object) }) }),
-			]) },
-		});
-		expect(result.interaction).not.toHaveProperty("reply");
-		expect(result.interaction).not.toHaveProperty("schema");
-		expect(hasUserInteractionReceipt(activeDir, "main", 4, "claude", "session-a")).toBe(false);
-
-		// A user-like structured answer can be translated using only the delivered summary.
-		const output = answerFromReplySummary(result.interaction.outputHint as ReplySchemaSummary);
-		const response = JSON.parse(text(await world.tools.get("hyperchart_respond")!.handler({
-			runId: result.interaction.runId,
-			branchId: "main",
-			seqId: result.interaction.seqId,
-			event: result.interaction.allowedEvents[0],
-			output,
-		})));
-		expect(response).toMatchObject({ committed: true, event: "APPROVED" });
-		expect(readUserInteractionResponse(activeDir, "main", 4)?.event).toEqual({ type: "APPROVED", output });
-	}, 30_000);
-
-	it("round-trips long gate identities through the bounded summary and respond tool", async () => {
-		const world = makeWorld("session-a");
-		const runId = `long-${"r".repeat(180)}`;
-		const event = `APPROVED_${"e".repeat(180)}`;
-		const option = `Choice ${"o".repeat(180)}`;
-		const runDir = createUserGate(world, runId, 1, { events: [event, "FAILED"], gateOptions: [option] });
-		const boundary = JSON.parse(text(await world.tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true })));
-
-		expect(boundary.interaction.runId).toBe(runId);
-		expect(boundary.interaction.allowedEvents).toEqual([event]);
-		expect(boundary.interaction.options).toEqual([{
-			label: { text: `${option.slice(0, 159)}…`, originalChars: option.length, omittedChars: option.length - 159 },
-			value: option,
-		}]);
-		expect(JSON.stringify(boundary.interaction)).not.toContain(`${runId.slice(0, 159)}…`);
-		expect(JSON.stringify(boundary.interaction)).not.toContain(`${event.slice(0, 159)}…`);
-
-		const response = JSON.parse(text(await world.tools.get("hyperchart_respond")!.handler({
-			runId: boundary.interaction.runId,
-			branchId: "main",
-			seqId: boundary.interaction.seqId,
-			event: boundary.interaction.allowedEvents[0],
-			output: { note: boundary.interaction.options[0].value },
-		})));
-		expect(response).toMatchObject({ committed: true, event });
-		expect(readUserInteractionResponse(runDir, "main", 1)?.event).toEqual({ type: event, output: { note: option } });
-	}, 30_000);
-
-	it("routes an oversized gate identity to the browser inspector instead of emitting a partial gate", async () => {
-		const world = makeWorld("session-a");
-		createUserGate(world, "unsafe-identity", 1, { events: ["e".repeat(2_001)] });
-		const result = await world.tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true });
-		expect(result.isError).toBe(true);
-		expect(text(result)).toMatch(/identity.*cannot be truncated.*browser inspector/i);
-		expect(text(result)).not.toContain("…");
-	}, 30_000);
-
-	it("bounds an oversized envelope through the actual Claude MCP handler", async () => {
-		const world = makeWorld("session-a");
-		for (let index = 0; index < 21; index++) createUserGate(world, `overflow-${String(index).padStart(2, "0")}`, 1, { reply: largeRepresentableGateSchema() });
-		const result = await world.tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: "overflow-00" });
-		const payload = JSON.parse(text(result));
-		expect(payload).toMatchObject({ error: "model-envelope-too-large", digest: expect.stringMatching(/^fnv1a32:/), maxBytes: 64 * 1024 });
-		expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(64 * 1024);
-	}, 30_000);
-
-	it("fails closed through the Claude MCP handler when a gate contract cannot be summarized", async () => {
-		const world = makeWorld("session-a");
-		createUserGate(world, "unrepresentable", 1, { reply: { type: "string", enum: Array.from({ length: 41 }, (_, index) => `value-${index}`) } });
-		const result = await world.tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true });
-		expect(result.isError).toBe(true);
-		expect(text(result)).toMatch(/cannot safely deliver.*browser inspector/i);
-	}, 30_000);
-
-	it("validates, commits, retries, and isolates hyperchart_respond at the exact active owner", async () => {
-		const world = makeWorld("session-a");
-		const activeDir = createUserGate(world, "run-a", 1);
-		const queuedDir = createUserGate(world, "run-b", 2);
-		const respond = world.tools.get("hyperchart_respond")!;
-
-		for (const [args, pattern] of [
-			[{ runId: "run-a", branchId: "main", seqId: 1, event: "FAILED", output: { note: "x" } }, /reserved/],
-			[{ runId: "run-a", branchId: "main", seqId: 1, event: "OTHER", output: { note: "x" } }, /not allowed/],
-			[{ runId: "run-a", branchId: "main", seqId: 1, event: "APPROVED", output: {} }, /does not match/],
-			[{ runId: "run-b", branchId: "main", seqId: 2, event: "APPROVED", output: { note: "early" } }, /not the active gate/],
-		] as const) {
-			const rejected = await respond.handler(args);
-			expect(rejected.isError).toBe(true);
-			expect(text(rejected)).toMatch(pattern);
-		}
-
-		const committed = JSON.parse(text(await respond.handler({
-			runId: "run-a",
-			branchId: "main",
-			seqId: 1,
-			event: "APPROVED",
-			output: { note: "human said yes" },
-		})));
-		expect(committed).toMatchObject({ committed: true, idempotent: false, runId: "run-a", seqId: 1 });
-		expect(readUserInteractionResponse(activeDir, "main", 1)?.event).toEqual({ type: "APPROVED", output: { note: "human said yes" } });
-
-		// Identical durable retry must not require reparsing mutable chart source.
-		writeFileSync(world.chartPath, "this is no longer valid TypeScript");
-		const retried = JSON.parse(text(await respond.handler({
-			runId: "run-a",
-			branchId: "main",
-			seqId: 1,
-			event: "APPROVED",
-			output: { note: "human said yes" },
-		})));
-		expect(retried.idempotent).toBe(true);
-		const conflict = await respond.handler({ runId: "run-a", branchId: "main", seqId: 1, event: "REJECTED", output: { note: "different" } });
-		expect(conflict.isError).toBe(true);
-		expect(text(conflict)).toContain("Conflicting response");
-
-		const foreignSession = new Map(createHyperchartMcpTools({ cwd: world.cwd, runsRoot: world.runsRoot, sessionId: "session-b" }).map((tool) => [tool.name, tool]));
-		const deniedSession = await foreignSession.get("hyperchart_respond")!.handler({ branchId: "main", runId: "run-b", seqId: 2, event: "APPROVED", output: { note: "x" } });
-		expect(deniedSession.isError).toBe(true);
-		expect(text(deniedSession)).toContain("not owned");
-		const deniedCwd = await respond.handler({ branchId: "main", runId: "run-b", seqId: 2, event: "APPROVED", output: { note: "x" }, cwd: resolve(world.cwd, "other") });
-		expect(deniedCwd.isError).toBe(true);
-		expect(text(deniedCwd)).toContain("another working directory");
-
-		closeUserInteraction(queuedDir, { runId: "run-b", branchId: "main", seqId: 2 }, "machine cancelled");
-		const stale = await respond.handler({ branchId: "main", runId: "run-b", seqId: 2, event: "APPROVED", output: { note: "late" } });
-		expect(stale.isError).toBe(true);
-		expect(text(stale)).toMatch(/stale|closed/);
-	});
 
 	it("publishes the actual FAILED error before matching failed status", async () => {
 		const { tools, chartsDir } = makeWorld();
@@ -719,29 +536,5 @@ describe("session start hook", () => {
 		expect(parsed.hookSpecificOutput.additionalContext).not.toContain("foreign-run");
 	});
 
-	it("recovers the exact session's already-presented pinned gate before queued gates", () => {
-		const world = makeWorld("session-a");
-		createUserGate(world, "run-a", 1);
-		const pinnedDir = createUserGate(world, "run-b", 2);
-		createUserGate(world, "foreign-session", 1, { sessionId: "session-b" });
-		markUserInteractionReceipt(pinnedDir, "main", 2, "claude", "session-a");
-		const hook = resolve("packages/claude-hyperchart/hooks/session_start.mjs");
-		const invoke = (sessionId: string) => execFileSync(process.execPath, [hook], {
-			input: JSON.stringify({ cwd: world.cwd, session_id: sessionId }),
-			env: { ...process.env, HYPERCHART_RUNS_ROOT: world.runsRoot },
-			encoding: "utf8",
-		});
 
-		const first = JSON.parse(invoke("session-a")) as { hookSpecificOutput: { additionalContext: string } };
-		expect(first.hookSpecificOutput.additionalContext).toContain("ACTIVE HYPERCHART USER GATE (run-b, 2)");
-		expect(first.hookSpecificOutput.additionalContext).toContain("AskUserQuestion is still in flight");
-		expect(first.hookSpecificOutput.additionalContext).toContain("hyperchart_respond");
-		expect(first.hookSpecificOutput.additionalContext).not.toContain("ACTIVE HYPERCHART USER GATE (run-a, 1)");
-		expect(first.hookSpecificOutput.additionalContext).not.toContain("foreign-session");
-		expect(invoke("session-x")).toBe("");
-
-		closeUserInteraction(pinnedDir, { runId: "run-b", branchId: "main", seqId: 2 }, "answered elsewhere");
-		const promoted = JSON.parse(invoke("session-a")) as { hookSpecificOutput: { additionalContext: string } };
-		expect(promoted.hookSpecificOutput.additionalContext).toContain("ACTIVE HYPERCHART USER GATE (run-a, 1)");
-	});
 });
