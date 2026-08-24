@@ -481,7 +481,7 @@ class PiUserInteractionCoordinator {
 			content: formatCompactUserInteraction(active),
 			display: true,
 			details: safeToolDetails(compactPiUserInteraction(active)),
-		}), { deliverAs: "followUp" });
+		}), { deliverAs: "followUp", triggerTurn: true });
 		markUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "pi", ctx.sessionManager.getSessionId());
 		this.state = { key, phase: "awaiting-user" };
 	}

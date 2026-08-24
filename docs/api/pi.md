@@ -259,7 +259,7 @@ A user boundary has `boundary: "user"`, `final: false`, `interaction: { version,
 
 A terminal result text is a compact boundary notice directing the operator to `view`; it never copies the durable terminal prompt or inspector snapshot. Pi recovery checks persisted `hyperchart-terminal` custom messages by request id before re-sending the same compact notice.
 
-For a background gate, Pi scans only requests owned by the exact session and canonical cwd. While the agent is busy, it sends a hidden `hyperchart-yield` steering message and lets the current safe action/tool batch finish. On idle or `agent_settled`, it rechecks the shared arbiter and displays the active request once without `triggerTurn`. State is `pending → yielding → awaiting-user → answered/closed`; reload/session-start recovery reconstructs semantic openness from journal ancestry and presentation state from receipts. Simultaneous requests remain queued in lexical `runId`, then numeric `seqId` order.
+For a background gate, Pi scans only requests owned by the exact session and canonical cwd. While the agent is busy, it sends a hidden `hyperchart-yield` steering message and lets the current safe action/tool batch finish. On idle or `agent_settled`, it rechecks the shared arbiter and displays the active request once with `triggerTurn: true`, making gate presentation observable through the normal agent/turn lifecycle. The triggered turn must not answer or commit the gate without subsequent real user input. State is `pending → yielding → awaiting-user → answered/closed`; reload/session-start recovery reconstructs semantic openness from journal ancestry and presentation state from receipts. Simultaneous requests remain queued in lexical `runId`, then numeric `seqId` order.
 
 Start example:
 

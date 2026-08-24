@@ -8,7 +8,9 @@ import { z } from "zod";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
+import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
 import { branchSessionSegment } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import {
 	hasTerminalNotificationReceipt,
@@ -323,6 +325,45 @@ describe("hyperchart extension", () => {
 		await sessionStart?.({ reason: "startup" }, ctx);
 
 		expect(widgetKeys).toEqual(["hyperchart:owned-running"]);
+	});
+
+	it("triggers an observable Pi turn when presenting an idle user gate", async () => {
+		const chartPath = join(tempDir, "observable-user-gate.chart.ts");
+		writeFileSync(chartPath, `
+			import { chart, final, user } from "@surprisal/hyperchart";
+			export default chart({ id: "observable-user-gate", initial: "ask", states: {
+				ask: { kind: "state", action: user({ prompt: "Approve?", options: ["APPROVED"] }), transitions: { APPROVED: "done" } },
+				done: final(),
+			} });
+		`);
+		const parsed = parseChartModuleSync(chartPath);
+		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		const state = parsed.ast.states.ask;
+		if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("invalid user gate fixture");
+		const runDir = createRun("observable-user-gate", projectDir, chartPath, "session-a");
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
+		await store.initializeRootBranch();
+		await store.appendDrafts([{ type: "args", args: {} }]);
+		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+		const [opened] = await store.appendDrafts([{
+			type: "user_interaction",
+			kind: "opened",
+			actionUid: state.action.uid,
+			phaseSeqId: invoke!.seqId,
+			prompt: "Approve?",
+			options: ["APPROVED"],
+			events: ["APPROVED"],
+		}]);
+
+		const harness = lifecycleHarness(projectDir, true);
+		await harness.sessionStart();
+		await harness.shutdown();
+
+		expect(harness.sent).toEqual([expect.objectContaining({
+			message: expect.objectContaining({ customType: "hyperchart-user-request", display: true }),
+			options: { deliverAs: "followUp", triggerTurn: true },
+		})]);
+		expect(hasUserInteractionReceipt(runDir, "main", opened!.seqId, "pi", "session-a")).toBe(true);
 	});
 
 	it("recovers terminal notifications only into the exact owning session and workDir", async () => {
