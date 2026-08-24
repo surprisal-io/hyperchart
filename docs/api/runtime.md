@@ -126,13 +126,37 @@ await completion;
 
 `startBranch()` synchronously reserves a durable branch before its replay gate or executor construction, then returns a promise for that branch's `complete` or `failed` outcome. Each admitted branch owns a branch-scoped agent executor and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
 
-`liveBranchIds` and status-v2 `branchIds` are current live reservations, not durable branch selection. Forking does not add a reservation. The final reservation is removed only after disposal, terminal notification persistence publishes `branchIds: []`, and the controller rejects fork/admission after it begins closing. Keep an existing reservation live while admitting more work; there is intentionally no filesystem, Pi-command, or MCP control plane for dynamic admission.
+`durableBranchIds` comes from the controller's already-loaded journal snapshot and includes branches that are not admitted in this attempt. `liveBranchIds` and status-v2 `branchIds` are current live reservations, not durable branch selection. `activeBranchIds` is the subset currently executing or setting up; it excludes live branches suspended at a journal-native open user gate, so an external scheduler can bound actual execution without counting idle decision points. Forking does not add a reservation. The final reservation is removed only after disposal, terminal notification persistence publishes `branchIds: []`, and the controller rejects fork/admission after it begins closing. Keep an existing reservation live while admitting more work; there is intentionally no filesystem, Pi-command, or MCP control plane for dynamic admission.
 
 ## Journal-native user input
 
 `RunLogStore.respondToUserInteraction({ ast, gateSeqId, event, schemaRegistry? })` is the sole-writer admission primitive. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
 
-JSONL validates and appends against its already-open snapshot under the writer lock and rejects a stale byte boundary. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected. Its managed transaction callback can combine journal operations with host-domain SQL only while that sole writer owns the run.
+JSONL validates and appends against its already-open snapshot under the writer lock and rejects a stale byte boundary. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
+
+For trusted in-process hosts that must commit application ownership together with a response, the controller exposes PostgreSQL-only composite operations:
+
+```ts
+await controller.commitUserInteraction(
+  { branchId: "main", gateSeqId: 42, event: { type: "SELECTED" } },
+  (tx) => tx.query("insert into app.selection_claims (...) values (...)", values),
+);
+
+const committed = await controller.forkAndCommitUserInteraction(
+  {
+    branchId: "experiment",
+    sourceBranchId: "main",
+    fromSeqId: 42,
+    responseBranchId: "experiment",
+    gateSeqId: 42,
+    event: { type: "SELECTED" },
+  },
+  (tx) => tx.query("insert into app.selection_claims (...) values (...)", values),
+);
+await controller.startBranch(committed.branch.branchId);
+```
+
+The callback receives only `query()`, not journal mutation methods. Branch creation, `user_interaction/resolved`, and participating SQL share the run writer's existing `BEGIN/COMMIT`. A failure rolls all of them back and leaves the in-memory journal snapshot unchanged. The fork point may be a historical record in the selected source branch ancestry; the source branch does not have to remain parked there after its first response. An identical branch/response retry is accepted only when branch ancestry, metadata, event, and application ownership agree exactly. JSONL and memory stores retain journal-native responses but reject cross-database composite commits because they cannot join a PostgreSQL transaction.
 
 ## `AgentExecutor`
 

@@ -45,6 +45,18 @@ Design actions to be idempotent when possible:
 - separate irreversible publication from preparation;
 - keep enough provenance to reconcile manually.
 
+### Narrow PostgreSQL exception
+
+When the PostgreSQL journal backend owns the sole run-writer advisory lock, `commitUserInteraction()` and `forkAndCommitUserInteraction()` may join trusted application SQL to the same managed transaction as a journal-native response. This is deliberately narrower than arbitrary action-side-effect transactions:
+
+- the participant receives SQL `query()` only;
+- it runs inside the serialized journal writer;
+- failure rolls back the branch mutation, response record, and application rows together;
+- the transaction-local journal snapshot is published only after commit;
+- application uniqueness errors remain application errors and are not rewritten as stale-journal failures.
+
+Do not perform network, filesystem, LLM, or long-running work in the participant. Validate and prepare its bounded SQL inputs beforehand. After a forked commit, starting the branch remains an in-memory action; if the process dies first, reopen the committed journal and admit that durable branch rather than creating another selection.
+
 ## Replay warnings
 
 `explainReplay()` compares the current chart with the stored log and classifies records:
