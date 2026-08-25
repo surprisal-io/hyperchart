@@ -43,6 +43,7 @@ describe("run inspection transcript seam", () => {
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
+			sessionId: "opaque-session-id",
 		}, "seam:done:agent:1:7", "main");
 		const readTranscript = vi.fn(async () => [{ id: "m1", role: "assistant" as const, text: "injected" }]);
 
@@ -85,13 +86,7 @@ describe("run inspection transcript seam", () => {
 		expect(run.states.find((state) => state.id === "done")?.session?.messages).toEqual([
 			{ id: "pg", role: "assistant", text: "from postgres" },
 		]);
-		expect(readTranscript).toHaveBeenCalledWith({
-			runId: "run",
-			branchId: "main",
-			invokeSeqId: 7,
-			actionUid,
-			attempt: 2,
-		});
+		expect(readTranscript).toHaveBeenCalledWith({ sessionId: "opaque-pg-id" });
 	});
 
 	it("reads the neutral JSONL format by default and ignores unknown formats", async () => {
@@ -158,11 +153,11 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		const definition = { kind: "agent", uid: actionUid, name: "worker", task: "work" };
 		const records = [
 			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1000 },
-			{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 1, seqId: 2, branchId: "main", timestamp: 2000 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 1, seqId: 2, branchId: "main", timestamp: 2000 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 3000 },
-			{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 3, seqId: 4, branchId: "main", timestamp: 4000 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 3, seqId: 4, branchId: "main", timestamp: 4000 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 4, seqId: 5, branchId: "main", timestamp: 5000 },
-			{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 5, seqId: 6, branchId: "main", timestamp: 6000 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 5, seqId: 6, branchId: "main", timestamp: 6000 },
 		];
 		writeFileSync(join(runDir, "log.jsonl"), [
 			{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 900 },
@@ -179,6 +174,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 			actionName: "worker",
 			status: "running",
 			// A stale row must not suppress recovery from the real visit directory, even when it claims newer activity.
+			sessionId: "session-id",
 			sessionFile: join(sessionsDir, "missing.jsonl"),
 			lastActivityAt: Number.MAX_SAFE_INTEGER,
 		}, "visits:work:agent:3:6");

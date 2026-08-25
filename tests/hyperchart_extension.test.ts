@@ -70,7 +70,7 @@ function writeTwoBranchV2Log(runDir: string): void {
 		], headSeqId: 1, committedAt: 1 },
 		{ kind: "branch", op: "create", branchId: "experiment", headSeqId: 1, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 1 } },
 		{ kind: "record_batch", branchId: "experiment", records: [
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, branchId: "experiment", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, branchId: "experiment", timestamp: 2 },
 			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" }, parentId: 2, seqId: 3, branchId: "experiment", timestamp: 3 },
 		], headSeqId: 3, committedAt: 3 },
 	].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n");
@@ -344,7 +344,7 @@ describe("hyperchart extension", () => {
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		await store.appendDrafts([{ type: "args", args: {} }]);
-		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
 		const [opened] = await store.appendDrafts([{
 			type: "user_interaction",
 			kind: "opened",
@@ -833,13 +833,14 @@ describe("hyperchart extension", () => {
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 		]);
 		const transcriptFile = join(runDir, "sessions", "tool-view.jsonl");
 		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", type: "message", message: { role: "assistant", content: "inspector transcript" } })}\n`);
 		updateSessionProgress(join(runDir, "sessions"), actionUid, {
 			actionName: "worker",
 			status: "running",
+			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, "demo:work:agent:1:2");
 		const tool = registeredTool("hyperchart");
@@ -937,7 +938,7 @@ describe("hyperchart extension", () => {
 		const uid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
 			{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 			{ type: "failure_intent", origin: "work", error: { code: 2, stderr: "nope" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
 		]);
 		patchRunStatus(runDir, { runId, chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] });
@@ -948,6 +949,7 @@ describe("hyperchart extension", () => {
 			status: "failed",
 			error: "session failed",
 			lastActivityAt: 4,
+			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, "demo:work:agent:1:2");
 		const tool = registeredTool("hyperchart");
@@ -1016,6 +1018,7 @@ describe("hyperchart extension", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: { chart: "demo", state: "first", action: "agent" },
 				definition: { kind: "agent", uid: { chart: "demo", state: "first", action: "agent" }, name: "old-worker" },
 				parentId: 1,
@@ -1067,11 +1070,11 @@ describe("hyperchart extension", () => {
 		const definition = { kind: "agent", uid: actionUid, name: "worker" };
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
-			{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 3, seqId: 4, branchId: "main", timestamp: 4 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 3, seqId: 4, branchId: "main", timestamp: 4 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 4, seqId: 5, branchId: "main", timestamp: 5 },
-			{ type: "state_action", kind: "invoke", actionUid, definition, parentId: 5, seqId: 6, branchId: "main", timestamp: 6 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 5, seqId: 6, branchId: "main", timestamp: 6 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "DONE" }, parentId: 6, seqId: 7, branchId: "main", timestamp: 7 },
 		]);
 		const sessionsDir = join(runDir, "sessions");

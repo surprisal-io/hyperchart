@@ -72,6 +72,8 @@ export type StateActionInvokeLog = {
 	type: "state_action";
 	kind: "invoke";
 	actionUid: ActionUID;
+	/** Opaque runtime identity for resources owned by this durable action invocation. */
+	sessionId: string;
 	// Mandatory provenance for replay over a modified chart. Logs without it are structurally
 	// incompatible and must be rewound/restarted instead of silently replayed.
 	definition: StateActionAst;

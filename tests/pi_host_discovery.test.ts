@@ -373,6 +373,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid,
 				definition: {
 					kind: "agent",
@@ -413,13 +414,14 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const actionUid = { chart: "sample", state: "work", action: "agent" };
 		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
 			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 		]), "utf8");
 		const transcriptFile = join(sessionsDir, "transcript.jsonl");
 		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload" } })}\n`, "utf8");
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
+			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, "sample:work:agent:1:2");
 

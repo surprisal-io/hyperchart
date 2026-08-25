@@ -87,13 +87,13 @@ describe("session progress", () => {
 		updateSessionProgress(
 			dir,
 			actionUid,
-			{ actionName: "worker", status: "completed", sessionFile: "visit-1.jsonl", startedAt: 100 },
+			{ actionName: "worker", status: "completed", sessionId: "session-1", sessionFile: "visit-1.jsonl", startedAt: 100 },
 			firstEffect,
 		);
 		updateSessionProgress(
 			dir,
 			actionUid,
-			{ actionName: "worker", status: "running", sessionFile: "visit-2.jsonl", startedAt: 200 },
+			{ actionName: "worker", status: "running", sessionId: "session-2", sessionFile: "visit-2.jsonl", startedAt: 200 },
 			secondEffect,
 		);
 
@@ -105,6 +105,7 @@ describe("session progress", () => {
 			invokeSeqId: 2,
 			visit: 1,
 			status: "completed",
+			sessionId: "session-1",
 			sessionFile: "visit-1.jsonl",
 		});
 		expect(progress.sessions["main:chart:work:agent:invoke:9"]).toMatchObject({
@@ -113,6 +114,7 @@ describe("session progress", () => {
 			invokeSeqId: 9,
 			visit: 2,
 			status: "running",
+			sessionId: "session-2",
 			sessionFile: "visit-2.jsonl",
 		});
 	});

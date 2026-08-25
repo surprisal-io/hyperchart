@@ -79,9 +79,9 @@ describe("terminal notification outbox", () => {
 		const prepareUid = action(ast, "prepare").uid;
 		const workUid = action(ast, "work").uid;
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", actionUid: prepareUid, definition: action(ast, "prepare"), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: prepareUid, definition: action(ast, "prepare"), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
 			{ type: "state_action", kind: "complete", actionUid: prepareUid, event: { type: "READY", output: { topic: "alpha" } }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
-			{ type: "state_action", kind: "invoke", actionUid: workUid, definition: action(ast, "work"), parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: workUid, definition: action(ast, "work"), parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
 			{ type: "state_action", kind: "complete", actionUid: workUid, event: { type: "DONE", output: { summary: "ready" } }, parentId: 3, seqId: 4, branchId: "main", timestamp: 4 },
 		];
 		const state = createMachine(ast, projectBranch(createBranchProjection(ast), ast, log));

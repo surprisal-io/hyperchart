@@ -238,6 +238,7 @@ process.stdin.on("end", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid,
 				definition: runState.action,
 				parentId: null,

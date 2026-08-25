@@ -32,12 +32,13 @@ export type PendingAction =
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
 	// validationAttempts counts the rejected rounds of this invoke cycle — derived from validated(false)
 	// facts, it decides when the retry budget (state.retries) is exhausted.
-	| { actionUid: ActionUID; visitId: number; seqId: number; invokeSeqId: number; timestamp: number; phase: "running"; gateSeqId?: number }
+	| { actionUid: ActionUID; visitId: number; seqId: number; invokeSeqId: number; sessionId: string; timestamp: number; phase: "running"; gateSeqId?: number }
 	| {
 			actionUid: ActionUID;
 			visitId: number;
 			seqId: number;
 			invokeSeqId: number;
+			sessionId: string;
 			phase: "validating";
 			gateSeqId?: number;
 			event: ChartEvent;
@@ -48,6 +49,7 @@ export type PendingAction =
 			visitId: number;
 			seqId: number;
 			invokeSeqId: number;
+			sessionId: string;
 			phase: "rejected";
 			gateSeqId?: number;
 			event: ChartEvent;
@@ -441,6 +443,7 @@ export function projectBranch(
 								visitId,
 								seqId: record.seqId,
 								invokeSeqId: record.seqId,
+								sessionId: record.sessionId,
 								timestamp: record.timestamp,
 								phase: "running",
 							});
@@ -489,6 +492,7 @@ export function projectBranch(
 							visitId: validating.visitId,
 							seqId: record.seqId,
 							invokeSeqId: validating.invokeSeqId,
+							sessionId: validating.sessionId,
 							phase: "rejected",
 							event: validating.event,
 							validationAttempts,
@@ -575,13 +579,15 @@ function applyActionCompletion(
 	const state = actionStateAt(ast, actionUid.state);
 	if (state?.kind === "state" && state.validate !== undefined && event.type !== "FAILED") {
 		const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
-		const validationAttempts = previous?.phase === "rejected" ? previous.validationAttempts : 0;
+		if (previous === undefined) throw new Error(`No pending invocation for completion in ${actionUid.state}`);
+		const validationAttempts = previous.phase === "rejected" ? previous.validationAttempts : 0;
 		removePendingAction(projection, actionUid);
 		projection.pendingActions.push({
 			actionUid,
-			visitId: previous?.visitId ?? projection.stateVisits[actionUidKey(actionUid)] ?? 1,
+			visitId: previous.visitId,
 			seqId,
-			invokeSeqId: previous?.invokeSeqId ?? seqId,
+			invokeSeqId: previous.invokeSeqId,
+			sessionId: previous.sessionId,
 			phase: "validating",
 			event,
 			validationAttempts,

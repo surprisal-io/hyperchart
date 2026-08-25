@@ -4,7 +4,6 @@ export { PiAgentExecutor } from "./pi_agent_executor.js";
 export { transcriptMessagesFromPiEntries } from "./session_transcript.js";
 export type {
 	PiExecutorOptions,
-	PiInvocationBinding,
 	PiSessionHandle,
 	PiSessionService,
 	PiSessionOverrides,

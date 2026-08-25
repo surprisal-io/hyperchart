@@ -19,6 +19,7 @@ function effect(): AgentEffect {
 		actionUid,
 		action: { kind: "agent", uid: actionUid, name: "worker" },
 		events: ["DONE", "FAILED"],
+		sessionId: "session-id",
 		reply: schema(z.object({ value: z.number() })),
 	};
 }

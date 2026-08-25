@@ -53,7 +53,7 @@ function fanoutChart(): ChartAst {
 }
 
 function invoke(seqId: number, actionUid: ActionUID, timestamp = seqId * 100): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", actionUid, definition: definitionForUid(actionUid), parentId: seqId - 1, seqId, branchId: "main", timestamp };
+	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: definitionForUid(actionUid), parentId: seqId - 1, seqId, branchId: "main", timestamp };
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {

@@ -285,7 +285,7 @@ function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecor
 }
 
 function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", actionUid: uid, definition: definitionForUid(uid), ...meta(seqId) };
+	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: definitionForUid(uid), ...meta(seqId) };
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
@@ -762,6 +762,11 @@ describe("execution loop", () => {
 			"invoke",
 			"complete",
 		]);
+		const invoke = records[0];
+		if (invoke?.type !== "state_action" || invoke.kind !== "invoke") throw new Error("missing invoke record");
+		expect(invoke.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+		const agent = runtime.effectBatches.flat().find((effect) => effect.kind === "agent");
+		expect(agent?.kind === "agent" ? agent.sessionId : undefined).toBe(invoke.sessionId);
 	});
 
 	it("throws when the runtime queue closes before a final state is reached", async () => {

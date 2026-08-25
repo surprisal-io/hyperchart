@@ -80,6 +80,7 @@ function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst 
 	return {
 		type: "state_action",
 		kind: "invoke",
+			sessionId: "session-id",
 		actionUid: uid,
 		definition: actionDefinition,
 		...meta(seqId),
@@ -313,7 +314,7 @@ describe("explainReplay", () => {
 	it("rejects pre-provenance invoke records instead of replaying them", () => {
 		const current = twoStep();
 		const first = actionUid(current, "first");
-		const oldInvoke = { type: "state_action", kind: "invoke", actionUid: first, ...meta(2) } as unknown as DurableLogRecord;
+		const oldInvoke = { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: first, ...meta(2) } as unknown as DurableLogRecord;
 		const log = [args(), oldInvoke];
 
 		const explanation = explainReplay(current, log);

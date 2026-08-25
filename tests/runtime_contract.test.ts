@@ -307,6 +307,7 @@ describe("runtime Zod contracts", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: oneState.action.uid,
 				definition: oneState.action,
 				parentId: 1,

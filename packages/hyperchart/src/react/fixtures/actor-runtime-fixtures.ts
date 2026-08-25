@@ -281,6 +281,7 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 		{
 			type: "state_action",
 			kind: "invoke",
+			sessionId: "session-id",
 			actionUid: { ...action.action.uid, state: "@editor.apply" },
 			definition: action.action,
 			parentId: 7,
@@ -399,7 +400,7 @@ export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
 		{ type: "args", args: {}, ...stamp(1) },
 		actorCreated("phase.@worker", 1, 2),
 		enqueue("phase.@worker", 1, 1, 3),
-		{ type: "state_action", kind: "invoke", actionUid: hold.action.uid, definition: hold.action, ...stamp(4) },
+		{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: hold.action.uid, definition: hold.action, ...stamp(4) },
 		{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker", messageId: first[0]!.messageId, receiveState: "phase.@worker.idle", ...stamp(5) },
 		{ type: "actor_message", kind: "replied", occurrence: "phase.@worker", messageId: first[0]!.messageId, message: "PING", ...stamp(6) },
 		{ type: "actor_message", kind: "settled", occurrence: "phase.@worker", messageId: first[0]!.messageId, ...stamp(7) },
@@ -409,11 +410,11 @@ export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
 		{ type: "state_action", kind: "complete", actionUid: hold.action.uid, event: { type: "EXIT" }, ...stamp(11) },
 		{ type: "actor_scope", kind: "closing", occurrence: "phase.@worker", ...stamp(12) },
 		{ type: "actor_scope", kind: "stopped", occurrence: "phase.@worker", ...stamp(13) },
-		{ type: "state_action", kind: "invoke", actionUid: between.action.uid, definition: between.action, ...stamp(14) },
+		{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: between.action.uid, definition: between.action, ...stamp(14) },
 		{ type: "state_action", kind: "complete", actionUid: between.action.uid, event: { type: "AGAIN" }, ...stamp(15) },
 		actorCreated("phase.@worker~2", 2, 16),
 		enqueue("phase.@worker~2", 2, 2, 17),
-		{ type: "state_action", kind: "invoke", actionUid: hold.action.uid, definition: hold.action, ...stamp(18) },
+		{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: hold.action.uid, definition: hold.action, ...stamp(18) },
 		{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker~2", messageId: second[0]!.messageId, receiveState: "phase.@worker~2.idle", ...stamp(19) },
 	];
 }

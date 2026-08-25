@@ -75,6 +75,7 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uid,
 				definition: { kind: "agent", uid, name: "old-worker" },
 				parentId: 1,

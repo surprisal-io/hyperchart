@@ -49,7 +49,7 @@ export function storyArgs(args: Record<string, unknown>, seqId = 1, timestamp = 
 
 export function storyInvoke(ast: ChartAst, statePath: string, seqId: number, timestamp = seqId): DurableLogRecord {
 	const action = actionAt(ast, statePath);
-	return { type: "state_action", kind: "invoke", actionUid: action.uid, definition: action, parentId: seqId - 1, branchId: "main", seqId, timestamp };
+	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: action.uid, definition: action, parentId: seqId - 1, branchId: "main", seqId, timestamp };
 }
 
 export function storyComplete(ast: ChartAst, statePath: string, event: string, seqId: number, timestamp = seqId): DurableLogRecord {

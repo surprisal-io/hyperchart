@@ -707,6 +707,7 @@ class ClaudeSession {
 			actionName: this.options.definition.name,
 			status: "running",
 			model,
+			sessionId: this.options.effect.sessionId,
 			sessionFile: this.writer.path,
 			...(this.options.definition.role === undefined ? {} : { role: this.options.definition.role }),
 			...(this.options.plan.thinkingLevel === undefined ? {} : { thinking: this.options.plan.thinkingLevel }),

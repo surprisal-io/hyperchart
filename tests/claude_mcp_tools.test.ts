@@ -172,6 +172,7 @@ describe("hyperchart MCP tools", () => {
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "completed",
+			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, "simple:done:agent:1:2");
 
@@ -471,6 +472,7 @@ export default chart({
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
+			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, `${actionUidKey(actionUid)}:1:11`, "main");
 

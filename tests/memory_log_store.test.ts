@@ -8,7 +8,7 @@ function argsDraft(args: Readonly<Record<string, unknown>> = { topic: "test" }):
 
 function invokeDraft(): DurableRecordDraft {
 	const actionUid = { chart: "chart", state: "work", action: "agent" };
-	return { type: "state_action", kind: "invoke", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" } };
+	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" } };
 }
 
 describe("MemoryLogStore", () => {

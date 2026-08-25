@@ -178,6 +178,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "work"),
 				definition: (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -240,6 +241,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "first.work"),
 				definition: firstWork.action,
 				...baseRecord(2),
@@ -254,6 +256,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "second.work"),
 				definition: secondWork.action,
 				...baseRecord(4),
@@ -292,9 +295,9 @@ describe("React runtime adapter", () => {
 		if (route?.kind !== "state" || publish?.kind !== "state") throw new Error("missing action state");
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "pipeline.route"), definition: route.action, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "pipeline.route"), definition: route.action, ...baseRecord(2) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "pipeline.route"), event: { type: "FAST" }, ...baseRecord(3) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(4) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(4) },
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
@@ -333,6 +336,7 @@ describe("React runtime adapter", () => {
 		const invoke = (path: string, seqId: number): DurableLogRecord => ({
 			type: "state_action",
 			kind: "invoke",
+			sessionId: "session-id",
 			actionUid: actionUid(chartAst, path),
 			definition: action(path),
 			...baseRecord(seqId),
@@ -396,9 +400,9 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "items#a.route"), definition: route.action, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "items#a.route"), definition: route.action, ...baseRecord(3) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#a.route"), event: { type: "FAST" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(5) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(5) },
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
@@ -446,11 +450,11 @@ describe("React runtime adapter", () => {
 		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "fan.left.route"), definition: leftRoute.action, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "fan.right.work"), definition: rightWork.action, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "fan.left.route"), definition: leftRoute.action, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "fan.right.work"), definition: rightWork.action, ...baseRecord(3) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "fan.left.route"), event: { type: "FAST" }, ...baseRecord(4) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "fan.right.work"), event: { type: "DONE" }, ...baseRecord(5) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(6) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(6) },
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
@@ -482,7 +486,7 @@ describe("React runtime adapter", () => {
 		const definition = (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action;
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { topic: "runtime" }, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition, ...baseRecord(2) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition, ...baseRecord(2) },
 			{
 				type: "state_action",
 				kind: "complete",
@@ -490,7 +494,7 @@ describe("React runtime adapter", () => {
 				event: { type: "AGAIN", output: { feedback: "second" } },
 				...baseRecord(3),
 			},
-			{ type: "state_action", kind: "invoke", actionUid: uid, definition, ...baseRecord(4) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition, ...baseRecord(4) },
 		];
 		const work = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records, {
 			sessionProgress: {
@@ -560,6 +564,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "start"),
 				definition: definition("start"),
 				...baseRecord(2),
@@ -574,6 +579,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "review"),
 				definition: definition("review"),
 				...baseRecord(4),
@@ -588,6 +594,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "publish"),
 				definition: definition("publish"),
 				...baseRecord(6),
@@ -602,6 +609,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "review"),
 				definition: definition("review"),
 				...baseRecord(8),
@@ -643,6 +651,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: checkUid,
 				definition: (chartAst.states["review.check"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -651,6 +660,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: publishUid,
 				definition: (chartAst.states.publish as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(4),
@@ -659,6 +669,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: checkUid,
 				definition: (chartAst.states["review.check"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(6),
@@ -699,12 +710,12 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "first" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "first" }, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke", actionUid: workerUid, definition: workerDefinition, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: workerUid, definition: workerDefinition, ...baseRecord(3) },
 			{ type: "state_action", kind: "complete", actionUid: workerUid, event: { type: "DONE" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke", actionUid: publishUid, definition: publishDefinition, ...baseRecord(5) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: publishUid, definition: publishDefinition, ...baseRecord(5) },
 			{ type: "state_action", kind: "complete", actionUid: publishUid, event: { type: "RETRY" }, ...baseRecord(6) },
 			{ type: "spawned", path: "items", instances: { a: "second" }, ...baseRecord(7) },
-			{ type: "state_action", kind: "invoke", actionUid: workerUid, definition: workerDefinition, ...baseRecord(8) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: workerUid, definition: workerDefinition, ...baseRecord(8) },
 		];
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
 		expect(run.states.find((state) => state.id === "items#a.work")?.status).toBe("running");
@@ -742,6 +753,7 @@ describe("React runtime adapter", () => {
 		const invoke = (path: string, seqId: number): DurableLogRecord => ({
 			type: "state_action",
 			kind: "invoke",
+			sessionId: "session-id",
 			actionUid: actionUid(chartAst, path),
 			definition: definition(path),
 			...baseRecord(seqId),
@@ -839,6 +851,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: leftUid,
 				definition: definition("fan.left.work"),
 				...baseRecord(2),
@@ -846,6 +859,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: rightUid,
 				definition: definition("fan.right.work"),
 				...baseRecord(3),
@@ -855,6 +869,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: publishUid,
 				definition: definition("publish"),
 				...baseRecord(6),
@@ -863,6 +878,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: leftUid,
 				definition: definition("fan.left.work"),
 				...baseRecord(8),
@@ -870,6 +886,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: rightUid,
 				definition: definition("fan.right.work"),
 				...baseRecord(9),
@@ -909,6 +926,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: timedUid,
 				definition: (timedAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -959,6 +977,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: leftUid,
 				definition: (fanAst.states["fan.left.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -966,6 +985,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: rightUid,
 				definition: (fanAst.states["fan.right.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(3),
@@ -1046,6 +1066,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uid,
 				definition: (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -1095,6 +1116,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uid,
 				definition: (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -1142,6 +1164,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uid,
 				definition: (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -1226,6 +1249,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uid,
 				definition: (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -1280,6 +1304,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: actionUid(chartAst, "items#a.work"),
 				definition: worker.action,
 				...baseRecord(3),
@@ -1331,6 +1356,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uidA,
 				definition: (chartAst.states["items.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(3),
@@ -1339,6 +1365,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uidB,
 				definition: (chartAst.states["items.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(5),
@@ -1346,6 +1373,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: uidC,
 				definition: (chartAst.states["items.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(6),
@@ -1411,11 +1439,11 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: firstInstances }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: firstInstances, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke", actionUid: itemUid, definition: itemDefinition, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: itemUid, definition: itemDefinition, ...baseRecord(3) },
 			{ type: "state_action", kind: "complete", actionUid: itemUid, event: { type: "DONE" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke", actionUid: secondItemUid, definition: itemDefinition, ...baseRecord(5) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: secondItemUid, definition: itemDefinition, ...baseRecord(5) },
 			{ type: "state_action", kind: "complete", actionUid: secondItemUid, event: { type: "DONE" }, ...baseRecord(6) },
-			{ type: "state_action", kind: "invoke", actionUid: gateUid, definition: gateDefinition, ...baseRecord(7) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: gateUid, definition: gateDefinition, ...baseRecord(7) },
 			{ type: "state_action", kind: "complete", actionUid: gateUid, event: { type: "REDO" }, ...baseRecord(8) },
 			{ type: "spawned", path: "items", instances: secondInstances, ...baseRecord(9) },
 		];
@@ -1463,14 +1491,14 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "items#a.work"), definition: worker.action, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "items#a.work"), definition: worker.action, ...baseRecord(3) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#a.work"), event: { type: "DONE" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(5) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(5) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "gate"), event: { type: "REDO" }, ...baseRecord(6) },
 			{ type: "spawned", path: "items", instances: { b: "Beta" }, ...baseRecord(7) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "items#b.work"), definition: worker.action, ...baseRecord(8) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "items#b.work"), definition: worker.action, ...baseRecord(8) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#b.work"), event: { type: "DONE" }, ...baseRecord(9) },
-			{ type: "state_action", kind: "invoke", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(10) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(10) },
 			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "gate"), event: { type: "PASS" }, ...baseRecord(11) },
 		];
 
@@ -1520,6 +1548,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: nestedUid,
 				definition: (chartAst.states["outer.inner.work"] as Extract<ChartAst["states"][string], { kind: "state" }>)
 					.action,
@@ -1643,6 +1672,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: leftUid,
 				definition: (chartAst.states["items.fan.left.work"] as Extract<ChartAst["states"][string], { kind: "state" }>)
 					.action,
@@ -1652,6 +1682,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: rightUid,
 				definition: (chartAst.states["items.fan.right.work"] as Extract<ChartAst["states"][string], { kind: "state" }>)
 					.action,
@@ -1715,6 +1746,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: leftUid,
 				definition: (chartAst.states["fan.left.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action,
 				...baseRecord(2),
@@ -1723,6 +1755,7 @@ describe("React runtime adapter", () => {
 			{
 				type: "state_action",
 				kind: "invoke",
+			sessionId: "session-id",
 				actionUid: rightUid,
 				definition: (chartAst.states["fan.right.work"] as Extract<ChartAst["states"][string], { kind: "state" }>)
 					.action,

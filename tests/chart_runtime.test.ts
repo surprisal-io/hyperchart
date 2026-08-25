@@ -186,6 +186,7 @@ describe("ChartRuntime", () => {
 			id: "delayed-read",
 			actionUid: state.action.uid,
 			action: state.action,
+			sessionId: "delayed-read",
 			reads: [{ path: "input.txt" }],
 			events: ["DONE"],
 		}]);
@@ -203,6 +204,7 @@ describe("ChartRuntime", () => {
 			id: "after-disposal",
 			actionUid: state.action.uid,
 			action: state.action,
+			sessionId: "after-disposal",
 			events: ["DONE"],
 		}]);
 

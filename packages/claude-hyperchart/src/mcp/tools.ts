@@ -80,13 +80,7 @@ const cwdField = {
 function fileTranscriptReader(sessionsDir: string): SessionTranscriptReader {
 	return async (binding) => {
 		const session = Object.values(readSessionProgress(sessionsDir).sessions).find(
-			(candidate) =>
-				candidate.branchId === binding.branchId &&
-				candidate.invokeSeqId === binding.invokeSeqId &&
-				candidate.actionUid.chart === binding.actionUid.chart &&
-				candidate.actionUid.state === binding.actionUid.state &&
-				candidate.actionUid.action === binding.actionUid.action &&
-				(binding.attempt === undefined || candidate.sessionAttempt === binding.attempt),
+			(candidate) => candidate.sessionId === binding.sessionId,
 		);
 		return readNeutralSessionTranscript(sessionsDir, session?.sessionFile, { limit: false });
 	};

@@ -64,15 +64,6 @@ export type PiSessionOverrides = Readonly<{
 	customTools?: ToolDefinition[];
 }>;
 
-export type PiInvocationBinding = Readonly<{
-	runId: string;
-	branchId: string;
-	invokeSeqId: number;
-	actionUid: ActionUID;
-	/** Zero for the original invocation; increments only for restart-style validation retries. */
-	attempt: number;
-}>;
-
 export type PiSessionHandle = Readonly<{
 	manager: SessionManager;
 	sessionId: string;
@@ -82,10 +73,8 @@ export type PiSessionHandle = Readonly<{
 }>;
 
 export interface PiSessionService {
-	openOrCreate(binding: PiInvocationBinding): Promise<PiSessionHandle>;
-	readTranscript(
-		binding: Omit<PiInvocationBinding, "attempt"> & { attempt?: number },
-	): Promise<HyperchartSessionMessageInfo[] | undefined>;
+	openOrCreate(sessionId: string): Promise<PiSessionHandle>;
+	readTranscript(sessionId: string): Promise<HyperchartSessionMessageInfo[] | undefined>;
 	close(): Promise<void>;
 }
 
@@ -108,10 +97,9 @@ type PiExecutorOptionsBase = {
 	schemaRegistry?: SchemaRegistry;
 };
 
-export type PiExecutorOptions = PiExecutorOptionsBase & (
-	| { sessionService?: undefined; runId?: string }
-	| { sessionService: PiSessionService; runId: string }
-);
+export type PiExecutorOptions = PiExecutorOptionsBase & {
+	sessionService?: PiSessionService;
+};
 
 export function createInvocationCustomTools(
 	effect: AgentEffect,
@@ -120,6 +108,10 @@ export function createInvocationCustomTools(
 	customTools: readonly ToolDefinition[] | undefined,
 ): ToolDefinition[] {
 	return [...(customTools ?? []), createFinishTool(effect, sink, registry)];
+}
+
+export function sessionIdForAttempt(sessionId: string, attempt: number): string {
+	return attempt === 0 ? sessionId : `${sessionId}:attempt:${attempt}`;
 }
 
 function workspaceContextNote(projectDir: string, branchWorkspace: string): string {
@@ -487,13 +479,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		let sessionHandle: PiSessionHandle | undefined;
 		if (this.options.sessionService !== undefined) {
 			if (invokeSeqId === undefined) throw new Error(`Agent effect ${effect.id} has no durable invoke sequence`);
-			sessionHandle = await this.options.sessionService.openOrCreate({
-				runId: this.options.runId,
-				branchId: this.options.branchId,
-				invokeSeqId,
-				actionUid: effect.actionUid,
-				attempt: runOptions.sessionAttempt,
-			});
+			sessionHandle = await this.options.sessionService.openOrCreate(
+				sessionIdForAttempt(effect.sessionId, runOptions.sessionAttempt),
+			);
 		}
 		if (isStopped()) {
 			await sessionHandle?.close();
@@ -502,7 +490,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		const sessionManager =
 			sessionHandle?.manager ??
 			(latest === undefined
-				? SessionManager.create(this.options.workDir, dir)
+				? SessionManager.create(this.options.workDir, dir, {
+						id: sessionIdForAttempt(effect.sessionId, runOptions.sessionAttempt),
+					  })
 				: SessionManager.open(latest, dir, this.options.workDir));
 		const { session } = await createAgentSession({
 			cwd: this.options.workDir,
@@ -529,11 +519,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		this.updateProgress(effect, {
 			actionName: definition.name,
 			status: "running",
-			...(sessionHandle === undefined
-				? sessionFile === undefined
-					? {}
-					: { sessionFile }
-				: { sessionId: sessionHandle.sessionId, sessionAttempt: runOptions.sessionAttempt }),
+			sessionId: sessionManager.getSessionId(),
+			sessionAttempt: runOptions.sessionAttempt,
+			...(sessionFile === undefined ? {} : { sessionFile }),
 			...(definition.role === undefined ? {} : { role: definition.role }),
 			...(modelRef === undefined ? {} : { model: modelRef }),
 			...(plan.thinkingLevel === undefined ? {} : { thinking: plan.thinkingLevel }),

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import assert from "./assert.js";
 import type {
 	ChartEvent,
@@ -110,6 +111,8 @@ export type AgentEffect = Readonly<{
 	events: readonly string[];
 	reply?: SchemaAst;
 	resume?: ResumeRequest;
+	/** Opaque identity durably assigned to this action invocation. */
+	sessionId: string;
 }>;
 
 export type UserEffect = Readonly<{
@@ -502,7 +505,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	const id = pendingEffectId(pending);
 	switch (pending.phase) {
 		case "running":
-			return actionInvocationForAction(state, pending.actionUid, node.action, id, pending.seqId);
+			return actionInvocationForAction(state, pending.actionUid, node.action, id, pending.seqId, pending.sessionId);
 		case "validating": {
 			if (node.validate === undefined) {
 				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without a validator`);
@@ -537,6 +540,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 					node.action,
 					actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
 					pending.invokeSeqId,
+					pending.sessionId,
 				),
 			};
 	}
@@ -557,6 +561,7 @@ export function renderPendingActionInvocation(
 		node.action,
 		actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
 		pending.seqId,
+		pending.sessionId,
 	);
 }
 
@@ -566,10 +571,11 @@ function actionInvocationForAction(
 	action: ActionStateAst["action"],
 	id: EffectId,
 	seqId: number,
+	sessionId: string,
 ): ActionEffect {
 	switch (action.kind) {
 		case "agent":
-			return agentInvocationForAction(state, actionUid, action, id);
+			return agentInvocationForAction(state, actionUid, action, id, sessionId);
 		case "script":
 			return scriptInvocationForAction(state, actionUid, action, id);
 		case "user":
@@ -582,6 +588,7 @@ function agentInvocationForAction(
 	actionUid: ActionUID,
 	action: AgentActionAst,
 	id: EffectId,
+	sessionId: string,
 ): AgentEffect {
 	const resume = resumeRequestForAction(state, actionUid, id);
 	return {
@@ -589,6 +596,7 @@ function agentInvocationForAction(
 		id,
 		actionUid,
 		action,
+		sessionId,
 		events: allowedEventsForAction(state.ast, actionUid.state),
 		...(action.reply === undefined ? {} : { reply: action.reply }),
 		...(resume === undefined ? {} : { resume }),
@@ -1647,6 +1655,7 @@ function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 				type: "state_action",
 				kind: "invoke",
 				actionUid,
+				sessionId: randomUUID(),
 				definition: node.action,
 			},
 		],

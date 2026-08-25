@@ -41,7 +41,7 @@ async function fixture(reply = false) {
 	const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.initializeRootBranch();
 	const state = parsed.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
 	await store.appendDrafts([{ type: "args", args: {} }]);
-	const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+	const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
 	const replySchema = reply ? { kind: "jsonSchema" as const, schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false } } : undefined;
 	const [opened] = await store.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"], ...(replySchema === undefined ? {} : { reply: replySchema }) }]);
 	return { root, runsRoot, workDir, runDir, ast: parsed.ast, store, gateSeqId: opened!.seqId };
@@ -111,7 +111,7 @@ describe("journal-native user interactions", () => {
 		const f = await fixture();
 		const memory = new MemoryLogStore();
 		const state = f.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
-		const [invoke] = await memory.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, definition: state.action }]);
+		const [invoke] = await memory.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
 		const [opened] = await memory.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"] }]);
 		const mem = await Promise.allSettled([
 			memory.respondToUserInteraction({ ast: f.ast, gateSeqId: opened!.seqId, event: { type: "APPROVED", output: "left" } }),

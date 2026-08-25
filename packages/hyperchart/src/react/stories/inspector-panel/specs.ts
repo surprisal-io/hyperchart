@@ -252,6 +252,7 @@ function pushInvoke(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePat
 	builder.records.push({
 		type: "state_action",
 		kind: "invoke",
+			sessionId: "session-id",
 		actionUid,
 		definition: storyActionDefinition(ast, statePath),
 		parentId: builder.seq,

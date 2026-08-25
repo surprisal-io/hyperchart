@@ -121,7 +121,7 @@ const editorApplyUid = { ...editorApply.action.uid, state: "@editor.apply" };
 export const actorNamedReplyRecords: DurableLogRecord[] = [
 	...pendingCallRecords,
 	{ type: "actor_message", kind: "accepted", occurrence: "@editor", messageId: callMessage.messageId, receiveState: "@editor.idle", ...stamp(4) },
-	{ type: "state_action", kind: "invoke", actionUid: editorApplyUid, definition: editorApply.action, ...stamp(5) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: editorApplyUid, definition: editorApply.action, ...stamp(5) },
 	{ type: "state_action", kind: "complete", actionUid: editorApplyUid, event: { type: "DONE" }, ...stamp(6) },
 	{ type: "actor_message", kind: "replied", occurrence: "@editor", messageId: callMessage.messageId, message: editorSettle.message, replyEvent: editorSettle.event, output: editorSettle.output, schema: appliedSchema, ...stamp(7) },
 ];
@@ -291,7 +291,7 @@ const reentryRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "replied", occurrence: "phase.@auditor", messageId: reentryMessage1.messageId, message: "RECORD", ...stamp(5) },
 	{ type: "actor_message", kind: "settled", occurrence: "phase.@auditor", messageId: reentryMessage1.messageId, ...stamp(6) },
 	{ type: "actor_scope", kind: "stopped", occurrence: "phase.@auditor", ...stamp(7) },
-	{ type: "state_action", kind: "invoke", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(8) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(8) },
 	{ type: "state_action", kind: "complete", actionUid: reentryAction.action.uid, event: { type: "AGAIN" }, ...stamp(9) },
 	{ type: "actor_created", declaration: "phase.@auditor", occurrence: "phase.@auditor~2", generation: 2, owner: "phase", input: reentryDefinition.inputValue, definition: reentryDefinition, ...stamp(10) },
 	enqueue(reentryAst, "phase.record", "phase.@auditor~2", "RECORD", [reentryMessage2], 11, "phase.record", 2),
@@ -300,7 +300,7 @@ const reentryRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "replied", occurrence: "phase.@auditor~2", messageId: reentryMessage2.messageId, message: "RECORD", ...stamp(14) },
 	{ type: "actor_message", kind: "settled", occurrence: "phase.@auditor~2", messageId: reentryMessage2.messageId, ...stamp(15) },
 	{ type: "actor_scope", kind: "stopped", occurrence: "phase.@auditor~2", ...stamp(16) },
-	{ type: "state_action", kind: "invoke", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(17) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(17) },
 	{ type: "state_action", kind: "complete", actionUid: reentryAction.action.uid, event: { type: "AGAIN" }, ...stamp(18) },
 	{ type: "actor_created", declaration: "phase.@auditor", occurrence: "phase.@auditor~3", generation: 3, owner: "phase", input: reentryDefinition.inputValue, definition: reentryDefinition, ...stamp(19) },
 	enqueue(reentryAst, "phase.record", "phase.@auditor~3", "RECORD", [reentryMessage3], 20, "phase.record", 3),
@@ -309,7 +309,7 @@ const reentryRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "replied", occurrence: "phase.@auditor~3", messageId: reentryMessage3.messageId, message: "RECORD", ...stamp(23) },
 	{ type: "actor_message", kind: "settled", occurrence: "phase.@auditor~3", messageId: reentryMessage3.messageId, ...stamp(24) },
 	{ type: "actor_scope", kind: "stopped", occurrence: "phase.@auditor~3", ...stamp(25) },
-	{ type: "state_action", kind: "invoke", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(26) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(26) },
 ];
 export const actorReentryRun = reentryScenario.runtimeRun(reentryRecords, { runId: "actor:reentry", status: { state: "running", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000 });
 
@@ -385,7 +385,7 @@ const poolAccepted = (messageIndex: number, workerIndex: number, seqId: number):
 	receiveState: `@workers.$worker-${workerIndex}.idle`, workerIndex, ...stamp(seqId),
 });
 const poolInvoked = (workerIndex: number, seqId: number): DurableLogRecord => ({
-	type: "state_action", kind: "invoke", actionUid: poolWorkerUid(workerIndex), definition: poolAction.action, ...stamp(seqId),
+	type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: poolWorkerUid(workerIndex), definition: poolAction.action, ...stamp(seqId),
 });
 const poolCompleted = (workerIndex: number, messageIndex: number, seqId: number): DurableLogRecord => ({
 	type: "state_action", kind: "complete", actionUid: poolWorkerUid(workerIndex), event: { type: "DONE", output: { id: messageIndex, receipt: `receipt-${messageIndex}` } }, ...stamp(seqId),
@@ -489,7 +489,7 @@ const crowdedAccepted = (messageIndex: number, workerIndex: number, seqId: numbe
 	receiveState: `@workers.$worker-${workerIndex}.idle`, workerIndex, ...stamp(seqId),
 });
 const crowdedInvoked = (workerIndex: number, seqId: number): DurableLogRecord => ({
-	type: "state_action", kind: "invoke", actionUid: crowdedWorkerUid(workerIndex), definition: crowdedAction.action, ...stamp(seqId),
+	type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: crowdedWorkerUid(workerIndex), definition: crowdedAction.action, ...stamp(seqId),
 });
 const crowdedCompleted = (workerIndex: number, messageIndex: number, seqId: number): DurableLogRecord => ({
 	type: "state_action", kind: "complete", actionUid: crowdedWorkerUid(workerIndex), event: { type: "DONE", output: { id: messageIndex, receipt: `receipt-${messageIndex}` } }, ...stamp(seqId),
@@ -602,15 +602,15 @@ const mapPoolRecords: DurableLogRecord[] = [
 	created(mapPoolAst, "projects.@workers", "projects#a.@workers", 3, "projects#a", mapPoolInput),
 	enqueue(mapPoolAst, "projects#a.dispatch", "projects#a.@workers", mapPoolDispatch.event, [mapPoolMessage], 4, "projects.dispatch"),
 	{ type: "actor_message", kind: "accepted", occurrence: "projects#a.@workers", messageId: mapPoolMessage.messageId, receiveState: "projects#a.@workers.$worker-0.idle", workerIndex: 0, ...stamp(5) },
-	{ type: "state_action", kind: "invoke", actionUid: mapPoolWorkerUid, definition: mapPoolWorkerAction.action, ...stamp(6) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: mapPoolWorkerUid, definition: mapPoolWorkerAction.action, ...stamp(6) },
 	{ type: "state_action", kind: "complete", actionUid: mapPoolWorkerUid, event: { type: "DONE", output: { id: 0, receipt: "map-generation-receipt" } }, ...stamp(7) },
 	{ type: "actor_message", kind: "replied", occurrence: "projects#a.@workers", messageId: mapPoolMessage.messageId, message: "WORK", output: { id: 0, receipt: "map-generation-receipt" }, schema: mapPoolReply.schema, workerIndex: 0, ...stamp(8) },
 	{ type: "actor_message", kind: "settled", occurrence: "projects#a.@workers", messageId: mapPoolMessage.messageId, workerIndex: 0, ...stamp(9) },
-	{ type: "state_action", kind: "invoke", actionUid: mapPoolHoldUid, definition: mapPoolHold.action, ...stamp(10) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: mapPoolHoldUid, definition: mapPoolHold.action, ...stamp(10) },
 	{ type: "state_action", kind: "complete", actionUid: mapPoolHoldUid, event: { type: "FINISH" }, ...stamp(11) },
 	{ type: "actor_scope", kind: "closing", occurrence: "projects#a.@workers", ...stamp(12) },
 	{ type: "actor_scope", kind: "stopped", occurrence: "projects#a.@workers", ...stamp(13) },
-	{ type: "state_action", kind: "invoke", actionUid: mapPoolBetween.action.uid, definition: mapPoolBetween.action, ...stamp(14) },
+	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: mapPoolBetween.action.uid, definition: mapPoolBetween.action, ...stamp(14) },
 	{ type: "state_action", kind: "complete", actionUid: mapPoolBetween.action.uid, event: { type: "AGAIN" }, ...stamp(15) },
 	{ type: "spawned", path: "projects", instances: { a: mapPoolInput }, ...stamp(16) },
 	created(mapPoolAst, "projects.@workers", "projects#a.@workers~2", 17, "projects#a", mapPoolInput, 2),

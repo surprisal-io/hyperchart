@@ -45,6 +45,7 @@ function effect(overrides: Partial<AgentEffect> = {}, actionOverrides: Partial<A
 		events: ["DONE", "FAILED"],
 		reply: schema(z.object({ value: z.number() })),
 		...overrides,
+		sessionId: overrides.sessionId ?? "session-id",
 	};
 }
 

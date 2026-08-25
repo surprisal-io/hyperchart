@@ -46,6 +46,7 @@ function effect(overrides: Partial<AgentEffect> = {}): AgentEffect {
 		action: { kind: "agent", uid: actionUid, name: "worker" },
 		events: ["DONE", "FAILED"],
 		...overrides,
+		sessionId: overrides.sessionId ?? "session-id",
 	};
 }
 

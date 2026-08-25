@@ -80,6 +80,7 @@ function actionRecord(
 		return {
 			type: "state_action",
 			kind: "invoke",
+			sessionId: "session-id",
 			actionUid: state.action.uid,
 			definition: state.action,
 			...session,

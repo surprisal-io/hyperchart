@@ -18,14 +18,7 @@ import { readRunStatus } from "../runtime/generic/run_status.js";
 import { readRunnerConfig } from "../runtime/generic/runner_main.js";
 import { readSessionProgress, sessionProgressKey } from "../runtime/generic/session_progress.js";
 
-export type InvocationTranscriptBinding = Readonly<{
-	runId: string;
-	branchId: BranchId;
-	invokeSeqId: number;
-	actionUid: ActionUID;
-	/** Omitted to resolve the latest attempt for a historical invocation. */
-	attempt?: number;
-}>;
+export type InvocationTranscriptBinding = Readonly<{ sessionId: string }>;
 
 export type SessionTranscriptReader = (
 	binding: InvocationTranscriptBinding,
@@ -90,7 +83,6 @@ export async function hyperchartRunFromRunDir(
 	const runId = status?.runId ?? basename(absoluteRunDir);
 	const sessionProgress = options.includeTranscripts === true
 		? await sessionProgressWithVisitTranscripts(
-				runId,
 				records,
 				branchSessionProgress,
 				options.readTranscript,
@@ -123,7 +115,6 @@ export async function hyperchartRunFromRunDir(
 }
 
 async function sessionProgressWithVisitTranscripts(
-	runId: string,
 	records: readonly DurableLogRecord[],
 	progress: ReturnType<typeof readSessionProgress>,
 	readTranscript: SessionTranscriptReader,
@@ -131,13 +122,11 @@ async function sessionProgressWithVisitTranscripts(
 	const invocations = agentInvocationsByAction(records);
 	const resolvedSessions = await Promise.all(
 		Object.entries(progress.sessions).map(async ([key, session]) => {
-			const messages = await readTranscript({
-				runId,
-				branchId: session.branchId,
-				invokeSeqId: session.invokeSeqId,
-				actionUid: session.actionUid,
-				...(session.sessionAttempt === undefined ? {} : { attempt: session.sessionAttempt }),
-			});
+			const invocation = invocations.get(session.actionKey)?.find(
+				(candidate) => candidate.invokeSeqId === session.invokeSeqId,
+			);
+			const sessionId = session.sessionId ?? invocation?.sessionId;
+			const messages = sessionId === undefined ? undefined : await readTranscript({ sessionId });
 			const visit = session.visit ?? invocations.get(session.actionKey)?.at(-1)?.visit;
 			return [key, {
 				...session,
@@ -155,12 +144,7 @@ async function sessionProgressWithVisitTranscripts(
 	for (const visits of invocations.values()) {
 		for (const invocation of visits) {
 			if (knownVisits.has(`${invocation.actionKey}:${invocation.visit}`)) continue;
-			const messages = await readTranscript({
-				runId,
-				branchId: invocation.branchId,
-				invokeSeqId: invocation.invokeSeqId,
-				actionUid: invocation.actionUid,
-			});
+			const messages = await readTranscript({ sessionId: invocation.sessionId });
 			if (messages === undefined) continue;
 			const progressKey = sessionProgressKey(
 				invocation.actionUid,
@@ -203,6 +187,7 @@ type AgentInvocationVisit = {
 	actionName: string;
 	visit: number;
 	invokeSeqId: number;
+	sessionId: string;
 	startedAt: number;
 };
 
@@ -219,6 +204,7 @@ function agentInvocationsByAction(records: readonly DurableLogRecord[]): Map<str
 			actionName: record.definition.name,
 			visit: visits.length + 1,
 			invokeSeqId: record.seqId,
+			sessionId: record.sessionId,
 			startedAt: record.timestamp,
 		});
 		byAction.set(actionKey, visits);
