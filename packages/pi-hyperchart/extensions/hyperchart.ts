@@ -94,7 +94,11 @@ import {
 	summarizeRunInspect,
 	summarizeUserGate,
 } from "@surprisal/hyperchart/host";
-import { hyperchartRunFromRunDir } from "../src/runtime/pi/run_inspect.js";
+import {
+	createPiFileTranscriptReader,
+	hyperchartRunFromRunDir,
+	type SessionTranscriptReader,
+} from "../src/runtime/pi/run_inspect.js";
 import { closeRunInspectorServer, openRunInspector } from "@surprisal/hyperchart/inspect";
 
 const require = createRequire(import.meta.url);
@@ -120,9 +124,15 @@ type RunHistoryEntry = {
 };
 type ActiveRun = RunSnapshot & { done: Promise<HyperchartRunStatus> };
 type HyperchartContext = Pick<ExtensionContext, "cwd" | "mode" | "model" | "sessionManager" | "ui" | "isIdle">;
+export type HyperchartExtensionOptions = {
+	transcriptReaderForRun(runDir: string): SessionTranscriptReader;
+	close?(): void | Promise<void>;
+};
+
 type PiTerminalDelivery = {
 	api: ExtensionAPI;
 	currentContext: () => HyperchartContext | undefined;
+	transcriptReaderForRun(runDir: string): SessionTranscriptReader;
 	interactions?: PiUserInteractionCoordinator;
 };
 type RunStartOptions = {
@@ -303,11 +313,34 @@ function filterCompletions(items: readonly AutocompleteItem[], current: string):
 	return filtered.length === 0 ? null : filtered;
 }
 
-export default function register(pi: ExtensionAPI) {
+function loadHyperchartExtensionOptions(cwd: string): HyperchartExtensionOptions {
+	const configPath = join(cwd, ".pi", "hyperchart.config.ts");
+	if (!existsSync(configPath)) return { transcriptReaderForRun: createPiFileTranscriptReader };
+	const module = createJiti(pathToFileURL(configPath).href, { interopDefault: true, moduleCache: false })(configPath) as unknown;
+	const loaded = (typeof module === "object" && module !== null && "default" in module ? module.default : module) as Partial<HyperchartExtensionOptions>;
+	if (typeof loaded.transcriptReaderForRun !== "function") {
+		throw new Error(`${configPath} must export transcriptReaderForRun(runDir)`);
+	}
+	return {
+		transcriptReaderForRun: loaded.transcriptReaderForRun,
+		...(typeof loaded.close === "function" ? { close: loaded.close } : {}),
+	};
+}
+
+export default function registerDefault(pi: ExtensionAPI) {
+	register(pi, loadHyperchartExtensionOptions(process.cwd()));
+}
+
+export function register(pi: ExtensionAPI, options: HyperchartExtensionOptions) {
 	registerBundleExtensions(pi, process.cwd());
 	let currentCtx: HyperchartContext | undefined;
 	const interactions = new PiUserInteractionCoordinator(pi, () => currentCtx);
-	const delivery: PiTerminalDelivery = { api: pi, currentContext: () => currentCtx, interactions };
+	const delivery: PiTerminalDelivery = {
+		api: pi,
+		currentContext: () => currentCtx,
+		transcriptReaderForRun: options.transcriptReaderForRun,
+		interactions,
+	};
 	pi.registerCommand("hyperchart", {
 		description: "Run and inspect hyperchart workflows",
 		handler: async (args, ctx) => dispatch(args, ctx, true, delivery),
@@ -339,6 +372,7 @@ export default function register(pi: ExtensionAPI) {
 		interactions.stop();
 		currentCtx = undefined;
 		await closeRunInspectorServer();
+		await options.close?.();
 	});
 }
 
@@ -753,7 +787,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 				throw new Error("hyperchart action=view requires exactly one of chartPath or runDir/runId");
 			}
 			const branchId = runDir === undefined ? undefined : params.branchId ?? await unambiguousRunBranch("view", runDir, ctx);
-			return hyperchartViewTool.execute(
+			return createHyperchartViewTool(delivery).execute(
 				toolCallId,
 				{ runDir, branchId, chartPath: params.chartPath, open: params.open },
 				signal,
@@ -1060,20 +1094,35 @@ function createHyperchartRunTool(delivery: PiTerminalDelivery) {
 	});
 }
 
+type InspectRunOptions = { ast?: ChartAst; branchId?: string } & (
+	| { includeTranscripts?: false }
+	| { includeTranscripts: true; readTranscript: SessionTranscriptReader }
+);
+
+function transcriptReaderForRun(delivery: PiTerminalDelivery, runDir: string): SessionTranscriptReader {
+	return delivery.transcriptReaderForRun(runDir);
+}
+
 async function inspectRunForCurrentWorkDir(
 	runDir: string,
 	ctx: HyperchartContext,
-	options: { ast?: ChartAst; branchId?: string; includeTranscripts?: boolean } = {},
+	options: InspectRunOptions = {},
 ) {
 	const meta = loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
 	if (meta === undefined) throw new Error(`Run '${basename(runDir)}' belongs to another working directory or is missing metadata`);
-	return hyperchartRunFromRunDir(runDir, {
+	const base = {
 		meta,
 		...(options.ast === undefined ? {} : { ast: options.ast }),
 		...(options.branchId === undefined ? {} : { branchId: options.branchId }),
-		includeTranscripts: options.includeTranscripts === true,
 		agentDefaults: createAgentDefaultsResolver(ctx.cwd, getAgentDir(), meta.chartPath),
-	});
+	};
+	return options.includeTranscripts === true
+		? hyperchartRunFromRunDir(runDir, {
+				...base,
+				includeTranscripts: true,
+				readTranscript: options.readTranscript,
+			  })
+		: hyperchartRunFromRunDir(runDir, { ...base, includeTranscripts: false });
 }
 
 const hyperchartInspectTool = defineTool({
@@ -1142,7 +1191,8 @@ const hyperchartRunInspectTool = defineTool({
 	},
 });
 
-const hyperchartViewTool = defineTool({
+function createHyperchartViewTool(delivery: PiTerminalDelivery) {
+	return defineTool({
 	name: "hyperchart_view",
 	label: "View Hyperchart Run",
 	description:
@@ -1176,9 +1226,14 @@ const hyperchartViewTool = defineTool({
 		if (params.runDir === undefined) throw new Error("hyperchart_view requires runDir when chartPath is omitted");
 		const runDir = resolveHyperchartRunDir(params.runDir, ctx.cwd);
 		const inspector = await inspectRunForCurrentWorkDir(runDir, ctx, params.branchId === undefined ? {} : { branchId: params.branchId });
+		const readTranscript = transcriptReaderForRun(delivery, runDir);
 		const { url } = await openRunInspector({
 			runId: inspector.runId,
-			loadRun: () => inspectRunForCurrentWorkDir(runDir, ctx, { ...(inspector.branchId === undefined ? {} : { branchId: inspector.branchId }), includeTranscripts: true }),
+			loadRun: () => inspectRunForCurrentWorkDir(runDir, ctx, {
+				...(inspector.branchId === undefined ? {} : { branchId: inspector.branchId }),
+				includeTranscripts: true,
+				readTranscript,
+			}),
 			steerSession: (actionKey, message) => {
 				queueLiveSessionSteering(join(runDir, "sessions"), inspector.branchId ?? "main", actionKey, message);
 			},
@@ -1189,7 +1244,8 @@ const hyperchartViewTool = defineTool({
 			details: safeToolDetails({ url }),
 		};
 	},
-});
+	});
+}
 
 const hyperchartRewindTool = defineTool({
 	name: "hyperchart_rewind",
@@ -1238,15 +1294,15 @@ const hyperchartRewindTool = defineTool({
 async function dispatch(
 	args: string,
 	ctx: HyperchartContext,
-	notifyErrors = true,
-	delivery?: PiTerminalDelivery,
+	notifyErrors: boolean,
+	delivery: PiTerminalDelivery,
 ): Promise<void> {
 	const tokens = tokenize(args);
 	const command = tokens.shift();
 	try {
 		if (command === undefined || command.startsWith("-")) {
 			if (command !== undefined) tokens.unshift(command);
-			await runsCommand(tokens, ctx);
+			await runsCommand(tokens, ctx, delivery);
 			return;
 		}
 		switch (command) {
@@ -1273,13 +1329,13 @@ async function dispatch(
 				await deleteCommand(tokens, ctx);
 				break;
 			case "view":
-				await viewCommand(tokens, ctx);
+				await viewCommand(tokens, ctx, delivery);
 				break;
 			default:
 				if (isBareRunIdSpec(command)) {
 					const run = lookupBareRunIdForView(command, ctx.cwd);
 					if (run.kind === "match") {
-						await viewCommand([command], ctx);
+						await viewCommand([command], ctx, delivery);
 						break;
 					}
 					if (run.kind === "foreign") {
@@ -1295,7 +1351,7 @@ async function dispatch(
 	}
 }
 
-async function runCommand(tokens: string[], ctx: HyperchartContext, delivery?: PiTerminalDelivery): Promise<void> {
+async function runCommand(tokens: string[], ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<void> {
 	const { wait, ...options } = parseRunOptions(tokens);
 	const result = await startHyperchartRun({ ...options, ...(wait === true ? { wait: true } : {}), ...(delivery === undefined ? {} : { delivery }) }, ctx);
 	if (wait === true) {
@@ -1309,7 +1365,7 @@ async function runCommand(tokens: string[], ctx: HyperchartContext, delivery?: P
 	}
 }
 
-async function runsCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
+async function runsCommand(tokens: string[], ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<void> {
 	const options = parseRunsOptions(tokens);
 	const entries = await loadRunHistory({ cwd: ctx.cwd, limit: options.limit });
 	if (entries.length === 0) {
@@ -1329,10 +1385,10 @@ async function runsCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 			}),
 		{ overlay: true },
 	);
-	await executeRunHistoryAction(action, ctx);
+	await executeRunHistoryAction(action, ctx, delivery);
 }
 
-async function resumeCommand(tokens: string[], ctx: HyperchartContext, delivery?: PiTerminalDelivery): Promise<void> {
+async function resumeCommand(tokens: string[], ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<void> {
 	const options = parseResumeOptions(tokens);
 	await resumeRun(
 		options.runId,
@@ -1340,7 +1396,7 @@ async function resumeCommand(tokens: string[], ctx: HyperchartContext, delivery?
 		{
 			...(options.branchIds === undefined ? {} : { branchIds: options.branchIds }),
 			...(options.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}),
-			...(delivery === undefined ? {} : { delivery }),
+			delivery,
 		},
 	);
 }
@@ -1363,7 +1419,7 @@ async function steerCommand(tokens: string[], ctx: HyperchartContext): Promise<v
 	ctx.ui.notify(`Steering queued for @${session.actionName} on branch ${branchId}`, "info");
 }
 
-async function restartCommand(tokens: string[], ctx: HyperchartContext, delivery?: PiTerminalDelivery): Promise<void> {
+async function restartCommand(tokens: string[], ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<void> {
 	const runId = tokens[0];
 	if (runId === undefined) throw new Error("restart requires a runId");
 	await restartRun(runId, ctx, delivery);
@@ -1378,12 +1434,12 @@ async function deleteCommand(tokens: string[], ctx: HyperchartContext): Promise<
 async function resumeRun(
 	runId: string,
 	ctx: HyperchartContext,
-	opts: { branchIds?: string[]; ignoreReplayWarnings?: boolean; delivery?: PiTerminalDelivery } = {},
+	opts: { branchIds?: string[]; ignoreReplayWarnings?: boolean; delivery: PiTerminalDelivery },
 ): Promise<RunStartResult> {
 	return startHyperchartRun({ runDir: runId, ...(opts.branchIds === undefined ? {} : { branchIds: opts.branchIds }), ...(opts.ignoreReplayWarnings === true ? { ignoreReplayWarnings: true } : {}), ...(opts.delivery === undefined ? {} : { delivery: opts.delivery }) }, ctx);
 }
 
-async function restartRun(runId: string, ctx: HyperchartContext, delivery?: PiTerminalDelivery): Promise<RunStartResult> {
+async function restartRun(runId: string, ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<RunStartResult> {
 	const runDir = resolveHyperchartRunDir(runId, ctx.cwd);
 	const meta = loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
@@ -1403,8 +1459,8 @@ async function restartRun(runId: string, ctx: HyperchartContext, delivery?: PiTe
 	return result;
 }
 
-async function executeRunHistoryAction(action: RunHistoryAction, ctx: HyperchartContext): Promise<void> {
-	if (action.kind === "view") await viewCommand([action.runId], ctx);
+async function executeRunHistoryAction(action: RunHistoryAction, ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<void> {
+	if (action.kind === "view") await viewCommand([action.runId], ctx, delivery);
 }
 
 async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext): Promise<RunStartResult> {
@@ -1890,7 +1946,7 @@ async function deleteRun(runId: string, ctx: HyperchartContext): Promise<void> {
 	ctx.ui.notify(`Deleted hyperchart run ${runId}`, "info");
 }
 
-async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<void> {
+async function viewCommand(tokens: string[], ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<void> {
 	const activeRun = runs.get(tokens[0]);
 	const run = activeRun ?? (await resolveRunForView(tokens[0], ctx.cwd));
 	if (run === undefined) {
@@ -1901,10 +1957,15 @@ async function viewCommand(tokens: string[], ctx: HyperchartContext): Promise<vo
 		ctx.ui.notify(`Run ${run.runId}: ${run.runDir}`, "info");
 		return;
 	}
+	const readTranscript = transcriptReaderForRun(delivery, run.runDir);
 	const { url } = await openRunInspector({
 		runId: run.runId,
 		// The snapshot's parsed AST avoids a synchronous chart-module re-parse on every poll.
-		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, { ast: run.ast, includeTranscripts: true }),
+		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, {
+			ast: run.ast,
+			includeTranscripts: true,
+			readTranscript,
+		}),
 		steerSession: (actionKey, message) => {
 			queueLiveSessionSteering(join(run.runDir, "sessions"), "main", actionKey, message);
 		},

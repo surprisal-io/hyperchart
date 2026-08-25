@@ -32,14 +32,19 @@ import {
 	summarizeRunInspect,
 	summarizeUserGate,
 } from "@surprisal/hyperchart/host";
-import { hyperchartRunFromRunDir } from "@surprisal/hyperchart/inspect";
-import { openRunInspector } from "@surprisal/hyperchart/inspect";
+import {
+	hyperchartRunFromRunDir,
+	openRunInspector,
+	readNeutralSessionTranscript,
+	type SessionTranscriptReader,
+} from "@surprisal/hyperchart/inspect";
 import {
 	isPidAlive,
 	isRunLive,
 	patchRunStatus,
 	queueLiveSessionSteering,
 	readRunStatus,
+	readSessionProgress,
 } from "@surprisal/hyperchart/sessions";
 import { claudeHostPaths, claudeRunsRoot, claudeUserChartsDir } from "../claude/paths.js";
 import { createClaudeAgentDefaultsResolver } from "../claude/agent_definitions.js";
@@ -71,6 +76,21 @@ export type HyperchartMcpTool = {
 const cwdField = {
 	cwd: z.string().optional().describe("Working directory override; defaults to the session working directory"),
 };
+
+function fileTranscriptReader(sessionsDir: string): SessionTranscriptReader {
+	return async (binding) => {
+		const session = Object.values(readSessionProgress(sessionsDir).sessions).find(
+			(candidate) =>
+				candidate.branchId === binding.branchId &&
+				candidate.invokeSeqId === binding.invokeSeqId &&
+				candidate.actionUid.chart === binding.actionUid.chart &&
+				candidate.actionUid.state === binding.actionUid.state &&
+				candidate.actionUid.action === binding.actionUid.action &&
+				(binding.attempt === undefined || candidate.sessionAttempt === binding.attempt),
+		);
+		return readNeutralSessionTranscript(sessionsDir, session?.sessionFile, { limit: false });
+	};
+}
 
 export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcpTool[] {
 	const runsRoot = () => deps.runsRoot ?? claudeRunsRoot();
@@ -525,7 +545,12 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const agentDefaults = createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath);
 				const { url } = await openRunInspector({
 					runId: basename(runDir),
-					loadRun: () => hyperchartRunFromRunDir(runDir, { branchId: args.branchId as string, agentDefaults, includeTranscripts: true }),
+					loadRun: () => hyperchartRunFromRunDir(runDir, {
+						branchId: args.branchId as string,
+						agentDefaults,
+						includeTranscripts: true,
+						readTranscript: fileTranscriptReader(sessionsDir),
+					}),
 					steerSession: (actionKey, message) => {
 						queueLiveSessionSteering(sessionsDir, args.branchId as string, actionKey, message);
 					},

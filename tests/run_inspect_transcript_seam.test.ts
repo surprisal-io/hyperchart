@@ -43,11 +43,10 @@ describe("run inspection transcript seam", () => {
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
-			sessionFile: join(sessionsDir, "whatever.jsonl"),
-		});
-		const readTranscript = vi.fn(() => [{ id: "m1", role: "assistant" as const, text: "injected" }]);
+		}, "seam:done:agent:1:7", "main");
+		const readTranscript = vi.fn(async () => [{ id: "m1", role: "assistant" as const, text: "injected" }]);
 
-		const compact = await hyperchartRunFromRunDir(runDir, { readTranscript });
+		const compact = await hyperchartRunFromRunDir(runDir);
 		const compactState = compact.states.find((candidate) => candidate.id === "done");
 		expect(compactState?.session).toMatchObject({ actionKey: "seam:done:agent", status: "running" });
 		expect(compactState?.session?.messages).toBeUndefined();
@@ -57,6 +56,42 @@ describe("run inspection transcript seam", () => {
 		const fullState = full.states.find((candidate) => candidate.id === "done");
 		expect(fullState?.session?.messages).toEqual([{ id: "m1", role: "assistant", text: "injected" }]);
 		expect(readTranscript).toHaveBeenCalled();
+	});
+
+	it("resolves provider-backed transcripts by durable invocation without filesystem access", async () => {
+		const { runDir } = makeRunDir();
+		const sessionsDir = join(runDir, "sessions");
+		const actionUid = { chart: "seam", state: "done", action: "agent" };
+		updateSessionProgress(
+			sessionsDir,
+			actionUid,
+			{
+				actionName: "worker",
+				status: "running",
+				sessionId: "opaque-pg-id",
+				sessionAttempt: 2,
+			},
+			"seam:done:agent:1:7",
+			"main",
+		);
+		const readTranscript = vi.fn(async () => [
+			{ id: "pg", role: "assistant" as const, text: "from postgres" },
+		]);
+
+		const run = await hyperchartRunFromRunDir(runDir, {
+			includeTranscripts: true,
+			readTranscript,
+		});
+		expect(run.states.find((state) => state.id === "done")?.session?.messages).toEqual([
+			{ id: "pg", role: "assistant", text: "from postgres" },
+		]);
+		expect(readTranscript).toHaveBeenCalledWith({
+			runId: "run",
+			branchId: "main",
+			invokeSeqId: 7,
+			actionUid,
+			attempt: 2,
+		});
 	});
 
 	it("reads the neutral JSONL format by default and ignores unknown formats", async () => {
@@ -81,15 +116,6 @@ describe("run inspection transcript seam", () => {
 		]);
 		expect(readNeutralSessionTranscript(sessionsDir, foreignFile)).toBeUndefined();
 
-		const actionUid = { chart: "seam", state: "done", action: "agent" };
-		updateSessionProgress(sessionsDir, actionUid, {
-			actionName: "worker",
-			status: "running",
-			sessionFile: neutralFile,
-		});
-		const run = await hyperchartRunFromRunDir(runDir, { includeTranscripts: true });
-		const state = run.states.find((candidate) => candidate.id === "done");
-		expect(state?.session?.messages?.[0]).toEqual({ id: "u1", role: "user", text: "hi" });
 	});
 
 	it("can read a full neutral transcript for visit segmentation while keeping the compact default", () => {
@@ -149,26 +175,22 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		mkdirSync(join(firstFile, ".."), { recursive: true });
 		mkdirSync(thirdVisitDir, { recursive: true });
 		writeFileSync(firstFile, "{}\n");
-		// Legacy progress files retain only the latest action session and have no visit field.
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
 			// A stale row must not suppress recovery from the real visit directory, even when it claims newer activity.
 			sessionFile: join(sessionsDir, "missing.jsonl"),
 			lastActivityAt: Number.MAX_SAFE_INTEGER,
-		});
+		}, "visits:work:agent:3:6");
 
 		const run = await hyperchartRunFromRunDir(runDir, {
 			includeTranscripts: true,
-			readTranscript: (_sessionsDir, sessionFile) => {
-				if (sessionFile === firstFile) return [
-					{ id: "first", role: "assistant", text: "first visit", timestamp: 2500 },
-					{ id: "boundary", role: "assistant", text: "second visit boundary", timestamp: 4000 },
-					{ id: "resumed", role: "assistant", text: "resumed visit", timestamp: 4500 },
-					{ id: "third", role: "assistant", text: "third visit", timestamp: 6500 },
-				];
-				return undefined;
-			},
+			readTranscript: async () => [
+				{ id: "first", role: "assistant", text: "first visit", timestamp: 2500 },
+				{ id: "boundary", role: "assistant", text: "second visit boundary", timestamp: 4000 },
+				{ id: "resumed", role: "assistant", text: "resumed visit", timestamp: 4500 },
+				{ id: "third", role: "assistant", text: "third visit", timestamp: 6500 },
+			],
 		});
 		const state = run.states.find((state) => state.id === "work");
 		const visits = state?.visitHistory;
@@ -225,7 +247,7 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 			model: "deepseek/worker",
 			toolset: "researching",
 			tools: ["read", "browser", "finish"],
-		});
+		}, "configured:work:agent:1:2");
 
 		const run = await hyperchartRunFromRunDir(runDir, {
 			agentDefaults: () => ({

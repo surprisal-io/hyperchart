@@ -24,6 +24,7 @@ describe("session progress", () => {
 	it("merges progress updates and allows clearing transient tool fields", async () => {
 		const dir = await makeTempDir();
 		const actionUid = { chart: "chart", state: "review.correctness.scan", action: "agent" };
+		const effectId = "chart:review.correctness.scan:agent:1:2";
 
 		updateSessionProgress(dir, actionUid, {
 			actionName: "reviewer",
@@ -36,16 +37,16 @@ describe("session progress", () => {
 			currentTool: "read",
 			currentToolArgs: '{"path":"src/index.ts"}',
 			currentToolStartedAt: 123,
-		});
+		}, effectId);
 		updateSessionProgress(dir, actionUid, {
 			currentTool: undefined,
 			currentToolArgs: undefined,
 			currentToolStartedAt: undefined,
 			toolCount: 1,
 			tokenCount: 1234,
-		});
+		}, effectId);
 
-		const key = sessionProgressKey(actionUid);
+		const key = sessionProgressKey(actionUid, effectId);
 		const progress = readSessionProgress(dir).sessions[key];
 		expect(progress).toMatchObject({
 			actionName: "reviewer",
@@ -69,7 +70,7 @@ describe("session progress", () => {
 			thinking: undefined,
 			toolset: undefined,
 			tools: undefined,
-		});
+		}, effectId);
 		const restarted = readSessionProgress(dir).sessions[key];
 		expect(restarted?.role).toBeUndefined();
 		expect(restarted?.model).toBeUndefined();

@@ -173,7 +173,7 @@ describe("hyperchart MCP tools", () => {
 			actionName: "worker",
 			status: "completed",
 			sessionFile: transcriptFile,
-		});
+		}, "simple:done:agent:1:2");
 
 		const compact = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: "verbose-run" })));
 		const rejected = await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: "verbose-run", verbose: true });

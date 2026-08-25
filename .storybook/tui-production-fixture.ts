@@ -228,6 +228,7 @@ function session(
 		actionUid: uid,
 		branchId: "main",
 		invokeSeqId: options.startedAgo,
+		visit: 1,
 		actionName: options.name,
 		status: options.status,
 		startedAt: RUNTIME_NOW - options.startedAgo,

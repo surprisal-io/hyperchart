@@ -1,5 +1,10 @@
 export { hyperchartRunFromRunDir } from "./run_inspect.js";
-export type { HyperchartRunFromRunDirOptions } from "./run_inspect.js";
+export type {
+	HyperchartRunFromRunDirBaseOptions,
+	HyperchartRunFromRunDirOptions,
+	InvocationTranscriptBinding,
+	SessionTranscriptReader,
+} from "./run_inspect.js";
 export { closeRunInspectorServer, openRunInspector } from "./inspector_server.js";
 export type { OpenRunInspectorOptions, RunInspectorSource } from "./inspector_server.js";
 export {
@@ -14,5 +19,4 @@ export {
 export type {
 	NeutralTranscriptHeader,
 	SessionTranscriptReadOptions,
-	SessionTranscriptReader,
 } from "./session_transcript.js";

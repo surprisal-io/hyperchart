@@ -18,7 +18,7 @@ export function readSessionTranscript(
 	const file = resolveContainedSessionFile(sessionsDir, sessionFile);
 	if (file === undefined) return undefined;
 	try {
-		const messages: HyperchartSessionMessageInfo[] = [];
+		const entries: unknown[] = [];
 		for (const line of readFileSync(file, "utf8").split("\n")) {
 			if (line.trim().length === 0) continue;
 			let entry: unknown;
@@ -28,12 +28,21 @@ export function readSessionTranscript(
 				// A writer may still be appending the final JSONL record during an inspector poll.
 				continue;
 			}
-			messages.push(...messagesFromEntry(entry));
+			entries.push(entry);
 		}
-		return limitTranscriptMessages(combineToolLifecycle(messages), options);
+		return transcriptMessagesFromPiEntries(entries, options);
 	} catch {
 		return undefined;
 	}
+}
+
+/** Normalize exact Pi SessionEntry records from any storage backend. */
+export function transcriptMessagesFromPiEntries(
+	entries: readonly unknown[],
+	options: SessionTranscriptReadOptions = {},
+): HyperchartSessionMessageInfo[] {
+	const messages = entries.flatMap(messagesFromEntry);
+	return limitTranscriptMessages(combineToolLifecycle(messages), options);
 }
 
 function messagesFromEntry(value: unknown): HyperchartSessionMessageInfo[] {

@@ -1,5 +1,4 @@
 export const HYPERCHART_COMMAND_EVENT = "hyperchart:command";
-
 export interface HyperchartCommandRequest {
 	args: string;
 	claim(run: () => void | Promise<void>): boolean;

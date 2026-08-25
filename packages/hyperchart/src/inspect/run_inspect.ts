@@ -1,6 +1,6 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { actionUidDirName, actionUidKey, sanitizeSegment } from "../core/action_uid.js";
+import { actionUidKey } from "../core/action_uid.js";
 import {
 	inspectChartAst,
 	parseChartModuleSync,
@@ -9,18 +9,29 @@ import {
 import type { ActionUID, ChartAst } from "../core/types.js";
 import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
 import { hyperchartRunFromRuntime } from "../host/index.js";
-import type { HyperchartRunInfo } from "../host/index.js";
+import type { HyperchartRunInfo, HyperchartSessionMessageInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
-import { branchSessionSegment } from "../runtime/generic/executor_helpers.js";
 import type { NormalizedRunLog } from "../runtime/generic/log_store.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
 import { readRunnerConfig } from "../runtime/generic/runner_main.js";
 import { readSessionProgress, sessionProgressKey } from "../runtime/generic/session_progress.js";
-import { readNeutralSessionTranscript, type SessionTranscriptReader } from "./session_transcript.js";
 
-export type HyperchartRunFromRunDirOptions = {
+export type InvocationTranscriptBinding = Readonly<{
+	runId: string;
+	branchId: BranchId;
+	invokeSeqId: number;
+	actionUid: ActionUID;
+	/** Omitted to resolve the latest attempt for a historical invocation. */
+	attempt?: number;
+}>;
+
+export type SessionTranscriptReader = (
+	binding: InvocationTranscriptBinding,
+) => Promise<HyperchartSessionMessageInfo[] | undefined>;
+
+export type HyperchartRunFromRunDirBaseOptions = {
 	/** Explicit non-durable branch selection; defaults only for internal/static callers. */
 	branchId?: BranchId;
 	meta?: RunMeta;
@@ -28,11 +39,19 @@ export type HyperchartRunFromRunDirOptions = {
 	records?: readonly DurableLogRecord[];
 	agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined;
 	now?: number;
-	/** Load and attach transcript message payloads. Defaults to false for compact snapshots. */
-	includeTranscripts?: boolean;
-	/** Host-specific session transcript reader; defaults to the neutral JSONL format when transcripts are included. */
-	readTranscript?: SessionTranscriptReader;
 };
+
+export type HyperchartRunFromRunDirOptions = HyperchartRunFromRunDirBaseOptions & (
+	| {
+			/** Compact inspection without transcript message payloads. */
+			includeTranscripts?: false;
+	  }
+	| {
+			/** Full inspection requires an explicit host-owned transcript reader. */
+			includeTranscripts: true;
+			readTranscript: SessionTranscriptReader;
+	  }
+);
 
 export async function hyperchartRunFromRunDir(
 	runDir: string,
@@ -61,15 +80,6 @@ export async function hyperchartRunFromRunDir(
 		}
 	}
 	const sessionsDir = resolve(absoluteRunDir, "sessions");
-	const readTranscript = options.readTranscript ?? readNeutralSessionTranscript;
-	const transcriptCache = new Map<string, ReturnType<SessionTranscriptReader>>();
-	const readFullTranscript: SessionTranscriptReader = (_sessionsDir, sessionFile) => {
-		if (sessionFile === undefined) return undefined;
-		if (transcriptCache.has(sessionFile)) return transcriptCache.get(sessionFile);
-		const messages = readTranscript(sessionsDir, sessionFile, { limit: false });
-		transcriptCache.set(sessionFile, messages);
-		return messages;
-	};
 	const rawSessionProgress = readSessionProgress(sessionsDir);
 	const branchSessionProgress = {
 		...rawSessionProgress,
@@ -77,12 +87,18 @@ export async function hyperchartRunFromRunDir(
 			Object.entries(rawSessionProgress.sessions).filter(([, session]) => session.branchId === branchId),
 		),
 	};
+	const runId = status?.runId ?? basename(absoluteRunDir);
 	const sessionProgress = options.includeTranscripts === true
-		? sessionProgressWithVisitTranscripts(sessionsDir, records, branchSessionProgress, readFullTranscript)
+		? await sessionProgressWithVisitTranscripts(
+				runId,
+				records,
+				branchSessionProgress,
+				options.readTranscript,
+			)
 		: branchSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
 	const run = hyperchartRunFromRuntime(inspect, ast, records, {
-		runId: status?.runId ?? basename(absoluteRunDir),
+		runId,
 		...(status === undefined ? {} : { status }),
 		sessionProgress,
 		cwd: meta.workDir,
@@ -106,27 +122,31 @@ export async function hyperchartRunFromRunDir(
 	};
 }
 
-function sessionProgressWithVisitTranscripts(
-	sessionsDir: string,
+async function sessionProgressWithVisitTranscripts(
+	runId: string,
 	records: readonly DurableLogRecord[],
 	progress: ReturnType<typeof readSessionProgress>,
 	readTranscript: SessionTranscriptReader,
 ) {
 	const invocations = agentInvocationsByAction(records);
-	const sessions = Object.fromEntries(
-		Object.entries(progress.sessions).map(([key, session]) => {
-			const messages = readTranscript(sessionsDir, session.sessionFile);
+	const resolvedSessions = await Promise.all(
+		Object.entries(progress.sessions).map(async ([key, session]) => {
+			const messages = await readTranscript({
+				runId,
+				branchId: session.branchId,
+				invokeSeqId: session.invokeSeqId,
+				actionUid: session.actionUid,
+				...(session.sessionAttempt === undefined ? {} : { attempt: session.sessionAttempt }),
+			});
 			const visit = session.visit ?? invocations.get(session.actionKey)?.at(-1)?.visit;
-			return [
-				key,
-				{
-					...session,
-					...(visit === undefined ? {} : { visit }),
-					...(messages === undefined ? {} : { messages }),
-				},
-			];
+			return [key, {
+				...session,
+				...(visit === undefined ? {} : { visit }),
+				...(messages === undefined ? {} : { messages }),
+			}] as const;
 		}),
 	);
+	const sessions = Object.fromEntries(resolvedSessions);
 	const knownVisits = new Set(
 		Object.values(sessions)
 			.filter((session) => session.visit !== undefined && session.messages !== undefined)
@@ -135,9 +155,12 @@ function sessionProgressWithVisitTranscripts(
 	for (const visits of invocations.values()) {
 		for (const invocation of visits) {
 			if (knownVisits.has(`${invocation.actionKey}:${invocation.visit}`)) continue;
-			const sessionFile = latestVisitTranscript(sessionsDir, invocation.branchId, invocation.actionUid, invocation.actionKey, invocation.visit);
-			if (sessionFile === undefined) continue;
-			const messages = readTranscript(sessionsDir, sessionFile);
+			const messages = await readTranscript({
+				runId,
+				branchId: invocation.branchId,
+				invokeSeqId: invocation.invokeSeqId,
+				actionUid: invocation.actionUid,
+			});
 			if (messages === undefined) continue;
 			const progressKey = sessionProgressKey(
 				invocation.actionUid,
@@ -154,8 +177,7 @@ function sessionProgressWithVisitTranscripts(
 				actionName: invocation.actionName,
 				status: "completed",
 				startedAt: invocation.startedAt,
-				lastActivityAt: statSync(sessionFile).mtimeMs,
-				sessionFile,
+				lastActivityAt: invocation.startedAt,
 				turnCount: 0,
 				toolCount: 0,
 				messages,
@@ -166,9 +188,7 @@ function sessionProgressWithVisitTranscripts(
 					candidate.actionKey === invocation.actionKey &&
 					candidate.visit === invocation.visit &&
 					candidate.messages === undefined
-				) {
-					delete sessions[key];
-				}
+				) delete sessions[key];
 			}
 			knownVisits.add(`${invocation.actionKey}:${invocation.visit}`);
 		}
@@ -204,29 +224,6 @@ function agentInvocationsByAction(records: readonly DurableLogRecord[]): Map<str
 		byAction.set(actionKey, visits);
 	}
 	return byAction;
-}
-
-function latestVisitTranscript(
-	sessionsDir: string,
-	branchId: string,
-	actionUid: ActionUID,
-	actionKey: string,
-	visit: number,
-): string | undefined {
-	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(actionUid), sanitizeSegment(`${actionKey}:${visit}`));
-	if (!existsSync(root)) return undefined;
-	const candidates = transcriptFiles(root);
-	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
-}
-
-function transcriptFiles(root: string): string[] {
-	const files: string[] = [];
-	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		const path = join(root, entry.name);
-		if (entry.isDirectory()) files.push(...transcriptFiles(path));
-		else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(path);
-	}
-	return files;
 }
 
 function runAgentDefaults(

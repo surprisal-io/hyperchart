@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
 import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
@@ -87,6 +87,41 @@ describe("PiAgentExecutor live delivery", () => {
 		expect(await executor.steer(actionUidKey(target.actionUid), 1, "stale visit")).toBe(false);
 		expect(await executor.steer(actionUidKey(target.actionUid), 2, "current visit")).toBe(true);
 		expect(steered).toEqual(["current visit"]);
+	});
+});
+
+describe("PiAgentExecutor provider durability", () => {
+	it("fails closed before completion when the external session drain fails", async () => {
+		const dir = await makeTempDir();
+		const executor = new PiAgentExecutor({
+			workDir: dir,
+			agentDir: dir,
+			definitionDirs: [dir],
+			sessionsDir: join(dir, "sessions"),
+			branchId: "main",
+			modelRuntime: {} as never,
+		});
+		const invocation = effect();
+		const key = actionUidKey(invocation.actionUid);
+		const session = { prompt: vi.fn(async () => undefined) };
+		const emit = vi.fn();
+		const internal = executor as unknown as {
+			generations: { next(key: string): number };
+			sessionHandles: WeakMap<object, { drain(): Promise<void> }>;
+			promptAndAccept(key: string, generation: number, emit: (event: ChartEvent) => void, live: object, prompt: string): Promise<void>;
+		};
+		const generation = internal.generations.next(key);
+		internal.sessionHandles.set(session, {
+			drain: async () => { throw new Error("postgres unavailable"); },
+		});
+
+		await expect(internal.promptAndAccept(key, generation, emit, {
+			session,
+			effect: invocation,
+			sink: { captured: { type: "DONE" } },
+			generation,
+		}, "work")).rejects.toThrow("postgres unavailable");
+		expect(emit).not.toHaveBeenCalled();
 	});
 });
 

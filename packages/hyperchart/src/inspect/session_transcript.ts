@@ -14,12 +14,6 @@ export type SessionTranscriptReadOptions = {
 	limit?: number | false;
 };
 
-export type SessionTranscriptReader = (
-	sessionsDir: string,
-	sessionFile: string | undefined,
-	options?: SessionTranscriptReadOptions,
-) => HyperchartSessionMessageInfo[] | undefined;
-
 /** Containment guard shared by transcript readers: only files inside sessionsDir are readable. */
 export function resolveContainedSessionFile(sessionsDir: string, sessionFile: string): string | undefined {
 	const root = resolve(sessionsDir);

@@ -14,14 +14,19 @@ export type HyperchartSessionProgress = {
 	/** Durable producer coordinate; sibling visits never share this identity. */
 	branchId: BranchId;
 	invokeSeqId: number;
-	/** Durable state visit this session belongs to. Absent in legacy progress files. */
-	visit?: number;
+	/** Durable state visit this session belongs to. */
+	visit: number;
 	actionName: string;
 	status: HyperchartSessionStatus;
 	startedAt: number;
 	lastActivityAt: number;
 	completedAt?: number;
+	/** File-backed Pi backend only. */
 	sessionFile?: string;
+	/** Opaque provider-backed Pi session identity; never interpreted by Hyperchart. */
+	sessionId?: string;
+	/** Provider restart attempt for this durable invocation. */
+	sessionAttempt?: number;
 	role?: string;
 	model?: string;
 	thinking?: string;
@@ -70,28 +75,32 @@ type SessionProgressPatch = {
 		| undefined;
 };
 
-export function sessionProgressKey(actionUid: ActionUID, effectId?: string, branchId: BranchId = "main"): string {
+export function sessionProgressKey(actionUid: ActionUID, effectId: string, branchId: BranchId = "main"): string {
 	const actionKey = actionUidKey(actionUid);
 	const invokeSeqId = seqIdFromEffectId(actionKey, effectId);
-	return `${branchId}:${actionKey}:invoke:${invokeSeqId ?? "unknown"}`;
+	if (invokeSeqId === undefined) throw new Error(`Invalid durable agent effect id: ${effectId}`);
+	return `${branchId}:${actionKey}:invoke:${invokeSeqId}`;
 }
 
 export function updateSessionProgress(
 	sessionsDir: string,
 	actionUid: ActionUID,
 	patch: SessionProgressPatch,
-	effectId?: string,
+	effectId: string,
 	branchId: BranchId = "main",
 ): void {
 	const actionKey = actionUidKey(actionUid);
 	const visit = visitFromEffectId(actionKey, effectId);
-	const invokeSeqId = seqIdFromEffectId(actionKey, effectId) ?? 0;
+	const invokeSeqId = seqIdFromEffectId(actionKey, effectId);
+	if (visit === undefined || invokeSeqId === undefined) throw new Error(`Invalid durable agent effect id: ${effectId}`);
 	const progressKey = sessionProgressKey(actionUid, effectId, branchId);
 	const file = readSessionProgress(sessionsDir);
 	const now = Date.now();
 	const previous = file.sessions[progressKey];
 	const completedAt = valueFor("completedAt", patch, previous);
 	const sessionFile = valueFor("sessionFile", patch, previous);
+	const sessionId = valueFor("sessionId", patch, previous);
+	const sessionAttempt = valueFor("sessionAttempt", patch, previous);
 	const role = valueFor("role", patch, previous);
 	const model = valueFor("model", patch, previous);
 	const thinking = valueFor("thinking", patch, previous);
@@ -110,7 +119,7 @@ export function updateSessionProgress(
 		actionUid,
 		branchId,
 		invokeSeqId,
-		...(visit === undefined ? {} : { visit }),
+		visit,
 		actionName: valueFor("actionName", patch, previous) ?? actionUid.action,
 		status: valueFor("status", patch, previous) ?? "starting",
 		startedAt: valueFor("startedAt", patch, previous) ?? now,
@@ -120,6 +129,8 @@ export function updateSessionProgress(
 		...(tokenCount === undefined ? {} : { tokenCount }),
 		...(completedAt === undefined ? {} : { completedAt }),
 		...(sessionFile === undefined ? {} : { sessionFile }),
+		...(sessionId === undefined ? {} : { sessionId }),
+		...(sessionAttempt === undefined ? {} : { sessionAttempt }),
 		...(role === undefined ? {} : { role }),
 		...(model === undefined ? {} : { model }),
 		...(thinking === undefined ? {} : { thinking }),
@@ -148,21 +159,23 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 		if (!isRecord(entry)) continue;
 		if (!isActionUid(entry.actionUid)) continue;
 		const status = parseStatus(entry.status);
-		if (status === undefined) continue;
+		const invokeSeqId = positiveInteger(entry.invokeSeqId);
+		const visit = positiveInteger(entry.visit);
+		if (status === undefined || invokeSeqId === undefined || visit === undefined) continue;
 		out[key] = {
 			actionKey: typeof entry.actionKey === "string" ? entry.actionKey : actionUidKey(entry.actionUid),
 			actionUid: entry.actionUid,
 			branchId: typeof entry.branchId === "string" ? entry.branchId : "main",
-			invokeSeqId: typeof entry.invokeSeqId === "number" ? entry.invokeSeqId : 0,
-			...(typeof entry.visit === "number" && Number.isInteger(entry.visit) && entry.visit > 0
-				? { visit: entry.visit }
-				: {}),
+			invokeSeqId,
+			visit,
 			actionName: typeof entry.actionName === "string" ? entry.actionName : entry.actionUid.action,
 			status,
 			startedAt: typeof entry.startedAt === "number" ? entry.startedAt : 0,
 			lastActivityAt: typeof entry.lastActivityAt === "number" ? entry.lastActivityAt : 0,
 			...(typeof entry.completedAt === "number" ? { completedAt: entry.completedAt } : {}),
 			...(typeof entry.sessionFile === "string" ? { sessionFile: entry.sessionFile } : {}),
+			...(typeof entry.sessionId === "string" ? { sessionId: entry.sessionId } : {}),
+			...(typeof entry.sessionAttempt === "number" ? { sessionAttempt: entry.sessionAttempt } : {}),
 			...(typeof entry.role === "string" ? { role: entry.role } : {}),
 			...(typeof entry.model === "string" ? { model: entry.model } : {}),
 			...(typeof entry.thinking === "string" ? { thinking: entry.thinking } : {}),
@@ -183,16 +196,20 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 	return out;
 }
 
-function visitFromEffectId(actionKey: string, effectId: string | undefined): number | undefined {
-	if (effectId === undefined || !effectId.startsWith(`${actionKey}:`)) return undefined;
+function visitFromEffectId(actionKey: string, effectId: string): number | undefined {
+	if (!effectId.startsWith(`${actionKey}:`)) return undefined;
 	const visit = Number(effectId.slice(actionKey.length + 1).split(":", 1)[0]);
 	return Number.isInteger(visit) && visit > 0 ? visit : undefined;
 }
 
-function seqIdFromEffectId(actionKey: string, effectId: string | undefined): number | undefined {
-	if (effectId === undefined || !effectId.startsWith(`${actionKey}:`)) return undefined;
+function seqIdFromEffectId(actionKey: string, effectId: string): number | undefined {
+	if (!effectId.startsWith(`${actionKey}:`)) return undefined;
 	const seqId = Number(effectId.split(":").at(-1));
 	return Number.isSafeInteger(seqId) && seqId > 0 ? seqId : undefined;
+}
+
+function positiveInteger(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -246,7 +263,7 @@ export function createThrottledProgressWriter(
 	sessionsDir: string,
 	actionUid: ActionUID,
 	actionName: string,
-	effectId?: string,
+	effectId: string,
 	branchId: BranchId = "main",
 ): StreamingProgressWriter {
 	let currentText = "";

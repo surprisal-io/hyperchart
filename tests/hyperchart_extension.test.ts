@@ -949,7 +949,7 @@ describe("hyperchart extension", () => {
 			error: "session failed",
 			lastActivityAt: 4,
 			sessionFile: transcriptFile,
-		});
+		}, "demo:work:agent:1:2");
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
@@ -1101,12 +1101,11 @@ describe("hyperchart extension", () => {
 			"demo:work:agent:1:2",
 			"main",
 		);
-		// Legacy progress has no visit and represents the latest resumed session, whose transcript spans both removed visits.
 		updateSessionProgress(
 			sessionsDir,
 			actionUid,
 			{ actionName: "worker", status: "completed", sessionFile: sharedSessionFile },
-			undefined,
+			"demo:work:agent:3:6",
 			"main",
 		);
 

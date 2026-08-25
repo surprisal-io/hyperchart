@@ -13,8 +13,14 @@ import type { HyperchartInfo, HyperchartRunInfo, HyperchartRunSummaryInfo, Hyper
 import { loadRunMeta } from "@surprisal/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, getSharedHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
-import { hyperchartRunFromRunDir } from "./run_inspect.js";
+import {
+	createPiFileTranscriptReader,
+	hyperchartRunFromRunDir,
+	type SessionTranscriptReader,
+} from "./run_inspect.js";
 import { isRunLive, readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
+
+type SessionTranscriptReaderFactory = (runDir: string) => SessionTranscriptReader;
 
 export interface PiHyperchartHostOptions {
 	agentDir?: string;
@@ -43,6 +49,7 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 				agentDir,
 				true,
 				options.agentDefaults,
+				createPiFileTranscriptReader,
 				failedRunMetaFingerprints,
 				failedRunInspectionFingerprints,
 			);
@@ -313,6 +320,7 @@ async function readRun(
 	agentDir: string,
 	includeTranscripts: boolean,
 	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
+	transcriptReader: SessionTranscriptReaderFactory,
 	failedRunMetaFingerprints: Map<string, string>,
 	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartRunInfo | undefined> {
@@ -330,11 +338,18 @@ async function readRun(
 	try {
 		if (resolve(meta.workDir) !== cwd) return undefined;
 		const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir, meta.chartPath);
-		const run = await hyperchartRunFromRunDir(runDir, {
-			meta,
-			includeTranscripts,
-			agentDefaults: resolvedAgentDefaults,
-		});
+		const run = await hyperchartRunFromRunDir(runDir, includeTranscripts
+			? {
+					meta,
+					includeTranscripts: true,
+					readTranscript: transcriptReader(runDir),
+					agentDefaults: resolvedAgentDefaults,
+			  }
+			: {
+					meta,
+					includeTranscripts: false,
+					agentDefaults: resolvedAgentDefaults,
+			  });
 		failedRunInspectionFingerprints.delete(runDir);
 		return {
 			...run,
