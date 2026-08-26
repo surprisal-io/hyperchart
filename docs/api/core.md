@@ -467,6 +467,8 @@ Handle the third variant with `output.kind === "error"`; it contains `state` and
 | `TimerEffect` | `timer` | Emit a timer event at `firesAt`. |
 | `CancelEffect` | `cancel` | Stop abandoned work. |
 
+Each `DurableRecordsEffect` is exactly one atomic append boundary. The runtime must commit all records in that effect together or commit none before sending `durable_records_added`; it must never split one effect across storage commits. Separate `durable_records` effects are separate atomic units. The effect itself is transient: durable storage contains only the resulting flat records, not an effect or batch wrapper.
+
 `ValidateEffect` carries guard env rendered by the same helper as `ScriptEffect.env`:
 
 ```ts
@@ -735,4 +737,4 @@ The root core API exports `ProjectedActorEndpointOccurrence`, `ProjectedActorPoo
 
 ## Branch-aware durable records (v2)
 
-Every new `DurableLogRecord` has mandatory `seqId`, `parentId`, `branchId`, and `timestamp`. The machine emits `DurableRecordDraft` payloads; only the serialized run writer stamps coordinates. Storage mutations are `RecordBatchMutation` (atomic records plus head advance) and branch `create`/`move` mutations. Branch mutations never enter `projectBranch()` or `explainReplay()`.
+Every new `DurableLogRecord` has mandatory `seqId`, `parentId`, `branchId`, and `timestamp`. The machine emits `DurableRecordDraft` payloads; only the serialized run writer stamps coordinates. One positive per-run `seqId` namespace covers both records and branch `create`/`move` entries, so record ids remain unique and monotonic but may contain gaps where branch storage operations occurred. Passing multiple drafts to `appendDrafts()` instructs the backend to commit their stamped records together; no batch or wrapper is durable. Both JSONL and PostgreSQL store one flat entry per universal sequence id. Branch entries never enter `projectBranch()` or `explainReplay()`.

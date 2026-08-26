@@ -152,17 +152,17 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		const actionUid = { chart: "visits", state: "work", action: "agent" };
 		const definition = { kind: "agent", uid: actionUid, name: "worker", task: "work" };
 		const records = [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1000 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 1, seqId: 2, branchId: "main", timestamp: 2000 },
-			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 3000 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 3, seqId: 4, branchId: "main", timestamp: 4000 },
-			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 4, seqId: 5, branchId: "main", timestamp: 5000 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 5, seqId: 6, branchId: "main", timestamp: 6000 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1000 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 2, seqId: 3, branchId: "main", timestamp: 2000 },
+			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3000 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 4, seqId: 5, branchId: "main", timestamp: 4000 },
+			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 5, seqId: 6, branchId: "main", timestamp: 5000 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 6, seqId: 7, branchId: "main", timestamp: 6000 },
 		];
 		writeFileSync(join(runDir, "log.jsonl"), [
-			{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 900 },
-			{ kind: "record_batch", branchId: "main", records, headSeqId: 6, committedAt: 6000 },
-		].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n");
+			{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 900 },
+			...records,
+		].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 		const actionDir = join(sessionsDir, branchSessionSegment("main"), actionUidDirName(actionUid));
 		const firstFile = join(actionDir, sanitizeSegment(`${actionUidKey(actionUid)}:1`), "first.jsonl");
 		// Visits 2 and 3 resume the first session, so their own invocation directories have no transcript.

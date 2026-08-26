@@ -54,36 +54,29 @@ let projectDir = "";
 let otherProjectDir = "";
 
 function writeV2Log(runDir: string, records: readonly Record<string, unknown>[]): void {
-	const headSeqId = typeof records.at(-1)?.seqId === "number" ? records.at(-1)!.seqId as number : null;
 	writeFileSync(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
-		{ kind: "record_batch", branchId: "main", records, headSeqId, committedAt: headSeqId ?? 0 },
-	].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n");
+		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
+		...records,
+	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 }
 
 function writeTwoBranchV2Log(runDir: string): void {
 	const uid = { chart: "demo", state: "work", action: "agent" };
 	writeFileSync(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
-		{ kind: "record_batch", branchId: "main", records: [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-		], headSeqId: 1, committedAt: 1 },
-		{ kind: "branch", op: "create", branchId: "experiment", headSeqId: 1, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 1 } },
-		{ kind: "record_batch", branchId: "experiment", records: [
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, branchId: "experiment", timestamp: 2 },
-			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" }, parentId: 2, seqId: 3, branchId: "experiment", timestamp: 3 },
-		], headSeqId: 3, committedAt: 3 },
-	].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n");
+		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
+					{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+		{ kind: "branch", op: "create", seqId: 3, branchId: "experiment", headSeqId: 2, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 2 } },
+					{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 4, branchId: "experiment", timestamp: 2 },
+			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" }, parentId: 4, seqId: 5, branchId: "experiment", timestamp: 3 },
+	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 }
 
 function writeTwoBranchFinalLog(runDir: string): void {
 	writeFileSync(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
-		{ kind: "record_batch", branchId: "main", records: [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-		], headSeqId: 1, committedAt: 1 },
-		{ kind: "branch", op: "create", branchId: "experiment", headSeqId: 1, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 1 } },
-	].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n");
+		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
+					{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+		{ kind: "branch", op: "create", seqId: 3, branchId: "experiment", headSeqId: 2, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 2 } },
+	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
 }
 
 beforeEach(() => {
@@ -601,8 +594,8 @@ describe("hyperchart extension", () => {
 		const runId = "coordinate-alias";
 		const runDir = createRun(runId, projectDir, writeChart("coordinate-alias"));
 		writeV2Log(runDir, [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "session_ref", index: 1, file: "missing.jsonl", parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+			{ type: "session_ref", index: 1, file: "missing.jsonl", parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]);
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
@@ -610,10 +603,10 @@ describe("hyperchart extension", () => {
 		expect(listed.details).toMatchObject({ runDir, branches: [expect.objectContaining({ branchId: "main" })] });
 		const viewed = await tool.execute("view-alias", { action: "view", runId, branchId: "main", open: false }, new AbortController().signal, () => undefined, ctx);
 		expect(viewed.details).toMatchObject({ url: expect.stringMatching(/^http:\/\//) });
-		const forked = await tool.execute("fork-alias", { action: "fork", runId, branchId: "experiment", fromSeqId: 1 }, new AbortController().signal, () => undefined, ctx);
-		expect(forked.details).toMatchObject({ branchId: "experiment", headSeqId: 1, selectedBranchChanged: false, started: false });
-		const rewound = await tool.execute("rewind-alias", { action: "rewind", runId, branchId: "main", seqId: 1, mode: "after" }, new AbortController().signal, () => undefined, ctx);
-		expect(rewound.details).toMatchObject({ branchId: "main", headSeqId: 1 });
+		const forked = await tool.execute("fork-alias", { action: "fork", runId, branchId: "experiment", fromSeqId: 2 }, new AbortController().signal, () => undefined, ctx);
+		expect(forked.details).toMatchObject({ branchId: "experiment", headSeqId: 2, selectedBranchChanged: false, started: false });
+		const rewound = await tool.execute("rewind-alias", { action: "rewind", runId, branchId: "main", seqId: 2, mode: "after" }, new AbortController().signal, () => undefined, ctx);
+		expect(rewound.details).toMatchObject({ branchId: "main", headSeqId: 2 });
 		await expect(tool.execute(
 			"coordinate-conflict",
 			{ action: "branches", runId, runDir: "different-run" },
@@ -832,8 +825,8 @@ describe("hyperchart extension", () => {
 		const runDir = createRun(runId, projectDir, writeChart("tool-view"));
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]);
 		const transcriptFile = join(runDir, "sessions", "tool-view.jsonl");
 		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", type: "message", message: { role: "assistant", content: "inspector transcript" } })}\n`);
@@ -937,9 +930,9 @@ describe("hyperchart extension", () => {
 		const runDir = createRun(runId, projectDir, writeChart("runtime-inspect"));
 		const uid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
-			{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
-			{ type: "failure_intent", origin: "work", error: { code: 2, stderr: "nope" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
+			{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
+			{ type: "failure_intent", origin: "work", error: { code: 2, stderr: "nope" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3 },
 		]);
 		patchRunStatus(runDir, { runId, chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] });
 		const transcriptFile = join(runDir, "sessions", "runtime-inspect.jsonl");
@@ -1014,15 +1007,15 @@ describe("hyperchart extension", () => {
 		const runDir = createRun("rewind-compatible", projectDir, chartPath);
 		mkdirSync(runDir, { recursive: true });
 		writeV2Log(runDir, [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 			{
 				type: "state_action",
 				kind: "invoke",
 			sessionId: "session-id",
 				actionUid: { chart: "demo", state: "first", action: "agent" },
 				definition: { kind: "agent", uid: { chart: "demo", state: "first", action: "agent" }, name: "old-worker" },
-				parentId: 1,
-				seqId: 2,
+				parentId: 2,
+				seqId: 3,
 				branchId: "main", timestamp: 2,
 			},
 			{
@@ -1030,8 +1023,8 @@ describe("hyperchart extension", () => {
 				kind: "complete",
 				actionUid: { chart: "demo", state: "first", action: "agent" },
 				event: { type: "FIRST_DONE" },
-				parentId: 2,
-				seqId: 3,
+				parentId: 3,
+				seqId: 4,
 				branchId: "main", timestamp: 3,
 			},
 		]);
@@ -1048,7 +1041,7 @@ describe("hyperchart extension", () => {
 
 		const logText = readFileSync(join(runDir, "log.jsonl"), "utf8");
 		expect(logText).toContain('"seqId":3');
-		expect(result.details).toMatchObject({ branchId: "main", previousHeadSeqId: 3, headSeqId: 1, preservedRecords: 3 });
+		expect(result.details).toMatchObject({ branchId: "main", previousHeadSeqId: 4, headSeqId: 2, preservedRecords: 3 });
 		expect(existsSync(join(runDir, "rewind-backups"))).toBe(false);
 	});
 
@@ -1069,13 +1062,13 @@ describe("hyperchart extension", () => {
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		const definition = { kind: "agent", uid: actionUid, name: "worker" };
 		writeV2Log(runDir, [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
-			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 3, seqId: 4, branchId: "main", timestamp: 4 },
-			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 4, seqId: 5, branchId: "main", timestamp: 5 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 5, seqId: 6, branchId: "main", timestamp: 6 },
-			{ type: "state_action", kind: "complete", actionUid, event: { type: "DONE" }, parentId: 6, seqId: 7, branchId: "main", timestamp: 7 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 4, seqId: 5, branchId: "main", timestamp: 4 },
+			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 5, seqId: 6, branchId: "main", timestamp: 5 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 6, seqId: 7, branchId: "main", timestamp: 6 },
+			{ type: "state_action", kind: "complete", actionUid, event: { type: "DONE" }, parentId: 7, seqId: 8, branchId: "main", timestamp: 7 },
 		]);
 		const sessionsDir = join(runDir, "sessions");
 		const actionDir = join(sessionsDir, branchSessionSegment("main"), actionUidDirName(actionUid));
@@ -1130,7 +1123,7 @@ describe("hyperchart extension", () => {
 		expect(readFileSync(sharedSessionFile, "utf8")).toContain("retained visit");
 		expect(readFileSync(sharedSessionFile, "utf8")).toContain("removed visit two");
 		expect(readFileSync(sharedSessionFile, "utf8")).toContain("removed visit three");
-		expect(result.details).toMatchObject({ branchId: "main", previousHeadSeqId: 7, headSeqId: 3, preservedRecords: 7 });
+		expect(result.details).toMatchObject({ branchId: "main", previousHeadSeqId: 8, headSeqId: 3, preservedRecords: 7 });
 	});
 });
 

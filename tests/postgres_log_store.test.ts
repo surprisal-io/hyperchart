@@ -105,15 +105,51 @@ describePg("PostgresLogStore", () => {
 		await expect(store.appendDrafts([argsDraft()])).rejects.toThrow(/Unknown Hyperchart branch 'main'/);
 	});
 
-	it("atomically commits a stamped record batch with its head", async () => {
-		const store = await openWriter(newRunId());
+	it("atomically commits records as independent universal-sequence rows", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
 		await store.initializeRootBranch();
 		const records = await store.appendDrafts([argsDraft(), invokeDraft()]);
 		const normalized = await store.read();
 
-		expect(normalized.branch("main").headSeqId).toBe(2);
-		expect(normalized.nextSeqId).toBe(3);
+		expect(normalized.branch("main").headSeqId).toBe(3);
+		expect(normalized.nextSeqId).toBe(4);
 		expect(normalized.ancestry("main")).toEqual(records);
+		const relational = await store.transaction((tx) => tx.query(
+			`SELECT seq, kind, branch_id, parent_id, head_seq_id,
+			        record_type, payload, metadata
+			   FROM ${JOURNAL_TABLE}
+			  WHERE run_id = $1
+			  ORDER BY seq`,
+			[runId],
+		));
+		expect(relational.rows).toEqual([
+			{
+				seq: "1", kind: "branch_create", branch_id: "main",
+				parent_id: null, head_seq_id: null, record_type: null, payload: null,
+				metadata: { name: "main" },
+			},
+			{
+				seq: "2", kind: "record", branch_id: "main",
+				parent_id: null, head_seq_id: null, record_type: "args",
+				payload: { args: { topic: "test" }, timestamp: records[0]?.timestamp }, metadata: null,
+			},
+			{
+				seq: "3", kind: "record", branch_id: "main",
+				parent_id: "2", head_seq_id: null, record_type: "state_action",
+				payload: expect.objectContaining({ kind: "invoke", sessionId: "session-id", timestamp: records[1]?.timestamp }), metadata: null,
+			},
+		]);
+		const columns = await store.transaction((tx) => tx.query(
+			`SELECT column_name FROM information_schema.columns
+			  WHERE table_schema = 'public' AND table_name = $1
+			  ORDER BY ordinal_position`,
+			[JOURNAL_TABLE],
+		));
+		expect(columns.rows.map((row) => row.column_name)).toEqual([
+			"run_id", "seq", "kind", "branch_id", "parent_id", "head_seq_id",
+			"record_type", "payload", "metadata", "committed_at_ms",
+		]);
 	});
 
 	it("reloads an identical journal after reopening the run", async () => {
@@ -121,31 +157,31 @@ describePg("PostgresLogStore", () => {
 		const writer = await openWriter(runId);
 		await writer.initializeRootBranch();
 		await writer.appendDrafts([argsDraft(), invokeDraft()]);
-		await writer.createBranch("experiment", 1, { reason: "sibling", sourceBranchId: "main", sourceSeqId: 1 });
+		await writer.createBranch("experiment", 2, { reason: "sibling", sourceBranchId: "main", sourceSeqId: 2 });
 		const before = await writer.read();
 		await writer.close();
 
 		const reopened = await openReader(runId);
 		const after = await reopened.read();
 
-		expect(after.mutations).toEqual(before.mutations);
+		expect(after.entries).toEqual(before.entries);
 		expect(after.records).toEqual(before.records);
 		expect(after.nextSeqId).toBe(before.nextSeqId);
-		expect(after.branch("experiment").headSeqId).toBe(1);
+		expect(after.branch("experiment").headSeqId).toBe(2);
 	});
 
 	it("shares one journal across branch handles", async () => {
 		const store = await openWriter(newRunId());
 		await store.initializeRootBranch();
 		await store.appendDrafts([argsDraft()]);
-		await store.createBranch("experiment", 1);
+		await store.createBranch("experiment", 2);
 
 		const experiment = store.forBranch("experiment");
 		const forked = await experiment.appendDrafts([invokeDraft()]);
 
-		expect(forked[0]?.parentId).toBe(1);
-		expect(store.snapshot().branch("experiment").headSeqId).toBe(2);
-		expect(store.snapshot().branch("main").headSeqId).toBe(1);
+		expect(forked[0]?.parentId).toBe(2);
+		expect(store.snapshot().branch("experiment").headSeqId).toBe(4);
+		expect(store.snapshot().branch("main").headSeqId).toBe(2);
 		expect(await experiment.readAll()).toHaveLength(2);
 	});
 
@@ -153,12 +189,12 @@ describePg("PostgresLogStore", () => {
 		const store = await openWriter(newRunId());
 		await store.initializeRootBranch();
 		await store.appendDrafts([argsDraft(), invokeDraft()]);
-		await store.moveBranch("main", 1);
+		await store.moveBranch("main", 2);
 
 		const normalized = await store.read();
-		expect(normalized.branch("main").headSeqId).toBe(1);
+		expect(normalized.branch("main").headSeqId).toBe(2);
 		expect(normalized.records).toHaveLength(2);
-		expect(normalized.nextSeqId).toBe(3);
+		expect(normalized.nextSeqId).toBe(5);
 	});
 
 	it("rejects a second live writer for the same run", async () => {
@@ -266,7 +302,7 @@ describePg("PostgresLogStore", () => {
 		await ensureClaimTable(store);
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
-		const before = store.snapshot().mutations.length;
+		const before = store.snapshot().entries.length;
 
 		await expect(store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
@@ -280,7 +316,7 @@ describePg("PostgresLogStore", () => {
 		})).rejects.toThrow("participant failed");
 
 		expect(store.snapshot().branches.has("rolled-back")).toBe(false);
-		expect(store.snapshot().mutations).toHaveLength(before);
+		expect(store.snapshot().entries).toHaveLength(before);
 		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 2", [runId]));
 		expect(claims.rows).toEqual([]);
 	});
@@ -333,7 +369,7 @@ describePg("PostgresLogStore", () => {
 	it("treats a missing journal as an empty read-only run", async () => {
 		const reader = await openReader(newRunId());
 		const normalized = await reader.read();
-		expect(normalized.mutations).toHaveLength(0);
+		expect(normalized.entries).toHaveLength(0);
 	});
 
 	it("rejects a corrupt journal with a seq gap on load", async () => {
@@ -346,7 +382,7 @@ describePg("PostgresLogStore", () => {
 		const { Client } = await import("pg");
 		const client = new Client({ connectionString: dsn });
 		await client.connect();
-		// Drop the branch-create mutation so the surviving record batch appends to an unknown branch.
+		// Drop the branch-create entry so the surviving record appends to an unknown branch.
 		await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = 1`, [runId]);
 		await client.end();
 

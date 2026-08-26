@@ -35,12 +35,12 @@ describe("materializeWorkspace", () => {
 		await writeFile(source, "parent accepted bytes");
 		const pin = await store.put(source);
 		const logStore = new JsonlLogStore(join(dir, "run", "log.jsonl"));
-		logStore.initializeRootBranch();
+		await logStore.initializeRootBranch();
 		const [accepted] = await logStore.appendDrafts([{
 			type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" },
 			artifacts: { "nested/report.md": pin },
 		}]);
-		logStore.createBranch("fork", accepted!.seqId, { name: "fork", sourceBranchId: "main", sourceSeqId: accepted!.seqId });
+		await logStore.createBranch("fork", accepted!.seqId, { name: "fork", sourceBranchId: "main", sourceSeqId: accepted!.seqId });
 		const forkAncestry = logStore.snapshot().ancestry("fork");
 		const workspace = join(dir, "run", "workspaces", "fork");
 

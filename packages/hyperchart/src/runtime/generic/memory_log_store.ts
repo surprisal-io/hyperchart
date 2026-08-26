@@ -2,7 +2,7 @@ import type {
 	BranchId,
 	DurableLogRecord,
 	DurableRecordDraft,
-	StorageMutation,
+	StorageEntry,
 } from "../../core/durable_events.js";
 import {
 	DEFAULT_BRANCH_ID,
@@ -16,30 +16,30 @@ import {
 import { prepareUserInteractionResponse, prepareUserInteractionResponseSync } from "./user_interaction_admission.js";
 
 export class MemoryLogStore implements LogStore {
-	private mutations: StorageMutation[];
+	private entries: StorageEntry[];
 	private writeChain: Promise<void> = Promise.resolve();
 
 	constructor(
-		mutations: readonly StorageMutation[] | undefined = undefined,
+		entries: readonly StorageEntry[] | undefined = undefined,
 		readonly branchId: BranchId = DEFAULT_BRANCH_ID,
 	) {
 		assertBranchId(branchId);
-		this.mutations = mutations === undefined
-			? [{ kind: "branch", op: "create", branchId, headSeqId: null, metadata: { name: branchId }, committedAt: Date.now() }]
-			: [...mutations];
-		validateAndProjectJournal(this.mutations);
+		this.entries = entries === undefined
+			? [{ kind: "branch", op: "create", seqId: 1, branchId, headSeqId: null, metadata: { name: branchId }, committedAt: Date.now() }]
+			: [...entries];
+		validateAndProjectJournal(this.entries);
 	}
 
 	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
-		const normalized = validateAndProjectJournal(this.mutations);
-		const { records, mutation } = stampDrafts(normalized, this.branchId, drafts, Date.now());
-		this.mutations.push(mutation);
+		const normalized = validateAndProjectJournal(this.entries);
+		const records = stampDrafts(normalized, this.branchId, drafts, Date.now());
+		this.entries.push(...records);
 		return records;
 	}
 
 	snapshot(): NormalizedRunLog {
-		return validateAndProjectJournal(this.mutations);
+		return validateAndProjectJournal(this.entries);
 	}
 
 	async read(): Promise<NormalizedRunLog> {
@@ -48,19 +48,19 @@ export class MemoryLogStore implements LogStore {
 
 	respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit> {
 		return this.enqueue(async () => {
-			await prepareUserInteractionResponse(validateAndProjectJournal(this.mutations), this.branchId, input);
-			const normalized = validateAndProjectJournal(this.mutations);
+			await prepareUserInteractionResponse(validateAndProjectJournal(this.entries), this.branchId, input);
+			const normalized = validateAndProjectJournal(this.entries);
 			const prepared = prepareUserInteractionResponseSync(normalized, this.branchId, input);
 			if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
-			const { records, mutation } = stampDrafts(normalized, this.branchId, [prepared.draft], Date.now());
-			this.mutations.push(mutation);
+			const records = stampDrafts(normalized, this.branchId, [prepared.draft], Date.now());
+			this.entries.push(...records);
 			return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
 		});
 	}
 
 	async readAll(): Promise<readonly DurableLogRecord[]> {
 		const normalized = await this.read();
-		if (normalized.mutations.length === 0) return [];
+		if (normalized.entries.length === 0) return [];
 		return normalized.ancestry(this.branchId);
 	}
 
@@ -70,8 +70,8 @@ export class MemoryLogStore implements LogStore {
 		return result;
 	}
 
-	storageMutations(): readonly StorageMutation[] {
-		return [...this.mutations];
+	storageEntries(): readonly StorageEntry[] {
+		return [...this.entries];
 	}
 }
 

@@ -270,21 +270,11 @@ export type DurableLogRecord =
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type DurableRecordDraft = DistributiveOmit<DurableLogRecord, keyof DurableRecordCoordinates>;
 
-/**
- * One atomic append commit. A batch is one JSONL mutation so a process crash can
- * never expose records without the matching branch-head advance.
- */
-export type RecordBatchMutation = Readonly<{
-	kind: "record_batch";
-	branchId: BranchId;
-	records: readonly DurableLogRecord[];
-	headSeqId: number;
-	committedAt: number;
-}>;
-
 export type BranchCreateMutation = Readonly<{
 	kind: "branch";
 	op: "create";
+	/** Universal positive per-run journal sequence shared with machine records. */
+	seqId: number;
 	branchId: BranchId;
 	headSeqId: number | null;
 	metadata?: BranchMetadata;
@@ -294,10 +284,16 @@ export type BranchCreateMutation = Readonly<{
 export type BranchMoveMutation = Readonly<{
 	kind: "branch";
 	op: "move";
+	/** Universal per-run journal sequence shared with machine records. */
+	seqId: number;
 	branchId: BranchId;
 	headSeqId: number | null;
 	committedAt: number;
 }>;
 
-/** Values accepted as lines in the current log.jsonl journal. */
-export type StorageMutation = RecordBatchMutation | BranchCreateMutation | BranchMoveMutation;
+/** Flat durable entries accepted as lines in the current log.jsonl journal. */
+export type StorageEntry = DurableLogRecord | BranchCreateMutation | BranchMoveMutation;
+
+export function isDurableRecordEntry(entry: StorageEntry): entry is DurableLogRecord {
+	return "type" in entry;
+}

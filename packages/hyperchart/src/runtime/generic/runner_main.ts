@@ -439,7 +439,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		let executor: SteerableAgentExecutor;
 		try {
 			const normalized = entry.store.snapshot();
-			const ancestry = normalized.mutations.length === 0 ? [] : normalized.ancestry(entry.branchId);
+			const ancestry = normalized.entries.length === 0 ? [] : normalized.ancestry(entry.branchId);
 			await materializeWorkspace(ancestry, this.artifactStore, workDir);
 			if (!this.isRunnable(entry)) {
 				entry.ready.resolve();

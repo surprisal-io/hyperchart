@@ -12,11 +12,10 @@ import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generi
 const tempDirs: string[] = [];
 
 function v2Jsonl(records: readonly Record<string, unknown>[]): string {
-	const headSeqId = typeof records.at(-1)?.seqId === "number" ? records.at(-1)!.seqId as number : null;
 	return `${[
-		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
-		{ kind: "record_batch", branchId: "main", records, headSeqId, committedAt: headSeqId ?? 0 },
-	].map((mutation) => JSON.stringify(mutation)).join("\n")}\n`;
+		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
+		...records,
+	].map((entry) => JSON.stringify(entry)).join("\n")}\n`;
 }
 
 async function tempDir(prefix: string): Promise<string> {
@@ -329,7 +328,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 			startedAt: 1,
 			updatedAt: 2,
 		}), "utf8");
-		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([{ type: "args", args: { topic: "native" }, seqId: 1, parentId: null, branchId: "main", timestamp: 1 }]), "utf8");
+		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([{ type: "args", args: { topic: "native" }, seqId: 2, parentId: null, branchId: "main", timestamp: 1 }]), "utf8");
 		await writeFile(join(malformedDir, "meta.json"), "not json", "utf8");
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -368,8 +367,8 @@ console.log(JSON.stringify(snapshot.runs));`;
 		}), "utf8");
 		const actionUid = { chart: "waiting-map", state: "items#a.work", action: "agent" };
 		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
-			{ type: "args", args: { items: { a: "Alpha", b: "Beta", c: "Gamma" } }, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "spawned", path: "items", instances: { a: "Alpha", b: "Beta", c: "Gamma" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "args", args: { items: { a: "Alpha", b: "Beta", c: "Gamma" } }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+			{ type: "spawned", path: "items", instances: { a: "Alpha", b: "Beta", c: "Gamma" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 			{
 				type: "state_action",
 				kind: "invoke",
@@ -380,8 +379,8 @@ console.log(JSON.stringify(snapshot.runs));`;
 					uid: { chart: "waiting-map", state: "items.work", action: "agent" },
 					name: "worker",
 				},
-				parentId: 2,
-				seqId: 3,
+				parentId: 3,
+				seqId: 4,
 				branchId: "main", timestamp: 3,
 			},
 		]), "utf8");
@@ -413,8 +412,8 @@ console.log(JSON.stringify(snapshot.runs));`;
 		}), "utf8");
 		const actionUid = { chart: "sample", state: "work", action: "agent" };
 		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]), "utf8");
 		const transcriptFile = join(sessionsDir, "transcript.jsonl");
 		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload" } })}\n`, "utf8");

@@ -151,7 +151,11 @@ export type ActionEffect = AgentEffect | UserEffect | ScriptEffect;
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
 	id: EffectId;
-	/** Unstamped machine payloads. The selected branch writer assigns every coordinate. */
+	/**
+	 * One effect is one atomic append unit: the runtime must commit every record
+	 * together or commit none. Records are unstamped; the selected branch writer
+	 * assigns every durable coordinate.
+	 */
 	records: readonly DurableRecordDraft[];
 }>;
 

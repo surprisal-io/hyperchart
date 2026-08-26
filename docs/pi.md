@@ -313,7 +313,7 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 | Path | Owner | Meaning |
 |---|---|---|
 | `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
-| `log.jsonl` | core runtime | append-only v2 record-batch and named-branch mutations |
+| `log.jsonl` | core runtime | append-only flat v2 records and named-branch entries |
 | `status.json` | Pi runner | v2 process state, current live `branchIds`, pid, heartbeat, exit, aggregate error |
 | journal `user_interaction/*` | sole runtime writer | rendered gate and validated external response facts |
 | `user-interactions/<branchId>/<seqId>/receipts/` | host | non-semantic presentation claims and confirmations |

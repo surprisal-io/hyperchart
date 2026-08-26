@@ -29,39 +29,39 @@ async function createStoppedRun() {
 	});
 	patchRunStatus(runDir, { runId: "run", branchIds: ["main"], chartId: "quickstart", state: "stopped" });
 	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
-	store.initializeRootBranch();
+	await store.initializeRootBranch();
 	return { root, runDir, store };
 }
 
 describe("append-only branch rewind", () => {
 	it("forks without selecting/starting and moves a branch head without deleting the old tail", async () => {
 		const { root, runDir, store } = await createStoppedRun();
-		store.appendDrafts([
+		await store.appendDrafts([
 			{ type: "args", args: {} },
 			{ type: "session_ref", index: 1, file: "one.jsonl" },
 			{ type: "session_ref", index: 2, file: "two.jsonl" },
 		]);
-		const fork = await forkHyperchartRun({ runDir, fromSeqId: 2, branchId: "experiment", reason: "preserve B", cwd: root, sourceBranchId: "main" });
-		expect(fork).toMatchObject({ selectedBranchChanged: false, started: false, branch: { branchId: "experiment", headSeqId: 2 } });
+		const fork = await forkHyperchartRun({ runDir, fromSeqId: 3, branchId: "experiment", reason: "preserve B", cwd: root, sourceBranchId: "main" });
+		expect(fork).toMatchObject({ selectedBranchChanged: false, started: false, branch: { branchId: "experiment", headSeqId: 3 } });
 		const bytesBeforeCheckout = await readFile(join(runDir, "log.jsonl"), "utf8");
 		await store.read();
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).toBe(bytesBeforeCheckout);
 
-		const rewind = await rewindHyperchartRun({ runDir, branchId: "main", seqId: 2, mode: "after", cwd: root });
-		expect(rewind).toMatchObject({ branchId: "main", previousHeadSeqId: 3, headSeqId: 2, preservedRecords: 3 });
+		const rewind = await rewindHyperchartRun({ runDir, branchId: "main", seqId: 3, mode: "after", cwd: root });
+		expect(rewind).toMatchObject({ branchId: "main", previousHeadSeqId: 4, headSeqId: 3, preservedRecords: 3 });
 		// Reopen after a separate host operation; an opened journal never rereads itself.
 		const replacementStore = new JsonlLogStore(join(runDir, "log.jsonl"));
 		const replacement = await replacementStore.appendDrafts([{ type: "session_ref", index: 3, file: "replacement.jsonl" }]);
-		expect(replacement[0]).toMatchObject({ seqId: 4, parentId: 2, branchId: "main" });
+		expect(replacement[0]).toMatchObject({ seqId: 7, parentId: 3, branchId: "main" });
 
-		await rewindHyperchartRun({ runDir, branchId: "main", seqId: 3, mode: "after", cwd: root });
+		await rewindHyperchartRun({ runDir, branchId: "main", seqId: 4, mode: "after", cwd: root });
 		const continuationStore = new JsonlLogStore(join(runDir, "log.jsonl"));
 		const oldTailContinuation = await continuationStore.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
-		expect(oldTailContinuation[0]).toMatchObject({ seqId: 5, parentId: 3, branchId: "main" });
+		expect(oldTailContinuation[0]).toMatchObject({ seqId: 9, parentId: 4, branchId: "main" });
 		const normalized = await continuationStore.read();
-		expect(normalized.records.map((record) => record.seqId)).toEqual([1, 2, 3, 4, 5]);
-		expect(normalized.ancestry("main").map((record) => record.seqId)).toEqual([1, 2, 3, 5]);
-		expect(normalized.ancestry("experiment").map((record) => record.seqId)).toEqual([1, 2]);
+		expect(normalized.records.map((record) => record.seqId)).toEqual([2, 3, 4, 7, 9]);
+		expect(normalized.ancestry("main").map((record) => record.seqId)).toEqual([2, 3, 4, 9]);
+		expect(normalized.ancestry("experiment").map((record) => record.seqId)).toEqual([2, 3]);
 		expect((await listHyperchartBranches(runDir)).map((branch) => branch.branchId)).toEqual(["main", "experiment"]);
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).not.toContain("rewind-backups");
 	});

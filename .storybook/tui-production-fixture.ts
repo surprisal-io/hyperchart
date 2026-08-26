@@ -55,10 +55,10 @@ function action(ast: ChartAst, statePath: StatePath): { uid: ActionUID; definiti
 }
 
 function deckLog(ast: ChartAst, variant: "single" | "many" = "single"): DurableLogRecord[] {
-	let seq = 0;
+	let seq = 1;
 	const records: DurableLogRecord[] = [];
 	const push = (record: Record<string, unknown> & { type: DurableLogRecord["type"]; timestamp: number }) => {
-		const parentId = seq === 0 ? null : seq;
+		const parentId = seq === 1 ? null : seq;
 		seq += 1;
 		records.push({ ...record, seqId: seq, parentId, branchId: "main" } as DurableLogRecord);
 	};
@@ -264,8 +264,8 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const records = deckLog(ast, variant === "many-running" ? "many" : "single");
 	writeJsonl(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, metadata: { name: "main" }, committedAt: RUNTIME_NOW - 721_000 },
-		{ kind: "record_batch", branchId: "main", records, headSeqId: records.at(-1)?.seqId ?? null, committedAt: RUNTIME_NOW - 5_000 },
+		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, metadata: { name: "main" }, committedAt: RUNTIME_NOW - 721_000 },
+		...records,
 	]);
 	writeFileSync(
 		join(runDir, "meta.json"),

@@ -1,22 +1,22 @@
 import { dirname, resolve } from "node:path";
 import {
-	appendFileSync,
 	existsSync,
-	mkdirSync,
 	readFileSync,
-	rmSync,
-	statSync,
 	truncateSync,
-	writeFileSync,
 } from "node:fs";
-import type {
-	BranchHead,
-	BranchId,
-	BranchMetadata,
-	DurableLogRecord,
-	DurableRecordDraft,
-	RecordBatchMutation,
-	StorageMutation,
+import {
+	mkdir,
+	open,
+	stat,
+} from "node:fs/promises";
+import {
+	isDurableRecordEntry,
+	type BranchHead,
+	type BranchId,
+	type BranchMetadata,
+	type DurableLogRecord,
+	type DurableRecordDraft,
+	type StorageEntry,
 } from "../../core/durable_events.js";
 import { prepareUserInteractionResponse, prepareUserInteractionResponseSync, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
@@ -32,7 +32,7 @@ export class CorruptRunLogError extends Error {
 type AncestryNode = Readonly<{ record: DurableLogRecord; parent?: AncestryNode }>;
 
 export class NormalizedRunLog {
-	readonly mutations: readonly StorageMutation[];
+	readonly entries: readonly StorageEntry[];
 	readonly records: readonly DurableLogRecord[];
 	readonly recordsBySeqId: ReadonlyMap<number, DurableLogRecord>;
 	readonly branches: ReadonlyMap<BranchId, BranchHead>;
@@ -41,7 +41,7 @@ export class NormalizedRunLog {
 	private readonly ancestryCache: Map<number, readonly DurableLogRecord[]>;
 
 	constructor(input: {
-		mutations: readonly StorageMutation[];
+		entries: readonly StorageEntry[];
 		records: readonly DurableLogRecord[];
 		recordsBySeqId: ReadonlyMap<number, DurableLogRecord>;
 		branches: ReadonlyMap<BranchId, BranchHead>;
@@ -49,7 +49,7 @@ export class NormalizedRunLog {
 		ancestryNodes?: Map<number, AncestryNode>;
 		ancestryCache?: Map<number, readonly DurableLogRecord[]>;
 	}) {
-		this.mutations = input.mutations;
+		this.entries = input.entries;
 		this.records = input.records;
 		this.recordsBySeqId = input.recordsBySeqId;
 		this.branches = input.branches;
@@ -60,29 +60,28 @@ export class NormalizedRunLog {
 
 	get nextSeqId(): number { return this.currentNextSeqId; }
 
-	/** Publish one already-durable mutation into the shared in-memory projection. */
-	applyMutation(mutation: StorageMutation): void {
-		const mutations = this.mutations as StorageMutation[];
+	/** Publish one already-durable flat entry into the shared in-memory projection. */
+	applyEntry(entry: StorageEntry): void {
+		const entries = this.entries as StorageEntry[];
 		const records = this.records as DurableLogRecord[];
 		const recordsBySeqId = this.recordsBySeqId as Map<number, DurableLogRecord>;
 		const branches = this.branches as Map<BranchId, BranchHead>;
-		mutations.push(mutation);
-		if (mutation.kind === "branch") {
-			const previous = branches.get(mutation.branchId);
-			branches.set(mutation.branchId, mutation.op === "create"
-				? { branchId: mutation.branchId, headSeqId: mutation.headSeqId, createdAt: mutation.committedAt, ...(mutation.metadata === undefined ? {} : { metadata: mutation.metadata }) }
-				: { ...previous!, headSeqId: mutation.headSeqId });
+		entries.push(entry);
+		if (!isDurableRecordEntry(entry)) {
+			const previous = branches.get(entry.branchId);
+			branches.set(entry.branchId, entry.op === "create"
+				? { branchId: entry.branchId, headSeqId: entry.headSeqId, createdAt: entry.committedAt, ...(entry.metadata === undefined ? {} : { metadata: entry.metadata }) }
+				: { ...previous!, headSeqId: entry.headSeqId });
+			this.currentNextSeqId = entry.seqId + 1;
 			return;
 		}
-		const branch = branches.get(mutation.branchId)!;
-		for (const record of mutation.records) {
-			records.push(record);
-			recordsBySeqId.set(record.seqId, record);
-			const parent = record.parentId === null ? undefined : this.ancestryNodes.get(record.parentId);
-			this.ancestryNodes.set(record.seqId, { record, ...(parent === undefined ? {} : { parent }) });
-		}
-		this.currentNextSeqId = mutation.headSeqId + 1;
-		branches.set(mutation.branchId, { ...branch, headSeqId: mutation.headSeqId });
+		const branch = branches.get(entry.branchId)!;
+		records.push(entry);
+		recordsBySeqId.set(entry.seqId, entry);
+		const parent = entry.parentId === null ? undefined : this.ancestryNodes.get(entry.parentId);
+		this.ancestryNodes.set(entry.seqId, { record: entry, ...(parent === undefined ? {} : { parent }) });
+		this.currentNextSeqId = entry.seqId + 1;
+		branches.set(entry.branchId, { ...branch, headSeqId: entry.seqId });
 	}
 
 	branch(branchId: BranchId): BranchHead {
@@ -117,7 +116,7 @@ export class NormalizedRunLog {
 
 export interface LogStore {
 	readonly branchId: BranchId;
-	/** Resolves only after the mutation is durable in the backend; the in-memory snapshot is published at the same boundary. */
+	/** Resolves only after the entry is durable in the backend; the in-memory snapshot is published at the same boundary. */
 	appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
 	/** Synchronous already-normalized snapshot for effect addressing in the serialized runtime. */
 	snapshot(): NormalizedRunLog;
@@ -125,7 +124,7 @@ export interface LogStore {
 	readAll(): Promise<readonly DurableLogRecord[]>;
 }
 
-/** Full run-journal handle: branch mutations plus lifecycle, shared across branch handles. */
+/** Full run-journal handle: branch entries plus lifecycle, shared across branch handles. */
 export interface RunLogStore extends LogStore {
 	forBranch(branchId: BranchId): RunLogStore;
 	initializeRootBranch(metadata?: BranchMetadata): Promise<BranchHead>;
@@ -143,23 +142,21 @@ export function stampDrafts(
 	branchId: BranchId,
 	drafts: readonly DurableRecordDraft[],
 	now: number,
-): { records: DurableLogRecord[]; mutation: RecordBatchMutation } {
+): DurableLogRecord[] {
 	const branch = normalized.branches.get(branchId);
 	if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 	let nextSeqId = normalized.nextSeqId;
 	let parentId = branch.headSeqId;
-	const records = drafts.map((draft) => {
+	return drafts.map((draft) => {
 		assertDraft(draft);
 		const record = { ...draft, seqId: nextSeqId++, parentId, branchId, timestamp: now } as DurableLogRecord;
 		parentId = record.seqId;
 		return record;
 	});
-	const tail = records.at(-1)!;
-	return { records, mutation: { kind: "record_batch", branchId, records, headSeqId: tail.seqId, committedAt: now } };
 }
 
 export function validateAndProjectJournal(values: readonly unknown[]): NormalizedRunLog {
-	const mutations: StorageMutation[] = [];
+	const entries: StorageEntry[] = [];
 	const records: DurableLogRecord[] = [];
 	const recordsBySeqId = new Map<number, DurableLogRecord>();
 	const branches = new Map<BranchId, BranchHead>();
@@ -167,26 +164,21 @@ export function validateAndProjectJournal(values: readonly unknown[]): Normalize
 
 	for (let index = 0; index < values.length; index++) {
 		const value = values[index];
-		const coordinate = `mutation ${index + 1}`;
+		const coordinate = `entry ${index + 1}`;
 		if (!isRecord(value)) throw new CorruptRunLogError(`${coordinate} is not an object`);
-		if (value.kind !== "branch" && value.kind !== "record_batch") {
-			throw new CorruptRunLogError(`${coordinate} is not a storage mutation`);
-		}
 		if (value.kind === "branch") {
 			const branchId = requireBranchId(value.branchId, coordinate);
 			const committedAt = requireTimestamp(value.committedAt, `${coordinate}.committedAt`);
+			const seqId = requireSeqId(value.seqId, `${coordinate}.seqId`);
+			if (seqId !== nextSeqId) throw new CorruptRunLogError(`${coordinate} seqId ${seqId} is not global next seqId ${nextSeqId}`);
+			nextSeqId++;
 			if (value.op === "create") {
 				if (branches.has(branchId)) throw new CorruptRunLogError(`${coordinate} creates duplicate branch '${branchId}'`);
 				const headSeqId = requireNullableSeqId(value.headSeqId, `${coordinate}.headSeqId`);
-				if (headSeqId !== null && !recordsBySeqId.has(headSeqId)) {
-					throw new CorruptRunLogError(`${coordinate} references missing head seqId ${headSeqId}`);
-				}
+				if (headSeqId !== null && !recordsBySeqId.has(headSeqId)) throw new CorruptRunLogError(`${coordinate} references missing head seqId ${headSeqId}`);
 				const metadata = normalizeBranchMetadata(value.metadata, coordinate);
-				const mutation: StorageMutation = {
-					kind: "branch", op: "create", branchId, headSeqId,
-					...(metadata === undefined ? {} : { metadata }), committedAt,
-				};
-				mutations.push(mutation);
+				const entry: StorageEntry = { kind: "branch", op: "create", seqId, branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt };
+				entries.push(entry);
 				branches.set(branchId, { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) });
 				continue;
 			}
@@ -195,42 +187,29 @@ export function validateAndProjectJournal(values: readonly unknown[]): Normalize
 				if (previous === undefined) throw new CorruptRunLogError(`${coordinate} moves unknown branch '${branchId}'`);
 				const headSeqId = requireNullableSeqId(value.headSeqId, `${coordinate}.headSeqId`);
 				if (headSeqId !== null && !recordsBySeqId.has(headSeqId)) throw new CorruptRunLogError(`${coordinate} references missing head seqId ${headSeqId}`);
-				const mutation: StorageMutation = { kind: "branch", op: "move", branchId, headSeqId, committedAt };
-				mutations.push(mutation);
+				const entry: StorageEntry = { kind: "branch", op: "move", seqId, branchId, headSeqId, committedAt };
+				entries.push(entry);
 				branches.set(branchId, { ...previous, headSeqId });
 				continue;
 			}
 			throw new CorruptRunLogError(`${coordinate} has unknown branch operation`);
 		}
 
-		const branchId = requireBranchId(value.branchId, coordinate);
-		const branch = branches.get(branchId);
-		if (branch === undefined) throw new CorruptRunLogError(`${coordinate} appends to unknown branch '${branchId}'`);
-		if (!Array.isArray(value.records) || value.records.length === 0) throw new CorruptRunLogError(`${coordinate} record batch must be non-empty`);
-		const committedAt = requireTimestamp(value.committedAt, `${coordinate}.committedAt`);
-		const batch: DurableLogRecord[] = [];
-		let expectedParent = branch.headSeqId;
-		for (let recordIndex = 0; recordIndex < value.records.length; recordIndex++) {
-			const recordCoordinate = `${coordinate}.records[${recordIndex}]`;
-			const record = normalizeDurableRecord(value.records[recordIndex], recordCoordinate);
-			if (record.branchId !== branchId) throw new CorruptRunLogError(`${recordCoordinate} branchId '${record.branchId}' does not match batch '${branchId}'`);
-			if (record.seqId !== nextSeqId) throw new CorruptRunLogError(`${recordCoordinate} seqId ${record.seqId} is not global next seqId ${nextSeqId}`);
-			if (record.parentId !== expectedParent) throw new CorruptRunLogError(`${recordCoordinate} parentId ${String(record.parentId)} does not match branch head/batch predecessor ${String(expectedParent)}`);
-			if (record.parentId !== null && !recordsBySeqId.has(record.parentId) && !batch.some((entry) => entry.seqId === record.parentId)) throw new CorruptRunLogError(`${recordCoordinate} references missing parent seqId ${record.parentId}`);
-			if (recordsBySeqId.has(record.seqId)) throw new CorruptRunLogError(`${recordCoordinate} duplicates seqId ${record.seqId}`);
-			batch.push(record);
-			expectedParent = record.seqId;
-			nextSeqId++;
-		}
-		const headSeqId = requireSeqId(value.headSeqId, `${coordinate}.headSeqId`);
-		if (headSeqId !== batch.at(-1)?.seqId) throw new CorruptRunLogError(`${coordinate} headSeqId does not match the batch tail`);
-		for (const record of batch) { records.push(record); recordsBySeqId.set(record.seqId, record); }
-		const mutation: RecordBatchMutation = { kind: "record_batch", branchId, records: batch, headSeqId, committedAt };
-		mutations.push(mutation);
-		branches.set(branchId, { ...branch, headSeqId });
+		const record = normalizeDurableRecord(value, coordinate);
+		const branch = branches.get(record.branchId);
+		if (branch === undefined) throw new CorruptRunLogError(`${coordinate} appends to unknown branch '${record.branchId}'`);
+		if (record.seqId !== nextSeqId) throw new CorruptRunLogError(`${coordinate} seqId ${record.seqId} is not global next seqId ${nextSeqId}`);
+		if (record.parentId !== branch.headSeqId) throw new CorruptRunLogError(`${coordinate} parentId ${String(record.parentId)} does not match branch head ${String(branch.headSeqId)}`);
+		if (record.parentId !== null && !recordsBySeqId.has(record.parentId)) throw new CorruptRunLogError(`${coordinate} references missing parent seqId ${record.parentId}`);
+		if (recordsBySeqId.has(record.seqId)) throw new CorruptRunLogError(`${coordinate} duplicates seqId ${record.seqId}`);
+		entries.push(record);
+		records.push(record);
+		recordsBySeqId.set(record.seqId, record);
+		branches.set(record.branchId, { ...branch, headSeqId: record.seqId });
+		nextSeqId++;
 	}
 
-	return new NormalizedRunLog({ mutations, records, recordsBySeqId, branches, nextSeqId });
+	return new NormalizedRunLog({ entries, records, recordsBySeqId, branches, nextSeqId });
 }
 
 type SharedJournalState = {
@@ -270,18 +249,18 @@ export class JsonlLogStore implements RunLogStore {
 
 	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }): Promise<BranchHead> {
 		return this.commitBuilt((normalized) => {
-			if (normalized.mutations.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
+			if (normalized.entries.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
 			const committedAt = Date.now();
-			const mutation: StorageMutation = { kind: "branch", op: "create", branchId: this.branchId, headSeqId: null, metadata, committedAt };
-			return { mutation, result: { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata } };
+			const entry: StorageEntry = { kind: "branch", op: "create", seqId: normalized.nextSeqId, branchId: this.branchId, headSeqId: null, metadata, committedAt };
+			return { entries: [entry], result: { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata } };
 		});
 	}
 
 	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
 		return this.commitBuilt((normalized) => {
-			const { records, mutation } = stampDrafts(normalized, this.branchId, drafts, Date.now());
-			return { mutation, result: records };
+			const records = stampDrafts(normalized, this.branchId, drafts, Date.now());
+			return { entries: records, result: records };
 		});
 	}
 
@@ -295,7 +274,7 @@ export class JsonlLogStore implements RunLogStore {
 	async close(): Promise<void> {}
 	async readAll(): Promise<readonly DurableLogRecord[]> {
 		const normalized = await this.read();
-		return normalized.mutations.length === 0 ? [] : normalized.ancestry(this.branchId);
+		return normalized.entries.length === 0 ? [] : normalized.ancestry(this.branchId);
 	}
 
 	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
@@ -305,7 +284,7 @@ export class JsonlLogStore implements RunLogStore {
 			if (!normalized.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
 			const committedAt = Date.now();
 			return {
-				mutation: { kind: "branch", op: "create", branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt },
+				entries: [{ kind: "branch", op: "create", seqId: normalized.nextSeqId, branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt }],
 				result: { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) },
 			};
 		});
@@ -318,7 +297,7 @@ export class JsonlLogStore implements RunLogStore {
 			if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 			if (headSeqId !== null && !normalized.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
 			return {
-				mutation: { kind: "branch", op: "move", branchId, headSeqId, committedAt: Date.now() },
+				entries: [{ kind: "branch", op: "move", seqId: normalized.nextSeqId, branchId, headSeqId, committedAt: Date.now() }],
 				result: { ...branch, headSeqId },
 			};
 		});
@@ -329,73 +308,58 @@ export class JsonlLogStore implements RunLogStore {
 		// with every other in-process writer operation. No second live process may own this store.
 		await prepareUserInteractionResponse(this.snapshot(), this.branchId, input);
 		return enqueueJsonlWrite(this.journal.filePath, async () => {
-			const release = acquireWriterLock(this.journal.filePath);
-			try {
-				const normalized = this.snapshot();
-				const prepared = prepareUserInteractionResponseSync(normalized, this.branchId, input);
-				if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
-				const { records, mutation } = stampDrafts(normalized, this.branchId, [prepared.draft], Date.now());
-				this.appendLocked(mutation);
-				return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
-			} finally { release(); }
+			const normalized = this.snapshot();
+			const prepared = prepareUserInteractionResponseSync(normalized, this.branchId, input);
+			if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
+			const records = stampDrafts(normalized, this.branchId, [prepared.draft], Date.now());
+			await this.appendLocked(records);
+			return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
 		});
 	}
 
 	private openJournal(): void {
 		if (this.journal.snapshot !== undefined) return;
-		const opened = readMutationValues(this.journal.filePath, this.journal.onWarn);
+		const opened = readEntryValues(this.journal.filePath, this.journal.onWarn);
 		this.journal.fullReadCount++;
 		this.journal.expectedByteLength = opened.byteLength;
 		this.journal.snapshot = validateAndProjectJournal(opened.values);
 	}
 
-	private commitBuilt<T>(builder: (normalized: NormalizedRunLog) => { mutation: StorageMutation; result: T }): T {
-		this.openJournal();
-		const release = acquireWriterLock(this.journal.filePath);
-		try {
+	private commitBuilt<T>(builder: (normalized: NormalizedRunLog) => { entries: readonly StorageEntry[]; result: T }): Promise<T> {
+		return enqueueJsonlWrite(this.journal.filePath, async () => {
+			this.openJournal();
 			const built = builder(this.snapshot());
-			this.appendLocked(built.mutation);
+			await this.appendLocked(built.entries);
 			return built.result;
-		} finally { release(); }
+		});
 	}
 
-	private appendLocked(mutation: StorageMutation): void {
+	private async appendLocked(entries: readonly StorageEntry[]): Promise<void> {
 		const snapshot = this.journal.snapshot;
 		const expectedByteLength = this.journal.expectedByteLength;
 		if (snapshot === undefined || expectedByteLength === undefined) throw new Error("Hyperchart journal is not open");
-		const currentByteLength = journalByteLength(this.journal.filePath);
+		const currentByteLength = await journalByteLengthAsync(this.journal.filePath);
 		if (currentByteLength !== expectedByteLength) {
 			throw new Error(`Stale Hyperchart journal writer: expected ${expectedByteLength} bytes but found ${currentByteLength}; reopen the run before writing`);
 		}
-		const line = `${JSON.stringify(mutation)}\n`;
-		appendMutationLine(this.journal.filePath, line);
-		this.journal.expectedByteLength = expectedByteLength + Buffer.byteLength(line, "utf8");
-		snapshot.applyMutation(mutation);
+		const payload = Buffer.from(entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""), "utf8");
+		await appendEntriesOnce(this.journal.filePath, payload);
+		this.journal.expectedByteLength = expectedByteLength + payload.byteLength;
+		for (const entry of entries) snapshot.applyEntry(entry);
 	}
 }
 
-type OpenedMutationValues = { values: unknown[]; byteLength: number };
+type OpenedEntryValues = { values: unknown[]; byteLength: number };
 
-function readMutationValues(filePath: string, onWarn: (message: string) => void): OpenedMutationValues {
+function readEntryValues(filePath: string, onWarn: (message: string) => void): OpenedEntryValues {
 	if (!existsSync(filePath)) return { values: [], byteLength: 0 };
 	let content = readFileSync(filePath, "utf8");
 	if (!content.endsWith("\n") && content.length > 0) {
-		// The first read only detects a possible torn tail. The repair decision and
-		// boundary are recomputed from a second read while holding the append lock,
-		// so a writer that completed the line meanwhile can never be truncated.
-		let repaired = false;
-		const release = acquireWriterLock(filePath);
-		try {
-			content = readFileSync(filePath, "utf8");
-			if (!content.endsWith("\n") && content.length > 0) {
-				const end = content.lastIndexOf("\n") + 1;
-				const complete = content.slice(0, end);
-				truncateSync(filePath, Buffer.byteLength(complete, "utf8"));
-				content = complete;
-				repaired = true;
-			}
-		} finally { release(); }
-		if (repaired) onWarn(`Discarded incomplete trailing JSONL mutation in ${filePath}`);
+		const end = content.lastIndexOf("\n") + 1;
+		const complete = content.slice(0, end);
+		truncateSync(filePath, Buffer.byteLength(complete, "utf8"));
+		content = complete;
+		onWarn(`Discarded incomplete trailing JSONL entry in ${filePath}`);
 	}
 	const values: unknown[] = [];
 	for (const [index, line] of content.split(/\r?\n/).entries()) {
@@ -406,14 +370,18 @@ function readMutationValues(filePath: string, onWarn: (message: string) => void)
 	return { values, byteLength: Buffer.byteLength(content, "utf8") };
 }
 
-function journalByteLength(filePath: string): number {
-	try { return statSync(filePath).size; }
+async function journalByteLengthAsync(filePath: string): Promise<number> {
+	try { return (await stat(filePath)).size; }
 	catch (error) { if (isNodeError(error) && error.code === "ENOENT") return 0; throw error; }
 }
 
-function appendMutationLine(filePath: string, line: string): void {
-	mkdirSync(dirname(filePath), { recursive: true });
-	appendFileSync(filePath, line, "utf8");
+async function appendEntriesOnce(filePath: string, payload: Buffer): Promise<void> {
+	await mkdir(dirname(filePath), { recursive: true });
+	const handle = await open(filePath, "a");
+	try {
+		const { bytesWritten } = await handle.write(payload, 0, payload.byteLength, null);
+		if (bytesWritten !== payload.byteLength) throw new Error(`Short Hyperchart journal append: wrote ${bytesWritten} of ${payload.byteLength} bytes`);
+	} finally { await handle.close(); }
 }
 
 function buildAncestryNodes(records: readonly DurableLogRecord[]): Map<number, AncestryNode> {
@@ -435,34 +403,6 @@ function enqueueJsonlWrite<T>(filePath: string, task: () => Promise<T>): Promise
 	jsonlWriteChains.set(key, settled);
 	void settled.finally(() => { if (jsonlWriteChains.get(key) === settled) jsonlWriteChains.delete(key); });
 	return result;
-}
-
-function acquireWriterLock(filePath: string): () => void {
-	const lockDir = `${filePath}.writer-lock`;
-	mkdirSync(dirname(filePath), { recursive: true });
-	const started = Date.now();
-	for (;;) {
-		try {
-			mkdirSync(lockDir);
-			writeFileSync(`${lockDir}/owner.json`, `${JSON.stringify({ pid: process.pid, acquiredAt: Date.now() })}\n`, "utf8");
-			return () => rmSync(lockDir, { recursive: true, force: true });
-		} catch (error) {
-			if (!isNodeError(error) || error.code !== "EEXIST") throw error;
-			if (writerLockIsStale(lockDir)) { rmSync(lockDir, { recursive: true, force: true }); continue; }
-			if (Date.now() - started > 10_000) throw new Error(`Timed out waiting for Hyperchart run writer claim ${lockDir}`);
-			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-		}
-	}
-}
-
-function writerLockIsStale(lockDir: string): boolean {
-	try {
-		const owner = JSON.parse(readFileSync(`${lockDir}/owner.json`, "utf8")) as { pid?: unknown };
-		if (typeof owner.pid !== "number") return Date.now() - statSync(lockDir).mtimeMs > 30_000;
-		try { process.kill(owner.pid, 0); return false; } catch { return true; }
-	} catch {
-		try { return Date.now() - statSync(lockDir).mtimeMs > 30_000; } catch { return false; }
-	}
 }
 
 function normalizeDurableRecord(value: unknown, coordinate: string): DurableLogRecord {

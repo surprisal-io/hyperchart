@@ -71,15 +71,15 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 	);
 	const uid = { chart: "demo", state: "work", action: "agent" };
 	const records = [
-			{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
+			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 			{
 				type: "state_action",
 				kind: "invoke",
 			sessionId: "session-id",
 				actionUid: uid,
 				definition: { kind: "agent", uid, name: "old-worker" },
-				parentId: 1,
-				seqId: 2,
+				parentId: 2,
+				seqId: 3,
 				branchId: "main", timestamp: 2,
 			},
 			{
@@ -87,15 +87,15 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 				kind: "complete",
 				actionUid: uid,
 				event: { type: "DONE" },
-				parentId: 2,
-				seqId: 3,
+				parentId: 3,
+				seqId: 4,
 				branchId: "main", timestamp: 3,
 			},
 		];
 	writeFileSync(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", branchId: "main", headSeqId: null, committedAt: 0 },
-		{ kind: "record_batch", branchId: "main", records, headSeqId: 3, committedAt: 3 },
-	].map((mutation) => JSON.stringify(mutation)).join("\n") + "\n", "utf8");
+		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
+		...records,
+	].map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
 	const config: HyperchartRunnerConfig = {
 		runId: "run",
 		branchId: "main",

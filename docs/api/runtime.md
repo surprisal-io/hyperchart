@@ -47,7 +47,7 @@ interface Runtime {
 
 The core execution loop owns machine semantics. A runtime interprets effects, returns machine events, and supplies chart and log data.
 
-`runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Effects are consumed in the supplied list order. Durable records must be appended before emitting `durable_records_added`; when one batch contains multiple `durable_records` effects, both appends and acknowledgements must preserve that order.
+`runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Effects are consumed in the supplied list order. Each `durable_records` effect is one indivisible storage commit: append every record in that effect together or append none, and never split it into multiple commits. Durable records must be committed before emitting `durable_records_added`; when one machine output contains multiple `durable_records` effects, each effect remains a separate atomic unit and both commits and acknowledgements preserve their supplied order.
 
 ## `ChartRuntime`
 
@@ -132,7 +132,7 @@ await completion;
 
 `RunLogStore.respondToUserInteraction({ ast, gateSeqId, event, schemaRegistry? })` is the sole-writer admission primitive. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
 
-JSONL validates and appends against its already-open snapshot under the writer lock and rejects a stale byte boundary. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
+JSONL serializes writes only inside one Node process, validates against its already-open snapshot, and rejects a stale byte boundary when detected. It provides no consistency guarantee for concurrent writers in different processes. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
 
 For trusted in-process hosts that must commit application ownership together with a response, the controller exposes PostgreSQL-only composite operations:
 

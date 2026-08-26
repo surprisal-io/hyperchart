@@ -145,7 +145,7 @@ describe("ChartRuntime", () => {
 		const events = runtime.eventsQueue()[Symbol.asyncIterator]();
 		expect(await events.next()).toMatchObject({ value: { kind: "durable_records_added", effectId: "first" } });
 		expect(await events.next()).toMatchObject({ value: { kind: "durable_records_added", effectId: "second" } });
-		expect((await store.readAll()).map((record) => record.seqId)).toEqual([1, 2]);
+		expect((await store.readAll()).map((record) => record.seqId)).toEqual([2, 3]);
 		await runtime.dispose();
 	});
 
@@ -332,7 +332,7 @@ describe("ChartRuntime", () => {
 		const ast = linearChart();
 		const dir = await makeTempDir();
 		const logStore = new JsonlLogStore(join(dir, "log.jsonl"));
-		logStore.initializeRootBranch();
+		await logStore.initializeRootBranch();
 		const firstExecutor = new FakeAgentExecutor({ work: [undefined] });
 		const firstRuntime = new ChartRuntime({
 			ast, branchId: "main",

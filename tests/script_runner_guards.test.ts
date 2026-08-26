@@ -267,8 +267,8 @@ process.stdin.on("end", () => {
 			},
 		];
 		const logStore = new JsonlLogStore(join(dir, "log.jsonl"));
-		logStore.initializeRootBranch();
-		logStore.appendDrafts(rejectedLog.map(({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft }) => draft));
+		await logStore.initializeRootBranch();
+		await logStore.appendDrafts(rejectedLog.map(({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft }) => draft));
 		const runtime = new ChartRuntime({
 			ast, branchId: "main",
 			logStore,

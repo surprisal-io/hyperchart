@@ -16,10 +16,11 @@ describe("MemoryLogStore", () => {
 		const store = new MemoryLogStore();
 		const first = await store.appendDrafts([argsDraft(), invokeDraft()]);
 		expect(first.map(({ seqId, parentId, branchId }) => ({ seqId, parentId, branchId }))).toEqual([
-			{ seqId: 1, parentId: null, branchId: "main" },
-			{ seqId: 2, parentId: 1, branchId: "main" },
+			{ seqId: 2, parentId: null, branchId: "main" },
+			{ seqId: 3, parentId: 2, branchId: "main" },
 		]);
 		await expect(store.readAll()).resolves.toEqual(first);
-		expect(store.storageMutations().map((mutation) => mutation.kind)).toEqual(["branch", "record_batch"]);
+		const entries = store.storageEntries();
+		expect(entries).toEqual([expect.objectContaining({ kind: "branch", seqId: 1 }), ...first]);
 	});
 });

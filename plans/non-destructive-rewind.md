@@ -105,7 +105,7 @@ Runtime получает обязательный branch handle (`main` испо
 Stamping нельзя оставлять на `projection.seqId` (`packages/hyperchart/src/core/machine.ts:416–421`): после rewind projection заканчивается старым id, а физический журнал уже содержит большие ids. Serialized writer должен:
 
 - брать следующий `seqId` из полного нормализованного журнала, а не из укороченной branch projection;
-- ставить первому record batch `parentId = branches[branchId].headSeqId`;
+- ставить первому record в multi-record append `parentId = branches[branchId].headSeqId`;
 - ставить каждому record `branchId` выбранного handle;
 - сцеплять остальные records batch друг с другом;
 - одним сериализованным commit append-ить records и продвижение head ветки;

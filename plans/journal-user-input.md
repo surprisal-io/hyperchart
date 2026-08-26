@@ -100,7 +100,7 @@ A gate is open only when its opened fact is in the selected branch ancestry, has
 
 - Reuse user-effect reconstruction in `userInvocationForAction()` and pending-action identity in `packages/hyperchart/src/core/machine.ts`.
 - Reuse exact event/reply validation from `validateUserInteractionEvent()` in `packages/hyperchart/src/runtime/generic/user_interactions.ts`, moving the semantic portion to a backend-neutral admission layer.
-- Reuse journal stamping and atomic record batches from `stampDrafts()` in `packages/hyperchart/src/runtime/generic/log_store.ts`.
+- Reuse journal stamping and multi-record `appendDrafts()` calls from `packages/hyperchart/src/runtime/generic/log_store.ts`; durable storage remains flat.
 - Reuse `NormalizedRunLog` branch ancestry/projection as the source for open-gate checks and idempotency.
 - Reuse JSONL `acquireWriterLock()` and stale-length validation, but place validation and append in one critical section.
 - Reuse PostgreSQL advisory locking and `writeChain` serialization, adapting them to transaction-scoped composition rather than introducing a second interaction table.

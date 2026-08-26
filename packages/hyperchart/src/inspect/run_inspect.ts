@@ -67,7 +67,7 @@ export async function hyperchartRunFromRunDir(
 		const store = await openRunLogStore(absoluteRunDir, { branchId });
 		try {
 			normalized = await store.read();
-			records = normalized.mutations.length === 0 ? [] : normalized.ancestry(branchId);
+			records = normalized.entries.length === 0 ? [] : normalized.ancestry(branchId);
 		} finally {
 			await store.close();
 		}
