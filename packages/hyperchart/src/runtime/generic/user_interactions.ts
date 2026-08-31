@@ -16,6 +16,10 @@ export const USER_INTERACTION_ARBITER_DIR = ".user-interaction-arbiter";
 export const USER_INTERACTION_CLAIM_LEASE_MS = 30_000;
 export const USER_INTERACTION_WAIT_LEASE_MS = 5 * 60_000;
 
+const MAX_SCAN_CHART_CACHE_ENTRIES = 64;
+type ParsedChartModule = Extract<ReturnType<typeof parseChartModuleSync>, { ok: true }>;
+const scanChartCache = new Map<string, { sourceHash: string; parsed: ParsedChartModule }>();
+
 export type UserInteractionCoordinate = Readonly<{ runId: string; branchId: BranchId; seqId: number }>;
 export type UserInteractionRequest = Readonly<{
 	version: 2;
@@ -155,10 +159,30 @@ export function releaseActiveUserInteraction(owner: UserInteractionOwner, coordi
 	removeUserInteractionReceipt(join(owner.runsRoot, coordinate.runId), coordinate.branchId, coordinate.seqId, owner.host, owner.sessionId);
 }
 
+function parseChartForInteractionScan(chartPath: string, exportName?: string): ParsedChartModule {
+	const absolutePath = resolve(chartPath);
+	const cacheKey = `${absolutePath}\0${exportName ?? "default"}`;
+	const sourceHash = createHash("sha256").update(readFileSync(absolutePath)).digest("hex");
+	const cached = scanChartCache.get(cacheKey);
+	if (cached?.sourceHash === sourceHash) {
+		// Refresh insertion order so the bounded map behaves as an LRU cache.
+		scanChartCache.delete(cacheKey);
+		scanChartCache.set(cacheKey, cached);
+		return cached.parsed;
+	}
+	const parsed = parseChartModuleSync(absolutePath, exportName === undefined ? {} : { exportName });
+	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!scanChartCache.has(cacheKey) && scanChartCache.size >= MAX_SCAN_CHART_CACHE_ENTRIES) {
+		const oldest = scanChartCache.keys().next().value;
+		if (oldest !== undefined) scanChartCache.delete(oldest);
+	}
+	scanChartCache.set(cacheKey, { sourceHash, parsed });
+	return parsed;
+}
+
 export async function scanOpenUserInteractions(runDir: string, branchId?: BranchId): Promise<UserInteractionRequest[]> {
 	const meta = loadRunMeta(runDir);
-	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	const parsed = parseChartForInteractionScan(meta.chartPath, meta.exportName);
 	const store = await openRunLogStore(runDir, { access: "read", ...(branchId === undefined ? {} : { branchId }) });
 	try {
 		const normalized = await store.read();

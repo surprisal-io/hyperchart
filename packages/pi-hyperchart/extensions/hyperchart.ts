@@ -395,7 +395,9 @@ class PiUserInteractionCoordinator {
 		// Real Pi contexts always expose isIdle. Minimal extension-test contexts may not;
 		// those still receive the immediate scan without leaking a process-wide timer.
 		if (ctx === undefined || typeof ctx.isIdle !== "function") return;
-		this.timer = setInterval(() => void this.scan(), 1_000);
+		// Journal scans load and project every owned run. A short polling cadence is
+		// responsive without continuously occupying the Pi host while it is idle.
+		this.timer = setInterval(() => void this.scan(), 5_000);
 		this.timer.unref();
 	}
 

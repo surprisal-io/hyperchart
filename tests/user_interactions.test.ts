@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -25,12 +25,13 @@ import {
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-async function fixture(reply = false) {
+async function fixture(reply = false, loadCounterKey?: string) {
 	const root = mkdtempSync(join(tmpdir(), "hyperchart-journal-input-")); roots.push(root);
 	const runsRoot = join(root, "runs"), workDir = join(root, "project"), runDir = join(runsRoot, "run-a"), chartPath = join(workDir, "chart.ts");
 	mkdirSync(runsRoot); mkdirSync(workDir);
 	writeFileSync(chartPath, `
 		import { chart, final, user } from "@surprisal/hyperchart";
+		${loadCounterKey === undefined ? "" : `(globalThis as any)[${JSON.stringify(loadCounterKey)}] = ((globalThis as any)[${JSON.stringify(loadCounterKey)}] ?? 0) + 1;`}
 		export default chart({ id: "chart", initial: "ask", states: {
 			ask: { kind: "state", action: user({ prompt: "Approve?", options: ["APPROVED"] }), transitions: { APPROVED: "done" } },
 			done: final(),
@@ -44,7 +45,7 @@ async function fixture(reply = false) {
 	const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
 	const replySchema = reply ? { kind: "jsonSchema" as const, schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false } } : undefined;
 	const [opened] = await store.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"], ...(replySchema === undefined ? {} : { reply: replySchema }) }]);
-	return { root, runsRoot, workDir, runDir, ast: parsed.ast, store, gateSeqId: opened!.seqId };
+	return { root, runsRoot, workDir, runDir, chartPath, ast: parsed.ast, store, gateSeqId: opened!.seqId };
 }
 function owner(runsRoot: string, workDir: string): UserInteractionOwner { return { runsRoot, workDir, sessionId: "session-a", host: "test" }; }
 
@@ -54,6 +55,24 @@ describe("journal-native user interactions", () => {
 		const requests = await scanOpenUserInteractions(f.runDir, "main");
 		expect(requests).toEqual([expect.objectContaining({ version: 2, runId: "run-a", branchId: "main", seqId: f.gateSeqId, prompt: "Approve?", events: ["APPROVED"] })]);
 		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "request.json"))).toBe(false);
+	});
+
+	it("reuses a parsed chart across interaction scans and invalidates it when source changes", async () => {
+		const counterKey = `__hyperchart_scan_loads_${Date.now()}_${Math.random()}`;
+		const state = globalThis as Record<string, unknown>;
+		try {
+			const f = await fixture(false, counterKey);
+			expect(state[counterKey]).toBe(1);
+			await scanOpenUserInteractions(f.runDir, "main");
+			expect(state[counterKey]).toBe(2);
+			await scanOpenUserInteractions(f.runDir, "main");
+			expect(state[counterKey]).toBe(2);
+			writeFileSync(f.chartPath, `${readFileSync(f.chartPath, "utf8")}\n// invalidate scan cache\n`);
+			await scanOpenUserInteractions(f.runDir, "main");
+			expect(state[counterKey]).toBe(3);
+		} finally {
+			delete state[counterKey];
+		}
 	});
 
 	it("commits one resolved journal fact, retries identically, and conflicts divergently", async () => {
