@@ -38,7 +38,7 @@ async function fixture(reply = false, loadCounterKey?: string) {
 		} });
 	`);
 	const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error(parsed.diagnostics.map((d) => d.message).join("\n"));
-	saveRunMeta(runDir, { chartPath, workDir, chartId: "chart", createdAt: new Date().toISOString(), originSessionId: "session-a" });
+	await saveRunMeta(runDir, { chartPath, workDir, chartId: "chart", createdAt: new Date().toISOString(), originSessionId: "session-a" });
 	const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.initializeRootBranch();
 	const state = parsed.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
 	await store.appendDrafts([{ type: "args", args: {} }]);

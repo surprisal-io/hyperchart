@@ -122,8 +122,8 @@ The files to know first are:
 
 | File | Purpose |
 |---|---|
-| `meta.json` | Chart path, arguments, working directory, and run identity. |
-| `log.jsonl` | Ordered semantic facts used to replay the run. |
+| `meta.json` | Filesystem-backend chart path, working directory, and run identity. PostgreSQL uses `hyperchart_run_meta` instead. |
+| `log.jsonl` | Filesystem-backend semantic journal. PostgreSQL uses `hyperchart_journal` instead. |
 | `status.json` | Operational process status and heartbeat information. |
 | `sessions/progress.json` | Optional progress from Pi agent sessions. |
 

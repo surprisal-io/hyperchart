@@ -1,8 +1,11 @@
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
 	existsSync,
+	mkdirSync,
 	readFileSync,
+	rmSync,
 	truncateSync,
+	writeFileSync,
 } from "node:fs";
 import {
 	mkdir,
@@ -21,6 +24,15 @@ import {
 import { prepareUserInteractionResponse, prepareUserInteractionResponseSync, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
 export const DEFAULT_BRANCH_ID: BranchId = "main";
+
+export type RunMeta = {
+	chartPath: string;
+	exportName?: string;
+	workDir: string;
+	chartId: string;
+	createdAt: string;
+	originSessionId?: string;
+};
 
 export class CorruptRunLogError extends Error {
 	constructor(message: string) {
@@ -127,6 +139,9 @@ export interface LogStore {
 /** Full run-journal handle: branch entries plus lifecycle, shared across branch handles. */
 export interface RunLogStore extends LogStore {
 	forBranch(branchId: BranchId): RunLogStore;
+	readRunMeta(): Promise<RunMeta | undefined>;
+	writeRunMeta(meta: RunMeta): Promise<void>;
+	deleteRunData(): Promise<void>;
 	initializeRootBranch(metadata?: BranchMetadata): Promise<BranchHead>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
@@ -272,6 +287,19 @@ export class JsonlLogStore implements RunLogStore {
 	async read(): Promise<NormalizedRunLog> { return this.snapshot(); }
 	readSync(): NormalizedRunLog { return this.snapshot(); }
 	async close(): Promise<void> {}
+	async readRunMeta(): Promise<RunMeta | undefined> {
+		const path = join(dirname(this.journal.filePath), "meta.json");
+		if (!existsSync(path)) return undefined;
+		return JSON.parse(readFileSync(path, "utf8")) as RunMeta;
+	}
+	async writeRunMeta(meta: RunMeta): Promise<void> {
+		mkdirSync(dirname(this.journal.filePath), { recursive: true });
+		writeFileSync(join(dirname(this.journal.filePath), "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
+	}
+	async deleteRunData(): Promise<void> {
+		rmSync(join(dirname(this.journal.filePath), "meta.json"), { force: true });
+		rmSync(this.journal.filePath, { force: true });
+	}
 	async readAll(): Promise<readonly DurableLogRecord[]> {
 		const normalized = await this.read();
 		return normalized.entries.length === 0 ? [] : normalized.ancestry(this.branchId);

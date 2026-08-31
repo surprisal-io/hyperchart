@@ -1,16 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sanitizeSegment } from "../../core/action_uid.js";
+import type { RunMeta } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
 
-export type RunMeta = {
-	chartPath: string;
-	exportName?: string;
-	workDir: string;
-	chartId: string;
-	createdAt: string;
-	originSessionId?: string;
-};
+export type { RunMeta } from "./log_store.js";
 
 export async function createRunDir(workDir: string, chartId: string, options: { rootDir?: string } = {}): Promise<string> {
 	const root = options.rootDir ?? join(workDir, ".hyperchart", "runs");
@@ -36,19 +30,50 @@ export async function initializeRunDir(runDir: string): Promise<void> {
 	}
 }
 
-export function loadRunMeta(runDir: string): RunMeta {
-	const parsed = JSON.parse(readFileSync(join(runDir, "meta.json"), "utf8")) as RunMeta;
+export async function loadRunMeta(runDir: string): Promise<RunMeta> {
+	const store = await openRunLogStore(runDir, { access: "read", loadJournal: false });
+	try {
+		const meta = await store.readRunMeta();
+		if (meta === undefined) throw missingRunMeta(runDir);
+		return normalizeRunMeta(meta);
+	} finally {
+		await store.close();
+	}
+}
+
+export async function saveRunMeta(runDir: string, meta: RunMeta): Promise<void> {
+	const absoluteRunDir = resolve(runDir);
+	mkdirSync(absoluteRunDir, { recursive: true });
+	mkdirSync(join(absoluteRunDir, "sessions"), { recursive: true });
+	const store = await openRunLogStore(absoluteRunDir, { access: "writer", loadJournal: false });
+	try {
+		await store.writeRunMeta(normalizeRunMeta(meta));
+	} finally {
+		await store.close();
+	}
+}
+
+export async function deleteRunStorage(runDir: string): Promise<void> {
+	const store = await openRunLogStore(runDir, { access: "writer", loadJournal: false });
+	try {
+		await store.deleteRunData();
+	} finally {
+		await store.close();
+	}
+}
+
+function normalizeRunMeta(meta: RunMeta): RunMeta {
 	return {
-		...parsed,
-		chartPath: resolve(parsed.chartPath),
-		workDir: resolve(parsed.workDir),
+		...meta,
+		chartPath: resolve(meta.chartPath),
+		workDir: resolve(meta.workDir),
 	};
 }
 
-export function saveRunMeta(runDir: string, meta: RunMeta): void {
-	mkdirSync(runDir, { recursive: true });
-	writeFileSync(join(runDir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`, "utf8");
-	mkdirSync(join(runDir, "sessions"), { recursive: true });
+function missingRunMeta(runDir: string): NodeJS.ErrnoException {
+	const error = new Error(`No Hyperchart run metadata for ${resolve(runDir)}`) as NodeJS.ErrnoException;
+	error.code = "ENOENT";
+	return error;
 }
 
 function formatTimestamp(date: Date): string {

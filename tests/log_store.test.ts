@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -31,6 +32,19 @@ function invokeDraft(): DurableRecordDraft {
 }
 
 describe("JsonlLogStore branch journal", () => {
+	it("owns filesystem run metadata through the store interface", async () => {
+		const dir = await makeTempDir();
+		const file = join(dir, "log.jsonl");
+		const store = new JsonlLogStore(file);
+		const meta = { chartPath: join(dir, "chart.ts"), workDir: dir, chartId: "file-meta", createdAt: new Date().toISOString() };
+		await store.writeRunMeta(meta);
+		expect(await store.readRunMeta()).toEqual(meta);
+		await store.initializeRootBranch();
+		await store.deleteRunData();
+		expect(await store.readRunMeta()).toBeUndefined();
+		expect(existsSync(file)).toBe(false);
+	});
+
 	it("rejects append before explicit root-branch initialization", async () => {
 		const dir = await makeTempDir();
 		const store = new JsonlLogStore(join(dir, "log.jsonl"));

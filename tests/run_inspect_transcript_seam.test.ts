@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
 import { branchSessionSegment } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { hyperchartRunFromRunDir } from "../packages/hyperchart/src/inspect/run_inspect.js";
@@ -31,7 +32,7 @@ export default chart({ kind: "chart", id: "seam", initial: "done", states: { don
 	);
 	const runDir = join(root, "run");
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
-	saveRunMeta(runDir, { chartPath, workDir: root, chartId: "seam", createdAt: new Date().toISOString() });
+	void new JsonlLogStore(join(runDir, "log.jsonl")).writeRunMeta({ chartPath, workDir: root, chartId: "seam", createdAt: new Date().toISOString() });
 	return { runDir, chartPath };
 }
 
@@ -148,7 +149,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		const runDir = join(root, "run");
 		const sessionsDir = join(runDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
-		saveRunMeta(runDir, { chartPath, workDir: root, chartId: "visits", createdAt: new Date().toISOString() });
+		await saveRunMeta(runDir, { chartPath, workDir: root, chartId: "visits", createdAt: new Date().toISOString() });
 		const actionUid = { chart: "visits", state: "work", action: "agent" };
 		const definition = { kind: "agent", uid: actionUid, name: "worker", task: "work" };
 		const records = [
@@ -220,7 +221,7 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 		);
 		const runDir = join(root, "run");
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
-		saveRunMeta(runDir, { chartPath, workDir: root, chartId: "configured", createdAt: new Date().toISOString() });
+		await saveRunMeta(runDir, { chartPath, workDir: root, chartId: "configured", createdAt: new Date().toISOString() });
 		writeFileSync(
 			join(runDir, "runner.config.json"),
 			JSON.stringify({

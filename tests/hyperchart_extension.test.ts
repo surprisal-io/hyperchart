@@ -123,7 +123,7 @@ describe("hyperchart extension", () => {
 
 		expect(details.inspector).toBeUndefined();
 		expect(details.notification).toBeUndefined();
-		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
+		expect((await loadRunMeta(runDir)).originSessionId).toBe("session-a");
 	});
 
 	it("returns only bounded startup coordinates for wait=false and rejects verbose static inspection", async () => {
@@ -739,7 +739,9 @@ describe("hyperchart extension", () => {
 
 	it("offers documented top-level commands and run ids with an empty prefix", () => {
 		const runId = "demo-run";
-		createRun(runId, projectDir, writeChart("demo"));
+		const chartPath = writeChart("demo");
+		const runDir = createRun(runId, projectDir, chartPath);
+		writeFileSync(join(runDir, "runner.config.json"), JSON.stringify({ runId, runDir, chartPath, chartId: "demo", workDir: projectDir, branchId: "main" }));
 
 		const values = registeredCommand()
 			.getArgumentCompletions("")
@@ -970,7 +972,7 @@ describe("hyperchart extension", () => {
 		const importedFlag = join(tempDir, "imported.txt");
 		const maliciousChart = writeChart("malicious", importedFlag);
 		const pathRunDir = join(tempDir, "crafted-run");
-		saveRunMeta(pathRunDir, {
+		await saveRunMeta(pathRunDir, {
 			chartPath: maliciousChart,
 			workDir: projectDir,
 			chartId: "malicious",
@@ -1248,7 +1250,8 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 
 function createRun(runId: string, workDir: string, chartPath: string, originSessionId?: string): string {
 	const runDir = join(agentDir, "hypercharts", "runs", runId);
-	saveRunMeta(runDir, {
+	mkdirSync(join(runDir, "sessions"), { recursive: true });
+	void new JsonlLogStore(join(runDir, "log.jsonl")).writeRunMeta({
 		chartPath,
 		workDir,
 		chartId: "demo",

@@ -35,14 +35,14 @@ export function claudeInteractionOwner(options: ClaudeMonitorOptions & { session
 	return { runsRoot: options.runsRoot, host: "claude", sessionId: options.sessionId, workDir: options.cwd };
 }
 
-export function pendingOwnedClaudeTerminalRequests(options: ClaudeMonitorOptions): OwnedClaudeTerminalRequest[] {
+export async function pendingOwnedClaudeTerminalRequests(options: ClaudeMonitorOptions): Promise<OwnedClaudeTerminalRequest[]> {
 	if (options.sessionId === undefined || !existsSync(options.runsRoot)) return [];
 	const pending: OwnedClaudeTerminalRequest[] = [];
 	for (const entry of readdirSync(options.runsRoot, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
 		const runDir = join(options.runsRoot, entry.name);
 		try {
-			const meta = loadRunMeta(runDir);
+			const meta = await loadRunMeta(runDir);
 			if (canonicalPath(meta.workDir) !== canonicalPath(options.cwd) || meta.originSessionId !== options.sessionId) continue;
 			recoverStaleRunTerminalNotification(runDir);
 			const request = readDeliverableTerminalNotificationRequest(runDir);
@@ -111,11 +111,11 @@ export function claudeUserInteractionNotification(interaction: OwnedUserInteract
 }
 
 /** Emit each prompt as JSON so embedded newlines remain one physical stdout line, then receipt it. */
-export function emitPendingClaudeTerminalNotifications(options: ClaudeMonitorOptions): number {
+export async function emitPendingClaudeTerminalNotifications(options: ClaudeMonitorOptions): Promise<number> {
 	if (options.sessionId === undefined) return 0;
 	const writeLine = options.writeLine ?? ((line: string) => { writeSync(process.stdout.fd, `${line}\n`); });
 	let delivered = 0;
-	for (const pending of pendingOwnedClaudeTerminalRequests(options)) {
+	for (const pending of await pendingOwnedClaudeTerminalRequests(options)) {
 		if (!claimTerminalNotificationReceipt(pending.runDir, pending.request.requestId, "claude", options.sessionId)) continue;
 		if (readDeliverableTerminalNotificationRequest(pending.runDir)?.requestId !== pending.request.requestId) continue;
 		// Confirm only after stdout accepts the line. A crash between write and confirmation
@@ -156,7 +156,7 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 			(!Number.isFinite(leaseUntil) && Number.isFinite(fallbackUntil) && Date.now() < fallbackUntil)) return 0;
 	}
 	// Defense in depth around the shared owner's canonical/session checks.
-	const meta = loadRunMeta(active.runDir);
+	const meta = await loadRunMeta(active.runDir);
 	if (meta.originSessionId !== options.sessionId || canonicalPath(meta.workDir) !== canonicalPath(options.cwd)) return 0;
 	if (!claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId, { source: "monitor" })) return 0;
 	// Claim and selection are separate filesystem operations. Re-arbitrate after the
@@ -182,7 +182,7 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 
 /** Combined persistent-monitor scan for terminal notifications and the one active user gate. */
 export async function emitPendingClaudeNotifications(options: ClaudeMonitorOptions): Promise<number> {
-	return emitPendingClaudeTerminalNotifications(options) + await emitPendingClaudeUserInteraction(options);
+	return await emitPendingClaudeTerminalNotifications(options) + await emitPendingClaudeUserInteraction(options);
 }
 
 type ClaudeMonitorEnvelope = {

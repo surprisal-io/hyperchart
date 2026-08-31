@@ -33,13 +33,13 @@ import {
 	type StatePath,
 } from "@surprisal/hyperchart";
 import {
-	JsonlLogStore,
 	USER_INTERACTION_WAIT_LEASE_MS,
 	acquireActiveUserInteraction,
 	assertChartPreflight,
 	claimTerminalNotificationReceipt,
 	claimUserInteractionReceipt,
 	createRunDir,
+	deleteRunStorage,
 	forkHyperchartRun,
 	initializeRunDir,
 	listHyperchartBranches,
@@ -48,7 +48,9 @@ import {
 	loadRunMeta,
 	markTerminalNotificationReceipt,
 	markUserInteractionReceipt,
+	openRunLogStore,
 	readDeliverableTerminalNotificationRequest,
+	readRunnerConfig,
 	removeTerminalNotificationReceipt,
 	recoverStaleRunTerminalNotification,
 	rewindHyperchartRun,
@@ -295,11 +297,11 @@ function runIdCompletions(cwd: string): AutocompleteItem[] {
 
 function runCompletionItem(runDir: string, cwd: string): AutocompleteItem | undefined {
 	try {
-		const meta = loadRunMeta(runDir);
-		if (resolve(meta.workDir) !== resolve(cwd)) return undefined;
+		const identity = readRunnerConfig(resolve(runDir, "runner.config.json"));
+		if (resolve(identity.workDir) !== resolve(cwd)) return undefined;
 		const status = readRunStatus(runDir);
 		const state = isRunLive(status) ? "running" : (status?.state ?? "stale");
-		return { value: basename(runDir), label: basename(runDir), description: `${meta.chartId} · ${state}` };
+		return { value: basename(runDir), label: basename(runDir), description: `${identity.chartId} · ${state}` };
 	} catch {
 		return undefined;
 	}
@@ -812,7 +814,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		}
 		if (params.action === "branches") {
 			const runSpec = actionRunCoordinate(params, "branches");
-			const runDir = ownedRunDir("branches", runSpec, ctx);
+			const runDir = await ownedRunDir("branches", runSpec, ctx);
 			return { content: [{ type: "text" as const, text: `Branches for ${basename(runDir)}` }], details: safeToolDetails({ runDir, branches: await listHyperchartBranches(runDir) }) };
 		}
 		if (params.action === "fork") {
@@ -864,16 +866,16 @@ function actionRunCoordinate(
 	return coordinate;
 }
 
-function ownedRunDir(action: string, runSpec: string, ctx: HyperchartContext): string {
+async function ownedRunDir(action: string, runSpec: string, ctx: HyperchartContext): Promise<string> {
 	const runDir = resolveHyperchartRunDir(runSpec, ctx.cwd);
-	if (loadRunMetaForCurrentWorkDir(runDir, ctx.cwd) === undefined) {
+	if (await loadRunMetaForCurrentWorkDir(runDir, ctx.cwd) === undefined) {
 		throw new Error(`hyperchart action=${action} requires a run owned by the current working directory`);
 	}
 	return runDir;
 }
 
 async function unambiguousRunBranch(action: string, runSpec: string, ctx: HyperchartContext): Promise<string> {
-	const runDir = ownedRunDir(action, runSpec, ctx);
+	const runDir = await ownedRunDir(action, runSpec, ctx);
 	const branches = await listHyperchartBranches(runDir);
 	if (branches.length === 1) return branches[0]!.branchId;
 	const available = branches.map((branch) => branch.branchId).join(", ") || "none";
@@ -899,7 +901,7 @@ async function respondToUserInteraction(
 	if (canonicalHostPath(runDir) !== canonicalHostPath(expectedRunDir) || basename(runDir) !== params.runId) {
 		throw new Error(`Run coordinate '${params.runId}' is not a run id under the configured runs root`);
 	}
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (meta.originSessionId !== ctx.sessionManager.getSessionId()) {
 		throw new Error(`Run '${params.runId}' is not owned by this session`);
 	}
@@ -1110,7 +1112,7 @@ async function inspectRunForCurrentWorkDir(
 	ctx: HyperchartContext,
 	options: InspectRunOptions = {},
 ) {
-	const meta = loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
+	const meta = await loadRunMetaForCurrentWorkDir(runDir, ctx.cwd);
 	if (meta === undefined) throw new Error(`Run '${basename(runDir)}' belongs to another working directory or is missing metadata`);
 	const base = {
 		meta,
@@ -1335,7 +1337,7 @@ async function dispatch(
 				break;
 			default:
 				if (isBareRunIdSpec(command)) {
-					const run = lookupBareRunIdForView(command, ctx.cwd);
+					const run = await lookupBareRunIdForView(command, ctx.cwd);
 					if (run.kind === "match") {
 						await viewCommand([command], ctx, delivery);
 						break;
@@ -1412,7 +1414,7 @@ async function steerCommand(tokens: string[], ctx: HyperchartContext): Promise<v
 		throw new Error("Usage: /hyperchart steer <runId> <branchId> <actionKey> <message>");
 	}
 	const runDir = resolveHyperchartRunDir(runId, ctx.cwd);
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; open that directory first`);
 	}
@@ -1443,7 +1445,7 @@ async function resumeRun(
 
 async function restartRun(runId: string, ctx: HyperchartContext, delivery: PiTerminalDelivery): Promise<RunStartResult> {
 	const runDir = resolveHyperchartRunDir(runId, ctx.cwd);
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; open that directory first`);
 	}
@@ -1474,7 +1476,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	let exportName = opts.exportName;
 	let workDir = ctx.cwd;
 	if (requestedRunDir !== undefined && opts.chartPath === undefined) {
-		meta = loadRunMeta(requestedRunDir);
+		meta = await loadRunMeta(requestedRunDir);
 		if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 			throw new Error(
 				`Run '${opts.runDir ?? basename(requestedRunDir)}' belongs to ${meta.workDir}; open that directory first`,
@@ -1508,7 +1510,7 @@ async function startHyperchartRun(opts: RunStartOptions, ctx: HyperchartContext)
 	const actualRunDir = requestedRunDir ?? (await createRunDir(workDir, parsed.ast.id, { rootDir: getHyperchartRunsRoot() }));
 	if (meta === undefined) {
 		if (requestedRunDir !== undefined) await initializeRunDir(actualRunDir);
-		saveRunMeta(actualRunDir, {
+		await saveRunMeta(actualRunDir, {
 			chartPath,
 			...(exportName === undefined ? {} : { exportName }),
 			workDir,
@@ -1618,7 +1620,7 @@ async function deliverToCurrentPiSession(delivery: PiTerminalDelivery, runDir: s
 }
 
 async function deliverPendingPiTerminalNotification(pi: ExtensionAPI, ctx: HyperchartContext, runDir: string): Promise<boolean> {
-	const meta = loadRunMetaIfPresent(runDir);
+	const meta = await loadRunMetaIfPresent(runDir);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return false;
 	// A visible or queued owned gate is the current conversational boundary. Leave the
@@ -1732,7 +1734,7 @@ function waitForPiRunBoundary(result: RunStartResult, ctx: HyperchartContext): P
 }
 
 async function receiptWaitedPiTerminalNotification(runDir: string, ctx: HyperchartContext) {
-	const meta = loadRunMetaIfPresent(runDir);
+	const meta = await loadRunMetaIfPresent(runDir);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return undefined;
 	if (await acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return undefined;
@@ -1851,7 +1853,7 @@ async function stopHyperchartRuns(
 		throw new Error("hyperchart action=stop requires exactly one of runDir or all=true");
 	}
 	const targets = params.all === true
-		? activeRunDirsForWorkDir(ctx.cwd)
+		? await activeRunDirsForWorkDir(ctx.cwd)
 		: [resolveHyperchartRunDir(params.runDir as string, ctx.cwd)];
 	const stopped = await Promise.all(targets.map((runDir) => stopRunDirectory(runDir, ctx)));
 	const stoppedDigest = stopped.slice(0, 20).map((run) => ({
@@ -1874,19 +1876,20 @@ async function stopHyperchartRuns(
 	};
 }
 
-function activeRunDirsForWorkDir(cwd: string): string[] {
+async function activeRunDirsForWorkDir(cwd: string): Promise<string[]> {
 	const root = getHyperchartRunsRoot();
 	if (!existsSync(root)) return [];
-	return runDirs(root).filter((runDir) => {
-		const meta = loadRunMetaIfPresent(runDir);
-		if (meta === undefined || resolve(meta.workDir) !== resolve(cwd)) return false;
+	const candidates = await Promise.all(runDirs(root).map(async (runDir) => {
+		const meta = await loadRunMetaIfPresent(runDir);
+		if (meta === undefined || resolve(meta.workDir) !== resolve(cwd)) return undefined;
 		const status = readRunStatus(runDir);
-		return status !== undefined && (isRunLive(status) || ["starting", "running", "stopping"].includes(status.state));
-	});
+		return status !== undefined && (isRunLive(status) || ["starting", "running", "stopping"].includes(status.state)) ? runDir : undefined;
+	}));
+	return candidates.filter((runDir): runDir is string => runDir !== undefined);
 }
 
 async function stopRunDirectory(runDir: string, ctx: HyperchartContext): Promise<{ runId: string; runDir: string; pid?: number }> {
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 		throw new Error(`Run '${basename(runDir)}' belongs to ${meta.workDir}; open that directory first`);
 	}
@@ -1929,7 +1932,7 @@ async function stopRun(runId: string | undefined, ctx: HyperchartContext): Promi
 
 async function deleteRun(runId: string, ctx: HyperchartContext): Promise<void> {
 	const runDir = resolveHyperchartRunDir(runId, ctx.cwd);
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(ctx.cwd)) {
 		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; open that directory first`);
 	}
@@ -1940,11 +1943,15 @@ async function deleteRun(runId: string, ctx: HyperchartContext): Promise<void> {
 		`${meta.chartId}${live ? " is running and will be stopped. " : ". "}This removes ${runDir}`,
 	);
 	if (!confirmed) return;
-	if (status?.pid !== undefined && isPidAlive(status.pid)) process.kill(status.pid, "SIGTERM");
+	if (status?.pid !== undefined && isPidAlive(status.pid)) {
+		process.kill(status.pid, "SIGTERM");
+		await waitForRunProcessExit(status.pid);
+	}
+	await deleteRunStorage(runDir);
+	rmSync(runDir, { recursive: true, force: true });
 	runs.remove(runId);
 	ctx.ui.setWidget(`hyperchart:${runId}`, undefined);
 	ctx.ui.setStatus("hyperchart", runs.active.size === 0 ? undefined : `▶ ${runs.active.size} runs`);
-	rmSync(runDir, { recursive: true, force: true });
 	ctx.ui.notify(`Deleted hyperchart run ${runId}`, "info");
 }
 
@@ -2010,8 +2017,8 @@ async function restoreRunWidgets(ctx: HyperchartContext): Promise<void> {
 
 type BareRunIdLookup = { kind: "match" } | { kind: "foreign"; workDir: string } | { kind: "missing" };
 
-function lookupBareRunIdForView(runId: string, cwd: string): BareRunIdLookup {
-	const meta = loadRunMetaIfPresent(resolveHyperchartRunDir(runId, cwd));
+async function lookupBareRunIdForView(runId: string, cwd: string): Promise<BareRunIdLookup> {
+	const meta = await loadRunMetaIfPresent(resolveHyperchartRunDir(runId, cwd));
 	if (meta === undefined) return { kind: "missing" };
 	return resolve(meta.workDir) === resolve(cwd) ? { kind: "match" } : { kind: "foreign", workDir: meta.workDir };
 }
@@ -2023,7 +2030,7 @@ function isBareRunIdSpec(spec: string): boolean {
 async function resolveRunForView(runId: string | undefined, cwd: string): Promise<RunSnapshot | undefined> {
 	if (runId !== undefined) {
 		const runDir = resolveHyperchartRunDir(runId, cwd);
-		const meta = loadRunMetaForCurrentWorkDir(runDir, cwd);
+		const meta = await loadRunMetaForCurrentWorkDir(runDir, cwd);
 		return meta === undefined ? undefined : loadRunSnapshot(runDir, meta);
 	}
 	return (await recentRunSnapshots(5, cwd))[0];
@@ -2036,13 +2043,12 @@ async function recentRunSnapshots(limit = 5, cwd?: string, originSessionId?: str
 	const snapshots: RunSnapshot[] = [];
 	for (const dir of dirs) {
 		try {
-			const meta = loadRunMeta(dir);
+			const meta = await loadRunMeta(dir);
 			if (cwd !== undefined && resolve(meta.workDir) !== resolve(cwd)) continue;
 			if (originSessionId !== undefined && meta.originSessionId !== originSessionId) continue;
 			const snapshot = await loadRunSnapshot(dir, meta);
 			if (snapshot.status !== undefined && isTerminalRunState(snapshot.status.state)) continue;
-			const store = new JsonlLogStore(resolve(dir, "log.jsonl"));
-			const view = buildRunView(snapshot.ast, await store.readAll(), Date.now());
+			const view = buildRunView(snapshot.ast, await readRunRecords(dir), Date.now());
 			if (!view.final) snapshots.push(snapshot);
 		} catch {
 			continue;
@@ -2066,7 +2072,7 @@ async function loadRunHistory(options: { cwd: string; limit: number }): Promise<
 }
 
 async function loadRunHistoryEntry(runDir: string, cwd: string): Promise<RunHistoryEntry | undefined> {
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(cwd)) return undefined;
 	const status = readRunStatus(runDir);
 	let final = status?.state === "complete" || status?.state === "failed";
@@ -2074,8 +2080,7 @@ async function loadRunHistoryEntry(runDir: string, cwd: string): Promise<RunHist
 		status?.state === "complete" || status?.state === "failed" ? status.state : undefined;
 	try {
 		const snapshot = await loadRunSnapshot(runDir);
-		const store = new JsonlLogStore(resolve(runDir, "log.jsonl"));
-		const view = buildRunView(snapshot.ast, await store.readAll(), Date.now());
+		const view = buildRunView(snapshot.ast, await readRunRecords(runDir), Date.now());
 		final = view.final;
 		terminalState = view.final ? (isFailedRunView(view) ? "failed" : "complete") : undefined;
 	} catch {
@@ -2101,18 +2106,17 @@ function isFailedRunView(view: RunView): boolean {
 function runDirs(root: string): string[] {
 	return readdirSync(root)
 		.map((entry) => resolve(root, entry))
-		.filter((path) => existsSync(resolve(path, "meta.json")))
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
 }
 
-function loadRunMetaForCurrentWorkDir(runDir: string, cwd: string): RunMeta | undefined {
-	const meta = loadRunMetaIfPresent(runDir);
+async function loadRunMetaForCurrentWorkDir(runDir: string, cwd: string): Promise<RunMeta | undefined> {
+	const meta = await loadRunMetaIfPresent(runDir);
 	return meta !== undefined && resolve(meta.workDir) === resolve(cwd) ? meta : undefined;
 }
 
-function loadRunMetaIfPresent(runDir: string): RunMeta | undefined {
+async function loadRunMetaIfPresent(runDir: string): Promise<RunMeta | undefined> {
 	try {
-		return loadRunMeta(runDir);
+		return await loadRunMeta(runDir);
 	} catch (error) {
 		if (isNotFoundError(error)) return undefined;
 		throw error;
@@ -2123,7 +2127,8 @@ function isNotFoundError(error: unknown): boolean {
 	return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
-async function loadRunSnapshot(runDir: string, meta: RunMeta = loadRunMeta(runDir)): Promise<RunSnapshot> {
+async function loadRunSnapshot(runDir: string, suppliedMeta?: RunMeta): Promise<RunSnapshot> {
+	const meta = suppliedMeta ?? await loadRunMeta(runDir);
 	const parsed = parseChartModuleSync(
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
@@ -2192,9 +2197,17 @@ function historyState(entry: RunHistoryEntry): string {
 	return entry.final ? "complete" : "stale";
 }
 
+async function readRunRecords(runDir: string): Promise<readonly DurableLogRecord[]> {
+	const store = await openRunLogStore(runDir, { access: "read" });
+	try {
+		return await store.readAll();
+	} finally {
+		await store.close();
+	}
+}
+
 async function loadRunArgs(runDir: string): Promise<Record<string, unknown> | undefined> {
-	const store = new JsonlLogStore(resolve(runDir, "log.jsonl"));
-	const argsRecord = (await store.readAll()).find((record) => record.type === "args");
+	const argsRecord = (await readRunRecords(runDir)).find((record) => record.type === "args");
 	return argsRecord?.type === "args" ? { ...argsRecord.args } : undefined;
 }
 

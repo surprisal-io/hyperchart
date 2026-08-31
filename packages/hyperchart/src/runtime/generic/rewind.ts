@@ -51,8 +51,8 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	const targetCount = [opts.state, opts.seqId, opts.to].filter((target) => target !== undefined).length;
 	if (targetCount !== 1) throw new Error("rewind requires exactly one of state, seqId, or to=compatible");
 	assertStoppedRun(opts.runDir, "rewinding");
-	assertRunOwnership(opts.runDir, opts.cwd);
-	const meta = loadRunMeta(opts.runDir);
+	await assertRunOwnership(opts.runDir, opts.cwd);
+	const meta = await loadRunMeta(opts.runDir);
 	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 

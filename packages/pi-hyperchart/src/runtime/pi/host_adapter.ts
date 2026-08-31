@@ -283,14 +283,14 @@ async function readRunSummary(
 	cwd: string,
 	failedRunMetaFingerprints: Map<string, string>,
 ): Promise<HyperchartRunSummaryInfo | undefined> {
-	const metaFingerprint = await fileFingerprint(join(runDir, "meta.json"));
-	if (failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
+	const metaFingerprint = process.env.HYPERCHART_PG_DSN ? undefined : await fileFingerprint(join(runDir, "meta.json"));
+	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
 	let meta;
 	try {
-		meta = loadRunMeta(runDir);
+		meta = await loadRunMeta(runDir);
 		failedRunMetaFingerprints.delete(runDir);
 	} catch (error) {
-		failedRunMetaFingerprints.set(runDir, metaFingerprint);
+		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runDir, metaFingerprint);
 		console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
 		return undefined;
 	}
@@ -324,17 +324,18 @@ async function readRun(
 	failedRunMetaFingerprints: Map<string, string>,
 	failedRunInspectionFingerprints: Map<string, string>,
 ): Promise<HyperchartRunInfo | undefined> {
-	const metaFingerprint = await fileFingerprint(join(runDir, "meta.json"));
-	if (failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
+	const metaFingerprint = process.env.HYPERCHART_PG_DSN ? undefined : await fileFingerprint(join(runDir, "meta.json"));
+	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
 	let meta;
 	try {
-		meta = loadRunMeta(runDir);
+		meta = await loadRunMeta(runDir);
 		failedRunMetaFingerprints.delete(runDir);
 	} catch (error) {
-		failedRunMetaFingerprints.set(runDir, metaFingerprint);
+		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runDir, metaFingerprint);
 		console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
 		return undefined;
 	}
+	const inspectionFingerprint = metaFingerprint ?? JSON.stringify(meta);
 	try {
 		if (resolve(meta.workDir) !== cwd) return undefined;
 		const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir, meta.chartPath);
@@ -356,8 +357,8 @@ async function readRun(
 			...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
 		};
 	} catch (error) {
-		if (failedRunInspectionFingerprints.get(runDir) !== metaFingerprint) {
-			failedRunInspectionFingerprints.set(runDir, metaFingerprint);
+		if (failedRunInspectionFingerprints.get(runDir) !== inspectionFingerprint) {
+			failedRunInspectionFingerprints.set(runDir, inspectionFingerprint);
 			console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
 		}
 		const persistedStatus = readRunStatus(runDir);

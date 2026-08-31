@@ -8,13 +8,15 @@ export type OpenRunLogStoreOptions = Readonly<{
 	onWarn?: (message: string) => void;
 	/** Writers take the run's exclusive claim; read-only opens never do. Defaults to "read". */
 	access?: PostgresLogAccess;
+	/** Skip eager journal hydration for metadata-only operations. */
+	loadJournal?: boolean;
 }>;
 
 /**
  * Open the durable journal for one run directory. The backend is selected by
  * HYPERCHART_PG_DSN: when set, the journal lives in Postgres keyed by the run
- * directory's basename; otherwise it is the run-local log.jsonl file. The store
- * is returned already opened so corrupt journals fail here for both backends.
+ * directory's basename; otherwise it is the run-local log.jsonl file. Journal
+ * opens hydrate and validate eagerly; metadata-only opens deliberately skip it.
  */
 export async function openRunLogStore(runDir: string, options: OpenRunLogStoreOptions = {}): Promise<RunLogStore> {
 	const branchId = options.branchId ?? DEFAULT_BRANCH_ID;
@@ -27,9 +29,10 @@ export async function openRunLogStore(runDir: string, options: OpenRunLogStoreOp
 			branchId,
 			onWarn,
 			access: options.access ?? "read",
+			loadJournal: options.loadJournal ?? true,
 		});
 	}
 	const store = new JsonlLogStore(resolve(runDir, "log.jsonl"), onWarn, branchId);
-	await store.read();
+	if (options.loadJournal !== false) await store.read();
 	return store;
 }

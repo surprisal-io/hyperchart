@@ -51,7 +51,7 @@ export async function hyperchartRunFromRunDir(
 	options: HyperchartRunFromRunDirOptions = {},
 ): Promise<HyperchartRunInfo> {
 	const absoluteRunDir = resolve(runDir);
-	const meta = options.meta ?? loadRunMeta(absoluteRunDir);
+	const meta = options.meta ?? await loadRunMeta(absoluteRunDir);
 	const ast = options.ast ?? parsedRunAst(meta);
 	const agentDefaults = runAgentDefaults(absoluteRunDir, options.agentDefaults);
 	const inspect = inspectChartAst(ast, {

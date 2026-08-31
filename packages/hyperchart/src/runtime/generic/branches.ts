@@ -47,7 +47,7 @@ export async function getHyperchartBranch(runDir: string, branchId: BranchId): P
 /** Create a durable named pointer without selecting it and without starting a runner. */
 export async function forkHyperchartRun(options: ForkBranchOptions): Promise<ForkBranchResult> {
 	assertStoppedRun(options.runDir, "forking");
-	assertRunOwnership(options.runDir, options.cwd);
+	await assertRunOwnership(options.runDir, options.cwd);
 	const store = await openRunLogStore(options.runDir, { access: "writer" });
 	let branch: BranchHead;
 	try {
@@ -87,9 +87,9 @@ export function assertStoppedRun(runDir: string, operation: string): void {
 	if (isRunLive(status)) throw new Error(`Run '${basename(runDir)}' is live; stop it before ${operation}`);
 }
 
-export function assertRunOwnership(runDir: string, cwd: string | undefined): void {
+export async function assertRunOwnership(runDir: string, cwd: string | undefined): Promise<void> {
 	if (cwd === undefined) return;
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (resolve(meta.workDir) !== resolve(cwd)) {
 		throw new Error(`Run '${basename(runDir)}' belongs to ${meta.workDir}; open that directory first`);
 	}

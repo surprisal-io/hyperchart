@@ -58,7 +58,7 @@ export {
 	listHyperchartBranches,
 } from "./generic/branches.js";
 export type { ForkBranchOptions, ForkBranchResult } from "./generic/branches.js";
-export { createRunDir, initializeRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
+export { createRunDir, deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
 export type { RunMeta } from "./generic/run_dir.js";
 export { finalMachineFailureMessage, terminalStateForFinalMachine } from "./generic/run_outcome.js";
 export type { RunTerminalState } from "./generic/run_outcome.js";

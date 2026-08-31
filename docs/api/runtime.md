@@ -13,6 +13,7 @@ import {
   checkSchemaAsync,
   createAgentDefaultsResolver,
   createRunDir,
+  deleteRunStorage,
   finalMachineFailureMessage,
   loadRunMeta,
   resolveAgentDefaults,
@@ -220,6 +221,20 @@ interface LogStore {
 
 `append()` is synchronous because `ChartRuntime` acknowledges records immediately after calling it. A custom implementation must not acknowledge data before it is durably written.
 
+### `RunLogStore` metadata ownership
+
+The selected run store owns both the durable journal and immutable run metadata:
+
+```ts
+interface RunLogStore extends LogStore {
+  readRunMeta(): Promise<RunMeta | undefined>;
+  writeRunMeta(meta: RunMeta): Promise<void>;
+  deleteRunData(): Promise<void>;
+}
+```
+
+`JsonlLogStore` implements these operations with `meta.json` and `log.jsonl`. `PostgresLogStore` implements them with `hyperchart_run_meta` and `hyperchart_journal`. `run_dir.ts` contains lifecycle orchestration only and never selects a backend or reads `HYPERCHART_PG_DSN`.
+
 ### `JsonlLogStore`
 
 ```ts
@@ -231,6 +246,9 @@ class JsonlLogStore implements LogStore {
   forBranch(branchId: string): JsonlLogStore;
   snapshot(): NormalizedRunLog;
   readAll(): Promise<readonly DurableLogRecord[]>;
+  readRunMeta(): Promise<RunMeta | undefined>;
+  writeRunMeta(meta: RunMeta): Promise<void>;
+  deleteRunData(): Promise<void>;
   fullReadCount(): number;
 }
 ```
@@ -452,7 +470,7 @@ function createRunDir(
   workDir: string,
   chartId: string,
   options?: { rootDir?: string },
-): string;
+): Promise<string>;
 ```
 
 Creates a unique directory and its `sessions/` child. The default root is `<workDir>/.hyperchart/runs`; hosts can supply another root.
@@ -475,18 +493,26 @@ type RunMeta = {
 ### `saveRunMeta()`
 
 ```ts
-function saveRunMeta(runDir: string, meta: RunMeta): void;
+function saveRunMeta(runDir: string, meta: RunMeta): Promise<void>;
 ```
 
-Writes formatted `meta.json` and ensures `sessions/` exists.
+Ensures `sessions/` exists and writes metadata to the selected run-storage backend. With `HYPERCHART_PG_DSN`, metadata is stored in `hyperchart_run_meta` and no `meta.json` is required. Without PostgreSQL, it writes formatted `meta.json`.
 
 ### `loadRunMeta()`
 
 ```ts
-function loadRunMeta(runDir: string): RunMeta;
+function loadRunMeta(runDir: string): Promise<RunMeta>;
 ```
 
-Reads `meta.json` and resolves `chartPath` and `workDir` to absolute paths. It throws for missing or malformed metadata.
+The selected `RunLogStore` implementation reads its own metadata: PostgreSQL reads `hyperchart_run_meta` by run id, while JSONL reads `meta.json`. `chartPath` and `workDir` are returned as absolute paths.
+
+### `deleteRunStorage()`
+
+```ts
+function deleteRunStorage(runDir: string): Promise<void>;
+```
+
+Deletes the PostgreSQL metadata and journal rows atomically when PostgreSQL is configured. The host remains responsible for removing the local run directory. It is a no-op for the JSONL backend.
 
 ## Terminal outcome helpers
 
@@ -570,7 +596,7 @@ LogStore, JsonlLogStore, MemoryLogStore
 ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue
 runGuard, checkSchema, checkSchemaAsync
-createRunDir, loadRunMeta, saveRunMeta, RunMeta
+createRunDir, loadRunMeta, saveRunMeta, deleteRunStorage, RunMeta
 terminalStateForFinalMachine, finalMachineFailureMessage, RunTerminalState
 archiveTerminalNotificationGeneration, persistTerminalNotificationRequest,
 readTerminalNotificationRequest,

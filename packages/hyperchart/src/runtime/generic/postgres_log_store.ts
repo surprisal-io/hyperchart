@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import { isDurableRecordEntry, type BranchHead, type BranchId, type BranchMetadata, type DurableLogRecord, type DurableRecordDraft, type StorageEntry } from "../../core/durable_events.js";
-import { CorruptRunLogError, DEFAULT_BRANCH_ID, type NormalizedRunLog, type RunLogStore, stampDrafts, validateAndProjectJournal, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./log_store.js";
+import { CorruptRunLogError, DEFAULT_BRANCH_ID, type NormalizedRunLog, type RunLogStore, type RunMeta, stampDrafts, validateAndProjectJournal, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./log_store.js";
 import { prepareUserInteractionResponse } from "./user_interaction_admission.js";
 
 export const JOURNAL_TABLE = "hyperchart_journal";
 export const JOURNAL_CHANNEL = "hyperchart_journal";
+export const RUN_META_TABLE = "hyperchart_run_meta";
 const JOURNAL_DDL = `CREATE TABLE IF NOT EXISTS ${JOURNAL_TABLE} (
   run_id text NOT NULL,
   seq bigint NOT NULL,
@@ -29,13 +30,22 @@ const JOURNAL_DDL = `CREATE TABLE IF NOT EXISTS ${JOURNAL_TABLE} (
       AND record_type IS NULL AND payload IS NULL AND metadata IS NULL)
   )
 )`;
+const RUN_META_DDL = `CREATE TABLE IF NOT EXISTS ${RUN_META_TABLE} (
+  run_id text PRIMARY KEY,
+  chart_path text NOT NULL,
+  export_name text,
+  work_dir text NOT NULL,
+  chart_id text NOT NULL,
+  created_at text NOT NULL,
+  origin_session_id text
+)`;
 const JOURNAL_PARENT_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_journal_parent_idx
   ON ${JOURNAL_TABLE}(run_id, parent_id) WHERE kind = 'record'`;
 const JOURNAL_BRANCH_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_journal_branch_idx
   ON ${JOURNAL_TABLE}(run_id, branch_id, seq) WHERE kind = 'record'`;
 
 export type PostgresLogAccess = "writer" | "read";
-export type OpenPostgresLogStoreOptions = Readonly<{ dsn: string; runId: string; branchId?: BranchId; onWarn?: (message: string) => void; access?: PostgresLogAccess }>;
+export type OpenPostgresLogStoreOptions = Readonly<{ dsn: string; runId: string; branchId?: BranchId; onWarn?: (message: string) => void; access?: PostgresLogAccess; loadJournal?: boolean }>;
 export type PgQueryResult = { rows: Record<string, unknown>[] };
 export type PgClientLike = {
 	connect(): Promise<void>;
@@ -60,7 +70,7 @@ type SharedPgJournal = {
 	client: PgClientLike;
 	runId: string;
 	access: PostgresLogAccess;
-	snapshot: NormalizedRunLog;
+	snapshot: NormalizedRunLog | undefined;
 	writeChain: Promise<void>;
 	closed: boolean;
 };
@@ -103,16 +113,79 @@ export class PostgresLogStore implements RunLogStore {
 		try {
 			if (access === "writer") {
 				await ensureJournalTable(client);
+				await ensureRunMetaTable(client);
 				const locked = await client.query("SELECT pg_try_advisory_lock(hashtextextended('hyperchart:run:' || $1, 0)) AS locked", [options.runId]);
 				if (locked.rows[0]?.locked !== true) throw new Error(`Another live writer holds Hyperchart run '${options.runId}' in Postgres; stop it before writing`);
 			}
-			const values = await readJournalEntries(client, options.runId, access);
-			return new PostgresLogStore({ client, runId: options.runId, access, snapshot: validateAndProjectJournal(values), writeChain: Promise.resolve(), closed: false }, branchId);
+			const snapshot = options.loadJournal === false
+				? undefined
+				: validateAndProjectJournal(await readJournalEntries(client, options.runId, access));
+			return new PostgresLogStore({ client, runId: options.runId, access, snapshot, writeChain: Promise.resolve(), closed: false }, branchId);
 		} catch (error) { await client.end().catch(() => {}); throw error; }
 	}
 
 	forBranch(branchId: BranchId): PostgresLogStore { return new PostgresLogStore(this.journal, branchId); }
-	snapshot(): NormalizedRunLog { if (this.journal.closed) throw new Error("Postgres Hyperchart journal is closed"); return this.journal.snapshot; }
+	async readRunMeta(): Promise<RunMeta | undefined> {
+		await this.journal.writeChain;
+		try {
+			const result = await this.journal.client.query(
+				`SELECT chart_path, export_name, work_dir, chart_id, created_at, origin_session_id FROM ${RUN_META_TABLE} WHERE run_id = $1`,
+				[this.journal.runId],
+			);
+			const row = result.rows[0];
+			return row === undefined ? undefined : decodeRunMeta(row);
+		} catch (error) {
+			if (isUndefinedTable(error)) return undefined;
+			throw error;
+		}
+	}
+	writeRunMeta(meta: RunMeta): Promise<void> {
+		return this.enqueueWrite(async () => {
+			const { client, runId } = this.journal;
+			try {
+				await client.query("BEGIN");
+				await client.query(
+					`INSERT INTO ${RUN_META_TABLE} (run_id, chart_path, export_name, work_dir, chart_id, created_at, origin_session_id)
+					 VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (run_id) DO NOTHING`,
+					[runId, meta.chartPath, meta.exportName ?? null, meta.workDir, meta.chartId, meta.createdAt, meta.originSessionId ?? null],
+				);
+				const stored = await this.readRunMetaDirect();
+				if (stored === undefined || !isDeepStrictEqual(stored, meta)) throw new Error(`Conflicting metadata for Hyperchart run '${runId}'`);
+				await client.query("COMMIT");
+			} catch (error) {
+				await client.query("ROLLBACK").catch(() => {});
+				throw error;
+			}
+		});
+	}
+	deleteRunData(): Promise<void> {
+		return this.enqueueWrite(async () => {
+			const { client, runId } = this.journal;
+			try {
+				await client.query("BEGIN");
+				await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = $1`, [runId]);
+				await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1`, [runId]);
+				await client.query("COMMIT");
+				this.journal.snapshot = validateAndProjectJournal([]);
+			} catch (error) {
+				await client.query("ROLLBACK").catch(() => {});
+				throw error;
+			}
+		});
+	}
+	private async readRunMetaDirect(): Promise<RunMeta | undefined> {
+		const result = await this.journal.client.query(
+			`SELECT chart_path, export_name, work_dir, chart_id, created_at, origin_session_id FROM ${RUN_META_TABLE} WHERE run_id = $1`,
+			[this.journal.runId],
+		);
+		const row = result.rows[0];
+		return row === undefined ? undefined : decodeRunMeta(row);
+	}
+	snapshot(): NormalizedRunLog {
+		if (this.journal.closed) throw new Error("Postgres Hyperchart journal is closed");
+		if (this.journal.snapshot === undefined) throw new Error("Postgres Hyperchart journal has not been loaded; call read() first");
+		return this.journal.snapshot;
+	}
 	async read(): Promise<NormalizedRunLog> { await this.journal.writeChain; await this.refresh(); return this.snapshot(); }
 	async readAll(): Promise<readonly DurableLogRecord[]> { const log = await this.read(); return log.entries.length === 0 ? [] : log.ancestry(this.branchId); }
 
@@ -178,7 +251,9 @@ export class PostgresLogStore implements RunLogStore {
 	}
 	private async refresh(): Promise<void> {
 		const values = await readJournalEntries(this.journal.client, this.journal.runId, this.journal.access);
-		if (values.length !== this.journal.snapshot.entries.length) this.journal.snapshot = validateAndProjectJournal(values);
+		if (this.journal.snapshot === undefined || values.length !== this.journal.snapshot.entries.length) {
+			this.journal.snapshot = validateAndProjectJournal(values);
+		}
 	}
 }
 
@@ -257,6 +332,10 @@ async function connectPg(dsn: string, onWarn: (message: string) => void): Promis
 	catch { throw new Error("Postgres Hyperchart log storage requires the optional 'pg' package; install it to use HYPERCHART_PG_DSN"); }
 	const client = new pg.Client({ connectionString: dsn }); client.on("error", (error) => onWarn(`Hyperchart Postgres journal connection error: ${error.message}`)); await client.connect(); return client;
 }
+async function ensureRunMetaTable(client: PgClientLike): Promise<void> {
+	try { await client.query(RUN_META_DDL); }
+	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(RUN_META_DDL); }
+}
 async function ensureJournalTable(client: PgClientLike): Promise<void> {
 	try { await client.query(JOURNAL_DDL); }
 	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(JOURNAL_DDL); }
@@ -302,6 +381,25 @@ function decodeJournalRows(rows: readonly JournalSqlRow[]): StorageEntry[] {
 function requiredObject(value: unknown, label: string): Record<string, unknown> {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new CorruptRunLogError(`${label} must be an object`);
 	return value as Record<string, unknown>;
+}
+function decodeRunMeta(row: Record<string, unknown>): RunMeta {
+	const exportName = optionalMetaString(row.export_name, "export_name");
+	const originSessionId = optionalMetaString(row.origin_session_id, "origin_session_id");
+	return {
+		chartPath: requiredMetaString(row.chart_path, "chart_path"),
+		...(exportName === undefined ? {} : { exportName }),
+		workDir: requiredMetaString(row.work_dir, "work_dir"),
+		chartId: requiredMetaString(row.chart_id, "chart_id"),
+		createdAt: requiredMetaString(row.created_at, "created_at"),
+		...(originSessionId === undefined ? {} : { originSessionId }),
+	};
+}
+function requiredMetaString(value: unknown, label: string): string {
+	if (typeof value !== "string" || value.length === 0) throw new Error(`Corrupt Hyperchart run metadata: ${label} must be a non-empty string`);
+	return value;
+}
+function optionalMetaString(value: unknown, label: string): string | undefined {
+	return value === null || value === undefined ? undefined : requiredMetaString(value, label);
 }
 function optionalObject(value: unknown): BranchMetadata | undefined {
 	return value === null ? undefined : requiredObject(value, "branch metadata") as BranchMetadata;

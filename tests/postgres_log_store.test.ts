@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { normalizeChartConfig, type ChartAst, type ChartCst, type DurableRecordDraft } from "../packages/hyperchart/src/index.js";
 import { chart, final, user } from "../packages/hyperchart/src/core/dsl.js";
@@ -7,7 +11,11 @@ import {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
 	PostgresLogStore,
+	RUN_META_TABLE,
 } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
+import { deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
+import { createPiHyperchartHost } from "../packages/pi-hyperchart/src/runtime/pi/host_adapter.js";
 
 const dsn = process.env.HYPERCHART_PG_DSN;
 const describePg = dsn === undefined ? describe.skip : describe;
@@ -95,11 +103,94 @@ afterAll(async () => {
 	const client = new Client({ connectionString: dsn });
 	await client.connect();
 	await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
+	await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query("DELETE FROM hyperchart_test_claims WHERE run_id = ANY($1)", [usedRunIds]).catch(() => {});
 	await client.end();
 });
 
 describePg("PostgresLogStore", () => {
+	it("stores run metadata in PostgreSQL without requiring meta.json", async () => {
+		const runId = newRunId();
+		const runDir = join(tmpdir(), runId);
+		await mkdir(runDir, { recursive: true });
+		await initializeRunDir(runDir);
+		const meta = {
+			chartPath: join(runDir, "workflow.chart.ts"),
+			workDir: runDir,
+			chartId: "postgres-meta",
+			createdAt: new Date().toISOString(),
+			originSessionId: "session-meta",
+		};
+		try {
+			await saveRunMeta(runDir, meta);
+			expect(existsSync(join(runDir, "meta.json"))).toBe(false);
+			expect(await loadRunMeta(runDir)).toEqual(meta);
+			await deleteRunStorage(runDir);
+			await expect(loadRunMeta(runDir)).rejects.toMatchObject({ code: "ENOENT" });
+			expect((await openReader(runId)).snapshot().entries).toHaveLength(0);
+		} finally {
+			await rm(runDir, { recursive: true, force: true });
+		}
+	});
+
+	it("discovers a PostgreSQL-backed run without meta.json through the Pi host", async () => {
+		const runId = newRunId();
+		const root = join(tmpdir(), `postgres-meta-host-${randomUUID()}`);
+		const agentDir = join(root, "agent");
+		const workDir = join(root, "project");
+		const runDir = join(agentDir, "hypercharts", "runs", runId);
+		const chartPath = join(workDir, "postgres-meta.chart.ts");
+		await mkdir(workDir, { recursive: true });
+		await writeFile(chartPath, `import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "postgres-meta-host", initial: "done", states: { done: final() } });\n`);
+		try {
+			await initializeRunDir(runDir);
+			await saveRunMeta(runDir, { chartPath, workDir, chartId: "postgres-meta-host", createdAt: new Date().toISOString(), originSessionId: "session-host" });
+			patchRunStatus(runDir, { runId, chartId: "postgres-meta-host", state: "stopped", branchIds: ["main"] });
+			expect(existsSync(join(runDir, "meta.json"))).toBe(false);
+			const snapshot = await createPiHyperchartHost({ agentDir }).readSessionSnapshot(workDir);
+			expect(snapshot.runs).toEqual([expect.objectContaining({ runId, chartName: "postgres-meta-host", cwd: workDir, originSessionId: "session-host" })]);
+		} finally {
+			await deleteRunStorage(runDir).catch(() => {});
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("loads metadata without hydrating or validating the PostgreSQL journal", async () => {
+		const runId = newRunId();
+		const runDir = join(tmpdir(), runId);
+		await mkdir(runDir, { recursive: true });
+		const meta = { chartPath: join(runDir, "chart.ts"), workDir: runDir, chartId: "metadata-only", createdAt: new Date().toISOString() };
+		try {
+			await initializeRunDir(runDir);
+			const writer = await openWriter(runId);
+			await writer.appendDrafts([argsDraft()]);
+			await writer.close();
+			await saveRunMeta(runDir, meta);
+			const { Client } = await import("pg");
+			const client = new Client({ connectionString: dsn });
+			await client.connect();
+			await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = 1`, [runId]);
+			await client.end();
+			expect(await loadRunMeta(runDir)).toEqual(meta);
+		} finally {
+			await deleteRunStorage(runDir).catch(() => {});
+			await rm(runDir, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects conflicting PostgreSQL metadata for the same run id", async () => {
+		const runId = newRunId();
+		const runDir = join(tmpdir(), runId);
+		await mkdir(runDir, { recursive: true });
+		const meta = { chartPath: join(runDir, "one.chart.ts"), workDir: runDir, chartId: "one", createdAt: new Date().toISOString() };
+		try {
+			await saveRunMeta(runDir, meta);
+			await expect(saveRunMeta(runDir, { ...meta, chartId: "two" })).rejects.toThrow(/Conflicting metadata/);
+		} finally {
+			await rm(runDir, { recursive: true, force: true });
+		}
+	});
+
 	it("rejects append before explicit root-branch initialization", async () => {
 		const store = await openWriter(newRunId());
 		await expect(store.appendDrafts([argsDraft()])).rejects.toThrow(/Unknown Hyperchart branch 'main'/);

@@ -68,7 +68,7 @@ Rules:
 - Extension implementation files do not appear as separate charts.
 - Flat charts remain supported.
 
-A run id is visible only from the working directory recorded in its `meta.json`. Open the owning directory before viewing, resuming, stopping, or rewinding that run.
+A run id is visible only from the working directory recorded in its run metadata (`meta.json` for JSONL, `hyperchart_run_meta` for PostgreSQL). Open the owning directory before viewing, resuming, stopping, or rewinding that run.
 
 ## `/hyperchart`
 
@@ -312,8 +312,10 @@ ${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/hypercharts/runs/<run-id>/
 
 | Path | Owner | Meaning |
 |---|---|---|
-| `meta.json` | runner | chart path/export, args, working directory, run identity, originating Pi session |
-| `log.jsonl` | core runtime | append-only flat v2 records and named-branch entries |
+| `meta.json` | runner | JSONL-backend run identity; absent for new PostgreSQL-backed runs |
+| `log.jsonl` | core runtime | JSONL-backend append-only flat v2 records and named-branch entries |
+| PostgreSQL `hyperchart_run_meta` | host | PostgreSQL-backed chart path/export, working directory, run identity, originating Pi session |
+| PostgreSQL `hyperchart_journal` | core runtime | PostgreSQL-backed durable journal |
 | `status.json` | Pi runner | v2 process state, current live `branchIds`, pid, heartbeat, exit, aggregate error |
 | journal `user_interaction/*` | sole runtime writer | rendered gate and validated external response facts |
 | `user-interactions/<branchId>/<seqId>/receipts/` | host | non-semantic presentation claims and confirmations |
@@ -371,7 +373,7 @@ You can still pass an explicit path.
 
 ### A run belongs to another directory
 
-Change into the working directory recorded in `meta.json`, then reopen Pi. Run ids are scoped by working directory to avoid mutating unrelated projects.
+Change into the working directory recorded in the run metadata, then reopen Pi. Run ids are scoped by working directory to avoid mutating unrelated projects.
 
 ### Replay blocks startup
 

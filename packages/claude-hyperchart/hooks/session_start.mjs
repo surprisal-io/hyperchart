@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import {
 	acquireActiveUserInteraction,
 	claimUserInteractionReceipt,
+	loadRunMeta,
 	markUserInteractionReceipt,
 } from "@surprisal/hyperchart/runtime";
 
@@ -97,7 +98,7 @@ async function main() {
 	const liveLines = [];
 	for (const entry of readdirSync(runsRoot)) {
 		const runDir = join(runsRoot, entry);
-		const meta = readJson(join(runDir, "meta.json"));
+		const meta = await loadRunMeta(runDir).catch(() => undefined);
 		if (
 			meta === undefined ||
 			typeof meta.workDir !== "string" ||

@@ -124,7 +124,7 @@ New runs record the creating Pi session as `meta.originSessionId`. The adapter e
 
 Project charts replace same-name user charts. Definitions are sorted by name; runs are sorted newest first and limited by `runLimit`, defaulting to 50.
 
-If run metadata is readable but full chart/runtime inspection fails, the adapter keeps a metadata-only run entry with `status: "blocked"` or a status-derived terminal value and a `run_failed` issue. Corrupt or missing `meta.json` cannot be attributed to a working directory and is omitted.
+If run metadata is readable but full chart/runtime inspection fails, the adapter keeps a metadata-only run entry with `status: "blocked"` or a status-derived terminal value and a `run_failed` issue. A run whose selected-backend metadata is missing or corrupt cannot be attributed to a working directory and is omitted. PostgreSQL-backed runs read only `hyperchart_run_meta`; filesystem-backed runs read `meta.json`.
 
 ### `piHyperchartHost`
 
@@ -215,7 +215,7 @@ Starts a new run, attaches to a live run, or resumes an existing stopped run.
 Rules:
 
 - A new run requires `chartPath`. When both branch selectors are omitted, it starts singleton branch `main`.
-- A resume can provide `runDir` or `runId`; `meta.json` supplies chart path, export name, and working directory. Both names accept a run id or path resolved by the extension, but conflicting simultaneous values are rejected.
+- A resume can provide `runDir` or `runId`; selected-backend run metadata supplies chart path, export name, and working directory (`hyperchart_run_meta` under PostgreSQL, otherwise `meta.json`). Both names accept a run id or path resolved by the extension, but conflicting simultaneous values are rejected.
 - A run must belong to the current Pi working directory.
 - `branchId` and `branchIds` are mutually exclusive. `branchIds` must be non-empty and unique. A fresh chart can select only singleton `main`; after forking durable heads, resume the existing run with an explicit `branchId` or `branchIds`. Omission is accepted only when the existing run has exactly one durable branch, which is inferred; a multi-branch run fails closed rather than silently selecting a head.
 - `wait` defaults to `false`.

@@ -181,7 +181,7 @@ function parseChartForInteractionScan(chartPath: string, exportName?: string): P
 }
 
 export async function scanOpenUserInteractions(runDir: string, branchId?: BranchId): Promise<UserInteractionRequest[]> {
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	const parsed = parseChartForInteractionScan(meta.chartPath, meta.exportName);
 	const store = await openRunLogStore(runDir, { access: "read", ...(branchId === undefined ? {} : { branchId }) });
 	try {
@@ -210,7 +210,7 @@ export async function scanOwnedOpenUserInteractions(ownerInput: UserInteractionO
 		if (!entry.isDirectory()) continue;
 		const runDir = join(owner.runsRoot, entry.name);
 		try {
-			assertUserInteractionOwner(owner, runDir, entry.name);
+			await assertUserInteractionOwner(owner, runDir, entry.name);
 			for (const request of await scanOpenUserInteractions(runDir)) {
 				const receipt = receiptState(runDir, request, owner.host, owner.sessionId);
 				result.push({ runDir, request, presentation: receipt.presentation, ...(receipt.order === undefined ? {} : { presentationOrder: receipt.order }) });
@@ -226,7 +226,7 @@ export const readActiveUserInteraction = acquireActiveUserInteraction;
 
 export async function validateAndPersistUserInteractionResponse(options: PersistUserInteractionResponseOptions): Promise<{ response: UserInteractionResponse; idempotent: boolean }> {
 	assertRunCoordinate(options.runDir, options.runId, options.branchId, options.seqId);
-	if (options.owner !== undefined) assertUserInteractionOwner(options.owner, options.runDir, options.runId);
+	if (options.owner !== undefined) await assertUserInteractionOwner(options.owner, options.runDir, options.runId);
 	const status = readRunStatus(options.runDir);
 	if (isRunLive(status)) {
 		if (status?.attemptId === undefined) throw new Error(`Live run '${options.runId}' has no runner attempt identity`);
@@ -248,7 +248,7 @@ export async function validateAndPersistUserInteractionResponse(options: Persist
 }
 
 async function commitOfflineUserInteractionResponse(options: PersistUserInteractionResponseOptions): Promise<{ response: UserInteractionResponse; idempotent: boolean }> {
-	const meta = loadRunMeta(options.runDir);
+	const meta = await loadRunMeta(options.runDir);
 	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const store = await openRunLogStore(options.runDir, { access: "writer", branchId: options.branchId });
@@ -334,10 +334,10 @@ function writeJsonExclusive(path: string, value: unknown): void {
 	writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
 	try { linkSync(temp, path); } finally { rmSync(temp, { force: true }); }
 }
-function assertUserInteractionOwner(ownerInput: UserInteractionOwner, runDir: string, runId: string): void {
+async function assertUserInteractionOwner(ownerInput: UserInteractionOwner, runDir: string, runId: string): Promise<void> {
 	const owner = normalizeOwner(ownerInput);
 	if (canonicalPath(runDir) !== canonicalPath(join(owner.runsRoot, runId))) throw new Error(`Run '${runId}' is outside the configured runs root`);
-	const meta = loadRunMeta(runDir);
+	const meta = await loadRunMeta(runDir);
 	if (meta.originSessionId !== owner.sessionId) throw new Error(`Run '${runId}' is not owned by this session`);
 	if (canonicalPath(meta.workDir) !== owner.workDir) throw new Error(`Run '${runId}' belongs to another working directory`);
 }

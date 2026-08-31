@@ -21,7 +21,7 @@ async function createStoppedRun() {
 	tempDirs.push(root);
 	const runDir = join(root, "run");
 	const chartPath = resolve("examples/quickstart.chart.ts");
-	saveRunMeta(runDir, {
+	await saveRunMeta(runDir, {
 		chartPath,
 		workDir: root,
 		chartId: "quickstart",

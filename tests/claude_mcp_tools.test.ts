@@ -162,7 +162,7 @@ describe("hyperchart MCP tools", () => {
 		const runDir = join(runsRoot, "verbose-run");
 		const sessionsDir = join(runDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
-		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
 		const actionUid = { chart: "simple", state: "done", action: "agent" };
 		const transcriptFile = join(sessionsDir, "verbose.jsonl");
 		writeFileSync(transcriptFile, [
@@ -190,7 +190,7 @@ describe("hyperchart MCP tools", () => {
 		const [runId] = readdirSync(runsRoot);
 		if (runId === undefined) throw new Error("expected run");
 		const runDir = join(runsRoot, runId);
-		expect(loadRunMeta(runDir).originSessionId).toBe("session-a");
+		expect((await loadRunMeta(runDir)).originSessionId).toBe("session-a");
 		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-a")).toBe(false);
 		const firstRequestId = readTerminalNotificationRequest(runDir)!.requestId;
 
@@ -407,7 +407,7 @@ export default chart({
 		const { tools, runsRoot, cwd, chartPath } = makeWorld();
 		const runDir = join(runsRoot, "steer-run");
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
-		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
 		const actionUid = { chart: "simple", state: "work", action: "agent" };
 		const actionKey = actionUidKey(actionUid);
 		updateSessionProgress(join(runDir, "sessions"), actionUid, { actionName: "worker", status: "running" }, `${actionKey}:1:7`);
@@ -448,7 +448,7 @@ export default chart({
 		const { tools, runsRoot, cwd, chartPath } = makeWorld();
 		const runDir = join(runsRoot, "stop-run");
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
-		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
 		patchRunStatus(runDir, { runId: "stop-run", branchIds: ["main"], chartId: "simple", state: "running" });
 
 		const stopped = JSON.parse(text(await tools.get("hyperchart_stop")!.handler({ runDir: "stop-run" })));
@@ -462,7 +462,7 @@ export default chart({
 		const runDir = join(runsRoot, "view-run");
 		const sessionsDir = join(runDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
-		saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
 		const actionUid = { chart: "simple", state: "done", action: "agent" };
 		const transcriptFile = join(sessionsDir, "view-run.jsonl");
 		writeFileSync(transcriptFile, [
@@ -510,14 +510,14 @@ describe("session start hook", () => {
 		const deadDir = join(runsRoot, "dead-run");
 		const foreignDir = join(runsRoot, "foreign-run");
 		for (const dir of [liveDir, deadDir, foreignDir]) mkdirSync(dir, { recursive: true });
-		writeFileSync(join(liveDir, "meta.json"), JSON.stringify({ workDir: cwd, chartId: "one", originSessionId: "s1" }));
+		writeFileSync(join(liveDir, "meta.json"), JSON.stringify({ chartPath: join(cwd, "one.chart.ts"), workDir: cwd, chartId: "one", createdAt: new Date().toISOString(), originSessionId: "s1" }));
 		writeFileSync(
 			join(liveDir, "status.json"),
 			JSON.stringify({ chartId: "one", state: "running", pid: process.pid, heartbeatAt: Date.now() }),
 		);
-		writeFileSync(join(deadDir, "meta.json"), JSON.stringify({ workDir: cwd, chartId: "two", originSessionId: "s1" }));
+		writeFileSync(join(deadDir, "meta.json"), JSON.stringify({ chartPath: join(cwd, "two.chart.ts"), workDir: cwd, chartId: "two", createdAt: new Date().toISOString(), originSessionId: "s1" }));
 		writeFileSync(join(deadDir, "status.json"), JSON.stringify({ chartId: "two", state: "complete" }));
-		writeFileSync(join(foreignDir, "meta.json"), JSON.stringify({ workDir: root, chartId: "three", originSessionId: "s1" }));
+		writeFileSync(join(foreignDir, "meta.json"), JSON.stringify({ chartPath: join(root, "three.chart.ts"), workDir: root, chartId: "three", createdAt: new Date().toISOString(), originSessionId: "s1" }));
 		writeFileSync(
 			join(foreignDir, "status.json"),
 			JSON.stringify({ chartId: "three", state: "running", pid: process.pid, heartbeatAt: Date.now() }),
