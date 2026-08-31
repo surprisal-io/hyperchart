@@ -72,7 +72,7 @@ export type ExecutorContext = {
 
 export type RunnerBranchOutcome = Readonly<{
 	branchId: BranchId;
-	outcome: "complete" | "failed";
+	outcome: "complete" | "failed" | "drained";
 	state?: MachineState;
 	error?: string;
 }>;
@@ -123,6 +123,8 @@ export interface HyperchartRunnerController {
 	forkAndCommitUserInteraction<T>(options: RunnerForkAndCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }>;
 	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. */
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
+	/** Stop one live branch, reject further runtime work, and resolve after setup, execution, and disposal are quiescent. */
+	stopAndDrain(branchId: BranchId): Promise<RunnerBranchOutcome>;
 }
 
 type RunnerPhase = "accepting" | "closing" | "closed";
@@ -135,8 +137,12 @@ type BranchEntry = {
 	outcome: Deferred<RunnerBranchOutcome>;
 	setupState: BranchSetupState;
 	setup?: Promise<void>;
+	execution?: Promise<void>;
 	executor?: SteerableAgentExecutor;
 	runtime?: ChartRuntime;
+	draining: boolean;
+	operations: Set<Promise<unknown>>;
+	drain?: Promise<RunnerBranchOutcome>;
 	disposal?: Promise<void>;
 };
 type ReplayGate = { warnings: string[]; error?: string };
@@ -232,11 +238,12 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	get liveBranchIds(): readonly BranchId[] { return [...this.live.keys()]; }
 	get activeBranchIds(): readonly BranchId[] {
 		const normalized = this.rootStore.snapshot();
-		return [...this.live.keys()].filter((branchId) => {
+		return [...this.live.entries()].filter(([branchId, entry]) => {
+			if (entry.draining) return false;
 			const headSeqId = normalized.branch(branchId).headSeqId;
 			const head = headSeqId === null ? undefined : normalized.recordsBySeqId.get(headSeqId);
 			return head?.type !== "user_interaction" || head.kind !== "opened";
-		});
+		}).map(([branchId]) => branchId);
 	}
 
 	start(): Promise<void> {
@@ -266,54 +273,67 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		assertRunnerBranchId(options.branchId);
 		const normalized = this.rootStore.snapshot();
 		if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
-		return this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options));
+		return this.trackBranchOperation(
+			options.sourceBranchId === undefined ? [] : [options.sourceBranchId],
+			"fork a branch",
+			() => this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options)),
+		);
 	}
 
 	async respondToUserInteraction(branchId: BranchId, gateSeqId: number, event: ChartEvent): Promise<UserInteractionResponseCommit> {
 		this.assertAccepting("respond to a user interaction");
 		const store = branchId === this.rootStore.branchId ? this.rootStore : this.rootStore.forBranch(branchId);
 		store.snapshot().branch(branchId);
-		const committed = await store.respondToUserInteraction({
-			ast: this.ast,
-			gateSeqId,
-			event,
-			schemaRegistry: this.schemaRegistry,
+		return this.trackBranchOperation([branchId], "respond to a user interaction", async () => {
+			const committed = await store.respondToUserInteraction({
+				ast: this.ast,
+				gateSeqId,
+				event,
+				schemaRegistry: this.schemaRegistry,
+			});
+			this.acknowledgeUserInteraction(branchId, gateSeqId, committed, "control:user-response");
+			return committed;
 		});
-		this.acknowledgeUserInteraction(branchId, gateSeqId, committed, "control:user-response");
-		return committed;
 	}
 
 	async commitUserInteraction<T>(options: RunnerCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }> {
 		this.assertAccepting("atomically commit a user interaction");
-		if (!supportsSqlTransactions(this.rootStore)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
-		this.rootStore.snapshot().branch(options.branchId);
-		const committed = await this.rootStore.commitUserInteraction(
-			options.branchId,
-			{ ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
-			participate,
-		);
-		this.acknowledgeUserInteraction(options.branchId, options.gateSeqId, committed.response, "control:atomic-user-response");
-		return committed;
+		const store = this.rootStore;
+		if (!supportsSqlTransactions(store)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
+		store.snapshot().branch(options.branchId);
+		return this.trackBranchOperation([options.branchId], "atomically commit a user interaction", async () => {
+			const committed = await store.commitUserInteraction(
+				options.branchId,
+				{ ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
+				participate,
+			);
+			this.acknowledgeUserInteraction(options.branchId, options.gateSeqId, committed.response, "control:atomic-user-response");
+			return committed;
+		});
 	}
 
 	async forkAndCommitUserInteraction<T>(options: RunnerForkAndCommitUserInteractionOptions, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }> {
 		this.assertAccepting("atomically fork and commit a user interaction");
 		assertRunnerBranchId(options.branchId);
 		assertRunnerBranchId(options.responseBranchId);
-		if (!supportsSqlTransactions(this.rootStore)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
-		const committed = await this.rootStore.forkAndCommitUserInteraction(
-			{
-				sourceBranchId: options.sourceBranchId ?? this.rootStore.branchId,
-				newBranchId: options.branchId,
-				fromSeqId: options.fromSeqId,
-				responseBranchId: options.responseBranchId,
-				metadata: forkMetadata(options),
-				response: { ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
-			},
-			participate,
-		);
-		this.acknowledgeUserInteraction(options.responseBranchId, options.gateSeqId, committed.response, "control:atomic-fork-response");
-		return committed;
+		const store = this.rootStore;
+		if (!supportsSqlTransactions(store)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
+		const sourceBranchId = options.sourceBranchId ?? store.branchId;
+		return this.trackBranchOperation([sourceBranchId, options.responseBranchId], "atomically fork and commit a user interaction", async () => {
+			const committed = await store.forkAndCommitUserInteraction(
+				{
+					sourceBranchId,
+					newBranchId: options.branchId,
+					fromSeqId: options.fromSeqId,
+					responseBranchId: options.responseBranchId,
+					metadata: forkMetadata(options),
+					response: { ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
+				},
+				participate,
+			);
+			this.acknowledgeUserInteraction(options.responseBranchId, options.gateSeqId, committed.response, "control:atomic-fork-response");
+			return committed;
+		});
 	}
 
 	private acknowledgeUserInteraction(branchId: BranchId, gateSeqId: number, committed: UserInteractionResponseCommit, source: string): void {
@@ -336,6 +356,21 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		return entry.outcome.promise;
 	}
 
+	stopAndDrain(branchId: BranchId): Promise<RunnerBranchOutcome> {
+		this.assertAccepting("stop and drain a branch");
+		if (!this.started) throw new Error("Hyperchart runner must be started before stopping and draining a branch; call controller.start() first");
+		assertRunnerBranchId(branchId);
+		const entry = this.live.get(branchId);
+		if (entry === undefined) throw new Error(`Hyperchart branch '${branchId}' is not live in this runner attempt`);
+		if (entry.drain !== undefined) return entry.drain;
+		entry.draining = true;
+		// ChartRuntime.dispose() rejects callbacks synchronously before awaiting cleanup.
+		// Start it now so a late action completion cannot race the first await below.
+		void entry.runtime?.dispose();
+		entry.drain = this.drainEntry(entry);
+		return entry.drain;
+	}
+
 	private reserve(branchId: BranchId): BranchEntry {
 		const entry: BranchEntry = {
 			branchId,
@@ -343,6 +378,8 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			ready: deferred<void>(),
 			outcome: deferred<RunnerBranchOutcome>(),
 			setupState: "reserved",
+			draining: false,
+			operations: new Set(),
 		};
 		this.admitted.add(branchId);
 		this.live.set(branchId, entry);
@@ -474,7 +511,8 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		}
 		entry.setupState = "running";
 		entry.ready.resolve();
-		void this.runEntry(entry);
+		entry.execution = this.runEntry(entry);
+		void entry.execution;
 	}
 
 	private async runEntry(entry: BranchEntry): Promise<void> {
@@ -490,6 +528,24 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		} catch (error) {
 			if (this.isRunnable(entry)) await this.settle(entry, { branchId: entry.branchId, outcome: "failed", error: error instanceof Error ? error.message : String(error) });
 		}
+	}
+
+	private async drainEntry(entry: BranchEntry): Promise<RunnerBranchOutcome> {
+		let outcome: RunnerBranchOutcome = { branchId: entry.branchId, outcome: "drained" };
+		const results = await Promise.allSettled([
+			entry.setup ?? Promise.resolve(),
+			this.disposeEntry(entry),
+			entry.execution ?? Promise.resolve(),
+			...entry.operations,
+		]);
+		const errors = results.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []);
+		if (errors.length > 0) outcome = { branchId: entry.branchId, outcome: "failed", error: `Branch drain failed: ${errors.join("; ")}` };
+		if (this.live.get(entry.branchId) === entry) {
+			entry.outcome.resolve(outcome);
+			this.live.delete(entry.branchId);
+			this.publishLiveStatus();
+		}
+		return outcome;
 	}
 
 	private disposeEntry(entry: BranchEntry): Promise<void> {
@@ -571,7 +627,22 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	}
 
 	private isRunnable(entry: BranchEntry): boolean {
-		return this.phase === "accepting" && this.live.get(entry.branchId) === entry;
+		return this.phase === "accepting" && this.live.get(entry.branchId) === entry && !entry.draining;
+	}
+
+	private trackBranchOperation<T>(branchIds: readonly BranchId[], operation: string, task: () => Promise<T>): Promise<T> {
+		const entries = [...new Set(branchIds)].flatMap((branchId) => {
+			const entry = this.live.get(branchId);
+			if (entry?.draining === true) throw new Error(`Hyperchart branch '${branchId}' is draining; cannot ${operation}`);
+			return entry === undefined ? [] : [entry];
+		});
+		const promise = Promise.resolve().then(task);
+		for (const entry of entries) entry.operations.add(promise);
+		void promise.then(
+			() => { for (const entry of entries) entry.operations.delete(promise); },
+			() => { for (const entry of entries) entry.operations.delete(promise); },
+		);
+		return promise;
 	}
 
 	private assertAccepting(operation: string): void {

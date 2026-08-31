@@ -464,6 +464,54 @@ describe("multi-branch process runner", () => {
 		expect(normalized.ancestry("experiment").every((record) => record.branchId === "main" || record.branchId === "experiment")).toBe(true);
 	});
 
+	it("stops and drains one live branch while its sibling keeps running", async () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-branch-drain-"));
+		roots.push(root);
+		const workDir = join(root, "work");
+		const runDir = join(root, "run");
+		mkdirSync(workDir, { recursive: true });
+		mkdirSync(runDir, { recursive: true });
+		const chartPath = join(workDir, "chart.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "branch-drain", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
+		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		let releaseExperimentDispose!: () => void;
+		const experimentDisposeGate = new Promise<void>((resolve) => { releaseExperimentDispose = resolve; });
+		const executors = new Map<string, ControlledExecutor>();
+		const controller = await createHyperchartRunnerController({ runId: "run", runDir, chartPath, chartId: "branch-drain", workDir, branchId: "main" }, ({ config }) => {
+			const executor = new ControlledExecutor(config.branchId === "experiment" ? experimentDisposeGate : undefined);
+			executors.set(config.branchId, executor);
+			return executor;
+		});
+		const completion = controller.start();
+		await waitFor(() => executors.get("main")?.emit !== undefined);
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main");
+		await controller.forkBranch({ branchId: "experiment", fromSeqId: store.snapshot().branch("main").headSeqId!, sourceBranchId: "main" });
+		const experimentOutcome = controller.startBranch("experiment");
+		await waitFor(() => executors.get("experiment")?.emit !== undefined);
+		const journalSize = () => new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot().entries.length;
+		const beforeDrain = journalSize();
+
+		const drain = controller.stopAndDrain("experiment");
+		expect(controller.stopAndDrain("experiment")).toBe(drain);
+		expect(controller.liveBranchIds).toEqual(["main", "experiment"]);
+		executors.get("experiment")!.complete();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(journalSize()).toBe(beforeDrain);
+
+		releaseExperimentDispose();
+		expect(await drain).toEqual({ branchId: "experiment", outcome: "drained" });
+		expect(await experimentOutcome).toEqual({ branchId: "experiment", outcome: "drained" });
+		expect(controller.liveBranchIds).toEqual(["main"]);
+		expect(controller.activeBranchIds).toEqual(["main"]);
+		expect(readRunStatus(runDir)).toMatchObject({ state: "running", branchIds: ["main"] });
+		expect(executors.get("experiment")?.disposed).toBe(true);
+		expect(() => controller.stopAndDrain("experiment")).toThrow(/not live/);
+
+		executors.get("main")!.complete();
+		await completion;
+		expect(readRunStatus(runDir)).toMatchObject({ state: "complete", branchIds: [] });
+	});
+
 	it("a durable dynamic branch keeps the runner alive during async executor construction", async () => {
 		const root = mkdtempSync(join(tmpdir(), "hyperchart-dynamic-reservation-"));
 		roots.push(root);
