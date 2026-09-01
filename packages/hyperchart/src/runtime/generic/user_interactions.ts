@@ -185,12 +185,12 @@ export async function scanOpenUserInteractions(runDir: string, branchId?: Branch
 	const parsed = parseChartForInteractionScan(meta.chartPath, meta.exportName);
 	const store = await openRunLogStore(runDir, { access: "read", ...(branchId === undefined ? {} : { branchId }) });
 	try {
-		const normalized = await store.read();
-		const branchIds = branchId === undefined ? [...normalized.branches.keys()] : [branchId];
+		const branches = await store.listBranches();
+		const branchIds = branchId === undefined ? branches.map((branch) => branch.branchId) : [branchId];
 		const result: UserInteractionRequest[] = [];
 		for (const selected of branchIds) {
-			if (!normalized.branches.has(selected)) continue;
-			const projection = projectBranch(createBranchProjection(parsed.ast), parsed.ast, normalized.ancestry(selected));
+			if (!branches.some((branch) => branch.branchId === selected)) continue;
+			const projection = projectBranch(createBranchProjection(parsed.ast), parsed.ast, await store.readAncestry(selected));
 			if (projection.failure !== undefined) continue;
 			for (const gate of Object.values(projection.userInteractions)) {
 				if (gate.status !== "open") continue;
@@ -261,8 +261,7 @@ async function commitOfflineUserInteractionResponse(options: PersistUserInteract
 export async function readUserInteractionResponse(runDir: string, branchId: BranchId, seqId: number): Promise<UserInteractionResponse | undefined> {
 	const store = await openRunLogStore(runDir, { access: "read", branchId });
 	try {
-		const normalized = await store.read();
-		const record = normalized.ancestry(branchId).find((entry): entry is UserInteractionResolvedLog => entry.type === "user_interaction" && entry.kind === "resolved" && entry.gateSeqId === seqId);
+		const record = (await store.readAncestry(branchId)).find((entry): entry is UserInteractionResolvedLog => entry.type === "user_interaction" && entry.kind === "resolved" && entry.gateSeqId === seqId);
 		return record === undefined ? undefined : responseFromResolved(basename(resolve(runDir)), branchId, record);
 	} finally { await store.close(); }
 }

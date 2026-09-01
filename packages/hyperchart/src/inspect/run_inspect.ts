@@ -11,7 +11,7 @@ import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
 import { hyperchartRunFromRuntime } from "../host/index.js";
 import type { HyperchartRunInfo, HyperchartSessionMessageInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
-import type { NormalizedRunLog } from "../runtime/generic/log_store.js";
+import type { BranchHead } from "../core/durable_events.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
@@ -62,12 +62,14 @@ export async function hyperchartRunFromRunDir(
 	const status = readRunStatus(absoluteRunDir);
 	const branchId = options.branchId ?? "main";
 	let records = options.records;
-	let normalized: NormalizedRunLog | undefined;
+	let branches: readonly BranchHead[] | undefined;
 	if (records === undefined) {
 		const store = await openRunLogStore(absoluteRunDir, { branchId });
 		try {
-			normalized = await store.read();
-			records = normalized.entries.length === 0 ? [] : normalized.ancestry(branchId);
+			[records, branches] = await Promise.all([
+				store.readAncestry(branchId),
+				store.listBranches(),
+			]);
 		} finally {
 			await store.close();
 		}
@@ -102,14 +104,13 @@ export async function hyperchartRunFromRunDir(
 		...run,
 		branchId,
 		...(status === undefined ? {} : { runnerBranchIds: status.branchIds }),
-		...(normalized === undefined ? {} : {
-			branches: [...normalized.branches.values()].map((branch) => ({
+		...(branches === undefined ? {} : {
+			branches: branches.map((branch) => ({
 				branchId: branch.branchId,
 				headSeqId: branch.headSeqId,
 				...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }),
 				...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }),
 			})),
-			recordTree: normalized.records.map((record) => ({ seqId: record.seqId, parentId: record.parentId, branchId: record.branchId, type: record.type, timestamp: record.timestamp })),
 		}),
 	};
 }

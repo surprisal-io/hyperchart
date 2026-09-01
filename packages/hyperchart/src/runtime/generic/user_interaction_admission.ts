@@ -2,8 +2,7 @@ import { isDeepStrictEqual } from "node:util";
 import { createBranchProjection, projectBranch } from "../../core/projection.js";
 import type { ChartAst, ChartEvent } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
-import type { DurableRecordDraft, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../../core/durable_events.js";
-import type { NormalizedRunLog } from "./log_store.js";
+import type { DurableLogRecord, DurableRecordDraft, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../../core/durable_events.js";
 import { checkSchemaAsync } from "./schema.js";
 
 export type RespondToUserInteractionInput = Readonly<{
@@ -32,11 +31,11 @@ export type PreparedUserInteractionResponse =
  * releasing it. Runtime-contract validation may await, so the boundary must remain owned.
  */
 export async function prepareUserInteractionResponse(
-	normalized: NormalizedRunLog,
+	ancestry: readonly DurableLogRecord[],
 	branchId: string,
 	input: RespondToUserInteractionInput,
 ): Promise<PreparedUserInteractionResponse> {
-	const prepared = prepareUserInteractionResponseSync(normalized, branchId, input);
+	const prepared = prepareUserInteractionResponseSync(ancestry, branchId, input);
 	if (prepared.kind === "append" && prepared.gate.reply !== undefined) {
 		const check = await checkSchemaAsync(prepared.gate.reply, "output" in input.event ? input.event.output : undefined, input.schemaRegistry);
 		if (!check.ok) throw new Error(`User response output does not match reply schema: ${check.errors.join("; ")}`);
@@ -46,7 +45,7 @@ export async function prepareUserInteractionResponse(
 
 /** Structural prefix admission for use inside a synchronous backend critical section. */
 export function prepareUserInteractionResponseSync(
-	normalized: NormalizedRunLog,
+	ancestry: readonly DurableLogRecord[],
 	branchId: string,
 	input: RespondToUserInteractionInput,
 ): PreparedUserInteractionResponse {
@@ -54,7 +53,6 @@ export function prepareUserInteractionResponseSync(
 		throw new Error("gateSeqId must be a positive safe integer");
 	}
 	assertUserEventShape(input.event);
-	const ancestry = normalized.ancestry(branchId);
 	const existing = ancestry.find((record): record is UserInteractionResolvedLog =>
 		record.type === "user_interaction" && record.kind === "resolved" && record.gateSeqId === input.gateSeqId,
 	);

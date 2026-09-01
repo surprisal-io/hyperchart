@@ -115,7 +115,7 @@ try {
 const controller = await createHyperchartRunnerController(config, buildExecutor);
 const completion = controller.start();
 
-const fork = controller.forkBranch({
+const fork = await controller.forkBranch({
   branchId: "experiment",
   sourceBranchId: "main",
   fromSeqId: 42,
@@ -125,17 +125,17 @@ const outcome = await controller.startBranch(fork.branchId); // explicit admissi
 await completion;
 ```
 
-`startBranch()` synchronously reserves a durable branch before its replay gate or executor construction, then returns a promise for that branch's `complete`, `failed`, or externally `drained` outcome. Each admitted branch owns a branch-scoped agent executor and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
+`startBranch()` verifies the controller's compact durable-branch set, reserves the branch before its replay gate or executor construction, then resolves with that branch's `complete`, `failed`, or externally `drained` outcome. Each admitted branch owns a branch-scoped agent executor and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
 
 `stopAndDrain(branchId)` operates only on a branch currently live in the same started controller attempt. It synchronously makes that reservation non-runnable, starts runtime disposal so late callbacks are rejected, and resolves only after branch setup, runtime execution, completion admission, durable appends already in flight, and executor/script disposal have settled. The durable branch head is unchanged and sibling reservations keep running. Concurrent calls while the same drain is pending return the same promise. The corresponding `startBranch()` promise resolves with `outcome: "drained"`; cleanup failure produces a failed branch outcome. A drained branch remains admitted for this runner attempt and cannot yet be restarted without creating a new controller attempt.
 
-`durableBranchIds` comes from the controller's already-loaded journal snapshot and includes branches that are not admitted in this attempt. `liveBranchIds` and status-v2 `branchIds` are current live reservations, not durable branch selection; a branch remains listed while `stopAndDrain()` is still disposing it and disappears only at the drain boundary. `activeBranchIds` is the subset currently executing or setting up; it excludes draining reservations and live branches suspended at a journal-native open user gate, so an external scheduler can bound actual execution without counting idle decision points. Forking does not add a reservation. A naturally terminal reservation is removed only after disposal, terminal notification persistence publishes `branchIds: []`, and the controller rejects fork/admission after it begins closing. Keep an existing reservation live while admitting more work; there is intentionally no filesystem, Pi-command, or MCP control plane for dynamic admission.
+`await durableBranchIds()` returns the controller's compact durable-branch set, including branches that are not admitted in this attempt. `liveBranchIds` and status-v2 `branchIds` are current live reservations, not durable branch selection; a branch remains listed while `stopAndDrain()` is still disposing it and disappears only at the drain boundary. `await activeBranchIds()` queries only each live branch head and excludes draining reservations and branches suspended at a journal-native open user gate, so an external scheduler can bound actual execution without counting idle decision points. Forking adds the durable branch to the compact set but does not add a live reservation. A naturally terminal reservation is removed only after disposal, terminal notification persistence publishes `branchIds: []`, and the controller rejects fork/admission after it begins closing. Keep an existing reservation live while admitting more work; there is intentionally no filesystem, Pi-command, or MCP control plane for dynamic admission.
 
 ## Journal-native user input
 
 `RunLogStore.respondToUserInteraction({ ast, gateSeqId, event, schemaRegistry? })` is the sole-writer admission primitive. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
 
-JSONL serializes writes only inside one Node process, validates against its already-open snapshot, and rejects a stale byte boundary when detected. It provides no consistency guarantee for concurrent writers in different processes. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
+JSONL serializes writes only inside one Node process, allocates against its private opened index, trusts stored entries, and rejects a stale byte boundary when detected. It provides no consistency guarantee for concurrent writers in different processes. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
 
 For trusted in-process hosts that must commit application ownership together with a response, the controller exposes PostgreSQL-only composite operations:
 

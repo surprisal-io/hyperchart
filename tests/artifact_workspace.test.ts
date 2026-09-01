@@ -41,7 +41,7 @@ describe("materializeWorkspace", () => {
 			artifacts: { "nested/report.md": pin },
 		}]);
 		await logStore.createBranch("fork", accepted!.seqId, { name: "fork", sourceBranchId: "main", sourceSeqId: accepted!.seqId });
-		const forkAncestry = logStore.snapshot().ancestry("fork");
+		const forkAncestry = await logStore.readAncestry("fork");
 		const workspace = join(dir, "run", "workspaces", "fork");
 
 		await materializeWorkspace(forkAncestry, store, workspace);

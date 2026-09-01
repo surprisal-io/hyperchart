@@ -102,11 +102,11 @@ export interface RunnerHold {
 }
 
 export interface HyperchartRunnerController {
-	/** Every durable branch in the controller's already-loaded journal snapshot. */
-	readonly durableBranchIds: readonly BranchId[];
+	/** Every durable branch currently known to this controller. */
+	durableBranchIds(): Promise<readonly BranchId[]>;
 	readonly liveBranchIds: readonly BranchId[];
-	/** Live branches currently executing/setup, excluding journal-native open user gates. */
-	readonly activeBranchIds: readonly BranchId[];
+	/** Live branches currently executing/setup, excluding drains and journal-native open user gates. */
+	activeBranchIds(): Promise<readonly BranchId[]>;
 	/** Launch the reserved initial branches and resolve at aggregate termination. */
 	start(): Promise<void>;
 	/** Stop every live branch and close the controller without terminating the host process. */
@@ -196,6 +196,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	private phase: RunnerPhase = "accepting";
 	private readonly live = new Map<BranchId, BranchEntry>();
 	private readonly admitted = new Set<BranchId>();
+	private readonly knownDurableBranches: Set<BranchId>;
 	private readonly outcomes: RunnerBranchOutcome[] = [];
 	private readonly executors = new Map<BranchId, SteerableAgentExecutor>();
 	private readonly completion = deferred<void>();
@@ -218,10 +219,12 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		private readonly ast: ChartAst,
 		private readonly schemaRegistry: SchemaRegistry,
 		private readonly rootStore: RunLogStore,
+		durableBranchIds: readonly BranchId[],
 		private readonly sessionsDir: string,
 		private readonly buildExecutor: ExecutorFactory,
 	) {
 		this.artifactStore = new ArtifactStore(config.runDir);
+		this.knownDurableBranches = new Set(durableBranchIds);
 		this.initialSetupTurns = Array.from({ length: initialBranchIds.length + 1 }, () => deferred<void>());
 		this.initialSetupTurns[0]!.resolve();
 		for (const branchId of initialBranchIds) this.reserve(branchId);
@@ -234,16 +237,16 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		process.on("SIGINT", this.onSigint);
 	}
 
-	get durableBranchIds(): readonly BranchId[] { return [...this.rootStore.snapshot().branches.keys()]; }
+	async durableBranchIds(): Promise<readonly BranchId[]> { return [...this.knownDurableBranches]; }
 	get liveBranchIds(): readonly BranchId[] { return [...this.live.keys()]; }
-	get activeBranchIds(): readonly BranchId[] {
-		const normalized = this.rootStore.snapshot();
-		return [...this.live.entries()].filter(([branchId, entry]) => {
-			if (entry.draining) return false;
-			const headSeqId = normalized.branch(branchId).headSeqId;
-			const head = headSeqId === null ? undefined : normalized.recordsBySeqId.get(headSeqId);
-			return head?.type !== "user_interaction" || head.kind !== "opened";
-		}).map(([branchId]) => branchId);
+	async activeBranchIds(): Promise<readonly BranchId[]> {
+		const active = await Promise.all([...this.live.entries()].map(async ([branchId, entry]) => {
+			if (entry.draining) return undefined;
+			const headSeqId = (await this.rootStore.getBranch(branchId)).headSeqId;
+			const head = headSeqId === null ? undefined : await this.rootStore.getRecord(headSeqId);
+			return head?.type !== "user_interaction" || head.kind !== "opened" ? branchId : undefined;
+		}));
+		return active.filter((branchId): branchId is BranchId => branchId !== undefined);
 	}
 
 	start(): Promise<void> {
@@ -271,19 +274,22 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	async forkBranch(options: RunnerForkOptions): Promise<BranchHead> {
 		this.assertAccepting("fork a branch");
 		assertRunnerBranchId(options.branchId);
-		const normalized = this.rootStore.snapshot();
-		if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
+		if (options.sourceBranchId !== undefined) await this.rootStore.getBranch(options.sourceBranchId);
 		return this.trackBranchOperation(
 			options.sourceBranchId === undefined ? [] : [options.sourceBranchId],
 			"fork a branch",
-			() => this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options)),
+			async () => {
+				const branch = await this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options));
+				this.knownDurableBranches.add(branch.branchId);
+				return branch;
+			},
 		);
 	}
 
 	async respondToUserInteraction(branchId: BranchId, gateSeqId: number, event: ChartEvent): Promise<UserInteractionResponseCommit> {
 		this.assertAccepting("respond to a user interaction");
 		const store = branchId === this.rootStore.branchId ? this.rootStore : this.rootStore.forBranch(branchId);
-		store.snapshot().branch(branchId);
+		await store.getBranch(branchId);
 		return this.trackBranchOperation([branchId], "respond to a user interaction", async () => {
 			const committed = await store.respondToUserInteraction({
 				ast: this.ast,
@@ -300,7 +306,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		this.assertAccepting("atomically commit a user interaction");
 		const store = this.rootStore;
 		if (!supportsSqlTransactions(store)) throw new Error("Atomic application commit requires the PostgreSQL Hyperchart backend");
-		store.snapshot().branch(options.branchId);
+		await store.getBranch(options.branchId);
 		return this.trackBranchOperation([options.branchId], "atomically commit a user interaction", async () => {
 			const committed = await store.commitUserInteraction(
 				options.branchId,
@@ -331,6 +337,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 				},
 				participate,
 			);
+			this.knownDurableBranches.add(committed.branch.branchId);
 			this.acknowledgeUserInteraction(options.responseBranchId, options.gateSeqId, committed.response, "control:atomic-fork-response");
 			return committed;
 		});
@@ -344,12 +351,12 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		);
 	}
 
-	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {
+	async startBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {
 		this.assertAccepting("start a branch");
 		if (!this.started) throw new Error("Hyperchart runner must be started before starting a dynamic branch; call controller.start() first");
 		assertRunnerBranchId(branchId);
 		if (this.admitted.has(branchId)) throw new Error(`Hyperchart branch '${branchId}' was already admitted to this runner attempt`);
-		this.rootStore.snapshot().branch(branchId);
+		if (!this.knownDurableBranches.has(branchId)) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 		const entry = this.reserve(branchId);
 		this.publishLiveStatus();
 		entry.setup = this.setupDynamicEntry(entry);
@@ -448,7 +455,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 
 	private async replayGate(entry: BranchEntry): Promise<ReplayGate> {
 		try {
-			const existingLog = await entry.store.readAll();
+			const existingLog = await entry.store.readAncestry(entry.branchId);
 			const explanation = existingLog.length === 0 ? undefined : explainReplay(this.ast, existingLog);
 			if (explanation?.broken !== undefined) {
 				return { warnings: [], error: `[branch ${entry.branchId}] ${formatReplayCompatibilityError(this.config.runDir, explanation)}` };
@@ -475,8 +482,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		};
 		let executor: SteerableAgentExecutor;
 		try {
-			const normalized = entry.store.snapshot();
-			const ancestry = normalized.entries.length === 0 ? [] : normalized.ancestry(entry.branchId);
+			const ancestry = await entry.store.readAncestry(entry.branchId);
 			await materializeWorkspace(ancestry, this.artifactStore, workDir);
 			if (!this.isRunnable(entry)) {
 				entry.ready.resolve();
@@ -520,7 +526,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			if (!this.isRunnable(entry) || entry.runtime === undefined) return;
 			const state = await start(entry.runtime, this.config.args);
 			if (!this.isRunnable(entry)) return;
-			const log = await entry.store.readAll();
+			const log = await entry.store.readAncestry(entry.branchId);
 			if (!this.isRunnable(entry)) return;
 			const outcome = terminalStateForFinalMachine(state, log);
 			const error = outcome === "failed" ? finalMachineFailureMessage(state, log) : undefined;
@@ -731,7 +737,8 @@ export async function createHyperchartRunnerController(
 		const parsed = parseChartModuleSync(config.chartPath, config.exportName === undefined ? {} : { exportName: config.exportName });
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 		const rootStore = await openRunLogStore(config.runDir, { ...(initialBranchIds[0] === undefined ? {} : { branchId: initialBranchIds[0] }), onWarn: (message) => console.warn(message), access: "writer" });
-		return new HyperchartRunnerControllerImpl(config, initialBranchIds, attemptId, parsed.ast, parsed.schemaRegistry, rootStore, join(config.runDir, "sessions"), buildExecutor);
+		const durableBranchIds = (await rootStore.listBranches()).map((branch) => branch.branchId);
+		return new HyperchartRunnerControllerImpl(config, initialBranchIds, attemptId, parsed.ast, parsed.schemaRegistry, rootStore, durableBranchIds, join(config.runDir, "sessions"), buildExecutor);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		try {

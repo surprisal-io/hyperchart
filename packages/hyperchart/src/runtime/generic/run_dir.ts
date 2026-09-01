@@ -31,7 +31,7 @@ export async function initializeRunDir(runDir: string): Promise<void> {
 }
 
 export async function loadRunMeta(runDir: string): Promise<RunMeta> {
-	const store = await openRunLogStore(runDir, { access: "read", loadJournal: false });
+	const store = await openRunLogStore(runDir, { access: "read" });
 	try {
 		const meta = await store.readRunMeta();
 		if (meta === undefined) throw missingRunMeta(runDir);
@@ -45,7 +45,7 @@ export async function saveRunMeta(runDir: string, meta: RunMeta): Promise<void> 
 	const absoluteRunDir = resolve(runDir);
 	mkdirSync(absoluteRunDir, { recursive: true });
 	mkdirSync(join(absoluteRunDir, "sessions"), { recursive: true });
-	const store = await openRunLogStore(absoluteRunDir, { access: "writer", loadJournal: false });
+	const store = await openRunLogStore(absoluteRunDir, { access: "writer" });
 	try {
 		await store.writeRunMeta(normalizeRunMeta(meta));
 	} finally {
@@ -54,7 +54,7 @@ export async function saveRunMeta(runDir: string, meta: RunMeta): Promise<void> 
 }
 
 export async function deleteRunStorage(runDir: string): Promise<void> {
-	const store = await openRunLogStore(runDir, { access: "writer", loadJournal: false });
+	const store = await openRunLogStore(runDir, { access: "writer" });
 	try {
 		await store.deleteRunData();
 	} finally {

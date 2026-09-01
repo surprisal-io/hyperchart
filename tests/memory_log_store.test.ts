@@ -19,7 +19,7 @@ describe("MemoryLogStore", () => {
 			{ seqId: 2, parentId: null, branchId: "main" },
 			{ seqId: 3, parentId: 2, branchId: "main" },
 		]);
-		await expect(store.readAll()).resolves.toEqual(first);
+		await expect(store.readAncestry(store.branchId)).resolves.toEqual(first);
 		const entries = store.storageEntries();
 		expect(entries).toEqual([expect.objectContaining({ kind: "branch", seqId: 1 }), ...first]);
 	});

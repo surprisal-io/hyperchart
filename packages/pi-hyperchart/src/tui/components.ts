@@ -205,15 +205,18 @@ export class RunWidget implements Component {
 		if (stat === this.lastStat && this.view !== undefined) return;
 		this.lastStat = stat;
 		const branchId = this.opts.branchId ?? "main";
-		const store = new JsonlLogStore(this.opts.logPath, () => {}, branchId);
-		const normalized = await store.read();
-		const records = normalized.ancestry(branchId);
+		const store = new JsonlLogStore(this.opts.logPath, branchId);
+		const [records, branches, recordCount] = await Promise.all([
+			store.readAncestry(branchId),
+			store.listBranches(),
+			store.countRecords(),
+		]);
 		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId, records });
 		this.view = buildRunView(this.opts.ast, records, Date.now(), {
 			branchId,
 			...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
-			branches: [...normalized.branches.values()].map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
-			recordCount: normalized.records.length,
+			branches: branches.map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
+			recordCount,
 		});
 		this.progress = readSessionProgress(resolve(this.opts.runDir, "sessions")).sessions;
 		this.progressPercent = summarizeHyperchartProgress(run).pct;

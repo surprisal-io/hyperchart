@@ -3,10 +3,9 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeChartConfig, type ChartAst, type ChartCst, type DurableRecordDraft } from "../packages/hyperchart/src/index.js";
 import { chart, final, user } from "../packages/hyperchart/src/core/dsl.js";
-import { CorruptRunLogError } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
@@ -82,6 +81,11 @@ async function appendOpenGate(store: PostgresLogStore, ast: ChartAst): Promise<n
 	return opened!.seqId;
 }
 
+async function journalStats(store: PostgresLogStore, runId: string): Promise<{ count: number; maxSeq: number }> {
+	const result = await store.transaction((tx) => tx.query(`SELECT COUNT(*)::int AS count, COALESCE(MAX(seq), 0)::int AS max_seq FROM ${JOURNAL_TABLE} WHERE run_id = $1`, [runId]));
+	return { count: Number(result.rows[0]?.count), maxSeq: Number(result.rows[0]?.max_seq) };
+}
+
 async function ensureClaimTable(store: PostgresLogStore): Promise<void> {
 	await store.transaction(async (tx) => {
 		await tx.query(`CREATE TABLE IF NOT EXISTS hyperchart_test_claims (
@@ -94,6 +98,7 @@ async function ensureClaimTable(store: PostgresLogStore): Promise<void> {
 }
 
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(openStores.splice(0).map((store) => store.close().catch(() => {})));
 });
 
@@ -127,7 +132,7 @@ describePg("PostgresLogStore", () => {
 			expect(await loadRunMeta(runDir)).toEqual(meta);
 			await deleteRunStorage(runDir);
 			await expect(loadRunMeta(runDir)).rejects.toMatchObject({ code: "ENOENT" });
-			expect((await openReader(runId)).snapshot().entries).toHaveLength(0);
+			expect(await (await openReader(runId)).listBranches()).toEqual([]);
 		} finally {
 			await rm(runDir, { recursive: true, force: true });
 		}
@@ -201,11 +206,10 @@ describePg("PostgresLogStore", () => {
 		const store = await openWriter(runId);
 		await store.initializeRootBranch();
 		const records = await store.appendDrafts([argsDraft(), invokeDraft()]);
-		const normalized = await store.read();
 
-		expect(normalized.branch("main").headSeqId).toBe(3);
-		expect(normalized.nextSeqId).toBe(4);
-		expect(normalized.ancestry("main")).toEqual(records);
+		expect((await store.getBranch("main")).headSeqId).toBe(3);
+		expect((await journalStats(store, runId)).maxSeq + 1).toBe(4);
+		expect(await store.readAncestry("main")).toEqual(records);
 		const relational = await store.transaction((tx) => tx.query(
 			`SELECT seq, kind, branch_id, parent_id, head_seq_id,
 			        record_type, payload, metadata
@@ -243,22 +247,51 @@ describePg("PostgresLogStore", () => {
 		]);
 	});
 
-	it("reloads an identical journal after reopening the run", async () => {
+	it("opens and appends without selecting the whole journal", async () => {
+		const runId = newRunId();
+		const seed = await openWriter(runId);
+		await seed.initializeRootBranch();
+		for (let index = 0; index < 20; index++) await seed.appendDrafts([argsDraft({ index })]);
+		await seed.close();
+
+		const { Client } = await import("pg");
+		const originalQuery = Client.prototype.query;
+		const queries: string[] = [];
+		vi.spyOn(Client.prototype, "query").mockImplementation(function (this: InstanceType<typeof Client>, ...args: unknown[]) {
+			const query = args[0];
+			queries.push(typeof query === "string" ? query : typeof query === "object" && query !== null && "text" in query ? String(query.text) : "");
+			return Reflect.apply(originalQuery, this, args) as never;
+		} as typeof originalQuery);
+
+		const writer = await openWriter(runId);
+		const [record] = await writer.appendDrafts([argsDraft({ final: true })]);
+		expect(record?.seqId).toBe(22);
+		const normalized = queries.map((query) => query.replace(/\s+/g, " ").trim().toLowerCase());
+		expect(normalized.some((query) => query.includes("max(seq)"))).toBe(false);
+		expect(normalized.some((query) => query.includes("update hyperchart_run_meta") && query.includes("returning next_seq - $2"))).toBe(true);
+		expect(normalized.some((query) => query.includes("record_type, payload") && query.includes("order by seq"))).toBe(false);
+	});
+
+	it("reloads identical targeted views after reopening the run", async () => {
 		const runId = newRunId();
 		const writer = await openWriter(runId);
 		await writer.initializeRootBranch();
 		await writer.appendDrafts([argsDraft(), invokeDraft()]);
 		await writer.createBranch("experiment", 2, { reason: "sibling", sourceBranchId: "main", sourceSeqId: 2 });
-		const before = await writer.read();
+		const before = {
+			branches: await writer.listBranches(),
+			main: await writer.readAncestry("main"),
+			experiment: await writer.readAncestry("experiment"),
+			count: await writer.countRecords(),
+		};
 		await writer.close();
 
 		const reopened = await openReader(runId);
-		const after = await reopened.read();
-
-		expect(after.entries).toEqual(before.entries);
-		expect(after.records).toEqual(before.records);
-		expect(after.nextSeqId).toBe(before.nextSeqId);
-		expect(after.branch("experiment").headSeqId).toBe(2);
+		expect(await reopened.listBranches()).toEqual(before.branches);
+		expect(await reopened.readAncestry("main")).toEqual(before.main);
+		expect(await reopened.readAncestry("experiment")).toEqual(before.experiment);
+		expect(await reopened.countRecords()).toBe(before.count);
+		expect((await reopened.getBranch("experiment")).headSeqId).toBe(2);
 	});
 
 	it("shares one journal across branch handles", async () => {
@@ -271,21 +304,21 @@ describePg("PostgresLogStore", () => {
 		const forked = await experiment.appendDrafts([invokeDraft()]);
 
 		expect(forked[0]?.parentId).toBe(2);
-		expect(store.snapshot().branch("experiment").headSeqId).toBe(4);
-		expect(store.snapshot().branch("main").headSeqId).toBe(2);
-		expect(await experiment.readAll()).toHaveLength(2);
+		expect((await store.getBranch("experiment")).headSeqId).toBe(4);
+		expect((await store.getBranch("main")).headSeqId).toBe(2);
+		expect(await experiment.readAncestry("experiment")).toHaveLength(2);
 	});
 
 	it("moves a named head without deleting records", async () => {
-		const store = await openWriter(newRunId());
+		const runId = newRunId();
+		const store = await openWriter(runId);
 		await store.initializeRootBranch();
 		await store.appendDrafts([argsDraft(), invokeDraft()]);
 		await store.moveBranch("main", 2);
 
-		const normalized = await store.read();
-		expect(normalized.branch("main").headSeqId).toBe(2);
-		expect(normalized.records).toHaveLength(2);
-		expect(normalized.nextSeqId).toBe(5);
+		expect((await store.getBranch("main")).headSeqId).toBe(2);
+		expect(await store.countRecords()).toBe(2);
+		expect((await journalStats(store, runId)).maxSeq + 1).toBe(5);
 	});
 
 	it("rejects a second live writer for the same run", async () => {
@@ -302,7 +335,9 @@ describePg("PostgresLogStore", () => {
 			await tx.appendDrafts("main", [argsDraft()]);
 			await tx.query("SELECT * FROM hyperchart_table_that_does_not_exist");
 		})).rejects.toBeDefined();
-		expect((await store.read()).records).toHaveLength(0);
+		expect(await store.countRecords()).toBe(0);
+		const [record] = await store.appendDrafts([argsDraft()]);
+		expect(record?.seqId).toBe(2);
 	});
 
 	it("atomically commits a fork, response, and participating SQL", async () => {
@@ -327,8 +362,8 @@ describePg("PostgresLogStore", () => {
 
 		expect(committed.participant).toBe("claimed");
 		expect(committed.response.idempotent).toBe(false);
-		expect(store.snapshot().branch("experiment").headSeqId).toBe(committed.response.record.seqId);
-		expect(store.snapshot().ancestry("experiment").at(-1)).toEqual(committed.response.record);
+		expect((await store.getBranch("experiment")).headSeqId).toBe(committed.response.record.seqId);
+		expect((await store.readAncestry("experiment")).at(-1)).toEqual(committed.response.record);
 		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 1", [runId]));
 		expect(claims.rows).toEqual([{ branch_id: "experiment" }]);
 
@@ -355,7 +390,7 @@ describePg("PostgresLogStore", () => {
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
 		await store.respondToUserInteraction({ ast, gateSeqId, event: { type: "SELECTED" } });
-		expect(store.snapshot().branch("main").headSeqId).not.toBe(gateSeqId);
+		expect((await store.getBranch("main")).headSeqId).not.toBe(gateSeqId);
 
 		const committed = await store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
@@ -369,7 +404,7 @@ describePg("PostgresLogStore", () => {
 		));
 
 		expect(committed.branch.branchId).toBe("historical-fork");
-		expect(store.snapshot().ancestry("historical-fork").at(-1)).toEqual(committed.response.record);
+		expect((await store.readAncestry("historical-fork")).at(-1)).toEqual(committed.response.record);
 	});
 
 	it("rejects a fork point outside the selected source ancestry", async () => {
@@ -393,7 +428,7 @@ describePg("PostgresLogStore", () => {
 		await ensureClaimTable(store);
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
-		const before = store.snapshot().entries.length;
+		const before = (await journalStats(store, runId)).count;
 
 		await expect(store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
@@ -406,8 +441,8 @@ describePg("PostgresLogStore", () => {
 			throw new Error("participant failed");
 		})).rejects.toThrow("participant failed");
 
-		expect(store.snapshot().branches.has("rolled-back")).toBe(false);
-		expect(store.snapshot().entries).toHaveLength(before);
+		expect((await store.listBranches()).some((branch) => branch.branchId === "rolled-back")).toBe(false);
+		expect((await journalStats(store, runId)).count).toBe(before);
 		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 2", [runId]));
 		expect(claims.rows).toEqual([]);
 	});
@@ -435,7 +470,7 @@ describePg("PostgresLogStore", () => {
 		}
 		expect(failure).toMatchObject({ code: "23505", constraint: "hyperchart_test_claims_pkey" });
 		expect(String(failure)).not.toContain("Stale Hyperchart journal writer");
-		expect(store.snapshot().branches.has("loser")).toBe(false);
+		expect((await store.listBranches()).some((branch) => branch.branchId === "loser")).toBe(false);
 	});
 
 	it("rejects a composite response branch unrelated to source or new fork", async () => {
@@ -459,11 +494,11 @@ describePg("PostgresLogStore", () => {
 
 	it("treats a missing journal as an empty read-only run", async () => {
 		const reader = await openReader(newRunId());
-		const normalized = await reader.read();
-		expect(normalized.entries).toHaveLength(0);
+		expect(await reader.listBranches()).toEqual([]);
+		expect(await reader.countRecords()).toBe(0);
 	});
 
-	it("rejects a corrupt journal with a seq gap on load", async () => {
+	it("trusts targeted reads without globally validating the journal", async () => {
 		const runId = newRunId();
 		const writer = await openWriter(runId);
 		await writer.initializeRootBranch();
@@ -477,7 +512,8 @@ describePg("PostgresLogStore", () => {
 		await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = 1`, [runId]);
 		await client.end();
 
-		await expect(PostgresLogStore.open({ dsn: dsn as string, runId })).rejects.toThrow(CorruptRunLogError);
+		const reader = await openReader(runId);
+		expect(await reader.getRecord(2)).toMatchObject({ seqId: 2, type: "args" });
 	});
 
 	it("publishes the existing PostgreSQL commit notification without using it as a runtime subscription", async () => {

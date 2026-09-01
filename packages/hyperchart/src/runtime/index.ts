@@ -38,15 +38,8 @@ export { ChartRuntime } from "./generic/chart_runtime.js";
 export type { ChartRuntimeOptions } from "./generic/chart_runtime.js";
 export { runGuard } from "./generic/guards.js";
 export type { GuardContext, RenderedGuardInvocation } from "./generic/guards.js";
-export {
-	CorruptRunLogError,
-	DEFAULT_BRANCH_ID,
-	JsonlLogStore,
-	NormalizedRunLog,
-	stampDrafts,
-	validateAndProjectJournal,
-} from "./generic/log_store.js";
-export type { LogStore, RunLogStore, RespondToUserInteractionInput, UserInteractionResponseCommit } from "./generic/log_store.js";
+export { DEFAULT_BRANCH_ID, JsonlLogStore } from "./generic/log_store.js";
+export type { LogStore, RunLogReader, RunLogStore, RespondToUserInteractionInput, UserInteractionResponseCommit } from "./generic/log_store.js";
 export { MemoryLogStore } from "./generic/memory_log_store.js";
 export { openRunLogStore } from "./generic/log_store_factory.js";
 export type { OpenRunLogStoreOptions } from "./generic/log_store_factory.js";

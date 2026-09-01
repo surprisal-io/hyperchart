@@ -52,7 +52,7 @@ When the PostgreSQL journal backend owns the sole run-writer advisory lock, `com
 - the participant receives SQL `query()` only;
 - it runs inside the serialized journal writer;
 - failure rolls back the branch mutation, response record, and application rows together;
-- the transaction-local journal snapshot is published only after commit;
+- journal rows remain transaction-local until commit; rollback leaves no Node-side projection to repair;
 - application uniqueness errors remain application errors and are not rewritten as stale-journal failures.
 
 Do not perform network, filesystem, LLM, or long-running work in the participant. Validate and prepare its bounded SQL inputs beforehand. After a forked commit, starting the branch remains an in-memory action; if the process dies first, reopen the committed journal and admit that durable branch rather than creating another selection.

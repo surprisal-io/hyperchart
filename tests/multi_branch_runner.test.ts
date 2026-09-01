@@ -32,6 +32,13 @@ async function closeWithoutExiting(controller: unknown, signal: NodeJS.Signals =
 	await (controller as { close(signal: NodeJS.Signals, exitProcess: boolean): Promise<void> }).close(signal, false);
 }
 
+function storedRecordSeqIds(runDir: string): number[] {
+	return readFileSync(join(runDir, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean)
+		.map((line) => JSON.parse(line) as { kind?: string; seqId: number })
+		.filter((entry) => entry.kind !== "branch")
+		.map((entry) => entry.seqId);
+}
+
 function latestArtifactHash(records: readonly DurableLogRecord[], path: string): string | undefined {
 	let hash: string | undefined;
 	for (const record of records) {
@@ -109,7 +116,7 @@ describe("multi-branch process runner", () => {
 			return new ControlledExecutor();
 		});
 
-		expect(() => controller.startBranch("main")).toThrow(/must be started.*controller\.start/);
+		await expect(controller.startBranch("main")).rejects.toThrow(/must be started.*controller\.start/);
 		await closeWithoutExiting(controller);
 		await controller.start();
 
@@ -132,13 +139,13 @@ describe("multi-branch process runner", () => {
 		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
 		let gateEntered!: () => void;
 		const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
-		const originalReadAll = JsonlLogStore.prototype.readAll;
-		vi.spyOn(JsonlLogStore.prototype, "readAll").mockImplementation(async function (this: JsonlLogStore) {
+		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
+		vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
 			if (this.branchId === "main") {
 				gateEntered();
 				await gate;
 			}
-			return originalReadAll.call(this);
+			return originalReadAncestry.call(this, branchId);
 		});
 		let built = 0;
 		const controller = await createHyperchartRunnerController({
@@ -251,19 +258,19 @@ describe("multi-branch process runner", () => {
 		});
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
-		const snapshot = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot();
-		await controller.forkBranch({ branchId: "experiment", fromSeqId: snapshot.branch("main").headSeqId! });
+		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		await controller.forkBranch({ branchId: "experiment", fromSeqId: (await reader.getBranch("main")).headSeqId! });
 		let releaseGate!: () => void;
 		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
 		let gateEntered!: () => void;
 		const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
-		const originalReadAll = JsonlLogStore.prototype.readAll;
-		vi.spyOn(JsonlLogStore.prototype, "readAll").mockImplementation(async function (this: JsonlLogStore) {
+		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
+		vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
 			if (this.branchId === "experiment") {
 				gateEntered();
 				await gate;
 			}
-			return originalReadAll.call(this);
+			return originalReadAncestry.call(this, branchId);
 		});
 		const experimentOutcome = controller.startBranch("experiment");
 		await entered;
@@ -299,13 +306,13 @@ describe("multi-branch process runner", () => {
 		const initialGate = new Promise<void>((resolve) => { releaseInitialGate = resolve; });
 		let initialGateEntered!: () => void;
 		const entered = new Promise<void>((resolve) => { initialGateEntered = resolve; });
-		const originalReadAll = JsonlLogStore.prototype.readAll;
-		vi.spyOn(JsonlLogStore.prototype, "readAll").mockImplementation(async function (this: JsonlLogStore) {
+		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
+		vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
 			if (this.branchId === "main") {
 				initialGateEntered();
 				await initialGate;
 			}
-			return originalReadAll.call(this);
+			return originalReadAncestry.call(this, branchId);
 		});
 		const built: string[] = [];
 		const executors = new Map<string, ControlledExecutor>();
@@ -396,16 +403,15 @@ describe("multi-branch process runner", () => {
 		expect(activity.max).toBe(2);
 		expect(readRunStatus(runDir)).toMatchObject({ version: 2, state: "complete", branchIds: [], exitCode: 0 });
 
-		const main = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main");
-		const normalized = main.snapshot();
-		expect(main.fullReadCount()).toBe(1);
-		expect(normalized.records.map((record) => record.seqId)).toEqual([3, 4, 5, 6]);
+		const main = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		expect(storedRecordSeqIds(runDir)).toEqual([3, 4, 5, 6]);
 		for (const branchId of ["main", "experiment"]) {
-			const ancestry = normalized.ancestry(branchId);
+			const ancestry = await main.readAncestry(branchId);
 			expect(ancestry.length).toBeGreaterThan(0);
 			expect(ancestry.every((record) => record.branchId === branchId)).toBe(true);
 			for (let index = 1; index < ancestry.length; index++) expect(ancestry[index]!.parentId).toBe(ancestry[index - 1]!.seqId);
 		}
+		expect(main.fullReadCount()).toBe(1);
 	});
 
 	it("forks durably without starting and admits a dynamic branch into the live set", async () => {
@@ -434,8 +440,8 @@ describe("multi-branch process runner", () => {
 		});
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
-		const store = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main");
-		const mainHead = store.snapshot().branch("main").headSeqId;
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		const mainHead = (await store.getBranch("main")).headSeqId;
 		expect(mainHead).not.toBeNull();
 
 		const fork = await controller.forkBranch({ branchId: "experiment", fromSeqId: mainHead!, sourceBranchId: "main" });
@@ -447,7 +453,7 @@ describe("multi-branch process runner", () => {
 		const experimentOutcome = controller.startBranch("experiment");
 		expect(controller.liveBranchIds).toEqual(["main", "experiment"]);
 		expect(readRunStatus(runDir)?.branchIds).toEqual(["main", "experiment"]);
-		expect(() => controller.startBranch("experiment")).toThrow(/already admitted/);
+		await expect(controller.startBranch("experiment")).rejects.toThrow(/already admitted/);
 		await waitFor(() => executors.get("experiment")?.emit !== undefined);
 		executors.get("experiment")!.complete();
 		expect(await experimentOutcome).toMatchObject({ branchId: "experiment", outcome: "complete" });
@@ -458,10 +464,10 @@ describe("multi-branch process runner", () => {
 		await completion;
 		expect(readRunStatus(runDir)).toMatchObject({ state: "complete", branchIds: [] });
 		await expect(controller.forkBranch({ branchId: "late", fromSeqId: mainHead! })).rejects.toThrow(/closed/);
-		expect(() => controller.startBranch("main")).toThrow(/closed/);
-		const normalized = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot();
-		expect(normalized.records.map((record) => record.seqId)).toEqual([2, 4, 5]);
-		expect(normalized.ancestry("experiment").every((record) => record.branchId === "main" || record.branchId === "experiment")).toBe(true);
+		await expect(controller.startBranch("main")).rejects.toThrow(/closed/);
+		const finalReader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		expect(storedRecordSeqIds(runDir)).toEqual([2, 4, 5]);
+		expect((await finalReader.readAncestry("experiment")).every((record) => record.branchId === "main" || record.branchId === "experiment")).toBe(true);
 	});
 
 	it("stops and drains one live branch while its sibling keeps running", async () => {
@@ -484,11 +490,11 @@ describe("multi-branch process runner", () => {
 		});
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
-		const store = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main");
-		await controller.forkBranch({ branchId: "experiment", fromSeqId: store.snapshot().branch("main").headSeqId!, sourceBranchId: "main" });
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		await controller.forkBranch({ branchId: "experiment", fromSeqId: (await store.getBranch("main")).headSeqId!, sourceBranchId: "main" });
 		const experimentOutcome = controller.startBranch("experiment");
 		await waitFor(() => executors.get("experiment")?.emit !== undefined);
-		const journalSize = () => new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot().entries.length;
+		const journalSize = () => readFileSync(join(runDir, "log.jsonl"), "utf8").trim().split("\n").length;
 		const beforeDrain = journalSize();
 
 		const drain = controller.stopAndDrain("experiment");
@@ -502,7 +508,7 @@ describe("multi-branch process runner", () => {
 		expect(await drain).toEqual({ branchId: "experiment", outcome: "drained" });
 		expect(await experimentOutcome).toEqual({ branchId: "experiment", outcome: "drained" });
 		expect(controller.liveBranchIds).toEqual(["main"]);
-		expect(controller.activeBranchIds).toEqual(["main"]);
+		expect(await controller.activeBranchIds()).toEqual(["main"]);
 		expect(readRunStatus(runDir)).toMatchObject({ state: "running", branchIds: ["main"] });
 		expect(executors.get("experiment")?.disposed).toBe(true);
 		expect(() => controller.stopAndDrain("experiment")).toThrow(/not live/);
@@ -533,8 +539,8 @@ describe("multi-branch process runner", () => {
 		});
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
-		const store = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main");
-		const head = store.snapshot().branch("main").headSeqId!;
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		const head = (await store.getBranch("main")).headSeqId!;
 		await controller.forkBranch({ branchId: "experiment", fromSeqId: head });
 		const experimentOutcome = controller.startBranch("experiment");
 		executors.get("main")!.complete();
@@ -570,8 +576,8 @@ describe("multi-branch process runner", () => {
 		});
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
-		const snapshot = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot();
-		await controller.forkBranch({ branchId: "experiment", fromSeqId: snapshot.branch("main").headSeqId! });
+		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		await controller.forkBranch({ branchId: "experiment", fromSeqId: (await reader.getBranch("main")).headSeqId! });
 		executors.get("main")!.complete();
 		await startedDisposal;
 		const outcome = controller.startBranch("experiment");
@@ -602,14 +608,14 @@ describe("multi-branch process runner", () => {
 		});
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
-		const snapshot = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot();
-		await controller.forkBranch({ branchId: "broken", fromSeqId: snapshot.branch("main").headSeqId! });
-		const originalReadAll = JsonlLogStore.prototype.readAll;
-		const readAll = vi.spyOn(JsonlLogStore.prototype, "readAll").mockImplementation(function (this: JsonlLogStore) {
-			return this.branchId === "broken" ? Promise.reject(new Error("incompatible ancestry")) : originalReadAll.call(this);
+		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
+		await controller.forkBranch({ branchId: "broken", fromSeqId: (await reader.getBranch("main")).headSeqId! });
+		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
+		const readAncestry = vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(function (this: JsonlLogStore, branchId: string) {
+			return this.branchId === "broken" ? Promise.reject(new Error("incompatible ancestry")) : originalReadAncestry.call(this, branchId);
 		});
 		const outcome = await controller.startBranch("broken");
-		readAll.mockRestore();
+		readAncestry.mockRestore();
 		expect(outcome).toMatchObject({ branchId: "broken", outcome: "failed", error: expect.stringMatching(/Replay|replay|stale/) });
 		expect(executors.has("broken")).toBe(false);
 		executors.get("main")!.complete();
@@ -692,8 +698,8 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 
 		expect(workspaceByBranch.get("left")).not.toBe(workspaceByBranch.get("right"));
 		expect(observedReads).toEqual(new Map([["left", "left bytes"], ["right", "right bytes"]]));
-		const normalized = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "left").snapshot();
-		const pins = ["left", "right"].map((branchId) => latestArtifactHash(normalized.ancestry(branchId), "shared.txt"));
+		const finalReader = new JsonlLogStore(join(runDir, "log.jsonl"), "left");
+		const pins = await Promise.all(["left", "right"].map(async (branchId) => latestArtifactHash(await finalReader.readAncestry(branchId), "shared.txt")));
 		expect(pins.every((pin) => pin !== undefined)).toBe(true);
 		expect(new Set(pins).size).toBe(2);
 	});
@@ -725,7 +731,7 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(completed).toBe(false);
 
-		const head = new JsonlLogStore(join(runDir, "log.jsonl"), () => {}, "main").snapshot().branch("main").headSeqId!;
+		const head = (await new JsonlLogStore(join(runDir, "log.jsonl"), "main").getBranch("main")).headSeqId!;
 		await controller.forkBranch({ branchId: "wave-two", fromSeqId: head - 1, sourceBranchId: "main" });
 		const outcome = controller.startBranch("wave-two");
 		await waitFor(() => executors.get("wave-two")?.emit !== undefined);

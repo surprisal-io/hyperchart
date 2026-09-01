@@ -44,7 +44,7 @@ describe("append-only branch rewind", () => {
 		const fork = await forkHyperchartRun({ runDir, fromSeqId: 3, branchId: "experiment", reason: "preserve B", cwd: root, sourceBranchId: "main" });
 		expect(fork).toMatchObject({ selectedBranchChanged: false, started: false, branch: { branchId: "experiment", headSeqId: 3 } });
 		const bytesBeforeCheckout = await readFile(join(runDir, "log.jsonl"), "utf8");
-		await store.read();
+		await store.listBranches();
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).toBe(bytesBeforeCheckout);
 
 		const rewind = await rewindHyperchartRun({ runDir, branchId: "main", seqId: 3, mode: "after", cwd: root });
@@ -58,10 +58,10 @@ describe("append-only branch rewind", () => {
 		const continuationStore = new JsonlLogStore(join(runDir, "log.jsonl"));
 		const oldTailContinuation = await continuationStore.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
 		expect(oldTailContinuation[0]).toMatchObject({ seqId: 9, parentId: 4, branchId: "main" });
-		const normalized = await continuationStore.read();
-		expect(normalized.records.map((record) => record.seqId)).toEqual([2, 3, 4, 7, 9]);
-		expect(normalized.ancestry("main").map((record) => record.seqId)).toEqual([2, 3, 4, 9]);
-		expect(normalized.ancestry("experiment").map((record) => record.seqId)).toEqual([2, 3]);
+		const storedEntries = (await readFile(join(runDir, "log.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { kind?: string; seqId: number });
+		expect(storedEntries.filter((entry) => entry.kind !== "branch").map((record) => record.seqId)).toEqual([2, 3, 4, 7, 9]);
+		expect((await continuationStore.readAncestry("main")).map((record) => record.seqId)).toEqual([2, 3, 4, 9]);
+		expect((await continuationStore.readAncestry("experiment")).map((record) => record.seqId)).toEqual([2, 3]);
 		expect((await listHyperchartBranches(runDir)).map((branch) => branch.branchId)).toEqual(["main", "experiment"]);
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).not.toContain("rewind-backups");
 	});

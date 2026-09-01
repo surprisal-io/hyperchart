@@ -218,7 +218,7 @@ export class ChartRuntime implements Runtime {
 	}
 
 	async loadLogs(): Promise<readonly DurableLogRecord[]> {
-		return this.options.logStore.readAll();
+		return this.options.logStore.readAncestry(this.branchId);
 	}
 
 	dispose(): Promise<void> {
@@ -296,7 +296,7 @@ export class ChartRuntime implements Runtime {
 		if (store === undefined || reads === undefined || reads.length === 0) return;
 		let pins: ReadonlyMap<string, ArtifactPin> | undefined;
 		for (const artifact of reads) {
-			pins ??= latestPinsByPath(this.options.logStore.snapshot().ancestry(this.branchId));
+			pins ??= latestPinsByPath(await this.options.logStore.readAncestry(this.branchId));
 			const pin = pins.get(artifact.path);
 			if (pin === undefined) continue;
 			const path = renderedArtifactPath(artifact, this.options.workDir);

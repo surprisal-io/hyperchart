@@ -2,7 +2,6 @@ import { basename, resolve } from "node:path";
 import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_events.js";
 import { loadRunMeta } from "./run_dir.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
-import type { NormalizedRunLog } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
 
 export type ForkBranchOptions = Readonly<{
@@ -27,8 +26,7 @@ export type ForkBranchResult = Readonly<{
 export async function listHyperchartBranches(runDir: string): Promise<readonly BranchHead[]> {
 	const store = await openRunLogStore(runDir);
 	try {
-		const normalized = await store.read();
-		return [...normalized.branches.values()].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
+		return [...await store.listBranches()].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
 	} finally {
 		await store.close();
 	}
@@ -37,8 +35,7 @@ export async function listHyperchartBranches(runDir: string): Promise<readonly B
 export async function getHyperchartBranch(runDir: string, branchId: BranchId): Promise<BranchHead> {
 	const store = await openRunLogStore(runDir);
 	try {
-		const normalized = await store.read();
-		return normalized.branch(branchId);
+		return store.getBranch(branchId);
 	} finally {
 		await store.close();
 	}
@@ -51,14 +48,13 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 	const store = await openRunLogStore(options.runDir, { access: "writer" });
 	let branch: BranchHead;
 	try {
-		const normalized = await store.read();
-		if (!normalized.recordsBySeqId.has(options.fromSeqId)) {
+		if (await store.getRecord(options.fromSeqId) === undefined) {
 			throw new Error(`No durable log record with seqId ${options.fromSeqId}`);
 		}
-		if (normalized.branches.has(options.branchId)) {
+		if ((await store.listBranches()).some((candidate) => candidate.branchId === options.branchId)) {
 			throw new Error(`Hyperchart branch '${options.branchId}' already exists`);
 		}
-		if (options.sourceBranchId !== undefined) normalized.branch(options.sourceBranchId);
+		if (options.sourceBranchId !== undefined) await store.getBranch(options.sourceBranchId);
 		const metadata: BranchMetadata = {
 			name: options.branchId,
 			...(options.reason === undefined ? {} : { reason: options.reason }),
@@ -76,10 +72,6 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 		selectedBranchChanged: false,
 		started: false,
 	};
-}
-
-export function branchContainsSeqId(normalized: NormalizedRunLog, branchId: BranchId, seqId: number): boolean {
-	return normalized.ancestry(branchId).some((record) => record.seqId === seqId);
 }
 
 export function assertStoppedRun(runDir: string, operation: string): void {

@@ -2200,7 +2200,7 @@ function historyState(entry: RunHistoryEntry): string {
 async function readRunRecords(runDir: string): Promise<readonly DurableLogRecord[]> {
 	const store = await openRunLogStore(runDir, { access: "read" });
 	try {
-		return await store.readAll();
+		return await store.readAncestry(store.branchId);
 	} finally {
 		await store.close();
 	}

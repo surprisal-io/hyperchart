@@ -6,7 +6,7 @@ import { templatePath } from "../../core/paths.js";
 import { explainReplay } from "../../core/replay_check.js";
 import type { ChartAst, StatePath } from "../../core/types.js";
 import { assertRunOwnership, assertStoppedRun } from "./branches.js";
-import type { NormalizedRunLog } from "./log_store.js";
+import type { RunLogReader } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import { loadRunMeta } from "./run_dir.js";
 import { patchRunStatus } from "./run_status.js";
@@ -61,15 +61,14 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	let previousHeadSeqId: number | null;
 	let preservedRecords: number;
 	try {
-		const normalized = await store.read();
-		const previous = normalized.branch(opts.branchId);
-		match = findRewindMatch(normalized, opts, parsed.ast);
+		const previous = await store.getBranch(opts.branchId);
+		match = await findRewindMatch(store, opts, parsed.ast);
 		if (match.targetHeadSeqId === previous.headSeqId) {
 			throw new Error(`Rewind would not move branch '${opts.branchId}'; choose a different target`);
 		}
 		await store.moveBranch(opts.branchId, match.targetHeadSeqId);
 		previousHeadSeqId = previous.headSeqId;
-		preservedRecords = normalized.records.length;
+		preservedRecords = await store.countRecords();
 	} finally {
 		await store.close();
 	}
@@ -95,13 +94,13 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	};
 }
 
-/** Resolve a selector once against normalized storage. Explicit seqId may target a sibling tip. */
-export function findRewindMatch(
-	normalized: NormalizedRunLog,
+/** Resolve a selector once against storage. Explicit seqId may target a sibling tip. */
+export async function findRewindMatch(
+	reader: RunLogReader,
 	opts: Pick<RewindOptions, "branchId" | "state" | "seqId" | "to" | "mode">,
 	ast: ChartAst,
-): RewindMatch {
-	const ancestry = normalized.ancestry(opts.branchId);
+): Promise<RewindMatch> {
+	const ancestry = await reader.readAncestry(opts.branchId);
 	if (opts.to === "compatible") {
 		const explanation = explainReplay(ast, ancestry);
 		const broken = explanation.broken;
@@ -124,7 +123,7 @@ export function findRewindMatch(
 		};
 	}
 	if (opts.seqId !== undefined) {
-		const record = normalized.recordsBySeqId.get(opts.seqId);
+		const record = await reader.getRecord(opts.seqId);
 		if (record === undefined) throw new Error(`No durable log record with seqId ${opts.seqId}`);
 		const index = ancestry.findIndex((candidate) => candidate.seqId === opts.seqId);
 		return {

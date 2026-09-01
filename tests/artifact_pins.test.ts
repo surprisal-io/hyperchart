@@ -80,7 +80,7 @@ async function run(ast: ChartAst, workDir: string, options: Options = {}) {
 	});
 	try {
 		const state = await start(runtime);
-		return { state, log: await logStore.readAll() };
+		return { state, log: await logStore.readAncestry(logStore.branchId) };
 	} finally {
 		await runtime.dispose();
 	}

@@ -122,9 +122,9 @@ describePg("atomic runner interaction commit", () => {
       },
       () => new NoopExecutor(),
     );
-    expect(controller.durableBranchIds).toEqual(["main"]);
+    expect(await controller.durableBranchIds()).toEqual(["main"]);
     expect(controller.liveBranchIds).toEqual(["main"]);
-    expect(controller.activeBranchIds).toEqual([]);
+    expect(await controller.activeBranchIds()).toEqual([]);
 
     const committed = await controller.forkAndCommitUserInteraction(
       {
@@ -146,7 +146,7 @@ describePg("atomic runner interaction commit", () => {
     );
     expect(committed.participant).toBe("claim-committed");
     expect(committed.branch.branchId).toBe("experiment");
-    expect(controller.durableBranchIds).toEqual(["main", "experiment"]);
+    expect(await controller.durableBranchIds()).toEqual(["main", "experiment"]);
     // The commit is durable before admission; a restart may safely admit this exact branch.
     const aggregate = controller.start();
     const outcome = await controller.startBranch("experiment");
@@ -159,7 +159,7 @@ describePg("atomic runner interaction commit", () => {
       runId: f.runId,
       branchId: "experiment",
     });
-    const ancestry = await reader.readAll();
+    const ancestry = await reader.readAncestry(reader.branchId);
     expect(ancestry.at(-1)).toMatchObject({
       type: "user_interaction",
       kind: "resolved",
