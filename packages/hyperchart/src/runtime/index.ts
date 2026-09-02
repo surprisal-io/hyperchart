@@ -59,7 +59,15 @@ export type {
 export { MemoryLogStore } from "./generic/memory_log_store.js";
 export { openRunLogStore } from "./generic/log_store_factory.js";
 export type { OpenRunLogStoreOptions } from "./generic/log_store_factory.js";
-export { JOURNAL_CHANNEL, JOURNAL_TABLE, PostgresLogStore, supportsSqlTransactions } from "./generic/postgres_log_store.js";
+export {
+	PROJECTION_CHECKPOINT_INTERVAL,
+	PROJECTOR_VERSION,
+	chartAstDigest,
+	loadBranchProjection,
+	projectionContractForAst,
+} from "./generic/projection_loader.js";
+export type { LoadedBranchProjection, ProjectionCheckpoint, ProjectionContract } from "./generic/projection_loader.js";
+export { JOURNAL_CHANNEL, JOURNAL_TABLE, PROJECTION_CHECKPOINT_TABLE, PostgresLogStore, supportsSqlTransactions } from "./generic/postgres_log_store.js";
 export type { OpenPostgresLogStoreOptions, PostgresLogAccess, PostgresRunTransaction, PostgresForkAndCommitInput, PgClientLike, PgQueryResult, SqlCommitParticipant, SqlCommitTransaction, SqlTransactionalRunLogStore } from "./generic/postgres_log_store.js";
 export {
 	forkHyperchartRun,

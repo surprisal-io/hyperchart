@@ -68,6 +68,20 @@ export type ReplayExplanation = Readonly<{
 	unpinned: readonly ReplayUnpinnedRecord[];
 }>;
 
+export type ReplayRecordDiagnostics = Readonly<{
+	stale: readonly ReplayStaleRecord[];
+	unpinned: readonly ReplayUnpinnedRecord[];
+}>;
+
+/** @internal Streaming compatibility diagnostics evaluated against the projection prefix. */
+export function replayRecordDiagnostics(ast: ChartAst, projection: BranchProjection, index: number, record: DurableLogRecord): ReplayRecordDiagnostics {
+	const unpinned = unpinnedRecordFor(ast, index, record);
+	return {
+		stale: staleRecordsFor(ast, projection, index, record),
+		unpinned: unpinned === undefined ? [] : [unpinned],
+	};
+}
+
 export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): ReplayExplanation {
 	const projection = createBranchProjection(ast);
 	const skipped: ReplaySkippedRecord[] = [];
@@ -76,9 +90,9 @@ export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): 
 	for (let index = 0; index < log.length; index++) {
 		const record = log[index];
 		if (record === undefined) continue;
-		stale.push(...staleRecordsFor(ast, projection, index, record));
-		const unpinnedRecord = unpinnedRecordFor(ast, index, record);
-		if (unpinnedRecord !== undefined) unpinned.push(unpinnedRecord);
+		const diagnostics = replayRecordDiagnostics(ast, projection, index, record);
+		stale.push(...diagnostics.stale);
+		unpinned.push(...diagnostics.unpinned);
 		const skippedForRecord: ProjectionSkippedRecord[] = [];
 		try {
 			projectBranch(projection, ast, [record], [], skippedForRecord);

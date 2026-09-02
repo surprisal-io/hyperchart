@@ -19,10 +19,12 @@ import {
 	type HistorySnapshot,
 	type HistorySubject,
 	type MapVisitHistoryItem,
+	type ProjectionCheckpointLookup,
 	type RunLogStore,
 	type RunMeta,
 	type RespondToUserInteractionInput,
 	type StateVisitHistoryItem,
+	type StoredProjectionCheckpoint,
 	type UserInteractionResponseCommit,
 } from "./log_store.js";
 import type { StatePath } from "../../core/types.js";
@@ -31,6 +33,7 @@ import { prepareUserInteractionResponse } from "./user_interaction_admission.js"
 export const JOURNAL_TABLE = "hyperchart_journal";
 export const JOURNAL_CHANNEL = "hyperchart_journal";
 export const RUN_META_TABLE = "hyperchart_run_meta";
+export const PROJECTION_CHECKPOINT_TABLE = "hyperchart_projection_checkpoint";
 const JOURNAL_DDL = `CREATE TABLE IF NOT EXISTS ${JOURNAL_TABLE} (
   run_id text NOT NULL,
   seq bigint NOT NULL,
@@ -72,6 +75,19 @@ const RUN_META_DDL = `CREATE TABLE IF NOT EXISTS ${RUN_META_TABLE} (
       AND chart_id IS NOT NULL AND created_at IS NOT NULL)
   )
 )`;
+const PROJECTION_CHECKPOINT_DDL = `CREATE TABLE IF NOT EXISTS ${PROJECTION_CHECKPOINT_TABLE} (
+  run_id text NOT NULL,
+  checkpoint_id text NOT NULL,
+  head_seq_id bigint,
+  projector_version integer NOT NULL,
+  ast_digest text NOT NULL,
+  projection jsonb NOT NULL,
+  created_at_ms bigint NOT NULL,
+  PRIMARY KEY (run_id, checkpoint_id),
+  FOREIGN KEY (run_id, head_seq_id) REFERENCES ${JOURNAL_TABLE}(run_id, seq)
+)`;
+const PROJECTION_CHECKPOINT_IDENTITY_DDL = `CREATE UNIQUE INDEX IF NOT EXISTS hyperchart_projection_identity_idx
+  ON ${PROJECTION_CHECKPOINT_TABLE}(run_id, COALESCE(head_seq_id, -1), projector_version, ast_digest)`;
 const JOURNAL_PARENT_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_journal_parent_idx
   ON ${JOURNAL_TABLE}(run_id, parent_id) WHERE kind = 'record'`;
 const JOURNAL_BRANCH_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_journal_branch_latest_idx
@@ -119,6 +135,7 @@ export type PostgresRunTransaction = SqlCommitTransaction & Readonly<{
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
 	respondToUserInteraction(branchId: BranchId, input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit>;
+	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void>;
 }>;
 export type PostgresForkAndCommitInput = Readonly<{
 	sourceBranchId: BranchId;
@@ -134,7 +151,10 @@ export interface SqlTransactionalRunLogStore extends RunLogStore {
 }
 
 export class PostgresLogStore implements RunLogStore {
-	private constructor(private readonly journal: SharedPgJournal, readonly branchId: BranchId) {}
+	readonly canSaveProjectionCheckpoints: boolean;
+	private constructor(private readonly journal: SharedPgJournal, readonly branchId: BranchId) {
+		this.canSaveProjectionCheckpoints = journal.access === "writer";
+	}
 
 	static async open(options: OpenPostgresLogStoreOptions): Promise<PostgresLogStore> {
 		const access = options.access ?? "read";
@@ -144,6 +164,7 @@ export class PostgresLogStore implements RunLogStore {
 			if (access === "writer") {
 				await ensureJournalTable(client);
 				await ensureRunMetaTable(client);
+				await ensureProjectionCheckpointTable(client);
 				const locked = await client.query("SELECT pg_try_advisory_lock(hashtextextended('hyperchart:run:' || $1, 0)) AS locked", [options.runId]);
 				if (locked.rows[0]?.locked !== true) throw new Error(`Another live writer holds Hyperchart run '${options.runId}' in Postgres; stop it before writing`);
 			}
@@ -199,6 +220,43 @@ export class PostgresLogStore implements RunLogStore {
 		await this.awaitReadable();
 		return countRecordsDirect(this.journal.client, this.journal.runId, this.journal.access);
 	}
+	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+		await this.awaitReadable();
+		const rows = await queryRows(this.journal.client, this.journal.access,
+			`SELECT checkpoint_id, head_seq_id, projector_version, ast_digest, projection, created_at_ms
+			   FROM ${PROJECTION_CHECKPOINT_TABLE}
+			  WHERE run_id = $1 AND head_seq_id IS NOT DISTINCT FROM $2
+			    AND projector_version = $3 AND ast_digest = $4
+			  ORDER BY created_at_ms DESC LIMIT 1`,
+			[this.journal.runId, input.targetHeadSeqId, input.projectorVersion, input.astDigest]);
+		return rows[0] === undefined ? undefined : decodeCheckpointRow(rows[0]);
+	}
+	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+		await this.awaitReadable();
+		const rows = await queryRows(this.journal.client, this.journal.access,
+			`WITH RECURSIVE ancestry AS (
+			   SELECT seq, parent_id, 0 AS depth FROM ${JOURNAL_TABLE}
+			    WHERE run_id = $1 AND seq = $2 AND kind = 'record'
+			   UNION ALL
+			   SELECT parent.seq, parent.parent_id, child.depth + 1
+			     FROM ancestry child JOIN ${JOURNAL_TABLE} parent
+			       ON parent.run_id = $1 AND parent.seq = child.parent_id AND parent.kind = 'record'
+			 )
+			 SELECT checkpoint_id, head_seq_id, projector_version, ast_digest, projection, created_at_ms
+			   FROM ${PROJECTION_CHECKPOINT_TABLE} checkpoint
+			   LEFT JOIN ancestry ON ancestry.seq = checkpoint.head_seq_id
+			  WHERE checkpoint.run_id = $1 AND checkpoint.projector_version = $3 AND checkpoint.ast_digest = $4
+			    AND (checkpoint.head_seq_id IS NULL OR ancestry.seq IS NOT NULL)
+			  ORDER BY COALESCE(ancestry.depth, 2147483647), checkpoint.created_at_ms DESC LIMIT 1`,
+			[this.journal.runId, input.targetHeadSeqId, input.projectorVersion, input.astDigest]);
+		return rows[0] === undefined ? undefined : decodeCheckpointRow(rows[0]);
+	}
+	discardProjectionCheckpoint(checkpointId: string): Promise<void> {
+		return this.transaction(async (tx) => { await tx.query(`DELETE FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 AND checkpoint_id = $2`, [this.journal.runId, checkpointId]); });
+	}
+	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> {
+		return this.transaction((tx) => tx.saveProjectionCheckpoint(checkpoint));
+	}
 
 	private async readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): Promise<HistoryChunk<DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem>> {
 		const ancestry = await this.ancestryForSnapshot(snapshot);
@@ -249,6 +307,7 @@ export class PostgresLogStore implements RunLogStore {
 			const { client, runId } = this.journal;
 			try {
 				await client.query("BEGIN");
+				await client.query(`DELETE FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query("COMMIT");
@@ -390,6 +449,7 @@ class TransactionImpl implements PostgresRunTransaction {
 		return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
 	}
 	containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> { return containsInAncestryDirect(this.client, this.runId, branchId, seqId, "writer"); }
+	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> { return saveCheckpointDirect(this.client, this.runId, checkpoint); }
 	private async allocateOne(): Promise<number> { return this.allocate(1); }
 	private async allocate(count: number): Promise<number> {
 		if (!Number.isSafeInteger(count) || count <= 0) throw new Error(`Invalid Hyperchart sequence allocation size ${count}`);
@@ -441,6 +501,11 @@ async function connectPg(dsn: string, onWarn: (message: string) => void): Promis
 async function ensureRunMetaTable(client: PgClientLike): Promise<void> {
 	try { await client.query(RUN_META_DDL); }
 	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(RUN_META_DDL); }
+}
+async function ensureProjectionCheckpointTable(client: PgClientLike): Promise<void> {
+	try { await client.query(PROJECTION_CHECKPOINT_DDL); }
+	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(PROJECTION_CHECKPOINT_DDL); }
+	await client.query(PROJECTION_CHECKPOINT_IDENTITY_DDL);
 }
 async function ensureJournalTable(client: PgClientLike): Promise<void> {
 	try { await client.query(JOURNAL_DDL); }
@@ -565,6 +630,28 @@ async function hasAnyEntryDirect(client: PgClientLike, runId: string, access: Po
 async function countRecordsDirect(client: PgClientLike, runId: string, access: PostgresLogAccess): Promise<number> {
 	const rows = await queryRows(client, access, `SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND kind = 'record'`, [runId]);
 	return rows.length === 0 ? 0 : pgNumber(rows[0]?.count);
+}
+async function saveCheckpointDirect(client: PgClientLike, runId: string, checkpoint: StoredProjectionCheckpoint): Promise<void> {
+	if (checkpoint.checkpointId.length === 0 || !Number.isSafeInteger(checkpoint.projectorVersion) || checkpoint.projectorVersion <= 0 || checkpoint.astDigest.length === 0 || !Number.isSafeInteger(checkpoint.createdAt)) {
+		throw new Error("Invalid opaque Hyperchart projection checkpoint coordinates");
+	}
+	await client.query(
+		`INSERT INTO ${PROJECTION_CHECKPOINT_TABLE}
+		   (run_id, checkpoint_id, head_seq_id, projector_version, ast_digest, projection, created_at_ms)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+		 ON CONFLICT DO NOTHING`,
+		[runId, checkpoint.checkpointId, checkpoint.headSeqId, checkpoint.projectorVersion, checkpoint.astDigest, JSON.stringify(checkpoint.payload), checkpoint.createdAt],
+	);
+}
+function decodeCheckpointRow(row: Record<string, unknown>): StoredProjectionCheckpoint {
+	return {
+		checkpointId: row.checkpoint_id as string,
+		headSeqId: row.head_seq_id === null ? null : pgNumber(row.head_seq_id),
+		projectorVersion: pgNumber(row.projector_version),
+		astDigest: row.ast_digest as string,
+		payload: row.projection,
+		createdAt: pgNumber(row.created_at_ms),
+	};
 }
 async function queryRows(client: PgClientLike, access: PostgresLogAccess, text: string, values: readonly unknown[]): Promise<Record<string, unknown>[]> {
 	try { return (await client.query(text, values)).rows; }

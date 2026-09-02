@@ -29,6 +29,29 @@ export const DEFAULT_BRANCH_ID: BranchId = "main";
 export const HISTORY_READ_ITEMS = 100;
 export const PROJECTION_READ_RECORDS = 500;
 
+/** Opaque derived projection cache row. Storage must not interpret payload. */
+export type StoredProjectionCheckpoint = Readonly<{
+	checkpointId: string;
+	headSeqId: number | null;
+	projectorVersion: number;
+	astDigest: string;
+	payload: unknown;
+	createdAt: number;
+}>;
+export type ProjectionCheckpointLookup = Readonly<{
+	targetHeadSeqId: number | null;
+	projectorVersion: number;
+	astDigest: string;
+}>;
+/** @internal AST-free checkpoint repository consumed only by projection_loader. */
+export interface ProjectionCheckpointStore extends RunHistoryStore {
+	readonly canSaveProjectionCheckpoints: boolean;
+	loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined>;
+	findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined>;
+	discardProjectionCheckpoint(checkpointId: string): Promise<void>;
+	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void>;
+}
+
 export type HistorySnapshot = Readonly<{ branchId: BranchId; headSeqId: number | null }>;
 /** Opaque versioned cursor bound to an exact snapshot, typed subject, boundary, and direction. */
 export type HistoryCursor = string;
@@ -439,7 +462,7 @@ export interface LogStore extends RunLogReader {
 }
 
 /** Full run-journal handle: branch entries plus lifecycle, shared across branch handles. */
-export interface RunLogStore extends LogStore {
+export interface RunLogStore extends LogStore, ProjectionCheckpointStore {
 	forBranch(branchId: BranchId): RunLogStore;
 	readRunMeta(): Promise<RunMeta | undefined>;
 	writeRunMeta(meta: RunMeta): Promise<void>;
@@ -483,17 +506,20 @@ export function materializeJournal(values: readonly unknown[]): MaterializedRunL
 type SharedJournalState = {
 	filePath: string;
 	index?: MaterializedRunLogIndex;
+	/** Disposable process-local projection cache. Never persisted beside JSONL. */
+	projectionCheckpoints: StoredProjectionCheckpoint[];
 	/** Exact durable byte boundary represented by the index. Shared branch handles advance it together. */
 	expectedByteLength?: number;
 	fullReadCount: number;
 };
 
 function newJournal(filePath: string): SharedJournalState {
-	return { filePath: resolve(filePath), fullReadCount: 0 };
+	return { filePath: resolve(filePath), projectionCheckpoints: [], fullReadCount: 0 };
 }
 
 export class JsonlLogStore implements RunLogStore {
 	private journal: SharedJournalState;
+	readonly canSaveProjectionCheckpoints = true;
 
 	constructor(
 		readonly filePath: string,
@@ -592,6 +618,27 @@ export class JsonlLogStore implements RunLogStore {
 		return this.containsInHistory({ headSeqId: snapshot.headSeqId, seqId });
 	}
 	async countRecords(): Promise<number> { return this.index().recordsBySeqId.size; }
+	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+		const checkpoint = this.journal.projectionCheckpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest);
+		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
+	}
+	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+		const ancestry = this.index().ancestryTo(input.targetHeadSeqId);
+		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
+		const checkpoint = this.journal.projectionCheckpoints
+			.filter((candidate) => candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
+			.sort((left, right) => checkpointDistance(left, distance) - checkpointDistance(right, distance) || right.createdAt - left.createdAt)[0];
+		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
+	}
+	async discardProjectionCheckpoint(checkpointId: string): Promise<void> {
+		const index = this.journal.projectionCheckpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
+		if (index >= 0) this.journal.projectionCheckpoints.splice(index, 1);
+	}
+	async saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> {
+		const duplicate = this.journal.projectionCheckpoints.find((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.projectorVersion === checkpoint.projectorVersion && candidate.astDigest === checkpoint.astDigest);
+		if (duplicate !== undefined) return;
+		this.journal.projectionCheckpoints.push(structuredClone(checkpoint));
+	}
 	async close(): Promise<void> {}
 	async readRunMeta(): Promise<RunMeta | undefined> {
 		const path = join(dirname(this.journal.filePath), "meta.json");
@@ -740,6 +787,10 @@ function enqueueJsonlWrite<T>(filePath: string, task: () => Promise<T>): Promise
 export function assertDurableRecordDraft(value: DurableRecordDraft): void {
 	if (!isRecord(value) || typeof value.type !== "string") throw new Error("Durable record draft must contain a machine record type");
 	if ("seqId" in value || "parentId" in value || "branchId" in value || "timestamp" in value) throw new Error("Durable record coordinates are assigned only by the run writer");
+}
+
+function checkpointDistance(checkpoint: StoredProjectionCheckpoint, distance: ReadonlyMap<number, number>): number {
+	return checkpoint.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(checkpoint.headSeqId) ?? Number.MAX_SAFE_INTEGER;
 }
 
 function requireBranchId(value: unknown, coordinate: string): BranchId {

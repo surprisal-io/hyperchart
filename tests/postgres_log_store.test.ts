@@ -11,11 +11,13 @@ import {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
 	PostgresLogStore,
+	PROJECTION_CHECKPOINT_TABLE,
 	RUN_META_TABLE,
 } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
 import { deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { createPiHyperchartHost } from "../packages/pi-hyperchart/src/runtime/pi/host_adapter.js";
+import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/runtime/generic/projection_loader.js";
 
 const dsn = process.env.HYPERCHART_PG_DSN;
 const describePg = dsn === undefined ? describe.skip : describe;
@@ -108,6 +110,7 @@ afterAll(async () => {
 	const { Client } = await import("pg");
 	const client = new Client({ connectionString: dsn });
 	await client.connect();
+	await client.query(`DELETE FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query("DELETE FROM hyperchart_test_claims WHERE run_id = ANY($1)", [usedRunIds]).catch(() => {});
@@ -246,6 +249,62 @@ describePg("PostgresLogStore", () => {
 			"run_id", "seq", "kind", "branch_id", "parent_id", "head_seq_id",
 			"record_type", "payload", "metadata", "committed_at_ms",
 		]);
+	});
+
+	it("persists nearest compatible checkpoints and restores a bounded replay tail", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		const chartAst = userAst();
+		const contract = projectionContractForAst(chartAst);
+		const prefix = await store.appendDrafts(Array.from({ length: 520 }, (_, index) => ({ type: "args", args: { index } })));
+		const cold = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
+		expect(cold.replayedRecords).toBe(520);
+		expect(cold.replayBatches).toBe(2);
+		await store.createBranch("fork", prefix.at(-1)!.seqId);
+		const fork = store.forBranch("fork");
+		await fork.appendDrafts(Array.from({ length: 31 }, (_, index) => ({ type: "args", args: { index: 520 + index } })));
+		const restored = await loadBranchProjection({ ast: chartAst, branchId: "fork", store: fork, contract });
+		expect(restored.checkpointHeadSeqId).toBe(prefix.at(-1)!.seqId);
+		expect(restored.replayedRecords).toBe(31);
+		const rows = await store.transaction((tx) => tx.query(`SELECT head_seq_id, projector_version, ast_digest FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY created_at_ms`, [runId]));
+		expect(rows.rows).toHaveLength(2);
+		expect(rows.rows.every((row) => row.projector_version === 1 && row.ast_digest === contract.astDigest)).toBe(true);
+	});
+
+	it("falls back from malformed, non-ancestral, and incompatible PostgreSQL checkpoints", async () => {
+		const runId = newRunId(); const store = await openWriter(runId); await store.initializeRootBranch();
+		const chartAst = userAst(); const contract = projectionContractForAst(chartAst);
+		const records = await store.appendDrafts([argsDraft({ index: 1 }), argsDraft({ index: 2 })]);
+		await store.createBranch("sibling", records[0]!.seqId);
+		const [siblingHead] = await store.forBranch("sibling").appendDrafts([argsDraft({ sibling: true })]);
+		await store.saveProjectionCheckpoint({ checkpointId: "sibling-only", headSeqId: siblingHead!.seqId, ...contract, payload: { schemaVersion: 1, projection: {} }, createdAt: 1 });
+		expect(await store.findNearestProjectionCheckpoint({ targetHeadSeqId: records.at(-1)!.seqId, ...contract })).toBeUndefined();
+		await store.saveProjectionCheckpoint({ checkpointId: "incompatible", headSeqId: records.at(-1)!.seqId, projectorVersion: contract.projectorVersion + 1, astDigest: contract.astDigest, payload: {}, createdAt: 2 });
+		await store.saveProjectionCheckpoint({ checkpointId: "malformed", headSeqId: records.at(-1)!.seqId, ...contract, payload: { schemaVersion: 1, projection: { seqId: records.at(-1)!.seqId, pendingActions: [{}] } }, createdAt: 3 });
+		const cold = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
+		expect(cold.replayedRecords).toBe(2);
+		expect(cold.projection.args).toEqual({ index: 2 });
+		const warm = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
+		expect(warm.replayedRecords).toBe(0);
+		const rows = await store.transaction((tx) => tx.query(`SELECT checkpoint_id FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY checkpoint_id`, [runId]));
+		expect(rows.rows.map((row) => row.checkpoint_id)).not.toContain("malformed");
+		expect(rows.rows.map((row) => row.checkpoint_id)).toContain("incompatible");
+	});
+
+	it("rolls back checkpoint and journal rows together in a managed transaction", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		const chartAst = userAst(); const contract = projectionContractForAst(chartAst);
+		await expect(store.transaction(async (tx) => {
+			const [record] = await tx.appendDrafts("main", [argsDraft({ rolledBack: true })]);
+			await tx.saveProjectionCheckpoint({ checkpointId: "rolled-back", headSeqId: record!.seqId, ...contract, payload: { schemaVersion: 1, projection: {} }, createdAt: Date.now() });
+			throw new Error("rollback checkpoint");
+		})).rejects.toThrow(/rollback checkpoint/);
+		expect(await store.countRecords()).toBe(0);
+		const rows = await store.transaction((tx) => tx.query(`SELECT COUNT(*)::int AS count FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1`, [runId]));
+		expect(Number(rows.rows[0]?.count)).toBe(0);
 	});
 
 	it("opens and appends without selecting the whole journal", async () => {

@@ -210,7 +210,7 @@ These helpers describe inspection configuration. Runtime launch strictness and c
 
 ## Log stores
 
-`RunLogStore` owns the journal, branch heads, and immutable run metadata. Writes use async `appendDrafts()`; the writer assigns durable coordinates and returns the committed facts. JSONL owns `meta.json` plus `log.jsonl`; PostgreSQL owns `hyperchart_run_meta` plus `hyperchart_journal`. `run_dir.ts` performs lifecycle orchestration and never selects a backend.
+`RunLogStore` owns the journal, branch heads, immutable run metadata, and opaque disposable projection-cache rows. Writes use async `appendDrafts()`; the writer assigns durable coordinates and returns the committed facts. JSONL owns `meta.json` plus `log.jsonl`; PostgreSQL owns `hyperchart_run_meta`, `hyperchart_journal`, and `hyperchart_projection_checkpoint`. `run_dir.ts` performs lifecycle orchestration and never selects a backend.
 
 ### Snapshot-pinned history
 
@@ -251,6 +251,20 @@ Projection replay is a package-internal oldest-first `AsyncIterable`; each yield
 The PostgreSQL Phase 1 implementation deliberately computes these bounded results by traversing and filtering the captured journal ancestry. This is temporary correctness scaffolding and may consume work/memory proportional to ancestry. The public contracts, snapshots, cursors, result caps, and replay-batch caps are final; the deferred version-order predecessor catalog will replace only backend internals. JSONL continues to use its complete private in-memory index and writes no index sidecar.
 
 `JsonlLogStore` trusts parsed entries, fails malformed/incomplete JSON without changing the file, shares one private index across `forBranch()` handles, and rejects stale byte boundaries. `MemoryLogStore` provides the same history contract for tests and ephemeral execution.
+
+### Versioned projection checkpoints
+
+```ts
+type ProjectionContract = { projectorVersion: number; astDigest: string };
+
+const contract = projectionContractForAst(ast);
+const loaded = await loadBranchProjection({ ast, branchId, store, contract });
+// loaded.projection is synchronous machine-ready state for the captured head.
+```
+
+`astDigest` is SHA-256 over canonical normalized `ChartAst` JSON. `PROJECTOR_VERSION` identifies the current serialized `BranchProjection` semantics. The loader captures one branch head, accepts only an exact-contract checkpoint whose head still exists in that ancestry and whose versioned payload decodes, then streams the remaining ancestry oldest-first in fixed batches of at most 500. It applies `projectBranch()` and synchronous `compactProjection()` outside storage. A malformed, stale, or incompatible checkpoint is ignored; the durable journal is neither validated nor repaired. A failed rebuild saves nothing. Replay prefixes with stale, skipped, or unpinned diagnostics are also left uncached so a later replay gate cannot accidentally lose those findings.
+
+PostgreSQL stores immutable opaque payloads in `hyperchart_projection_checkpoint`; its managed transaction exposes `saveProjectionCheckpoint()` so later orchestration can commit due journal/branch/checkpoint work atomically. JSONL and memory checkpoints are process-local only. JSONL creates no checkpoint or index sidecar and reopening the file rebuilds from durable facts. `PROJECTION_CHECKPOINT_INTERVAL = 512` is the Phase 4 policy target, not an active append cadence: Phase 3's loader saves only the fully reached head when writable. Startup/restart, interval, fork/rewind, and clean-shutdown orchestration remain Phase 4 work.
 
 ## Script execution
 
@@ -572,7 +586,10 @@ readUserInteractionReceipt, removeUserInteractionReceipt,
 validateAndPersistUserInteractionResponse
 DEFAULT_BRANCH_ID, collectBranches, HistoryCursorError,
 JsonlLogStore, MemoryLogStore, PostgresLogStore, openRunLogStore,
-JOURNAL_CHANNEL, JOURNAL_TABLE, supportsSqlTransactions,
+JOURNAL_CHANNEL, JOURNAL_TABLE, PROJECTION_CHECKPOINT_TABLE, supportsSqlTransactions,
+PROJECTOR_VERSION, PROJECTION_CHECKPOINT_INTERVAL,
+chartAstDigest, projectionContractForAst, loadBranchProjection,
+ProjectionContract, ProjectionCheckpoint, LoadedBranchProjection,
 LogStore, RunHistoryStore, RunLogStore,
 HistorySnapshot, HistoryCursor, HistorySubject, HistoryChunk,
 BranchListCursor, BranchListChunk,

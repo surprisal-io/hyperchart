@@ -18,6 +18,8 @@ import {
 	type HistorySubject,
 	type LogStore,
 	type MapVisitHistoryItem,
+	type ProjectionCheckpointLookup,
+	type StoredProjectionCheckpoint,
 	cursorAtItems,
 	decodeBranchListCursor,
 	encodeBranchListCursor,
@@ -34,7 +36,9 @@ import { prepareUserInteractionResponse } from "./user_interaction_admission.js"
 
 export class MemoryLogStore implements LogStore {
 	private readonly index;
+	private readonly projectionCheckpoints: StoredProjectionCheckpoint[] = [];
 	private writeChain: Promise<void> = Promise.resolve();
+	readonly canSaveProjectionCheckpoints = true;
 
 	constructor(
 		entries: readonly StorageEntry[] | undefined = undefined,
@@ -91,6 +95,26 @@ export class MemoryLogStore implements LogStore {
 	async readAncestry(branchId: BranchId): Promise<readonly DurableLogRecord[]> { return this.index.entries.length === 0 ? [] : this.index.ancestry(branchId); }
 	async containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> { return this.containsInHistory({ headSeqId: this.index.branch(branchId).headSeqId, seqId }); }
 	async countRecords(): Promise<number> { return this.index.recordsBySeqId.size; }
+	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+		const checkpoint = this.projectionCheckpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest);
+		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
+	}
+	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+		const ancestry = this.index.ancestryTo(input.targetHeadSeqId);
+		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
+		const checkpoint = this.projectionCheckpoints
+			.filter((candidate) => candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
+			.sort((left, right) => (left.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(left.headSeqId)!) - (right.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(right.headSeqId)!) || right.createdAt - left.createdAt)[0];
+		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
+	}
+	async discardProjectionCheckpoint(checkpointId: string): Promise<void> {
+		const index = this.projectionCheckpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
+		if (index >= 0) this.projectionCheckpoints.splice(index, 1);
+	}
+	async saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> {
+		if (this.projectionCheckpoints.some((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.projectorVersion === checkpoint.projectorVersion && candidate.astDigest === checkpoint.astDigest)) return;
+		this.projectionCheckpoints.push(structuredClone(checkpoint));
+	}
 
 	private readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): HistoryChunk<DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem> {
 		return historyChunkFromItems(snapshot, subject, historyItemsForSubject(this.ancestryForSnapshot(snapshot), subject), cursor);
