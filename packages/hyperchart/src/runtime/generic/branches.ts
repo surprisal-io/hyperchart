@@ -3,6 +3,7 @@ import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_ev
 import { loadRunMeta } from "./run_dir.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
 import { openRunLogStore } from "./log_store_factory.js";
+import { collectBranches } from "./log_store.js";
 
 export type ForkBranchOptions = Readonly<{
 	runDir: string;
@@ -26,7 +27,7 @@ export type ForkBranchResult = Readonly<{
 export async function listHyperchartBranches(runDir: string): Promise<readonly BranchHead[]> {
 	const store = await openRunLogStore(runDir);
 	try {
-		return [...await store.listBranches()].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
+		return [...await collectBranches(store)].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
 	} finally {
 		await store.close();
 	}
@@ -51,7 +52,7 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 		if (await store.getRecord(options.fromSeqId) === undefined) {
 			throw new Error(`No durable log record with seqId ${options.fromSeqId}`);
 		}
-		if ((await store.listBranches()).some((candidate) => candidate.branchId === options.branchId)) {
+		if ((await collectBranches(store)).some((candidate) => candidate.branchId === options.branchId)) {
 			throw new Error(`Hyperchart branch '${options.branchId}' already exists`);
 		}
 		if (options.sourceBranchId !== undefined) await store.getBranch(options.sourceBranchId);

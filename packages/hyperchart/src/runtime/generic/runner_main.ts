@@ -11,7 +11,7 @@ import type { MachineState } from "../../core/machine.js";
 import { ChartRuntime } from "./chart_runtime.js";
 import { ArtifactStore } from "./artifact_store.js";
 import { materializeWorkspace } from "./artifact_workspace.js";
-import type { RunLogStore, UserInteractionResponseCommit } from "./log_store.js";
+import { collectBranches, type RunLogStore, type UserInteractionResponseCommit } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import {
 	supportsSqlTransactions,
@@ -737,7 +737,7 @@ export async function createHyperchartRunnerController(
 		const parsed = parseChartModuleSync(config.chartPath, config.exportName === undefined ? {} : { exportName: config.exportName });
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 		const rootStore = await openRunLogStore(config.runDir, { ...(initialBranchIds[0] === undefined ? {} : { branchId: initialBranchIds[0] }), onWarn: (message) => console.warn(message), access: "writer" });
-		const durableBranchIds = (await rootStore.listBranches()).map((branch) => branch.branchId);
+		const durableBranchIds = (await collectBranches(rootStore)).map((branch) => branch.branchId);
 		return new HyperchartRunnerControllerImpl(config, initialBranchIds, attemptId, parsed.ast, parsed.schemaRegistry, rootStore, durableBranchIds, join(config.runDir, "sessions"), buildExecutor);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

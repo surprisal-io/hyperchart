@@ -7,6 +7,7 @@ import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } f
 import type { ActionUID, ChartEvent, SchemaAst } from "../../core/types.js";
 import { loadRunMeta } from "./run_dir.js";
 import { openRunLogStore } from "./log_store_factory.js";
+import { collectBranches } from "./log_store.js";
 import { requestLiveRunnerUserResponse, RunnerControlUnavailableError } from "./runner_control.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
 
@@ -185,7 +186,7 @@ export async function scanOpenUserInteractions(runDir: string, branchId?: Branch
 	const parsed = parseChartForInteractionScan(meta.chartPath, meta.exportName);
 	const store = await openRunLogStore(runDir, { access: "read", ...(branchId === undefined ? {} : { branchId }) });
 	try {
-		const branches = await store.listBranches();
+		const branches = await collectBranches(store);
 		const branchIds = branchId === undefined ? branches.map((branch) => branch.branchId) : [branchId];
 		const result: UserInteractionRequest[] = [];
 		for (const selected of branchIds) {

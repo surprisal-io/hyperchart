@@ -1,6 +1,31 @@
 import { isDeepStrictEqual } from "node:util";
 import { isDurableRecordEntry, type BranchHead, type BranchId, type BranchMetadata, type DurableLogRecord, type DurableRecordDraft, type StorageEntry } from "../../core/durable_events.js";
-import { DEFAULT_BRANCH_ID, assertDurableRecordDraft, type RunLogStore, type RunMeta, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./log_store.js";
+import {
+	DEFAULT_BRANCH_ID,
+	HISTORY_READ_ITEMS,
+	assertDurableRecordDraft,
+	cursorAtItems,
+	decodeBranchListCursor,
+	encodeBranchListCursor,
+	findUserInteractionResponseInAncestry,
+	historyChunkFromItems,
+	historyItemsForSubject,
+	type ActorGenerationHistoryItem,
+	type ActorMessageHistoryItem,
+	type BranchListChunk,
+	type BranchListCursor,
+	type HistoryChunk,
+	type HistoryCursor,
+	type HistorySnapshot,
+	type HistorySubject,
+	type MapVisitHistoryItem,
+	type RunLogStore,
+	type RunMeta,
+	type RespondToUserInteractionInput,
+	type StateVisitHistoryItem,
+	type UserInteractionResponseCommit,
+} from "./log_store.js";
+import type { StatePath } from "../../core/types.js";
 import { prepareUserInteractionResponse } from "./user_interaction_admission.js";
 
 export const JOURNAL_TABLE = "hyperchart_journal";
@@ -128,9 +153,13 @@ export class PostgresLogStore implements RunLogStore {
 
 	forBranch(branchId: BranchId): PostgresLogStore { return new PostgresLogStore(this.journal, branchId); }
 
-	async listBranches(): Promise<readonly BranchHead[]> {
+	async captureSnapshot(branchId: BranchId): Promise<HistorySnapshot> {
+		const branch = await this.getBranch(branchId);
+		return { branchId, headSeqId: branch.headSeqId };
+	}
+	async listBranches(cursor?: BranchListCursor): Promise<BranchListChunk> {
 		await this.awaitReadable();
-		return listBranchesDirect(this.journal.client, this.journal.runId, this.journal.access);
+		return listBranchesDirect(this.journal.client, this.journal.runId, this.journal.access, cursor);
 	}
 	async getBranch(branchId: BranchId): Promise<BranchHead> {
 		await this.awaitReadable();
@@ -140,17 +169,45 @@ export class PostgresLogStore implements RunLogStore {
 		await this.awaitReadable();
 		return findRecordDirect(this.journal.client, this.journal.runId, seqId, this.journal.access);
 	}
+	async containsInHistory(input: { headSeqId: number | null; seqId: number }): Promise<boolean> {
+		await this.awaitReadable();
+		return containsInHistoryDirect(this.journal.client, this.journal.runId, input.headSeqId, input.seqId, this.journal.access);
+	}
+	async readRecords(input: { snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<DurableLogRecord>> { return this.readSubject(input.snapshot, { kind: "records" }, input.cursor) as Promise<HistoryChunk<DurableLogRecord>>; }
+	async readStateVisits(input: { snapshot: HistorySnapshot; state: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<StateVisitHistoryItem>> { return this.readSubject(input.snapshot, { kind: "state-visits", state: input.state }, input.cursor) as Promise<HistoryChunk<StateVisitHistoryItem>>; }
+	async readMapVisits(input: { snapshot: HistorySnapshot; mapPath: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<MapVisitHistoryItem>> { return this.readSubject(input.snapshot, { kind: "map-visits", mapPath: input.mapPath }, input.cursor) as Promise<HistoryChunk<MapVisitHistoryItem>>; }
+	async readActorGenerations(input: { snapshot: HistorySnapshot; logicalOccurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorGenerationHistoryItem>> { return this.readSubject(input.snapshot, { kind: "actor-generations", logicalOccurrence: input.logicalOccurrence }, input.cursor) as Promise<HistoryChunk<ActorGenerationHistoryItem>>; }
+	async readActorMessages(input: { snapshot: HistorySnapshot; occurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorMessageHistoryItem>> { return this.readSubject(input.snapshot, { kind: "actor-messages", occurrence: input.occurrence }, input.cursor) as Promise<HistoryChunk<ActorMessageHistoryItem>>; }
+	async cursorAt(input: { snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined> {
+		const ancestry = await this.ancestryForSnapshot(input.snapshot);
+		return cursorAtItems(input.snapshot, input.subject, historyItemsForSubject(ancestry, input.subject), input.seqId);
+	}
+	async findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
+		await this.awaitReadable();
+		const ancestry = await readAncestryToHeadDirect(this.journal.client, this.journal.runId, input.headSeqId, this.journal.access);
+		return findUserInteractionResponseInAncestry(ancestry, input.gateSeqId);
+	}
 	async readAncestry(branchId: BranchId): Promise<readonly DurableLogRecord[]> {
 		await this.awaitReadable();
 		return readAncestryDirect(this.journal.client, this.journal.runId, branchId, this.journal.access);
 	}
 	async containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> {
-		await this.awaitReadable();
-		return containsInAncestryDirect(this.journal.client, this.journal.runId, branchId, seqId, this.journal.access);
+		const snapshot = await this.captureSnapshot(branchId);
+		return this.containsInHistory({ headSeqId: snapshot.headSeqId, seqId });
 	}
 	async countRecords(): Promise<number> {
 		await this.awaitReadable();
 		return countRecordsDirect(this.journal.client, this.journal.runId, this.journal.access);
+	}
+
+	private async readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): Promise<HistoryChunk<DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem>> {
+		const ancestry = await this.ancestryForSnapshot(snapshot);
+		return historyChunkFromItems(snapshot, subject, historyItemsForSubject(ancestry, subject), cursor);
+	}
+	private async ancestryForSnapshot(snapshot: HistorySnapshot): Promise<readonly DurableLogRecord[]> {
+		await this.awaitReadable();
+		await requireSnapshotBranchDirect(this.journal.client, this.journal.runId, snapshot, this.journal.access);
+		return readAncestryToHeadDirect(this.journal.client, this.journal.runId, snapshot.headSeqId, this.journal.access);
 	}
 
 	async readRunMeta(): Promise<RunMeta | undefined> {
@@ -393,25 +450,39 @@ async function ensureJournalTable(client: PgClientLike): Promise<void> {
 	await client.query(JOURNAL_BRANCH_CREATE_INDEX_DDL);
 }
 
-async function listBranchesDirect(client: PgClientLike, runId: string, access: PostgresLogAccess): Promise<BranchHead[]> {
-	const rows = await queryRows(client, access,
-		`WITH creates AS (
-		   SELECT branch_id, metadata, committed_at_ms
-		     FROM ${JOURNAL_TABLE}
-		    WHERE run_id = $1 AND kind = 'branch_create'
-		 )
-		 SELECT creates.branch_id,
-		        CASE WHEN latest.kind = 'record' THEN latest.seq ELSE latest.head_seq_id END AS current_head_seq_id,
-		        creates.metadata, creates.committed_at_ms
-		   FROM creates
-		   CROSS JOIN LATERAL (
-		     SELECT kind, seq, head_seq_id
-		       FROM ${JOURNAL_TABLE}
-		      WHERE run_id = $1 AND branch_id = creates.branch_id
-		      ORDER BY seq DESC LIMIT 1
-		   ) latest
-		  ORDER BY creates.committed_at_ms, creates.branch_id`, [runId]);
-	return rows.map(decodeBranchRow);
+async function listBranchesDirect(client: PgClientLike, runId: string, access: PostgresLogAccess, cursor?: BranchListCursor): Promise<BranchListChunk> {
+	const decoded = cursor === undefined ? undefined : decodeBranchListCursor(cursor);
+	const values: unknown[] = [runId];
+	const boundary = decoded === undefined ? "" : "AND (seq, branch_id) > ($2, $3)";
+	if (decoded !== undefined) values.push(decoded.createdSeqId, decoded.branchId);
+	const [rows, totals] = await Promise.all([
+		queryRows(client, access,
+			`WITH creates AS (
+			   SELECT seq AS created_seq_id, branch_id, metadata, committed_at_ms
+			     FROM ${JOURNAL_TABLE}
+			    WHERE run_id = $1 AND kind = 'branch_create' ${boundary}
+			    ORDER BY seq, branch_id LIMIT ${HISTORY_READ_ITEMS + 1}
+			 )
+			 SELECT creates.created_seq_id, creates.branch_id,
+			        CASE WHEN latest.kind = 'record' THEN latest.seq ELSE latest.head_seq_id END AS current_head_seq_id,
+			        creates.metadata, creates.committed_at_ms
+			   FROM creates
+			   CROSS JOIN LATERAL (
+			     SELECT kind, seq, head_seq_id
+			       FROM ${JOURNAL_TABLE}
+			      WHERE run_id = $1 AND branch_id = creates.branch_id
+			      ORDER BY seq DESC LIMIT 1
+			   ) latest
+			  ORDER BY creates.created_seq_id, creates.branch_id`, values),
+		queryRows(client, access, `SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id=$1 AND kind='branch_create'`, [runId]),
+	]);
+	const page = rows.slice(0, HISTORY_READ_ITEMS);
+	const last = page.at(-1);
+	return {
+		items: page.map(decodeBranchRow),
+		totalCount: totals[0] === undefined ? 0 : pgNumber(totals[0].count),
+		...(rows.length > page.length && last !== undefined ? { next: encodeBranchListCursor(pgNumber(last.created_seq_id), last.branch_id as BranchId) } : {}),
+	};
 }
 async function findBranchDirect(client: PgClientLike, runId: string, branchId: BranchId, access: PostgresLogAccess): Promise<BranchHead | undefined> {
 	const rows = await queryRows(client, access,
@@ -442,7 +513,10 @@ async function readAncestryDirect(client: PgClientLike, runId: string, branchId:
 		if (!await hasAnyEntryDirect(client, runId, access)) return [];
 		throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 	}
-	if (branch.headSeqId === null) return [];
+	return readAncestryToHeadDirect(client, runId, branch.headSeqId, access);
+}
+async function readAncestryToHeadDirect(client: PgClientLike, runId: string, headSeqId: number | null, access: PostgresLogAccess): Promise<DurableLogRecord[]> {
+	if (headSeqId === null) return [];
 	const rows = await queryRows(client, access,
 		`WITH RECURSIVE ancestry AS (
 		   SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms, 0 AS depth
@@ -456,8 +530,13 @@ async function readAncestryDirect(client: PgClientLike, runId: string, branchId:
 		    WHERE parent.kind = 'record'
 		 )
 		 SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms
-		   FROM ancestry ORDER BY depth DESC`, [runId, branch.headSeqId]);
+		   FROM ancestry ORDER BY depth DESC`, [runId, headSeqId]);
+	if (rows.length === 0) throw new Error(`No durable log record with seqId ${headSeqId}`);
 	return rows.map((row) => decodeRecordRow(row as JournalSqlRow));
+}
+async function requireSnapshotBranchDirect(client: PgClientLike, runId: string, snapshot: HistorySnapshot, access: PostgresLogAccess): Promise<void> {
+	if (await findBranchDirect(client, runId, snapshot.branchId, access) === undefined) throw new Error(`Unknown Hyperchart branch '${snapshot.branchId}'`);
+	if (snapshot.headSeqId !== null && await findRecordDirect(client, runId, snapshot.headSeqId, access) === undefined) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
 }
 async function containsInAncestryDirect(client: PgClientLike, runId: string, branchId: BranchId, seqId: number, access: PostgresLogAccess): Promise<boolean> {
 	const branch = await findBranchDirect(client, runId, branchId, access);
@@ -465,7 +544,10 @@ async function containsInAncestryDirect(client: PgClientLike, runId: string, bra
 		if (!await hasAnyEntryDirect(client, runId, access)) return false;
 		throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 	}
-	if (branch.headSeqId === null) return false;
+	return containsInHistoryDirect(client, runId, branch.headSeqId, seqId, access);
+}
+async function containsInHistoryDirect(client: PgClientLike, runId: string, headSeqId: number | null, seqId: number, access: PostgresLogAccess): Promise<boolean> {
+	if (headSeqId === null) return false;
 	const rows = await queryRows(client, access,
 		`WITH RECURSIVE ancestry AS (
 		   SELECT seq, parent_id FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'
@@ -473,7 +555,7 @@ async function containsInAncestryDirect(client: PgClientLike, runId: string, bra
 		   SELECT parent.seq, parent.parent_id
 		     FROM ancestry child JOIN ${JOURNAL_TABLE} parent ON parent.run_id = $1 AND parent.seq = child.parent_id
 		    WHERE parent.kind = 'record'
-		 ) SELECT EXISTS (SELECT 1 FROM ancestry WHERE seq = $3) AS present`, [runId, branch.headSeqId, seqId]);
+		 ) SELECT EXISTS (SELECT 1 FROM ancestry WHERE seq = $3) AS present`, [runId, headSeqId, seqId]);
 	return rows[0]?.present === true;
 }
 async function hasAnyEntryDirect(client: PgClientLike, runId: string, access: PostgresLogAccess): Promise<boolean> {

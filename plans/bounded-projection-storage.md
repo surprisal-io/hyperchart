@@ -283,12 +283,20 @@ export type HistoryChunk<T> = Readonly<{
 }>;
 
 export type HistorySubject =
+  | Readonly<{ kind: "records" }>
   | Readonly<{ kind: "state-visits"; state: StatePath }>
   | Readonly<{ kind: "map-visits"; mapPath: StatePath }>
   | Readonly<{ kind: "actor-generations"; logicalOccurrence: StatePath }>
   | Readonly<{ kind: "actor-messages"; occurrence: StatePath }>;
 
 export type BranchListCursor = string;
+
+// Storage-owned, AST-free record groups. Phase 5 maps these to Hyperchart* host models.
+export type StateVisitHistoryItem = Readonly<{ kind: "state-visit"; state: StatePath; seqId: number; invoke: StateActionInvokeLog; records: readonly DurableLogRecord[] }>;
+export type MapVisitHistoryItem = Readonly<{ kind: "map-visit"; mapPath: StatePath; seqId: number; spawn: SpawnedLog; records: readonly DurableLogRecord[] }>;
+export type ActorGenerationHistoryItem = Readonly<{ kind: "actor-generation"; logicalOccurrence: StatePath; seqId: number; created: ActorCreatedLog; records: readonly DurableLogRecord[] }>;
+export type ActorMessageHistoryItem = Readonly<{ kind: "actor-message-batch"; occurrence: StatePath; seqId: number; enqueued: ActorMessagesEnqueuedLog; records: readonly DurableLogRecord[] }>;
+
 export type BranchListChunk = Readonly<{
   items: readonly BranchHead[];
   totalCount: number;
@@ -318,25 +326,25 @@ export interface RunHistoryStore {
     snapshot: HistorySnapshot;
     state: StatePath;
     cursor?: HistoryCursor;
-  }): Promise<HistoryChunk<HyperchartVisitInfo>>;
+  }): Promise<HistoryChunk<StateVisitHistoryItem>>;
 
   readMapVisits(input: {
     snapshot: HistorySnapshot;
     mapPath: StatePath;
     cursor?: HistoryCursor;
-  }): Promise<HistoryChunk<HyperchartMapVisitInfo>>;
+  }): Promise<HistoryChunk<MapVisitHistoryItem>>;
 
   readActorGenerations(input: {
     snapshot: HistorySnapshot;
     logicalOccurrence: StatePath;
     cursor?: HistoryCursor;
-  }): Promise<HistoryChunk<HyperchartActorGenerationInfo>>;
+  }): Promise<HistoryChunk<ActorGenerationHistoryItem>>;
 
   readActorMessages(input: {
     snapshot: HistorySnapshot;
     occurrence: StatePath;
     cursor?: HistoryCursor;
-  }): Promise<HistoryChunk<ProjectedActorMessage>>;
+  }): Promise<HistoryChunk<ActorMessageHistoryItem>>;
 
   /** Mint a cursor whose next subject read returns a newest-first chunk beginning with seqId. */
   cursorAt(input: {
@@ -351,6 +359,8 @@ export interface RunHistoryStore {
   }): Promise<UserInteractionResolvedLog | undefined>;
 }
 ```
+
+Ownership correction: storage cannot produce `HyperchartVisitInfo`, map/actor presentation models, or `ProjectedActorMessage` without importing the AST/projector/host layers. Phase 1 therefore returns the typed AST-free durable groups above. Phase 5 performs AST-aware mapping in `HyperchartHostAdapter`; storage never imports host types or calls `projectBranch`.
 
 Public-history invariants:
 

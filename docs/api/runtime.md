@@ -210,71 +210,47 @@ These helpers describe inspection configuration. Runtime launch strictness and c
 
 ## Log stores
 
-### `LogStore`
+`RunLogStore` owns the journal, branch heads, and immutable run metadata. Writes use async `appendDrafts()`; the writer assigns durable coordinates and returns the committed facts. JSONL owns `meta.json` plus `log.jsonl`; PostgreSQL owns `hyperchart_run_meta` plus `hyperchart_journal`. `run_dir.ts` performs lifecycle orchestration and never selects a backend.
+
+### Snapshot-pinned history
+
+History reads are stateless serializable request/response operations. There is no public materialized log, stateful reader, offset, `seek`, or `readAll()` API.
 
 ```ts
-interface LogStore {
-  append(records: readonly DurableLogRecord[]): void;
-  readAll(): Promise<readonly DurableLogRecord[]>;
+type HistorySnapshot = { branchId: string; headSeqId: number | null };
+type HistoryCursor = string; // opaque, versioned, snapshot + subject bound
+
+type HistoryChunk<T> = {
+  snapshot: HistorySnapshot;
+  items: readonly T[];       // always newest-first, maximum 100
+  older?: HistoryCursor;
+  newer?: HistoryCursor;
+};
+
+interface RunHistoryStore {
+  captureSnapshot(branchId: string): Promise<HistorySnapshot>;
+  listBranches(cursor?: BranchListCursor): Promise<BranchListChunk>;
+  getBranch(branchId: string): Promise<BranchHead>;
+  getRecord(seqId: number): Promise<DurableLogRecord | undefined>;
+  containsInHistory(input: { headSeqId: number | null; seqId: number }): Promise<boolean>;
+  readRecords(input: { snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<DurableLogRecord>>;
+  readStateVisits(input: { snapshot: HistorySnapshot; state: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<StateVisitHistoryItem>>;
+  readMapVisits(input: { snapshot: HistorySnapshot; mapPath: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<MapVisitHistoryItem>>;
+  readActorGenerations(input: { snapshot: HistorySnapshot; logicalOccurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorGenerationHistoryItem>>;
+  readActorMessages(input: { snapshot: HistorySnapshot; occurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorMessageHistoryItem>>;
+  cursorAt(input: { snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined>;
 }
 ```
 
-`append()` is synchronous because `ChartRuntime` acknowledges records immediately after calling it. A custom implementation must not acknowledge data before it is durably written.
+A cursor is valid only for the exact snapshot and typed subject that minted it; misuse throws `HistoryCursorError`. `cursorAt()` returns `undefined` when the durable coordinate is outside that snapshot/subject. Cursor absence is the only edge marker. Branch enumeration is separately read-committed and keyset-paginated in creation-coordinate order; each page contains at most 100 heads.
 
-### `RunLogStore` metadata ownership
+Storage returns AST-free durable record groups for state visits, map visits, actor generations, and actor message batches. It never imports the chart AST, projector, or host presentation models. The host adapter performs AST-aware mapping in the inspector layer.
 
-The selected run store owns both the durable journal and immutable run metadata:
+Projection replay is a package-internal oldest-first `AsyncIterable`; each yielded batch contains at most 500 facts. It is absent from exported store interfaces and concrete class declarations and is not a host/UI history API.
 
-```ts
-interface RunLogStore extends LogStore {
-  readRunMeta(): Promise<RunMeta | undefined>;
-  writeRunMeta(meta: RunMeta): Promise<void>;
-  deleteRunData(): Promise<void>;
-}
-```
+The PostgreSQL Phase 1 implementation deliberately computes these bounded results by traversing and filtering the captured journal ancestry. This is temporary correctness scaffolding and may consume work/memory proportional to ancestry. The public contracts, snapshots, cursors, result caps, and replay-batch caps are final; the deferred version-order predecessor catalog will replace only backend internals. JSONL continues to use its complete private in-memory index and writes no index sidecar.
 
-`JsonlLogStore` implements these operations with `meta.json` and `log.jsonl`. `PostgresLogStore` implements them with `hyperchart_run_meta` and `hyperchart_journal`. `run_dir.ts` contains lifecycle orchestration only and never selects a backend or reads `HYPERCHART_PG_DSN`.
-
-### `JsonlLogStore`
-
-```ts
-class JsonlLogStore implements LogStore {
-  constructor(filePath: string, onWarn?: (message: string) => void, branchId?: string);
-  readonly filePath: string;
-  readonly branchId: string;
-  appendDrafts(records: readonly DurableRecordDraft[]): readonly DurableLogRecord[];
-  forBranch(branchId: string): JsonlLogStore;
-  snapshot(): NormalizedRunLog;
-  readAll(): Promise<readonly DurableLogRecord[]>;
-  readRunMeta(): Promise<RunMeta | undefined>;
-  writeRunMeta(meta: RunMeta): Promise<void>;
-  deleteRunData(): Promise<void>;
-  fullReadCount(): number;
-}
-```
-
-- `forBranch()` creates explicit branch handles over one opened journal; independent readers reopen independently;
-- repairs an incomplete final mutation and fully validates the v2 journal once at open;
-- allocates global ids and appends only each new mutation under the writer lock;
-- incrementally publishes snapshots sharing the record index and ancestry pointers, without rereading on append/snapshot;
-- returns only the selected branch ancestry from `readAll()`; public singleton use defaults to `main`.
-
-```ts
-const store = new JsonlLogStore("/absolute/run/log.jsonl", console.warn);
-const records = await store.readAll();
-```
-
-### `MemoryLogStore`
-
-```ts
-class MemoryLogStore implements LogStore {
-  constructor(records?: readonly DurableLogRecord[]);
-  append(records: readonly DurableLogRecord[]): void;
-  readAll(): Promise<readonly DurableLogRecord[]>;
-}
-```
-
-The constructor and `readAll()` copy their arrays. Use this store for tests and ephemeral execution.
+`JsonlLogStore` trusts parsed entries, fails malformed/incomplete JSON without changing the file, shares one private index across `forBranch()` handles, and rejects stale byte boundaries. `MemoryLogStore` provides the same history contract for tests and ephemeral execution.
 
 ## Script execution
 
@@ -592,7 +568,19 @@ readActiveUserInteraction, releaseActiveUserInteraction,
 claimUserInteractionReceipt, markUserInteractionReceipt, hasUserInteractionReceipt,
 readUserInteractionReceipt, removeUserInteractionReceipt,
 validateAndPersistUserInteractionResponse
-LogStore, JsonlLogStore, MemoryLogStore
+DEFAULT_BRANCH_ID, collectBranches, HistoryCursorError,
+JsonlLogStore, MemoryLogStore, PostgresLogStore, openRunLogStore,
+JOURNAL_CHANNEL, JOURNAL_TABLE, supportsSqlTransactions,
+LogStore, RunHistoryStore, RunLogStore,
+HistorySnapshot, HistoryCursor, HistorySubject, HistoryChunk,
+BranchListCursor, BranchListChunk,
+StateVisitHistoryItem, MapVisitHistoryItem,
+ActorGenerationHistoryItem, ActorMessageHistoryItem,
+RespondToUserInteractionInput, UserInteractionResponseCommit,
+OpenRunLogStoreOptions, OpenPostgresLogStoreOptions, PostgresLogAccess,
+PostgresRunTransaction, PostgresForkAndCommitInput,
+PgClientLike, PgQueryResult, SqlCommitParticipant,
+SqlCommitTransaction, SqlTransactionalRunLogStore
 ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue
 runGuard, checkSchema, checkSchemaAsync
@@ -613,4 +601,4 @@ Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_re
 
 ## Named branch storage API
 
-`JsonlLogStore.read()` returns one normalized full tree and durable branch registry; `readAll()` returns only the store's explicit selected branch ancestry. `appendDrafts()` numbers from the full journal and appends from that durable head. `listHyperchartBranches()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.
+`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. The exported temporary `collectBranches()` helper consumes every page for control surfaces that have not yet migrated to paginated presentation. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranches()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeChartConfig, type ChartAst, type ChartCst, type DurableRecordDraft } from "../packages/hyperchart/src/index.js";
 import { chart, final, user } from "../packages/hyperchart/src/core/dsl.js";
+import { HISTORY_READ_ITEMS, HistoryCursorError, openProjectionReplay } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
@@ -132,7 +133,7 @@ describePg("PostgresLogStore", () => {
 			expect(await loadRunMeta(runDir)).toEqual(meta);
 			await deleteRunStorage(runDir);
 			await expect(loadRunMeta(runDir)).rejects.toMatchObject({ code: "ENOENT" });
-			expect(await (await openReader(runId)).listBranches()).toEqual([]);
+			expect(await (await openReader(runId)).listBranches()).toEqual({ items: [], totalCount: 0 });
 		} finally {
 			await rm(runDir, { recursive: true, force: true });
 		}
@@ -364,6 +365,7 @@ describePg("PostgresLogStore", () => {
 		expect(committed.response.idempotent).toBe(false);
 		expect((await store.getBranch("experiment")).headSeqId).toBe(committed.response.record.seqId);
 		expect((await store.readAncestry("experiment")).at(-1)).toEqual(committed.response.record);
+		expect(await store.findUserInteractionResponse({ headSeqId: committed.response.record.seqId, gateSeqId })).toEqual(committed.response.record);
 		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 1", [runId]));
 		expect(claims.rows).toEqual([{ branch_id: "experiment" }]);
 
@@ -441,7 +443,7 @@ describePg("PostgresLogStore", () => {
 			throw new Error("participant failed");
 		})).rejects.toThrow("participant failed");
 
-		expect((await store.listBranches()).some((branch) => branch.branchId === "rolled-back")).toBe(false);
+		expect((await store.listBranches()).items.some((branch) => branch.branchId === "rolled-back")).toBe(false);
 		expect((await journalStats(store, runId)).count).toBe(before);
 		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 2", [runId]));
 		expect(claims.rows).toEqual([]);
@@ -470,7 +472,7 @@ describePg("PostgresLogStore", () => {
 		}
 		expect(failure).toMatchObject({ code: "23505", constraint: "hyperchart_test_claims_pkey" });
 		expect(String(failure)).not.toContain("Stale Hyperchart journal writer");
-		expect((await store.listBranches()).some((branch) => branch.branchId === "loser")).toBe(false);
+		expect((await store.listBranches()).items.some((branch) => branch.branchId === "loser")).toBe(false);
 	});
 
 	it("rejects a composite response branch unrelated to source or new fork", async () => {
@@ -494,7 +496,7 @@ describePg("PostgresLogStore", () => {
 
 	it("treats a missing journal as an empty read-only run", async () => {
 		const reader = await openReader(newRunId());
-		expect(await reader.listBranches()).toEqual([]);
+		expect(await reader.listBranches()).toEqual({ items: [], totalCount: 0 });
 		expect(await reader.countRecords()).toBe(0);
 	});
 
@@ -514,6 +516,64 @@ describePg("PostgresLogStore", () => {
 
 		const reader = await openReader(runId);
 		expect(await reader.getRecord(2)).toMatchObject({ seqId: 2, type: "args" });
+	});
+
+	it("serves snapshot-pinned older/newer history chunks and deep-link cursors", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		const records = await store.appendDrafts(Array.from({ length: 230 }, () => invokeDraft()));
+		const snapshot = await store.captureSnapshot("main");
+		const first = await store.readStateVisits({ snapshot, state: "work" });
+		expect(first.items).toHaveLength(HISTORY_READ_ITEMS);
+		expect(first.items.map((item) => item.seqId)).toEqual(records.slice(-100).reverse().map((record) => record.seqId));
+		const second = await store.readStateVisits({ snapshot, state: "work", cursor: first.older! });
+		expect(second.items).toHaveLength(100); expect(second.newer).toBeTypeOf("string");
+		expect((await store.readStateVisits({ snapshot, state: "work", cursor: second.newer! })).items.map((item) => item.seqId)).toEqual(first.items.map((item) => item.seqId));
+		const target = records[109]!.seqId;
+		const cursor = await store.cursorAt({ snapshot, subject: { kind: "state-visits", state: "work" }, seqId: target });
+		expect((await store.readStateVisits({ snapshot, state: "work", cursor: cursor! })).items[0]?.seqId).toBe(target);
+		await expect(store.readRecords({ snapshot, cursor: cursor! })).rejects.toBeInstanceOf(HistoryCursorError);
+		await store.appendDrafts([invokeDraft()]);
+		expect((await store.readStateVisits({ snapshot, state: "work" })).items.map((item) => item.seqId)).toEqual(first.items.map((item) => item.seqId));
+		await expect(store.readStateVisits({ snapshot: await store.captureSnapshot("main"), state: "work", cursor: cursor! })).rejects.toBeInstanceOf(HistoryCursorError);
+	});
+
+	it("paginates branch heads by creation coordinate under read committed semantics", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		const [root] = await store.appendDrafts([argsDraft()]);
+		for (let index = 0; index < 105; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		const first = await store.listBranches();
+		expect(first.items).toHaveLength(100); expect(first.totalCount).toBe(106); expect(first.next).toBeTypeOf("string");
+		await store.createBranch("late-branch", root!.seqId);
+		const second = await store.listBranches(first.next);
+		expect(second.items).toHaveLength(7); expect(second.totalCount).toBe(107); expect(second.next).toBeUndefined();
+		expect(new Set([...first.items, ...second.items].map((branch) => branch.branchId)).size).toBe(107);
+	});
+
+	it("streams private projection replay oldest-first with 500-record batches", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		const records = await store.appendDrafts(Array.from({ length: 1_201 }, () => invokeDraft()));
+		const batches: number[][] = [];
+		for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) batches.push(batch.map((record) => record.seqId));
+		expect(batches.map((batch) => batch.length)).toEqual([500, 500, 201]);
+		expect(batches.flat()).toEqual(records.map((record) => record.seqId));
+	});
+
+	it("keeps arbitrary-parent divergent snapshots independent", async () => {
+		const store = await openWriter(newRunId());
+		await store.initializeRootBranch();
+		const [root] = await store.appendDrafts([argsDraft()]);
+		await store.createBranch("experiment", root!.seqId);
+		const main = await store.appendDrafts(Array.from({ length: 120 }, () => invokeDraft()));
+		const experiment = await store.forBranch("experiment").appendDrafts(Array.from({ length: 120 }, () => invokeDraft()));
+		const mainSnapshot = await store.captureSnapshot("main");
+		const experimentSnapshot = await store.captureSnapshot("experiment");
+		await store.moveBranch("main", root!.seqId);
+		expect((await store.readStateVisits({ snapshot: mainSnapshot, state: "work" })).items.map((item) => item.seqId)).toEqual(main.slice(-100).reverse().map((record) => record.seqId));
+		expect((await store.readStateVisits({ snapshot: experimentSnapshot, state: "work" })).items.map((item) => item.seqId)).toEqual(experiment.slice(-100).reverse().map((record) => record.seqId));
+		expect(await store.containsInHistory({ headSeqId: mainSnapshot.headSeqId, seqId: experiment[0]!.seqId })).toBe(false);
 	});
 
 	it("publishes the existing PostgreSQL commit notification without using it as a runtime subscription", async () => {

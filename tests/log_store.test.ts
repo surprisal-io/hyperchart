@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DurableRecordDraft, StorageEntry } from "../packages/hyperchart/src/index.js";
-import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import {
+	HISTORY_READ_ITEMS,
+	HistoryCursorError,
+	JsonlLogStore,
+	openProjectionReplay,
+	type LogStore,
+} from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
+import { PostgresLogStore } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
+import * as runtimeExports from "../packages/hyperchart/src/runtime/index.js";
 
 const tempDirs: string[] = [];
 async function makeTempDir(): Promise<string> { const dir = await mkdtemp(join(tmpdir(), "hyperchart-log-store-")); tempDirs.push(dir); return dir; }
@@ -19,6 +28,15 @@ async function persistedEntries(file: string): Promise<StorageEntry[]> {
 	return (await readFile(file, "utf8")).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as StorageEntry);
 }
 function isBranchEntry(entry: StorageEntry): boolean { return "kind" in entry && entry.kind === "branch"; }
+
+describe("runtime replay boundary", () => {
+	it("does not expose projection replay through the public runtime or concrete stores", () => {
+		expect("openProjectionReplay" in runtimeExports).toBe(false);
+		expect("openProjectionReplay" in JsonlLogStore.prototype).toBe(false);
+		expect("openProjectionReplay" in MemoryLogStore.prototype).toBe(false);
+		expect("openProjectionReplay" in PostgresLogStore.prototype).toBe(false);
+	});
+});
 
 describe("JsonlLogStore branch journal", () => {
 	it("owns filesystem run metadata through the store interface", async () => {
@@ -119,5 +137,144 @@ describe("JsonlLogStore branch journal", () => {
 		expect((await main.getBranch("experiment")).headSeqId).toBe(experimentHead);
 		expect((await main.readAncestry("experiment")).map((record) => record.seqId)).toEqual([2, experimentHead]);
 		expect(main.fullReadCount()).toBe(1);
+	});
+});
+
+type HistoryTestStore = LogStore & { close?: () => Promise<void> };
+
+async function historyStore(kind: "memory" | "jsonl"): Promise<HistoryTestStore> {
+	if (kind === "memory") return new MemoryLogStore();
+	const store = new JsonlLogStore(join(await makeTempDir(), "log.jsonl"));
+	await store.initializeRootBranch();
+	return store;
+}
+
+for (const backend of ["memory", "jsonl"] as const) {
+	describe(`${backend} bounded history contract`, () => {
+		it("pages older and newer in canonical newest-first order and pins the snapshot", async () => {
+			const store = await historyStore(backend);
+			const records = await store.appendDrafts(Array.from({ length: 230 }, () => invokeDraft()));
+			const snapshot = await store.captureSnapshot("main");
+			const first = await store.readStateVisits({ snapshot, state: "work" });
+			expect(first.items).toHaveLength(HISTORY_READ_ITEMS);
+			expect(first.items.map((item) => item.seqId)).toEqual(records.slice(-100).reverse().map((record) => record.seqId));
+			expect(first.newer).toBeUndefined();
+			expect(first.older).toBeTypeOf("string");
+
+			const second = await store.readStateVisits({ snapshot, state: "work", cursor: first.older! });
+			expect(second.items).toHaveLength(100);
+			expect(second.older).toBeTypeOf("string");
+			expect(second.newer).toBeTypeOf("string");
+			const oldest = await store.readStateVisits({ snapshot, state: "work", cursor: second.older! });
+			expect(oldest.items).toHaveLength(30);
+			expect(oldest.older).toBeUndefined();
+			const backToNewest = await store.readStateVisits({ snapshot, state: "work", cursor: second.newer! });
+			expect(backToNewest.items.map((item) => item.seqId)).toEqual(first.items.map((item) => item.seqId));
+
+			await store.appendDrafts(Array.from({ length: 5 }, () => invokeDraft()));
+			const pinned = await store.readStateVisits({ snapshot, state: "work" });
+			expect(pinned.items.map((item) => item.seqId)).toEqual(first.items.map((item) => item.seqId));
+			expect((await store.captureSnapshot("main")).headSeqId).not.toBe(snapshot.headSeqId);
+		});
+
+		it("mints deep-link cursors and rejects snapshot, subject, and malformed cursor misuse", async () => {
+			const store = await historyStore(backend);
+			const records = await store.appendDrafts(Array.from({ length: 220 }, () => invokeDraft()));
+			const snapshot = await store.captureSnapshot("main");
+			const target = records[109]!.seqId;
+			const cursor = await store.cursorAt({ snapshot, subject: { kind: "state-visits", state: "work" }, seqId: target });
+			expect(cursor).toBeTypeOf("string");
+			const centered = await store.readStateVisits({ snapshot, state: "work", cursor: cursor! });
+			expect(centered.items[0]?.seqId).toBe(target);
+			expect(centered.older).toBeTypeOf("string");
+			expect(centered.newer).toBeTypeOf("string");
+			expect(await store.cursorAt({ snapshot, subject: { kind: "state-visits", state: "other" }, seqId: target })).toBeUndefined();
+			await expect(store.readRecords({ snapshot, cursor: cursor! })).rejects.toBeInstanceOf(HistoryCursorError);
+			await expect(store.readStateVisits({ snapshot, state: "work", cursor: "not-a-cursor" })).rejects.toBeInstanceOf(HistoryCursorError);
+			await store.appendDrafts([invokeDraft()]);
+			await expect(store.readStateVisits({ snapshot: await store.captureSnapshot("main"), state: "work", cursor: cursor! })).rejects.toBeInstanceOf(HistoryCursorError);
+		});
+
+		it("streams projection ancestry oldest-first in fixed batches", async () => {
+			const store = await historyStore(backend);
+			const records = await store.appendDrafts(Array.from({ length: 1_201 }, () => invokeDraft()));
+			const actual: number[][] = [];
+			for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) actual.push(batch.map((record) => record.seqId));
+			expect(actual.map((batch) => batch.length)).toEqual([500, 500, 201]);
+			expect(actual.flat()).toEqual(records.map((record) => record.seqId));
+			const tail: number[] = [];
+			for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: records[499]!.seqId })) tail.push(...batch.map((record) => record.seqId));
+			expect(tail).toEqual(records.slice(500).map((record) => record.seqId));
+			await expect((async () => {
+				for await (const _batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: -1 })) { /* consume */ }
+			})()).rejects.toThrow(/not in target ancestry/);
+		});
+
+		it("returns typed actor generation and message record groups", async () => {
+			const store = await historyStore(backend);
+			const message = { messageId: "message-1", event: "PING", input: { value: 1 }, producerState: "send", producerVisit: 1, batchIndex: 0 };
+			const secondMessage = { ...message, messageId: "message-2", batchIndex: 1 };
+			const drafts = [
+				{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: {} as never },
+				{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: { producerState: "send", kind: "send", definition: {} as never, targetDeclaration: "@worker", event: "PING", inputSchema: {} as never }, messages: [message, secondMessage] },
+				{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: message.messageId, receiveState: "@worker.receive" },
+				{ type: "actor_message", kind: "settled", occurrence: "@worker", messageId: message.messageId },
+				{ type: "actor_batch_call_resolved", callId: "call-1", callerState: "send", messageIds: [message.messageId, secondMessage.messageId] },
+				{ type: "actor_scope", kind: "stopped", occurrence: "@worker" },
+				{ type: "actor_created", declaration: "@worker", occurrence: "@worker~2", generation: 2, input: {}, definition: {} as never },
+			] satisfies DurableRecordDraft[];
+			const records = await store.appendDrafts(drafts);
+			const snapshot = await store.captureSnapshot("main");
+			const generations = await store.readActorGenerations({ snapshot, logicalOccurrence: "@worker" });
+			expect(generations.items.map((item) => item.created.generation)).toEqual([2, 1]);
+			expect(generations.items[1]?.records.map((record) => record.seqId)).toEqual([records[0]!.seqId, records[1]!.seqId, records[2]!.seqId, records[3]!.seqId, records[5]!.seqId]);
+			const messages = await store.readActorMessages({ snapshot, occurrence: "@worker" });
+			expect(messages.items).toHaveLength(1);
+			expect(messages.items[0]?.records.map((record) => record.seqId)).toEqual(records.slice(1, 5).map((record) => record.seqId));
+			expect(messages.items[0]?.records.map((record) => record.seqId)).toEqual([...new Set(messages.items[0]?.records.map((record) => record.seqId))]);
+			const cursor = await store.cursorAt({ snapshot, subject: { kind: "actor-messages", occurrence: "@worker" }, seqId: records[1]!.seqId });
+			expect((await store.readActorMessages({ snapshot, occurrence: "@worker", cursor: cursor! })).items[0]?.seqId).toBe(records[1]!.seqId);
+		});
+
+		it("returns typed map visit record groups", async () => {
+			const store = await historyStore(backend);
+			const spawned: DurableRecordDraft[] = Array.from({ length: 3 }, (_, index) => ({ type: "spawned", path: "fanout", instances: { [`item-${index}`]: index } }));
+			const records = await store.appendDrafts(spawned);
+			const chunk = await store.readMapVisits({ snapshot: await store.captureSnapshot("main"), mapPath: "fanout" });
+			expect(chunk.items.map((item) => item.spawn.seqId)).toEqual(records.map((record) => record.seqId).reverse());
+			expect(chunk.items.every((item) => item.kind === "map-visit" && item.mapPath === "fanout")).toBe(true);
+		});
+	});
+}
+
+describe("JsonlLogStore branch keyset pagination and divergent snapshots", () => {
+	it("paginates branches by immutable creation coordinate", async () => {
+		const store = new JsonlLogStore(join(await makeTempDir(), "log.jsonl"));
+		await store.initializeRootBranch();
+		const [root] = await store.appendDrafts([argsDraft()]);
+		for (let index = 0; index < 205; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		const first = await store.listBranches();
+		expect(first.items).toHaveLength(100); expect(first.totalCount).toBe(206); expect(first.next).toBeTypeOf("string");
+		await store.createBranch("late-branch", root!.seqId);
+		const second = await store.listBranches(first.next);
+		const third = await store.listBranches(second.next);
+		expect(second.items).toHaveLength(100); expect(second.totalCount).toBe(207);
+		expect(third.items).toHaveLength(7); expect(third.next).toBeUndefined();
+		expect(new Set([...first.items, ...second.items, ...third.items].map((branch) => branch.branchId)).size).toBe(207);
+	});
+
+	it("keeps divergent captured heads independent after branch movement", async () => {
+		const store = new JsonlLogStore(join(await makeTempDir(), "log.jsonl"));
+		await store.initializeRootBranch();
+		const [root] = await store.appendDrafts([argsDraft()]);
+		await store.createBranch("experiment", root!.seqId);
+		const mainRecords = await store.appendDrafts(Array.from({ length: 120 }, () => invokeDraft()));
+		const experimentRecords = await store.forBranch("experiment").appendDrafts(Array.from({ length: 120 }, () => invokeDraft()));
+		const mainSnapshot = await store.captureSnapshot("main");
+		const experimentSnapshot = await store.captureSnapshot("experiment");
+		await store.moveBranch("main", root!.seqId);
+		expect((await store.readStateVisits({ snapshot: mainSnapshot, state: "work" })).items.map((item) => item.seqId)).toEqual(mainRecords.slice(-100).reverse().map((record) => record.seqId));
+		expect((await store.readStateVisits({ snapshot: experimentSnapshot, state: "work" })).items.map((item) => item.seqId)).toEqual(experimentRecords.slice(-100).reverse().map((record) => record.seqId));
+		expect(await store.containsInHistory({ headSeqId: mainSnapshot.headSeqId, seqId: experimentRecords[0]!.seqId })).toBe(false);
 	});
 });

@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
+import type { RunHistoryStore } from "@surprisal/hyperchart/runtime";
 import {
+	collectRunWidgetBranches,
 	RunHistoryOverlay,
 	type RunHistoryAction,
 	RunWidget,
@@ -74,6 +76,28 @@ describe("minimal Hyperchart TUI", () => {
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(widget.render(120).join("\n")).toContain("inspect failed");
 		widget.dispose();
+	});
+
+	it("collects every branch page for the run widget", async () => {
+		const branches = Array.from({ length: 101 }, (_, index) => ({
+			branchId: `branch-${index.toString().padStart(3, "0")}`,
+			headSeqId: index,
+			createdAt: index,
+		}));
+		const cursors: Array<string | undefined> = [];
+		const store = {
+			listBranches: async (cursor?: string) => {
+				cursors.push(cursor);
+				return cursor === undefined
+					? { items: branches.slice(0, 100), totalCount: branches.length, next: "page-2" }
+					: { items: branches.slice(100), totalCount: branches.length };
+			},
+		} as unknown as RunHistoryStore;
+
+		const collected = await collectRunWidgetBranches(store);
+		expect(cursors).toEqual([undefined, "page-2"]);
+		expect(collected).toHaveLength(101);
+		expect(collected.at(-1)?.branchId).toBe("branch-100");
 	});
 
 	it("closes the picker with Escape", () => {

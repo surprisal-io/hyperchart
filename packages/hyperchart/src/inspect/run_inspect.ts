@@ -13,6 +13,7 @@ import type { HyperchartRunInfo, HyperchartSessionMessageInfo } from "../host/in
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
 import type { BranchHead } from "../core/durable_events.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
+import { collectBranches } from "../runtime/generic/log_store.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
 import { readRunnerConfig } from "../runtime/generic/runner_main.js";
@@ -68,7 +69,7 @@ export async function hyperchartRunFromRunDir(
 		try {
 			[records, branches] = await Promise.all([
 				store.readAncestry(branchId),
-				store.listBranches(),
+				collectBranches(store),
 			]);
 		} finally {
 			await store.close();

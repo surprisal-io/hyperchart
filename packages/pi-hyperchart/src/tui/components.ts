@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, visibleWidth, type Component, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
-import { JsonlLogStore } from "@surprisal/hyperchart/runtime";
+import { collectBranches, JsonlLogStore, type RunHistoryStore } from "@surprisal/hyperchart/runtime";
 import {
 	readSessionProgress,
 	sessionProgressPath,
@@ -37,6 +37,11 @@ export type RunHistoryItem = {
 };
 
 export type RunHistoryAction = { kind: "view"; runId: string } | { kind: "close" };
+
+/** @internal Compatibility helper until Phase 5 gives the TUI paginated presentation. */
+export async function collectRunWidgetBranches(store: RunHistoryStore) {
+	return collectBranches(store);
+}
 
 /** A deliberately small picker. Detailed run information belongs in the browser inspector. */
 export class RunHistoryOverlay implements Component {
@@ -208,7 +213,7 @@ export class RunWidget implements Component {
 		const store = new JsonlLogStore(this.opts.logPath, branchId);
 		const [records, branches, recordCount] = await Promise.all([
 			store.readAncestry(branchId),
-			store.listBranches(),
+			collectRunWidgetBranches(store),
 			store.countRecords(),
 		]);
 		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId, records });
