@@ -32,7 +32,7 @@ export type {
 	UserInteractionResponse,
 } from "./generic/user_interactions.js";
 export { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./generic/artifacts.js";
-export { latestPinsByPath, materializeWorkspace } from "./generic/artifact_workspace.js";
+export { latestPinsByPath, materializeWorkspace, materializeWorkspaceFromPins } from "./generic/artifact_workspace.js";
 export type { RenderedArtifact } from "../core/machine.js";
 export { ChartRuntime } from "./generic/chart_runtime.js";
 export type { ChartRuntimeOptions } from "./generic/chart_runtime.js";

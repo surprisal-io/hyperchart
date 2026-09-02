@@ -65,7 +65,7 @@ export function prepareUserInteractionResponseSync(
 	);
 	if (gate === undefined) throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${branchId}'`);
 	const projection = projectBranch(createBranchProjection(input.ast), input.ast, ancestry);
-	const projected = projection.userInteractions[input.gateSeqId];
+	const projected = projection.openUserInteractions[input.gateSeqId];
 	const pending = projection.pendingActions.find((entry) =>
 		entry.gateSeqId === input.gateSeqId &&
 		entry.actionUid.chart === gate.actionUid.chart &&

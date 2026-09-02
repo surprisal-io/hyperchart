@@ -1,6 +1,6 @@
 import assert from "./assert.js";
 import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
-import type { ActorMessageEnvelope, DurableLogRecord, UserInteractionOpenedLog } from "./durable_events.js";
+import type { ActorMessageEnvelope, ArtifactPin, DurableLogRecord, UserInteractionOpenedLog } from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
@@ -75,7 +75,6 @@ export type ProjectedActorOccurrence = {
 	definition: import("./types.js").ActorDeclarationAst;
 	currentState: StatePath;
 	mailbox: ProjectedActorMessage[];
-	messages: ProjectedActorMessage[];
 	currentMessage?: ProjectedActorMessage;
 	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
 };
@@ -97,7 +96,6 @@ export type ProjectedActorPoolOccurrence = {
 	input: unknown;
 	definition: ActorPoolDeclarationAst;
 	mailbox: ProjectedActorMessage[];
-	messages: ProjectedActorMessage[];
 	workers: ProjectedActorPoolWorker[];
 	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
 };
@@ -111,7 +109,8 @@ export type PendingActorCall =
 		callerState: StatePath;
 		occurrence: StatePath;
 		messageId: string;
-		status: "enqueued" | "accepted";
+		status: "enqueued" | "accepted" | "partial";
+		messages: ProjectedActorMessage[];
 	}
 	| {
 		kind: "batch";
@@ -120,12 +119,12 @@ export type PendingActorCall =
 		occurrence: StatePath;
 		messageIds: readonly string[];
 		status: "enqueued" | "accepted" | "partial";
+		messages: ProjectedActorMessage[];
 	};
 
-export type ProjectedUserInteraction = {
+export type OpenProjectedUserInteraction = {
 	opened: UserInteractionOpenedLog;
-	status: "open" | "resolved" | "closed";
-	resolvedEvent?: ChartEvent;
+	status: "open";
 };
 
 export type BranchProjection = {
@@ -134,8 +133,8 @@ export type BranchProjection = {
 	activeLeaves: StatePath[];
 	seqId: number;
 	pendingActions: PendingAction[];
-	/** Journal-native user gates keyed by their opened-record seqId. */
-	userInteractions: Record<number, ProjectedUserInteraction>;
+	/** Open journal-native user gates keyed by their opened-record seqId. */
+	openUserInteractions: Record<number, OpenProjectedUserInteraction>;
 	// The run's input arguments; undefined until the args fact lands in the log.
 	args?: Readonly<Record<string, unknown>>;
 	// Pinned fan-outs: map instance-path → { key → item }, written by spawned facts. Entries stay
@@ -151,6 +150,8 @@ export type BranchProjection = {
 	// Latest persisted agent session file per concrete actionUid. Optional runtime metadata used
 	// for onReenter resume; it never drives chart control flow.
 	sessions: Record<string, string>;
+	/** Latest accepted durable artifact revision per rendered authored path. */
+	artifactPins: Record<string, ArtifactPin>;
 	/** Durable global fail-fast intent. Presence blocks every new invoke/message effect. */
 	failure?: { origin: StatePath; error: unknown; seqId: number };
 	actors: Record<StatePath, ProjectedActorOccurrence>;
@@ -171,12 +172,13 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		activeLeaves: enterState(ast, ast.initial),
 		seqId: 0,
 		pendingActions: [],
-		userInteractions: {},
+		openUserInteractions: {},
 		spawns: {},
 		inputs: {},
 		results: {},
 		stateVisits: {},
 		sessions: {},
+		artifactPins: {},
 		actors: {},
 		actorPools: {},
 		pendingActorCalls: {},
@@ -214,9 +216,7 @@ export function projectBranch(
 			case "failure_intent":
 				assertFailureIntent(projection);
 				projection.failure = { origin: record.origin, error: record.error, seqId: record.seqId };
-				for (const interaction of Object.values(projection.userInteractions)) {
-					if (interaction.status === "open") interaction.status = "closed";
-				}
+				projection.openUserInteractions = {};
 				break;
 			case "actor_created": {
 				const { liveDefinition, logicalOccurrence } = assertActorCreated(projection, ast, record);
@@ -230,7 +230,6 @@ export function projectBranch(
 						input: record.input,
 						definition: record.definition as ActorPoolDeclarationAst,
 						mailbox: [],
-						messages: [],
 						workers: Array.from({ length: liveDefinition.concurrency }, (_, index) => ({
 							index,
 							occurrence: actorPoolWorkerOccurrencePath(record.occurrence, index),
@@ -250,7 +249,6 @@ export function projectBranch(
 						definition: record.definition as ActorDeclarationAst,
 						currentState: liveDefinition.initial,
 						mailbox: [],
-						messages: [],
 						status: "idle",
 					};
 				}
@@ -258,20 +256,17 @@ export function projectBranch(
 			}
 			case "actor_messages_enqueued": {
 				const actor = assertActorMessagesEnqueued(projection, ast, record);
-				for (const envelope of record.messages) {
-					const message: ProjectedActorMessage = { ...envelope, status: "queued" };
-					actor.mailbox.push(message);
-					actor.messages.push(message);
-				}
+				const messages = record.messages.map((envelope): ProjectedActorMessage => ({ ...envelope, status: "queued" }));
+				actor.mailbox.push(...messages);
 				const callId = record.messages[0]?.callId;
 				if (callId !== undefined) {
 					projection.pendingActorCalls[callId] = record.source.kind === "callBatch"
-						? { kind: "batch", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageIds: record.messages.map((message) => message.messageId), status: "enqueued" }
-						: { kind: "singleton", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageId: record.messages[0]!.messageId, status: "enqueued" };
+						? { kind: "batch", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageIds: record.messages.map((message) => message.messageId), messages, status: "enqueued" }
+						: { kind: "singleton", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageId: record.messages[0]!.messageId, messages, status: "enqueued" };
 				}
 				const producer = record.messages[0]?.producerState;
 				if (producer !== undefined) {
-					projection.actorProducerVisits[producer] = Math.max(projection.actorProducerVisits[producer] ?? 0, record.messages[0]?.producerVisit ?? 0);
+					projection.actorProducerVisits[producer] = record.messages[0]!.producerVisit;
 					advanceActorProducerAfterEnqueue(projection, ast, producer, abandoned);
 				}
 				break;
@@ -296,7 +291,10 @@ export function projectBranch(
 						worker.status = endpoint.status === "closing" || endpoint.status === "draining" ? "draining" : "busy";
 						refreshPoolStatus(endpoint as ProjectedActorPoolOccurrence);
 					}
-					if (head.callId !== undefined) refreshPendingBatchStatus(projection, head.callId);
+					if (head.callId !== undefined) {
+						syncPendingCallMessage(projection, head);
+						refreshPendingBatchStatus(projection, head.callId);
+					}
 					break;
 				}
 				if (record.kind === "replied") {
@@ -304,6 +302,7 @@ export function projectBranch(
 					current.status = "replied";
 					if (record.replyEvent !== undefined) current.replyEvent = record.replyEvent;
 					if (Object.hasOwn(record, "output")) current.replyOutput = record.output;
+					if (current.callId !== undefined) syncPendingCallMessage(projection, current);
 					break;
 				}
 				const { endpoint, worker, current, reply } = assertActorMessageSettled(projection, ast, record);
@@ -319,7 +318,10 @@ export function projectBranch(
 					worker.status = endpoint.status === "closing" || endpoint.status === "draining" ? "draining" : "idle";
 					refreshPoolStatus(endpoint as ProjectedActorPoolOccurrence);
 				}
-				if (current.callId !== undefined) refreshPendingBatchStatus(projection, current.callId);
+				if (current.callId !== undefined) {
+					syncPendingCallMessage(projection, current);
+					refreshPendingBatchStatus(projection, current.callId);
+				}
 				break;
 			}
 			case "actor_call_resolved": {
@@ -403,10 +405,10 @@ export function projectBranch(
 					}
 					if (pending.gateSeqId !== undefined) throw new Error(`User phase in state ${record.actionUid.state} already has an opened gate`);
 					pending.gateSeqId = record.seqId;
-					projection.userInteractions[record.seqId] = { opened: record, status: "open" };
+					projection.openUserInteractions[record.seqId] = { opened: record, status: "open" };
 					break;
 				}
-				const gate = projection.userInteractions[record.gateSeqId];
+				const gate = projection.openUserInteractions[record.gateSeqId];
 				const pending = projection.pendingActions.find((entry) =>
 					sameActionUid(entry.actionUid, record.actionUid) &&
 					(entry.phase === "running" || entry.phase === "rejected") &&
@@ -422,8 +424,7 @@ export function projectBranch(
 				if (record.event.type === "FAILED" || !gate.opened.events.includes(record.event.type)) {
 					throw new Error(`Event '${record.event.type}' is not allowed for user interaction ${record.gateSeqId}`);
 				}
-				gate.status = "resolved";
-				gate.resolvedEvent = record.event;
+				delete projection.openUserInteractions[record.gateSeqId];
 				applyActionCompletion(projection, ast, record.actionUid, record.event, record.seqId, abandoned);
 				break;
 			}
@@ -519,6 +520,27 @@ export function projectedActorEndpoint(
 	return projection.actors[occurrence] ?? projection.actorPools[occurrence];
 }
 
+/** Live-control messages only; settled non-call history belongs to durable history queries. */
+export function projectedActorLiveMessages(
+	projection: BranchProjection,
+	endpoint: ProjectedActorEndpointOccurrence,
+): ProjectedActorMessage[] {
+	const messages = new Map<string, ProjectedActorMessage>();
+	for (const message of endpoint.mailbox) messages.set(message.messageId, message);
+	if ("workers" in endpoint) {
+		for (const worker of endpoint.workers) {
+			if (worker.currentMessage !== undefined) messages.set(worker.currentMessage.messageId, worker.currentMessage);
+		}
+	} else if (endpoint.currentMessage !== undefined) {
+		messages.set(endpoint.currentMessage.messageId, endpoint.currentMessage);
+	}
+	for (const call of Object.values(projection.pendingActorCalls)) {
+		if (call.occurrence !== endpoint.occurrence) continue;
+		for (const message of call.messages) messages.set(message.messageId, message);
+	}
+	return [...messages.values()];
+}
+
 function actorExecutionForContext(projection: BranchProjection, context: ReturnType<typeof actorContextForState>) {
 	assert(context !== undefined);
 	const endpoint = projectedActorEndpoint(projection, context.endpointOccurrence);
@@ -546,6 +568,13 @@ function refreshPoolStatus(pool: ProjectedActorPoolOccurrence): void {
 	pool.status = pool.workers.some((worker) => worker.currentMessage !== undefined) || pool.mailbox.length > 0 ? "busy" : "idle";
 }
 
+function syncPendingCallMessage(projection: BranchProjection, message: ProjectedActorMessage): void {
+	if (message.callId === undefined) return;
+	const pending = projection.pendingActorCalls[message.callId];
+	const retained = pending?.messages.find((candidate) => candidate.messageId === message.messageId);
+	if (retained !== undefined && retained !== message) Object.assign(retained, message);
+}
+
 function refreshPendingBatchStatus(projection: BranchProjection, callId: string): void {
 	const pending = projection.pendingActorCalls[callId];
 	if (pending === undefined) return;
@@ -553,11 +582,9 @@ function refreshPendingBatchStatus(projection: BranchProjection, callId: string)
 		pending.status = "accepted";
 		return;
 	}
-	const endpoint = projectedActorEndpoint(projection, pending.occurrence);
-	const messages = pending.messageIds.map((messageId) => endpoint?.messages.find((message) => message.messageId === messageId));
-	const accepted = messages.filter((message) => message !== undefined && message.status !== "queued").length;
-	const settled = messages.filter((message) => message?.status === "settled").length;
-	pending.status = settled > 0 || (accepted > 0 && accepted < messages.length) ? "partial" : accepted === messages.length ? "accepted" : "enqueued";
+	const accepted = pending.messages.filter((message) => message.status !== "queued").length;
+	const settled = pending.messages.filter((message) => message.status === "settled").length;
+	pending.status = settled > 0 || (accepted > 0 && accepted < pending.messages.length) ? "partial" : accepted === pending.messages.length ? "accepted" : "enqueued";
 }
 
 function applyActionCompletion(
@@ -576,6 +603,9 @@ function applyActionCompletion(
 		return;
 	}
 	assertActiveActionUid(ast, actionUid.state, actionUid, "complete");
+	if (record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined) {
+		for (const [path, pin] of Object.entries(record.artifacts)) projection.artifactPins[path] = pin;
+	}
 	const state = actionStateAt(ast, actionUid.state);
 	if (state?.kind === "state" && state.validate !== undefined && event.type !== "FAILED") {
 		const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
@@ -619,10 +649,7 @@ function removePendingAction(projection: BranchProjection, actionUid: ActionUID)
 	const index = projection.pendingActions.findIndex((pending) => sameActionUid(pending.actionUid, actionUid));
 	if (index !== -1) {
 		const [removed] = projection.pendingActions.splice(index, 1);
-		if (removed?.gateSeqId !== undefined) {
-			const interaction = projection.userInteractions[removed.gateSeqId];
-			if (interaction?.status === "open") interaction.status = "closed";
-		}
+		if (removed?.gateSeqId !== undefined) delete projection.openUserInteractions[removed.gateSeqId];
 	}
 }
 
@@ -773,10 +800,7 @@ function exitAndEnter(
 			kept.push(pending);
 		} else {
 			abandoned.push(pending);
-			if (pending.gateSeqId !== undefined) {
-				const interaction = projection.userInteractions[pending.gateSeqId];
-				if (interaction?.status === "open") interaction.status = "closed";
-			}
+			if (pending.gateSeqId !== undefined) delete projection.openUserInteractions[pending.gateSeqId];
 		}
 	}
 	projection.pendingActions = kept;
@@ -1065,14 +1089,24 @@ function assertActorMessagesEnqueued(
 		const producerMessage = producerExecution?.worker?.currentMessage ?? (producerExecution?.endpoint as ProjectedActorOccurrence | undefined)?.currentMessage;
 		assert(producerMessage !== undefined, `External message enqueue targets closing actor ${record.occurrence}`);
 	}
-	assert(record.messages.every((message, index) => message.batchIndex === index), "Actor enqueue batchIndex must preserve authored order");
+	const expectedProducerVisit = (projection.actorProducerVisits[record.source.producerState] ?? 0) + 1;
+	assert(
+		record.messages.every((message, index) =>
+			message.producerVisit === expectedProducerVisit &&
+			message.batchIndex === index &&
+			message.messageId === `${record.source.producerState}:message:${expectedProducerVisit}:${index}`),
+		`Actor enqueue identity must use producer ${record.source.producerState} visit ${expectedProducerVisit} with canonical batch indexes`,
+	);
 	const singleton = record.source.kind === "send" || record.source.kind === "call";
 	assert(!singleton || record.messages.length === 1, `${record.source.kind} must enqueue exactly one message`);
 	const expectsCall = record.source.kind === "call" || record.source.kind === "callBatch";
 	const callId = first.callId;
-	assert(expectsCall ? callId !== undefined && record.messages.every((message) => message.callId === callId) : record.messages.every((message) => message.callId === undefined), `Actor ${record.source.kind} call correlation is inconsistent`);
+	const expectedCallId = `${record.source.producerState}:call:${expectedProducerVisit}`;
+	assert(expectsCall
+		? callId === expectedCallId && record.messages.every((message) => message.callId === expectedCallId)
+		: record.messages.every((message) => message.callId === undefined), `Actor ${record.source.kind} call correlation is inconsistent`);
 	if (callId !== undefined) assert(projection.pendingActorCalls[callId] === undefined, `Duplicate actor call id ${callId}`);
-	const ids = new Set(actor.messages.map((message) => message.messageId));
+	const ids = new Set(projectedActorLiveMessages(projection, actor).map((message) => message.messageId));
 	for (const envelope of record.messages) {
 		assert(!ids.has(envelope.messageId), `Duplicate actor message id ${envelope.messageId}`);
 		ids.add(envelope.messageId);
@@ -1162,8 +1196,7 @@ function assertActorCallResolved(projection: BranchProjection, record: ActorCall
 		call?.kind === "singleton" && call.callerState === record.callerState && call.messageId === record.messageId,
 		`Actor call result ${record.callId} has no matching pending singleton caller`,
 	);
-	const actor = projectedActorEndpoint(projection, call.occurrence);
-	const message = actor?.messages.find((entry) => entry.messageId === record.messageId);
+	const message = call.messages.find((entry) => entry.messageId === record.messageId);
 	assert(message?.status === "settled", `Actor call result ${record.callId} resolved before its message settled`);
 	assert(
 		message.callId === record.callId && message.replyEvent === record.replyEvent,
@@ -1184,10 +1217,9 @@ function assertActorBatchCallResolved(projection: BranchProjection, record: Acto
 	const call = projection.pendingActorCalls[record.callId];
 	assert(call?.kind === "batch" && call.callerState === record.callerState, `Actor batch call result ${record.callId} has no matching pending caller`);
 	assert.deepStrictEqual(record.messageIds, call.messageIds, `Actor batch call ${record.callId} resolution order or membership changed`);
-	const endpoint = projectedActorEndpoint(projection, call.occurrence);
-	assert(endpoint !== undefined, `Actor batch call ${record.callId} targets a missing endpoint`);
+	assert(projectedActorEndpoint(projection, call.occurrence) !== undefined, `Actor batch call ${record.callId} targets a missing endpoint`);
 	return call.messageIds.map((messageId) => {
-		const message = endpoint.messages.find((entry) => entry.messageId === messageId);
+		const message = call.messages.find((entry) => entry.messageId === messageId);
 		assert(message?.status === "settled", `Actor batch call ${record.callId} resolved before all items settled`);
 		assert(Object.hasOwn(message, "replyOutput"), `Actor batch call ${record.callId} item ${messageId} has no single reply output`);
 		return message.replyOutput;

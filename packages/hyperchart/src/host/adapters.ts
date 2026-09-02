@@ -13,6 +13,7 @@ import {
 	projectedActorEndpoint,
 	projectedActorEndpoints,
 	type PendingAction,
+	type ProjectedActorMessage,
 	type ProjectedActorOccurrence,
 	type ProjectedActorPoolOccurrence,
 	type ProjectionSkippedRecord,
@@ -251,7 +252,8 @@ export function hyperchartRunFromRuntime(
 		args: projection.args === undefined ? {} : { ...projection.args },
 		...(options.description === undefined ? {} : { description: options.description }),
 	});
-	const runtime = runtimeFacts(ast, records, projection, skipped, options.sessionProgress);
+	const messagesByOccurrence = projectedMessagesByOccurrence(records, new Set(skipped.map((entry) => entry.record)));
+	const runtime = runtimeFacts(ast, records, projection, skipped, options.sessionProgress, messagesByOccurrence);
 	const staticStates = staticRun.states.map((state) => overlayRuntimeState(state, ast, projection, runtime));
 	const projectedActors = projectedActorEndpoints(projection);
 	const actorGenerationsByLogicalOccurrence = new Map<StatePath, typeof projectedActors>();
@@ -296,6 +298,7 @@ export function hyperchartRunFromRuntime(
 	).values()];
 	const actorOccurrences: HyperchartActorOccurrenceInfo[] = latestProjectedActors.map((actor) => {
 		const pending = Object.values(projection.pendingActorCalls).find((call) => call.occurrence === actor.occurrence);
+		const messagesFor = (candidate: typeof actor) => messagesByOccurrence.get(candidate.occurrence) ?? [];
 		const pool = actor.definition.kind === "actorPool" ? actor as ProjectedActorPoolOccurrence : undefined;
 		const ordinary = pool === undefined ? actor as ProjectedActorOccurrence : undefined;
 		const currentMessages = pool === undefined
@@ -303,7 +306,7 @@ export function hyperchartRunFromRuntime(
 			: pool.workers.flatMap((worker) => worker.currentMessage === undefined ? [] : [worker.currentMessage]);
 		// Pool messages are owned by concrete worker slots, never by the endpoint mailbox itself.
 		const currentMessage = ordinary?.currentMessage;
-		const messageInfo = (sourceActor: typeof actor, message: typeof actor.messages[number]) => {
+		const messageInfo = (sourceActor: typeof actor, message: ProjectedActorMessage) => {
 			const replyFact = repliedByMessage.get(`${sourceActor.occurrence}\u0000${message.messageId}`);
 			return {
 				messageId: message.messageId,
@@ -333,7 +336,7 @@ export function hyperchartRunFromRuntime(
 				...(candidate.mailbox[0] === undefined ? {} : { head: messageInfo(candidate, candidate.mailbox[0]) }),
 				entries: candidate.mailbox.map((message) => messageInfo(candidate, message)),
 			};
-			const messageHistory = candidate.messages
+			const messageHistory = messagesFor(candidate)
 				.filter((message) => message.status === "settled" || message.status === "failed" || message.status === "cancelled")
 				.map((message) => messageInfo(candidate, message));
 			const candidateCurrent = candidate.definition.kind === "actorPool"
@@ -381,7 +384,7 @@ export function hyperchartRunFromRuntime(
 			const sessions = workerFacts.flatMap(([, facts]) => facts.session === undefined ? [] : [facts.session]).sort((left, right) => sessionActivity(left) - sessionActivity(right));
 			const latestSession = sessions.at(-1);
 			const results = Object.entries(projection.results).flatMap(([statePath, value]) => statePath.startsWith(`${worker.occurrence}.`) ? [{ state: statePath.slice(worker.occurrence.length + 1), value }] : []);
-			const workerMessages = actor.messages
+			const workerMessages = messagesFor(actor)
 				.filter((message) => message.workerIndex === worker.index && message.messageId !== worker.currentMessage?.messageId)
 				.map((message) => messageInfo(actor, message));
 			return {
@@ -400,7 +403,7 @@ export function hyperchartRunFromRuntime(
 		const batchCalls = Object.values(projection.pendingActorCalls).flatMap((call) => {
 			if (call.kind !== "batch" || call.occurrence !== actor.occurrence) return [];
 			const items = call.messageIds.flatMap((messageId) => {
-				const message = actor.messages.find((candidate) => candidate.messageId === messageId);
+				const message = call.messages.find((candidate) => candidate.messageId === messageId);
 				return message === undefined ? [] : [messageInfo(actor, message)];
 			});
 			const settled = items.filter((message) => message.status === "settled").length;
@@ -434,7 +437,7 @@ export function hyperchartRunFromRuntime(
 			...(messageHistory.length === 0 ? {} : { messageHistory }),
 			...(currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, currentMessage) }),
 			...(pending === undefined || projection.failure !== undefined ? {} : { pendingCaller: { callId: pending.callId, state: pending.callerState, waitReason: pending.status === "enqueued" ? "accept" as const : "reply" as const } }),
-			...(actor.status === "closing" || actor.status === "draining" ? { drain: { queued: actor.mailbox.length, current: currentMessages.length, settled: actor.messages.filter((message) => message.status === "settled").length } } : {}),
+			...(actor.status === "closing" || actor.status === "draining" ? { drain: { queued: actor.mailbox.length, current: currentMessages.length, settled: messagesFor(actor).filter((message) => message.status === "settled").length } } : {}),
 		};
 	});
 	const actorOccurrenceStates: HyperchartStateInfo[] = actorOccurrences.map((occurrence) => {
@@ -1019,6 +1022,37 @@ function runtimeRunStatus(value: string | undefined, states: readonly Hyperchart
 	return "paused";
 }
 
+function projectedMessagesByOccurrence(
+	records: readonly DurableLogRecord[],
+	skippedRecords: ReadonlySet<DurableLogRecord>,
+): ReadonlyMap<StatePath, ProjectedActorMessage[]> {
+	const messages = new Map<StatePath, Map<string, ProjectedActorMessage>>();
+	for (const record of records) {
+		if (skippedRecords.has(record)) continue;
+		if (record.type === "actor_messages_enqueued") {
+			const occurrenceMessages = messages.get(record.occurrence) ?? new Map<string, ProjectedActorMessage>();
+			for (const envelope of record.messages) occurrenceMessages.set(envelope.messageId, { ...envelope, status: "queued" });
+			messages.set(record.occurrence, occurrenceMessages);
+			continue;
+		}
+		if (record.type !== "actor_message") continue;
+		const message = messages.get(record.occurrence)?.get(record.messageId);
+		if (message === undefined) continue;
+		if (record.kind === "accepted") {
+			message.status = "accepted";
+			message.receiveState = record.receiveState;
+			if (record.workerIndex !== undefined) message.workerIndex = record.workerIndex;
+		} else if (record.kind === "replied") {
+			message.status = "replied";
+			if (record.replyEvent !== undefined) message.replyEvent = record.replyEvent;
+			if (Object.hasOwn(record, "output")) message.replyOutput = record.output;
+		} else {
+			message.status = "settled";
+		}
+	}
+	return new Map([...messages].map(([occurrence, occurrenceMessages]) => [occurrence, [...occurrenceMessages.values()]]));
+}
+
 function firstTimestamp(records: readonly DurableLogRecord[]): number | undefined {
 	return records.find((record) => typeof record.timestamp === "number")?.timestamp;
 }
@@ -1037,13 +1071,14 @@ function runtimeFacts(
 	projection: ReturnType<typeof createBranchProjection>,
 	skipped: readonly ProjectionSkippedRecord[],
 	sessionProgress: HyperchartRuntimeSessionProgressFile | undefined,
+	messagesByOccurrence: ReadonlyMap<StatePath, ProjectedActorMessage[]>,
 ): RuntimeFacts {
 	const byState = new Map<StatePath, StateRuntimeFacts>();
 	const pendingByState = new Map<StatePath, PendingAction>();
 	const issuesByState = new Map<StatePath, HyperchartIssueInfo[]>();
 	const actorOwnerVisits = new Map<StatePath, Array<{ generation: number; seqId: number }>>();
 	const skippedRecords = new Set(skipped.map((entry) => entry.record));
-	for (const [stateId, history] of actorInternalMessageHistories(ast, records, projection, skippedRecords)) {
+	for (const [stateId, history] of actorInternalMessageHistories(ast, records, messagesByOccurrence, skippedRecords)) {
 		const facts = byState.get(stateId) ?? {};
 		facts.actorMessageHistory = history;
 		byState.set(stateId, facts);
@@ -1059,7 +1094,7 @@ function runtimeFacts(
 			continue;
 		}
 		if (record.type === "actor_message" && record.kind === "accepted" && !skippedRecords.has(record)) {
-			const message = projectedActorEndpoint(projection, record.occurrence)?.messages.find((candidate) => candidate.messageId === record.messageId);
+			const message = messagesByOccurrence.get(record.occurrence)?.find((candidate) => candidate.messageId === record.messageId);
 			const facts = byState.get(record.receiveState) ?? {};
 			facts.invokedAt ??= record.timestamp;
 			facts.completedAt = record.timestamp;
@@ -1079,7 +1114,7 @@ function runtimeFacts(
 					producerVisit: message.producerVisit,
 					batchIndex: message.batchIndex,
 					input: message.input,
-					status: actor?.messages.find((candidate) => candidate.messageId === message.messageId)?.status ?? "queued",
+					status: messagesByOccurrence.get(record.occurrence)?.find((candidate) => candidate.messageId === message.messageId)?.status ?? "queued",
 					targetOccurrencePath: record.occurrence,
 					targetLogicalPath: actor?.logicalOccurrence ?? record.occurrence,
 					targetGeneration: record.generation,
@@ -1175,7 +1210,7 @@ function runtimeFacts(
 function actorInternalMessageHistories(
 	ast: ChartAst,
 	records: readonly DurableLogRecord[],
-	finalProjection: ReturnType<typeof createBranchProjection>,
+	messagesByOccurrence: ReadonlyMap<StatePath, ProjectedActorMessage[]>,
 	skippedRecords: ReadonlySet<DurableLogRecord>,
 ): Map<StatePath, HyperchartActorMessageInfo[]> {
 	const histories = new Map<StatePath, HyperchartActorMessageInfo[]>();
@@ -1252,9 +1287,8 @@ function actorInternalMessageHistories(
 	}
 	for (const history of histories.values()) {
 		for (const entry of history) {
-			const final = projectedActorEndpoints(finalProjection)
-				.flatMap((actor) => actor.messages)
-				.find((message) => message.messageId === entry.messageId);
+			const final = entry.actorOccurrencePath === undefined ? undefined : messagesByOccurrence.get(entry.actorOccurrencePath)
+				?.find((message) => message.messageId === entry.messageId);
 			if (final !== undefined) entry.status = final.status;
 		}
 	}

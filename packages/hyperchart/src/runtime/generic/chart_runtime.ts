@@ -6,7 +6,6 @@ import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import type { AgentEffect, Effect, MachineEvent, RejectedEffect, RenderedArtifact } from "../../core/machine.js";
 import { ArtifactStore, hashFile } from "./artifact_store.js";
-import { latestPinsByPath } from "./artifact_workspace.js";
 import { checkArtifactContent, renderedArtifactPath } from "./artifacts.js";
 import { actorContextForState } from "../../core/actors.js";
 import { nodeAt } from "../../core/paths.js";
@@ -294,10 +293,8 @@ export class ChartRuntime implements Runtime {
 	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {
 		const store = this.artifactStore;
 		if (store === undefined || reads === undefined || reads.length === 0) return;
-		let pins: ReadonlyMap<string, ArtifactPin> | undefined;
 		for (const artifact of reads) {
-			pins ??= latestPinsByPath(await this.options.logStore.readAncestry(this.branchId));
-			const pin = pins.get(artifact.path);
+			const pin = artifact.pin;
 			if (pin === undefined) continue;
 			const path = renderedArtifactPath(artifact, this.options.workDir);
 			if (await matchesHash(path, pin.hash)) continue;

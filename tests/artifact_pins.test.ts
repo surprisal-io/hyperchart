@@ -107,6 +107,7 @@ describe("artifact pins", () => {
 		const content = await readFile(join(workDir, "report.json"), "utf8");
 		expect(pin.hash).toBe(createHash("sha256").update(content).digest("hex"));
 		expect(pin.size).toBe(Buffer.byteLength(content));
+		expect(state.projection.artifactPins["report.json"]).toEqual(pin);
 		const store = new ArtifactStore(runDir);
 		expect(await readFile(await store.get(pin.hash), "utf8")).toBe(content);
 		expect(explainReplay(ast, log).unpinned).toEqual([]);

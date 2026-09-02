@@ -91,6 +91,8 @@ export type RenderedArtifact = Readonly<{
 	// Present on artifactOf reads with a selector: the runtime hands the agent only this field of the
 	// file's content (validated against `shape`, which describes the WHOLE file).
 	select?: string;
+	/** Latest accepted durable revision for this rendered read path. */
+	pin?: ArtifactPin;
 }>;
 
 // A spawn-ready subagent call: the definition name and frontmatter overrides live in `action`;
@@ -940,7 +942,7 @@ function dueActorBatchResolutions(state: MachineState): RecordAppend[] {
 	return Object.values(state.projection.pendingActorCalls).flatMap((pending) => {
 		if (pending.kind !== "batch") return [];
 		const endpoint = projectedActorEndpoint(state.projection, pending.occurrence);
-		if (endpoint === undefined || !pending.messageIds.every((messageId) => endpoint.messages.find((message) => message.messageId === messageId)?.status === "settled")) return [];
+		if (endpoint === undefined || !pending.messageIds.every((messageId) => pending.messages.find((message) => message.messageId === messageId)?.status === "settled")) return [];
 		return [{ kind: "append", id: `actor:batch-resolve:${pending.callId}`, records: [{ type: "actor_batch_call_resolved", callId: pending.callId, callerState: pending.callerState, messageIds: pending.messageIds }] }];
 	});
 }
@@ -951,7 +953,7 @@ function actorCallResolutionAfterReply(state: MachineState, effect: ActorReplyEf
 	if (pending?.kind === "batch") {
 		const endpoint = projectedActorEndpoint(state.projection, pending.occurrence);
 		const complete = endpoint !== undefined && pending.messageIds.every((messageId) =>
-			messageId === effect.messageId || endpoint.messages.find((message) => message.messageId === messageId)?.status === "settled");
+			messageId === effect.messageId || pending.messages.find((message) => message.messageId === messageId)?.status === "settled");
 		return complete
 			? [{ type: "actor_batch_call_resolved", callId: pending.callId, callerState: pending.callerState, messageIds: pending.messageIds }]
 			: [];
@@ -1471,11 +1473,14 @@ export function renderRead(
 	if (declared === undefined) {
 		throw new Error(`Read in state ${stateId}: cannot resolve artifact '${read.artifact ?? "*"}' of ${read.state}`);
 	}
+	const rendered = renderArtifact(state, declared, producerState);
+	const pin = state.projection.artifactPins[rendered.path];
 	return {
-		...renderArtifact(state, declared, producerState),
+		...rendered,
 		...(name === undefined ? {} : { name }),
 		sourceState: producerState,
 		...(read.select === undefined ? {} : { select: read.select }),
+		...(pin === undefined ? {} : { pin }),
 	};
 }
 

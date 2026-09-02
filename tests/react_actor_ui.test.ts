@@ -223,7 +223,7 @@ describe("React actor inspector structure", () => {
 			event: "APPLY",
 			messages: [expect.objectContaining({
 				input: { patch: "follow-up patch" },
-				messageId: "apply-call:1:0",
+				messageId: "apply-call:message:1:0",
 				targetOccurrencePath: "@editor",
 				targetLogicalPath: "@editor",
 				targetGeneration: 1,
@@ -232,7 +232,7 @@ describe("React actor inspector structure", () => {
 		expect(actorStaticAdapterRun.actorDeclarations?.[0]?.inputValue).toEqual({ file: "src/index.ts" });
 		expect(actorRuntimeAdapterRun.actorOccurrences?.[0]).toMatchObject({
 			input: { file: "src/index.ts" },
-			pendingCaller: { state: "apply-call", callId: "apply-call:1" },
+			pendingCaller: { state: "apply-call", callId: "apply-call:call:1" },
 		});
 
 		const rootScope = visibleStateIdsForScope(actorRuntimeAdapterRun.states);
@@ -280,25 +280,25 @@ describe("React actor inspector structure", () => {
 		const replyBContract = declaration.protocol.B!.reply;
 		if (sendA.kind !== "send" || sendB.kind !== "send" || replyAContract.kind !== "named" || replyBContract.kind !== "named") throw new Error("expected send states and named replies");
 		const source = (definition: typeof sendA, event: "A" | "B") => ({ producerState: definition.id, kind: "send" as const, definition, targetDeclaration: "@worker", event, inputSchema: declaration.protocol[event]!.input });
-		const envelope = (producerState: string, event: "A" | "B", value: string) => ({ messageId: `${event}:1:0`, event, input: { value }, producerState, producerVisit: 1, batchIndex: 0 });
+		const envelope = (producerState: string, event: "A" | "B", value: string) => ({ messageId: `${producerState}:message:1:0`, event, input: { value }, producerState, producerVisit: 1, batchIndex: 0 });
 		const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: 1_700_100_000_000 + seqId });
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...stamp(1) },
 			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: { name: "worker" }, definition: declaration, ...stamp(2) },
 			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: source(sendA, "A"), messages: [envelope("sendA", "A", "input-a")], ...stamp(3) },
 			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: source(sendB, "B"), messages: [envelope("sendB", "B", "input-b")], ...stamp(4) },
-			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: "A:1:0", receiveState: "@worker.receiveA", ...stamp(5) },
-			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: "A:1:0", message: "A", replyEvent: "A_OK", output: { result: "a" }, schema: replyAContract.schemas.A_OK!, ...stamp(6) },
-			{ type: "actor_message", kind: "settled", occurrence: "@worker", messageId: "A:1:0", ...stamp(7) },
-			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: "B:1:0", receiveState: "@worker.receiveB", ...stamp(8) },
-			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: "B:1:0", message: "B", replyEvent: "B_OK", output: { result: "b" }, schema: replyBContract.schemas.B_OK!, ...stamp(9) },
+			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: "sendA:message:1:0", receiveState: "@worker.receiveA", ...stamp(5) },
+			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: "sendA:message:1:0", message: "A", replyEvent: "A_OK", output: { result: "a" }, schema: replyAContract.schemas.A_OK!, ...stamp(6) },
+			{ type: "actor_message", kind: "settled", occurrence: "@worker", messageId: "sendA:message:1:0", ...stamp(7) },
+			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: "sendB:message:1:0", receiveState: "@worker.receiveB", ...stamp(8) },
+			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: "sendB:message:1:0", message: "B", replyEvent: "B_OK", output: { result: "b" }, schema: replyBContract.schemas.B_OK!, ...stamp(9) },
 		];
 		const run = scenario.runtimeRun(records);
 		const state = (id: string) => run.states.find((candidate) => candidate.id === id)!;
-		expect(state("@worker.receiveA").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "A:1:0", event: "A", input: { value: "input-a" }, producerVisit: "sendA:1", status: "settled" })]);
-		expect(state("@worker.receiveB").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "B:1:0", event: "B", input: { value: "input-b" }, producerVisit: "sendB:1", status: "replied" })]);
-		expect(state("@worker.replyA").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "A:1:0", event: "A", replyEvent: "A_OK", replyOutput: { result: "a" }, validation: "valid", replyState: "@worker.replyA" })]);
-		expect(state("@worker.replyB").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "B:1:0", event: "B", replyEvent: "B_OK", replyOutput: { result: "b" }, validation: "valid", replyState: "@worker.replyB" })]);
+		expect(state("@worker.receiveA").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendA:message:1:0", event: "A", input: { value: "input-a" }, producerVisit: "sendA:1", status: "settled" })]);
+		expect(state("@worker.receiveB").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendB:message:1:0", event: "B", input: { value: "input-b" }, producerVisit: "sendB:1", status: "replied" })]);
+		expect(state("@worker.replyA").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendA:message:1:0", event: "A", replyEvent: "A_OK", replyOutput: { result: "a" }, validation: "valid", replyState: "@worker.replyA" })]);
+		expect(state("@worker.replyB").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendB:message:1:0", event: "B", replyEvent: "B_OK", replyOutput: { result: "b" }, validation: "valid", replyState: "@worker.replyB" })]);
 		for (const id of ["@worker.receiveA", "@worker.receiveB", "@worker.replyA", "@worker.replyB"]) {
 			const markup = renderToStaticMarkup(createElement(StateDetails, { state: state(id), allStates: run.states }));
 			expect(markup).not.toContain("Actor definition / input");
@@ -395,7 +395,7 @@ describe("React actor inspector structure", () => {
 				instances: actorOccurrence.mailboxInstances,
 			}));
 			expect(mailboxMarkup).toContain("current");
-			expect(mailboxMarkup).not.toContain("queue:1:0");
+			expect(mailboxMarkup).not.toContain("queue:message:1:0");
 			expect(mailboxMarkup).toContain(">send<");
 			expect(mailboxMarkup).toContain(">call<");
 			expect(mailboxMarkup).not.toContain("Message input");

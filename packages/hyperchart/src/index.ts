@@ -246,8 +246,10 @@ export type {
 	ProjectedActorPoolWorker,
 	ProjectedActorEndpointOccurrence,
 	ProjectionSkippedRecord,
-	ProjectedUserInteraction,
+	OpenProjectedUserInteraction,
 } from "./core/projection.js";
+export { compactProjection, compileProjectionRetention } from "./core/projection_retention.js";
+export type { ProjectionRetentionPlan } from "./core/projection_retention.js";
 export { actorEndpointAdmission, createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";
 export type { AsyncQueue, MaybeAsyncIterable } from "./utils/index.js";

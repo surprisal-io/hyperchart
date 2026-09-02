@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
+import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
 import type { ChartAst } from "../packages/hyperchart/src/core/types.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
@@ -54,6 +55,8 @@ describe("journal-native user interactions", () => {
 		const f = await fixture();
 		const requests = await scanOpenUserInteractions(f.runDir, "main");
 		expect(requests).toEqual([expect.objectContaining({ version: 2, runId: "run-a", branchId: "main", seqId: f.gateSeqId, prompt: "Approve?", events: ["APPROVED"] })]);
+		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await f.store.readAncestry("main"));
+		expect(Object.keys(projection.openUserInteractions)).toEqual([String(f.gateSeqId)]);
 		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "request.json"))).toBe(false);
 	});
 
@@ -82,6 +85,9 @@ describe("journal-native user interactions", () => {
 		expect((await validateAndPersistUserInteractionResponse(input)).idempotent).toBe(true);
 		await expect(validateAndPersistUserInteractionResponse({ ...input, event: { type: "APPROVED", output: "different" } })).rejects.toThrow(/Conflicting response/);
 		expect((await readUserInteractionResponse(f.runDir, "main", f.gateSeqId))?.event).toEqual({ type: "APPROVED" });
+		const refreshed = new JsonlLogStore(join(f.runDir, "log.jsonl"));
+		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await refreshed.readAncestry("main"));
+		expect(projection.openUserInteractions).toEqual({});
 		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "resolution.json"))).toBe(false);
 	});
 

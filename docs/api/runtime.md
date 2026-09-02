@@ -556,6 +556,8 @@ AgentDefinition, AgentDefinitionResolution, ThinkingLevel,
 createAgentDefaultsResolver, resolveAgentDefaults, loadAgentDefinition, parseAgentFile
 RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry, SchemaRegistryLike
 ChartRuntime, ChartRuntimeOptions
+createBranchProjection, projectBranch, compactProjection, compileProjectionRetention,
+BranchProjection, ProjectionRetentionPlan, OpenProjectedUserInteraction
 USER_INTERACTIONS_DIR, USER_INTERACTION_ARBITER_DIR,
 USER_INTERACTION_CLAIM_LEASE_MS, USER_INTERACTION_WAIT_LEASE_MS,
 UserInteractionCoordinate, UserInteractionOwner, UserInteractionRequest,
@@ -582,7 +584,8 @@ PostgresRunTransaction, PostgresForkAndCommitInput,
 PgClientLike, PgQueryResult, SqlCommitParticipant,
 SqlCommitTransaction, SqlTransactionalRunLogStore
 ScriptRunner
-checkArtifactFile, resolveArtifactValue, serializeEnvValue
+checkArtifactFile, resolveArtifactValue, serializeEnvValue,
+latestPinsByPath, materializeWorkspace, materializeWorkspaceFromPins
 runGuard, checkSchema, checkSchemaAsync
 createRunDir, loadRunMeta, saveRunMeta, deleteRunStorage, RunMeta
 terminalStateForFinalMachine, finalMachineFailureMessage, RunTerminalState
@@ -594,6 +597,12 @@ hasTerminalNotificationReceipt, removeTerminalNotificationReceipt,
 removeTerminalNotificationOutbox, TerminalNotificationPayload,
 TerminalNotificationRequest, TerminalNotificationReceipt
 ```
+
+## Live projection retention
+
+`BranchProjection` contains current synchronous machine state rather than elapsed history. `openUserInteractions` contains open gates only; actor and pool occurrences retain mailbox/current-worker control while settled call payloads survive only as long as their `pendingActorCalls` entry needs them. `artifactPins` contains the latest accepted revision for each rendered authored path and is attached to rendered artifact reads before the runtime performs asynchronous restoration.
+
+`compileProjectionRetention(ast)` returns the conservative AST-derived `ProjectionRetentionPlan`; `compactProjection(projection, ast, plan)` is the synchronous compaction seam. The initial implementation deletes only session references proven non-resumable. Inputs, results, spawns, actor generations, and counters remain when future liveness is ambiguous. The execution-owned projection loader introduced with checkpoints calls compaction after each projected batch and before serialization; callers must not add I/O to `machine` or `projectBranch`.
 
 ## Actor pool runtime behavior
 

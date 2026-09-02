@@ -101,7 +101,7 @@ const callScenario = storyScenario(chart({ kind: "chart", id: "actor-call-story"
 export const actorCallAst = callScenario.ast;
 const callAst = actorCallAst;
 const callBaseRecords: DurableLogRecord[] = [{ type: "args", args: {}, ...stamp(1) }, created(callAst, "@editor", "@editor", 2)];
-const callMessage = envelope(callAst, "apply", "apply", "apply:1:0", 0, "apply:1");
+const callMessage = envelope(callAst, "apply", "apply", "apply:message:1:0", 0, "apply:call:1");
 const pendingCallRecords: DurableLogRecord[] = [
 	...callBaseRecords,
 	enqueue(callAst, "apply", "@editor", "APPLY", [callMessage], 3),
@@ -170,7 +170,7 @@ const drainScenario = storyScenario(chart({
 const drainAst = drainScenario.ast;
 const drainDispatch = sourceState(drainAst, "phase.dispatch");
 if (drainDispatch.kind !== "sendBatch" || !Array.isArray(drainDispatch.inputs)) throw new Error("expected structured-drain batch send");
-const drainMessages = drainDispatch.inputs.map((_, index) => envelope(drainAst, "phase.dispatch", "phase.dispatch", `phase.dispatch:1:${index}`, index));
+const drainMessages = drainDispatch.inputs.map((_, index) => envelope(drainAst, "phase.dispatch", "phase.dispatch", `phase.dispatch:message:1:${index}`, index));
 const drainingRecords: DurableLogRecord[] = [
 	{ type: "args", args: {}, ...stamp(1) },
 	created(drainAst, "phase.@worker", "phase.@worker", 2, "phase"),
@@ -239,7 +239,7 @@ const Auditor = actor({ input: z.object({}).strict(), protocol: AuditProtocol, i
 const auditor = Auditor({});
 const auditScenario = storyScenario(chart({ kind: "chart", id: "actor-send-void-story", actors: { auditor }, initial: "record", states: { record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "done" }), done: final() } }));
 const auditAst = auditScenario.ast;
-const auditMessage = envelope(auditAst, "record", "record", "record:1:0", 0);
+const auditMessage = envelope(auditAst, "record", "record", "record:message:1:0", 0);
 const auditRecords: DurableLogRecord[] = [
 	{ type: "args", args: {}, ...stamp(1) }, created(auditAst, "@auditor", "@auditor", 2), enqueue(auditAst, "record", "@auditor", "RECORD", [auditMessage], 3),
 	{ type: "actor_message", kind: "accepted", occurrence: "@auditor", messageId: auditMessage.messageId, receiveState: "@auditor.idle", ...stamp(4) },
@@ -316,8 +316,8 @@ export const actorReentryRun = reentryScenario.runtimeRun(reentryRecords, { runI
 const mapEditor = Editor({ file: item("file") });
 const mapScenario = storyScenario(chart({ kind: "chart", id: "actor-map-story", args: { projects: {} }, initial: "projects", states: { projects: map({ over: arg("projects"), actors: { editor: mapEditor }, initial: "apply", onDone: "done", states: { apply: call({ to: mapEditor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "finished", REJECTED: "finished" } }), finished: final() } }), done: final() } }));
 const mapAst = mapScenario.ast;
-const mapCallA = envelope(mapAst, "projects.apply", "projects#a.apply", "projects#a.apply:1:0", 0, "projects#a.apply:1");
-const mapCallB = envelope(mapAst, "projects.apply", "projects#b.apply", "projects#b.apply:1:0", 0, "projects#b.apply:1");
+const mapCallA = envelope(mapAst, "projects.apply", "projects#a.apply", "projects#a.apply:message:1:0", 0, "projects#a.apply:call:1");
+const mapCallB = envelope(mapAst, "projects.apply", "projects#b.apply", "projects#b.apply:message:1:0", 0, "projects#b.apply:call:1");
 const mapInstances = { a: { file: "a.ts" }, b: { file: "b.ts" } };
 const mapRecords: DurableLogRecord[] = [
 	{ type: "args", args: { projects: mapInstances }, ...stamp(1) },
@@ -378,7 +378,7 @@ const poolReplyContract = messageContract(actorPoolAst, "@workers", "WORK").repl
 if (poolReplyContract.kind !== "single") throw new Error("expected single pool reply schema");
 const poolSource = sourceState(actorPoolAst, "batch");
 if (poolSource.kind !== "callBatch" || !Array.isArray(poolSource.inputs)) throw new Error("expected pool callBatch story");
-const poolMessages = poolSource.inputs.map((_, index) => envelope(actorPoolAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:1"));
+const poolMessages = poolSource.inputs.map((_, index) => envelope(actorPoolAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:call:1"));
 const poolWorkerUid = (index: number) => ({ ...poolAction.action.uid, state: poolAction.action.uid.state.replace(".$worker.", `.$worker-${index}.`) });
 const poolAccepted = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
 	type: "actor_message", kind: "accepted", occurrence: "@workers", messageId: poolMessages[messageIndex]!.messageId,
@@ -433,7 +433,7 @@ const poolCompleteRecords: DurableLogRecord[] = [
 	poolCompleted(0, 3, 21),
 	poolReplied(3, 0, 22),
 	poolSettled(3, 0, 23),
-	{ type: "actor_batch_call_resolved", callId: "batch:1", callerState: "batch", messageIds: poolMessages.map((message) => message.messageId), ...stamp(24) },
+	{ type: "actor_batch_call_resolved", callId: "batch:call:1", callerState: "batch", messageIds: poolMessages.map((message) => message.messageId), ...stamp(24) },
 	{ type: "actor_scope", kind: "closing", occurrence: "@workers", ...stamp(25) },
 	{ type: "actor_scope", kind: "stopped", occurrence: "@workers", ...stamp(26) },
 ];
@@ -482,7 +482,7 @@ const crowdedReplyContract = messageContract(crowdedAst, "@workers", "WORK").rep
 if (crowdedReplyContract.kind !== "single") throw new Error("expected crowded pool reply schema");
 const crowdedSource = sourceState(crowdedAst, "batch");
 if (crowdedSource.kind !== "callBatch" || !Array.isArray(crowdedSource.inputs)) throw new Error("expected crowded pool callBatch");
-const crowdedMessages = crowdedSource.inputs.map((_, index) => envelope(crowdedAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:1"));
+const crowdedMessages = crowdedSource.inputs.map((_, index) => envelope(crowdedAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:call:1"));
 const crowdedWorkerUid = (index: number) => ({ ...crowdedAction.action.uid, state: crowdedAction.action.uid.state.replace(".$worker.", `.$worker-${index}.`) });
 const crowdedAccepted = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
 	type: "actor_message", kind: "accepted", occurrence: "@workers", messageId: crowdedMessages[messageIndex]!.messageId,
@@ -657,7 +657,7 @@ const overflowScenario = storyScenario(chart({ kind: "chart", id: "actor-overflo
 const overflowAst = overflowScenario.ast;
 const overflowQueue = sourceState(overflowAst, "queue");
 if (overflowQueue.kind !== "sendBatch" || !Array.isArray(overflowQueue.inputs)) throw new Error("expected overflow batch send state");
-const overflowMessages = overflowQueue.inputs.map((_, index) => envelope(overflowAst, "queue", "queue", `queue:1:${index}`, index));
+const overflowMessages = overflowQueue.inputs.map((_, index) => envelope(overflowAst, "queue", "queue", `queue:message:1:${index}`, index));
 const overflowRecords: DurableLogRecord[] = [
 	{ type: "args", args: {}, ...stamp(1) },
 	created(overflowAst, "@overflow", "@overflow", 2),

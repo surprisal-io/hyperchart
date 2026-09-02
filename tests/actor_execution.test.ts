@@ -142,6 +142,14 @@ function parsed(input: unknown = actorChart()) {
 	return result.ast;
 }
 
+function enqueuedMessages(records: readonly DurableLogRecord[], occurrence: string) {
+	return records.flatMap((record) => record.type === "actor_messages_enqueued" && record.occurrence === occurrence ? [...record.messages] : []);
+}
+
+function settledMessageIds(records: readonly DurableLogRecord[], occurrence: string): string[] {
+	return records.flatMap((record) => record.type === "actor_message" && record.kind === "settled" && record.occurrence === occurrence ? [record.messageId] : []);
+}
+
 async function waitFor<T>(read: () => T | undefined, message: string): Promise<T> {
 	for (let turn = 0; turn < 100; turn++) {
 		const value = read();
@@ -168,8 +176,9 @@ describe("explicit event-sourced actors", () => {
 		const runtime = new ActorRuntime(parsed());
 		const state = await loop(runtime);
 		expect(state.projection.actors["@auditor"]).toMatchObject({ status: "stopped", currentState: "idle" });
-		expect(state.projection.actors["@auditor"]?.messages).toHaveLength(1);
-		expect(state.projection.actors["@auditor"]?.messages[0]).toMatchObject({ event: "RECORD", status: "settled" });
+		expect(state.projection.actors["@auditor"]).not.toHaveProperty("messages");
+		expect(enqueuedMessages(runtime.records, "@auditor")).toHaveLength(1);
+		expect(settledMessageIds(runtime.records, "@auditor")).toHaveLength(1);
 		const accepted = runtime.records.find((record) => record.type === "actor_message" && record.kind === "accepted");
 		expect(accepted).toMatchObject({ occurrence: "@auditor", receiveState: "@auditor.idle" });
 		expect(runtime.records.map((record) => record.type)).toEqual(expect.arrayContaining([
@@ -216,11 +225,12 @@ describe("explicit event-sourced actors", () => {
 			],
 		});
 		const state = await loop(runtime);
-		expect(state.projection.actors["@crawler"]?.messages.map((message) => [message.input, message.status])).toEqual([
-			[{ url: "root" }, "settled"],
-			[{ url: "a" }, "settled"],
-			[{ url: "b" }, "settled"],
+		expect(enqueuedMessages(runtime.records, "@crawler").map((message) => message.input)).toEqual([
+			{ url: "root" },
+			{ url: "a" },
+			{ url: "b" },
 		]);
+		expect(settledMessageIds(runtime.records, "@crawler")).toHaveLength(3);
 		const selfEnqueue = runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState === "@crawler.queue");
 		expect(selfEnqueue).toMatchObject({ occurrence: "@crawler", generation: 1, source: { targetDeclaration: "@crawler", definition: { self: true } } });
 		expect(explainReplay(ast, runtime.records)).toMatchObject({ prefixEnd: runtime.records.length, stale: [], skipped: [] });
@@ -257,10 +267,11 @@ describe("explicit event-sourced actors", () => {
 		const state = await loop(runtime);
 		for (const key of ["a", "b"]) {
 			const occurrence = `projects#${key}.@worker`;
-			expect(state.projection.actors[occurrence]?.messages.map((message) => [message.event, message.input, message.status])).toEqual([
-				["ROOT", { id: key }, "settled"],
-				["CHILD", { id: key }, "settled"],
+			expect(enqueuedMessages(runtime.records, occurrence).map((message) => [message.event, message.input])).toEqual([
+				["ROOT", { id: key }],
+				["CHILD", { id: key }],
 			]);
+			expect(settledMessageIds(runtime.records, occurrence)).toHaveLength(2);
 		}
 		const selfEnqueues = runtime.records.filter(isSelfEnqueue);
 		expect(selfEnqueues.map((record) => [record.source.producerState, record.occurrence])).toEqual(expect.arrayContaining([
@@ -299,9 +310,11 @@ describe("explicit event-sourced actors", () => {
 		});
 		const state = await loop(runtime);
 		const pool = state.projection.actorPools["@workers"];
-		expect(pool?.messages).toHaveLength(3);
-		expect(pool?.messages.every((message) => message.status === "settled")).toBe(true);
-		expect(new Set(pool?.messages.slice(1).map((message) => message.workerIndex))).toEqual(new Set([0, 1]));
+		expect(pool).not.toHaveProperty("messages");
+		expect(enqueuedMessages(runtime.records, "@workers")).toHaveLength(3);
+		expect(settledMessageIds(runtime.records, "@workers")).toHaveLength(3);
+		const acceptedWorkers = runtime.records.flatMap((record) => record.type === "actor_message" && record.kind === "accepted" && record.occurrence === "@workers" && record.workerIndex !== undefined ? [record.workerIndex] : []);
+		expect(new Set(acceptedWorkers)).toEqual(new Set([0, 1]));
 		expect(runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState.includes(".$worker-"))).toMatchObject({
 			occurrence: "@workers",
 			source: { targetDeclaration: "@workers", definition: { self: true } },
@@ -341,7 +354,8 @@ describe("explicit event-sourced actors", () => {
 		const state = await loop(runtime);
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.actors["phase.@worker"]?.messages).toHaveLength(2);
+		expect(enqueuedMessages(runtime.records, "phase.@worker")).toHaveLength(2);
+		expect(state.projection.actors["phase.@worker"]).not.toHaveProperty("messages");
 		const stopped = runtime.records.find((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "phase.@worker");
 		const successorInvoke = runtime.records.find((record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "successor");
 		expect(stopped).toBeDefined();
@@ -477,7 +491,7 @@ describe("explicit event-sourced actors", () => {
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.actors["@store"]?.messages[0]?.input).toEqual({ note: { kind: "unit" } });
+		expect(enqueuedMessages(runtime.records, "@store")[0]?.input).toEqual({ note: { kind: "unit" } });
 	});
 
 	it("normalizes and resolves unknown kind objects in actor placement input", async () => {
@@ -521,7 +535,7 @@ describe("explicit event-sourced actors", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.results.run).toEqual({ timedOut: true });
 		expect(runtime.records.some((record) => record.type === "state_action" && record.kind === "timer_fired" && record.actionUid.state === "@timed.work")).toBe(true);
-		expect(state.projection.actors["@timed"]?.messages[0]).toMatchObject({ status: "settled" });
+		expect(settledMessageIds(runtime.records, "@timed")).toHaveLength(1);
 	});
 
 	it("processes an authored-order batch one message at a time", async () => {
@@ -535,11 +549,12 @@ describe("explicit event-sourced actors", () => {
 		}));
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
-		expect(state.projection.actors["@auditor"]?.messages.map((entry) => [entry.input, entry.status])).toEqual([
-			[{ path: "a" }, "settled"],
-			[{ path: "b" }, "settled"],
-			[{ path: "c" }, "settled"],
+		expect(enqueuedMessages(runtime.records, "@auditor").map((entry) => entry.input)).toEqual([
+			{ path: "a" },
+			{ path: "b" },
+			{ path: "c" },
 		]);
+		expect(settledMessageIds(runtime.records, "@auditor")).toHaveLength(3);
 		const enqueue = runtime.records.filter((record) => record.type === "actor_messages_enqueued");
 		expect(enqueue).toHaveLength(1);
 	});
@@ -691,7 +706,8 @@ describe("explicit event-sourced actors", () => {
 		});
 		const state = await start(runtime, { projects: { a: {}, b: {} } });
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.actors["@auditor"]?.messages[0]).toMatchObject({ event: "RECORD", status: "settled" });
+		expect(enqueuedMessages(runtime.records, "@auditor")[0]).toMatchObject({ event: "RECORD" });
+		expect(settledMessageIds(runtime.records, "@auditor")).toHaveLength(1);
 		expect(state.projection.actors["projects#a.@worker"]).toMatchObject({ status: "stopped" });
 		expect(state.projection.actors["projects#b.@worker"]).toMatchObject({ status: "stopped" });
 
@@ -838,6 +854,30 @@ describe("explicit event-sourced actors", () => {
 		expect(state.projection.results.ping).toEqual({ route: "live" });
 		const preserved = liveRuntime.records.find((record) => record.type === "actor_created");
 		expect(preserved).toEqual(created);
+	});
+
+	it("rejects reuse of a settled message identity from the retained producer visit", async () => {
+		const editor = Editor({ file: "src/index.ts" });
+		const ast = parsed(chart({
+			kind: "chart", id: "settled-message-id-reuse", actors: { editor }, initial: "apply",
+			states: {
+				apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "done" } }),
+				done: final(),
+			},
+		}));
+		const runtime = new ActorRuntime(ast);
+		await loop(runtime);
+		const reused = structuredClone(runtime.records);
+		const enqueue = reused.find((record) => record.type === "actor_messages_enqueued");
+		const settledIndex = reused.findIndex((record) => record.type === "actor_message" && record.kind === "settled");
+		assert(enqueue?.type === "actor_messages_enqueued" && settledIndex !== -1, "missing actor message lifecycle");
+		reused.splice(settledIndex + 1, 0, structuredClone(enqueue));
+		for (const [index, record] of reused.entries()) {
+			(record as { seqId: number }).seqId = index + 1;
+			(record as { parentId: number | null }).parentId = index === 0 ? null : index;
+		}
+
+		expect(explainReplay(ast, reused).broken?.error).toContain("identity must use producer apply visit 2");
 	});
 
 	it("detects stale send provenance and broken call resolution on a genuinely fresh replay", async () => {

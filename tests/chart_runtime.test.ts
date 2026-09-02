@@ -160,13 +160,6 @@ describe("ChartRuntime", () => {
 		if (state?.kind !== "state" || state.action.kind !== "agent") throw new Error("expected agent state");
 		const pin = { hash: "a".repeat(64), size: 6 };
 		const store = new MemoryLogStore();
-		await store.appendDrafts([{
-			type: "state_action",
-			kind: "complete",
-			actionUid: state.action.uid,
-			event: { type: "DONE" },
-			artifacts: { "input.txt": pin },
-		}]);
 		let releaseRead!: () => void;
 		const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
 		let readEntered!: () => void;
@@ -187,7 +180,7 @@ describe("ChartRuntime", () => {
 			actionUid: state.action.uid,
 			action: state.action,
 			sessionId: "delayed-read",
-			reads: [{ path: "input.txt" }],
+			reads: [{ path: "input.txt", pin }],
 			events: ["DONE"],
 		}]);
 		await entered;

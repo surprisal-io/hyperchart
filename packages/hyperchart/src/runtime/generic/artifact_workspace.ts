@@ -24,8 +24,18 @@ export async function materializeWorkspace(
 	artifactStore: ArtifactStore,
 	targetDir: string,
 ): Promise<void> {
+	return materializeWorkspaceFromPins(latestPinsByPath(ancestry), artifactStore, targetDir);
+}
+
+/** Materialize directly from current projected pins without rescanning ancestry. */
+export async function materializeWorkspaceFromPins(
+	pins: ReadonlyMap<string, ArtifactPin> | Readonly<Record<string, ArtifactPin>>,
+	artifactStore: ArtifactStore,
+	targetDir: string,
+): Promise<void> {
 	await fsp.mkdir(targetDir, { recursive: true });
-	for (const [authoredPath, pin] of latestPinsByPath(ancestry)) {
+	const entries = pins instanceof Map ? pins : Object.entries(pins);
+	for (const [authoredPath, pin] of entries) {
 		const targetPath = renderedArtifactPath({ path: authoredPath } satisfies RenderedArtifact, targetDir);
 		if (await matchesHash(targetPath, pin.hash)) continue;
 		let sourcePath: string;

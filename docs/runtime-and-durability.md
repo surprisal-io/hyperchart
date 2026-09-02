@@ -48,6 +48,14 @@ One detached runner process may execute a dynamic, non-empty set of live branch 
 
 The run owns two different filesystem locations. `projectDir` is the repository/project directory recorded as `meta.workDir`; it scopes discovery and ownership but is not an action cwd. Each branch executes in `branchWorkspace = <runDir>/workspaces/<branchId>`, materialized only from pinned Hyperchart artifacts. Agent system context names both paths and warns that the branch workspace is not a repository checkout. Scripts receive authoritative `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE` variables while retaining the branch workspace as `cwd`. Editing `projectDir` explicitly is outside branch-workspace isolation.
 
+## Bounded live projection
+
+`BranchProjection` is current machine state, not a history view. It retains only open journal-native user gates; resolving, closing, or global failure removes them, while exact historical response lookup and UI history come from the storage history API. Actor and pool projections retain mailbox/current-worker control plus pending call messages only; settled non-call message history is reconstructed from durable record groups rather than accumulated in each endpoint. The retained `actorProducerVisits` counter is exact and monotonic: replay requires each enqueue to use the next producer visit and canonical `<producer>:message:<visit>:<batchIndex>` identity, preserving durable global message-id uniqueness after settled payloads leave live state.
+
+Accepted completion pins are projected into `artifactPins`, keyed by rendered authored path. `machine` attaches the current pin to each rendered artifact read, so `ChartRuntime` restores the accepted revision without reading ancestry or performing storage I/O from synchronous machine code.
+
+`compileProjectionRetention(ast)` records statically discovered result readers, externally read map scopes, resumable actions, and re-enterable states. `compactProjection()` is synchronous. The initial implementation prunes only session references proven non-resumable; inputs, results, spawns, actor generations, and other values are retained whenever loops, guards, dynamic map paths, actor-local control, or future readers make liveness ambiguous. A stronger whole-chart data-flow analysis is deferred rather than guessed. Phase 3's execution-owned projection loader calls this seam after every projected batch and before checkpoint serialization.
+
 ## Why store facts instead of current state
 
 A mutable checkpoint answers “where did the old program say it was?” A fact log lets Hyperchart ask “what state follows from these accepted facts under this chart?”

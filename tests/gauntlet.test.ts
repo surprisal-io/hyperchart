@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actor, actorPool, agent, callBatch, compound, final, failed, json, map, message, messageInput, normalizeChartConfig, parallel, protocol, receive, reply, t, tsImport, z } from "../packages/hyperchart/src/index.js";
+import { actor, actorPool, agent, callBatch, compound, createBranchProjection, final, failed, json, map, message, messageInput, normalizeChartConfig, parallel, projectBranch, protocol, receive, reply, t, tsImport, z } from "../packages/hyperchart/src/index.js";
 import { arg, chart, event, input, item, key, result } from "../packages/hyperchart/src/core/dsl.js";
 import { loop, start } from "../packages/hyperchart/src/core/execution_loop.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../packages/hyperchart/src/index.js";
@@ -740,6 +740,14 @@ describe("replay gauntlet", () => {
 		}));
 		const live = await runLive(ast, { args: {} });
 		expect(live.state.projection.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+		let checkpointRoundTripped = createBranchProjection(ast);
+		for (const record of live.log) {
+			checkpointRoundTripped = structuredClone(checkpointRoundTripped);
+			projectBranch(checkpointRoundTripped, ast, [record]);
+		}
+		expect(checkpointRoundTripped.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+		expect(checkpointRoundTripped.actorPools["@workers"]).not.toHaveProperty("messages");
+
 		const assignments = live.log.filter((record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> => record.type === "actor_message" && record.kind === "accepted");
 		expect(assignments.map((record) => record.messageId)).toEqual(["batch:message:1:0", "batch:message:1:1", "batch:message:1:2", "batch:message:1:3"]);
 		expect(new Set(assignments.slice(0, 2).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));

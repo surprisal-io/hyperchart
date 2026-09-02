@@ -233,6 +233,8 @@ export function compactProjection(
 
 The GC implementation must begin with characterization tests for every `inputs`, `results`, `spawns`, `sessions`, actor-generation, map re-entry, and final-result read site in `core/machine.ts` and `core/projection.ts`. History remains available from durable paginated records after a value leaves the live projection.
 
+**Approved conservative implementation note (2026-09-02):** the normalized AST currently exposes ref validation but not a future-liveness/control-flow proof across loops, guards, dynamic maps, and actor-local workflows. `compileProjectionRetention()` therefore records concrete discovered reader/resume/re-entry sets, while `compactProjection()` initially prunes only session references proven non-resumable. Inputs, results, spawns, actor generations, and counters remain unchanged under ambiguity. Stronger GC is deferred until a whole-chart retention analysis is separately designed and approved. Phase 3's execution-owned projection loader must call the existing synchronous seam after each projected batch and before checkpoint serialization.
+
 ### 3. Version projection checkpoints
 
 ```ts
@@ -944,7 +946,7 @@ Tests to update/add include `tests/log_store.test.ts`, `tests/postgres_log_store
 - [x] Phase 0: clear the disposable PostgreSQL development data, define `next_seq` in the new initial schema, keep trusted-storage behavior, and stabilize/commit the current targeted-query refactor without adding migration/compatibility code or new ancestry callers.
 - [x] Phase 0.5: build the isolated PostgreSQL catalog prototype and run the benchmark gate below before integrating catalog code into runtime production paths. The HAMT candidate was rejected and retained as evidence.
 - [ ] Phase 1: introduce snapshot-bound stateless history chunks, read-committed branch keyset pagination, `cursorAt`, capped older/newer traversal, and the private oldest-first `AsyncIterable` replay stream. Implement them first as backend-private journal traversal/filtering scaffolding; do not integrate the rejected HAMT. Preserve the final consumer-facing contracts so the deferred predecessor catalog is a storage-only replacement.
-- [ ] Phase 2: remove resolved interactions and settled message histories from `BranchProjection`; add current artifact pins; compile conservative AST retention plans and synchronous projection GC; keep all synchronously required retained state; update semantic model/tests/TLA together.
+- [x] Phase 2: remove resolved interactions and settled message histories from `BranchProjection`; add current artifact pins; compile conservative AST retention plans and synchronous projection GC; keep all synchronously required retained state; update semantic model/tests/TLA together. The current branch has no `tla/` tree, so model/trace synchronization remains blocked until the planned infrastructure rebase.
 - [ ] Phase 3: add projection contract digest/version and nearest-compatible PostgreSQL checkpoints/cadence; keep JSONL projection/index state in memory only; add finite-log equivalence tests.
 - [ ] Phase 4: migrate runtime startup/restart, replay gate, gate admission, response lookup, artifact materialization, fork, rewind, and final-outcome paths.
 - [ ] Phase 5: add inspector overview and bidirectional stateless cursor-chunk host APIs; implement the `@tanstack/react-virtual` 1,000-item sliding window; migrate React inspector, Pi adapter/extension/TUI, and Claude surfaces; add the dedicated Runtime History Storybook board and interaction tests.

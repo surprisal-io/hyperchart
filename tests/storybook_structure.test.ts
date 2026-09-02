@@ -210,7 +210,7 @@ describe("Storybook information architecture", () => {
 
 	it("keeps all actor surfaces adapter-derived", () => {
 		expect(actorIdleRun.actorOccurrences?.[0]).toMatchObject({ status: "idle", mailbox: { totalCount: 0 } });
-		expect(actorBusyFifoRun.actorOccurrences?.[0]).toMatchObject({ status: "busy", mailbox: { totalCount: 3 }, pendingCaller: { state: "apply-call", callId: "apply-call:1" } });
+		expect(actorBusyFifoRun.actorOccurrences?.[0]).toMatchObject({ status: "busy", mailbox: { totalCount: 3 }, pendingCaller: { state: "apply-call", callId: "apply-call:call:1" } });
 		expect(actorBusyFifoRun.actorOccurrences?.[0]?.mailbox.entries).toHaveLength(3);
 		expect(actorBusyFifoRun.actorOccurrences?.[0]?.mailbox.entries).not.toContainEqual(actorBusyFifoRun.actorOccurrences?.[0]?.currentMessage);
 		expect(actorMapLocalRun.actorOccurrences).toHaveLength(2);
@@ -284,7 +284,7 @@ describe("Storybook information architecture", () => {
 		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]).toMatchObject({
 			activeCount: 1,
 			workers: expect.arrayContaining([expect.objectContaining({ currentStateId: "@workers.$worker.work" })]),
-			batchCalls: [expect.objectContaining({ callId: "batch:1", settled: 1, total: 4, items: expect.any(Array) })],
+			batchCalls: [expect.objectContaining({ callId: "batch:call:1", settled: 1, total: 4, items: expect.any(Array) })],
 		});
 		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]?.workers?.some((worker) => "nextMessageId" in worker)).toBe(false);
 		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.workers?.[1]).toMatchObject({ visits: 2, messageHistory: expect.arrayContaining([expect.objectContaining({ messageId: "batch:message:1:2", batchIndex: 2 })]) });

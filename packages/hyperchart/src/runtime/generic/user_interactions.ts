@@ -193,8 +193,7 @@ export async function scanOpenUserInteractions(runDir: string, branchId?: Branch
 			if (!branches.some((branch) => branch.branchId === selected)) continue;
 			const projection = projectBranch(createBranchProjection(parsed.ast), parsed.ast, await store.readAncestry(selected));
 			if (projection.failure !== undefined) continue;
-			for (const gate of Object.values(projection.userInteractions)) {
-				if (gate.status !== "open") continue;
+			for (const gate of Object.values(projection.openUserInteractions)) {
 				const pending = projection.pendingActions.some((entry) => entry.gateSeqId === gate.opened.seqId && (entry.phase === "running" || entry.phase === "rejected"));
 				if (pending) result.push(requestFromOpened(basename(resolve(runDir)), selected, gate.opened));
 			}

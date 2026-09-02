@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ArtifactPin, DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import { ArtifactStore } from "../packages/hyperchart/src/runtime/generic/artifact_store.js";
-import { materializeWorkspace } from "../packages/hyperchart/src/runtime/generic/artifact_workspace.js";
+import { materializeWorkspace, materializeWorkspaceFromPins } from "../packages/hyperchart/src/runtime/generic/artifact_workspace.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 
 const roots: string[] = [];
@@ -58,7 +58,7 @@ describe("materializeWorkspace", () => {
 		const pin = await store.put(source);
 		const workspace = join(dir, "workspace");
 
-		await materializeWorkspace([completion(1, "main", { "declared.txt": pin })], store, workspace);
+		await materializeWorkspaceFromPins({ "declared.txt": pin }, store, workspace);
 
 		await expect(readFile(join(workspace, "declared.txt"), "utf8")).resolves.toBe("declared");
 		await expect(readFile(join(workspace, "undeclared.txt"), "utf8")).rejects.toThrow();
