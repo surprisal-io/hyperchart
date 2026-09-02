@@ -31,12 +31,10 @@ export {
 export {
 	hyperchartRunFromInfo,
 	hyperchartRunFromInspectResult,
-	hyperchartRunFromRuntime,
 	hyperchartRunFromToolDetails,
 } from "../host/index.js";
 export type {
 	HyperchartRunFromInspectOptions,
-	HyperchartRunFromRuntimeOptions,
 	HyperchartRuntimeSessionProgressFile,
 	HyperchartRuntimeSessionProgressInfo,
 } from "../host/index.js";

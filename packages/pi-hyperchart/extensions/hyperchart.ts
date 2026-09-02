@@ -42,7 +42,7 @@ import {
 	deleteRunStorage,
 	forkHyperchartRun,
 	initializeRunDir,
-	listHyperchartBranches,
+	listHyperchartBranchPage,
 	hasTerminalNotificationReceipt,
 	loadBranchProjection,
 	loadHostSettings,
@@ -747,6 +747,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		args: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Fresh/resumed run arguments" })),
 		runDir: Type.Optional(Type.String({ description: "Run id or directory for run-target actions; not accepted by respond" })),
 		branchId: Type.Optional(Type.String({ description: "Durable branch; inferred only when a run has exactly one branch" })),
+		cursor: Type.Optional(Type.String({ description: "Opaque continuation cursor for action=branches" })),
 		branchIds: Type.Optional(Type.Array(Type.String(), { description: "Non-empty unique branches to run concurrently" })),
 		fromSeqId: Type.Optional(Type.Number({ description: "Existing durable record at which fork creates a branch" })),
 		sourceBranchId: Type.Optional(Type.String({ description: "Optional source branch asserted by fork" })),
@@ -817,7 +818,8 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		if (params.action === "branches") {
 			const runSpec = actionRunCoordinate(params, "branches");
 			const runDir = await ownedRunDir("branches", runSpec, ctx);
-			return { content: [{ type: "text" as const, text: `Branches for ${basename(runDir)}` }], details: safeToolDetails({ runDir, branches: await listHyperchartBranches(runDir) }) };
+			const page = await listHyperchartBranchPage(runDir, params.cursor);
+			return { content: [{ type: "text" as const, text: `Branches for ${basename(runDir)}` }], details: safeToolDetails({ runDir, branches: page.items.map(({ branchId, headSeqId, createdAt }) => ({ branchId, headSeqId, createdAt })), totalCount: page.totalCount, ...(page.next === undefined ? {} : { next: page.next }) }) };
 		}
 		if (params.action === "fork") {
 			const runSpec = actionRunCoordinate(params, "fork");
@@ -878,10 +880,11 @@ async function ownedRunDir(action: string, runSpec: string, ctx: HyperchartConte
 
 async function unambiguousRunBranch(action: string, runSpec: string, ctx: HyperchartContext): Promise<string> {
 	const runDir = await ownedRunDir(action, runSpec, ctx);
-	const branches = await listHyperchartBranches(runDir);
-	if (branches.length === 1) return branches[0]!.branchId;
-	const available = branches.map((branch) => branch.branchId).join(", ") || "none";
-	throw new Error(`hyperchart action=${action} requires branchId because run '${basename(runDir)}' has ${branches.length} durable branches (${available})`);
+	const page = await listHyperchartBranchPage(runDir);
+	if (page.totalCount === 1) return page.items[0]!.branchId;
+	const available = page.items.map((branch) => branch.branchId).join(", ") || "none";
+	const suffix = page.next === undefined ? "" : ", …";
+	throw new Error(`hyperchart action=${action} requires branchId because run '${basename(runDir)}' has ${page.totalCount} durable branches (${available}${suffix})`);
 }
 
 async function respondToUserInteraction(

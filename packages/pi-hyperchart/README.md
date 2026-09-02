@@ -50,7 +50,7 @@ Supported actions:
 - `action: "run"`
 - `action: "run_inspect"`
 - `action: "view"` — open the localhost inspector and return its URL; pass `open: false` to return the URL only
-- `action: "branches"`
+- `action: "branches"` — return at most 100 durable heads plus `totalCount` and opaque `next`; pass `cursor: next` for the following page
 - `action: "fork"`
 - `action: "rewind"`
 - `action: "stop"`

@@ -1,3 +1,6 @@
+import { collectHistoryRecords } from "./helpers/history.js";
+import { seedMemoryLogStore } from "./helpers/memory_log_store.js";
+import { commitUserInteractionResponse } from "./helpers/user_interaction_commit.js";
 import { readdir, readFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -116,13 +119,12 @@ class RepresentativeRuntime implements Runtime {
 	}
 	eventsQueue() { return this.queue; }
 	async loadAst() { return this.ast; }
-	async loadProjection() { return fullyProject(this.ast, await this.store.readAncestry(this.branchId)); }
-	loadLogs() { return this.store.readAncestry(this.branchId); }
+	async loadProjection() { return fullyProject(this.ast, await collectHistoryRecords(this.store, this.branchId)); }
 }
 
 async function waitForRecord<T extends DurableLogRecord>(store: JsonlLogStore, select: (record: DurableLogRecord) => record is T, message: string): Promise<T> {
 	for (let attempt = 0; attempt < 2_000; attempt++) {
-		const record = (await store.readAncestry("main")).find(select);
+		const record = (await collectHistoryRecords(store, "main")).find(select);
 		if (record !== undefined) return record;
 		await new Promise<void>((resolve) => setImmediate(resolve));
 	}
@@ -229,7 +231,7 @@ describe("projection loader", () => {
 		const running = start(runtime, {});
 		const opened = await waitForOpen(store);
 		const contract = projectionContractForAst(chartAst);
-		const openRecords = await store.readAncestry("main");
+		const openRecords = await collectHistoryRecords(store, "main");
 		const referenceAtGate = fullyProject(chartAst, openRecords);
 		expect(referenceAtGate.pendingActions).toHaveLength(1);
 		expect(Object.keys(referenceAtGate.openUserInteractions)).toEqual([String(opened.seqId)]);
@@ -250,10 +252,10 @@ describe("projection loader", () => {
 		expect(forkCold.checkpointHeadSeqId).toBe(opened.seqId);
 		expect(forkCold.projection).toEqual(referenceAtGate);
 
-		const committed = await store.respondToUserInteraction({ ast: chartAst, gateSeqId: opened.seqId, event: { type: "APPROVE" } });
+		const committed = await commitUserInteractionResponse(store, chartAst, opened.seqId, { type: "APPROVE" });
 		runtime.queue.send({ kind: "durable_records_added", effectId: `test:${committed.record.seqId}`, records: [committed.record] });
 		await running;
-		const finalRecords = await store.readAncestry("main");
+		const finalRecords = await collectHistoryRecords(store, "main");
 		const finalReference = fullyProject(chartAst, finalRecords);
 		const tail = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(tail.replayedRecords).toBe(finalRecords.length - openRecords.length);
@@ -264,7 +266,7 @@ describe("projection loader", () => {
 		const dir = await mkdtemp(join(tmpdir(), "hyperchart-coordinate-poison-")); dirs.push(dir);
 		const chartAst = representativeAst(); const source = new JsonlLogStore(join(dir, "log.jsonl")); await source.initializeRootBranch();
 		const runtime = new RepresentativeRuntime(chartAst, source); void start(runtime, {}); await waitForOpen(source);
-		const records = await source.readAncestry("main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
+		const records = await collectHistoryRecords(source, "main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
 		type MutableProjection = {
 			seqId: number;
 			pendingActions: Array<{ actionUid: Record<string, unknown>; seqId: number }>;
@@ -280,12 +282,14 @@ describe("projection loader", () => {
 			(projection) => { const key = Object.keys(projection.actors)[0]!; projection.actors.wrong = projection.actors[key]!; delete projection.actors[key]; },
 		];
 		for (const [index, mutate] of mutations.entries()) {
-			const store = new MemoryLogStore([{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 }, ...records]);
-			const candidate = structuredClone(reference) as unknown as MutableProjection; mutate(candidate);
-			await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `coordinate-${index}`, headSeqId: records.at(-1)!.seqId, contract, projection: candidate as unknown as BranchProjection, createdAt: index + 1 }));
+			const store = await seedMemoryLogStore(records);
+			const seededRecords = await collectHistoryRecords(store, "main");
+			const seededReference = fullyProject(chartAst, seededRecords);
+			const candidate = structuredClone(seededReference) as unknown as MutableProjection; mutate(candidate);
+			await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `coordinate-${index}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: candidate as unknown as BranchProjection, createdAt: index + 1 }));
 			const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
-			expect(loaded.replayedRecords).toBe(records.length);
-			expect(loaded.projection).toEqual(reference);
+			expect(loaded.replayedRecords).toBe(seededRecords.length);
+			expect(loaded.projection).toEqual(seededReference);
 		}
 	});
 
@@ -293,7 +297,7 @@ describe("projection loader", () => {
 		const dir = await mkdtemp(join(tmpdir(), "hyperchart-map-owner-")); dirs.push(dir);
 		const chartAst = mapOwnedActorAst(); const source = new JsonlLogStore(join(dir, "log.jsonl")); await source.initializeRootBranch();
 		const runtime = new RepresentativeRuntime(chartAst, source); await start(runtime, { jobs: { a: {} } });
-		const records = await source.readAncestry("main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
+		const records = await collectHistoryRecords(source, "main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
 		const endpoint = Object.values(reference.actors)[0]!;
 		expect(endpoint.owner).toBe("jobs#a");
 		const cold = await loadBranchProjection({ ast: chartAst, branchId: "main", store: source, contract });
@@ -302,15 +306,17 @@ describe("projection loader", () => {
 		expect(warm.replayedRecords).toBe(0);
 
 		for (const owner of ["arbitrary-root", "jobs#missing"]) {
-			const store = new MemoryLogStore([{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 }, ...records]);
-			const poisoned = structuredClone(reference);
+			const store = await seedMemoryLogStore(records);
+			const seededRecords = await collectHistoryRecords(store, "main");
+			const seededReference = fullyProject(chartAst, seededRecords);
+			const poisoned = structuredClone(seededReference);
 			const actor = Object.values(poisoned.actors)[0]!; const oldKey = actor.occurrence;
 			actor.owner = owner; actor.logicalOccurrence = `${owner}.@endpoint`; actor.occurrence = actor.logicalOccurrence;
 			delete poisoned.actors[oldKey]; poisoned.actors[actor.occurrence] = actor;
-			await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `owner-${owner}`, headSeqId: records.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
+			await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `owner-${owner}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
 			const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
-			expect(loaded.replayedRecords).toBe(records.length);
-			expect(loaded.projection).toEqual(reference);
+			expect(loaded.replayedRecords).toBe(seededRecords.length);
+			expect(loaded.projection).toEqual(seededReference);
 		}
 	});
 
@@ -319,19 +325,21 @@ describe("projection loader", () => {
 			const dir = await mkdtemp(join(tmpdir(), `hyperchart-${ownerKind}-owner-`)); dirs.push(dir);
 			const chartAst = structuralOwnedActorAst(ownerKind); const store = new JsonlLogStore(join(dir, "log.jsonl")); await store.initializeRootBranch();
 			const runtime = new RepresentativeRuntime(chartAst, store); await start(runtime, {});
-			const records = await store.readAncestry("main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
+			const records = await collectHistoryRecords(store, "main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
 			const endpoint = Object.values(reference.actors)[0]!;
 			expect(endpoint.owner).toBe(ownerKind === "region" ? "scope.a" : "scope");
 			const cold = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract }); expect(cold.projection).toEqual(reference);
 			const warm = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract }); expect(warm.replayedRecords).toBe(0);
 
-			const poisonStore = new MemoryLogStore([{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 }, ...records]);
-			const poisoned = structuredClone(reference); const actor = Object.values(poisoned.actors)[0]!; const oldKey = actor.occurrence;
+			const poisonStore = await seedMemoryLogStore(records);
+			const seededRecords = await collectHistoryRecords(poisonStore, "main");
+			const seededReference = fullyProject(chartAst, seededRecords);
+			const poisoned = structuredClone(seededReference); const actor = Object.values(poisoned.actors)[0]!; const oldKey = actor.occurrence;
 			actor.owner = `${endpoint.owner}.missing`; actor.logicalOccurrence = `${actor.owner}.${actor.declaration.split(".").at(-1)}`; actor.occurrence = actor.logicalOccurrence;
 			delete poisoned.actors[oldKey]; poisoned.actors[actor.occurrence] = actor;
-			await poisonStore.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `poison-${ownerKind}`, headSeqId: records.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
+			await poisonStore.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `poison-${ownerKind}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
 			const rebuilt = await loadBranchProjection({ ast: chartAst, branchId: "main", store: poisonStore, contract });
-			expect(rebuilt.replayedRecords).toBe(records.length); expect(rebuilt.projection).toEqual(reference);
+			expect(rebuilt.replayedRecords).toBe(seededRecords.length); expect(rebuilt.projection).toEqual(seededReference);
 		}
 	});
 
@@ -341,7 +349,7 @@ describe("projection loader", () => {
 		const runtime = new RepresentativeRuntime(chartAst, store, true);
 		void start(runtime, {});
 		await waitForRecord(store, (entry): entry is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> => entry.type === "actor_message" && entry.kind === "accepted", "actor call was not accepted");
-		const records = await store.readAncestry("main"); const reference = fullyProject(chartAst, records);
+		const records = await collectHistoryRecords(store, "main"); const reference = fullyProject(chartAst, records);
 		expect(Object.keys(reference.pendingActorCalls)).toHaveLength(1);
 		expect(Object.values(reference.actors)[0]?.currentMessage?.status).toBe("accepted");
 		const contract = projectionContractForAst(chartAst);
@@ -381,7 +389,7 @@ describe("projection loader", () => {
 		const chartAst = ast(); const contract = projectionContractForAst(chartAst);
 		await store.saveProjectionCheckpoint({ checkpointId: "wrong-contract", headSeqId: mainHead!.seqId, projectorVersion: PROJECTOR_VERSION + 1, astDigest: contract.astDigest, payload: {}, createdAt: 1 });
 		await store.saveProjectionCheckpoint({ checkpointId: "sibling-only", headSeqId: siblingHead!.seqId, ...contract, payload: { schemaVersion: 1, projection: {} }, createdAt: 2 });
-		const poisonedProjection = fullyProject(chartAst, await store.readAncestry("main")) as unknown as Record<string, unknown>;
+		const poisonedProjection = fullyProject(chartAst, await collectHistoryRecords(store, "main")) as unknown as Record<string, unknown>;
 		poisonedProjection.pendingActions = [{}];
 		await store.saveProjectionCheckpoint({ checkpointId: "malformed", headSeqId: mainHead!.seqId, ...contract, payload: { schemaVersion: 1, projection: poisonedProjection }, createdAt: 3 });
 		const before = await readFile(file, "utf8");

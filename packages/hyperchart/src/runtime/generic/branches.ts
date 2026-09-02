@@ -4,7 +4,7 @@ import { parseChartModuleSync } from "../../core/inspect.js";
 import { loadRunMeta } from "./run_dir.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
 import { openRunLogStore } from "./log_store_factory.js";
-import { collectBranches } from "./log_store.js";
+import { collectBranches, type BranchListChunk, type BranchListCursor } from "./log_store.js";
 import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst } from "./projection_loader.js";
 
 export type ForkBranchOptions = Readonly<{
@@ -26,10 +26,10 @@ export type ForkBranchResult = Readonly<{
 	started: false;
 }>;
 
-export async function listHyperchartBranches(runDir: string): Promise<readonly BranchHead[]> {
+export async function listHyperchartBranchPage(runDir: string, cursor?: BranchListCursor): Promise<BranchListChunk> {
 	const store = await openRunLogStore(runDir);
 	try {
-		return [...await collectBranches(store)].sort((left, right) => left.createdAt - right.createdAt || left.branchId.localeCompare(right.branchId));
+		return store.listBranches(cursor);
 	} finally {
 		await store.close();
 	}

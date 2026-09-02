@@ -63,11 +63,12 @@ export class MyHyperchartHost implements HyperchartHostAdapter {
     return readFullDefinitionForLaunch(cwd, chartName);
   }
 
-  async readRunSnapshot(
+  async readRunOverview(
     cwd: string,
     runId: string,
-  ): Promise<HyperchartRunInfo | undefined> {
-    return readFullRunForInspector(cwd, runId);
+    branchId?: string,
+  ): Promise<HyperchartRunOverview | undefined> {
+    return readBoundedRunOverview(cwd, runId, branchId);
   }
 }
 ```
@@ -96,7 +97,7 @@ const snapshot = await piHyperchartHost.readSessionSnapshot(process.cwd(), {
 });
 ```
 
-`readSessionSnapshot` is intentionally summary-only: it contains no chart launch `args`, chart `states`, runtime state arrays, visit histories, prompts, schemas, session objects, or transcript messages. The Pi adapter statically scans source metadata and reads persisted run metadata/status without evaluating chart modules, constructing graphs, or replaying logs. Literal ids and state counts are included when they are statically visible; graph-derived definition/run fields are omitted when they are not. When launch or definition inspection opens, call `readChartSnapshot(cwd, chartName)` and pass its `args` directly to `HyperchartLaunchDialog`; only that selected module is inspected, using project-over-shared-over-user precedence. When a full embedded run inspector opens, call `readRunSnapshot(cwd, runId)`. Keep either full model scoped to its open UI and discard it on close.
+`readSessionSnapshot` is intentionally summary-only: it contains no chart launch `args`, chart `states`, runtime state arrays, visit histories, prompts, schemas, session objects, or transcript messages. The Pi adapter statically scans source metadata and reads persisted run metadata/status without evaluating chart modules, constructing graphs, or replaying logs. Literal ids and state counts are included when they are statically visible; graph-derived definition/run fields are omitted when they are not. When launch or definition inspection opens, call `readChartSnapshot(cwd, chartName)` and pass its `args` directly to `HyperchartLaunchDialog`; only that selected module is inspected, using project-over-shared-over-user precedence. When an embedded run inspector opens, call `readRunOverview(cwd, runId)` and use the adapter's cursor methods for elapsed details. Keep the selected definition or bounded overview scoped to its open UI and discard it on close.
 
 Use `createPiHyperchartHost()` when you need explicit configuration or an isolated instance. Use `piHyperchartHost` for normal process-wide access.
 
@@ -108,7 +109,6 @@ The host entry point exports adapters for common sources:
 import {
   hyperchartRunFromInfo,
   hyperchartRunFromInspectResult,
-  hyperchartRunFromRuntime,
   hyperchartRunFromToolDetails,
 } from "@surprisal/hyperchart/host";
 ```
@@ -162,7 +162,7 @@ export function WorkflowStrip({
 }
 ```
 
-Pass the canonical summary arrays directly; `HyperchartSummaryInfo.stateCount` and all run progress fields may be absent. The strip hides progress unless `progressDone`, `progressTotal`, and `progressPercent` are all present, while preserving independently known status and running-state labels. When `openInspector` runs, call `readRunSnapshot(cwd, runId)` and give that full result to `HyperchartInspectorDialog`; do not pass the summary run to the inspector.
+Pass the canonical summary arrays directly; `HyperchartSummaryInfo.stateCount` and all run progress fields may be absent. The strip hides progress unless `progressDone`, `progressTotal`, and `progressPercent` are all present, while preserving independently known status and running-state labels. When `openInspector` runs, call `readRunOverview(cwd, runId)` and give `overview.run` plus the host-backed history data source to `HyperchartInspectorDialog`; do not pass the summary run to the inspector.
 
 Supply `onResume`, `onAbort`, or launch callbacks only when the host implements those operations. The inspector renders concurrency-gated map states and items as `waiting`; they do not expose a session until the runtime admits and invokes them. Agent cards render declared `role`/`toolset` plus `resolvedModel`/`resolvedTools` from the host snapshot, but no session controls. When a concrete run snapshot includes `state.session`, the selected state's `Runtime` section exposes the live-session dialog and expands automatically while the session is live. Provide `onSteerSession` to enable the dialog composer and route `(runId, actionKey, message)` to the matching active agent; without it, the transcript remains read-only. The UI does not mutate run files by itself.
 
@@ -229,7 +229,7 @@ Practical rules:
 
 The inspector bounds large prompts, command text, JSON, schemas, and definitions before syntax rendering. Truncated content shows `Open full`; the full value is mounted only after the user opens the dialog.
 
-For an open inspector, hosts should request and pass complete canonical data through `readRunSnapshot` (or `hyperchartRunFromRunDir(..., { includeTranscripts: true })` inside a host adapter). Do not pre-truncate fields unless the transport itself requires a limit, because the inspector owns display truncation and full-content access. Routine background/session snapshots must use only the summary list API and must not retain any full run model.
+For an open inspector, hosts request bounded canonical data through `readRunOverview` and load elapsed histories/transcripts through the snapshot-pinned `HyperchartInspectorDataSource` methods. Routine background/session snapshots must use only the summary list API and must not retain an elapsed full-run history model.
 
 ## Accessibility and responsive behavior
 
@@ -251,6 +251,6 @@ The repository's Storybook boards cover light/dark themes, mobile layouts, long 
 
 ## Integrating actor pools
 
-Do not synthesize pool view models in a host. Feed the normalized AST and durable records to `hyperchartRunFromRuntime()`. Pool occurrences are discriminated by `kind: "actorPool"` and expose declared concurrency, active/idle counts, aggregate mailbox, concrete workers, per-worker visits/results/session/message history, and partial batch-call items. Queued messages remain endpoint-level until a durable acceptance fact assigns one to a worker; the host must not predict a scheduler choice. Message links keep `sendBatch` and `callBatch` distinct and include batch index and assigned worker identity.
+Do not synthesize pool view models in a host. Load the bounded production model through `readRunOverview()` and the actor history cursor methods. Pool occurrences are discriminated by `kind: "actorPool"` and expose declared concurrency, active/idle counts, aggregate mailbox, concrete workers, per-worker visits/results/session/message history, and partial batch-call items. Queued messages remain endpoint-level until a durable acceptance fact assigns one to a worker; the host must not predict a scheduler choice. Message links keep `sendBatch` and `callBatch` distinct and include batch index and assigned worker identity.
 
 Use each worker's canonical `currentStateId` for Inspector navigation while displaying its concrete `occurrencePath` for durable identity. Keep batch item order from the adapter; never sort by reply timestamp. A self-send is projected with a navigable endpoint `to` plus `self: true`; preserve both rather than replacing the target with display text. The React Inspector renders `self()` as a distinct target badge and labels the dashed endpoint edge as self-addressed. It renders one endpoint node and one canonical worker workflow template, with concrete slot/history details under the endpoint.

@@ -1,3 +1,5 @@
+import { collectHistoryRecords } from "./helpers/history.js";
+import { commitUserInteractionResponse, prepareUserInteractionCommit } from "./helpers/user_interaction_commit.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -213,7 +215,7 @@ describePg("PostgresLogStore", () => {
 
 		expect((await store.getBranch("main")).headSeqId).toBe(3);
 		expect((await journalStats(store, runId)).maxSeq + 1).toBe(4);
-		expect(await store.readAncestry("main")).toEqual(records);
+		expect(await collectHistoryRecords(store, "main")).toEqual(records);
 		const relational = await store.transaction((tx) => tx.query(
 			`SELECT seq, kind, branch_id, parent_id, head_seq_id,
 			        record_type, payload, metadata
@@ -360,16 +362,16 @@ describePg("PostgresLogStore", () => {
 		await writer.createBranch("experiment", 2, { reason: "sibling", sourceBranchId: "main", sourceSeqId: 2 });
 		const before = {
 			branches: await writer.listBranches(),
-			main: await writer.readAncestry("main"),
-			experiment: await writer.readAncestry("experiment"),
+			main: await collectHistoryRecords(writer, "main"),
+			experiment: await collectHistoryRecords(writer, "experiment"),
 			count: await writer.countRecords(),
 		};
 		await writer.close();
 
 		const reopened = await openReader(runId);
 		expect(await reopened.listBranches()).toEqual(before.branches);
-		expect(await reopened.readAncestry("main")).toEqual(before.main);
-		expect(await reopened.readAncestry("experiment")).toEqual(before.experiment);
+		expect(await collectHistoryRecords(reopened, "main")).toEqual(before.main);
+		expect(await collectHistoryRecords(reopened, "experiment")).toEqual(before.experiment);
 		expect(await reopened.countRecords()).toBe(before.count);
 		expect((await reopened.getBranch("experiment")).headSeqId).toBe(2);
 	});
@@ -386,7 +388,7 @@ describePg("PostgresLogStore", () => {
 		expect(forked[0]?.parentId).toBe(2);
 		expect((await store.getBranch("experiment")).headSeqId).toBe(4);
 		expect((await store.getBranch("main")).headSeqId).toBe(2);
-		expect(await experiment.readAncestry("experiment")).toHaveLength(2);
+		expect(await collectHistoryRecords(experiment, "experiment")).toHaveLength(2);
 	});
 
 	it("moves a named head without deleting records", async () => {
@@ -427,6 +429,7 @@ describePg("PostgresLogStore", () => {
 		await ensureClaimTable(store);
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
+		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "experiment", snapshot: { branchId: "experiment", headSeqId: gateSeqId } });
 
 		const committed = await store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
@@ -434,7 +437,7 @@ describePg("PostgresLogStore", () => {
 			fromSeqId: gateSeqId,
 			responseBranchId: "experiment",
 			metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: gateSeqId },
-			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+			preparedResponse: prepared,
 		}, async (tx) => {
 			await tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 1, "experiment"]);
 			return "claimed";
@@ -443,18 +446,19 @@ describePg("PostgresLogStore", () => {
 		expect(committed.participant).toBe("claimed");
 		expect(committed.response.idempotent).toBe(false);
 		expect((await store.getBranch("experiment")).headSeqId).toBe(committed.response.record.seqId);
-		expect((await store.readAncestry("experiment")).at(-1)).toEqual(committed.response.record);
+		expect((await collectHistoryRecords(store, "experiment")).at(-1)).toEqual(committed.response.record);
 		expect(await store.findUserInteractionResponse({ headSeqId: committed.response.record.seqId, gateSeqId })).toEqual(committed.response.record);
 		const claims = await store.transaction((tx) => tx.query("SELECT branch_id FROM hyperchart_test_claims WHERE run_id = $1 AND candidate = 1", [runId]));
 		expect(claims.rows).toEqual([{ branch_id: "experiment" }]);
 
+		const retryPrepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "experiment" });
 		const retried = await store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
 			newBranchId: "experiment",
 			fromSeqId: gateSeqId,
 			responseBranchId: "experiment",
 			metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: gateSeqId },
-			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+			preparedResponse: retryPrepared,
 		}, async (tx) => {
 			await tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING", [runId, 1, "experiment"]);
 			return "existing";
@@ -470,22 +474,23 @@ describePg("PostgresLogStore", () => {
 		await ensureClaimTable(store);
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
-		await store.respondToUserInteraction({ ast, gateSeqId, event: { type: "SELECTED" } });
+		await commitUserInteractionResponse(store, ast, gateSeqId, { type: "SELECTED" });
 		expect((await store.getBranch("main")).headSeqId).not.toBe(gateSeqId);
 
+		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "historical-fork", snapshot: { branchId: "historical-fork", headSeqId: gateSeqId } });
 		const committed = await store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
 			newBranchId: "historical-fork",
 			fromSeqId: gateSeqId,
 			responseBranchId: "historical-fork",
-			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+			preparedResponse: prepared,
 		}, (tx) => tx.query(
 			"INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)",
 			[runId, 9, "historical-fork"],
 		));
 
 		expect(committed.branch.branchId).toBe("historical-fork");
-		expect((await store.readAncestry("historical-fork")).at(-1)).toEqual(committed.response.record);
+		expect((await collectHistoryRecords(store, "historical-fork")).at(-1)).toEqual(committed.response.record);
 	});
 
 	it("rejects a fork point outside the selected source ancestry", async () => {
@@ -493,12 +498,13 @@ describePg("PostgresLogStore", () => {
 		await store.initializeRootBranch();
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
+		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "invalid-fork", snapshot: { branchId: "invalid-fork", headSeqId: gateSeqId } });
 		await expect(store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
 			newBranchId: "invalid-fork",
 			fromSeqId: gateSeqId + 1000,
 			responseBranchId: "invalid-fork",
-			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+			preparedResponse: prepared,
 		}, async () => undefined)).rejects.toThrow(/not in source branch 'main' ancestry/);
 	});
 
@@ -510,13 +516,14 @@ describePg("PostgresLogStore", () => {
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
 		const before = (await journalStats(store, runId)).count;
+		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "rolled-back", snapshot: { branchId: "rolled-back", headSeqId: gateSeqId } });
 
 		await expect(store.forkAndCommitUserInteraction({
 			sourceBranchId: "main",
 			newBranchId: "rolled-back",
 			fromSeqId: gateSeqId,
 			responseBranchId: "rolled-back",
-			response: { ast, gateSeqId, event: { type: "SELECTED" } },
+			preparedResponse: prepared,
 		}, async (tx) => {
 			await tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 2, "rolled-back"]);
 			throw new Error("participant failed");
@@ -536,6 +543,7 @@ describePg("PostgresLogStore", () => {
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
 		await store.transaction((tx) => tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 3, "winner"]));
+		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "loser", snapshot: { branchId: "loser", headSeqId: gateSeqId } });
 
 		let failure: unknown;
 		try {
@@ -544,7 +552,7 @@ describePg("PostgresLogStore", () => {
 				newBranchId: "loser",
 				fromSeqId: gateSeqId,
 				responseBranchId: "loser",
-				response: { ast, gateSeqId, event: { type: "SELECTED" } },
+				preparedResponse: prepared,
 			}, (tx) => tx.query("INSERT INTO hyperchart_test_claims (run_id, candidate, branch_id) VALUES ($1, $2, $3)", [runId, 3, "loser"]));
 		} catch (error) {
 			failure = error;
@@ -559,7 +567,7 @@ describePg("PostgresLogStore", () => {
 		await store.initializeRootBranch();
 		await expect(store.forkAndCommitUserInteraction({
 			sourceBranchId: "main", newBranchId: "experiment", fromSeqId: 1, responseBranchId: "unrelated",
-			response: { ast: {} as never, gateSeqId: 1, event: { type: "OK" } },
+			preparedResponse: { expectedHeadSeqId: null, gateSeqId: 1, draft: { type: "user_interaction", kind: "resolved", gateSeqId: 1, actionUid: { chart: "chart", state: "state", action: "user" }, event: { type: "OK" } } },
 		}, async () => undefined)).rejects.toThrow(/source branch or the newly created branch/);
 	});
 

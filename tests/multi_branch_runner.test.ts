@@ -1,3 +1,4 @@
+import { collectHistoryRecords } from "./helpers/history.js";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -422,7 +423,7 @@ describe("multi-branch process runner", () => {
 		const main = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		expect(storedRecordSeqIds(runDir)).toEqual([3, 4, 5, 6]);
 		for (const branchId of ["main", "experiment"]) {
-			const ancestry = await main.readAncestry(branchId);
+			const ancestry = await collectHistoryRecords(main, branchId);
 			expect(ancestry.length).toBeGreaterThan(0);
 			expect(ancestry.every((record) => record.branchId === branchId)).toBe(true);
 			for (let index = 1; index < ancestry.length; index++) expect(ancestry[index]!.parentId).toBe(ancestry[index - 1]!.seqId);
@@ -483,7 +484,7 @@ describe("multi-branch process runner", () => {
 		await expect(controller.startBranch("main")).rejects.toThrow(/closed/);
 		const finalReader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		expect(storedRecordSeqIds(runDir)).toEqual([2, 4, 5]);
-		expect((await finalReader.readAncestry("experiment")).every((record) => record.branchId === "main" || record.branchId === "experiment")).toBe(true);
+		expect((await collectHistoryRecords(finalReader, "experiment")).every((record) => record.branchId === "main" || record.branchId === "experiment")).toBe(true);
 	});
 
 	it("stops and drains one live branch while its sibling keeps running", async () => {
@@ -715,7 +716,7 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		expect(workspaceByBranch.get("left")).not.toBe(workspaceByBranch.get("right"));
 		expect(observedReads).toEqual(new Map([["left", "left bytes"], ["right", "right bytes"]]));
 		const finalReader = new JsonlLogStore(join(runDir, "log.jsonl"), "left");
-		const pins = await Promise.all(["left", "right"].map(async (branchId) => latestArtifactHash(await finalReader.readAncestry(branchId), "shared.txt")));
+		const pins = await Promise.all(["left", "right"].map(async (branchId) => latestArtifactHash(await collectHistoryRecords(finalReader, branchId), "shared.txt")));
 		expect(pins.every((pin) => pin !== undefined)).toBe(true);
 		expect(new Set(pins).size).toBe(2);
 	});

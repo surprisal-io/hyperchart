@@ -12,7 +12,7 @@ import {
 	createRunDir,
 	forkHyperchartRun,
 	initializeRunDir,
-	listHyperchartBranches,
+	listHyperchartBranchPage,
 	listHyperchartFiles,
 	loadHostSettings,
 	loadRunMeta,
@@ -413,12 +413,13 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		},
 		{
 			name: "hyperchart_branches",
-			description: "List durable named branch heads for a run. This read-only operation does not select a branch or write the journal.",
-			inputSchema: { runDir: z.string(), ...cwdField },
+			description: "List one cursor-paged set of durable named branch heads for a run. This read-only operation does not select a branch or write the journal.",
+			inputSchema: { runDir: z.string(), cursor: z.string().optional(), ...cwdField },
 			handler: async (args) => {
 				const cwd = cwdOf(args);
 				const runDir = resolveRunDirArg(args.runDir as string, cwd);
-				return ok({ runDir, branches: await listHyperchartBranches(runDir) });
+				const page = await listHyperchartBranchPage(runDir, args.cursor as string | undefined);
+				return ok({ runDir, branches: page.items.map(({ branchId, headSeqId, createdAt }) => ({ branchId, headSeqId, createdAt })), totalCount: page.totalCount, ...(page.next === undefined ? {} : { next: page.next }) });
 			},
 		},
 		{

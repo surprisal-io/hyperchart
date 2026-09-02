@@ -1,3 +1,4 @@
+import { collectHistoryRecords } from "./helpers/history.js";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -57,7 +58,7 @@ describe("JsonlLogStore branch journal", () => {
 		await store.initializeRootBranch(); const records = await store.appendDrafts([argsDraft(), invokeDraft()]);
 		expect((await store.getBranch("main")).headSeqId).toBe(3);
 		expect(((await persistedEntries(file)).at(-1)?.seqId ?? 0) + 1).toBe(4);
-		expect(await store.readAncestry("main")).toEqual(records);
+		expect(await collectHistoryRecords(store, "main")).toEqual(records);
 		expect(await persistedEntries(file)).toEqual([expect.objectContaining({ kind: "branch", seqId: 1 }), ...records]);
 	});
 
@@ -71,8 +72,8 @@ describe("JsonlLogStore branch journal", () => {
 		expect(replacement).toMatchObject({ seqId: 7, parentId: 2, branchId: "main" });
 		expect((await persistedEntries(file)).map((entry) => entry.seqId)).toEqual([1, 2, 3, 4, 5, 6, 7]);
 		expect((await persistedEntries(file)).filter((entry) => !isBranchEntry(entry)).map((record) => record.seqId)).toEqual([2, 3, 5, 7]);
-		expect((await main.readAncestry("main")).map((record) => record.seqId)).toEqual([2, 7]);
-		expect((await main.readAncestry("experiment")).map((record) => record.seqId)).toEqual([2, 5]);
+		expect((await collectHistoryRecords(main, "main")).map((record) => record.seqId)).toEqual([2, 7]);
+		expect((await collectHistoryRecords(main, "experiment")).map((record) => record.seqId)).toEqual([2, 5]);
 	});
 
 	it("trusts parsed storage entries without globally validating their sequence", async () => {
@@ -115,8 +116,8 @@ describe("JsonlLogStore branch journal", () => {
 		const main = new JsonlLogStore(join(await makeTempDir(), "log.jsonl")); await main.initializeRootBranch();
 		for (let index = 0; index < 50; index++) await main.appendDrafts([invokeDraft()]);
 		expect(main.fullReadCount()).toBe(1); expect(await main.countRecords()).toBe(50);
-		expect((await main.readAncestry("main")).length).toBe(50);
-		expect((await main.readAncestry("main")).length).toBe(50);
+		expect((await collectHistoryRecords(main, "main")).length).toBe(50);
+		expect((await collectHistoryRecords(main, "main")).length).toBe(50);
 	});
 
 	it("keeps an opened reader view stable until the journal is reopened", async () => {
@@ -133,9 +134,9 @@ describe("JsonlLogStore branch journal", () => {
 		const experiment = main.forBranch("experiment"); await Promise.all([main.appendDrafts([invokeDraft()]), experiment.appendDrafts([invokeDraft()])]);
 		const experimentHead = (await main.getBranch("experiment")).headSeqId; await main.moveBranch("main", 2);
 		expect((await persistedEntries(file)).filter((entry) => !isBranchEntry(entry)).map((record) => record.seqId)).toEqual([2, 4, 5]);
-		expect((await main.readAncestry("main")).map((record) => record.seqId)).toEqual([2]);
+		expect((await collectHistoryRecords(main, "main")).map((record) => record.seqId)).toEqual([2]);
 		expect((await main.getBranch("experiment")).headSeqId).toBe(experimentHead);
-		expect((await main.readAncestry("experiment")).map((record) => record.seqId)).toEqual([2, experimentHead]);
+		expect((await collectHistoryRecords(main, "experiment")).map((record) => record.seqId)).toEqual([2, experimentHead]);
 		expect(main.fullReadCount()).toBe(1);
 	});
 });

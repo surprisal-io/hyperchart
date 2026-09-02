@@ -1,3 +1,4 @@
+import { collectHistoryRecords } from "./helpers/history.js";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -80,7 +81,7 @@ async function run(ast: ChartAst, workDir: string, options: Options = {}) {
 	});
 	try {
 		const state = await start(runtime);
-		return { state, log: await logStore.readAncestry(logStore.branchId) };
+		return { state, log: await collectHistoryRecords(logStore, logStore.branchId) };
 	} finally {
 		await runtime.dispose();
 	}

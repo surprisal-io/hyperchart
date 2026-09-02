@@ -32,13 +32,13 @@ export type {
 	UserInteractionResponse,
 } from "./generic/user_interactions.js";
 export { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./generic/artifacts.js";
-export { latestPinsByPath, materializeWorkspace, materializeWorkspaceFromPins } from "./generic/artifact_workspace.js";
+export { materializeWorkspaceFromPins } from "./generic/artifact_workspace.js";
 export type { RenderedArtifact } from "../core/machine.js";
 export { ChartRuntime } from "./generic/chart_runtime.js";
 export type { ChartRuntimeOptions } from "./generic/chart_runtime.js";
 export { runGuard } from "./generic/guards.js";
 export type { GuardContext, RenderedGuardInvocation } from "./generic/guards.js";
-export { collectBranches, DEFAULT_BRANCH_ID, HistoryCursorError, JsonlLogStore } from "./generic/log_store.js";
+export { DEFAULT_BRANCH_ID, HistoryCursorError, JsonlLogStore } from "./generic/log_store.js";
 export type {
 	ActorGenerationHistoryItem,
 	ActorMessageHistoryItem,
@@ -52,7 +52,6 @@ export type {
 	MapVisitHistoryItem,
 	RunHistoryStore,
 	RunLogStore,
-	RespondToUserInteractionInput,
 	StateVisitHistoryItem,
 	UserInteractionResponseCommit,
 } from "./generic/log_store.js";
@@ -72,12 +71,12 @@ export type { OpenPostgresLogStoreOptions, PostgresLogAccess, PostgresRunTransac
 export {
 	forkHyperchartRun,
 	getHyperchartBranch,
-	listHyperchartBranches,
+	listHyperchartBranchPage,
 } from "./generic/branches.js";
 export type { ForkBranchOptions, ForkBranchResult } from "./generic/branches.js";
 export { createRunDir, deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "./generic/run_dir.js";
 export type { RunMeta } from "./generic/run_dir.js";
-export { finalMachineFailureMessage, terminalStateForFinalMachine } from "./generic/run_outcome.js";
+export { terminalStateForFinalMachine } from "./generic/run_outcome.js";
 export type { RunTerminalState } from "./generic/run_outcome.js";
 export {
 	TERMINAL_NOTIFICATION_DIR,

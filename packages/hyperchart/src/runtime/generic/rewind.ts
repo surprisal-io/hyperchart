@@ -6,7 +6,7 @@ import { templatePath } from "../../core/paths.js";
 import { explainReplay } from "../../core/replay_check.js";
 import type { ChartAst, StatePath } from "../../core/types.js";
 import { assertRunOwnership, assertStoppedRun } from "./branches.js";
-import { openProjectionReplay, type RunLogReader } from "./log_store.js";
+import { openProjectionReplay, type RunHistoryStore } from "./log_store.js";
 import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst } from "./projection_loader.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import { loadRunMeta } from "./run_dir.js";
@@ -100,7 +100,7 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 
 /** Resolve a selector once against storage. Explicit seqId may target a sibling tip. */
 export async function findRewindMatch(
-	reader: RunLogReader,
+	reader: RunHistoryStore,
 	opts: Pick<RewindOptions, "branchId" | "state" | "seqId" | "to" | "mode">,
 	ast: ChartAst,
 ): Promise<RewindMatch> {

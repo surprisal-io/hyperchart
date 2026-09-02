@@ -42,7 +42,7 @@ describe("run outcome", () => {
 		];
 
 		const state = stateFromLog(machineAst, log);
-		expect(terminalStateForFinalMachine(state, log)).toBe("failed");
+		expect(terminalStateForFinalMachine(state)).toBe("failed");
 		expect(finalMachineFailureMessage(state, log)).toBe("boom");
 	});
 
@@ -128,6 +128,6 @@ describe("run outcome", () => {
 			},
 		];
 
-		expect(terminalStateForFinalMachine(stateFromLog(machineAst, log), log)).toBe("complete");
+		expect(terminalStateForFinalMachine(stateFromLog(machineAst, log))).toBe("complete");
 	});
 });

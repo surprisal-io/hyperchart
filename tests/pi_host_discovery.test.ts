@@ -387,11 +387,11 @@ console.log(JSON.stringify(snapshot.runs));`;
 
 		const host = createPiHyperchartHost({ agentDir });
 		const snapshot = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
-		const full = await host.readRunSnapshot(projectDir, "waiting-map-run");
-		const waitingCount = full?.states.filter((state) => state.status === "waiting").length;
+		const overview = await host.readRunOverview(projectDir, "waiting-map-run");
+		const waitingCount = overview?.run.states.filter((state) => state.status === "waiting").length;
 
 		expect(waitingCount).toBeGreaterThan(0);
-		expect(full?.stateCount).toBeGreaterThan(0);
+		expect(overview?.run.stateCount).toBeGreaterThan(0);
 		expect(snapshot.runs[0]).not.toHaveProperty("stateCount");
 		expect(snapshot.runs[0]).not.toHaveProperty("progressPercent");
 		expect(snapshot.runs[0]).not.toHaveProperty("activeStateCount");
@@ -426,8 +426,8 @@ console.log(JSON.stringify(snapshot.runs));`;
 
 		const host = createPiHyperchartHost({ agentDir });
 		const summary = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
-		const full = await host.readRunSnapshot(projectDir, "transcript-run");
-		const fullSession = full?.states.find((state) => state.id === "work")?.session;
+		const overview = await host.readRunOverview(projectDir, "transcript-run");
+		const fullSession = overview?.run.states.find((state) => state.id === "work")?.session;
 		const loadedSession = await host.readVisitSession({ runId: "transcript-run", branchId: "main", invokeSeqId: 2 });
 
 		expect(summary.runs[0]).toMatchObject({ runId: "transcript-run" });
@@ -466,7 +466,6 @@ console.log(JSON.stringify(snapshot.runs));`;
 
 		const host = createPiHyperchartHost({ agentDir });
 		const snapshot = await host.readSessionSnapshot(projectDir);
-		const full = await host.readRunSnapshot(projectDir, "missing-chart-run");
 
 		warn.mockRestore();
 		expect(snapshot.runs).toEqual([
@@ -478,10 +477,5 @@ console.log(JSON.stringify(snapshot.runs));`;
 			}),
 		]);
 		expect(snapshot.runs[0]).not.toHaveProperty("issues");
-		expect(full?.issues?.[0]).toMatchObject({
-			severity: "error",
-			kind: "run_failed",
-			source: "status",
-		});
 	});
 });

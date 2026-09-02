@@ -6,7 +6,6 @@ import type {
 } from "../host/models.js";
 import type { HyperchartInspectorDataSource } from "../host/adapter.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
-import { openProjectionReplay } from "../runtime/generic/log_store.js";
 import { loadBranchProjection, projectionContractForAst } from "../runtime/generic/projection_loader.js";
 import { projectBranch } from "../core/projection.js";
 import { renderPendingActionInvocation, type ActionEffect, type RenderedArtifact } from "../core/machine.js";
@@ -15,6 +14,7 @@ import type { ChartAst } from "../core/types.js";
 import type {
 	ActorMessageHistoryItem,
 	HistoryChunk,
+	HistoryCursor,
 	StateVisitHistoryItem,
 } from "../runtime/generic/log_store.js";
 import { loadRunMeta } from "../runtime/generic/run_dir.js";
@@ -51,7 +51,7 @@ export async function createRunInspectorDataSource(
 			const sessions = sessionSummariesByInvoke(absoluteRunDir, snapshot.branchId);
 			return withStore(async (store) => {
 				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readStateVisits({ snapshot, state: stateId, ...(cursor === undefined ? {} : { cursor }) }));
-				const records = await materializeSnapshot(store, snapshot);
+				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const semanticVisits = runtimeVisitHistoriesForInspector(parsed.ast, records).get(stateId) ?? [];
 				return mapChunkAsync(chunk, (item) => stateVisitWithProjection(store, parsed.ast, snapshot.branchId, item, sessions.get(item.seqId), semanticVisits.find((visit) => visit.invokeSeqId === item.seqId)));
 			});
@@ -74,7 +74,7 @@ export async function createRunInspectorDataSource(
 			assertRun(candidate);
 			return withStore(async (store) => {
 				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readActorMessages({ snapshot, occurrence, ...(cursor === undefined ? {} : { cursor }) }));
-				const records = await materializeSnapshot(store, snapshot);
+				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const items = actorMessageHistoryItemsToHost(chunk.items, parsed.ast, records);
 				return { ...chunk, items };
 			});
@@ -176,13 +176,23 @@ async function stateVisitWithProjection(
 	};
 }
 
-async function materializeSnapshot(
+/**
+ * Internal correctness scaffolding: existing AST-aware visit/message mapping still needs the
+ * captured prefix. It drains only bounded public pages and never exposes this array. Replace
+ * it with predecessor-catalog-backed targeted mapping after that catalog passes its benchmark.
+ */
+async function collectSnapshotRecordsForMapping(
 	store: Awaited<ReturnType<typeof openRunLogStore>>,
 	snapshot: { branchId: string; headSeqId: number | null },
 ): Promise<readonly import("../core/durable_events.js").DurableLogRecord[]> {
-	const records: import("../core/durable_events.js").DurableLogRecord[] = [];
-	for await (const batch of openProjectionReplay(store, { targetHeadSeqId: snapshot.headSeqId, afterSeqId: null })) records.push(...batch);
-	return records;
+	const newestFirst: import("../core/durable_events.js").DurableLogRecord[] = [];
+	let cursor: HistoryCursor | undefined;
+	do {
+		const chunk = await store.readRecords({ snapshot, ...(cursor === undefined ? {} : { cursor }) });
+		newestFirst.push(...chunk.items);
+		cursor = chunk.older;
+	} while (cursor !== undefined);
+	return newestFirst.reverse();
 }
 
 function actionEffectInfo(effect: ActionEffect): HyperchartVisitInfo["invocation"] {

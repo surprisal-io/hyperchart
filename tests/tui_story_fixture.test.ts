@@ -1,3 +1,4 @@
+import { collectHistoryRecords } from "./helpers/history.js";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,7 +35,7 @@ describe("Storybook production TUI fixture", () => {
 				chartId: fixture.ast.id,
 				state: item.state,
 			});
-			const log = await new JsonlLogStore(join(item.runDir, "log.jsonl")).readAncestry("main");
+			const log = await collectHistoryRecords(new JsonlLogStore(join(item.runDir, "log.jsonl")), "main");
 			const view = buildRunView(fixture.ast, log, Date.UTC(2026, 6, 14, 12, 0, 0));
 			expect(view.final).toBe(false);
 			expect(view.pending.some((entry) => entry.path === "research#market.scout")).toBe(true);

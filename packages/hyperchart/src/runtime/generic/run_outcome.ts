@@ -6,7 +6,7 @@ import { createBranchProjection, projectBranch } from "../../core/projection.js"
 export type RunTerminalState = "complete" | "failed";
 
 /** Terminal outcome is explicit chart data. Names and the event that entered a terminal are irrelevant. */
-export function terminalStateForFinalMachine(state: MachineState, _log: readonly DurableLogRecord[] = []): RunTerminalState {
+export function terminalStateForFinalMachine(state: MachineState): RunTerminalState {
 	if (state.projection.failure !== undefined) return "failed";
 	return state.projection.activeLeaves.some((leaf) => {
 		const node = nodeAt(state.ast, leaf);
@@ -14,7 +14,7 @@ export function terminalStateForFinalMachine(state: MachineState, _log: readonly
 	}) ? "failed" : "complete";
 }
 
-export function finalMachineFailureMessage(state: MachineState, log: readonly DurableLogRecord[] = []): string | undefined {
+export function finalMachineFailureMessage(state: MachineState, log: readonly DurableLogRecord[]): string | undefined {
 	if (state.projection.failure !== undefined) return describeEventError(state.projection.failure.error);
 	const failedLeaves = state.projection.activeLeaves.filter((leaf) => {
 		const node = nodeAt(state.ast, leaf);

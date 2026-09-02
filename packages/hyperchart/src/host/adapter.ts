@@ -13,7 +13,6 @@ import type {
 	HyperchartInfo,
 	HyperchartMapVisitInfo,
 	HyperchartRecordInfo,
-	HyperchartRunInfo,
 	HyperchartRunOverview,
 	HyperchartRunStatus,
 	HyperchartUsageInfo,
@@ -82,6 +81,4 @@ export interface HyperchartHostAdapter extends HyperchartInspectorDataSource {
 	readChartSnapshot(cwd: string, chartName: string): Promise<HyperchartInfo | undefined>;
 	/** Load graph/control state plus bounded summaries; elapsed histories are intentionally absent. */
 	readRunOverview(cwd: string, runId: string, branchId?: string): Promise<HyperchartRunOverview | undefined>;
-	/** @deprecated Compatibility alias for overview.run; does not include elapsed histories or transcripts. */
-	readRunSnapshot(cwd: string, runId: string): Promise<HyperchartRunInfo | undefined>;
 }

@@ -8,7 +8,8 @@ describe("Pi host public surface", () => {
 		expect(typeof createPiHyperchartHost).toBe("function");
 		expect(typeof piHyperchartHost.readSessionSnapshot).toBe("function");
 		expect(typeof piHyperchartHost.readChartSnapshot).toBe("function");
-		expect(typeof piHyperchartHost.readRunSnapshot).toBe("function");
+		expect(typeof piHyperchartHost.readRunOverview).toBe("function");
+		expect(piHyperchartHost).not.toHaveProperty("readRunSnapshot");
 	});
 
 	it("exports the implementation through pi-hyperchart/pi-host", () => {

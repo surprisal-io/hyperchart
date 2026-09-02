@@ -78,4 +78,4 @@ Marketplace packaging, model-id mapping between hosts, and cross-host run intero
 
 ## Named branches
 
-Claude tools require explicit branch handles for run/inspection/view/response/rewind and provide `hyperchart_branches` plus `hyperchart_fork`. Checkout is read-only; fork never selects; rewind only moves the named durable head.
+Claude tools require explicit branch handles for run/inspection/view/response/rewind and provide cursor-paged `hyperchart_branches` (at most 100 heads, `totalCount`, optional `next`) plus `hyperchart_fork`. Checkout is read-only; fork never selects; rewind only moves the named durable head.

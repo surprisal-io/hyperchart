@@ -75,7 +75,6 @@ describe("host public surface", () => {
 			readSessionSnapshot: async () => snapshot,
 			readChartSnapshot: async () => undefined,
 			readRunOverview: async () => undefined,
-			readRunSnapshot: async () => undefined,
 			listBranches: unavailable,
 			readStateVisits: unavailable,
 			readMapVisits: unavailable,
@@ -88,6 +87,6 @@ describe("host public surface", () => {
 
 		await expect(adapter.readSessionSnapshot("/workspace", { runLimit: 10 })).resolves.toBe(snapshot);
 		await expect(adapter.readChartSnapshot("/workspace", "chart-1")).resolves.toBeUndefined();
-		await expect(adapter.readRunSnapshot("/workspace", "run-1")).resolves.toBeUndefined();
+		await expect(adapter.readRunOverview("/workspace", "run-1")).resolves.toBeUndefined();
 	});
 });

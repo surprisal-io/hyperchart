@@ -6,10 +6,10 @@
 import {
   hyperchartRunFromInfo,
   hyperchartRunFromInspectResult,
-  hyperchartRunFromRuntime,
   hyperchartRunFromToolDetails,
   type HyperchartHostAdapter,
   type HyperchartRunInfo,
+  type HyperchartRunOverview,
 } from "@surprisal/hyperchart/host";
 ```
 
@@ -25,10 +25,11 @@ interface HyperchartHostAdapter {
     cwd: string,
     chartName: string,
   ): Promise<HyperchartInfo | undefined>;
-  readRunSnapshot(
+  readRunOverview(
     cwd: string,
     runId: string,
-  ): Promise<HyperchartRunInfo | undefined>;
+    branchId?: string,
+  ): Promise<HyperchartRunOverview | undefined>;
 }
 
 interface HyperchartSnapshotOptions {
@@ -43,12 +44,12 @@ interface HyperchartSessionSnapshot {
 
 A host implementation discovers chart definitions and runs belonging to `cwd`. `readSessionSnapshot` is a lightweight list API: it returns only source/definition metadata and scalar run/status metadata. It never returns chart graphs, runtime state arrays, visit histories, prompts, schemas, or transcripts, so a host may retain it in a dashboard session. The Pi adapter does not evaluate chart modules or replay runs for this periodic read; it extracts literal chart ids and state counts from source when possible and omits graph-derived fields otherwise.
 
-`readChartSnapshot` is the on-demand full-definition API. Call it when a user opens a definition or launch dialog; unlike the summary, it includes static states, generated definition source, and declared launch argument metadata. The Pi adapter resolves only the selected discovery entry, with host-specific project charts taking precedence over shared project charts and user charts, then evaluates that one module. `readRunSnapshot` is the separate full-run inspector API. Call it only after the user opens an inspector, keep the returned `HyperchartRunInfo` in inspector-local state, and discard it when the inspector closes.
+`readChartSnapshot` is the on-demand full-definition API. Call it when a user opens a definition or launch dialog; unlike the summary, it includes static states, generated definition source, and declared launch argument metadata. The Pi adapter resolves only the selected discovery entry, with host-specific project charts taking precedence over shared project charts and user charts, then evaluates that one module. `readRunOverview` is the on-demand bounded run-inspector API. It returns graph/control state, a pinned history snapshot, and bounded summaries; elapsed histories load through the stateless cursor methods on `HyperchartHostAdapter`.
 
 ```ts
 const snapshot = await host.readSessionSnapshot(process.cwd(), { runLimit: 20 });
 const definition = await host.readChartSnapshot(process.cwd(), selectedChartName);
-const inspectorRun = await host.readRunSnapshot(process.cwd(), selectedRunId);
+const inspectorOverview = await host.readRunOverview(process.cwd(), selectedRunId);
 ```
 
 ## Session summary models
@@ -620,7 +621,7 @@ Accepts:
 
 Returns `undefined` for unrecognized input.
 
-### `hyperchartRunFromRuntime()`
+### Runtime session-progress types
 
 ```ts
 type HyperchartRuntimeSessionProgressInfo = {
@@ -655,47 +656,9 @@ type HyperchartRuntimeSessionProgressFile = {
   sessions: Record<string, HyperchartRuntimeSessionProgressInfo>;
 };
 
-type HyperchartRunFromRuntimeOptions = {
-  runId?: string;
-  status?: {
-    runId?: string;
-    runDir?: string;
-    chartId?: string;
-    state?: string;
-    pid?: number;
-    startedAt?: number;
-    updatedAt?: number;
-    heartbeatAt?: number;
-    exitCode?: number;
-    error?: string;
-    replayWarnings?: readonly string[];
-  };
-  sessionProgress?: HyperchartRuntimeSessionProgressFile;
-  cwd?: string;
-  createdAt?: number;
-  updatedAt?: number;
-  description?: string;
-  now?: number;
-};
-
-function hyperchartRunFromRuntime(
-  inspect: HyperchartInspectResult,
-  ast: ChartAst,
-  records: readonly DurableLogRecord[],
-  options?: HyperchartRunFromRuntimeOptions,
-): HyperchartRunInfo;
 ```
 
-This is the canonical static-plus-runtime adapter. It:
-
-- projects durable facts;
-- overlays current statuses and timestamps;
-- reconstructs immutable visit histories and rendered invocations;
-- materializes map instances and generations;
-- marks historical traversal completions as stale;
-- attaches validation, replay, session, and process issues.
-
-It does not read files itself. The host supplies already-loaded status and session-progress data.
+These serializable types describe host-supplied live session summaries. Materialized durable-record adapters are internal implementation/fixture helpers and are not exported from `@surprisal/hyperchart/host`; production run inspection starts with `readRunOverview()` and loads elapsed detail through bounded cursor methods.
 
 The model-boundary helpers use a shared positive wire-field allowlist rather than attempting to enumerate unsafe names. `boundedModelEnvelope()` validates the complete constructed envelope and substitutes a caller-shaped deterministic digest error only when its final UTF-8 JSON exceeds 64 KiB; unknown fields and non-JSON values fail closed. `summarizeUserGate()` exposes only a bounded prompt preview, authored options, exact allowed events, and a non-executable recursive reply summary. Response coordinates and identities (`runId`, `seqId`, allowed event names, and option values) are never truncated: they round-trip exactly within dedicated per-field/collection and 48 KiB gate-summary budgets, otherwise delivery fails closed and directs the operator to the browser inspector. Options separate a possibly truncated human `label` from the exact `value`; every retained display string is `{ text, originalChars, omittedChars }`, including untruncated strings with `omittedChars: 0`. The summary carries JSON types and nullability, JSON-encoded enum/literal/default values, recursive required/optional object fields and additional-property policy, array/tuple/contains schemas, union alternatives, and supported string/numeric/array/object constraints. It never returns the normalized or executable schema. Reply summaries have independent depth, node, collection, string/default, and byte caps. A collection-cap error identifies the collection and exact omitted count; because omitting a response identity, validation branch, or field would make the contract unusable, gate delivery fails closed instead of returning a partial summary. The finite JSON type set is not sliced, and the former capped `itemTypes` projection no longer exists. Browser inspector payloads deliberately bypass this model-only boundary.
 
@@ -716,8 +679,8 @@ HyperchartRefInfo, HyperchartOnReenterInfo, HyperchartInspectMode,
 HyperchartValidationInfo, HyperchartRenderedArtifactInfo,
 HyperchartVisitInvocationInfo, HyperchartVisitInfo,
 hyperchartRunFromInfo, hyperchartRunFromInspectResult,
-hyperchartRunFromRuntime, hyperchartRunFromToolDetails,
-HyperchartRunFromInspectOptions, HyperchartRunFromRuntimeOptions,
+hyperchartRunFromToolDetails,
+HyperchartRunFromInspectOptions,
 HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo,
 summarizeHyperchartProgress, summarizeChartInspect, summarizeRunInspect,
 summarizeReplyContract, summarizeUserGate, assertToolPayloadSafe,

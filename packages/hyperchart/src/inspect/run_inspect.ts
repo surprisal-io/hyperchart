@@ -10,7 +10,7 @@ import {
 import type { ActionUID, ChartAst } from "../core/types.js";
 import type { BranchProjection } from "../core/projection.js";
 import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
-import { hyperchartRunFromRuntime } from "../host/index.js";
+import { hyperchartRunFromRuntime } from "../host/adapters.js";
 import type { HyperchartRunInfo, HyperchartRunOverview, HyperchartSessionMessageInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
 import type { BranchHead } from "../core/durable_events.js";
@@ -33,7 +33,6 @@ export type HyperchartRunFromRunDirBaseOptions = {
 	branchId?: BranchId;
 	meta?: RunMeta;
 	ast?: ChartAst;
-	records?: readonly DurableLogRecord[];
 	agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined;
 	now?: number;
 };
@@ -65,35 +64,32 @@ export async function hyperchartRunFromRunDir(
 	});
 	const status = readRunStatus(absoluteRunDir);
 	const branchId = options.branchId ?? "main";
-	let records = options.records;
+	let records: readonly DurableLogRecord[] = [];
 	let branches: readonly BranchHead[] | undefined;
 	let initialBranches: BranchListChunk | undefined;
 	let snapshot: HistorySnapshot | undefined;
 	let projection: BranchProjection | undefined;
-	const bounded = records === undefined;
-	if (bounded) {
-		const store = await openRunLogStore(absoluteRunDir, { access: "read", branchId });
+	const store = await openRunLogStore(absoluteRunDir, { access: "read", branchId });
+	try {
+		let syntheticEmptyBranch = false;
 		try {
-			let syntheticEmptyBranch = false;
-			try {
-				snapshot = await store.captureSnapshot(branchId);
-			} catch (error) {
-				if (await store.countRecords() !== 0) throw error;
-				snapshot = { branchId, headSeqId: null };
-				syntheticEmptyBranch = true;
-			}
-			const loaded = await loadBranchProjection({ ast, branchId, store, contract: projectionContractForAst(ast), snapshot, saveCheckpoint: "never" });
-			projection = loaded.projection;
-			const [recordChunk, branchChunk] = await Promise.all([
-				syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
-				store.listBranches(),
-			]);
-			records = [...recordChunk.items].reverse();
-			initialBranches = branchChunk;
-			branches = branchChunk.items;
-		} finally {
-			await store.close();
+			snapshot = await store.captureSnapshot(branchId);
+		} catch (error) {
+			if (await store.countRecords() !== 0) throw error;
+			snapshot = { branchId, headSeqId: null };
+			syntheticEmptyBranch = true;
 		}
+		const loaded = await loadBranchProjection({ ast, branchId, store, contract: projectionContractForAst(ast), snapshot, saveCheckpoint: "never" });
+		projection = loaded.projection;
+		const [recordChunk, branchChunk] = await Promise.all([
+			syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
+			store.listBranches(),
+		]);
+		records = [...recordChunk.items].reverse();
+		initialBranches = branchChunk;
+		branches = branchChunk.items;
+	} finally {
+		await store.close();
 	}
 	const sessionsDir = resolve(absoluteRunDir, "sessions");
 	const rawSessionProgress = readSessionProgress(sessionsDir);
@@ -104,8 +100,8 @@ export async function hyperchartRunFromRunDir(
 		),
 	};
 	const runId = status?.runId ?? basename(absoluteRunDir);
-	const runtimeRecords = records ?? [];
-	const overviewSessionProgress = bounded && projection !== undefined && options.includeTranscripts !== true
+	const runtimeRecords = records;
+	const overviewSessionProgress = projection !== undefined && options.includeTranscripts !== true
 		? currentSessionProgress(branchSessionProgress, projection)
 		: branchSessionProgress;
 	const sessionProgress = options.includeTranscripts === true
@@ -126,7 +122,7 @@ export async function hyperchartRunFromRunDir(
 		...(options.now === undefined ? {} : { now: options.now }),
 		...(projection === undefined ? {} : { projection }),
 	});
-	const selected = bounded && projection !== undefined && options.includeTranscripts !== true ? overviewOnly(run, projection) : run;
+	const selected = projection !== undefined && options.includeTranscripts !== true ? overviewOnly(run, projection) : run;
 	return {
 		...selected,
 		...(snapshot === undefined ? {} : { historySnapshot: snapshot }),
@@ -146,7 +142,7 @@ export async function hyperchartRunFromRunDir(
 
 export async function hyperchartRunOverviewFromRunDir(
 	runDir: string,
-	options: Omit<HyperchartRunFromRunDirOptions, "records" | "includeTranscripts" | "readTranscript"> = {},
+	options: Omit<HyperchartRunFromRunDirOptions, "includeTranscripts" | "readTranscript"> = {},
 ): Promise<HyperchartRunOverview> {
 	const run = await hyperchartRunFromRunDir(runDir, { ...options, includeTranscripts: false });
 	if (run.historySnapshot === undefined) throw new Error("Bounded run overview did not capture a history snapshot");

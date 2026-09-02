@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
 	BranchHead,
 	BranchId,
@@ -28,11 +29,10 @@ import {
 	historyItemsForSubject,
 	materializeJournal,
 	stampDrafts,
-	type RespondToUserInteractionInput,
+	type PreparedUserInteractionCommit,
 	type StateVisitHistoryItem,
 	type UserInteractionResponseCommit,
 } from "./log_store.js";
-import { prepareUserInteractionResponse } from "./user_interaction_admission.js";
 
 export class MemoryLogStore implements LogStore {
 	private readonly index;
@@ -40,14 +40,11 @@ export class MemoryLogStore implements LogStore {
 	private writeChain: Promise<void> = Promise.resolve();
 	readonly canSaveProjectionCheckpoints = true;
 
-	constructor(
-		entries: readonly StorageEntry[] | undefined = undefined,
-		readonly branchId: BranchId = DEFAULT_BRANCH_ID,
-	) {
+	constructor(readonly branchId: BranchId = DEFAULT_BRANCH_ID) {
 		assertBranchId(branchId);
-		this.index = materializeJournal(entries === undefined
-			? [{ kind: "branch", op: "create", seqId: 1, branchId, headSeqId: null, metadata: { name: branchId }, committedAt: Date.now() }]
-			: entries);
+		this.index = materializeJournal([
+			{ kind: "branch", op: "create", seqId: 1, branchId, headSeqId: null, metadata: { name: branchId }, committedAt: Date.now() },
+		]);
 	}
 
 	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
@@ -98,17 +95,15 @@ export class MemoryLogStore implements LogStore {
 		return cursorAtItems(input.snapshot, input.subject, historyItemsForSubject(this.ancestryForSnapshot(input.snapshot), input.subject), input.seqId);
 	}
 	async findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
-		return findUserInteractionResponseInAncestry(this.index.ancestryTo(input.headSeqId), input.gateSeqId);
+		return findUserInteractionResponseInAncestry(this.index.materializeHistoryToHead(input.headSeqId), input.gateSeqId);
 	}
-	async readAncestry(branchId: BranchId): Promise<readonly DurableLogRecord[]> { return this.index.entries.length === 0 ? [] : this.index.ancestry(branchId); }
-	async containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> { return this.containsInHistory({ headSeqId: this.index.branch(branchId).headSeqId, seqId }); }
 	async countRecords(): Promise<number> { return this.index.recordsBySeqId.size; }
 	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
 		const checkpoint = this.projectionCheckpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest);
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
 	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
-		const ancestry = this.index.ancestryTo(input.targetHeadSeqId);
+		const ancestry = this.index.materializeHistoryToHead(input.targetHeadSeqId);
 		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
 		const checkpoint = this.projectionCheckpoints
 			.filter((candidate) => candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
@@ -130,15 +125,23 @@ export class MemoryLogStore implements LogStore {
 	private ancestryForSnapshot(snapshot: HistorySnapshot): readonly DurableLogRecord[] {
 		this.index.branch(snapshot.branchId);
 		if (snapshot.headSeqId !== null && !this.index.recordsBySeqId.has(snapshot.headSeqId)) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
-		return this.index.ancestryTo(snapshot.headSeqId);
+		return this.index.materializeHistoryToHead(snapshot.headSeqId);
 	}
 
-	respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit> {
+	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> {
 		return this.enqueue(async () => {
-			const ancestry = this.index.ancestry(this.branchId);
-			const prepared = await prepareUserInteractionResponse(ancestry, this.branchId, input);
-			if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
-			const records = stampDrafts(this.index, this.branchId, [prepared.draft], Date.now());
+			const branch = this.index.branch(this.branchId);
+			if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${this.branchId}' moved while admitting user interaction ${input.gateSeqId}`);
+			const existing = findUserInteractionResponseInAncestry(this.index.materializeHistoryToHead(branch.headSeqId), input.gateSeqId);
+			if (existing !== undefined) {
+				if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
+				throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
+			}
+			const gate = this.index.recordsBySeqId.get(input.gateSeqId);
+			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !this.index.containsInBranchHistory(this.branchId, input.gateSeqId) || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
+				throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${this.branchId}'`);
+			}
+			const records = stampDrafts(this.index, this.branchId, [input.draft], Date.now());
 			for (const record of records) this.index.applyEntry(record);
 			return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
 		});
@@ -150,7 +153,6 @@ export class MemoryLogStore implements LogStore {
 		return result;
 	}
 
-	storageEntries(): readonly StorageEntry[] { return [...this.index.entries]; }
 }
 
 function assertBranchId(value: BranchId): void {

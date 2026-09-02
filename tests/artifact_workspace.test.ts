@@ -1,10 +1,12 @@
+import { collectHistoryRecords } from "./helpers/history.js";
+import { latestArtifactPins } from "./helpers/artifact_pins.js";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ArtifactPin, DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import { ArtifactStore } from "../packages/hyperchart/src/runtime/generic/artifact_store.js";
-import { materializeWorkspace, materializeWorkspaceFromPins } from "../packages/hyperchart/src/runtime/generic/artifact_workspace.js";
+import { materializeWorkspaceFromPins } from "../packages/hyperchart/src/runtime/generic/artifact_workspace.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 
 const roots: string[] = [];
@@ -41,10 +43,10 @@ describe("materializeWorkspace", () => {
 			artifacts: { "nested/report.md": pin },
 		}]);
 		await logStore.createBranch("fork", accepted!.seqId, { name: "fork", sourceBranchId: "main", sourceSeqId: accepted!.seqId });
-		const forkAncestry = await logStore.readAncestry("fork");
+		const forkAncestry = await collectHistoryRecords(logStore, "fork");
 		const workspace = join(dir, "run", "workspaces", "fork");
 
-		await materializeWorkspace(forkAncestry, store, workspace);
+		await materializeWorkspaceFromPins(latestArtifactPins(forkAncestry), store, workspace);
 
 		await expect(readFile(join(workspace, "nested/report.md"), "utf8")).resolves.toBe("parent accepted bytes");
 	});
@@ -72,11 +74,11 @@ describe("materializeWorkspace", () => {
 		const pin = await store.put(source);
 		const ancestry = [completion(1, "main", { "state.txt": pin })];
 		const workspace = join(dir, "workspace");
-		await materializeWorkspace(ancestry, store, workspace);
+		await materializeWorkspaceFromPins(latestArtifactPins(ancestry), store, workspace);
 		const before = await stat(join(workspace, "state.txt"));
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
-		await materializeWorkspace(ancestry, store, workspace);
+		await materializeWorkspaceFromPins(latestArtifactPins(ancestry), store, workspace);
 
 		const after = await stat(join(workspace, "state.txt"));
 		expect(after.mtimeMs).toBe(before.mtimeMs);
@@ -87,8 +89,8 @@ describe("materializeWorkspace", () => {
 		const store = new ArtifactStore(join(dir, "run"));
 		const hash = "a".repeat(64);
 
-		await expect(materializeWorkspace(
-			[completion(1, "main", { "missing/report.md": { hash, size: 12 } })],
+		await expect(materializeWorkspaceFromPins(
+			latestArtifactPins([completion(1, "main", { "missing/report.md": { hash, size: 12 } })]),
 			store,
 			join(dir, "workspace"),
 		)).rejects.toThrow(new RegExp(`missing/report\\.md.*${hash}|${hash}.*missing/report\\.md`));

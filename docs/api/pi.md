@@ -396,7 +396,7 @@ Live runners receive `SIGTERM`. Stale active statuses become `stopped` without s
 
 ### `action: "branches"`
 
-Lists durable named heads for a run. Pass either `runDir` or `runId`. This is read-only and does not change the selected view.
+Lists one creation-ordered page of at most 100 durable named heads. Pass either `runDir` or `runId`, and pass the returned opaque `next` as `cursor` for the following page. The result includes `branches`, `totalCount`, and optional `next`. This is read-only and does not change the selected view.
 
 ### `action: "fork"`
 

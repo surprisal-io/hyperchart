@@ -23,13 +23,11 @@ import {
 	type PreparedUserInteractionCommit,
 	type RunLogStore,
 	type RunMeta,
-	type RespondToUserInteractionInput,
 	type StateVisitHistoryItem,
 	type StoredProjectionCheckpoint,
 	type UserInteractionResponseCommit,
 } from "./log_store.js";
 import type { StatePath } from "../../core/types.js";
-import { prepareUserInteractionResponse } from "./user_interaction_admission.js";
 
 export const JOURNAL_TABLE = "hyperchart_journal";
 export const JOURNAL_CHANNEL = "hyperchart_journal";
@@ -135,7 +133,6 @@ export type PostgresRunTransaction = SqlCommitTransaction & Readonly<{
 	appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
-	respondToUserInteraction(branchId: BranchId, input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit>;
 	commitPreparedUserInteraction(branchId: BranchId, input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit>;
 	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void>;
 }>;
@@ -146,12 +143,10 @@ export type PostgresForkAndCommitInput = Readonly<{
 	responseBranchId: BranchId;
 	metadata?: BranchMetadata;
 	checkpoint?: StoredProjectionCheckpoint;
-	preparedResponse?: PreparedUserInteractionCommit;
-	response: RespondToUserInteractionInput;
+	preparedResponse: PreparedUserInteractionCommit;
 }>;
 export interface SqlTransactionalRunLogStore extends RunLogStore {
 	commitPreparedUserInteractionWithParticipant<T>(branchId: BranchId, response: PreparedUserInteractionCommit, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }>;
-	commitUserInteraction<T>(branchId: BranchId, response: RespondToUserInteractionInput, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }>;
 	forkAndCommitUserInteraction<T>(input: PostgresForkAndCommitInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }>;
 }
 
@@ -210,16 +205,8 @@ export class PostgresLogStore implements RunLogStore {
 	}
 	async findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
 		await this.awaitReadable();
-		const ancestry = await readAncestryToHeadDirect(this.journal.client, this.journal.runId, input.headSeqId, this.journal.access);
+		const ancestry = await materializeHistoryToHeadDirect(this.journal.client, this.journal.runId, input.headSeqId, this.journal.access);
 		return findUserInteractionResponseInAncestry(ancestry, input.gateSeqId);
-	}
-	async readAncestry(branchId: BranchId): Promise<readonly DurableLogRecord[]> {
-		await this.awaitReadable();
-		return readAncestryDirect(this.journal.client, this.journal.runId, branchId, this.journal.access);
-	}
-	async containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> {
-		const snapshot = await this.captureSnapshot(branchId);
-		return this.containsInHistory({ headSeqId: snapshot.headSeqId, seqId });
 	}
 	async countRecords(): Promise<number> {
 		await this.awaitReadable();
@@ -270,7 +257,7 @@ export class PostgresLogStore implements RunLogStore {
 	private async ancestryForSnapshot(snapshot: HistorySnapshot): Promise<readonly DurableLogRecord[]> {
 		await this.awaitReadable();
 		await requireSnapshotBranchDirect(this.journal.client, this.journal.runId, snapshot, this.journal.access);
-		return readAncestryToHeadDirect(this.journal.client, this.journal.runId, snapshot.headSeqId, this.journal.access);
+		return materializeHistoryToHeadDirect(this.journal.client, this.journal.runId, snapshot.headSeqId, this.journal.access);
 	}
 
 	async readRunMeta(): Promise<RunMeta | undefined> {
@@ -364,7 +351,6 @@ export class PostgresLogStore implements RunLogStore {
 	moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
 		return this.transaction(async (tx) => { const branch = await tx.moveBranch(branchId, headSeqId); await tx.saveProjectionCheckpoint(checkpoint); return branch; });
 	}
-	respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit> { return this.transaction((tx) => tx.respondToUserInteraction(this.branchId, input)); }
 	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> { return this.transaction((tx) => tx.commitPreparedUserInteraction(this.branchId, input)); }
 
 	/** Managed transaction: journal mutations and host-domain SQL share one client and commit. */
@@ -392,21 +378,16 @@ export class PostgresLogStore implements RunLogStore {
 	commitPreparedUserInteractionWithParticipant<T>(branchId: BranchId, response: PreparedUserInteractionCommit, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }> {
 		return this.transaction(async (tx) => ({ response: await tx.commitPreparedUserInteraction(branchId, response), participant: await participate(restrictTransaction(tx)) }));
 	}
-	commitUserInteraction<T>(branchId: BranchId, response: RespondToUserInteractionInput, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }> {
-		return this.transaction(async (tx) => ({ response: await tx.respondToUserInteraction(branchId, response), participant: await participate(restrictTransaction(tx)) }));
-	}
 	forkAndCommitUserInteraction<T>(input: PostgresForkAndCommitInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }> {
 		if (input.responseBranchId !== input.sourceBranchId && input.responseBranchId !== input.newBranchId) {
 			return Promise.reject(new Error("responseBranchId must be the source branch or the newly created branch"));
 		}
 		return this.transaction(async (tx) => {
 			const impl = tx as TransactionImpl;
-			if (!await impl.containsInAncestry(input.sourceBranchId, input.fromSeqId)) throw new Error(`Fork point ${input.fromSeqId} is not in source branch '${input.sourceBranchId}' ancestry`);
+			if (!await impl.containsInBranchHistory(input.sourceBranchId, input.fromSeqId)) throw new Error(`Fork point ${input.fromSeqId} is not in source branch '${input.sourceBranchId}' ancestry`);
 			const branch = await impl.ensureExactBranch(input.newBranchId, input.fromSeqId, input.metadata);
 			if (input.checkpoint !== undefined) await tx.saveProjectionCheckpoint(input.checkpoint);
-			const response = input.preparedResponse === undefined
-				? await tx.respondToUserInteraction(input.responseBranchId, input.response)
-				: await tx.commitPreparedUserInteraction(input.responseBranchId, input.preparedResponse);
+			const response = await tx.commitPreparedUserInteraction(input.responseBranchId, input.preparedResponse);
 			const participant = await participate(restrictTransaction(tx));
 			return { branch, response, participant };
 		});
@@ -470,7 +451,7 @@ class TransactionImpl implements PostgresRunTransaction {
 	async ensureExactBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
 		const existing = await findBranchDirect(this.client, this.runId, branchId, "writer");
 		if (existing === undefined) return this.createBranch(branchId, headSeqId, metadata);
-		if (!await containsInAncestryDirect(this.client, this.runId, branchId, headSeqId, "writer") || !isDeepStrictEqual(existing.metadata, metadata)) {
+		if (!await containsInBranchHistoryDirect(this.client, this.runId, branchId, headSeqId, "writer") || !isDeepStrictEqual(existing.metadata, metadata)) {
 			throw new Error(`Conflicting retry for Hyperchart branch '${branchId}'`);
 		}
 		return existing;
@@ -484,7 +465,7 @@ class TransactionImpl implements PostgresRunTransaction {
 	async commitPreparedUserInteraction(branchId: BranchId, input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> {
 		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
 		if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${branchId}' moved while admitting user interaction ${input.gateSeqId}`);
-		const existing = findUserInteractionResponseInAncestry(await readAncestryToHeadDirect(this.client, this.runId, branch.headSeqId, "writer"), input.gateSeqId);
+		const existing = findUserInteractionResponseInAncestry(await materializeHistoryToHeadDirect(this.client, this.runId, branch.headSeqId, "writer"), input.gateSeqId);
 		if (existing !== undefined) {
 			if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
 			throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
@@ -498,13 +479,7 @@ class TransactionImpl implements PostgresRunTransaction {
 		for (const checkpoint of input.prepareCheckpoints?.(record) ?? []) await this.saveProjectionCheckpoint(checkpoint);
 		return { record, idempotent: false };
 	}
-	async respondToUserInteraction(branchId: BranchId, input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit> {
-		const prepared = await prepareUserInteractionResponse(await readAncestryDirect(this.client, this.runId, branchId, "writer"), branchId, input);
-		if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
-		const records = await this.appendDrafts(branchId, [prepared.draft]);
-		return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
-	}
-	containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> { return containsInAncestryDirect(this.client, this.runId, branchId, seqId, "writer"); }
+	containsInBranchHistory(branchId: BranchId, seqId: number): Promise<boolean> { return containsInBranchHistoryDirect(this.client, this.runId, branchId, seqId, "writer"); }
 	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> { return saveCheckpointDirect(this.client, this.runId, checkpoint); }
 	private async allocateOne(): Promise<number> { return this.allocate(1); }
 	private async allocate(count: number): Promise<number> {
@@ -628,15 +603,7 @@ async function findRecordDirect(client: PgClientLike, runId: string, seqId: numb
 	const rows = await queryRows(client, access, `SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'`, [runId, seqId]);
 	return rows[0] === undefined ? undefined : decodeRecordRow(rows[0] as JournalSqlRow);
 }
-async function readAncestryDirect(client: PgClientLike, runId: string, branchId: BranchId, access: PostgresLogAccess): Promise<DurableLogRecord[]> {
-	const branch = await findBranchDirect(client, runId, branchId, access);
-	if (branch === undefined) {
-		if (!await hasAnyEntryDirect(client, runId, access)) return [];
-		throw new Error(`Unknown Hyperchart branch '${branchId}'`);
-	}
-	return readAncestryToHeadDirect(client, runId, branch.headSeqId, access);
-}
-async function readAncestryToHeadDirect(client: PgClientLike, runId: string, headSeqId: number | null, access: PostgresLogAccess): Promise<DurableLogRecord[]> {
+async function materializeHistoryToHeadDirect(client: PgClientLike, runId: string, headSeqId: number | null, access: PostgresLogAccess): Promise<DurableLogRecord[]> {
 	if (headSeqId === null) return [];
 	const rows = await queryRows(client, access,
 		`WITH RECURSIVE ancestry AS (
@@ -659,7 +626,7 @@ async function requireSnapshotBranchDirect(client: PgClientLike, runId: string, 
 	if (await findBranchDirect(client, runId, snapshot.branchId, access) === undefined) throw new Error(`Unknown Hyperchart branch '${snapshot.branchId}'`);
 	if (snapshot.headSeqId !== null && await findRecordDirect(client, runId, snapshot.headSeqId, access) === undefined) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
 }
-async function containsInAncestryDirect(client: PgClientLike, runId: string, branchId: BranchId, seqId: number, access: PostgresLogAccess): Promise<boolean> {
+async function containsInBranchHistoryDirect(client: PgClientLike, runId: string, branchId: BranchId, seqId: number, access: PostgresLogAccess): Promise<boolean> {
 	const branch = await findBranchDirect(client, runId, branchId, access);
 	if (branch === undefined) {
 		if (!await hasAnyEntryDirect(client, runId, access)) return false;

@@ -47,6 +47,10 @@ tla/                   independent semantics and trace model
 scripts/               build and package validation
 ```
 
+### Run-history boundaries
+
+Durable history consumers use only snapshot-pinned cursor chunks from `RunHistoryStore`: public chunks are capped at 100 items and carry no reader handle. The oldest-first projection replay iterator is package-private, yields at most 500 facts per batch, and must not be imported by host, inspector, React, Pi, or Claude surfaces. Storage modules must remain AST/projector/host independent. `tests/run_history_boundary.test.ts` guards the package entrypoint, deleted materialized-log methods, caps, and import directions.
+
 ## Build and test
 
 Build both packages:

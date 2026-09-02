@@ -5,12 +5,8 @@ import { explainReplay } from "../../../core/replay_check.js";
 import { hyperchartSource as coreHyperchartSource } from "../../../core/source.js";
 import type { ChartAst, ChartCst } from "../../../core/types.js";
 import type { DurableLogRecord } from "../../../core/durable_events.js";
-import {
-	hyperchartRunFromInspectResult,
-	hyperchartRunFromRuntime,
-	type HyperchartRunFromRuntimeOptions,
-	type HyperchartRuntimeSessionProgressFile,
-} from "../../../host/index.js";
+import { hyperchartRunFromInspectResult, type HyperchartRuntimeSessionProgressFile } from "../../../host/index.js";
+import { hyperchartRunFromRuntime, type HyperchartRunFromRuntimeOptions } from "../../../host/adapters.js";
 import type { HyperchartRunInfo, HyperchartRunStatus } from "../../types.js";
 import type { InspectorPanelTileProps, RuntimeSourceBlock } from "../components/index.js";
 import { storyLog, type InspectorPanelSpec } from "./specs.js";

@@ -600,7 +600,7 @@ describe("hyperchart extension", () => {
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
 		const listed = await tool.execute("branches-alias", { action: "branches", runId }, new AbortController().signal, () => undefined, ctx);
-		expect(listed.details).toMatchObject({ runDir, branches: [expect.objectContaining({ branchId: "main" })] });
+		expect(listed.details).toMatchObject({ runDir, branches: [expect.objectContaining({ branchId: "main" })], totalCount: 1 });
 		const viewed = await tool.execute("view-alias", { action: "view", runId, branchId: "main", open: false }, new AbortController().signal, () => undefined, ctx);
 		expect(viewed.details).toMatchObject({ url: expect.stringMatching(/^http:\/\//) });
 		const forked = await tool.execute("fork-alias", { action: "fork", runId, branchId: "experiment", fromSeqId: 2 }, new AbortController().signal, () => undefined, ctx);
@@ -621,6 +621,28 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			ctx,
 		)).rejects.toThrow(/respond accepts the exact runId only/);
+	});
+
+	it("returns cursor-paged branch tool results capped at 100", async () => {
+		const runId = "paged-branches";
+		const runDir = createRun(runId, projectDir, writeChart("paged-branches"));
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
+		await store.initializeRootBranch();
+		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
+		for (let index = 0; index < 105; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		const tool = registeredTool("hyperchart");
+		const ctx = commandContext(projectDir).ctx;
+		const first = await tool.execute("branches-first", { action: "branches", runId }, new AbortController().signal, () => undefined, ctx);
+		const firstDetails = first.details as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
+		expect(firstDetails.branches).toHaveLength(100);
+		expect(firstDetails.totalCount).toBe(106);
+		expect(firstDetails.next).toBeTypeOf("string");
+		const second = await tool.execute("branches-second", { action: "branches", runId, cursor: firstDetails.next }, new AbortController().signal, () => undefined, ctx);
+		const secondDetails = second.details as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
+		expect(secondDetails.branches).toHaveLength(6);
+		expect(secondDetails.totalCount).toBe(106);
+		expect(secondDetails.next).toBeUndefined();
+		expect(new Set([...firstDetails.branches, ...secondDetails.branches].map((branch) => branch.branchId)).size).toBe(106);
 	});
 
 	it("reports action-specific requirements for incomplete calls", async () => {

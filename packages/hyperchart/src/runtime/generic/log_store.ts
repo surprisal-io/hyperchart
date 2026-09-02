@@ -24,7 +24,6 @@ import {
 import { actionUidKey } from "../../core/action_uid.js";
 import { actorLogicalOccurrencePath } from "../../core/actors.js";
 import type { StatePath } from "../../core/types.js";
-import { prepareUserInteractionResponse, prepareUserInteractionResponseSync, type RespondToUserInteractionInput, type UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
 export const DEFAULT_BRANCH_ID: BranchId = "main";
 export const HISTORY_READ_ITEMS = 100;
@@ -141,14 +140,6 @@ export interface RunHistoryStore {
 	findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined>;
 }
 
-/** @internal Runtime compatibility/replay seams removed or hidden in Phase 6. */
-export interface RunLogReader extends RunHistoryStore {
-	/** @internal Temporary compatibility seam removed in Phase 6. */
-	readAncestry(branchId: BranchId): Promise<readonly DurableLogRecord[]>;
-	/** @internal Temporary compatibility seam removed in Phase 6. */
-	containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean>;
-}
-
 /** @internal Materialized index used only by file and memory backends. */
 export class MaterializedRunLogIndex {
 	readonly entries: StorageEntry[];
@@ -190,11 +181,11 @@ export class MaterializedRunLogIndex {
 		return branch;
 	}
 
-	ancestry(branchId: BranchId): readonly DurableLogRecord[] {
-		return this.ancestryTo(this.branch(branchId).headSeqId);
+	materializeBranchHistory(branchId: BranchId): readonly DurableLogRecord[] {
+		return this.materializeHistoryToHead(this.branch(branchId).headSeqId);
 	}
 
-	containsInAncestry(branchId: BranchId, targetSeqId: number): boolean {
+	containsInBranchHistory(branchId: BranchId, targetSeqId: number): boolean {
 		let seqId = this.branch(branchId).headSeqId;
 		while (seqId !== null) {
 			if (seqId === targetSeqId) return true;
@@ -203,7 +194,7 @@ export class MaterializedRunLogIndex {
 		return false;
 	}
 
-	ancestryTo(headSeqId: number | null): readonly DurableLogRecord[] {
+	materializeHistoryToHead(headSeqId: number | null): readonly DurableLogRecord[] {
 		if (headSeqId === null) return [];
 		const reversed: DurableLogRecord[] = [];
 		let seqId: number | null = headSeqId;
@@ -449,7 +440,7 @@ export async function* openProjectionReplay(
 	}
 }
 
-/** @internal Compatibility helper for control paths that still need every branch in Phase 1. */
+/** Collect bounded branch-list pages for package-internal control paths. */
 export async function collectBranches(reader: Pick<RunHistoryStore, "listBranches">): Promise<readonly BranchHead[]> {
 	const items: BranchHead[] = [];
 	let cursor: BranchListCursor | undefined;
@@ -461,7 +452,7 @@ export async function collectBranches(reader: Pick<RunHistoryStore, "listBranche
 	return items;
 }
 
-export interface LogStore extends RunLogReader {
+export interface LogStore extends RunHistoryStore {
 	readonly branchId: BranchId;
 	appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
 	/** @internal Stamp facts, prepare an opaque cache row, and commit both atomically when durable. */
@@ -483,10 +474,14 @@ export interface RunLogStore extends LogStore, ProjectionCheckpointStore {
 	createBranchWithCheckpoint(branchId: BranchId, headSeqId: number, metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
 	moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
-	respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit>;
 	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit>;
 	close(): Promise<void>;
 }
+
+export type UserInteractionResponseCommit = Readonly<{
+	record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }>;
+	idempotent: boolean;
+}>;
 
 export type PreparedUserInteractionCommit = Readonly<{
 	expectedHeadSeqId: number | null;
@@ -495,8 +490,6 @@ export type PreparedUserInteractionCommit = Readonly<{
 	/** Execution-owned synchronous callback over the stamped response; storage persists only opaque rows. */
 	prepareCheckpoints?: (record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }>) => readonly StoredProjectionCheckpoint[];
 }>;
-
-export type { RespondToUserInteractionInput, UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
 /** @internal Stamp drafts against the file/memory writer's materialized index. */
 export function stampDrafts(
@@ -645,15 +638,7 @@ export class JsonlLogStore implements RunLogStore {
 		return cursorAtItems(input.snapshot, input.subject, historyItemsForSubject(ancestry, input.subject), input.seqId);
 	}
 	async findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
-		return findUserInteractionResponseInAncestry(this.index().ancestryTo(input.headSeqId), input.gateSeqId);
-	}
-	async readAncestry(branchId: BranchId): Promise<readonly DurableLogRecord[]> {
-		const index = this.index();
-		return index.entries.length === 0 ? [] : index.ancestry(branchId);
-	}
-	async containsInAncestry(branchId: BranchId, seqId: number): Promise<boolean> {
-		const snapshot = await this.captureSnapshot(branchId);
-		return this.containsInHistory({ headSeqId: snapshot.headSeqId, seqId });
+		return findUserInteractionResponseInAncestry(this.index().materializeHistoryToHead(input.headSeqId), input.gateSeqId);
 	}
 	async countRecords(): Promise<number> { return this.index().recordsBySeqId.size; }
 	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
@@ -661,7 +646,7 @@ export class JsonlLogStore implements RunLogStore {
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
 	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
-		const ancestry = this.index().ancestryTo(input.targetHeadSeqId);
+		const ancestry = this.index().materializeHistoryToHead(input.targetHeadSeqId);
 		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
 		const checkpoint = this.journal.projectionCheckpoints
 			.filter((candidate) => candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
@@ -733,13 +718,13 @@ export class JsonlLogStore implements RunLogStore {
 			const index = this.index();
 			const branch = index.branch(this.branchId);
 			if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${this.branchId}' moved while admitting user interaction ${input.gateSeqId}`);
-			const existing = findUserInteractionResponseInAncestry(index.ancestryTo(branch.headSeqId), input.gateSeqId);
+			const existing = findUserInteractionResponseInAncestry(index.materializeHistoryToHead(branch.headSeqId), input.gateSeqId);
 			if (existing !== undefined) {
 				if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
 				throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
 			}
 			const gate = index.recordsBySeqId.get(input.gateSeqId);
-			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !index.containsInAncestry(this.branchId, input.gateSeqId) || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
+			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !index.containsInBranchHistory(this.branchId, input.gateSeqId) || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
 				throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${this.branchId}'`);
 			}
 			const records = stampDrafts(index, this.branchId, [input.draft], Date.now());
@@ -751,19 +736,6 @@ export class JsonlLogStore implements RunLogStore {
 		});
 	}
 
-	async respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit> {
-		// Runtime-schema validation may await, so serialize the final prefix check and append
-		// with every other in-process writer operation. No second live process may own this store.
-		await prepareUserInteractionResponse(this.index().ancestry(this.branchId), this.branchId, input);
-		return enqueueJsonlWrite(this.journal.filePath, async () => {
-			const index = this.index();
-			const prepared = prepareUserInteractionResponseSync(index.ancestry(this.branchId), this.branchId, input);
-			if (prepared.kind === "idempotent") return { record: prepared.record, idempotent: true };
-			const records = stampDrafts(index, this.branchId, [prepared.draft], Date.now());
-			await this.appendLocked(records);
-			return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
-		});
-	}
 
 	private readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): HistoryChunk<AnyHistoryItem> {
 		const ancestry = this.ancestryForSnapshot(snapshot);
@@ -774,7 +746,7 @@ export class JsonlLogStore implements RunLogStore {
 		const index = this.index();
 		index.branch(snapshot.branchId);
 		if (snapshot.headSeqId !== null && !index.recordsBySeqId.has(snapshot.headSeqId)) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
-		return index.ancestryTo(snapshot.headSeqId);
+		return index.materializeHistoryToHead(snapshot.headSeqId);
 	}
 
 	private openJournal(): void {

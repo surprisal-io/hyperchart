@@ -14,7 +14,6 @@ import {
   createAgentDefaultsResolver,
   createRunDir,
   deleteRunStorage,
-  finalMachineFailureMessage,
   loadRunMeta,
   resolveAgentDefaults,
   resolveArtifactValue,
@@ -133,7 +132,7 @@ await completion;
 
 ## Journal-native user input
 
-`RunLogStore.respondToUserInteraction({ ast, gateSeqId, event, schemaRegistry? })` is the sole-writer admission primitive. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
+Execution restores the selected projection, validates the response with `prepareUserInteractionResponseFromProjection()`, then calls the storage-only `commitPreparedUserInteraction()` primitive. Stores never accept an AST-bearing unprepared response. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
 
 JSONL serializes writes only inside one Node process, allocates against its private opened index, trusts stored entries, and rejects a stale byte boundary when detected. It provides no consistency guarantee for concurrent writers in different processes. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
 
@@ -214,7 +213,7 @@ These helpers describe inspection configuration. Runtime launch strictness and c
 
 ### Snapshot-pinned history
 
-History reads are stateless serializable request/response operations. There is no public materialized log, stateful reader, offset, `seek`, or `readAll()` API.
+History reads are stateless serializable request/response operations. There is no public `readAncestry()`, materialized log, full-history array, stateful reader, offset, `seek`, or `readAll()` API. Concrete stores expose only the bounded `RunHistoryStore` contract below; projection replay is not a store method or package entrypoint export.
 
 ```ts
 type HistorySnapshot = { branchId: string; headSeqId: number | null };
@@ -254,7 +253,7 @@ React Runtime histories share `VirtualizedHistoryList` and `useHistoryWindow`. A
 
 Projection replay is a package-internal oldest-first `AsyncIterable`; each yielded batch contains at most 500 facts. It is absent from exported store interfaces and concrete class declarations and is not a host/UI history API.
 
-The PostgreSQL Phase 1 implementation deliberately computes these bounded results by traversing and filtering the captured journal ancestry. This is temporary correctness scaffolding and may consume work/memory proportional to ancestry. The public contracts, snapshots, cursors, result caps, and replay-batch caps are final; the deferred version-order predecessor catalog will replace only backend internals. JSONL continues to use its complete private in-memory index and writes no index sidecar.
+The current PostgreSQL implementation deliberately computes these bounded results by traversing and filtering the captured journal history. This correctness scaffolding may consume work/memory proportional to history. The public contracts, snapshots, cursors, result caps, and replay-batch caps are final; the deferred version-order predecessor catalog will replace only backend internals. JSONL continues to use its complete private in-memory index and writes no index sidecar.
 
 `JsonlLogStore` trusts parsed entries, fails malformed/incomplete JSON without changing the file, shares one private index across `forBranch()` handles, and rejects stale byte boundaries. `MemoryLogStore` provides the same history contract for tests and ephemeral execution.
 
@@ -521,24 +520,10 @@ type RunTerminalState = "complete" | "failed";
 ### `terminalStateForFinalMachine()`
 
 ```ts
-function terminalStateForFinalMachine(
-  state: MachineState,
-  log: readonly DurableLogRecord[],
-): RunTerminalState;
+function terminalStateForFinalMachine(state: MachineState): RunTerminalState;
 ```
 
 Returns `failed` when durable global failure intent exists or any active terminal leaf has `outcome: "failed"`; otherwise returns `complete`. This includes failed leaves in completed parallel regions. Terminal names do not infer run outcome.
-
-### `finalMachineFailureMessage()`
-
-```ts
-function finalMachineFailureMessage(
-  state: MachineState,
-  log: readonly DurableLogRecord[],
-): string | undefined;
-```
-
-For global failure, returns the error stored on durable `failure_intent` (structured payloads are JSON-stringified). For an authored failed terminal without global failure, it describes the reached terminal. It returns `undefined` for complete terminals.
 
 ## Journal-native user interactions
 
@@ -590,7 +575,7 @@ readActiveUserInteraction, releaseActiveUserInteraction,
 claimUserInteractionReceipt, markUserInteractionReceipt, hasUserInteractionReceipt,
 readUserInteractionReceipt, removeUserInteractionReceipt,
 validateAndPersistUserInteractionResponse
-DEFAULT_BRANCH_ID, collectBranches, HistoryCursorError,
+DEFAULT_BRANCH_ID, HistoryCursorError,
 JsonlLogStore, MemoryLogStore, PostgresLogStore, openRunLogStore,
 JOURNAL_CHANNEL, JOURNAL_TABLE, PROJECTION_CHECKPOINT_TABLE, supportsSqlTransactions,
 PROJECTOR_VERSION, PROJECTION_CHECKPOINT_INTERVAL,
@@ -601,17 +586,19 @@ HistorySnapshot, HistoryCursor, HistorySubject, HistoryChunk,
 BranchListCursor, BranchListChunk,
 StateVisitHistoryItem, MapVisitHistoryItem,
 ActorGenerationHistoryItem, ActorMessageHistoryItem,
-RespondToUserInteractionInput, UserInteractionResponseCommit,
+UserInteractionResponseCommit,
 OpenRunLogStoreOptions, OpenPostgresLogStoreOptions, PostgresLogAccess,
 PostgresRunTransaction, PostgresForkAndCommitInput,
 PgClientLike, PgQueryResult, SqlCommitParticipant,
 SqlCommitTransaction, SqlTransactionalRunLogStore
 ScriptRunner
 checkArtifactFile, resolveArtifactValue, serializeEnvValue,
-latestPinsByPath, materializeWorkspace, materializeWorkspaceFromPins
+materializeWorkspaceFromPins
 runGuard, checkSchema, checkSchemaAsync
 createRunDir, loadRunMeta, saveRunMeta, deleteRunStorage, RunMeta
-terminalStateForFinalMachine, finalMachineFailureMessage, RunTerminalState
+listHyperchartBranchPage, getHyperchartBranch, forkHyperchartRun,
+ForkBranchOptions, ForkBranchResult
+terminalStateForFinalMachine, RunTerminalState
 archiveTerminalNotificationGeneration, persistTerminalNotificationRequest,
 readTerminalNotificationRequest,
 readDeliverableTerminalNotificationRequest, recoverStaleRunTerminalNotification,
@@ -629,8 +616,8 @@ TerminalNotificationRequest, TerminalNotificationReceipt
 
 ## Actor pool runtime behavior
 
-Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_reply` effect kinds for ordinary actors and pools. The core scheduler may choose any idle, receive-compatible pool worker and emits that choice as an accepted fact before worker workflow invocation. Hosts must append each `durable_records` effect atomically and acknowledge multiple effects in their supplied order. Until an accepted append is projected, the machine keeps an ordered reservation for that pool so the message is virtually dequeued and the chosen worker virtually occupied; ordinary actors and unrelated pools continue independently. On restart, load the complete log and let projection restore endpoint generations, worker ownership, partial batches, and drain state—never reconstruct or reassign from external worker sessions. Global failure best-effort cancels pending concrete worker actions.
+Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_reply` effect kinds for ordinary actors and pools. The core scheduler may choose any idle, receive-compatible pool worker and emits that choice as an accepted fact before worker workflow invocation. Hosts must append each `durable_records` effect atomically and acknowledge multiple effects in their supplied order. Until an accepted append is projected, the machine keeps an ordered reservation for that pool so the message is virtually dequeued and the chosen worker virtually occupied; ordinary actors and unrelated pools continue independently. On restart, restore through `loadBranchProjection()` and let bounded replay batches recover endpoint generations, worker ownership, partial batches, and drain state—never reconstruct or reassign from external worker sessions. Global failure best-effort cancels pending concrete worker actions.
 
 ## Named branch storage API
 
-`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. The exported temporary `collectBranches()` helper consumes every page for control surfaces that have not yet migrated to paginated presentation. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranches()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.
+`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runDir, cursor?)` exposes the same bounded page contract for run-directory callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported from `@surprisal/hyperchart/runtime`. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import {
 	hasTerminalNotificationReceipt,
@@ -101,6 +102,27 @@ function complexGateSchema(): Record<string, unknown> {
 }
 
 describe("hyperchart MCP tools", () => {
+	it("pages more than 100 branches through the MCP cursor contract", async () => {
+		const { cwd, runsRoot, tools, chartPath } = makeWorld();
+		const runDir = join(runsRoot, "paged-branches");
+		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
+		await store.initializeRootBranch();
+		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
+		for (let index = 0; index < 105; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		const firstResult = await tools.get("hyperchart_branches")!.handler({ runDir, cwd });
+		const first = JSON.parse(text(firstResult)) as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
+		expect(first.branches).toHaveLength(100);
+		expect(first.totalCount).toBe(106);
+		expect(first.next).toBeTypeOf("string");
+		const secondResult = await tools.get("hyperchart_branches")!.handler({ runDir, cwd, cursor: first.next });
+		const second = JSON.parse(text(secondResult)) as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
+		expect(second.branches).toHaveLength(6);
+		expect(second.totalCount).toBe(106);
+		expect(second.next).toBeUndefined();
+		expect(new Set([...first.branches, ...second.branches].map((branch) => branch.branchId)).size).toBe(106);
+	});
+
 	it("registers the full tool surface", () => {
 		const { tools } = makeWorld();
 		expect([...tools.keys()].sort()).toEqual([

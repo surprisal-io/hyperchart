@@ -14,14 +14,9 @@ import type { HyperchartInfo, HyperchartRunInfo, HyperchartRunSummaryInfo, Hyper
 import { loadRunMeta } from "@surprisal/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, getSharedHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
-import {
-	createPiFileTranscriptReader,
-	hyperchartRunFromRunDir,
-	type SessionTranscriptReader,
-} from "./run_inspect.js";
-import { isRunLive, readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
+import { createPiFileTranscriptReader } from "./run_inspect.js";
+import { readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
 
-type SessionTranscriptReaderFactory = (runDir: string) => SessionTranscriptReader;
 
 export interface PiHyperchartHostOptions {
 	agentDir?: string;
@@ -30,7 +25,6 @@ export interface PiHyperchartHostOptions {
 
 export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): HyperchartHostAdapter {
 	const failedRunMetaFingerprints = new Map<string, string>();
-	const failedRunInspectionFingerprints = new Map<string, string>();
 	const agentDir = resolve(options.agentDir ?? defaultAgentDir());
 	const runDirFor = (runId: string) => {
 		if (basename(runId) !== runId) throw new Error("Invalid Hyperchart run id");
@@ -58,13 +52,6 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 				...(branchId === undefined ? {} : { branchId }),
 				agentDefaults: options.agentDefaults ?? createAgentDefaultsResolver(resolve(cwd), agentDir, meta.chartPath),
 			});
-		},
-		readRunSnapshot: async (cwd, runId) => {
-			if (basename(runId) !== runId) return undefined;
-			return readRun(
-				runDirFor(runId), resolve(cwd), agentDir, false, options.agentDefaults,
-				createPiFileTranscriptReader, failedRunMetaFingerprints, failedRunInspectionFingerprints,
-			);
 		},
 		listBranches: async (input) => (await dataSourceFor(input.runId)).listBranches(input),
 		readStateVisits: async (input) => (await dataSourceFor(input.runId)).readStateVisits(input),
@@ -334,81 +321,6 @@ async function readRunSummary(
 	};
 }
 
-async function readRun(
-	runDir: string,
-	cwd: string,
-	agentDir: string,
-	includeTranscripts: boolean,
-	agentDefaults: PiHyperchartHostOptions["agentDefaults"],
-	transcriptReader: SessionTranscriptReaderFactory,
-	failedRunMetaFingerprints: Map<string, string>,
-	failedRunInspectionFingerprints: Map<string, string>,
-): Promise<HyperchartRunInfo | undefined> {
-	const metaFingerprint = process.env.HYPERCHART_PG_DSN ? undefined : await fileFingerprint(join(runDir, "meta.json"));
-	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
-	let meta;
-	try {
-		meta = await loadRunMeta(runDir);
-		failedRunMetaFingerprints.delete(runDir);
-	} catch (error) {
-		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runDir, metaFingerprint);
-		console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
-		return undefined;
-	}
-	const inspectionFingerprint = metaFingerprint ?? JSON.stringify(meta);
-	try {
-		if (resolve(meta.workDir) !== cwd) return undefined;
-		const resolvedAgentDefaults = agentDefaults ?? createAgentDefaultsResolver(cwd, agentDir, meta.chartPath);
-		const run = await hyperchartRunFromRunDir(runDir, includeTranscripts
-			? {
-					meta,
-					includeTranscripts: true,
-					readTranscript: transcriptReader(runDir),
-					agentDefaults: resolvedAgentDefaults,
-			  }
-			: {
-					meta,
-					includeTranscripts: false,
-					agentDefaults: resolvedAgentDefaults,
-			  });
-		failedRunInspectionFingerprints.delete(runDir);
-		return {
-			...run,
-			...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
-		};
-	} catch (error) {
-		if (failedRunInspectionFingerprints.get(runDir) !== inspectionFingerprint) {
-			failedRunInspectionFingerprints.set(runDir, inspectionFingerprint);
-			console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
-		}
-		const persistedStatus = readRunStatus(runDir);
-		const metaCreatedAt = Date.parse(meta.createdAt);
-		const createdAt = persistedStatus?.startedAt ?? (Number.isFinite(metaCreatedAt) ? metaCreatedAt : 0);
-		const updatedAt = persistedStatus?.updatedAt ?? await runUpdatedAt(runDir, createdAt);
-		return {
-			runId: persistedStatus?.runId ?? basename(runDir),
-			chartName: persistedStatus?.chartId ?? meta.chartId,
-			branchId: "main",
-			...(persistedStatus === undefined ? {} : { runnerBranchIds: persistedStatus.branchIds }),
-			...(meta.originSessionId === undefined ? {} : { originSessionId: meta.originSessionId }),
-			description: meta.chartPath,
-			status: metadataOnlyStatus(persistedStatus),
-			cwd: resolve(meta.workDir),
-			createdAt: createdAt || updatedAt,
-			updatedAt,
-			args: {},
-			states: [],
-			stateCount: 0,
-			issues: [{
-				severity: "error",
-				kind: "run_failed",
-				message: `Run inspection failed: ${error instanceof Error ? error.message : String(error)}`,
-				source: "status",
-			}],
-		};
-	}
-}
-
 function summaryRunStatus(status: HyperchartRunStatus | undefined): HyperchartRunInfo["status"] {
 	switch (status?.state) {
 		case "complete": return "completed";
@@ -417,18 +329,6 @@ function summaryRunStatus(status: HyperchartRunStatus | undefined): HyperchartRu
 		case "stopping": return "paused";
 		case "starting":
 		case "running": return "running";
-		default: return "blocked";
-	}
-}
-
-function metadataOnlyStatus(status: HyperchartRunStatus | undefined): HyperchartRunInfo["status"] {
-	switch (status?.state) {
-		case "complete": return "completed";
-		case "failed": return "failed";
-		case "stopped": return "paused";
-		case "starting":
-		case "running":
-		case "stopping": return isRunLive(status) ? "running" : "blocked";
 		default: return "blocked";
 	}
 }

@@ -1,3 +1,5 @@
+import { collectHistoryRecords } from "./helpers/history.js";
+import { commitUserInteractionResponse } from "./helpers/user_interaction_commit.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,7 +57,7 @@ describe("journal-native user interactions", () => {
 		const f = await fixture();
 		const requests = await scanOpenUserInteractions(f.runDir, "main");
 		expect(requests).toEqual([expect.objectContaining({ version: 2, runId: "run-a", branchId: "main", seqId: f.gateSeqId, prompt: "Approve?", events: ["APPROVED"] })]);
-		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await f.store.readAncestry("main"));
+		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await collectHistoryRecords(f.store, "main"));
 		expect(Object.keys(projection.openUserInteractions)).toEqual([String(f.gateSeqId)]);
 		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "request.json"))).toBe(false);
 	});
@@ -86,7 +88,7 @@ describe("journal-native user interactions", () => {
 		await expect(validateAndPersistUserInteractionResponse({ ...input, event: { type: "APPROVED", output: "different" } })).rejects.toThrow(/Conflicting response/);
 		expect((await readUserInteractionResponse(f.runDir, "main", f.gateSeqId))?.event).toEqual({ type: "APPROVED" });
 		const refreshed = new JsonlLogStore(join(f.runDir, "log.jsonl"));
-		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await refreshed.readAncestry("main"));
+		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await collectHistoryRecords(refreshed, "main"));
 		expect(projection.openUserInteractions).toEqual({});
 		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "resolution.json"))).toBe(false);
 	});
@@ -99,7 +101,7 @@ describe("journal-native user interactions", () => {
 			pid: process.pid, heartbeatAt: Date.now(),
 		});
 		const stop = watchRunnerUserResponses(f.runDir, attemptId, (request) =>
-			f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: request.gateSeqId, event: request.event }));
+			commitUserInteractionResponse(f.store, f.ast, request.gateSeqId, request.event));
 		try {
 			const committed = await validateAndPersistUserInteractionResponse({
 				runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId,
@@ -120,14 +122,14 @@ describe("journal-native user interactions", () => {
 	it("allows offline response and treats timeout as a closed gate", async () => {
 		const f = await fixture();
 		await f.store.appendDrafts([{ type: "failure_intent", origin: "ask", error: "closed" }]);
-		await expect(f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: f.gateSeqId, event: { type: "APPROVED" } })).rejects.toThrow(/stale or closed/);
+		await expect(commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, { type: "APPROVED" })).rejects.toThrow(/stale or closed/);
 	});
 
 	it("uses only selected ancestry for idempotency after rewind", async () => {
 		const f = await fixture();
-		await f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: f.gateSeqId, event: { type: "APPROVED" } });
+		await commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, { type: "APPROVED" });
 		await f.store.moveBranch("main", f.gateSeqId);
-		const second = await f.store.respondToUserInteraction({ ast: f.ast, gateSeqId: f.gateSeqId, event: { type: "APPROVED", output: "alternate" } });
+		const second = await commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, { type: "APPROVED", output: "alternate" });
 		expect(second.idempotent).toBe(false);
 		expect(second.record.parentId).toBe(f.gateSeqId);
 	});
@@ -139,8 +141,8 @@ describe("journal-native user interactions", () => {
 		const [invoke] = await memory.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
 		const [opened] = await memory.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"] }]);
 		const mem = await Promise.allSettled([
-			memory.respondToUserInteraction({ ast: f.ast, gateSeqId: opened!.seqId, event: { type: "APPROVED", output: "left" } }),
-			memory.respondToUserInteraction({ ast: f.ast, gateSeqId: opened!.seqId, event: { type: "APPROVED", output: "right" } }),
+			commitUserInteractionResponse(memory, f.ast, opened!.seqId, { type: "APPROVED", output: "left" }),
+			commitUserInteractionResponse(memory, f.ast, opened!.seqId, { type: "APPROVED", output: "right" }),
 		]);
 		expect(mem.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
 	});

@@ -372,7 +372,6 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 					metadata: forkMetadata(options),
 					...(loaded.checkpointable ? { checkpoint: prepareProjectionCheckpoint(loaded.projection, contract, options.fromSeqId) } : {}),
 					preparedResponse: runtimeCommit.input,
-					response: { ast: this.ast, gateSeqId: options.gateSeqId, event: options.event, schemaRegistry: this.schemaRegistry },
 				},
 				participate,
 			);

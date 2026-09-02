@@ -1,3 +1,4 @@
+import { collectHistoryRecords } from "./helpers/history.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -272,7 +273,7 @@ describePg("atomic runner interaction commit", () => {
       runId: f.runId,
       branchId: "experiment",
     });
-    const ancestry = await reader.readAncestry(reader.branchId);
+    const ancestry = await collectHistoryRecords(reader, reader.branchId);
     expect(ancestry.at(-1)).toMatchObject({
       type: "user_interaction",
       kind: "resolved",

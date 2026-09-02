@@ -1,9 +1,10 @@
+import { collectHistoryRecords } from "./helpers/history.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
-import { forkHyperchartRun, listHyperchartBranches } from "../packages/hyperchart/src/runtime/generic/branches.js";
+import { forkHyperchartRun, listHyperchartBranchPage } from "../packages/hyperchart/src/runtime/generic/branches.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
@@ -60,10 +61,29 @@ describe("append-only branch rewind", () => {
 		expect(oldTailContinuation[0]).toMatchObject({ seqId: 9, parentId: 4, branchId: "main" });
 		const storedEntries = (await readFile(join(runDir, "log.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as { kind?: string; seqId: number });
 		expect(storedEntries.filter((entry) => entry.kind !== "branch").map((record) => record.seqId)).toEqual([2, 3, 4, 7, 9]);
-		expect((await continuationStore.readAncestry("main")).map((record) => record.seqId)).toEqual([2, 3, 4, 9]);
-		expect((await continuationStore.readAncestry("experiment")).map((record) => record.seqId)).toEqual([2, 3]);
-		expect((await listHyperchartBranches(runDir)).map((branch) => branch.branchId)).toEqual(["main", "experiment"]);
+		expect((await collectHistoryRecords(continuationStore, "main")).map((record) => record.seqId)).toEqual([2, 3, 4, 9]);
+		expect((await collectHistoryRecords(continuationStore, "experiment")).map((record) => record.seqId)).toEqual([2, 3]);
+		expect((await listHyperchartBranchPage(runDir)).items.map((branch) => branch.branchId)).toEqual(["main", "experiment"]);
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).not.toContain("rewind-backups");
+	});
+
+	it("pages more than 100 run-directory branches without overlap", async () => {
+		const { runDir, store } = await createStoppedRun();
+		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
+		for (let index = 0; index < 105; index++) {
+			await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		}
+		const first = await listHyperchartBranchPage(runDir);
+		expect(first.items).toHaveLength(100);
+		expect(first.totalCount).toBe(106);
+		expect(first.next).toBeTypeOf("string");
+		const second = await listHyperchartBranchPage(runDir, first.next);
+		expect(second.items).toHaveLength(6);
+		expect(second.totalCount).toBe(106);
+		expect(second.next).toBeUndefined();
+		const ids = [...first.items, ...second.items].map((branch) => branch.branchId);
+		expect(new Set(ids).size).toBe(106);
+		expect(ids).toEqual(["main", ...Array.from({ length: 105 }, (_, index) => `branch-${index.toString().padStart(3, "0")}`)]);
 	});
 });
 

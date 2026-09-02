@@ -70,29 +70,29 @@ function RunInspector({
   selectedRunId: string | null; // non-null only while the inspector is open
   onClose: () => void;
 }) {
-  const [inspectorRun, setInspectorRun] =
-    useState<HyperchartRunInfo>();
+  const [inspectorOverview, setInspectorOverview] =
+    useState<HyperchartRunOverview>();
 
   useEffect(() => {
-    setInspectorRun(undefined);
+    setInspectorOverview(undefined);
     if (selectedRunId === null) return;
 
     let cancelled = false;
-    void host.readRunSnapshot(cwd, selectedRunId).then((run) => {
-      if (!cancelled) setInspectorRun(run);
+    void host.readRunOverview(cwd, selectedRunId).then((overview) => {
+      if (!cancelled) setInspectorOverview(overview);
     });
     return () => {
       cancelled = true;
     };
   }, [host, cwd, selectedRunId]);
 
-  if (selectedRunId === null || inspectorRun === undefined) return null;
+  if (selectedRunId === null || inspectorOverview === undefined) return null;
   return (
     <HyperchartInspectorDialog
-      runs={[inspectorRun]}
+      runs={[inspectorOverview.run]}
       selectedRunId={selectedRunId}
       onClose={() => {
-        setInspectorRun(undefined);
+        setInspectorOverview(undefined);
         onClose();
       }}
       portal={(children) => createPortal(children, document.body)}
@@ -102,7 +102,7 @@ function RunInspector({
 }
 ```
 
-Keep the full `HyperchartRunInfo` in inspector-local state as above. Do not pass `readSessionSnapshot().runs` summaries to the inspector; load the full run only after it opens and discard it on close.
+Keep the bounded `HyperchartRunOverview` in inspector-local state as above and provide the same host as the inspector history data source. Do not pass `readSessionSnapshot().runs` summaries to the inspector; load the overview only after it opens and discard it on close.
 
 Historical `HyperchartRunInfo` values are treated as immutable snapshots. While the modal inspector is open, the public stylesheet pauses CSS animations in sibling application roots under `body`; visible animations inside the inspector continue normally.
 
@@ -369,7 +369,6 @@ The React entry point re-exports:
 ```text
 hyperchartRunFromInfo
 hyperchartRunFromInspectResult
-hyperchartRunFromRuntime
 hyperchartRunFromToolDetails
 ```
 
@@ -391,8 +390,8 @@ hyperchartChartName, hyperchartRunLabel
 hyperchartStatusClasses, hyperchartStatusDotClass, hyperchartStatusIcon
 formatHyperchartDateTime, formatHyperchartTime, formatHyperchartUsage
 runningHyperchartStates, summarizeHyperchartProgress
-all host model types and the four host adapter functions
-HyperchartRunFromInspectOptions, HyperchartRunFromRuntimeOptions
+all host model types and the three public host adapter functions
+HyperchartRunFromInspectOptions
 HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo
 ```
 

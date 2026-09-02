@@ -1,3 +1,5 @@
+import { collectHistoryRecords } from "./helpers/history.js";
+import { commitUserInteractionResponse } from "./helpers/user_interaction_commit.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -209,7 +211,7 @@ describe("ChartRuntime", () => {
 		const events = runtime.eventsQueue()[Symbol.asyncIterator]();
 		expect(await events.next()).toMatchObject({ value: { kind: "durable_records_added", effectId: "first" } });
 		expect(await events.next()).toMatchObject({ value: { kind: "durable_records_added", effectId: "second" } });
-		expect((await store.readAncestry(store.branchId)).map((record) => record.seqId)).toEqual([2, 3]);
+		expect((await collectHistoryRecords(store, store.branchId)).map((record) => record.seqId)).toEqual([2, 3]);
 		await runtime.dispose();
 	});
 
@@ -308,7 +310,7 @@ describe("ChartRuntime", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.results.work).toEqual({ ok: true });
 		expect(executor.starts).toHaveLength(1);
-		expect(invokeRecords(await store.readAncestry(store.branchId))).toHaveLength(1);
+		expect(invokeRecords(await collectHistoryRecords(store, store.branchId))).toHaveLength(1);
 	});
 
 	it("runs map fan-out instances", async () => {
@@ -337,17 +339,17 @@ describe("ChartRuntime", () => {
 		await logStore.initializeRootBranch();
 		const firstRuntime = new ChartRuntime({ ast, branchId: "main", logStore, agentExecutor: new FakeAgentExecutor(), workDir: root, chartDir: root });
 		const firstRun = start(firstRuntime).catch(() => undefined);
-		await waitUntil(async () => (await logStore.readAncestry("main")).some((record) => record.type === "user_interaction" && record.kind === "opened"));
-		const opened = (await logStore.readAncestry("main")).find((record) => record.type === "user_interaction" && record.kind === "opened");
+		await waitUntil(async () => (await collectHistoryRecords(logStore, "main")).some((record) => record.type === "user_interaction" && record.kind === "opened"));
+		const opened = (await collectHistoryRecords(logStore, "main")).find((record) => record.type === "user_interaction" && record.kind === "opened");
 		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
 		await firstRuntime.dispose(); await firstRun;
-		await logStore.respondToUserInteraction({ ast, gateSeqId: opened.seqId, event: { type: "APPROVED" } });
+		await commitUserInteractionResponse(logStore, ast, opened.seqId, { type: "APPROVED" });
 		const secondRuntime = new ChartRuntime({ ast, branchId: "main", logStore, agentExecutor: new FakeAgentExecutor(), workDir: root, chartDir: root });
 		const state = await withTimeout(start(secondRuntime)); await secondRuntime.dispose();
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(invokeRecords(await logStore.readAncestry(logStore.branchId))).toHaveLength(1);
-		expect((await logStore.readAncestry(logStore.branchId)).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);
-		expect((await logStore.readAncestry(logStore.branchId)).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(0);
+		expect(invokeRecords(await collectHistoryRecords(logStore, logStore.branchId))).toHaveLength(1);
+		expect((await collectHistoryRecords(logStore, logStore.branchId)).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);
+		expect((await collectHistoryRecords(logStore, logStore.branchId)).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(0);
 	});
 
 	it("applies a control-API response committed by its own writer exactly once", async () => {
@@ -357,15 +359,15 @@ describe("ChartRuntime", () => {
 		await runtimeStore.initializeRootBranch();
 		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: runtimeStore, agentExecutor: new FakeAgentExecutor(), workDir: root, chartDir: root });
 		const running = start(runtime);
-		await waitUntil(async () => (await runtimeStore.readAncestry("main")).some((record) => record.type === "user_interaction" && record.kind === "opened"));
-		const opened = (await runtimeStore.readAncestry("main")).find((record) => record.type === "user_interaction" && record.kind === "opened");
+		await waitUntil(async () => (await collectHistoryRecords(runtimeStore, "main")).some((record) => record.type === "user_interaction" && record.kind === "opened"));
+		const opened = (await collectHistoryRecords(runtimeStore, "main")).find((record) => record.type === "user_interaction" && record.kind === "opened");
 		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
-		const committed = await runtimeStore.respondToUserInteraction({ ast, gateSeqId: opened.seqId, event: { type: "APPROVED" } });
+		const committed = await commitUserInteractionResponse(runtimeStore, ast, opened.seqId, { type: "APPROVED" });
 		runtime.acknowledgeCommittedRecords([committed.record], `test-control:${committed.record.seqId}`);
 		runtime.acknowledgeCommittedRecords([committed.record], `test-control-retry:${committed.record.seqId}`);
 		const state = await withTimeout(running); await runtime.dispose();
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect((await runtimeStore.readAncestry(runtimeStore.branchId)).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);
+		expect((await collectHistoryRecords(runtimeStore, runtimeStore.branchId)).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);
 	});
 
 	it("fires timers and cancels the timed-out action", async () => {
@@ -418,6 +420,6 @@ describe("ChartRuntime", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(secondExecutor.starts).toHaveLength(1);
 		expect(secondExecutor.starts[0]?.id).toBe(firstExecutor.starts[0]?.id);
-		expect(invokeRecords(await logStore.readAncestry(logStore.branchId))).toHaveLength(1);
+		expect(invokeRecords(await collectHistoryRecords(logStore, logStore.branchId))).toHaveLength(1);
 	});
 });
