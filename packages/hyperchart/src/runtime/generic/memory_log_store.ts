@@ -51,9 +51,17 @@ export class MemoryLogStore implements LogStore {
 	}
 
 	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
+		return this.appendDraftsWithCheckpoint(drafts, () => undefined);
+	}
+	async appendDraftsWithCheckpoint(
+		drafts: readonly DurableRecordDraft[],
+		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
+	): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
 		const records = stampDrafts(this.index, this.branchId, drafts, Date.now());
+		const prepared = prepare(records);
 		for (const record of records) this.index.applyEntry(record);
+		for (const checkpoint of prepared === undefined ? [] : Array.isArray(prepared) ? prepared : [prepared]) await this.saveProjectionCheckpoint(checkpoint);
 		return records;
 	}
 

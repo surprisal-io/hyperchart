@@ -1,9 +1,11 @@
 import { basename, resolve } from "node:path";
 import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_events.js";
+import { parseChartModuleSync } from "../../core/inspect.js";
 import { loadRunMeta } from "./run_dir.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import { collectBranches } from "./log_store.js";
+import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst } from "./projection_loader.js";
 
 export type ForkBranchOptions = Readonly<{
 	runDir: string;
@@ -46,6 +48,9 @@ export async function getHyperchartBranch(runDir: string, branchId: BranchId): P
 export async function forkHyperchartRun(options: ForkBranchOptions): Promise<ForkBranchResult> {
 	assertStoppedRun(options.runDir, "forking");
 	await assertRunOwnership(options.runDir, options.cwd);
+	const meta = await loadRunMeta(options.runDir);
+	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
+	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const store = await openRunLogStore(options.runDir, { access: "writer" });
 	let branch: BranchHead;
 	try {
@@ -55,14 +60,23 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 		if ((await collectBranches(store)).some((candidate) => candidate.branchId === options.branchId)) {
 			throw new Error(`Hyperchart branch '${options.branchId}' already exists`);
 		}
-		if (options.sourceBranchId !== undefined) await store.getBranch(options.sourceBranchId);
+		if (options.sourceBranchId !== undefined) {
+			const source = await store.captureSnapshot(options.sourceBranchId);
+			if (!await store.containsInHistory({ headSeqId: source.headSeqId, seqId: options.fromSeqId })) {
+				throw new Error(`Fork point ${options.fromSeqId} is not in source branch '${options.sourceBranchId}' history`);
+			}
+		}
 		const metadata: BranchMetadata = {
 			name: options.branchId,
 			...(options.reason === undefined ? {} : { reason: options.reason }),
 			...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
 			sourceSeqId: options.fromSeqId,
 		};
-		branch = await store.createBranch(options.branchId, options.fromSeqId, metadata);
+		const contract = projectionContractForAst(parsed.ast);
+		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: options.branchId, store, contract, saveCheckpoint: "never", snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId } });
+		branch = loaded.checkpointable
+			? await store.createBranchWithCheckpoint(options.branchId, options.fromSeqId, metadata, prepareProjectionCheckpoint(loaded.projection, contract, options.fromSeqId))
+			: await store.createBranch(options.branchId, options.fromSeqId, metadata);
 	} finally {
 		await store.close();
 	}

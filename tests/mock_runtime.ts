@@ -1,6 +1,6 @@
 import type { Runtime } from "../packages/hyperchart/src/runtime/runtime.js";
 import { toAsyncIterable } from "../packages/hyperchart/src/index.js";
-import type { ChartAst, DurableLogRecord, Effect, MachineEvent } from "../packages/hyperchart/src/index.js";
+import { createBranchProjection, projectBranch, type ChartAst, type DurableLogRecord, type Effect, type MachineEvent } from "../packages/hyperchart/src/index.js";
 
 type MaybeAsyncIterable<T> = Iterable<T> | AsyncIterable<T>;
 
@@ -53,6 +53,11 @@ export class MockRuntime implements Runtime {
 	async loadAst(): Promise<ChartAst> {
 		this.calls.push("loadAst");
 		return this.ast;
+	}
+
+	async loadProjection() {
+		this.calls.push("loadProjection");
+		return projectBranch(createBranchProjection(this.ast), this.ast, this.logs);
 	}
 
 	async loadLogs(): Promise<readonly DurableLogRecord[]> {

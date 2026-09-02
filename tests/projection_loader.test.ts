@@ -116,6 +116,7 @@ class RepresentativeRuntime implements Runtime {
 	}
 	eventsQueue() { return this.queue; }
 	async loadAst() { return this.ast; }
+	async loadProjection() { return fullyProject(this.ast, await this.store.readAncestry(this.branchId)); }
 	loadLogs() { return this.store.readAncestry(this.branchId); }
 }
 

@@ -268,7 +268,8 @@ describePg("PostgresLogStore", () => {
 		expect(restored.checkpointHeadSeqId).toBe(prefix.at(-1)!.seqId);
 		expect(restored.replayedRecords).toBe(31);
 		const rows = await store.transaction((tx) => tx.query(`SELECT head_seq_id, projector_version, ast_digest FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY created_at_ms`, [runId]));
-		expect(rows.rows).toHaveLength(2);
+		// Ordinary warm-tail restore preserves the 512-record cadence instead of eagerly caching the fork tip.
+		expect(rows.rows).toHaveLength(1);
 		expect(rows.rows.every((row) => row.projector_version === 1 && row.ast_digest === contract.astDigest)).toBe(true);
 	});
 
@@ -290,6 +291,25 @@ describePg("PostgresLogStore", () => {
 		const rows = await store.transaction((tx) => tx.query(`SELECT checkpoint_id FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY checkpoint_id`, [runId]));
 		expect(rows.rows.map((row) => row.checkpoint_id)).not.toContain("malformed");
 		expect(rows.rows.map((row) => row.checkpoint_id)).toContain("incompatible");
+	});
+
+	it("rolls back branch create and move when their prepared checkpoint cannot persist", async () => {
+		const runId = newRunId(); const store = await openWriter(runId); await store.initializeRootBranch();
+		const records = await store.appendDrafts([argsDraft({ index: 1 }), argsDraft({ index: 2 })]);
+		const invalid = { checkpointId: "invalid-json", headSeqId: records[0]!.seqId, projectorVersion: 1, astDigest: "a".repeat(64), payload: { value: 1n }, createdAt: Date.now() };
+		await expect(store.createBranchWithCheckpoint("rolled-back-fork", records[0]!.seqId, undefined, invalid)).rejects.toThrow();
+		await expect(store.getBranch("rolled-back-fork")).rejects.toThrow(/Unknown/);
+		await store.createBranch("movable", records.at(-1)!.seqId);
+		await expect(store.moveBranchWithCheckpoint("movable", records[0]!.seqId, invalid)).rejects.toThrow();
+		expect((await store.getBranch("movable")).headSeqId).toBe(records.at(-1)!.seqId);
+	});
+
+	it("atomically rolls back a cadence append when checkpoint preparation fails", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		await expect(store.appendDraftsWithCheckpoint([argsDraft({ atomic: true })], () => { throw new Error("checkpoint prepare failed"); })).rejects.toThrow(/checkpoint prepare failed/);
+		expect(await store.countRecords()).toBe(0);
 	});
 
 	it("rolls back checkpoint and journal rows together in a managed transaction", async () => {

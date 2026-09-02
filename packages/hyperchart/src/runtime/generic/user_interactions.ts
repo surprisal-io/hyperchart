@@ -1,15 +1,17 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseChartModuleSync } from "../../core/inspect.js";
-import { createBranchProjection, projectBranch } from "../../core/projection.js";
 import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../../core/durable_events.js";
 import type { ActionUID, ChartEvent, SchemaAst } from "../../core/types.js";
 import { loadRunMeta } from "./run_dir.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import { collectBranches } from "./log_store.js";
+import { loadBranchProjection, projectionContractForAst } from "./projection_loader.js";
 import { requestLiveRunnerUserResponse, RunnerControlUnavailableError } from "./runner_control.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
+import { prepareUserInteractionResponseFromProjection } from "./user_interaction_admission.js";
 
 /** Presentation-only directory. Semantic requests and answers live exclusively in the journal. */
 export const USER_INTERACTIONS_DIR = "user-interactions";
@@ -191,7 +193,7 @@ export async function scanOpenUserInteractions(runDir: string, branchId?: Branch
 		const result: UserInteractionRequest[] = [];
 		for (const selected of branchIds) {
 			if (!branches.some((branch) => branch.branchId === selected)) continue;
-			const projection = projectBranch(createBranchProjection(parsed.ast), parsed.ast, await store.readAncestry(selected));
+			const projection = (await loadBranchProjection({ ast: parsed.ast, branchId: selected, store: store.forBranch(selected), contract: projectionContractForAst(parsed.ast), saveCheckpoint: "never" })).projection;
 			if (projection.failure !== undefined) continue;
 			for (const gate of Object.values(projection.openUserInteractions)) {
 				const pending = projection.pendingActions.some((entry) => entry.gateSeqId === gate.opened.seqId && (entry.phase === "running" || entry.phase === "rejected"));
@@ -253,7 +255,17 @@ async function commitOfflineUserInteractionResponse(options: PersistUserInteract
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const store = await openRunLogStore(options.runDir, { access: "writer", branchId: options.branchId });
 	try {
-		const committed = await store.respondToUserInteraction({ ast: parsed.ast, gateSeqId: options.seqId, event: options.event, schemaRegistry: parsed.schemaRegistry });
+		const snapshot = await store.captureSnapshot(options.branchId);
+		const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId: options.seqId });
+		if (existing !== undefined) {
+			if (!isDeepStrictEqual(existing.event, options.event)) throw new Error(`Conflicting response for user interaction ${options.seqId}`);
+			return { response: responseFromResolved(options.runId, options.branchId, existing), idempotent: true };
+		}
+		const gate = await store.getRecord(options.seqId);
+		if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId })) throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
+		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: options.branchId, store, contract: projectionContractForAst(parsed.ast), saveCheckpoint: "never", snapshot });
+		const draft = await prepareUserInteractionResponseFromProjection(loaded.projection, options.branchId, gate, { ast: parsed.ast, gateSeqId: options.seqId, event: options.event, schemaRegistry: parsed.schemaRegistry });
+		const committed = await store.commitPreparedUserInteraction({ expectedHeadSeqId: snapshot.headSeqId, gateSeqId: options.seqId, draft });
 		return { response: responseFromResolved(options.runId, options.branchId, committed.record), idempotent: committed.idempotent };
 	} finally { await store.close(); }
 }
@@ -261,7 +273,8 @@ async function commitOfflineUserInteractionResponse(options: PersistUserInteract
 export async function readUserInteractionResponse(runDir: string, branchId: BranchId, seqId: number): Promise<UserInteractionResponse | undefined> {
 	const store = await openRunLogStore(runDir, { access: "read", branchId });
 	try {
-		const record = (await store.readAncestry(branchId)).find((entry): entry is UserInteractionResolvedLog => entry.type === "user_interaction" && entry.kind === "resolved" && entry.gateSeqId === seqId);
+		const snapshot = await store.captureSnapshot(branchId);
+		const record = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId: seqId });
 		return record === undefined ? undefined : responseFromResolved(basename(resolve(runDir)), branchId, record);
 	} finally { await store.close(); }
 }

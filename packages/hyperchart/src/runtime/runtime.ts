@@ -1,4 +1,5 @@
-import { ChartAst, DurableLogRecord, Effect, MachineEvent } from "../index.js";
+import { ChartAst, Effect, MachineEvent } from "../index.js";
+import type { BranchProjection } from "../core/projection.js";
 import type { BranchId } from "../core/durable_events.js";
 
 export interface Runtime {
@@ -8,5 +9,6 @@ export interface Runtime {
 	runEffects(effects: Effect[]): Promise<void>;
 	eventsQueue(): AsyncIterable<MachineEvent>;
 	loadAst(): Promise<ChartAst>;
-	loadLogs(): Promise<readonly DurableLogRecord[]>;
+	/** Restore the selected immutable head through checkpoints plus bounded replay. */
+	loadProjection(): Promise<BranchProjection>;
 }

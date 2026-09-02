@@ -42,11 +42,11 @@ interface Runtime {
   runEffects(effects: Effect[]): void;
   eventsQueue(): AsyncIterable<MachineEvent>;
   loadAst(): Promise<ChartAst>;
-  loadLogs(): Promise<readonly DurableLogRecord[]>;
+  loadProjection(): Promise<BranchProjection>;
 }
 ```
 
-The core execution loop owns machine semantics. A runtime interprets effects, returns machine events, and supplies chart and log data.
+The core execution loop owns machine semantics. A runtime interprets effects, returns machine events, supplies the chart, and restores one synchronous machine-ready projection through execution-owned checkpoint/replay orchestration.
 
 `runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Effects are consumed in the supplied list order. Each `durable_records` effect is one indivisible storage commit: append every record in that effect together or append none, and never split it into multiple commits. Durable records must be committed before emitting `durable_records_added`; when one machine output contains multiple `durable_records` effects, each effect remains a separate atomic unit and both commits and acknowledgements preserve their supplied order.
 
@@ -58,13 +58,13 @@ class ChartRuntime implements Runtime {
   runEffects(effects: Effect[]): void;
   eventsQueue(): AsyncIterable<MachineEvent>;
   loadAst(): Promise<ChartAst>;
-  loadLogs(): Promise<readonly DurableLogRecord[]>;
+  loadProjection(): Promise<BranchProjection>;
   dispose(): Promise<void>;
 }
 
 type ChartRuntimeOptions = {
   ast: ChartAst;
-  logStore: LogStore;
+  logStore: LogStore & ProjectionCheckpointStore;
   agentExecutor: AgentExecutor;
   workDir: string;
   chartDir: string;
@@ -264,7 +264,7 @@ const loaded = await loadBranchProjection({ ast, branchId, store, contract });
 
 `astDigest` is SHA-256 over canonical normalized `ChartAst` JSON. `PROJECTOR_VERSION` identifies the current serialized `BranchProjection` semantics. The loader captures one branch head, accepts only an exact-contract checkpoint whose head still exists in that ancestry and whose versioned payload decodes, then streams the remaining ancestry oldest-first in fixed batches of at most 500. It applies `projectBranch()` and synchronous `compactProjection()` outside storage. A malformed, stale, or incompatible checkpoint is ignored; the durable journal is neither validated nor repaired. A failed rebuild saves nothing. Replay prefixes with stale, skipped, or unpinned diagnostics are also left uncached so a later replay gate cannot accidentally lose those findings.
 
-PostgreSQL stores immutable opaque payloads in `hyperchart_projection_checkpoint`; its managed transaction exposes `saveProjectionCheckpoint()` so later orchestration can commit due journal/branch/checkpoint work atomically. JSONL and memory checkpoints are process-local only. JSONL creates no checkpoint or index sidecar and reopening the file rebuilds from durable facts. `PROJECTION_CHECKPOINT_INTERVAL = 512` is the Phase 4 policy target, not an active append cadence: Phase 3's loader saves only the fully reached head when writable. Startup/restart, interval, fork/rewind, and clean-shutdown orchestration remain Phase 4 work.
+PostgreSQL stores immutable opaque payloads in `hyperchart_projection_checkpoint`. Runtime startup and replay gates restore machine-ready state through the loader; appends prepare immutable cache rows outside storage and commit each due 512-record checkpoint in the same PostgreSQL transaction as its journal batch. Fork and rewind prepare the target projection first and atomically commit the new/moved head with that target checkpoint. Clean shutdown writes an exact checkpoint when a non-empty tail remains. JSONL and memory checkpoints are process-local only: JSONL creates no checkpoint or index sidecar and reopening rebuilds from durable facts. Compatibility rebuilds save only after fully successful replay, while ordinary warm startup preserves the interval tail instead of eagerly writing an exact checkpoint. A loader result remains permanently non-checkpointable when any replay batch reports stale, skipped, or unpinned facts; interval, response, fork, rewind, and shutdown orchestration propagate that state so accepting warnings cannot hide them on the next restart.
 
 ## Script execution
 
@@ -538,7 +538,7 @@ For global failure, returns the error stored on durable `failure_intent` (struct
 
 Each user phase appends `user_interaction/opened` with its fully rendered prompt, options, allowed events, reply schema, action identity, and rejection metadata. The opened record's global `seqId` is the public `(runId, branchId, seqId)` gate coordinate. An accepted external answer appends one `user_interaction/resolved` referencing that `gateSeqId`; projection applies it directly as the completion.
 
-Host scans derive open gates from selected journal ancestries and require exact `originSessionId` and canonical `workDir`. Presentation arbitration remains lexical by run, branch, and opened seqId, with claimed/confirmed gates pinned. The only files under `user-interactions/<branchId>/<seqId>/` are non-semantic delivery receipts and publication markers.
+Host scans restore each selected branch projection and read only `openUserInteractions`; response lookup uses the targeted storage operation. Admission validates the restored open gate/pending action and commits an AST-free prepared response against the captured head, retrying rather than silently admitting across branch movement. When a stamped response reaches a 512-record boundary, execution synchronously prepares the opaque cache row and PostgreSQL commits it in the same managed transaction as the response and optional host participant. Ownership still requires exact `originSessionId` and canonical `workDir`. Presentation arbitration remains lexical by run, branch, and opened seqId, with claimed/confirmed gates pinned. The only files under `user-interactions/<branchId>/<seqId>/` are non-semantic delivery receipts and publication markers.
 
 `validateAndPersistUserInteractionResponse()` performs ownership checks and selects one of two modes. A live status with an exact runner-attempt identity queues a typed non-semantic control command; the owning runtime commits and acknowledges it. Only a stopped run opens a temporary writer directly. Allowed non-`FAILED` events and reply payloads are validated before append. Identical selected-ancestry retries are idempotent, divergent retries conflict, and closed or off-ancestry gates are stale. A crash between commit and acknowledgement is safe because retry observes the same resolved fact.
 

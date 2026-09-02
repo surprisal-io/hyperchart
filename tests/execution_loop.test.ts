@@ -339,7 +339,7 @@ describe("execution loop", () => {
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches).toEqual([]);
-		expect(runtime.calls).toEqual(["loadAst", "loadLogs", "eventsQueue"]);
+		expect(runtime.calls).toEqual(["loadAst", "loadProjection", "eventsQueue"]);
 	});
 
 	it("projects persisted logs before processing runtime events", async () => {

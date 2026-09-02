@@ -91,6 +91,22 @@ class CompletingExecutor implements SteerableAgentExecutor {
 }
 
 describe("multi-branch process runner", () => {
+	it("rejects an unrelated old FAILED fact for a failed terminal across restart", async () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-final-provenance-")); roots.push(root);
+		const workDir = join(root, "work"); const runDir = join(root, "run"); mkdirSync(workDir, { recursive: true }); mkdirSync(runDir, { recursive: true });
+		const chartPath = join(workDir, "chart.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "failure-provenance", initial: "failed", states: { failed: { kind: "final", outcome: "failed" } } };\n`);
+		const unrelated = { type: "state_action", kind: "complete", actionUid: { chart: "failure-provenance", state: "old", action: "agent" }, event: { type: "FAILED", error: "unrelated old failure" }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 };
+		writeFileSync(join(runDir, "log.jsonl"), [{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 }, unrelated].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+		const config = { runId: "run", runDir, chartPath, chartId: "failure-provenance", workDir, branchId: "main" as const, ignoreReplayWarnings: true };
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const controller = await createHyperchartRunnerController(config, () => new ControlledExecutor());
+			await controller.start();
+			expect(readRunStatus(runDir)?.error).toContain("chart reached failed terminal state 'failed'");
+			expect(readRunStatus(runDir)?.replayWarnings?.join("\n")).toContain("skipped");
+		}
+	});
+
 	it("normalizes legacy singleton input and rejects ambiguous or duplicate sets", () => {
 		expect(runnerBranchIds({ branchId: "main" })).toEqual(["main"]);
 		expect(runnerBranchIds({ branchIds: ["main", "experiment"] })).toEqual(["main", "experiment"]);
@@ -139,13 +155,13 @@ describe("multi-branch process runner", () => {
 		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
 		let gateEntered!: () => void;
 		const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
-		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
-		vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
+		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
+		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
 			if (this.branchId === "main") {
 				gateEntered();
 				await gate;
 			}
-			return originalReadAncestry.call(this, branchId);
+			return originalCaptureSnapshot.call(this, branchId);
 		});
 		let built = 0;
 		const controller = await createHyperchartRunnerController({
@@ -264,13 +280,13 @@ describe("multi-branch process runner", () => {
 		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
 		let gateEntered!: () => void;
 		const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
-		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
-		vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
+		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
+		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
 			if (this.branchId === "experiment") {
 				gateEntered();
 				await gate;
 			}
-			return originalReadAncestry.call(this, branchId);
+			return originalCaptureSnapshot.call(this, branchId);
 		});
 		const experimentOutcome = controller.startBranch("experiment");
 		await entered;
@@ -306,13 +322,13 @@ describe("multi-branch process runner", () => {
 		const initialGate = new Promise<void>((resolve) => { releaseInitialGate = resolve; });
 		let initialGateEntered!: () => void;
 		const entered = new Promise<void>((resolve) => { initialGateEntered = resolve; });
-		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
-		vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
+		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
+		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
 			if (this.branchId === "main") {
 				initialGateEntered();
 				await initialGate;
 			}
-			return originalReadAncestry.call(this, branchId);
+			return originalCaptureSnapshot.call(this, branchId);
 		});
 		const built: string[] = [];
 		const executors = new Map<string, ControlledExecutor>();
@@ -610,12 +626,12 @@ describe("multi-branch process runner", () => {
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		await controller.forkBranch({ branchId: "broken", fromSeqId: (await reader.getBranch("main")).headSeqId! });
-		const originalReadAncestry = JsonlLogStore.prototype.readAncestry;
-		const readAncestry = vi.spyOn(JsonlLogStore.prototype, "readAncestry").mockImplementation(function (this: JsonlLogStore, branchId: string) {
-			return this.branchId === "broken" ? Promise.reject(new Error("incompatible ancestry")) : originalReadAncestry.call(this, branchId);
+		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
+		const captureSnapshot = vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(function (this: JsonlLogStore, branchId: string) {
+			return this.branchId === "broken" ? Promise.reject(new Error("incompatible ancestry")) : originalCaptureSnapshot.call(this, branchId);
 		});
 		const outcome = await controller.startBranch("broken");
-		readAncestry.mockRestore();
+		captureSnapshot.mockRestore();
 		expect(outcome).toMatchObject({ branchId: "broken", outcome: "failed", error: expect.stringMatching(/Replay|replay|stale/) });
 		expect(executors.has("broken")).toBe(false);
 		executors.get("main")!.complete();

@@ -42,6 +42,8 @@ export type LoadedBranchProjection = Readonly<{
 	replayedRecords: number;
 	replayBatches: number;
 	checkpointSaved: boolean;
+	/** False when this ancestry contains diagnostics that checkpoints must never hide. */
+	checkpointable: boolean;
 	replay: Readonly<{
 		skipped: readonly ProjectionSkippedRecord[];
 		stale: readonly ReplayStaleRecord[];
@@ -73,12 +75,17 @@ export async function loadBranchProjection(input: {
 	branchId: BranchId;
 	store: ProjectionCheckpointStore;
 	contract: ProjectionContract;
+	/** Phase 4 orchestration requests exact fork/rewind/shutdown checkpoints explicitly. */
+	saveCheckpoint?: "rebuild" | "always" | "never";
+	/** @internal Fixed historical target used to prepare an atomic branch/move checkpoint. */
+	snapshot?: HistorySnapshot;
 }): Promise<LoadedBranchProjection> {
 	const expectedContract = projectionContractForAst(input.ast);
 	if (!sameContract(input.contract, expectedContract)) {
 		throw new Error("Projection contract does not match the supplied normalized ChartAst");
 	}
-	const snapshot = await input.store.captureSnapshot(input.branchId);
+	const snapshot = input.snapshot ?? await input.store.captureSnapshot(input.branchId);
+	if (snapshot.branchId !== input.branchId) throw new Error("Projection snapshot branch does not match the selected branch");
 	const lookup: ProjectionCheckpointLookup = { targetHeadSeqId: snapshot.headSeqId, ...input.contract };
 	const exact = await input.store.loadExactProjectionCheckpoint(lookup);
 	const nearest = exact === undefined ? await input.store.findNearestProjectionCheckpoint(lookup) : undefined;
@@ -118,14 +125,10 @@ export async function loadBranchProjection(input: {
 
 	let checkpointSaved = false;
 	const replayIsCheckpointable = skipped.length === 0 && stale.length === 0 && unpinned.length === 0;
-	if (input.store.canSaveProjectionCheckpoints && replayIsCheckpointable && (decoded === undefined || decoded.headSeqId !== snapshot.headSeqId)) {
-		await input.store.saveProjectionCheckpoint(encodeCheckpoint({
-			checkpointId: randomUUID(),
-			headSeqId: snapshot.headSeqId,
-			contract: input.contract,
-			projection,
-			createdAt: Date.now(),
-		}));
+	const saveMode = input.saveCheckpoint ?? "rebuild";
+	const saveRequested = saveMode === "always" || saveMode === "rebuild" && decoded === undefined;
+	if (input.store.canSaveProjectionCheckpoints && replayIsCheckpointable && saveRequested && decoded?.headSeqId !== snapshot.headSeqId) {
+		await input.store.saveProjectionCheckpoint(prepareProjectionCheckpoint(projection, input.contract, snapshot.headSeqId));
 		checkpointSaved = true;
 	}
 	return {
@@ -136,8 +139,17 @@ export async function loadBranchProjection(input: {
 		replayedRecords,
 		replayBatches,
 		checkpointSaved,
+		checkpointable: replayIsCheckpointable,
 		replay: { skipped, stale, unpinned },
 	};
+}
+
+export function prepareProjectionCheckpoint(
+	projection: BranchProjection,
+	contract: ProjectionContract,
+	headSeqId: number | null = projection.seqId === 0 ? null : projection.seqId,
+): StoredProjectionCheckpoint {
+	return encodeCheckpoint({ checkpointId: randomUUID(), headSeqId, contract, projection, createdAt: Date.now() });
 }
 
 export function encodeCheckpoint(checkpoint: ProjectionCheckpoint): StoredProjectionCheckpoint {

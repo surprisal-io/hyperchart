@@ -9,6 +9,7 @@ import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_r
 import { ArtifactStore } from "../packages/hyperchart/src/runtime/generic/artifact_store.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
+import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/runtime/generic/projection_loader.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];
@@ -127,6 +128,69 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
 }
 
 describe("ChartRuntime", () => {
+	it("never checkpoints a warning-bearing ancestry at cadence or clean shutdown", async () => {
+		const ast = linearChart(); const store = new MemoryLogStore();
+		const action = ast.states.work;
+		if (action?.kind !== "state" || action.action.kind !== "agent") throw new Error("expected work agent");
+		await store.appendDrafts([
+			{ type: "args", args: {} },
+			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, definition: { ...action.action, name: "old-worker" }, sessionId: "dirty" },
+			{ type: "state_action", kind: "complete", actionUid: action.action.uid, event: { type: "DONE" } },
+		]);
+		const contract = projectionContractForAst(ast);
+		const dirty = await loadBranchProjection({ ast, branchId: "main", store, contract, saveCheckpoint: "never" });
+		expect(dirty.checkpointable).toBe(false); expect(dirty.replay.stale.length).toBeGreaterThan(0);
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), initialProjection: dirty });
+		await runtime.runEffects([{ kind: "durable_records", id: "dirty-cadence", records: Array.from({ length: 512 }, (_, index) => ({ type: "args", args: { index } })) }]);
+		await runtime.dispose();
+		const snapshot = await store.captureSnapshot("main");
+		expect(await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract })).toBeUndefined();
+		const restarted = await loadBranchProjection({ ast, branchId: "main", store, contract, saveCheckpoint: "never" });
+		expect(restarted.checkpointable).toBe(false); expect(restarted.replay.stale.length).toBeGreaterThan(0);
+	});
+
+	it("checkpoints at 512 records and saves a non-empty tail on clean shutdown", async () => {
+		for (const count of [511, 512, 513]) {
+			const ast = linearChart();
+			const store = new MemoryLogStore();
+			const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd() });
+			await runtime.runEffects([{ kind: "durable_records", id: `batch-${count}`, records: Array.from({ length: count }, (_, index) => ({ type: "args", args: { index } })) }]);
+			const snapshot = await store.captureSnapshot("main");
+			const contract = projectionContractForAst(ast);
+			const exact = await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
+			if (count === 512) expect(exact?.headSeqId).toBe(snapshot.headSeqId);
+			else expect(exact).toBeUndefined();
+			if (count === 513) {
+				const nearest = await store.findNearestProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
+				expect(nearest?.headSeqId).toBe(snapshot.headSeqId! - 1);
+			}
+			await runtime.dispose();
+			const shutdown = await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
+			expect(shutdown?.headSeqId).toBe(snapshot.headSeqId);
+		}
+	});
+
+	it("waits for an in-flight append before writing the clean-shutdown checkpoint", async () => {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		let entered!: () => void;
+		const started = new Promise<void>((resolve) => { entered = resolve; });
+		class DelayedStore extends MemoryLogStore {
+			override async appendDraftsWithCheckpoint(...args: Parameters<MemoryLogStore["appendDraftsWithCheckpoint"]>) {
+				entered(); await gate; return super.appendDraftsWithCheckpoint(...args);
+			}
+		}
+		const ast = linearChart(); const store = new DelayedStore();
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd() });
+		const effects = runtime.runEffects([{ kind: "durable_records", id: "in-flight", records: [{ type: "args", args: { value: 1 } }] }]);
+		await started;
+		let disposed = false; const disposal = runtime.dispose().then(() => { disposed = true; });
+		await new Promise<void>((resolve) => setImmediate(resolve)); expect(disposed).toBe(false);
+		release(); await effects; await disposal;
+		const snapshot = await store.captureSnapshot("main"); const contract = projectionContractForAst(ast);
+		expect((await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract }))?.headSeqId).toBe(snapshot.headSeqId);
+	});
+
 	it("appends and acknowledges durable effects in supplied order", async () => {
 		const store = new MemoryLogStore();
 		const runtime = new ChartRuntime({
@@ -298,6 +362,7 @@ describe("ChartRuntime", () => {
 		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
 		const committed = await runtimeStore.respondToUserInteraction({ ast, gateSeqId: opened.seqId, event: { type: "APPROVED" } });
 		runtime.acknowledgeCommittedRecords([committed.record], `test-control:${committed.record.seqId}`);
+		runtime.acknowledgeCommittedRecords([committed.record], `test-control-retry:${committed.record.seqId}`);
 		const state = await withTimeout(running); await runtime.dispose();
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect((await runtimeStore.readAncestry(runtimeStore.branchId)).filter((record) => record.type === "user_interaction" && record.kind === "resolved")).toHaveLength(1);

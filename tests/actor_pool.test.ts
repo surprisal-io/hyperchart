@@ -84,6 +84,7 @@ class PoolRuntime implements Runtime {
 	}
 	eventsQueue() { return this.queue; }
 	async loadAst() { return this.ast; }
+	async loadProjection() { return projectBranch(createBranchProjection(this.ast), this.ast, this.records); }
 	async loadLogs() { return this.records; }
 }
 

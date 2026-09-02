@@ -6,7 +6,8 @@ import { templatePath } from "../../core/paths.js";
 import { explainReplay } from "../../core/replay_check.js";
 import type { ChartAst, StatePath } from "../../core/types.js";
 import { assertRunOwnership, assertStoppedRun } from "./branches.js";
-import type { RunLogReader } from "./log_store.js";
+import { openProjectionReplay, type RunLogReader } from "./log_store.js";
+import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst } from "./projection_loader.js";
 import { openRunLogStore } from "./log_store_factory.js";
 import { loadRunMeta } from "./run_dir.js";
 import { patchRunStatus } from "./run_status.js";
@@ -66,7 +67,10 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 		if (match.targetHeadSeqId === previous.headSeqId) {
 			throw new Error(`Rewind would not move branch '${opts.branchId}'; choose a different target`);
 		}
-		await store.moveBranch(opts.branchId, match.targetHeadSeqId);
+		const contract = projectionContractForAst(parsed.ast);
+		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: opts.branchId, store, contract, saveCheckpoint: "never", snapshot: { branchId: opts.branchId, headSeqId: match.targetHeadSeqId } });
+		if (loaded.checkpointable) await store.moveBranchWithCheckpoint(opts.branchId, match.targetHeadSeqId, prepareProjectionCheckpoint(loaded.projection, contract, match.targetHeadSeqId));
+		else await store.moveBranch(opts.branchId, match.targetHeadSeqId);
 		previousHeadSeqId = previous.headSeqId;
 		preservedRecords = await store.countRecords();
 	} finally {
@@ -100,7 +104,22 @@ export async function findRewindMatch(
 	opts: Pick<RewindOptions, "branchId" | "state" | "seqId" | "to" | "mode">,
 	ast: ChartAst,
 ): Promise<RewindMatch> {
-	const ancestry = await reader.readAncestry(opts.branchId);
+	const snapshot = await reader.captureSnapshot(opts.branchId);
+	if (opts.seqId !== undefined) {
+		const record = await reader.getRecord(opts.seqId);
+		if (record === undefined) throw new Error(`No durable log record with seqId ${opts.seqId}`);
+		return {
+			index: -1,
+			label: `${opts.mode} seqId ${opts.seqId}`,
+			recordSeqId: opts.seqId,
+			targetHeadSeqId: opts.mode === "before" ? record.parentId : record.seqId,
+		};
+	}
+	// Interim waiver: state and compatibility selection may privately materialize
+	// ancestry until the benchmark-approved predecessor catalog replaces this walk.
+	// The operation returns only one bounded RewindMatch; no public history array leaks.
+	const ancestry: DurableLogRecord[] = [];
+	for await (const batch of openProjectionReplay(reader, { targetHeadSeqId: snapshot.headSeqId, afterSeqId: null })) ancestry.push(...batch);
 	if (opts.to === "compatible") {
 		const explanation = explainReplay(ast, ancestry);
 		const broken = explanation.broken;
@@ -120,17 +139,6 @@ export async function findRewindMatch(
 			label: `compatible before seqId ${targetSeqId}`,
 			recordSeqId: targetSeqId,
 			targetHeadSeqId: target.parentId,
-		};
-	}
-	if (opts.seqId !== undefined) {
-		const record = await reader.getRecord(opts.seqId);
-		if (record === undefined) throw new Error(`No durable log record with seqId ${opts.seqId}`);
-		const index = ancestry.findIndex((candidate) => candidate.seqId === opts.seqId);
-		return {
-			index,
-			label: `${opts.mode} seqId ${opts.seqId}`,
-			recordSeqId: opts.seqId,
-			targetHeadSeqId: opts.mode === "before" ? record.parentId : record.seqId,
 		};
 	}
 	const state = opts.state ?? "";

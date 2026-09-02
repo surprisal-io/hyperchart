@@ -1,4 +1,5 @@
 import { dirname, join, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
 	existsSync,
 	mkdirSync,
@@ -459,6 +460,11 @@ export async function collectBranches(reader: Pick<RunHistoryStore, "listBranche
 export interface LogStore extends RunLogReader {
 	readonly branchId: BranchId;
 	appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
+	/** @internal Stamp facts, prepare an opaque cache row, and commit both atomically when durable. */
+	appendDraftsWithCheckpoint(
+		drafts: readonly DurableRecordDraft[],
+		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
+	): Promise<readonly DurableLogRecord[]>;
 }
 
 /** Full run-journal handle: branch entries plus lifecycle, shared across branch handles. */
@@ -468,11 +474,23 @@ export interface RunLogStore extends LogStore, ProjectionCheckpointStore {
 	writeRunMeta(meta: RunMeta): Promise<void>;
 	deleteRunData(): Promise<void>;
 	initializeRootBranch(metadata?: BranchMetadata): Promise<BranchHead>;
+	initializeRootBranchWithCheckpoint(metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
+	createBranchWithCheckpoint(branchId: BranchId, headSeqId: number, metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
+	moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
 	respondToUserInteraction(input: RespondToUserInteractionInput): Promise<UserInteractionResponseCommit>;
+	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit>;
 	close(): Promise<void>;
 }
+
+export type PreparedUserInteractionCommit = Readonly<{
+	expectedHeadSeqId: number | null;
+	gateSeqId: number;
+	draft: Extract<DurableRecordDraft, { type: "user_interaction"; kind: "resolved" }>;
+	/** Execution-owned synchronous callback over the stamped response; storage persists only opaque rows. */
+	prepareCheckpoints?: (record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }>) => readonly StoredProjectionCheckpoint[];
+}>;
 
 export type { RespondToUserInteractionInput, UserInteractionResponseCommit } from "./user_interaction_admission.js";
 
@@ -548,12 +566,28 @@ export class JsonlLogStore implements RunLogStore {
 		});
 	}
 
+	async initializeRootBranchWithCheckpoint(metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
+		const branch = await this.initializeRootBranch(metadata);
+		await this.saveProjectionCheckpoint(checkpoint);
+		return branch;
+	}
+
 	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
+		return this.appendDraftsWithCheckpoint(drafts, () => undefined);
+	}
+
+	async appendDraftsWithCheckpoint(
+		drafts: readonly DurableRecordDraft[],
+		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
+	): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
-		return this.commitBuilt((index) => {
-			const records = stampDrafts(index, this.branchId, drafts, Date.now());
-			return { entries: records, result: records };
+		const records = await this.commitBuilt((index) => {
+			const stamped = stampDrafts(index, this.branchId, drafts, Date.now());
+			return { entries: stamped, result: stamped };
 		});
+		const prepared = prepare(records);
+		for (const checkpoint of prepared === undefined ? [] : Array.isArray(prepared) ? prepared : [prepared]) await this.saveProjectionCheckpoint(checkpoint);
+		return records;
 	}
 
 	async captureSnapshot(branchId: BranchId): Promise<HistorySnapshot> {
@@ -665,6 +699,11 @@ export class JsonlLogStore implements RunLogStore {
 			};
 		});
 	}
+	async createBranchWithCheckpoint(branchId: BranchId, headSeqId: number, metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
+		const branch = await this.createBranch(branchId, headSeqId, metadata);
+		await this.saveProjectionCheckpoint(checkpoint);
+		return branch;
+	}
 
 	async moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
@@ -676,6 +715,35 @@ export class JsonlLogStore implements RunLogStore {
 				entries: [{ kind: "branch", op: "move", seqId: index.nextSeqId, branchId, headSeqId, committedAt: Date.now() }],
 				result: { ...branch, headSeqId },
 			};
+		});
+	}
+
+	async moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
+		const branch = await this.moveBranch(branchId, headSeqId);
+		await this.saveProjectionCheckpoint(checkpoint);
+		return branch;
+	}
+
+	async commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> {
+		return enqueueJsonlWrite(this.journal.filePath, async () => {
+			const index = this.index();
+			const branch = index.branch(this.branchId);
+			if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${this.branchId}' moved while admitting user interaction ${input.gateSeqId}`);
+			const existing = findUserInteractionResponseInAncestry(index.ancestryTo(branch.headSeqId), input.gateSeqId);
+			if (existing !== undefined) {
+				if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
+				throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
+			}
+			const gate = index.recordsBySeqId.get(input.gateSeqId);
+			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !index.containsInAncestry(this.branchId, input.gateSeqId) || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
+				throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${this.branchId}'`);
+			}
+			const records = stampDrafts(index, this.branchId, [input.draft], Date.now());
+			const record = records[0] as UserInteractionResponseCommit["record"];
+			const checkpoints = input.prepareCheckpoints?.(record) ?? [];
+			await this.appendLocked(records);
+			for (const checkpoint of checkpoints) await this.saveProjectionCheckpoint(checkpoint);
+			return { record, idempotent: false };
 		});
 	}
 
