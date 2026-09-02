@@ -33,6 +33,7 @@ import {
 	summarizeUserGate,
 } from "@surprisal/hyperchart/host";
 import {
+	createRunInspectorDataSource,
 	hyperchartRunFromRunDir,
 	openRunInspector,
 	readNeutralSessionTranscript,
@@ -538,16 +539,17 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const meta = await loadRunMeta(runDir);
 				const sessionsDir = resolve(runDir, "sessions");
 				const agentDefaults = createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath);
+				const readTranscript = fileTranscriptReader(sessionsDir);
 				const { url } = await openRunInspector({
 					runId: basename(runDir),
-					loadRun: () => hyperchartRunFromRunDir(runDir, {
-						branchId: args.branchId as string,
+					historyDataSource: await createRunInspectorDataSource(runDir, { readTranscript }),
+					loadRun: (branchId) => hyperchartRunFromRunDir(runDir, {
+						branchId: branchId ?? args.branchId as string,
 						agentDefaults,
-						includeTranscripts: true,
-						readTranscript: fileTranscriptReader(sessionsDir),
+						includeTranscripts: false,
 					}),
-					steerSession: (actionKey, message) => {
-						queueLiveSessionSteering(sessionsDir, args.branchId as string, actionKey, message);
+					steerSession: (branchId, actionKey, message) => {
+						queueLiveSessionSteering(sessionsDir, branchId, actionKey, message);
 					},
 					...openBrowser,
 				});

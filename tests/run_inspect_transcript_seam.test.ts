@@ -52,6 +52,9 @@ describe("run inspection transcript seam", () => {
 		const compactState = compact.states.find((candidate) => candidate.id === "done");
 		expect(compactState?.session).toMatchObject({ actionKey: "seam:done:agent", status: "running" });
 		expect(compactState?.session?.messages).toBeUndefined();
+		expect(compactState?.visitHistory).toBeUndefined();
+		expect(compact.recordTree).toBeUndefined();
+		expect(compact.historySnapshot).toEqual({ branchId: "main", headSeqId: null });
 		expect(readTranscript).not.toHaveBeenCalled();
 
 		const full = await hyperchartRunFromRunDir(runDir, { readTranscript, includeTranscripts: true });

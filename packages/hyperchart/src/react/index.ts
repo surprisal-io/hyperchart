@@ -8,6 +8,9 @@ export {
 } from "./HyperchartInspectorDialog.js";
 export type { HyperchartInspectorDialogProps, HyperchartInspectorSidePanelProps } from "./HyperchartInspectorDialog.js";
 export { HyperchartRunStrip } from "./HyperchartRunStrip.js";
+export { VirtualizedHistoryList, HISTORY_VIRTUAL_OVERSCAN } from "./components/inspector/history/VirtualizedHistoryList.js";
+export { useHistoryWindow, mergeHistoryWindow, HISTORY_WINDOW_ITEMS } from "./components/inspector/history/useHistoryWindow.js";
+export type { HistoryWindow, HistoryWindowSource, HistoryEdgeState, MergeDirection } from "./components/inspector/history/useHistoryWindow.js";
 export type { HyperchartRunStripInfo, HyperchartRunStripProps } from "./HyperchartRunStrip.js";
 export { HyperchartToolSummary } from "./HyperchartToolSummary.js";
 export type { HyperchartToolSummaryProps } from "./HyperchartToolSummary.js";

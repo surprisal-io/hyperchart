@@ -8,7 +8,8 @@ import {
 	RectangleStackIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
-import type { HyperchartStateInfo } from "../../../types.js";
+import type { HyperchartInspectorDataSource, HyperchartStateInfo } from "../../../types.js";
+import type { HistorySnapshot } from "../../../../runtime/generic/log_store.js";
 import { agentStatesForSelection, stateConcurrencyLabel, stateDisplayName, stateKindMeta } from "../helpers/state.js";
 import {
 	artifactContractElementId,
@@ -54,6 +55,7 @@ export function StateDetails({
 	highlightedRefValue = null,
 	onHighlightRef,
 	onSteerSession,
+	history,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -72,6 +74,7 @@ export function StateDetails({
 	highlightedRefValue?: string | null;
 	onHighlightRef?: (value: string) => void;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
+	history?: { runId: string; snapshot: HistorySnapshot; dataSource: HyperchartInspectorDataSource; targetSeqId?: number };
 }) {
 	const kind = stateKindMeta(state);
 	const DetailKindIcon = kind.Icon;
@@ -391,6 +394,7 @@ export function StateDetails({
 					<RuntimeSection
 						state={state}
 						allStates={allStates}
+						{...(history === undefined ? {} : { history })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
@@ -409,6 +413,7 @@ export function StateDetails({
 				<RuntimeSection
 					state={state}
 					allStates={allStates}
+					{...(history === undefined ? {} : { history })}
 					{...(onSteerSession === undefined ? {} : { onSteerSession })}
 					{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					{...(onNavigateToState === undefined ? {} : { onNavigateToState })}

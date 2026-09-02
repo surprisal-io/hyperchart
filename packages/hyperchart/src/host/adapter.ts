@@ -1,4 +1,24 @@
-import type { HyperchartInfo, HyperchartRunInfo, HyperchartRunStatus, HyperchartUsageInfo } from "./models.js";
+import type {
+	BranchListChunk,
+	BranchListCursor,
+	HistoryChunk,
+	HistoryCursor,
+	HistorySnapshot,
+	HistorySubject,
+} from "../runtime/generic/log_store.js";
+import type {
+	HyperchartActorGenerationInfo,
+	HyperchartActorMessageBatchInfo,
+	HyperchartAgentSessionInfo,
+	HyperchartInfo,
+	HyperchartMapVisitInfo,
+	HyperchartRecordInfo,
+	HyperchartRunInfo,
+	HyperchartRunOverview,
+	HyperchartRunStatus,
+	HyperchartUsageInfo,
+	HyperchartVisitInfo,
+} from "./models.js";
 
 /** Definition metadata safe to retain in a host/dashboard session. */
 export interface HyperchartSummaryInfo {
@@ -44,10 +64,24 @@ export interface HyperchartSnapshotOptions {
 	runLimit?: number;
 }
 
-export interface HyperchartHostAdapter {
+/** Stateless, serializable inspector detail API. It never returns durable storage handles. */
+export interface HyperchartInspectorDataSource {
+	listBranches(input: { runId: string; cursor?: BranchListCursor }): Promise<BranchListChunk>;
+	readStateVisits(input: { runId: string; snapshot: HistorySnapshot; stateId: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartVisitInfo>>;
+	readMapVisits(input: { runId: string; snapshot: HistorySnapshot; mapPath: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartMapVisitInfo>>;
+	readActorGenerations(input: { runId: string; snapshot: HistorySnapshot; logicalOccurrence: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartActorGenerationInfo>>;
+	readActorMessages(input: { runId: string; snapshot: HistorySnapshot; occurrence: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartActorMessageBatchInfo>>;
+	readRecords(input: { runId: string; snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartRecordInfo>>;
+	cursorAt(input: { runId: string; snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined>;
+	readVisitSession(input: { runId: string; branchId: string; invokeSeqId: number }): Promise<HyperchartAgentSessionInfo | undefined>;
+}
+
+export interface HyperchartHostAdapter extends HyperchartInspectorDataSource {
 	readSessionSnapshot(cwd: string, options?: HyperchartSnapshotOptions): Promise<HyperchartSessionSnapshot>;
 	/** Load one full chart definition for an on-demand definition or launch dialog. */
 	readChartSnapshot(cwd: string, chartName: string): Promise<HyperchartInfo | undefined>;
-	/** Load a full run model, including transcripts, for an open inspector only. */
+	/** Load graph/control state plus bounded summaries; elapsed histories are intentionally absent. */
+	readRunOverview(cwd: string, runId: string, branchId?: string): Promise<HyperchartRunOverview | undefined>;
+	/** @deprecated Compatibility alias for overview.run; does not include elapsed histories or transcripts. */
 	readRunSnapshot(cwd: string, runId: string): Promise<HyperchartRunInfo | undefined>;
 }

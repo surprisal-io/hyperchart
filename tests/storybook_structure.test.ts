@@ -53,6 +53,42 @@ function storyFiles(directory: string): string[] {
 }
 
 describe("Storybook information architecture", () => {
+	it("keeps the dedicated virtualized Runtime History board and every required case", () => {
+		const source = readFileSync(join(storyDirectory, "RuntimeHistoryVirtualizedCursorChunks.stories.tsx"), "utf8");
+		expect(source).toContain("Runtime History — Virtualized Cursor Chunks");
+		for (const story of [
+			"TenThousandStateVisits", "DeepLinkedMiddleChunk", "OppositeEdgeEvictionAndReload",
+			"VariableHeightAnchorPreservation", "TenThousandMapLaunches", "TenThousandActorGenerations",
+			"TenThousandActorMessageBatches", "EmptyHistory", "OlderEdgeFailureAndRetry",
+			"NewerEdgeFailureAndRetry", "BranchSnapshotSwitchCancelsInflight",
+			"RefreshToLatestWithOlderWindow", "TranscriptOnDemand",
+		]) expect(source).toContain(`export const ${story}`);
+		expect(source).toContain("captureRuntime(VISITS)");
+		expect(source).toContain("explainReplay");
+		expect(source).toContain("stateVisitHistoryItemToHost");
+		expect(source).toContain("captureSemanticRows");
+		expect(source).toContain("actorMessageHistoryItemsToHost");
+		expect(source).toContain("HyperchartInspectorDataSource");
+		expect(source).toContain("withoutElapsedHistory");
+		expect(source).toContain("<RuntimeSection");
+		for (const [storyName, scenario, method, disclosure] of [
+			["TenThousandMapLaunches", "map", "readMapVisits", "Load map launch history"],
+			["TenThousandActorGenerations", "generations", "readActorGenerations", "Load actor generations"],
+			["TenThousandActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
+		] as const) {
+			expect(source).toContain(`export const ${storyName} = story(\"${scenario}\")`);
+			expect(source).toMatch(new RegExp(`${method}: async \\(input\\) => \\{ const chunk = await source\\.load\\(input\\.cursor\\)`));
+			expect(source).toContain(`case \"${scenario}\": disclosure = \"${disclosure}\"`);
+		}
+		expect(source).toContain("captureTranscriptFixture");
+		expect(source).toContain("readVisitSession: async ({ invokeSeqId })");
+		expect(source).toContain('name: "View session for visit 1"');
+		expect(source).not.toContain("<VirtualizedHistoryList");
+		expect(source).toContain("data-selected-history-subject");
+		expect(source).toContain("getBoundingClientRect().top");
+		expect(source).not.toContain("toBeGreaterThanOrEqual(anchor)");
+		expect(source).not.toContain("as unknown as Extract<DurableLogRecord");
+	});
 	it("organizes every visible story by product surface", () => {
 		const files = storyFiles(storyDirectory);
 		expect(files.length).toBeGreaterThan(0);

@@ -12,6 +12,7 @@ import {
 	projectBranch,
 	projectedActorEndpoint,
 	projectedActorEndpoints,
+	type BranchProjection,
 	type PendingAction,
 	type ProjectedActorMessage,
 	type ProjectedActorOccurrence,
@@ -232,6 +233,8 @@ export type HyperchartRunFromRuntimeOptions = {
 	updatedAt?: number;
 	description?: string;
 	now?: number;
+	/** Execution-owned current projection used by bounded inspector overview loading. */
+	projection?: BranchProjection;
 };
 
 export function hyperchartRunFromRuntime(
@@ -241,7 +244,7 @@ export function hyperchartRunFromRuntime(
 	options: HyperchartRunFromRuntimeOptions = {},
 ): HyperchartRunInfo {
 	const skipped: ProjectionSkippedRecord[] = [];
-	const projection = projectBranch(createBranchProjection(ast), ast, records, [], skipped);
+	const projection = options.projection ?? projectBranch(createBranchProjection(ast), ast, records, [], skipped);
 	const staticRun = hyperchartRunFromInspectResult(inspect, {
 		runId: options.runId ?? options.status?.runId ?? `run:${ast.id}`,
 		status: runtimeRunStatus(options.status?.state),
@@ -1312,6 +1315,11 @@ function runtimeMapVisitHistories(
 		histories.set(record.path, history);
 	}
 	return histories;
+}
+
+/** @internal AST-aware semantic mapper shared by the bounded inspector history adapter. */
+export function runtimeVisitHistoriesForInspector(ast: ChartAst, records: readonly DurableLogRecord[]): ReadonlyMap<StatePath, readonly HyperchartVisitInfo[]> {
+	return runtimeVisitHistories(ast, records, new Set());
 }
 
 function runtimeVisitHistories(

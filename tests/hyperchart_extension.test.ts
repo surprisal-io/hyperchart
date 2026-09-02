@@ -822,7 +822,7 @@ describe("hyperchart extension", () => {
 		expect(notifications).toContainEqual({ message: `Run ${runId}: ${runDir}`, type: "info" });
 	});
 
-	it("opens the browser inspector with full transcript details through the consolidated agent tool", async () => {
+	it("opens the browser inspector with overview data and on-demand transcripts", async () => {
 		const runId = "tool-view-run";
 		const runDir = createRun(runId, projectDir, writeChart("tool-view"));
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
@@ -838,6 +838,11 @@ describe("hyperchart extension", () => {
 			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, "demo:work:agent:1:2");
+		updateSessionProgress(join(runDir, "sessions"), actionUid, {
+			actionName: "worker",
+			status: "running",
+			sessionId: "experiment-session",
+		}, "demo:work:agent:1:2", "experiment");
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
@@ -865,19 +870,26 @@ describe("hyperchart extension", () => {
 			run: { runId: string; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
 		};
 		expect(runPayload).toMatchObject({ run: { runId } });
-		expect(runPayload.run.states.find((state) => state.id === "work")?.session?.messages).toEqual([
-			{ id: "assistant-1", role: "assistant", text: "inspector transcript" },
-		]);
+		expect(runPayload.run.states.find((state) => state.id === "work")?.session?.messages).toBeUndefined();
+		const sessionResponse = await fetch(new URL(`/api/runs/${token}/history`, inspectorUrl), {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ operation: "readVisitSession", input: { branchId: "main", invokeSeqId: 2 } }),
+		});
+		expect(sessionResponse.status).toBe(200);
+		const sessionPayload = await sessionResponse.json() as { result: { messages?: unknown[] } };
+		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript" }]);
 
 		const steerResponse = await fetch(new URL(`/api/runs/${token}/steer`, inspectorUrl), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ actionKey: actionUidKey(actionUid), message: "Focus on primary sources" }),
+			body: JSON.stringify({ branchId: "experiment", actionKey: actionUidKey(actionUid), message: "Focus on primary sources" }),
 		});
 		expect(steerResponse.status).toBe(202);
 		const steeringFiles = readdirSync(join(runDir, "sessions", "steering"));
 		expect(steeringFiles).toHaveLength(1);
 		expect(JSON.parse(readFileSync(join(runDir, "sessions", "steering", steeringFiles[0]!), "utf8"))).toMatchObject({
+			branchId: "experiment",
 			actionKey: actionUidKey(actionUid),
 			message: "Focus on primary sources",
 		});

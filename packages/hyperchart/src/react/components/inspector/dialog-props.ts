@@ -1,4 +1,4 @@
-import type { HyperchartPortalRenderer, HyperchartRunInfo, HyperchartUiTheme } from "../../types.js";
+import type { HyperchartInspectorDataSource, HyperchartPortalRenderer, HyperchartRunInfo, HyperchartUiTheme } from "../../types.js";
 
 export interface HyperchartInspectorDialogProps {
 	runs: HyperchartRunInfo[];
@@ -13,6 +13,11 @@ export interface HyperchartInspectorDialogProps {
 	onResume?: (runId: string) => void;
 	onAbort?: () => void;
 	onSteerSession?: (runId: string, actionKey: string, message: string) => void | Promise<void>;
+	/** Stateless lazy history source; omitted for definition-only/static inspectors. */
+	historyDataSource?: HyperchartInspectorDataSource;
+	onRefreshHistory?: (runId: string) => void | Promise<void>;
+	/** Optional durable coordinate for a deep-linked Runtime subject. */
+	historyTargetSeqId?: number;
 	portal?: HyperchartPortalRenderer;
 	theme?: HyperchartUiTheme;
 }

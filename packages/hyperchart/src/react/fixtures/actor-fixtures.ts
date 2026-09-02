@@ -418,7 +418,7 @@ const poolPartialRecords: DurableLogRecord[] = [
 	poolReplied(1, 1, 9),
 	poolSettled(1, 1, 10),
 ];
-const poolCompleteRecords: DurableLogRecord[] = [
+export const actorPoolCompleteRecords: DurableLogRecord[] = [
 	...poolPartialRecords,
 	poolAccepted(2, 1, 11),
 	poolInvoked(1, 12),
@@ -448,7 +448,7 @@ const poolSessionProgress = {
 export const actorPoolIdleRun = poolScenario.runtimeRun(poolBaseRecords, { runId: "actor:pool-idle", status: { state: "running", updatedAt: now + 2_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 2_000 });
 export const actorPoolBusyRun = poolScenario.runtimeRun(actorPoolBusyRecords, { runId: "actor:pool-busy", status: { state: "running", updatedAt: now + 8_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 8_000, sessionProgress: poolSessionProgress });
 export const actorPoolPartialBatchRun = poolScenario.runtimeRun(poolPartialRecords, { runId: "actor:pool-partial", status: { state: "running", updatedAt: now + 10_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 10_000, sessionProgress: poolSessionProgress });
-export const actorPoolOutOfOrderRun = poolScenario.runtimeRun(poolCompleteRecords, { runId: "actor:pool-complete", status: { state: "complete", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000, sessionProgress: poolSessionProgress });
+export const actorPoolOutOfOrderRun = poolScenario.runtimeRun(actorPoolCompleteRecords, { runId: "actor:pool-complete", status: { state: "complete", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000, sessionProgress: poolSessionProgress });
 
 const crowdedPool = PoolTemplate({ lane: "crowded" });
 export const actorPoolCrowdedChart = chart({

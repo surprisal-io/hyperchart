@@ -1,16 +1,21 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { BoltIcon, CommandLineIcon, EnvelopeIcon } from "@heroicons/react/24/outline";
-import type { HyperchartActorMessageInfo, HyperchartActorSentMessageInfo, HyperchartStateInfo } from "../../../types.js";
+import type { HyperchartActorGenerationInfo, HyperchartActorMessageBatchInfo, HyperchartActorMessageInfo, HyperchartActorSentMessageInfo, HyperchartInspectorDataSource, HyperchartStateInfo, HyperchartVisitInfo, HyperchartMapVisitInfo } from "../../../types.js";
+import type { HistoryCursor, HistorySnapshot, HistorySubject } from "../../../../runtime/generic/log_store.js";
 import { formatHyperchartDateTime, formatHyperchartUsage } from "../../../hyperchart-display.js";
 import { stateHasRuntimeDetails } from "../helpers/state.js";
 import { FanoutStatusCard } from "../graph/FanoutStatusCard.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { Section } from "../ui/Section.js";
 import { AgentSessionDialog } from "./AgentSessionDialog.js";
+import { ActorMailboxMessageRow } from "./ActorMailboxCard.js";
 import { MapResolvedInputList } from "./MapResolvedInputList.js";
 import { MapVisitHistory } from "./MapVisitHistory.js";
 import { VisitHistory } from "./VisitHistory.js";
+import { VirtualizedHistoryList } from "../history/VirtualizedHistoryList.js";
+
+export type RuntimeHistoryContext = { runId: string; snapshot: HistorySnapshot; dataSource: HyperchartInspectorDataSource; targetSeqId?: number };
 
 function ActorInternalMessageRow({ message, replies }: { message: HyperchartActorMessageInfo; replies: boolean }) {
 	const [open, setOpen] = useState(false);
@@ -178,18 +183,117 @@ function ActorSentMessageVisits({
 	);
 }
 
+function HistoryDisclosure({ label, children }: { label: string; children: ReactNode }) {
+	const [open, setOpen] = useState(false);
+	return <div className="grid gap-2"><button type="button" aria-expanded={open} className="justify-self-start text-[10px] text-[var(--hc-cyan-text)]" onClick={() => setOpen((value) => !value)}>{open ? `Hide ${label}` : `Load ${label}`}</button>{open && children}</div>;
+}
+
+function historyCacheKey(history: RuntimeHistoryContext, kind: string, subject: string): string {
+	return `${history.runId}:${history.snapshot.branchId}:${history.snapshot.headSeqId ?? "root"}:${kind}:${subject}`;
+}
+
+/** @internal Deep-link request coordinator characterized by interaction tests. */
+export function useTargetCursor(history: RuntimeHistoryContext, subject: HistorySubject) {
+	const key = `${historyCacheKey(history, subject.kind, JSON.stringify(subject))}:${history.targetSeqId ?? "newest"}`;
+	const [resolved, setResolved] = useState<{ key: string; cursor?: HistoryCursor; error?: string }>();
+	const [attempt, setAttempt] = useState(0);
+	useEffect(() => {
+		if (history.targetSeqId === undefined) return;
+		let current = true;
+		void history.dataSource.cursorAt({ runId: history.runId, snapshot: history.snapshot, subject, seqId: history.targetSeqId }).then((cursor) => {
+			if (current) setResolved({ key, ...(cursor === undefined ? {} : { cursor }) });
+		}, (error: unknown) => {
+			if (current) setResolved({ key, error: error instanceof Error ? error.message : String(error) });
+		});
+		return () => { current = false; };
+	}, [attempt, history.dataSource, history.runId, history.snapshot, history.targetSeqId, key]);
+	return history.targetSeqId === undefined
+		? { ready: true as const, missing: false }
+		: resolved?.key === key
+			? { ready: true as const, missing: resolved.error === undefined && resolved.cursor === undefined, cursor: resolved.cursor, error: resolved.error, retry: () => setAttempt((value) => value + 1) }
+			: { ready: false as const, missing: false };
+}
+
+function TargetCursorError({ error, onRetry }: { error: string; onRetry: () => void }) {
+	return <div className="flex items-center gap-2 text-[10px] text-[var(--danger)]"><span>Could not locate history item: {error}</span><button type="button" className="text-[var(--hc-cyan-text)]" onClick={onRetry}>Retry</button></div>;
+}
+
+function LazyStateVisits({ history, state, allStates, onSteerSession, onHighlightArtifact }: {
+	history: RuntimeHistoryContext;
+	state: HyperchartStateInfo;
+	allStates: HyperchartStateInfo[];
+	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
+	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
+}) {
+	const stateId = state.runtimeStatePath ?? state.id;
+	const target = useTargetCursor(history, { kind: "state-visits", state: stateId });
+	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readStateVisits({ runId: history.runId, snapshot: history.snapshot, stateId, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, stateId]);
+	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a visit of this state.</div>;
+	return <VirtualizedHistoryList<HyperchartVisitInfo>
+		cacheKey={historyCacheKey(history, "state-visits", stateId)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+		identity={(visit) => String(visit.invokeSeqId)} emptyLabel="No visits in this snapshot."
+		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
+	/>;
+}
+
+function LazyMapVisits({ history, state }: { history: RuntimeHistoryContext; state: HyperchartStateInfo }) {
+	const mapPath = state.runtimeStatePath ?? state.id;
+	const target = useTargetCursor(history, { kind: "map-visits", mapPath });
+	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readMapVisits({ runId: history.runId, snapshot: history.snapshot, mapPath, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, mapPath]);
+	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a launch of this map.</div>;
+	return <VirtualizedHistoryList<HyperchartMapVisitInfo>
+		cacheKey={historyCacheKey(history, "map-visits", mapPath)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+		identity={(visit) => String(visit.spawnSeqId)} emptyLabel="No map launches in this snapshot."
+		renderItem={(visit) => <MapVisitHistory visits={[visit]} {...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })} />}
+	/>;
+}
+
+function LazyActorGenerations({ history, logicalOccurrence }: { history: RuntimeHistoryContext; logicalOccurrence: string }) {
+	const target = useTargetCursor(history, { kind: "actor-generations", logicalOccurrence });
+	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readActorGenerations({ runId: history.runId, snapshot: history.snapshot, logicalOccurrence, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, logicalOccurrence]);
+	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not an actor generation.</div>;
+	return <VirtualizedHistoryList<HyperchartActorGenerationInfo>
+		cacheKey={historyCacheKey(history, "actor-generations", logicalOccurrence)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+		identity={(generation) => `${generation.occurrencePath}:${generation.createdSeqId}`}
+		emptyLabel="No actor generations in this snapshot."
+		renderItem={(generation) => <div className="rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]"><div className="font-semibold text-[var(--text-primary)]">Generation {generation.generation}</div><code className="text-[var(--text-muted)]">{generation.occurrencePath} · seq {generation.createdSeqId}</code></div>}
+	/>;
+}
+
+function LazyActorMessages({ history, occurrence }: { history: RuntimeHistoryContext; occurrence: string }) {
+	const target = useTargetCursor(history, { kind: "actor-messages", occurrence });
+	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readActorMessages({ runId: history.runId, snapshot: history.snapshot, occurrence, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, occurrence]);
+	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not an enqueue batch for this actor.</div>;
+	return <VirtualizedHistoryList<HyperchartActorMessageBatchInfo>
+		cacheKey={historyCacheKey(history, "actor-messages", occurrence)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+		identity={(batch) => `${batch.occurrencePath}:${batch.enqueueSeqId}`}
+		emptyLabel="No actor messages in this snapshot."
+		renderItem={(batch) => <div className="grid gap-1 rounded border border-[var(--border-secondary)] p-2"><div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Enqueue seq {batch.enqueueSeqId} · {batch.messages.length} message{batch.messages.length === 1 ? "" : "s"}</div>{batch.messages.map((message, index) => <ActorMailboxMessageRow key={message.messageId} message={message} index={index} />)}</div>}
+	/>;
+}
+
 export function RuntimeSection({
 	state,
 	allStates = [state],
 	onSteerSession,
 	onHighlightArtifact,
 	onNavigateToState,
+	history,
 }: {
 	state: HyperchartStateInfo;
 	allStates?: HyperchartStateInfo[];
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 	onNavigateToState?: (stateId: string) => void;
+	history?: RuntimeHistoryContext;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
 	const session = state.session;
@@ -202,6 +306,9 @@ export function RuntimeSection({
 		: undefined;
 	const actorInternalMessages = state.actorMessageHistory;
 	const actorInternalGenerations = state.actorInternal?.generations;
+	const linkedOccurrence = actorMessage === undefined ? undefined : allStates.find((candidate) => (candidate.actorOccurrence?.logicalPath ?? candidate.actorOccurrence?.occurrencePath) === actorMessage.to)?.actorOccurrence?.occurrencePath;
+	const historyOccurrence = actorOccurrence?.occurrencePath ?? state.actorInternal?.occurrencePath ?? linkedOccurrence;
+	const historyLogicalOccurrence = actorOccurrence?.logicalPath ?? state.actorInternal?.logicalOccurrencePath;
 	return (
 		<>
 			<Section
@@ -327,6 +434,12 @@ export function RuntimeSection({
 						usage: {formatHyperchartUsage(state.usage) ?? JSON.stringify(state.usage)}
 					</div>
 				)}
+				{history !== undefined && state.visitHistory === undefined && (state.type === "agent" || state.type === "user" || state.type === "script") && (
+					<LazyStateVisits history={history} state={state} allStates={allStates} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
+				)}
+				{history !== undefined && state.type === "map" && state.mapConfig?.visitHistory === undefined && <HistoryDisclosure label="map launch history"><LazyMapVisits history={history} state={state} /></HistoryDisclosure>}
+				{history !== undefined && historyLogicalOccurrence !== undefined && <HistoryDisclosure label="actor generations"><LazyActorGenerations history={history} logicalOccurrence={historyLogicalOccurrence} /></HistoryDisclosure>}
+				{history !== undefined && historyOccurrence !== undefined && <HistoryDisclosure label="actor message history"><LazyActorMessages history={history} occurrence={historyOccurrence} /></HistoryDisclosure>}
 				{actorInternalGenerations === undefined && state.visitHistory !== undefined && (
 					<VisitHistory
 						visits={state.visitHistory}

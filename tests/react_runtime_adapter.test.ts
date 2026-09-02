@@ -11,6 +11,7 @@ import {
 	hyperchartRunFromInspectResult,
 	hyperchartRunFromRuntime,
 	hyperchartRunFromToolDetails,
+	runtimeVisitHistoriesForInspector,
 } from "../packages/hyperchart/src/host/adapters.js";
 import { inspectChartAst } from "../packages/hyperchart/src/core/inspect.js";
 import { actorPoolDrainingRun, actorPoolMapReentryRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
@@ -921,7 +922,7 @@ describe("React runtime adapter", () => {
 			}),
 		);
 		const timedUid = actionUid(timedAst, "work");
-		const timedRun = hyperchartRunFromRuntime(inspectChartAst(timedAst), timedAst, [
+		const timedRecords: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
 			{
 				type: "state_action",
@@ -932,12 +933,14 @@ describe("React runtime adapter", () => {
 				...baseRecord(2),
 			},
 			{ type: "state_action", kind: "timer_fired", actionUid: timedUid, ...baseRecord(3) },
-		]);
+		];
+		const timedRun = hyperchartRunFromRuntime(inspectChartAst(timedAst), timedAst, timedRecords);
 		expect(timedRun.states.find((state) => state.id === "work")?.visitHistory?.[0]).toMatchObject({
 			status: "cancelled",
 			endedAt: 3000,
 			endedReason: "timed_out",
 		});
+		expect(runtimeVisitHistoriesForInspector(timedAst, timedRecords).get("work")?.[0]).toEqual(timedRun.states.find((state) => state.id === "work")?.visitHistory?.[0]);
 
 		const fanAst = ast(
 			chart({
@@ -972,7 +975,7 @@ describe("React runtime adapter", () => {
 		);
 		const leftUid = actionUid(fanAst, "fan.left.work");
 		const rightUid = actionUid(fanAst, "fan.right.work");
-		const fanRun = hyperchartRunFromRuntime(inspectChartAst(fanAst), fanAst, [
+		const fanRecords: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
 			{
 				type: "state_action",
@@ -991,7 +994,8 @@ describe("React runtime adapter", () => {
 				...baseRecord(3),
 			},
 			{ type: "failure_intent", origin: "fan.right.work", error: "stop", ...baseRecord(4) },
-		]);
+		];
+		const fanRun = hyperchartRunFromRuntime(inspectChartAst(fanAst), fanAst, fanRecords);
 		expect(fanRun.states.find((state) => state.id === "fan.left.work")?.visitHistory?.[0]).toMatchObject({
 			status: "cancelled",
 			endedAt: 4000,
@@ -1002,6 +1006,9 @@ describe("React runtime adapter", () => {
 			endedAt: 4000,
 			completedEvent: "FAILED",
 		});
+		const lazyFan = runtimeVisitHistoriesForInspector(fanAst, fanRecords);
+		expect(lazyFan.get("fan.left.work")?.[0]).toEqual(fanRun.states.find((state) => state.id === "fan.left.work")?.visitHistory?.[0]);
+		expect(lazyFan.get("fan.right.work")?.[0]).toEqual(fanRun.states.find((state) => state.id === "fan.right.work")?.visitHistory?.[0]);
 	});
 
 	it("maps run-level status errors and replay warnings", () => {

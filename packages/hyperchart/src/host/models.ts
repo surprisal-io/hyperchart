@@ -1,4 +1,5 @@
 import type { ChartArgumentAst } from "../core/types.js";
+import type { BranchListChunk, BranchListCursor, HistorySnapshot } from "../runtime/generic/log_store.js";
 
 /** Canonical serializable metadata consumed by host launch forms. */
 export type HyperchartLaunchArgumentInfo = ChartArgumentAst;
@@ -150,6 +151,13 @@ export interface HyperchartActorDeclarationInfo {
 
 export type HyperchartActorMessageStatus = "queued" | "accepted" | "replied" | "settled" | "failed" | "cancelled";
 
+export interface HyperchartActorMessageBatchInfo {
+	occurrencePath: string;
+	enqueueSeqId: number;
+	enqueuedAt: number;
+	messages: HyperchartActorMessageInfo[];
+}
+
 export interface HyperchartActorMessageInfo {
 	messageId: string;
 	actorOccurrencePath?: string;
@@ -188,7 +196,7 @@ export interface HyperchartActorSentMessageInfo {
 export interface HyperchartActorMailboxInfo {
 	totalCount: number;
 	head?: HyperchartActorMessageInfo;
-	entries: HyperchartActorMessageInfo[];
+	entries?: HyperchartActorMessageInfo[];
 }
 
 export interface HyperchartActorMailboxInstanceInfo {
@@ -196,7 +204,7 @@ export interface HyperchartActorMailboxInstanceInfo {
 	generation: number;
 	status: "idle" | "busy" | "closing" | "draining" | "stopped" | "failed" | "cancelled";
 	mailbox: HyperchartActorMailboxInfo;
-	messageHistory: HyperchartActorMessageInfo[];
+	messageHistory?: HyperchartActorMessageInfo[];
 	currentMessage?: HyperchartActorMessageInfo;
 }
 
@@ -412,6 +420,35 @@ export interface HyperchartAgentSessionInfo {
 	messages?: HyperchartSessionMessageInfo[];
 }
 
+export interface HyperchartStateRuntimeSummary {
+	status: HyperchartStateStatus;
+	visitCount: number;
+	latestVisit?: Pick<HyperchartVisitInfo, "visit" | "invokeSeqId" | "startedAt" | "endedAt" | "status">;
+	activeSession?: Omit<HyperchartAgentSessionInfo, "messages">;
+	usage?: HyperchartUsageInfo;
+	issueCount: number;
+	actorMessageCount: number;
+	mapVisitCount?: number;
+	hasOlderRuntime: boolean;
+}
+
+export interface HyperchartActorGenerationInfo {
+	logicalOccurrence: string;
+	occurrencePath: string;
+	generation: number;
+	createdSeqId: number;
+	createdAt: number;
+}
+
+export interface HyperchartRecordInfo {
+	seqId: number;
+	parentId: number | null;
+	branchId: string;
+	type: string;
+	timestamp: number;
+	record: unknown;
+}
+
 export interface HyperchartStateInfo {
 	id: string;
 	/** Inspector-only lexical hierarchy. Unlike id parsing, this also supports synthetic occurrence nodes. */
@@ -432,6 +469,8 @@ export interface HyperchartStateInfo {
 	agentDescription?: string;
 	definitionSource?: string;
 	status: HyperchartStateStatus;
+	/** Bounded overview only; elapsed rows are loaded through HyperchartInspectorDataSource. */
+	runtimeSummary?: HyperchartStateRuntimeSummary;
 	startedAt?: number;
 	endedAt?: number;
 	role?: string;
@@ -499,13 +538,24 @@ export interface HyperchartStateInfo {
 	};
 }
 
+export interface HyperchartRunOverview {
+	run: HyperchartRunInfo;
+	branchCount: number;
+	initialBranches: BranchListChunk;
+	snapshot: HistorySnapshot;
+}
+
 export interface HyperchartRunInfo {
 	runId: string;
 	chartName: string;
 	/** Non-durable branch selected for this snapshot. */
 	branchId?: string;
+	/** Immutable history coordinate used by lazy inspector detail requests. */
+	historySnapshot?: HistorySnapshot;
 	/** Durable named heads and full immutable tree metadata for branch navigation. */
 	branches?: Array<{ branchId: string; headSeqId: number | null; name?: string; reason?: string }>;
+	branchCount?: number;
+	branchListNext?: BranchListCursor;
 	recordTree?: Array<{ seqId: number; parentId: number | null; branchId: string; type: string; timestamp: number }>;
 	/** Dynamic operational branches of the live runner, which may differ from the selected view. */
 	runnerBranchIds?: string[];

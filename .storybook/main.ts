@@ -22,6 +22,7 @@ const config: StorybookConfig = {
 			...config.resolve,
 			alias: [
 				...(Array.isArray(config.resolve?.alias) ? config.resolve.alias : []),
+				{ find: "node:crypto", replacement: resolve(import.meta.dirname, "browser-node-crypto.ts") },
 				{ find: "@surprisal/hyperchart/host", replacement: core("host/index.ts") },
 				{ find: "@surprisal/hyperchart/runtime", replacement: core("runtime/index.ts") },
 				{ find: "@surprisal/hyperchart/inspect", replacement: core("inspect/index.ts") },

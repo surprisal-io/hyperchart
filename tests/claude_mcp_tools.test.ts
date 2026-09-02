@@ -457,7 +457,7 @@ export default chart({
 		expect(status.state).toBe("stopped");
 	});
 
-	it("opens the browser inspector with full transcript details and returns a tokenized URL", async () => {
+	it("opens the browser inspector with overview-only data and loads transcripts on demand", async () => {
 		const { tools, runsRoot, cwd, chartPath } = makeWorld();
 		const runDir = join(runsRoot, "view-run");
 		const sessionsDir = join(runDir, "sessions");
@@ -475,6 +475,11 @@ export default chart({
 			sessionId: "session-id",
 			sessionFile: transcriptFile,
 		}, `${actionUidKey(actionUid)}:1:11`, "main");
+		updateSessionProgress(sessionsDir, actionUid, {
+			actionName: "worker",
+			status: "running",
+			sessionId: "experiment-session",
+		}, `${actionUidKey(actionUid)}:1:11`, "experiment");
 
 		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ runDir: "view-run", branchId: "main", open: false })));
 		expect(viewed.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/runs\/[A-Za-z0-9_-]+$/);
@@ -484,18 +489,26 @@ export default chart({
 			run: { runId: string; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
 		};
 		expect(payload.run.runId).toBe("view-run");
-		expect(payload.run.states.find((state) => state.id === "done")?.session?.messages).toEqual([
-			{ id: "assistant-1", role: "assistant", text: "inspector transcript" },
-		]);
+		expect(payload.run.states.find((state) => state.id === "done")?.session?.messages).toBeUndefined();
+		const sessionResponse = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/history`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ operation: "readVisitSession", input: { branchId: "main", invokeSeqId: 11 } }),
+		});
+		expect(sessionResponse.status).toBe(200);
+		const sessionPayload = await sessionResponse.json() as { result: { messages?: unknown[] } };
+		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript" }]);
 
 		// The inspector's steering endpoint must land in the run's file queue.
 		const steer = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/steer`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ actionKey: actionUidKey(actionUid), message: "from inspector" }),
+			body: JSON.stringify({ branchId: "experiment", actionKey: actionUidKey(actionUid), message: "from inspector" }),
 		});
 		expect(steer.status).toBe(202);
-		expect(readdirSync(join(runDir, "sessions", "steering"))).toHaveLength(1);
+		const steeringFiles = readdirSync(join(runDir, "sessions", "steering"));
+		expect(steeringFiles).toHaveLength(1);
+		expect(JSON.parse(readFileSync(join(runDir, "sessions", "steering", steeringFiles[0]!), "utf8"))).toMatchObject({ branchId: "experiment" });
 	});
 });
 

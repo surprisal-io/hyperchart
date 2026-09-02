@@ -266,6 +266,7 @@ export function stateHasContracts(state: HyperchartStateInfo): boolean {
 
 export function stateHasRuntimeDetails(state: HyperchartStateInfo): boolean {
 	return (
+		state.runtimeSummary !== undefined ||
 		state.startedAt !== undefined ||
 		state.endedAt !== undefined ||
 		Boolean(state.mapItemLabel) ||

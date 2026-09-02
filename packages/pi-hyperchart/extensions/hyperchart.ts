@@ -44,11 +44,13 @@ import {
 	initializeRunDir,
 	listHyperchartBranches,
 	hasTerminalNotificationReceipt,
+	loadBranchProjection,
 	loadHostSettings,
 	loadRunMeta,
 	markTerminalNotificationReceipt,
 	markUserInteractionReceipt,
 	openRunLogStore,
+	projectionContractForAst,
 	readDeliverableTerminalNotificationRequest,
 	readRunnerConfig,
 	removeTerminalNotificationReceipt,
@@ -101,7 +103,7 @@ import {
 	hyperchartRunFromRunDir,
 	type SessionTranscriptReader,
 } from "../src/runtime/pi/run_inspect.js";
-import { closeRunInspectorServer, openRunInspector } from "@surprisal/hyperchart/inspect";
+import { closeRunInspectorServer, createRunInspectorDataSource, openRunInspector } from "@surprisal/hyperchart/inspect";
 
 const require = createRequire(import.meta.url);
 import { HYPERCHART_COMMAND_EVENT, type HyperchartCommandRequest } from "../src/command.js";
@@ -1233,13 +1235,13 @@ function createHyperchartViewTool(delivery: PiTerminalDelivery) {
 		const readTranscript = transcriptReaderForRun(delivery, runDir);
 		const { url } = await openRunInspector({
 			runId: inspector.runId,
-			loadRun: () => inspectRunForCurrentWorkDir(runDir, ctx, {
-				...(inspector.branchId === undefined ? {} : { branchId: inspector.branchId }),
-				includeTranscripts: true,
-				readTranscript,
+			historyDataSource: await createRunInspectorDataSource(runDir, { readTranscript }),
+			loadRun: (branchId) => inspectRunForCurrentWorkDir(runDir, ctx, {
+				...((branchId ?? inspector.branchId) === undefined ? {} : { branchId: branchId ?? inspector.branchId }),
+				includeTranscripts: false,
 			}),
-			steerSession: (actionKey, message) => {
-				queueLiveSessionSteering(join(runDir, "sessions"), inspector.branchId ?? "main", actionKey, message);
+			steerSession: (branchId, actionKey, message) => {
+				queueLiveSessionSteering(join(runDir, "sessions"), branchId, actionKey, message);
 			},
 			...(params.open === false ? { openBrowser: () => undefined } : {}),
 		});
@@ -1969,14 +1971,15 @@ async function viewCommand(tokens: string[], ctx: HyperchartContext, delivery: P
 	const readTranscript = transcriptReaderForRun(delivery, run.runDir);
 	const { url } = await openRunInspector({
 		runId: run.runId,
+		historyDataSource: await createRunInspectorDataSource(run.runDir, { readTranscript }),
 		// The snapshot's parsed AST avoids a synchronous chart-module re-parse on every poll.
-		loadRun: () => inspectRunForCurrentWorkDir(run.runDir, ctx, {
+		loadRun: (branchId) => inspectRunForCurrentWorkDir(run.runDir, ctx, {
 			ast: run.ast,
-			includeTranscripts: true,
-			readTranscript,
+			...(branchId === undefined ? {} : { branchId }),
+			includeTranscripts: false,
 		}),
-		steerSession: (actionKey, message) => {
-			queueLiveSessionSteering(join(run.runDir, "sessions"), "main", actionKey, message);
+		steerSession: (branchId, actionKey, message) => {
+			queueLiveSessionSteering(join(run.runDir, "sessions"), branchId, actionKey, message);
 		},
 	});
 	ctx.ui.notify(`Opened Hyperchart inspector for ${run.runId}: ${url}`, "info");
@@ -2048,7 +2051,7 @@ async function recentRunSnapshots(limit = 5, cwd?: string, originSessionId?: str
 			if (originSessionId !== undefined && meta.originSessionId !== originSessionId) continue;
 			const snapshot = await loadRunSnapshot(dir, meta);
 			if (snapshot.status !== undefined && isTerminalRunState(snapshot.status.state)) continue;
-			const view = buildRunView(snapshot.ast, await readRunRecords(dir), Date.now());
+			const view = await readRunView(dir, snapshot.ast);
 			if (!view.final) snapshots.push(snapshot);
 		} catch {
 			continue;
@@ -2080,7 +2083,7 @@ async function loadRunHistoryEntry(runDir: string, cwd: string): Promise<RunHist
 		status?.state === "complete" || status?.state === "failed" ? status.state : undefined;
 	try {
 		const snapshot = await loadRunSnapshot(runDir);
-		const view = buildRunView(snapshot.ast, await readRunRecords(runDir), Date.now());
+		const view = await readRunView(runDir, snapshot.ast);
 		final = view.final;
 		terminalState = view.final ? (isFailedRunView(view) ? "failed" : "complete") : undefined;
 	} catch {
@@ -2197,18 +2200,34 @@ function historyState(entry: RunHistoryEntry): string {
 	return entry.final ? "complete" : "stale";
 }
 
-async function readRunRecords(runDir: string): Promise<readonly DurableLogRecord[]> {
+async function readRunView(runDir: string, ast: ChartAst) {
 	const store = await openRunLogStore(runDir, { access: "read" });
 	try {
-		return await store.readAncestry(store.branchId);
-	} finally {
-		await store.close();
-	}
+		let syntheticEmptyBranch = false;
+		let snapshot: { branchId: string; headSeqId: number | null };
+		try { snapshot = await store.captureSnapshot(store.branchId); }
+		catch (error) {
+			if (await store.countRecords() !== 0) throw error;
+			snapshot = { branchId: store.branchId, headSeqId: null };
+			syntheticEmptyBranch = true;
+		}
+		const [loaded, records] = await Promise.all([
+			loadBranchProjection({ ast, branchId: store.branchId, store, contract: projectionContractForAst(ast), snapshot, saveCheckpoint: "never" }),
+			syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
+		]);
+		return buildRunView(ast, [...records.items].reverse(), Date.now(), { projection: loaded.projection, branchId: snapshot.branchId });
+	} finally { await store.close(); }
 }
 
 async function loadRunArgs(runDir: string): Promise<Record<string, unknown> | undefined> {
-	const argsRecord = (await readRunRecords(runDir)).find((record) => record.type === "args");
-	return argsRecord?.type === "args" ? { ...argsRecord.args } : undefined;
+	const meta = await loadRunMeta(runDir);
+	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
+	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	const store = await openRunLogStore(runDir, { access: "read" });
+	try {
+		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: store.branchId, store, contract: projectionContractForAst(parsed.ast), saveCheckpoint: "never" });
+		return loaded.projection.args === undefined ? undefined : { ...loaded.projection.args };
+	} finally { await store.close(); }
 }
 
 function countSessionDirs(runDir: string): number {

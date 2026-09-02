@@ -3,7 +3,7 @@ import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import type { RunHistoryStore } from "@surprisal/hyperchart/runtime";
 import {
-	collectRunWidgetBranches,
+	readRunWidgetBranchOverview,
 	RunHistoryOverlay,
 	type RunHistoryAction,
 	RunWidget,
@@ -78,7 +78,7 @@ describe("minimal Hyperchart TUI", () => {
 		widget.dispose();
 	});
 
-	it("collects every branch page for the run widget", async () => {
+	it("loads only the bounded branch overview page for the run widget", async () => {
 		const branches = Array.from({ length: 101 }, (_, index) => ({
 			branchId: `branch-${index.toString().padStart(3, "0")}`,
 			headSeqId: index,
@@ -94,10 +94,11 @@ describe("minimal Hyperchart TUI", () => {
 			},
 		} as unknown as RunHistoryStore;
 
-		const collected = await collectRunWidgetBranches(store);
-		expect(cursors).toEqual([undefined, "page-2"]);
-		expect(collected).toHaveLength(101);
-		expect(collected.at(-1)?.branchId).toBe("branch-100");
+		const overview = await readRunWidgetBranchOverview(store);
+		expect(cursors).toEqual([undefined]);
+		expect(overview.items).toHaveLength(100);
+		expect(overview.totalCount).toBe(101);
+		expect(overview.next).toBe("page-2");
 	});
 
 	it("closes the picker with Escape", () => {

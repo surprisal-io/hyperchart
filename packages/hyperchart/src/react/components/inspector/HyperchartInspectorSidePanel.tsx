@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
-import type { HyperchartRunInfo } from "../../types.js";
+import type { HyperchartInspectorDataSource, HyperchartRunInfo } from "../../types.js";
 import { useHyperchartTheme } from "../../support/theme-context.js";
 import { stateScopeParentId } from "./helpers/scope.js";
 import { RunOverview } from "./details/RunOverview.js";
@@ -15,6 +15,8 @@ export interface HyperchartInspectorSidePanelProps {
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	className?: string;
 	definitionSource?: string;
+	historyDataSource?: HyperchartInspectorDataSource;
+	historyTargetSeqId?: number;
 }
 
 export function HyperchartInspectorSidePanel({
@@ -26,6 +28,8 @@ export function HyperchartInspectorSidePanel({
 	onSteerSession,
 	className = "",
 	definitionSource,
+	historyDataSource,
+	historyTargetSeqId,
 }: HyperchartInspectorSidePanelProps) {
 	const { resolved } = useHyperchartTheme();
 	const selectedState = selectedStateId ? (run.states.find((state) => state.id === selectedStateId) ?? null) : null;
@@ -122,6 +126,7 @@ export function HyperchartInspectorSidePanel({
 							setHighlightedInputName(null);
 						}}
 						{...scopeProps}
+						{...(historyDataSource === undefined || run.historySnapshot === undefined ? {} : { history: { runId: run.runId, snapshot: run.historySnapshot, dataSource: historyDataSource, ...(historyTargetSeqId === undefined ? {} : { targetSeqId: historyTargetSeqId }) } })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 					/>
 				</>

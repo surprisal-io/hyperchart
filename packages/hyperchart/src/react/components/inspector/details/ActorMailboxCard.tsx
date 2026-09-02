@@ -54,25 +54,34 @@ export function ActorMailboxCard({
 	const [showHistory, setShowHistory] = useState(false);
 	const latest = instances.at(-1);
 	if (latest === undefined) return null;
-	const entries = expanded ? latest.mailbox.entries : latest.mailbox.entries.slice(0, 4);
+	const mailboxEntries = latest.mailbox.entries;
+	const messageHistory = latest.messageHistory ?? [];
+	const entries = mailboxEntries === undefined ? [] : expanded ? mailboxEntries : mailboxEntries.slice(0, 4);
+	const summarizedHead = mailboxEntries === undefined ? latest.mailbox.head : undefined;
 	const previousInstances = instances.slice(0, -1);
-	const hasHistory = previousInstances.length > 0 || latest.messageHistory.length > 0;
+	const hasHistory = previousInstances.length > 0 || messageHistory.length > 0;
 	return (
 		<div className="rounded-lg border border-[var(--border-secondary)] p-2">
 			<div className="mb-2 flex min-w-0 items-center gap-2 text-[10px]">
 				<span className="font-semibold text-[var(--text-primary)]">Latest instance · generation {latest.generation}</span>
 				<span className="ml-auto shrink-0 uppercase text-[var(--text-muted)]">{latest.status}</span>
 			</div>
-			{(!hideHeader || latest.mailbox.entries.length > 4) && (
+			{(!hideHeader || (mailboxEntries?.length ?? 0) > 4) && (
 				<div className="flex items-center justify-between gap-2">
 					{!hideHeader && <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">FIFO mailbox · {latest.mailbox.totalCount} queued</div>}
-					{latest.mailbox.entries.length > 4 && <button type="button" className="ml-auto text-[10px] text-[var(--hc-cyan-text)]" onClick={() => setExpanded((value) => !value)}>{expanded ? "Compact" : `Show all ${latest.mailbox.entries.length}`}</button>}
+					{(mailboxEntries?.length ?? 0) > 4 && <button type="button" className="ml-auto text-[10px] text-[var(--hc-cyan-text)]" onClick={() => setExpanded((value) => !value)}>{expanded ? "Compact" : `Show all ${mailboxEntries?.length ?? 0}`}</button>}
 				</div>
 			)}
 			<div className="grid gap-1">
 				{latest.currentMessage !== undefined && <ActorMailboxMessageRow message={latest.currentMessage} current />}
+				{summarizedHead !== undefined && <ActorMailboxMessageRow message={summarizedHead} index={0} />}
 				{entries.map((entry, index) => <ActorMailboxMessageRow key={entry.messageId} message={entry} index={index} />)}
-				{latest.currentMessage === undefined && entries.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">Mailbox is empty.</div>}
+				{mailboxEntries === undefined && latest.mailbox.totalCount > 0 && (
+					<div className="text-[10px] text-[var(--text-muted)]">
+						{summarizedHead === undefined ? "Mailbox contents are summarized." : "Showing the retained mailbox head."} {latest.mailbox.totalCount.toLocaleString()} queued in the pinned overview; load actor message history for durable batches.
+					</div>
+				)}
+				{latest.currentMessage === undefined && latest.mailbox.totalCount === 0 && <div className="text-[10px] text-[var(--text-muted)]">Mailbox is empty.</div>}
 				{hasHistory && (
 					<button
 						type="button"
@@ -84,27 +93,27 @@ export function ActorMailboxCard({
 				)}
 				{showHistory && (
 					<div className="mt-1 grid gap-2 border-t border-[var(--border-secondary)] pt-2">
-						{latest.messageHistory.length > 0 && (
+						{messageHistory.length > 0 && (
 							<section>
-								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed in latest instance · {latest.messageHistory.length}</div>
+								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed in latest instance · {messageHistory.length}</div>
 								<div className="grid gap-1">
-									{latest.messageHistory.map((entry, index) => <ActorMailboxMessageRow key={`history:${latest.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
+									{messageHistory.map((entry, index) => <ActorMailboxMessageRow key={`history:${latest.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
 								</div>
 							</section>
 						)}
 						{[...previousInstances].reverse().map((instance, instanceIndex) => (
 							<section
 								key={instance.occurrencePath}
-								className={latest.messageHistory.length === 0 && instanceIndex === 0 ? "" : "border-t border-[var(--border-secondary)] pt-2"}
+								className={messageHistory.length === 0 && instanceIndex === 0 ? "" : "border-t border-[var(--border-secondary)] pt-2"}
 							>
 								<div className="mb-1.5 flex min-w-0 items-center gap-2 text-[10px]">
 									<span className="font-semibold text-[var(--text-primary)]">Instance · generation {instance.generation}</span>
 									<span className="ml-auto shrink-0 uppercase text-[var(--text-muted)]">{instance.status}</span>
 								</div>
-								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed messages · {instance.messageHistory.length}</div>
+								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed messages · {instance.messageHistory?.length ?? 0}</div>
 								<div className="grid gap-1">
-									{instance.messageHistory.map((entry, index) => <ActorMailboxMessageRow key={`history:${instance.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
-									{instance.messageHistory.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No processed messages.</div>}
+									{instance.messageHistory?.map((entry, index) => <ActorMailboxMessageRow key={`history:${instance.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
+									{(instance.messageHistory?.length ?? 0) === 0 && <div className="text-[10px] text-[var(--text-muted)]">No processed messages.</div>}
 								</div>
 							</section>
 						))}

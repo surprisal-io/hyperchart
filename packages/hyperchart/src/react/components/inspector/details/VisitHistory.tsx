@@ -16,6 +16,7 @@ export function VisitHistory({
 	agentName,
 	onSteerSession,
 	onHighlightArtifact,
+	onReadSession,
 }: {
 	visits: HyperchartVisitInfo[];
 	state: HyperchartStateInfo;
@@ -23,16 +24,41 @@ export function VisitHistory({
 	agentName?: string;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
+	onReadSession?: (invokeSeqId: number) => Promise<HyperchartVisitInfo["session"]>;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
+	const [loadedSessions, setLoadedSessions] = useState<Record<number, NonNullable<HyperchartVisitInfo["session"]>>>({});
+	const [sessionReads, setSessionReads] = useState<Record<number, { loading: boolean; error?: string }>>({});
+	const openVisitSession = (visit: HyperchartVisitInfo) => {
+		const identity = visitSessionIdentity(visit);
+		if (identity === undefined) return;
+		if (onReadSession === undefined || loadedSessions[visit.invokeSeqId] !== undefined) {
+			setOpenSessionIdentity(identity);
+			return;
+		}
+		setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: true } }));
+		void onReadSession(visit.invokeSeqId).then((session) => {
+			if (session === undefined) {
+				setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: "Transcript is unavailable." } }));
+				return;
+			}
+			setLoadedSessions((current) => ({ ...current, [visit.invokeSeqId]: session }));
+			setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false } }));
+			setOpenSessionIdentity(identity);
+		}, (error: unknown) => {
+			setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: error instanceof Error ? error.message : String(error) } }));
+		});
+	};
 	if (visits.length === 0) return null;
 	const openVisit = visits.find((visit) => visitSessionIdentity(visit) === openSessionIdentity);
+	const openSession = openVisit === undefined ? undefined : loadedSessions[openVisit.invokeSeqId] ?? openVisit.session;
 	return (
 		<>
 			<div className="space-y-2">
 				<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Visit history</div>
-				{visits.map((visit, index) => (
-					<details
+				{visits.map((visit, index) => {
+					const sessionRead = sessionReads[visit.invokeSeqId];
+					return <details
 						key={visit.invokeSeqId}
 						open={index === visits.length - 1 && visit.status === "running"}
 						className="group rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]"
@@ -45,16 +71,24 @@ export function VisitHistory({
 								<button
 									type="button"
 									aria-label={`View session for visit ${visit.visit}`}
+									disabled={sessionRead?.loading === true || sessionRead?.error !== undefined}
 									onClick={(event) => {
 										event.preventDefault();
 										event.stopPropagation();
-										setOpenSessionIdentity(visitSessionIdentity(visit));
+										openVisitSession(visit);
 									}}
 									className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-cyan-text)] hover:bg-cyan-500/15"
 								>
 									<span className={`h-1.5 w-1.5 rounded-full ${isLiveSession(visit.session.status) ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
 									<CommandLineIcon className="h-3 w-3" aria-hidden="true" /> View session
 								</button>
+							)}
+							{sessionRead?.loading === true && <span role="status" className="text-[10px] text-[var(--text-muted)]">Loading transcript…</span>}
+							{sessionRead?.error !== undefined && (
+								<span className="inline-flex items-center gap-1 text-[10px] text-[var(--danger)]">
+									Transcript load failed: {sessionRead.error}
+									<button type="button" className="text-[var(--hc-cyan-text)]" onClick={(event) => { event.preventDefault(); event.stopPropagation(); openVisitSession(visit); }}>Retry</button>
+								</span>
 							)}
 							<span className="basis-full text-right text-[10px] text-[var(--text-muted)] group-open:hidden">show</span>
 							<span className="hidden basis-full text-right text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
@@ -118,18 +152,18 @@ export function VisitHistory({
 							)}
 							<VisitInvocationDetails invocation={visit.invocation} state={state} allStates={allStates} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
 						</div>
-					</details>
-				))}
+					</details>;
+				})}
 			</div>
-			{openVisit?.session !== undefined && (
+			{openVisit !== undefined && openSession !== undefined && (
 				<AgentSessionDialog
 					key={`visit-session-dialog:${visitSessionIdentity(openVisit)}`}
-					agentName={agentName ?? openVisit.session.actionKey}
-					session={openVisit.session}
+					agentName={agentName ?? openSession.actionKey}
+					session={openSession}
 					onClose={() => setOpenSessionIdentity(undefined)}
 					{...(onSteerSession === undefined
 						? {}
-						: { onSteer: (message: string) => onSteerSession(openVisit.session!.actionKey, message) })}
+						: { onSteer: (message: string) => onSteerSession(openSession.actionKey, message) })}
 				/>
 			)}
 		</>

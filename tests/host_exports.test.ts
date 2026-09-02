@@ -70,10 +70,20 @@ describe("host public surface", () => {
 
 	it("defines a harness-neutral snapshot adapter contract", async () => {
 		const snapshot: HyperchartSessionSnapshot = { hypercharts: [], runs: [] };
+		const unavailable = async (): Promise<never> => { throw new Error("not configured"); };
 		const adapter: HyperchartHostAdapter = {
 			readSessionSnapshot: async () => snapshot,
 			readChartSnapshot: async () => undefined,
+			readRunOverview: async () => undefined,
 			readRunSnapshot: async () => undefined,
+			listBranches: unavailable,
+			readStateVisits: unavailable,
+			readMapVisits: unavailable,
+			readActorGenerations: unavailable,
+			readActorMessages: unavailable,
+			readRecords: unavailable,
+			cursorAt: unavailable,
+			readVisitSession: unavailable,
 		};
 
 		await expect(adapter.readSessionSnapshot("/workspace", { runLimit: 10 })).resolves.toBe(snapshot);

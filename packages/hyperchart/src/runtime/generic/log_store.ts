@@ -81,6 +81,8 @@ export type StateVisitHistoryItem = Readonly<{
 	kind: "state-visit";
 	state: StatePath;
 	seqId: number;
+	/** One-based subject ordinal, derived from immutable ancestry order. */
+	visit: number;
 	invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>;
 	records: readonly DurableLogRecord[];
 }>;
@@ -88,6 +90,8 @@ export type MapVisitHistoryItem = Readonly<{
 	kind: "map-visit";
 	mapPath: StatePath;
 	seqId: number;
+	/** One-based subject ordinal, derived from immutable ancestry order. */
+	visit: number;
 	spawn: Extract<DurableLogRecord, { type: "spawned" }>;
 	records: readonly DurableLogRecord[];
 }>;
@@ -339,7 +343,7 @@ export function historyItemsForSubject(ancestry: readonly DurableLogRecord[], su
 		case "state-visits": return stateVisitItems(ancestry, subject.state);
 		case "map-visits": return ancestry
 			.filter((record): record is Extract<DurableLogRecord, { type: "spawned" }> => record.type === "spawned" && record.path === subject.mapPath)
-			.map((spawn): MapVisitHistoryItem => ({ kind: "map-visit", mapPath: subject.mapPath, seqId: spawn.seqId, spawn, records: [spawn] }))
+			.map((spawn, index): MapVisitHistoryItem => ({ kind: "map-visit", mapPath: subject.mapPath, seqId: spawn.seqId, visit: index + 1, spawn, records: [spawn] }))
 			.reverse();
 		case "actor-generations": return actorGenerationItems(ancestry, subject.logicalOccurrence);
 		case "actor-messages": return actorMessageItems(ancestry, subject.occurrence);
@@ -347,13 +351,13 @@ export function historyItemsForSubject(ancestry: readonly DurableLogRecord[], su
 }
 
 function stateVisitItems(ancestry: readonly DurableLogRecord[], state: StatePath): StateVisitHistoryItem[] {
-	type Mutable = { kind: "state-visit"; state: StatePath; seqId: number; invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>; records: DurableLogRecord[] };
+	type Mutable = { kind: "state-visit"; state: StatePath; seqId: number; visit: number; invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>; records: DurableLogRecord[] };
 	const items: Mutable[] = [];
 	const current = new Map<string, Mutable>();
 	for (const record of ancestry) {
 		if (record.type === "state_action" && record.kind === "invoke") {
 			if (record.actionUid.state !== state) continue;
-			const item: Mutable = { kind: "state-visit", state, seqId: record.seqId, invoke: record, records: [record] };
+			const item: Mutable = { kind: "state-visit", state, seqId: record.seqId, visit: items.length + 1, invoke: record, records: [record] };
 			items.push(item);
 			current.set(actionUidKey(record.actionUid), item);
 			continue;

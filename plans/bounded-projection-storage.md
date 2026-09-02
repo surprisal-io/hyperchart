@@ -294,8 +294,8 @@ export type HistorySubject =
 export type BranchListCursor = string;
 
 // Storage-owned, AST-free record groups. Phase 5 maps these to Hyperchart* host models.
-export type StateVisitHistoryItem = Readonly<{ kind: "state-visit"; state: StatePath; seqId: number; invoke: StateActionInvokeLog; records: readonly DurableLogRecord[] }>;
-export type MapVisitHistoryItem = Readonly<{ kind: "map-visit"; mapPath: StatePath; seqId: number; spawn: SpawnedLog; records: readonly DurableLogRecord[] }>;
+export type StateVisitHistoryItem = Readonly<{ kind: "state-visit"; state: StatePath; seqId: number; visit: number; invoke: StateActionInvokeLog; records: readonly DurableLogRecord[] }>;
+export type MapVisitHistoryItem = Readonly<{ kind: "map-visit"; mapPath: StatePath; seqId: number; visit: number; spawn: SpawnedLog; records: readonly DurableLogRecord[] }>;
 export type ActorGenerationHistoryItem = Readonly<{ kind: "actor-generation"; logicalOccurrence: StatePath; seqId: number; created: ActorCreatedLog; records: readonly DurableLogRecord[] }>;
 export type ActorMessageHistoryItem = Readonly<{ kind: "actor-message-batch"; occurrence: StatePath; seqId: number; enqueued: ActorMessagesEnqueuedLog; records: readonly DurableLogRecord[] }>;
 
@@ -785,7 +785,7 @@ export interface HyperchartInspectorDataSource {
     snapshot: HistorySnapshot;
     occurrence: StatePath;
     cursor?: HistoryCursor;
-  }): Promise<HistoryChunk<HyperchartActorMessageInfo>>;
+  }): Promise<HistoryChunk<HyperchartActorMessageBatchInfo>>;
 
   readRecords(input: {
     runId: string;
@@ -809,6 +809,8 @@ export interface HyperchartInspectorDataSource {
 ```
 
 Every method is idempotent and independently retryable. Older and newer edge requests may execute concurrently. No adapter method creates or retains a resource-holding reader object.
+
+**Phase 5 host-contract correction:** actor history remains one row per durable `actor_messages_enqueued` transaction. `HyperchartActorMessageBatchInfo` contains that batch's mapped messages and uses `(occurrencePath, enqueueSeqId)` as stable identity. The 100-item backend chunk bound and 1,000-item React window count batch rows, not messages. Flattening a multi-message enqueue would either exceed the chunk bound or lose cursor-addressable data, so the host layer deliberately preserves the stronger AST-free storage grouping.
 
 #### React loading flow
 
@@ -949,7 +951,7 @@ Tests to update/add include `tests/log_store.test.ts`, `tests/postgres_log_store
 - [x] Phase 2: remove resolved interactions and settled message histories from `BranchProjection`; add current artifact pins; compile conservative AST retention plans and synchronous projection GC; keep all synchronously required retained state; update semantic model/tests/TLA together.
 - [x] Phase 3: add projection contract digest/version, nearest-compatible PostgreSQL checkpoint persistence and loader/transaction seams; keep JSONL projection/index state in memory only; add finite-log equivalence tests. The 512-record cadence remains a policy constant only.
 - [x] Phase 4: migrate runtime startup/restart, replay gate, gate admission, response lookup, artifact materialization, fork, rewind, and final-outcome paths; activate interval, branch/move-target, and clean-shutdown checkpoint orchestration.
-- [ ] Phase 5: add inspector overview and bidirectional stateless cursor-chunk host APIs; implement the `@tanstack/react-virtual` 1,000-item sliding window; migrate React inspector, Pi adapter/extension/TUI, and Claude surfaces; add the dedicated Runtime History Storybook board and interaction tests.
+- [x] Phase 5: add inspector overview and bidirectional stateless cursor-chunk host APIs; implement the `@tanstack/react-virtual` 1,000-item sliding window; migrate React inspector, Pi adapter/extension/TUI, and Claude surfaces; add the dedicated Runtime History Storybook board and interaction tests. Actor messages remain durable enqueue-batch rows so public chunk/window bounds and cursor identity stay exact.
 - [ ] Phase 6: delete `readAncestry` and full-history snapshots from all production interfaces; add import-boundary tests preventing host/UI access to replay streams; update canonical/package docs.
 
 ## PostgreSQL catalog benchmark gate

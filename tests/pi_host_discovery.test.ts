@@ -428,12 +428,14 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const summary = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
 		const full = await host.readRunSnapshot(projectDir, "transcript-run");
 		const fullSession = full?.states.find((state) => state.id === "work")?.session;
+		const loadedSession = await host.readVisitSession({ runId: "transcript-run", branchId: "main", invokeSeqId: 2 });
 
 		expect(summary.runs[0]).toMatchObject({ runId: "transcript-run" });
 		expect(summary.runs[0]).not.toHaveProperty("states");
 		expect(summary.runs[0]).not.toHaveProperty("activeState");
 		expect(JSON.stringify(summary)).not.toContain("large transcript payload");
-		expect(fullSession?.messages).toEqual([
+		expect(fullSession?.messages).toBeUndefined();
+		expect(loadedSession?.messages).toEqual([
 			{ id: "message-1", role: "assistant", text: "large transcript payload" },
 		]);
 	});

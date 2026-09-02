@@ -50,6 +50,8 @@ Optional chart-level `args` metadata gives hosts serializable descriptions and J
 
 The host runtime overlay distinguishes map actions held behind a `concurrency` gate as `waiting`; admitted or invoked actions remain `running`. In the React inspector, agent cards show declared role/toolset metadata and resolved model/tool configuration, while a selected run state's `Runtime` section owns its live-session controls and actual launch-plan summary. `HyperchartRunStrip` accepts the lightweight chart/run summaries from `readSessionSnapshot()` directly and hides progress when its three summary progress fields are omitted or incomplete.
 
+Run inspectors load a projection-backed overview first, then request snapshot-pinned state/map/actor/record chunks through `HyperchartInspectorDataSource`. Runtime lists use `@tanstack/react-virtual`, retain at most 1,000 rows, and load transcripts only when a visit is opened. Actor messages remain grouped by durable enqueue transaction.
+
 The core package has no Pi dependency. React integrations use the optional peer dependencies declared by the package.
 
 ## Documentation

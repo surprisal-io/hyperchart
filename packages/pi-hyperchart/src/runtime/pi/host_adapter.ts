@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import * as ts from "typescript";
 import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect";
+import { createRunInspectorDataSource, hyperchartRunOverviewFromRunDir } from "@surprisal/hyperchart/inspect";
 import type {
 	HyperchartHostAdapter,
 	HyperchartSessionSnapshot,
@@ -31,6 +32,13 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 	const failedRunMetaFingerprints = new Map<string, string>();
 	const failedRunInspectionFingerprints = new Map<string, string>();
 	const agentDir = resolve(options.agentDir ?? defaultAgentDir());
+	const runDirFor = (runId: string) => {
+		if (basename(runId) !== runId) throw new Error("Invalid Hyperchart run id");
+		return join(getHyperchartRunsRoot(agentDir), runId);
+	};
+	const dataSourceFor = (runId: string) => createRunInspectorDataSource(runDirFor(runId), {
+		readTranscript: createPiFileTranscriptReader(runDirFor(runId)),
+	});
 
 	return {
 		readSessionSnapshot: (cwd, snapshotOptions = {}) =>
@@ -41,19 +49,31 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 			if (chart === undefined) return undefined;
 			return readChart(chart.source, chart.root, chart.scope, resolvedCwd, agentDir, options.agentDefaults);
 		},
+		readRunOverview: async (cwd, runId, branchId) => {
+			if (basename(runId) !== runId) return undefined;
+			const runDir = runDirFor(runId);
+			const meta = await loadRunMeta(runDir);
+			if (resolve(meta.workDir) !== resolve(cwd)) return undefined;
+			return hyperchartRunOverviewFromRunDir(runDir, {
+				...(branchId === undefined ? {} : { branchId }),
+				agentDefaults: options.agentDefaults ?? createAgentDefaultsResolver(resolve(cwd), agentDir, meta.chartPath),
+			});
+		},
 		readRunSnapshot: async (cwd, runId) => {
 			if (basename(runId) !== runId) return undefined;
 			return readRun(
-				join(getHyperchartRunsRoot(agentDir), runId),
-				resolve(cwd),
-				agentDir,
-				true,
-				options.agentDefaults,
-				createPiFileTranscriptReader,
-				failedRunMetaFingerprints,
-				failedRunInspectionFingerprints,
+				runDirFor(runId), resolve(cwd), agentDir, false, options.agentDefaults,
+				createPiFileTranscriptReader, failedRunMetaFingerprints, failedRunInspectionFingerprints,
 			);
 		},
+		listBranches: async (input) => (await dataSourceFor(input.runId)).listBranches(input),
+		readStateVisits: async (input) => (await dataSourceFor(input.runId)).readStateVisits(input),
+		readMapVisits: async (input) => (await dataSourceFor(input.runId)).readMapVisits(input),
+		readActorGenerations: async (input) => (await dataSourceFor(input.runId)).readActorGenerations(input),
+		readActorMessages: async (input) => (await dataSourceFor(input.runId)).readActorMessages(input),
+		readRecords: async (input) => (await dataSourceFor(input.runId)).readRecords(input),
+		cursorAt: async (input) => (await dataSourceFor(input.runId)).cursorAt(input),
+		readVisitSession: async (input) => (await dataSourceFor(input.runId)).readVisitSession(input),
 	};
 }
 

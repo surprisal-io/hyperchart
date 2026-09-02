@@ -1,19 +1,22 @@
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { actionUidKey } from "../core/action_uid.js";
+import { templatePath } from "../core/paths.js";
 import {
 	inspectChartAst,
 	parseChartModuleSync,
 	type HyperchartInspectAgentDefaults,
 } from "../core/inspect.js";
 import type { ActionUID, ChartAst } from "../core/types.js";
+import type { BranchProjection } from "../core/projection.js";
 import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
 import { hyperchartRunFromRuntime } from "../host/index.js";
-import type { HyperchartRunInfo, HyperchartSessionMessageInfo } from "../host/index.js";
+import type { HyperchartRunInfo, HyperchartRunOverview, HyperchartSessionMessageInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
 import type { BranchHead } from "../core/durable_events.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
-import { collectBranches } from "../runtime/generic/log_store.js";
+import type { BranchListChunk, HistorySnapshot } from "../runtime/generic/log_store.js";
+import { loadBranchProjection, projectionContractForAst } from "../runtime/generic/projection_loader.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
 import { readRunnerConfig } from "../runtime/generic/runner_main.js";
@@ -64,13 +67,30 @@ export async function hyperchartRunFromRunDir(
 	const branchId = options.branchId ?? "main";
 	let records = options.records;
 	let branches: readonly BranchHead[] | undefined;
-	if (records === undefined) {
-		const store = await openRunLogStore(absoluteRunDir, { branchId });
+	let initialBranches: BranchListChunk | undefined;
+	let snapshot: HistorySnapshot | undefined;
+	let projection: BranchProjection | undefined;
+	const bounded = records === undefined;
+	if (bounded) {
+		const store = await openRunLogStore(absoluteRunDir, { access: "read", branchId });
 		try {
-			[records, branches] = await Promise.all([
-				store.readAncestry(branchId),
-				collectBranches(store),
+			let syntheticEmptyBranch = false;
+			try {
+				snapshot = await store.captureSnapshot(branchId);
+			} catch (error) {
+				if (await store.countRecords() !== 0) throw error;
+				snapshot = { branchId, headSeqId: null };
+				syntheticEmptyBranch = true;
+			}
+			const loaded = await loadBranchProjection({ ast, branchId, store, contract: projectionContractForAst(ast), snapshot, saveCheckpoint: "never" });
+			projection = loaded.projection;
+			const [recordChunk, branchChunk] = await Promise.all([
+				syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
+				store.listBranches(),
 			]);
+			records = [...recordChunk.items].reverse();
+			initialBranches = branchChunk;
+			branches = branchChunk.items;
 		} finally {
 			await store.close();
 		}
@@ -84,15 +104,19 @@ export async function hyperchartRunFromRunDir(
 		),
 	};
 	const runId = status?.runId ?? basename(absoluteRunDir);
+	const runtimeRecords = records ?? [];
+	const overviewSessionProgress = bounded && projection !== undefined && options.includeTranscripts !== true
+		? currentSessionProgress(branchSessionProgress, projection)
+		: branchSessionProgress;
 	const sessionProgress = options.includeTranscripts === true
 		? await sessionProgressWithVisitTranscripts(
-				records,
+				runtimeRecords,
 				branchSessionProgress,
 				options.readTranscript,
 			)
-		: branchSessionProgress;
+		: overviewSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
-	const run = hyperchartRunFromRuntime(inspect, ast, records, {
+	const run = hyperchartRunFromRuntime(inspect, ast, runtimeRecords, {
 		runId,
 		...(status === undefined ? {} : { status }),
 		sessionProgress,
@@ -100,11 +124,15 @@ export async function hyperchartRunFromRunDir(
 		branchWorkspace: join(absoluteRunDir, "workspaces", branchId),
 		...(Number.isNaN(createdAt) ? {} : { createdAt }),
 		...(options.now === undefined ? {} : { now: options.now }),
+		...(projection === undefined ? {} : { projection }),
 	});
+	const selected = bounded && projection !== undefined && options.includeTranscripts !== true ? overviewOnly(run, projection) : run;
 	return {
-		...run,
+		...selected,
+		...(snapshot === undefined ? {} : { historySnapshot: snapshot }),
 		branchId,
 		...(status === undefined ? {} : { runnerBranchIds: status.branchIds }),
+		...(initialBranches === undefined ? {} : { branchCount: initialBranches.totalCount, ...(initialBranches.next === undefined ? {} : { branchListNext: initialBranches.next }) }),
 		...(branches === undefined ? {} : {
 			branches: branches.map((branch) => ({
 				branchId: branch.branchId,
@@ -114,6 +142,109 @@ export async function hyperchartRunFromRunDir(
 			})),
 		}),
 	};
+}
+
+export async function hyperchartRunOverviewFromRunDir(
+	runDir: string,
+	options: Omit<HyperchartRunFromRunDirOptions, "records" | "includeTranscripts" | "readTranscript"> = {},
+): Promise<HyperchartRunOverview> {
+	const run = await hyperchartRunFromRunDir(runDir, { ...options, includeTranscripts: false });
+	if (run.historySnapshot === undefined) throw new Error("Bounded run overview did not capture a history snapshot");
+	const store = await openRunLogStore(resolve(runDir), { access: "read", branchId: run.historySnapshot.branchId });
+	try {
+		const initialBranches = await store.listBranches();
+		return { run, branchCount: initialBranches.totalCount, initialBranches, snapshot: run.historySnapshot };
+	} finally { await store.close(); }
+}
+
+function currentSessionProgress(
+	progress: ReturnType<typeof readSessionProgress>,
+	projection: BranchProjection,
+): ReturnType<typeof readSessionProgress> {
+	const pendingInvokes = new Set(projection.pendingActions.map((pending) => pending.invokeSeqId));
+	const retainedSessionIds = new Set(Object.values(projection.sessions));
+	const latestByAction = new Map<string, number>();
+	const summaryKey = (session: (typeof progress.sessions)[string]) => `${templatePath(session.actionUid.state)}:${session.actionUid.action}`;
+	for (const session of Object.values(progress.sessions)) latestByAction.set(summaryKey(session), Math.max(latestByAction.get(summaryKey(session)) ?? 0, session.invokeSeqId));
+	return {
+		...progress,
+		sessions: Object.fromEntries(Object.entries(progress.sessions).filter(([, session]) =>
+			pendingInvokes.has(session.invokeSeqId)
+			|| session.sessionId !== undefined && retainedSessionIds.has(session.sessionId)
+			|| latestByAction.get(summaryKey(session)) === session.invokeSeqId,
+		)),
+	};
+}
+
+/** @internal Bounded transport projection characterized independently from disk loading. */
+export function overviewOnly(run: HyperchartRunInfo, projection: BranchProjection): HyperchartRunInfo {
+	const states = run.states.map((state) => {
+		const visitCount = Object.entries(projection.stateVisits)
+			.filter(([key]) => key.includes(`:${state.runtimeStatePath ?? state.id}:`))
+			.reduce((total, [, count]) => total + count, 0);
+		const latestVisit = state.visitHistory?.at(-1);
+		const session = state.session === undefined ? undefined : withoutMessages(state.session);
+		const hasMapRuntime = state.type === "map" && projection.spawns[state.id] !== undefined;
+		const actorMessageCount = state.actorOccurrence?.mailbox.totalCount ?? state.actorMessageHistory?.length ?? 0;
+		const actorOccurrence = state.actorOccurrence === undefined ? undefined : actorOccurrenceOverview(state.actorOccurrence);
+		const actorInternal = state.actorInternal === undefined ? undefined : (() => {
+			const generations = state.actorInternal.generations?.slice(-1).map((generation) => {
+				const { visitHistory: _visits, actorMessageHistory: _messages, actorMessages: _sent, ...current } = generation;
+				return current;
+			});
+			const { generations: _old, ...current } = state.actorInternal;
+			return { ...current, ...(generations === undefined ? {} : { generations }) };
+		})();
+		const actorMessageLink = state.actorMessageLink === undefined ? undefined : (() => {
+			const { messages: _messages, ...current } = state.actorMessageLink;
+			return current;
+		})();
+		const mapConfig = state.mapConfig === undefined ? undefined : (() => {
+			const { visitHistory: _visits, ...current } = state.mapConfig;
+			return current;
+		})();
+		const { visitHistory: _visits, actorMessageHistory: _actorMessages, mapConfig: _map, actorOccurrence: _actor, actorInternal: _internal, actorMessageLink: _link, ...base } = state;
+		return {
+			...base,
+			...(mapConfig === undefined ? {} : { mapConfig }),
+			...(session === undefined ? {} : { session }),
+			...(actorOccurrence === undefined ? {} : { actorOccurrence }),
+			...(actorInternal === undefined ? {} : { actorInternal }),
+			...(actorMessageLink === undefined ? {} : { actorMessageLink }),
+			runtimeSummary: {
+				status: state.status,
+				visitCount,
+				...(latestVisit === undefined ? {} : { latestVisit: { visit: latestVisit.visit, invokeSeqId: latestVisit.invokeSeqId, startedAt: latestVisit.startedAt, ...(latestVisit.endedAt === undefined ? {} : { endedAt: latestVisit.endedAt }), status: latestVisit.status } }),
+				...(session === undefined ? {} : { activeSession: session }),
+				...(state.usage === undefined ? {} : { usage: state.usage }),
+				issueCount: state.issues?.length ?? 0,
+				actorMessageCount,
+				hasOlderRuntime: visitCount > 0 || actorMessageCount > 0 || hasMapRuntime,
+			},
+		};
+	});
+	const actorOccurrences = run.actorOccurrences?.map(actorOccurrenceOverview);
+	const { recordTree: _tree, actorOccurrences: _actors, ...baseRun } = run;
+	return { ...baseRun, states, ...(actorOccurrences === undefined ? {} : { actorOccurrences }) };
+}
+
+function actorOccurrenceOverview(actor: NonNullable<HyperchartRunInfo["actorOccurrences"]>[number]) {
+	const { generationHistory: _generations, messageHistory: _messages, batchCalls: _batchCalls, ...current } = actor;
+	const mailbox = { totalCount: actor.mailbox.totalCount, ...(actor.mailbox.head === undefined ? {} : { head: actor.mailbox.head }) };
+	const mailboxInstances = current.mailboxInstances.slice(-1).map((instance) => {
+		const { messageHistory: _history, mailbox: instanceMailbox, ...summary } = instance;
+		return { ...summary, mailbox: { totalCount: instanceMailbox.totalCount, ...(instanceMailbox.head === undefined ? {} : { head: instanceMailbox.head }) } };
+	});
+	const workers = current.workers?.map((worker) => {
+		const { messageHistory: _workerMessages, visitHistory: _workerVisits, session, ...summary } = worker;
+		return { ...summary, ...(session === undefined ? {} : { session: withoutMessages(session) }) };
+	});
+	return { ...current, mailbox, mailboxInstances, ...(workers === undefined ? {} : { workers }) };
+}
+
+function withoutMessages(session: NonNullable<HyperchartRunInfo["states"][number]["session"]>) {
+	const { messages: _messages, ...summary } = session;
+	return summary;
 }
 
 async function sessionProgressWithVisitTranscripts(

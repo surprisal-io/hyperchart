@@ -1,6 +1,8 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { HyperchartRunInfo } from "../host/index.js";
+import { browserHistoryDataSource } from "./inspector_http_client.js";
+import type { HistorySnapshot } from "../runtime/generic/log_store.js";
 import { HyperchartInspectorDialog } from "../react/HyperchartInspectorDialog.js";
 import "../react/styles.css";
 
@@ -21,8 +23,13 @@ function initialTheme(): ThemeName {
 function InspectorApp() {
 	const [run, setRun] = useState<HyperchartRunInfo>();
 	const [error, setError] = useState<string>();
+	const [latestHistorySnapshot, setLatestHistorySnapshot] = useState<HistorySnapshot>();
+	const [selectedBranchId, setSelectedBranchId] = useState<string>();
 	const [theme, setTheme] = useState<ThemeName>(initialTheme);
 	const token = runToken();
+	const historyDataSource = useMemo(() => token === undefined ? undefined : browserHistoryDataSource(token), [token]);
+	const linkedSeqId = Number(new URLSearchParams(window.location.search).get("seqId"));
+	const historyTargetSeqId = Number.isSafeInteger(linkedSeqId) && linkedSeqId > 0 ? linkedSeqId : undefined;
 
 	useEffect(() => {
 		if (token === undefined) {
@@ -35,11 +42,18 @@ function InspectorApp() {
 			if (loading) return;
 			loading = true;
 			try {
-				const response = await fetch(`/api/runs/${token}`, { cache: "no-store" });
+				const branchQuery = selectedBranchId === undefined ? "" : `?branchId=${encodeURIComponent(selectedBranchId)}`;
+				const response = await fetch(`/api/runs/${token}${branchQuery}`, { cache: "no-store" });
 				const payload = (await response.json()) as RunResponse;
 				if (!response.ok || payload.run === undefined) throw new Error(payload.error ?? `Inspector request failed (${response.status})`);
 				if (!disposed) {
-					setRun(payload.run);
+					setLatestHistorySnapshot(payload.run.historySnapshot);
+					setRun((current) => {
+						const preserve = current?.runId === payload.run!.runId && current.branchId === payload.run!.branchId
+							? current.historySnapshot
+							: undefined;
+						return { ...payload.run!, ...(preserve === undefined ? {} : { historySnapshot: preserve }) };
+					});
 					setError(undefined);
 				}
 			} catch (nextError) {
@@ -54,7 +68,7 @@ function InspectorApp() {
 			disposed = true;
 			window.clearInterval(timer);
 		};
-	}, [token]);
+	}, [selectedBranchId, token]);
 
 	const toggleTheme = () => {
 		const next = theme === "dark" ? "light" : "dark";
@@ -64,10 +78,11 @@ function InspectorApp() {
 
 	const steerSession = async (_runId: string, actionKey: string, message: string) => {
 		if (token === undefined) throw new Error("Invalid inspector URL");
+		if (run?.branchId === undefined) throw new Error("The selected branch is unavailable");
 		const response = await fetch(`/api/runs/${token}/steer`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ actionKey, message }),
+			body: JSON.stringify({ branchId: run.branchId, actionKey, message }),
 		});
 		const payload = (await response.json()) as { error?: string };
 		if (!response.ok) throw new Error(payload.error ?? `Steering request failed (${response.status})`);
@@ -87,7 +102,11 @@ function InspectorApp() {
 					runs={[run]}
 					selectedRunId={run.runId}
 					onClose={() => window.close()}
+					onSelectBranch={(_runId, branchId) => setSelectedBranchId(branchId)}
 					onSteerSession={steerSession}
+					onRefreshHistory={() => setRun((current) => current === undefined || latestHistorySnapshot === undefined ? current : { ...current, historySnapshot: latestHistorySnapshot })}
+					{...(historyDataSource === undefined ? {} : { historyDataSource })}
+					{...(historyTargetSeqId === undefined ? {} : { historyTargetSeqId })}
 					theme={{ resolved: theme, themeName: theme }}
 				/>
 			) : (

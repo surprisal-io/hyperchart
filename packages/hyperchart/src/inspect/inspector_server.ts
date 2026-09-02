@@ -5,14 +5,15 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import type { HyperchartRunInfo } from "../host/index.js";
+import type { HyperchartInspectorDataSource, HyperchartRunInfo } from "../host/index.js";
 
 export type RunInspectorSource = {
 	runId: string;
 	/** Initial non-durable branch view registered for this inspector source. */
 	branchId?: string;
-	loadRun: () => Promise<HyperchartRunInfo>;
-	steerSession?: (actionKey: string, message: string) => void | Promise<void>;
+	loadRun: (branchId?: string) => Promise<HyperchartRunInfo>;
+	historyDataSource?: HyperchartInspectorDataSource;
+	steerSession?: (branchId: string, actionKey: string, message: string) => void | Promise<void>;
 };
 
 export type OpenRunInspectorOptions = RunInspectorSource & {
@@ -36,6 +37,7 @@ export async function openRunInspector(options: OpenRunInspectorOptions): Promis
 	state.entries.set(token, {
 		runId: options.runId,
 		loadRun: options.loadRun,
+		...(options.historyDataSource === undefined ? {} : { historyDataSource: options.historyDataSource }),
 		...(options.steerSession === undefined ? {} : { steerSession: options.steerSession }),
 		touchedAt: Date.now(),
 	});
@@ -127,6 +129,35 @@ async function routeRequest(
 		const url = new URL(request.url ?? "/", "http://127.0.0.1");
 		setSecurityHeaders(response);
 
+		const historyToken = routeToken(url.pathname, "/api/runs/", "/history");
+		if (historyToken !== undefined) {
+			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
+			const entry = entries.get(historyToken);
+			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
+			if (entry.historyDataSource === undefined) return sendJson(response, 409, { error: "Lazy history is unavailable for this run" });
+			entry.touchedAt = Date.now();
+			try {
+				const body = await readJsonBody(request);
+				const input = typeof body.input === "object" && body.input !== null && !Array.isArray(body.input) ? body.input as Record<string, unknown> : {};
+				const requestInput = { ...input, runId: entry.runId } as never;
+				let result: unknown;
+				switch (body.operation) {
+					case "listBranches": result = await entry.historyDataSource.listBranches(requestInput); break;
+					case "readStateVisits": result = await entry.historyDataSource.readStateVisits(requestInput); break;
+					case "readMapVisits": result = await entry.historyDataSource.readMapVisits(requestInput); break;
+					case "readActorGenerations": result = await entry.historyDataSource.readActorGenerations(requestInput); break;
+					case "readActorMessages": result = await entry.historyDataSource.readActorMessages(requestInput); break;
+					case "readRecords": result = await entry.historyDataSource.readRecords(requestInput); break;
+					case "cursorAt": result = await entry.historyDataSource.cursorAt(requestInput); break;
+					case "readVisitSession": result = await entry.historyDataSource.readVisitSession(requestInput); break;
+					default: return sendJson(response, 400, { error: "Unknown history operation" });
+				}
+				return sendJson(response, 200, result === undefined ? { found: false } : { found: true, result });
+			} catch (error) {
+				return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
+			}
+		}
+
 		const steerToken = routeToken(url.pathname, "/api/runs/", "/steer");
 		if (steerToken !== undefined) {
 			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
@@ -136,10 +167,10 @@ async function routeRequest(
 			entry.touchedAt = Date.now();
 			try {
 				const body = await readJsonBody(request);
-				if (typeof body.actionKey !== "string" || typeof body.message !== "string") {
-					return sendJson(response, 400, { error: "actionKey and message are required" });
+				if (typeof body.branchId !== "string" || !validBranchId(body.branchId) || typeof body.actionKey !== "string" || typeof body.message !== "string") {
+					return sendJson(response, 400, { error: "valid branchId, actionKey, and message are required" });
 				}
-				await entry.steerSession(body.actionKey, body.message);
+				await entry.steerSession(body.branchId, body.actionKey, body.message);
 				return sendJson(response, 202, { queued: true });
 			} catch (error) {
 				return sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) });
@@ -153,7 +184,9 @@ async function routeRequest(
 			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
 			entry.touchedAt = Date.now();
 			try {
-				return sendJson(response, 200, { run: await entry.loadRun() });
+				const branchId = url.searchParams.get("branchId") ?? undefined;
+				if (branchId !== undefined && !validBranchId(branchId)) return sendJson(response, 400, { error: "Invalid branch id" });
+				return sendJson(response, 200, { run: await entry.loadRun(branchId) });
 			} catch (error) {
 				return sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
 			}
@@ -235,6 +268,10 @@ function setSecurityHeaders(response: ServerResponse): void {
 		"Content-Security-Policy",
 		"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; font-src 'self' data:",
 	);
+}
+
+function validBranchId(branchId: string): boolean {
+	return branchId.trim().length > 0 && branchId.length <= 128 && !/[\0/\\]/.test(branchId);
 }
 
 function sendJson(response: ServerResponse, status: number, value: unknown): void {

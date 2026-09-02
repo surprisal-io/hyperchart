@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, visibleWidth, type Component, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
-import { collectBranches, JsonlLogStore, type RunHistoryStore } from "@surprisal/hyperchart/runtime";
+import { JsonlLogStore, loadBranchProjection, projectionContractForAst, type RunHistoryStore } from "@surprisal/hyperchart/runtime";
 import {
 	readSessionProgress,
 	sessionProgressPath,
@@ -38,9 +38,9 @@ export type RunHistoryItem = {
 
 export type RunHistoryAction = { kind: "view"; runId: string } | { kind: "close" };
 
-/** @internal Compatibility helper until Phase 5 gives the TUI paginated presentation. */
-export async function collectRunWidgetBranches(store: RunHistoryStore) {
-	return collectBranches(store);
+/** Bounded branch overview for the compact TUI; additional pages belong to interactive navigation. */
+export function readRunWidgetBranchOverview(store: RunHistoryStore) {
+	return store.listBranches();
 }
 
 /** A deliberately small picker. Detailed run information belongs in the browser inspector. */
@@ -170,7 +170,7 @@ export class RunWidget implements Component {
 			`${colorRunGlyph(this.theme, view, live)} ${this.theme.bold(view.chartId)}`,
 			colorRunState(this.theme, runStateLabel(view, live)),
 			accent(this.theme, `branch:${view.branchId}`),
-			view.branches.length > 1 ? dim(this.theme, `${view.branches.length} heads`) : undefined,
+			view.branchCount > 1 ? dim(this.theme, `${view.branchCount} heads`) : undefined,
 			dim(this.theme, `tree:${view.recordCount}`),
 			view.runnerBranchIds !== undefined && (view.runnerBranchIds.length !== 1 || view.runnerBranchIds[0] !== view.branchId)
 				? dim(this.theme, `runners:${view.runnerBranchIds.join(",")}`)
@@ -186,7 +186,7 @@ export class RunWidget implements Component {
 			activeLines.push(...sessions.slice(0, 3).map((session) => compactSessionLine(session, this.theme, live)));
 		}
 		const hidden = Math.max(active.length, sessions.length) - activeLines.length;
-		const heads = view.branches.length === 0 ? undefined : dim(this.theme, `  heads ${view.branches.map((branch) => `${branch.branchId}@${branch.headSeqId ?? "empty"}`).join(" · ")}`);
+		const heads = view.branches.length === 0 ? undefined : dim(this.theme, `  heads ${view.branches.map((branch) => `${branch.branchId}@${branch.headSeqId ?? "empty"}`).join(" · ")}${view.branchCount > view.branches.length ? ` · +${view.branchCount - view.branches.length} more` : ""}`);
 		return [
 			header,
 			heads,
@@ -211,17 +211,22 @@ export class RunWidget implements Component {
 		this.lastStat = stat;
 		const branchId = this.opts.branchId ?? "main";
 		const store = new JsonlLogStore(this.opts.logPath, branchId);
-		const [records, branches, recordCount] = await Promise.all([
-			store.readAncestry(branchId),
-			collectRunWidgetBranches(store),
+		const snapshot = await store.captureSnapshot(branchId);
+		const [loaded, recordChunk, branches, recordCount] = await Promise.all([
+			loadBranchProjection({ ast: this.opts.ast, branchId, store, contract: projectionContractForAst(this.opts.ast), snapshot, saveCheckpoint: "never" }),
+			store.readRecords({ snapshot }),
+			readRunWidgetBranchOverview(store),
 			store.countRecords(),
 		]);
-		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId, records });
+		const records = [...recordChunk.items].reverse();
+		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId });
 		this.view = buildRunView(this.opts.ast, records, Date.now(), {
 			branchId,
 			...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
-			branches: branches.map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
+			branches: branches.items.map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
+			branchCount: branches.totalCount,
 			recordCount,
+			projection: loaded.projection,
 		});
 		this.progress = readSessionProgress(resolve(this.opts.runDir, "sessions")).sessions;
 		this.progressPercent = summarizeHyperchartProgress(run).pct;

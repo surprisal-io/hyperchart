@@ -9,7 +9,7 @@ import { ActorPoolWorkersCard } from "./ActorPoolWorkersCard.js";
 export function ActorMailboxSection({ state }: { state: HyperchartStateInfo }) {
 	const occurrence = state.actorOccurrence;
 	if (occurrence === undefined) return null;
-	const hasHistory = occurrence.mailboxInstances.length > 1 || occurrence.mailboxInstances.some((instance) => instance.messageHistory.length > 0);
+	const hasHistory = occurrence.mailboxInstances.length > 1 || occurrence.mailboxInstances.some((instance) => (instance.messageHistory?.length ?? 0) > 0);
 	if (occurrence.currentMessage === undefined && occurrence.mailbox.totalCount === 0 && !hasHistory) return null;
 	return (
 		<Section

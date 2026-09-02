@@ -1,6 +1,6 @@
 import type { ChartAst, StateAst } from "@surprisal/hyperchart/internal/core/types";
 import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
-import { createBranchProjection, isFinalState, type PendingAction, projectBranch } from "@surprisal/hyperchart/internal/core/projection";
+import { createBranchProjection, isFinalState, type BranchProjection, type PendingAction, projectBranch } from "@surprisal/hyperchart/internal/core/projection";
 import { underScope } from "@surprisal/hyperchart/internal/core/paths";
 
 export type PendingView = {
@@ -41,6 +41,7 @@ export type RunView = {
 	branchId: string;
 	runnerBranchIds?: string[];
 	branches: Array<{ branchId: string; headSeqId: number | null }>;
+	branchCount: number;
 	/** Full immutable record-tree size, including sibling history outside the selected ancestry. */
 	recordCount: number;
 	final: boolean;
@@ -58,9 +59,9 @@ export function buildRunView(
 	ast: ChartAst,
 	log: readonly DurableLogRecord[],
 	now: number,
-	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; recordCount?: number } = {},
+	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; branchCount?: number; recordCount?: number; projection?: BranchProjection } = {},
 ): RunView {
-	const projection = projectBranch(createBranchProjection(ast), ast, log);
+	const projection = branch.projection ?? projectBranch(createBranchProjection(ast), ast, log);
 	const final = isFinalState(projection, ast);
 	const finalLeaf = projection.activeLeaves[0];
 	return {
@@ -68,6 +69,7 @@ export function buildRunView(
 		branchId: branch.branchId ?? log.at(-1)?.branchId ?? "main",
 		...(branch.runnerBranchIds === undefined ? {} : { runnerBranchIds: branch.runnerBranchIds }),
 		branches: branch.branches ?? [],
+		branchCount: branch.branchCount ?? branch.branches?.length ?? 0,
 		recordCount: branch.recordCount ?? log.length,
 		final,
 		failedTerminal: final && projection.activeLeaves.some((leaf) => ast.states[leaf]?.kind === "final" && ast.states[leaf]?.outcome === "failed"),

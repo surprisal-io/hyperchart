@@ -99,6 +99,9 @@ export function HyperchartInspectorDialogInner({
 	onResume,
 	onAbort,
 	onSteerSession,
+	historyDataSource,
+	onRefreshHistory,
+	historyTargetSeqId,
 }: Omit<HyperchartInspectorDialogProps, "portal" | "theme">) {
 	const isMobile = useMobile();
 	const titleId = useId();
@@ -121,11 +124,17 @@ export function HyperchartInspectorDialogInner({
 	const [showSkipped, setShowSkipped] = useState(false);
 	const [showMapWorkers, setShowMapWorkers] = useState(false);
 	const [scopeStack, setScopeStack] = useState<string[]>([]);
+	const [visibleBranches, setVisibleBranches] = useState(run?.branches ?? []);
+	const [branchCursor, setBranchCursor] = useState(run?.branchListNext);
+	const [branchLoadError, setBranchLoadError] = useState<string>();
 
 	useEffect(() => {
 		void run?.runId;
 		setSelectedStateId(null);
 		setScopeStack([]);
+		setVisibleBranches(run?.branches ?? []);
+		setBranchCursor(run?.branchListNext);
+		setBranchLoadError(undefined);
 	}, [run?.runId, run?.branchId]);
 
 	const currentScopeId = scopeStack.at(-1) ?? null;
@@ -168,6 +177,16 @@ export function HyperchartInspectorDialogInner({
 		setSelectedStateId(stateId);
 	}, []);
 	const clearStateSelection = useCallback(() => setSelectedStateId(null), []);
+	const loadMoreBranches = useCallback(async () => {
+		const latestRun = runRef.current;
+		if (latestRun === undefined || historyDataSource === undefined || branchCursor === undefined) return;
+		try {
+			const chunk = await historyDataSource.listBranches({ runId: latestRun.runId, cursor: branchCursor });
+			setVisibleBranches((current) => [...current, ...chunk.items.filter((branch) => !current.some((candidate) => candidate.branchId === branch.branchId)).map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId, ...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }), ...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }) }))]);
+			setBranchCursor(chunk.next);
+			setBranchLoadError(undefined);
+		} catch (error) { setBranchLoadError(error instanceof Error ? error.message : String(error)); }
+	}, [branchCursor, historyDataSource]);
 	const handleNodeClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => setSelectedStateId(node.id), []);
 	const handleNodeDoubleClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => openScope(node.id), [openScope]);
 
@@ -214,9 +233,9 @@ export function HyperchartInspectorDialogInner({
 								/>
 							</div>
 						</div>
-						{run.branches && run.branches.length > 0 && (
+						{visibleBranches.length > 0 && (
 							<div className="flex items-center gap-1" data-testid="hyperchart-branch-navigation">
-								{run.branches.map((branch) => (
+								{visibleBranches.map((branch) => (
 									<button
 										type="button"
 										key={branch.branchId}
@@ -229,12 +248,14 @@ export function HyperchartInspectorDialogInner({
 								))}
 								{onForkBranch && run.branchId && (
 									<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => {
-										const head = run.branches?.find((branch) => branch.branchId === run.branchId)?.headSeqId;
+										const head = visibleBranches.find((branch) => branch.branchId === run.branchId)?.headSeqId;
 										if (head === null || head === undefined) return;
 										const branchId = window.prompt("New branch name");
 										if (branchId && window.confirm(`Create branch ${branchId} at seqId ${head}? This will not select or start it.`)) void onForkBranch(run.runId, head, branchId);
 									}}>Fork…</button>
 								)}
+								{branchCursor !== undefined && historyDataSource !== undefined && <button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => void loadMoreBranches()}>More heads…</button>}
+								{branchLoadError !== undefined && <span className="text-xs text-[var(--danger)]" title={branchLoadError}>heads failed</span>}
 								{onRewindBranch && run.branchId && (
 									<button type="button" className="rounded border border-amber-500/35 px-2 py-1 text-xs" onClick={() => {
 										const value = window.prompt(`Move ${run.branchId} head to seqId`);
@@ -243,6 +264,9 @@ export function HyperchartInspectorDialogInner({
 									}}>Rewind…</button>
 								)}
 							</div>
+						)}
+						{historyDataSource !== undefined && run.historySnapshot !== undefined && onRefreshHistory !== undefined && (
+							<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)]" onClick={() => void onRefreshHistory(run.runId)}>Refresh history</button>
 						)}
 						{run.status === "running" && onAbort && (
 							<button
@@ -410,6 +434,8 @@ export function HyperchartInspectorDialogInner({
 							onClearSelection={clearStateSelection}
 							onOpenScope={openScope}
 							onNavigateToState={navigateToState}
+							{...(historyDataSource === undefined ? {} : { historyDataSource })}
+							{...(historyTargetSeqId === undefined ? {} : { historyTargetSeqId })}
 							{...(onSteerSession === undefined
 								? {}
 								: { onSteerSession: (actionKey: string, message: string) => onSteerSession(run.runId, actionKey, message) })}
