@@ -152,7 +152,7 @@ export type ProjectedActorPoolOccurrence = {
    pendingActorCalls: Record<string, PendingActorCall>;
    actorProducerVisits: Record<StatePath, number>;
  };
- 
+
 -export type ProjectedUserInteraction = {
 +export type OpenProjectedUserInteraction = {
    opened: UserInteractionOpenedLog;
@@ -160,14 +160,14 @@ export type ProjectedActorPoolOccurrence = {
 -  resolvedEvent?: ChartEvent;
 +  status: "open";
  };
- 
+
  export type ProjectedActorOccurrence = {
    // identity, definition, current state and live-control fields unchanged
    mailbox: ProjectedActorMessage[];
 -  messages: ProjectedActorMessage[];
    currentMessage?: ProjectedActorMessage;
  };
- 
+
  export type ProjectedActorPoolOccurrence = {
    // identity, definition, workers and live-control fields unchanged
    mailbox: ProjectedActorMessage[];
@@ -852,7 +852,7 @@ type HistoryWindow<T> = Readonly<{
   items: readonly T[];              // always <= HISTORY_WINDOW_ITEMS
   older?: HistoryCursor;
   newer?: HistoryCursor;
-  
+
 }>;
 ```
 
