@@ -2,7 +2,15 @@
 
 ## Status
 
-Design plan only. No implementation is authorized by this document.
+Implementation is authorized. Phase 0 is complete. Phase 0.5 rejected the immutable HAMT physical design; the retained benchmark remains evidence and must not be integrated.
+
+### Interim execution decision (2026-09-02)
+
+Ship the remaining API, semantic, projection, checkpoint, runtime, and inspector work now. Until the replacement catalog is benchmark-approved, PostgreSQL history operations are deliberately inefficient reference implementations over the durable journal: they may traverse/materialize selected ancestry internally, apply typed filtering in process or SQL, and then return only the bounded public chunk/private batch required by the final interface. Performance, ancestry-independent query cost, and history-proportional internal memory are temporarily waived; result bounds, snapshot pinning, cursor semantics, trusted-storage behavior, synchronous core semantics, and every other invariant remain in force.
+
+No public API regains `readAncestry()`, an unbounded array, or stateful reader handles. Slow full-log traversal is backend-private scaffolding behind the final bounded interfaces so the later storage replacement does not require consumer migration.
+
+**Deferred optimization TODO:** replace the journal-traversal scaffolding with the jointly selected version-order-list predecessor catalog: internal two-level order labels; mandatory open/closing fat entries; ordinal-addressed `head`, `item`, and `raw` keys; one snapshot-position predecessor lookup for point queries; and at most 100 `generate_series` + `LATERAL` predecessor probes for history chunks. Benchmark relabel churn, WAL, bloat, and all four 100k/100m shapes before production integration. The rejected HAMT nodes, membership keys, forward keys, shared-node GC, Stratified B-tree, Prolly tree, and binary-lifting variants are not interim production dependencies.
 
 ## Context
 
@@ -14,7 +22,7 @@ The intended outcome is to remove complete-ancestry reads while keeping `machine
 
 `machine` and `projectBranch` remain synchronous. They must never perform I/O and must not return promises.
 
-`execution_loop` owns projection restoration and execution. It asks `RunLogStore` only for checkpoint bytes and fixed-size journal chunks, synchronously applies each chunk through `projectBranch`, and then creates/steps the machine with the resulting in-memory `BranchProjection`. Storage never imports the AST, calls the projector, compacts semantic state, or decides when execution starts. Machine steps never fetch projection fields from storage and never await the projector. The optimization boundary is therefore:
+`execution_loop` owns projection restoration and execution. It asks `RunLogStore` only for checkpoint bytes and fixed-size journal chunks, synchronously applies each chunk through `projectBranch`, and then creates/steps the machine with the resulting in-memory `BranchProjection`. Storage never imports the AST, calls the projector, compacts semantic state, or decides when execution starts. Machine steps never fetch projection fields from storage and never await the projector. The target optimization boundary is therefore (the interim journal-backed scaffolding implements the interface first and temporarily defers the performance properties):
 
 1. stop materializing complete ancestry arrays;
 2. persist reusable projection checkpoints;
@@ -22,7 +30,7 @@ The intended outcome is to remove complete-ancestry reads while keeping `machine
 4. remove elapsed-history data from the live projection;
 5. expose history through fixed-size stateless cursor-chunk queries.
 
-This does not promise a fixed byte bound for all charts. A single live mailbox, fan-out input, result, or other semantically retained value may itself be arbitrarily large. The enforceable guarantee is: **normal memory and query results do not grow merely because more immutable journal history exists**.
+This does not promise a fixed byte bound for all charts. A single live mailbox, fan-out input, result, or other semantically retained value may itself be arbitrarily large. The final enforceable guarantee is: **normal memory and query results do not grow merely because more immutable journal history exists**. During the explicitly approved interim, only public query-result and replay-batch sizes are bounded; backend-private work may still grow with ancestry until the deferred predecessor catalog lands.
 
 ## Non-negotiable invariants
 
@@ -32,7 +40,7 @@ This does not promise a fixed byte bound for all charts. A single live mailbox, 
 - Malformed JSON in `log.jsonl`, including an incomplete final line, fails parsing and leaves the file unchanged.
 - Replay compatibility against a changed chart remains a semantic operation. It is not journal structural validation.
 - `machine`, `projectBranch`, and expression/template evaluation remain synchronous.
-- No public or production-internal API returns an unbounded ancestry array.
+- No public API returns an unbounded ancestry array. Backend-private interim traversal may materialize ancestry only to implement the final bounded API until the deferred catalog replaces it.
 - Every public history chunk and private replay batch has a hard backend-enforced maximum that callers cannot override.
 - An ancestry follows `parentId`; numeric `seqId` order is not ancestry order.
 - Branch movement never changes the snapshot represented by an issued history cursor.
@@ -923,9 +931,9 @@ Tests to update/add include `tests/log_store.test.ts`, `tests/postgres_log_store
 
 ## Steps
 
-- [ ] Phase 0: clear the disposable PostgreSQL development data, define `next_seq` in the new initial schema, keep trusted-storage behavior, and stabilize/commit the current targeted-query refactor without adding migration/compatibility code or new ancestry callers.
-- [ ] Phase 0.5: build the isolated PostgreSQL catalog prototype and run the benchmark gate below before integrating HAMT/catalog code into runtime production paths.
-- [ ] Phase 1: introduce snapshot-bound stateless history chunks, read-committed branch keyset pagination, and `cursorAt`; add the benchmark-approved persistent catalog with branch-versioned forward keys; implement capped older/newer traversal plus the private oldest-first `AsyncIterable` replay stream.
+- [x] Phase 0: clear the disposable PostgreSQL development data, define `next_seq` in the new initial schema, keep trusted-storage behavior, and stabilize/commit the current targeted-query refactor without adding migration/compatibility code or new ancestry callers.
+- [x] Phase 0.5: build the isolated PostgreSQL catalog prototype and run the benchmark gate below before integrating catalog code into runtime production paths. The HAMT candidate was rejected and retained as evidence.
+- [ ] Phase 1: introduce snapshot-bound stateless history chunks, read-committed branch keyset pagination, `cursorAt`, capped older/newer traversal, and the private oldest-first `AsyncIterable` replay stream. Implement them first as backend-private journal traversal/filtering scaffolding; do not integrate the rejected HAMT. Preserve the final consumer-facing contracts so the deferred predecessor catalog is a storage-only replacement.
 - [ ] Phase 2: remove resolved interactions and settled message histories from `BranchProjection`; add current artifact pins; compile conservative AST retention plans and synchronous projection GC; keep all synchronously required retained state; update semantic model/tests/TLA together.
 - [ ] Phase 3: add projection contract digest/version and nearest-compatible PostgreSQL checkpoints/cadence; keep JSONL projection/index state in memory only; add finite-log equivalence tests.
 - [ ] Phase 4: migrate runtime startup/restart, replay gate, gate admission, response lookup, artifact materialization, fork, rewind, and final-outcome paths.
