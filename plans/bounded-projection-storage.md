@@ -1010,6 +1010,19 @@ The catalog design is rejected before production integration unless all conditio
 
 A scaled `100_000`-record version runs in automated tests and asserts structural bounds/query plans. The full 100-million benchmark is an explicit release/design gate artifact, not a per-commit CI job.
 
+### Phase 0.5 benchmark outcome (2026-09-02)
+
+The isolated 16-way, canonical-JSON-node HAMT candidate was measured in a corrected four-shape 100,000-record matrix under `benchmarks/postgres-catalog/results/`. Candidate, baseline-only, and instrumentation storage are separated; TOAST and indexes are counted exactly once; measured append WAL excludes baseline facts and instrumentation writes. One hundred warm/cold samples use distinct deterministic roots and clear the driver node cache. All bounded-query, complete-key probe, arbitrary-parent equivalence, divergent-forward, sparse/missing, and shared-node deletion checks pass.
+
+The physical candidate is nevertheless **rejected** and must not be integrated:
+
+- linear: 44,810 candidate bytes/record, 5.89 nodes and 4,505 canonical node bytes per changed key, 59 KB warm append WAL mean, and 107 ms warm newer-chunk p99;
+- branch-per-record: 45,344 candidate bytes/record and 169 KB warm append WAL mean;
+- random-parent: 12,698 candidate bytes/record;
+- wide fan-out: 6,133 candidate bytes/record.
+
+At only 100,000 linear records the candidate already occupies 4.50 GB versus 106 MB for the ancestry baseline. Linear extrapolation alone is roughly 4.5 TB at 100 million records, before the observed HAMT path depth/node amplification grows further. The linked forward-key newer path also requires up to 100 HAMT lookups and is already two orders of magnitude slower than wide-fanout reads. Because root-map copy-on-write amplification dominates the result, changing only history links to multi-entry blocks cannot make this candidate acceptable; escalation and production integration stop here. Phase 1 is blocked until a revised persistent catalog representation is explicitly approved and benchmarked.
+
 ## Verification
 
 - Focused projection, store, replay, runtime, gate, fork, rewind, artifact, host, inspector, and TUI tests.
