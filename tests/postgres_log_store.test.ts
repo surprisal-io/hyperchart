@@ -442,8 +442,9 @@ describePg("PostgresLogStore", () => {
 		const store = await openWriter(runId);
 		await store.initializeRootBranch();
 		await store.appendDrafts([argsDraft(), invokeDraft()]);
-		await store.moveBranch("main", 2);
+		const moved = await store.moveBranch("main", 2);
 
+		expect(moved).toMatchObject({ moveSeqId: 4, previousHeadSeqId: 3, headSeqId: 2, preservedRecords: 2 });
 		expect((await store.getBranch("main")).headSeqId).toBe(2);
 		expect(await store.countRecords()).toBe(2);
 		expect((await journalStats(store, runId)).maxSeq + 1).toBe(5);

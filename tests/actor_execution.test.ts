@@ -160,6 +160,52 @@ async function waitFor<T>(read: () => T | undefined, message: string): Promise<T
 }
 
 describe("explicit event-sourced actors", () => {
+	it("validates refs on named actor-call transition objects for isolation and dominance", () => {
+		const ServiceProtocol = protocol({
+			CHECK: message({ input: z.object({}).strict(), replies: { ACCEPTED: z.object({ commit: z.string() }), REJECTED: z.object({ reason: z.string() }) } }),
+		});
+		const Service = actor({
+			input: z.object({}).strict(), protocol: ServiceProtocol, initial: "idle",
+			states: {
+				idle: receive({ on: { CHECK: "accept" } }),
+				accept: reply({ target: "idle", event: "ACCEPTED", output: { commit: "ok" } }),
+			},
+		});
+		const service = Service({});
+		const ClientProtocol = protocol({ RUN: message({ input: z.object({}).strict(), reply: z.object({ ok: z.boolean() }) }) });
+		const clientChart = (binding: ReturnType<typeof result> | ReturnType<typeof arg>, bypassProducer = false) => {
+			const Client = actor({
+				input: z.object({}).strict(), protocol: ClientProtocol, initial: "idle",
+				states: {
+					idle: receive({ on: { RUN: bypassProducer ? "choose" : "produce" } }),
+					...(bypassProducer ? { choose: { kind: "state" as const, action: agent("choose"), transitions: { PRODUCE: "produce", BYPASS: "check" } } } : {}),
+					produce: { kind: "state" as const, action: agent("produce", { reply: z.object({ id: z.string() }) }), transitions: { DONE: "check" } },
+					check: call({
+						to: service, event: "CHECK", input: {},
+						transitions: {
+							ACCEPTED: { target: "finish", input: { id: binding } },
+							REJECTED: { target: "finish", input: { id: binding } },
+						},
+					}),
+					finish: { kind: "state" as const, input: { id: z.string() }, action: agent("finish"), transitions: { DONE: "settle" } },
+					settle: reply({ target: "idle", output: { ok: true } }),
+				},
+			} as any);
+			const client = Client({});
+			return chart({
+				kind: "chart", id: "actor-call-transition-refs", actors: { service, client }, initial: "start",
+				states: { start: send({ to: client, event: "RUN", input: {}, target: "done" }), done: final() },
+			});
+		};
+
+		const valid = normalizeChartConfig(clientChart(result("produce", "id")));
+		if (!valid.ok) throw new Error(JSON.stringify(valid.diagnostics));
+		const isolated = normalizeChartConfig(clientChart(arg("global")));
+		expect(isolated.ok ? [] : isolated.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "ACTOR_ISOLATION_VIOLATION" })]));
+		const nonDominated = normalizeChartConfig(clientChart(result("produce", "id"), true));
+		expect(nonDominated.ok ? [] : nonDominated.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "NON_DOMINATED_REF" })]));
+	});
+
 	it("ignores a stale ok actor-effect response as a race loser instead of erroring the run", async () => {
 		const runtime = new ActorRuntime(parsed());
 		const state = await loop(runtime);

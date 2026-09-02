@@ -45,6 +45,15 @@ function fullyProject(chartAst: ChartAst, records: readonly DurableLogRecord[]) 
 	return projection;
 }
 
+function openInputGateAst(): ChartAst {
+	const result = normalizeChartConfig(chart({ kind: "chart", id: "open-input-gate-checkpoint", initial: "ask", states: {
+		ask: { kind: "state", input: { context: z.object({ id: z.string() }).default({ id: "default" }) }, action: user({ prompt: "Choose", options: ["CHOOSE"] }), transitions: { CHOOSE: "done" } },
+		done: final(),
+	} }) as ChartCst);
+	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	return result.ast;
+}
+
 function bareMapAst(): ChartAst {
 	const result = normalizeChartConfig(chart({ kind: "chart", id: "bare-map-checkpoint", initial: "jobs", states: {
 		jobs: map({ over: arg("jobs"), initial: "finished", onDone: "done", states: { finished: final() } }), done: final(),
@@ -144,6 +153,31 @@ it("digests canonical normalized ChartAst JSON independent of object insertion o
 });
 
 describe("projection checkpoint schema", () => {
+	it("round-trips and restores an open gate with JSON-valid resolved input", async () => {
+		const chartAst = openInputGateAst();
+		const action = chartAst.states.ask;
+		if (action?.kind !== "state" || action.action.kind !== "user") throw new Error("expected user action");
+		const store = new MemoryLogStore();
+		const records = await store.appendDrafts([
+			{ type: "args", args: {} },
+			{ type: "state_action", kind: "invoke", sessionId: "ask-session", actionUid: action.action.uid, input: { context: { id: "captured" } }, definition: action.action },
+			{ type: "user_interaction", kind: "opened", actionUid: action.action.uid, phaseSeqId: 3, input: { context: { id: "captured" } }, prompt: "Choose", options: ["CHOOSE"], events: ["CHOOSE"] },
+		]);
+		const projection = fullyProject(chartAst, records);
+		const contract = projectionContractForAst(chartAst);
+		const encoded = encodeCheckpoint({ checkpointId: "open-input", headSeqId: records.at(-1)!.seqId, contract, projection, createdAt: 1 });
+		expect(decodeCheckpoint(encoded, chartAst)?.projection.openUserInteractions[records.at(-1)!.seqId]?.opened.input).toEqual({ context: { id: "captured" } });
+		await store.storeCheckpoint(encoded);
+		const restored = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
+		expect(restored.replayedRecords).toBe(0);
+		expect(restored.projection).toEqual(projection);
+
+		const malformed = structuredClone(encoded);
+		const opened = ((malformed.blob as { projection: { openUserInteractions: Record<string, { opened: Record<string, unknown> }> } }).projection.openUserInteractions[String(records.at(-1)!.seqId)]!.opened);
+		opened.input = { invalid: Number.POSITIVE_INFINITY };
+		expect(decodeCheckpoint(malformed, chartAst)).toBeUndefined();
+	});
+
 	it("rejects poisoned current-version nested projection families", () => {
 		const chartAst = ast(); const contract = projectionContractForAst(chartAst);
 		const encoded = encodeCheckpoint({ checkpointId: "base", headSeqId: null, contract, projection: createBranchProjection(chartAst), createdAt: 1 });

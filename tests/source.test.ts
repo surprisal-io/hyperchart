@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t } from "../packages/hyperchart/src/core/dsl.js";
+import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, event, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t } from "../packages/hyperchart/src/core/dsl.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
 import { hyperchartSource } from "../packages/hyperchart/src/core/source.js";
 
@@ -40,6 +40,27 @@ describe("hyperchart source", () => {
 		expect(source).toContain("args: {");
 		expect(source).toContain('description: "Research subject"');
 		expect(source).toContain('default: "Hyperchart"');
+	});
+
+	it("prints event and result transition-input bindings", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart",
+			id: "transition-ref-source",
+			initial: "select",
+			states: {
+				select: {
+					kind: "state",
+					action: agent("selector"),
+					transitions: { SELECTED: { target: "work", input: { candidate: event("candidate"), id: result("select", "id") } } },
+				},
+				work: { kind: "state", input: { candidate: z.object({}), id: z.string() }, action: agent("worker"), transitions: { DONE: "done" } },
+				done: final(),
+			},
+		}));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain('candidate: event("candidate")');
+		expect(source).toContain('id: result("select", "id")');
 	});
 
 	it("keeps the positional args slot when script options exist without args", () => {

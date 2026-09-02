@@ -6,7 +6,6 @@ import type {
 	ArtifactAst,
 	ArtifactOfAst,
 	ChartAst,
-	EventBindingAst,
 	GuardRefAst,
 	InputRef,
 	JoinArtifactOfAst,
@@ -18,6 +17,7 @@ import type {
 	StatePath,
 	TemplateAst,
 	TransitionAst,
+	TransitionInputAst,
 } from "./types.js";
 
 const DSL_INDENT = "\t";
@@ -326,15 +326,17 @@ function transitionDsl(transition: TransitionAst): string {
 	if (transition.input === undefined || Object.keys(transition.input).length === 0) return stringDsl(transition.target);
 	return objectDsl([
 		["target", stringDsl(transition.target)],
-		["input", eventBindingsDsl(transition.input)],
+		["input", transitionInputsDsl(transition.input)],
 	]);
 }
 
-function eventBindingsDsl(input: Readonly<Record<string, EventBindingAst>>): string {
+function transitionInputsDsl(input: Readonly<Record<string, TransitionInputAst>>): string {
 	return objectDsl(
 		Object.entries(input).map(([name, binding]) => [
 			name,
-			binding.path === undefined ? "event()" : `event(${stringDsl(binding.path)})`,
+			binding.kind === "event"
+				? binding.path === undefined ? "event()" : `event(${stringDsl(binding.path)})`
+				: inputRefDsl(binding),
 		]),
 	);
 }

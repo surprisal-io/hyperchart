@@ -8,7 +8,6 @@ import type {
 	ActorWorkflowStateAst,
 	ChartArgumentAst,
 	ChartAst,
-	EventBindingAst,
 	GuardRefAst,
 	InputRef,
 	JoinArtifactOfAst,
@@ -19,6 +18,7 @@ import type {
 	StateActionAst,
 	StateAst,
 	TemplateAst,
+	TransitionInputAst,
 	ValueAst,
 } from "./types.js";
 
@@ -658,7 +658,7 @@ function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): Hyperch
 	const entries = Object.entries(state.transitions).map(([event, transition]) => ({
 		event,
 		target: siblingStatePath(state.parent, transition.target),
-		...(transition.input === undefined ? {} : { input: eventBindingsInfo(transition.input) }),
+		...(transition.input === undefined ? {} : { input: transitionInputsInfo(transition.input) }),
 	}));
 	if (state.kind === "send" || state.kind === "sendBatch") {
 		entries.push({ event: "ENQUEUED", target: siblingStatePath(state.parent, state.target) });
@@ -678,12 +678,11 @@ function transitionEntries(state: Exclude<StateAst, { kind: "final" }>): Hyperch
 	return entries;
 }
 
-function eventBindingsInfo(input: Readonly<Record<string, EventBindingAst>>): Record<string, string> {
-	return Object.fromEntries(Object.entries(input).map(([name, binding]) => [name, eventBindingPreview(binding)]));
-}
-
-function eventBindingPreview(binding: EventBindingAst): string {
-	return binding.path === undefined ? "event()" : `event:${binding.path}`;
+function transitionInputsInfo(input: Readonly<Record<string, TransitionInputAst>>): Record<string, string> {
+	return Object.fromEntries(Object.entries(input).map(([name, binding]) => [
+		name,
+		binding.kind === "event" ? (binding.path === undefined ? "event()" : `event:${binding.path}`) : inputRefPreview(binding),
+	]));
 }
 
 function siblingStatePath(parent: string | undefined, localId: string): string {

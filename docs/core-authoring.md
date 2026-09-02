@@ -254,7 +254,7 @@ A transition can be a target string:
 transitions: { PASS: "done" }
 ```
 
-or an object with target input:
+or an object with target input selected from the firing event and/or durable refs:
 
 ```ts
 transitions: {
@@ -262,6 +262,7 @@ transitions: {
     target: "repair",
     input: {
       notes: event("notes"),
+      priorNotes: result("review", "notes"),
     },
   },
 }
@@ -274,6 +275,7 @@ repair: {
   kind: "state",
   input: {
     notes: z.string(),
+    priorNotes: z.string(),
   },
   action: agent("fixer", {
     task: t`Attempt ${visit("review")}: ${input("notes")}`,
@@ -282,7 +284,9 @@ repair: {
 }
 ```
 
-Input is bound to a visit, not permanently to a state path. Re-entering the same state creates a new visit and a new input binding.
+Input is bound to a visit, not permanently to a state path. Re-entering the same state creates a new visit and a new input binding. `event()` reads the accepted event output; `result()` and the other ordinary refs use the same replay-derived resolver as templates, evaluated in the firing state's runtime scope. A missing result, missing selector, or otherwise unavailable ref throws before target entry, so no invoke is emitted with partial input.
+
+For non-user actions, the resolved input object is copied onto `state_action/invoke`, `state_action/complete`, and `state_action/validated` records. User actions expose the same provenance on `user_interaction/opened`. These optional copies are durable, JSON-only informational provenance for downstream journal consumers; replay still derives input from the edge and accepts old records without a copy.
 
 Reserved system events include `FAILED`, validation outcomes, timer events, and scope cancellation. Do not invent application events that collide with reserved names.
 

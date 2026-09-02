@@ -64,6 +64,38 @@ describe("Runtime inspector section", () => {
 		// TypeTooltip content is portal-rendered on hover and intentionally absent from SSR.
 	});
 
+	it("renders recorded resolved input as structured JSON and omits the block when absent", () => {
+		const withInput = renderToStaticMarkup(createElement(VisitHistory, {
+			state: runtimeState,
+			allStates: [runtimeState],
+			visits: [{
+				visit: 1,
+				invokeSeqId: 2,
+				startedAt: 1000,
+				status: "running",
+				inputs: { hypothesisId: "hypothesis:42", source: { kind: "result-ref" } },
+				invocation: { kind: "agent", task: "Run experiment" },
+			}],
+		}));
+		expect(withInput).toContain("resolved inputs");
+		expect(withInput).toContain("hypothesisId");
+		expect(withInput).toContain("hypothesis:42");
+		expect(withInput).toContain("result-ref");
+
+		const withoutInput = renderToStaticMarkup(createElement(VisitHistory, {
+			state: runtimeState,
+			allStates: [runtimeState],
+			visits: [{
+				visit: 1,
+				invokeSeqId: 2,
+				startedAt: 1000,
+				status: "running",
+				invocation: { kind: "agent", task: "Run experiment" },
+			}],
+		}));
+		expect(withoutInput).not.toContain("resolved inputs");
+	});
+
 	it("is collapsed by default and hides verbose visit data", () => {
 		const markup = renderToStaticMarkup(createElement(RuntimeSection, { state: runtimeState }));
 		expect(markup).toContain("Runtime");

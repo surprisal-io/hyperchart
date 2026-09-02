@@ -1,12 +1,14 @@
 import assert from "./assert.js";
-import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
+import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, InputRef, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
 import type { ActorMessageEnvelope, ArtifactPin, DurableLogRecord, UserInteractionOpenedLog } from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
 	childPath,
+	instancePathFor,
 	lastSegmentKey,
 	matchesDeclaredUid,
+	nearestInstance,
 	nodeAt,
 	parentPath,
 	siblingPath,
@@ -719,7 +721,7 @@ function applyTransition(
 		assert(actorContext.node.kind === "state", `Actor state ${fromLeaf} cannot emit action event ${eventType}`);
 		const transition = actorContext.node.transitions[eventType];
 		assert(transition !== undefined, `No actor transition for event type ${eventType} in state ${fromLeaf}`);
-		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, { transition, event });
+		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, { transition, event, scope: fromLeaf });
 		setExecutionCurrentState(endpoint, transition.target, worker);
 		return;
 	}
@@ -728,7 +730,7 @@ function applyTransition(
 		throw new Error(`No transition for event type ${eventType} in state ${fromLeaf}`);
 	}
 	const target = siblingPath(handler.path, handler.transition.target);
-	applyInputsForEntry(projection, ast, target, { transition: handler.transition, event });
+	applyInputsForEntry(projection, ast, target, { transition: handler.transition, event, scope: handler.path });
 	exitAndEnter(projection, ast, handler.path, target, abandoned);
 }
 
@@ -795,13 +797,13 @@ function applyActorProducerTransition(
 	if (actorContext !== undefined) {
 		const { endpoint, worker } = actorExecutionForContext(projection, actorContext);
 		assert(executionCurrentState(endpoint, worker) === actorContext.localState, `Actor producer state ${statePath} is not active`);
-		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, { transition, event });
+		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, { transition, event, scope: statePath });
 		setExecutionCurrentState(endpoint, transition.target, worker);
 		return;
 	}
 	assert(projection.activeLeaves.includes(statePath), `Actor producer state ${statePath} is not active`);
 	const target = siblingPath(statePath, transition.target);
-	applyInputsForEntry(projection, ast, target, { transition, event });
+	applyInputsForEntry(projection, ast, target, { transition, event, scope: statePath });
 	exitAndEnter(projection, ast, statePath, target, abandoned);
 }
 
@@ -1275,7 +1277,132 @@ function liveActorDeclaration(ast: ChartAst, declaration: StatePath, occurrence:
 	return live;
 }
 
-type EntryEvent = Readonly<{ transition: TransitionAst; event: ChartEvent }>;
+type EntryEvent = Readonly<{ transition: TransitionAst; event: ChartEvent; scope: StatePath }>;
+type RefResolutionState = Readonly<{ ast: ChartAst; projection: BranchProjection }>;
+
+/** Resolve one authored ref from the replay-derived state of a branch ancestry. */
+export function resolveRef(
+	state: RefResolutionState,
+	ref: InputRef,
+	stateId: StatePath,
+	context = "Template",
+): unknown {
+	const actorContext = actorContextForState(state.ast, stateId);
+	const actor = actorContext === undefined ? undefined : projectedActorEndpoint(state.projection, actorContext.endpointOccurrence);
+	const worker = actorContext?.workerIndex === undefined || actor?.definition.kind !== "actorPool"
+		? undefined
+		: (actor as ProjectedActorPoolOccurrence).workers[actorContext.workerIndex];
+	if (ref.kind === "actorInput") {
+		assert(actor !== undefined, `${context} in state ${stateId}: actorInput() used outside an actor`);
+		return selectRefPath(actor.input, ref.path, ref, stateId, context);
+	}
+	if (ref.kind === "messageInput") {
+		const message = actor === undefined ? undefined : projectedActorCurrentMessage(state.projection, actor, worker);
+		assert(message !== undefined && message.event === ref.message, `${context} in state ${stateId}: messageInput('${ref.message}') does not match the current message`);
+		return selectRefPath(message.input, ref.path, ref, stateId, context);
+	}
+	if (ref.kind === "arg") {
+		const args = state.projection.args;
+		if (args === undefined || !(ref.name in args)) throw new Error(`${context} in state ${stateId}: no argument '${ref.name}'`);
+		return args[ref.name];
+	}
+	if (ref.kind === "visit") return resolveVisitRef(state, ref, stateId, context);
+	if (ref.kind === "input") {
+		const slot = inputSlotFor(state, ref.name, stateId);
+		if (slot === undefined || !(ref.name in slot.values)) throw new Error(`${context} in state ${stateId}: no input '${ref.name}'`);
+		return selectRefPath(slot.values[ref.name], ref.path, ref, stateId, context);
+	}
+	if (ref.kind === "key" || ref.kind === "item") {
+		const instance = nearestInstance(stateId, ref.map);
+		if (instance === undefined) throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} used outside any map instance`);
+		const occurrenceInput = state.projection.inputs[`${instance.container}#${instance.key}`];
+		const instances = state.projection.spawns[instance.container];
+		if (instances === undefined || !(instance.key in instances)) {
+			throw new Error(`${context} in state ${stateId}: no spawned instance '${instance.key}' of ${instance.container}`);
+		}
+		if (ref.kind === "key") return occurrenceInput?.key ?? instance.key;
+		return selectRefPath(occurrenceInput?.item ?? instances[instance.key], ref.path, ref, stateId, context);
+	}
+	const resultKey = actorContext === undefined
+		? instancePathFor(ref.state, stateId)
+		: actorStatePath(actorContext.occurrence, ref.state);
+	if (!(resultKey in state.projection.results)) {
+		throw new Error(`${context} in state ${stateId}: no result for state ${resultKey}`);
+	}
+	return selectRefPath(state.projection.results[resultKey], ref.path, ref, stateId, context);
+}
+
+function resolveVisitRef(
+	state: RefResolutionState,
+	ref: Extract<InputRef, { kind: "visit" }>,
+	stateId: StatePath,
+	context: string,
+): number {
+	const actor = actorContextForState(state.ast, stateId);
+	const target = ref.state === undefined
+		? stateId
+		: actor === undefined
+			? instancePathFor(ref.state, stateId)
+			: actorStatePath(actor.occurrence, ref.state);
+	const node = actionStateAt(state.ast, target);
+	if (node === undefined) throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} does not reference an action state`);
+	const key = actionUidKey({ ...node.action.uid, state: target });
+	const visit = state.projection.stateVisits[key];
+	if (visit === undefined) throw new Error(`${context} in state ${stateId}: no visit for state ${target}`);
+	return visit;
+}
+
+function inputSlotFor(
+	state: RefResolutionState,
+	name: string,
+	stateId: StatePath,
+): { path: StatePath; values: Record<string, unknown> } | undefined {
+	const actor = actorContextForState(state.ast, stateId);
+	if (actor?.node.kind === "state" && actor.node.input !== undefined && name in actor.node.input) {
+		return { path: stateId, values: state.projection.inputs[stateId] ?? {} };
+	}
+	let current: StatePath | undefined = stateId;
+	while (current !== undefined) {
+		const node = nodeAt(state.ast, current);
+		if ((node?.kind === "state" || node?.kind === "map") && node.input !== undefined && name in node.input) {
+			const key = node.kind === "map" ? stripLastKey(current) : current;
+			return { path: key, values: state.projection.inputs[key] ?? {} };
+		}
+		current = parentPath(current);
+	}
+	return undefined;
+}
+
+function selectRefPath(
+	value: unknown,
+	path: string | undefined,
+	ref: InputRef,
+	stateId: StatePath,
+	context: string,
+): unknown {
+	if (path === undefined) return value;
+	let current = value;
+	for (const segment of path.split(".")) {
+		if (typeof current !== "object" || current === null || !(segment in current)) {
+			throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} has no '${path}'`);
+		}
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
+}
+
+function refLabel(ref: InputRef): string {
+	switch (ref.kind) {
+		case "arg": return `arg '${ref.name}'`;
+		case "result": return `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "key": return `map key${ref.map === undefined ? "" : ` of '${ref.map}'`}`;
+		case "item": return `map item${ref.map === undefined ? "" : ` of '${ref.map}'`}${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "input": return `input '${ref.name}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "visit": return `visit${ref.state === undefined ? "" : ` of '${ref.state}'`}`;
+		case "actorInput": return `actor input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "messageInput": return `message '${ref.message}' input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+	}
+}
 
 function applyActorInputForEntry(
 	projection: BranchProjection,
@@ -1288,7 +1415,7 @@ function applyActorInputForEntry(
 	const node = actorDefinitionForEndpoint(liveActorDeclaration(ast, actor.declaration, actor.occurrence)).states[target];
 	if (node?.kind !== "state" || node.input === undefined) return;
 	const occurrence = worker?.occurrence ?? actor.occurrence;
-	projection.inputs[actorStatePath(occurrence, target)] = resolveInputValues(node.input, entry, `${occurrence}.${target}`);
+	projection.inputs[actorStatePath(occurrence, target)] = resolveInputValues(projection, ast, node.input, entry, `${occurrence}.${target}`);
 }
 
 function applyInputsForEntry(
@@ -1298,11 +1425,13 @@ function applyInputsForEntry(
 	entry?: EntryEvent,
 ): void {
 	for (const target of inputEntryTargets(ast, entryPath)) {
-		projection.inputs[target.path] = resolveInputValues(target.input, entry, target.path);
+		projection.inputs[target.path] = resolveInputValues(projection, ast, target.input, entry, target.path);
 	}
 }
 
 function resolveInputValues(
+	projection: BranchProjection,
+	ast: ChartAst,
 	input: Readonly<Record<string, SchemaAst>>,
 	entry: EntryEvent | undefined,
 	statePath: StatePath,
@@ -1311,7 +1440,9 @@ function resolveInputValues(
 	for (const [name, schema] of Object.entries(input)) {
 		const binding = entry?.transition.input?.[name];
 		if (entry !== undefined && binding !== undefined) {
-			values[name] = selectEventValue(entry.event, binding.path, name, statePath);
+			values[name] = binding.kind === "event"
+				? selectEventValue(entry.event, binding.path, name, statePath)
+				: resolveRef({ ast, projection }, binding, entry.scope, "Transition input");
 			continue;
 		}
 		if (schemaHasDefault(schema)) {

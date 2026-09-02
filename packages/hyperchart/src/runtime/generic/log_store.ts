@@ -511,6 +511,13 @@ export type AppendAtHeadInput = Readonly<{
 	drafts: readonly DurableRecordDraft[];
 }>;
 export type BranchMutationOptions = Readonly<{ checkpoint?: OpaqueCheckpointEnvelope }>;
+export type BranchMoveResult = BranchHead & Readonly<{
+	moveSeqId: number;
+	/** Branch head observed at the serialized move commit boundary. */
+	previousHeadSeqId: number | null;
+	/** Durable machine-record count observed at that same boundary. */
+	preservedRecords: number;
+}>;
 
 export interface LogStore extends RunHistoryStore {
 	readonly branchId: BranchId;
@@ -526,7 +533,7 @@ export interface RunLogStore extends LogStore, CheckpointRepository {
 	deleteRunData(): Promise<void>;
 	initializeRootBranch(metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
-	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead>;
+	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult>;
 	close(): Promise<void>;
 }
 
@@ -741,16 +748,17 @@ export class JsonlLogStore implements RunLogStore {
 		return result;
 	}
 
-	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead> {
+	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult> {
 		requireBranchId(branchId, "branchId");
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		const result = await this.commitBuilt((index) => {
 			const branch = index.branches.get(branchId);
 			if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 			if (headSeqId !== null && !index.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
+			const moveSeqId = index.nextSeqId;
 			return {
-				entries: [{ kind: "branch", op: "move", seqId: index.nextSeqId, branchId, headSeqId, committedAt: Date.now() }],
-				result: { ...branch, headSeqId },
+				entries: [{ kind: "branch", op: "move", seqId: moveSeqId, branchId, headSeqId, committedAt: Date.now() }],
+				result: { ...branch, headSeqId, moveSeqId, previousHeadSeqId: branch.headSeqId, preservedRecords: index.recordsBySeqId.size },
 			};
 		});
 		if (checkpoint !== undefined) this.rememberClonedCheckpoint(checkpoint);
@@ -861,6 +869,36 @@ function enqueueJsonlWrite<T>(filePath: string, task: () => Promise<T>): Promise
 export function assertDurableRecordDraft(value: DurableRecordDraft): void {
 	if (!isRecord(value) || typeof value.type !== "string") throw new Error("Durable record draft must contain a machine record type");
 	if ("seqId" in value || "parentId" in value || "branchId" in value || "timestamp" in value) throw new Error("Durable record coordinates are assigned only by the run writer");
+	if ("input" in value && value.input !== undefined && (value.type === "state_action" || value.type === "user_interaction" && value.kind === "opened")) {
+		requireResolvedInput(value.input, `${value.type}.input`);
+	}
+}
+
+function requireResolvedInput(value: unknown, coordinate: string): void {
+	if (!isRecord(value)) throw new Error(`${coordinate} must be a JSON object`);
+	requireJsonValue(value, coordinate);
+}
+
+function requireJsonValue(value: unknown, coordinate: string, ancestors = new Set<object>()): void {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return;
+	if (typeof value === "number") {
+		if (Number.isFinite(value)) return;
+		throw new Error(`${coordinate} must contain only finite JSON numbers`);
+	}
+	if (typeof value !== "object") throw new Error(`${coordinate} must contain only JSON values`);
+	if (ancestors.has(value)) throw new Error(`${coordinate} must not contain circular references`);
+	ancestors.add(value);
+	try {
+		if (Array.isArray(value)) {
+			for (let index = 0; index < value.length; index++) requireJsonValue(value[index], `${coordinate}[${index}]`, ancestors);
+			return;
+		}
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) throw new Error(`${coordinate} must contain only plain JSON objects`);
+		for (const [key, entry] of Object.entries(value)) requireJsonValue(entry, `${coordinate}.${key}`, ancestors);
+	} finally {
+		ancestors.delete(value);
+	}
 }
 
 function checkpointDistance(checkpoint: OpaqueCheckpointEnvelope, distance: ReadonlyMap<number, number>): number {

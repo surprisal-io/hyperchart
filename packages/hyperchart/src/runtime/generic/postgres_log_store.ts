@@ -22,6 +22,7 @@ import {
 	type HistorySubject,
 	type MapVisitHistoryItem,
 	type AppendAtHeadInput,
+	type BranchMoveResult,
 	type BranchMutationOptions,
 	type CheckpointQuery,
 	type PrepareStampedCommit,
@@ -136,7 +137,7 @@ export type PostgresRunTransaction = SqlCommitTransaction & Readonly<{
 	appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
 	appendDraftsAtHead(branchId: BranchId, input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
 	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
-	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead>;
+	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult>;
 	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void>;
 }>;
 export type PostgresForkAndAppendInput = Readonly<{
@@ -342,7 +343,7 @@ export class PostgresLogStore implements RunLogStore {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		return this.transaction((tx) => tx.createBranch(branchId, headSeqId, metadata, checkpoint === undefined ? undefined : { checkpoint }));
 	}
-	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead> {
+	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult> {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		return this.transaction((tx) => tx.moveBranch(branchId, headSeqId, checkpoint === undefined ? undefined : { checkpoint }));
 	}
@@ -469,13 +470,18 @@ class TransactionImpl implements PostgresRunTransaction {
 		}
 		return existing;
 	}
-	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead> {
+	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult> {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
+		// Sequence allocation is the per-run serialization boundary. Read the old
+		// head and record count only after holding it so the acknowledgement names
+		// the exact durable state immediately preceding this move.
+		const moveSeqId = await this.allocateOne();
 		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
 		if (headSeqId !== null && await findRecordDirect(this.client, this.runId, headSeqId, "writer") === undefined) throw new Error(`No durable log record with seqId ${headSeqId}`);
-		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
-		await this.commitEntries([{ kind: "branch", op: "move", seqId: await this.allocateOne(), branchId, headSeqId, committedAt: Date.now() }]);
+		const preservedRecords = await countRecordsDirect(this.client, this.runId, "writer");
+		await this.commitEntries([{ kind: "branch", op: "move", seqId: moveSeqId, branchId, headSeqId, committedAt: Date.now() }]);
 		if (checkpoint !== undefined) await this.storeCheckpoint(checkpoint);
-		return { ...branch, headSeqId };
+		return { ...branch, headSeqId, moveSeqId, previousHeadSeqId: branch.headSeqId, preservedRecords };
 	}
 	containsInBranchHistory(branchId: BranchId, seqId: number): Promise<boolean> { return containsInBranchHistoryDirect(this.client, this.runId, branchId, seqId, "writer"); }
 	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> { return saveCheckpointDirect(this.client, this.runId, cloneOpaqueCheckpoint(checkpoint)); }

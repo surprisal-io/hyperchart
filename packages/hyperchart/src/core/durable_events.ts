@@ -11,6 +11,7 @@ import type {
 	CallBatchStateAst,
 	StateActionAst,
 	StatePath,
+	JsonValue,
 } from "./types.js";
 
 /** Durable named branch (the storage lane). Branch ids are public, stable names. */
@@ -68,12 +69,16 @@ type SpawnedLog = {
 	instances: Readonly<Record<string, unknown>>;
 } & SessionParams;
 
+type ResolvedStateInput = Readonly<Record<string, JsonValue>>;
+
 export type StateActionInvokeLog = {
 	type: "state_action";
 	kind: "invoke";
 	actionUid: ActionUID;
 	/** Opaque runtime identity for resources owned by this durable action invocation. */
 	sessionId: string;
+	/** Resolved visit input; informational provenance excluded from replay identity. */
+	input?: ResolvedStateInput;
 	// Mandatory provenance for replay over a modified chart. Logs without it are structurally
 	// incompatible and must be rewound/restarted instead of silently replayed.
 	definition: StateActionAst;
@@ -88,6 +93,8 @@ type StateActionCompleteLog = {
 	type: "state_action";
 	kind: "complete";
 	actionUid: ActionUID;
+	/** Resolved visit input; informational provenance excluded from replay identity. */
+	input?: ResolvedStateInput;
 	event: ChartEvent;
 	// Revisions of the declared deliverables observed when this completion was admitted, keyed by
 	// rendered path. The pin is provenance: replay never re-hashes. Absent on pre-versioning logs
@@ -102,6 +109,8 @@ type StateActionValidatedLog = {
 	type: "state_action";
 	kind: "validated";
 	actionUid: ActionUID;
+	/** Resolved visit input; informational provenance excluded from replay identity. */
+	input?: ResolvedStateInput;
 	event: ChartEvent;
 	guard: GuardRefAst;
 	outcome: GuardOutcome;
@@ -124,6 +133,11 @@ export type UserInteractionOpenedLog = {
 	actionUid: ActionUID;
 	/** Record that started the running/rejected phase represented by this gate. */
 	phaseSeqId: number;
+	/**
+	 * Fully resolved declared input for this state phase. Absent when the state declares no input.
+	 * This is informational durable provenance and is deliberately excluded from replay identity.
+	 */
+	input?: Readonly<Record<string, JsonValue>>;
 	prompt: string;
 	options: readonly string[];
 	events: readonly string[];

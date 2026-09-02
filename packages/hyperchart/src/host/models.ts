@@ -376,6 +376,7 @@ export interface HyperchartVisitInfo {
 	completedEvent?: string;
 	endedReason?: "timed_out" | "scope_exit";
 	validationAttempts?: number;
+	/** Resolved visit input. Durable phase provenance is preferred when present; old logs fall back to replay-derived input. */
 	inputs?: Record<string, unknown>;
 	mapItem?: { key: string; value?: unknown };
 	/** Pinned revisions recorded on this visit's accepted completion; absent when unpinned. */

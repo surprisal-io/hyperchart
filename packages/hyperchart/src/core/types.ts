@@ -316,7 +316,7 @@ export type SingleReplyMessageTypes<P extends ProtocolCst> = {
 export type CallRouting<P extends ProtocolCst, M extends keyof P, Target extends string = string> = P[M] extends {
 	replies: infer R extends Record<string, SchemaCst>;
 }
-	? { target?: never; transitions: { [E in keyof R]: Target } }
+	? { target?: never; transitions: { [E in keyof R]: Target | TransitionCst } }
 	: { target: Target; transitions?: never };
 
 export type ProtocolMessageAst = Readonly<{
@@ -461,18 +461,22 @@ export type EventBindingCst = {
 	path?: string;
 };
 
+/** A transition input is selected either from the firing event or from durable run state. */
+export type TransitionInputCst = EventBindingCst | InputRef;
+
 export type TransitionCst = {
 	target: StateId;
-	input?: Record<string, EventBindingCst>;
+	input?: Record<string, TransitionInputCst>;
 };
 
 export type TransitionMapCst = Record<EventType, StateId | TransitionCst>;
 
 export type EventBindingAst = Readonly<EventBindingCst>;
+export type TransitionInputAst = EventBindingAst | InputRef;
 
 export type TransitionAst = Readonly<{
 	target: StateId;
-	input?: Readonly<Record<string, EventBindingAst>>;
+	input?: Readonly<Record<string, TransitionInputAst>>;
 }>;
 
 // Deadline for an action state: if the action is still running delayMs after its invoke fact,
@@ -483,10 +487,9 @@ export type AfterCst = {
 	target: StateId;
 };
 
-// Serializable reference to a value from the run's args or a previous state's result (optionally
-// narrowed by a dot-path selector). Only ever appears interpolated inside a template. Never
-// logged: the same args/results facts always resolve to the same values, so a restarted machine
-// renders identical text.
+// Serializable reference to durable run state, optionally narrowed by a dot-path selector.
+// Refs appear in templates, effect-boundary value expressions, and transition inputs. The ref
+// expression itself is not logged: the same ancestry facts resolve it identically on replay.
 //
 // V is a phantom: the TS type of the value the ref resolves to, carried by the typed layer
 // (refs<Args, Results>()) so templates can insist on primitives. Never present at runtime.

@@ -1358,7 +1358,13 @@ function runtimeVisitHistories(
 			}
 			continue;
 		}
-		if (record.type !== "state_action" || skippedRecords.has(record)) continue;
+		if (skippedRecords.has(record)) continue;
+		if (record.type === "user_interaction" && record.kind === "opened") {
+			const visit = histories.get(record.actionUid.state)?.at(-1);
+			if (visit !== undefined && record.input !== undefined) visit.inputs = { ...record.input };
+			continue;
+		}
+		if (record.type !== "state_action") continue;
 		const stateId = record.actionUid.state;
 		if (record.kind === "invoke") {
 			const pending = replay.pendingActions.find(
@@ -1368,7 +1374,10 @@ function runtimeVisitHistories(
 					actionUidKey(candidate.actionUid) === actionUidKey(record.actionUid),
 			);
 			if (pending === undefined) continue;
-			const inputs = replay.inputs[stateId];
+			// Prefer the self-contained durable copy. Replay-derived inputs keep old journals and
+			// hand-authored host fixtures visually compatible when that informational field is absent.
+			const inputs = record.input ?? replay.inputs[stateId];
+			const hasRecordedInput = record.input !== undefined;
 			const instance = nearestInstance(stateId);
 			const mapValue = instance === undefined ? undefined : replay.spawns[instance.container]?.[instance.key];
 			const visit: HyperchartVisitInfo = {
@@ -1376,7 +1385,7 @@ function runtimeVisitHistories(
 				invokeSeqId: record.seqId,
 				startedAt: record.timestamp,
 				status: "running",
-				...(inputs === undefined || Object.keys(inputs).length === 0 ? {} : { inputs: { ...inputs } }),
+				...(inputs === undefined || (!hasRecordedInput && Object.keys(inputs).length === 0) ? {} : { inputs: { ...inputs } }),
 				...(instance === undefined
 					? {}
 					: {
@@ -1392,6 +1401,9 @@ function runtimeVisitHistories(
 		}
 		const visit = histories.get(stateId)?.at(-1);
 		if (visit === undefined) continue;
+		if ((record.kind === "complete" || record.kind === "validated") && record.input !== undefined) {
+			visit.inputs = { ...record.input };
+		}
 		if (record.kind === "complete") {
 			if (record.artifacts !== undefined) {
 				visit.artifactPins = Object.entries(record.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size }));

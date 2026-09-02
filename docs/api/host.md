@@ -364,7 +364,7 @@ interface HyperchartRenderedArtifactInfo {
 }
 ```
 
-Visit histories are append-only views derived from durable records. Session progress records that include a durable `visit` number are joined to the matching entry. Run-directory inspection also reconstructs older per-action progress files from the persisted per-visit invocation directories; when several visits resumed one transcript, timestamped messages are segmented by each visit's durable start/end range. Updating a run snapshot must not rewrite previously returned snapshot objects.
+Visit histories are append-only views derived from durable records. `inputs` prefers the optional resolved-input provenance copied onto `state_action` phases and `user_interaction/opened`; for older journals without those fields, the adapter retains the replay-derived input fallback. The React Inspector renders a present input as structured JSON in the visit detail and adds no block when input is absent. Session progress records that include a durable `visit` number are joined to the matching entry. Run-directory inspection also reconstructs older per-action progress files from the persisted per-visit invocation directories; when several visits resumed one transcript, timestamped messages are segmented by each visit's durable start/end range. Updating a run snapshot must not rewrite previously returned snapshot objects.
 
 ## Transitions, inputs, refs, and schemas
 

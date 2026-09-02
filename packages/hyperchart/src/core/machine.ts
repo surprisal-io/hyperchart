@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import assert from "./assert.js";
 import type {
 	ChartEvent,
@@ -16,6 +15,7 @@ import type {
 	JoinArtifactOfCst,
 	GuardRefAst,
 	InputRef,
+	JsonValue,
 	OnReject,
 	OnReenterAst,
 	SchemaAst,
@@ -46,6 +46,7 @@ import {
 	projectedActorEndpoints,
 	projectedActorMessage,
 	projectBranch,
+	resolveRef,
 } from "./projection.js";
 import {
 	instancePathFor,
@@ -463,6 +464,7 @@ export function userInteractionOpenedDraft(
 		kind: "opened",
 		actionUid: pending.actionUid,
 		phaseSeqId: pending.seqId,
+		...resolvedStateInput(state, pending.actionUid),
 		prompt: renderTemplate(state as MachineState, node.action.prompt, pending.actionUid.state),
 		options: node.action.options,
 		events: allowedEventsForAction(state.ast, pending.actionUid.state).filter((event) => event !== "FAILED"),
@@ -798,7 +800,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 				{
 					kind: "append",
 					id: event.effectId,
-					records: [{ type: "state_action", kind: "complete", actionUid: pending.actionUid, event: event.event, ...(event.artifacts === undefined ? {} : { artifacts: event.artifacts }) }],
+					records: [{ type: "state_action", kind: "complete", actionUid: pending.actionUid, ...resolvedStateInput(state, pending.actionUid), event: event.event, ...(event.artifacts === undefined ? {} : { artifacts: event.artifacts }) }],
 				},
 			]);
 		}
@@ -826,6 +828,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 							type: "state_action",
 							kind: "validated",
 							actionUid: validating.actionUid,
+							...resolvedStateInput(state, validating.actionUid),
 							event: validating.event,
 							guard: node.validate,
 							outcome: event.outcome,
@@ -1550,114 +1553,16 @@ function refLabel(ref: InputRef): string {
 	}
 }
 
-// stateId is the referencing action's INSTANCE path: result lookups re-scope into it, key/item
-// resolve against its nearest enclosing map's spawn fact.
-function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknown {
-	const actorContext = actorContextForState(state.ast, stateId);
-	const actor = actorContext === undefined ? undefined : projectedActorEndpoint(state.projection, actorContext.endpointOccurrence);
-	const worker = actorContext?.workerIndex === undefined || actor?.definition.kind !== "actorPool"
-		? undefined
-		: (actor as ProjectedActorPoolOccurrence).workers[actorContext.workerIndex];
-	if (ref.kind === "actorInput") {
-		assert(actor !== undefined, `Template in state ${stateId}: actorInput() used outside an actor`);
-		return selectPath(actor.input, ref.path, ref, stateId);
-	}
-	if (ref.kind === "messageInput") {
-		const message = actor === undefined ? undefined : projectedActorCurrentMessage(state.projection, actor, worker);
-		assert(message !== undefined && message.event === ref.message, `Template in state ${stateId}: messageInput('${ref.message}') does not match the current message`);
-		return selectPath(message.input, ref.path, ref, stateId);
-	}
-	if (ref.kind === "arg") {
-		const args = state.projection.args;
-		if (args === undefined || !(ref.name in args)) {
-			throw new Error(`Template in state ${stateId}: no argument '${ref.name}'`);
-		}
-		return args[ref.name];
-	}
-	if (ref.kind === "visit") {
-		return resolveVisitRef(state, ref, stateId);
-	}
-	if (ref.kind === "input") {
-		const slot = inputSlotFor(state, ref.name, stateId);
-		if (slot === undefined || !(ref.name in slot.values)) {
-			throw new Error(`Template in state ${stateId}: no input '${ref.name}'`);
-		}
-		return selectPath(slot.values[ref.name], ref.path, ref, stateId);
-	}
-	if (ref.kind === "key" || ref.kind === "item") {
-		const instance = nearestInstance(stateId, ref.map);
-		if (instance === undefined) {
-			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} used outside any map instance`);
-		}
-		const occurrenceInput = state.projection.inputs[`${instance.container}#${instance.key}`];
-		const instances = state.projection.spawns[instance.container];
-		if (instances === undefined || !(instance.key in instances)) {
-			throw new Error(`Template in state ${stateId}: no spawned instance '${instance.key}' of ${instance.container}`);
-		}
-		if (ref.kind === "key") return occurrenceInput?.key ?? instance.key;
-		return selectPath(occurrenceInput?.item ?? instances[instance.key], ref.path, ref, stateId);
-	}
-	const resultKey = actorContext === undefined
-		? instancePathFor(ref.state, stateId)
-		: actorStatePath(actorContext.occurrence, ref.state);
-	if (!(resultKey in state.projection.results)) {
-		throw new Error(`Template in state ${stateId}: no result for state ${resultKey}`);
-	}
-	return selectPath(state.projection.results[resultKey], ref.path, ref, stateId);
-}
-
-function resolveVisitRef(state: MachineState, ref: Extract<InputRef, { kind: "visit" }>, stateId: string): number {
-	const actor = actorContextForState(state.ast, stateId);
-	const target = ref.state === undefined
-		? stateId
-		: actor === undefined
-			? instancePathFor(ref.state, stateId)
-			: actorStatePath(actor.occurrence, ref.state);
-	const node = actionStateAtMachine(state.ast, target);
-	if (node === undefined) {
-		throw new Error(`Template in state ${stateId}: ${refLabel(ref)} does not reference an action state`);
-	}
-	const key = actionUidKey({ ...node.action.uid, state: target });
-	const visit = state.projection.stateVisits[key];
-	if (visit === undefined) {
-		throw new Error(`Template in state ${stateId}: no visit for state ${target}`);
-	}
-	return visit;
-}
-
-function inputSlotFor(
-	state: MachineState,
-	name: string,
-	stateId: string,
-): { path: StatePath; values: Record<string, unknown> } | undefined {
-	const actor = actorContextForState(state.ast, stateId);
-	if (actor?.node.kind === "state" && actor.node.input !== undefined && name in actor.node.input) {
-		return { path: stateId, values: state.projection.inputs[stateId] ?? {} };
-	}
-	let cur: StatePath | undefined = stateId;
-	while (cur !== undefined) {
-		const node = nodeAt(state.ast, cur);
-		if ((node?.kind === "state" || node?.kind === "map") && node.input !== undefined && name in node.input) {
-			const key = node.kind === "map" ? stripLastKey(cur) : cur;
-			return { path: key, values: state.projection.inputs[key] ?? {} };
-		}
-		cur = parentPath(cur);
-	}
-	return undefined;
-}
-
-function selectPath(value: unknown, path: string | undefined, ref: InputRef, stateId: string): unknown {
-	if (path === undefined) {
-		return value;
-	}
-	let current = value;
-	for (const segment of path.split(".")) {
-		if (typeof current !== "object" || current === null || !(segment in current)) {
-			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} has no '${path}'`);
-		}
-		current = (current as Record<string, unknown>)[segment];
-	}
-	return current;
+function resolvedStateInput(
+	state: Pick<MachineState, "ast" | "projection">,
+	actionUid: ActionUID,
+): { input?: Readonly<Record<string, JsonValue>> } {
+	const node = actionStateAtMachine(state.ast, actionUid.state);
+	assert(node !== undefined, `Cannot resolve input for non-action state ${actionUid.state}`);
+	if (node.input === undefined) return {};
+	const input = state.projection.inputs[actionUid.state];
+	assert(input !== undefined, `State ${actionUid.state} has no resolved input`);
+	return { input: structuredClone(input) as Readonly<Record<string, JsonValue>> };
 }
 
 function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
@@ -1671,7 +1576,8 @@ function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 				type: "state_action",
 				kind: "invoke",
 				actionUid,
-				sessionId: randomUUID(),
+				sessionId: globalThis.crypto.randomUUID(),
+				...resolvedStateInput(state, actionUid),
 				definition: node.action,
 			},
 		],

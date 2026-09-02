@@ -92,6 +92,8 @@ export type {
 	OnReenterCst,
 	TransitionAst,
 	TransitionCst,
+	TransitionInputAst,
+	TransitionInputCst,
 	TransitionMapCst,
 	UserActionAst,
 	UserActionCst,

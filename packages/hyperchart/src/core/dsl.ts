@@ -145,16 +145,22 @@ export function sendBatch(options: Omit<SendBatchStateCst, "kind">): SendBatchSt
 	return { kind: "sendBatch", ...options };
 }
 
+type ExactNamedCallRoutes<P extends ProtocolCst, M extends keyof P, Routing> = P[M] extends { replies: infer Replies extends Record<string, SchemaCst> }
+	? Routing extends { transitions: infer Routes }
+		? Exclude<keyof Routes, keyof Replies> extends never ? unknown : { readonly "named call routes must exactly match reply events": never }
+		: unknown
+	: unknown;
+
 export function call<
 	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
-	const Target extends string,
+	const Routing extends CallRouting<ProtocolOf<D>, M>,
 >(options: {
 	to: D;
 	event: M;
 	input: ActorPlacement<MessageInput<ProtocolOf<D>, M>>;
-} & CallRouting<ProtocolOf<D>, M, Target>): { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & CallRouting<ProtocolOf<D>, M, Target> & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> } {
-	return { kind: "call", ...options } as { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & CallRouting<ProtocolOf<D>, M, Target> & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> };
+} & Routing & ExactNamedCallRoutes<ProtocolOf<D>, M, Routing>): { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & Routing & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> } {
+	return { kind: "call", ...options } as { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & Routing & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> };
 }
 
 export function callBatch<

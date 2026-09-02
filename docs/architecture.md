@@ -87,7 +87,8 @@ The durable log records:
 - action invocations with normalized definition provenance;
 - completion events;
 - stored validation verdicts;
-- deadline firing.
+- deadline firing;
+- rendered user gates and their validated answers.
 
 It does not record transition targets. Projection recomputes targets from completion events and the current AST.
 
@@ -106,7 +107,7 @@ Data moves through named channels:
 - declared artifact paths;
 - visit identity.
 
-Templates resolve those channels immediately before dispatch. Prompt text and ambient files are not implicit workflow state.
+Templates resolve those channels immediately before dispatch. Transition bindings may select the accepted event output or resolve the same refs from the firing state's replay-derived scope; an unavailable ref fails before target entry. Prompt text and ambient files are not implicit workflow state. Non-user action invoke/complete/validated facts and opened user gates snapshot the fully resolved declared state input for downstream journal consumers. Those optional JSON copies are informational provenance rather than replay identity, so replay continues to enforce the pre-existing action/guard/gate contracts and accepts older records that lack them.
 
 ## Hierarchy
 

@@ -46,7 +46,7 @@ The current PostgreSQL implementation is explicitly temporary correctness scaffo
 
 Checkpoints are disposable cache, never journal truth. Runtime/storage sees only `{checkpointId, headSeqId, selectorKey, blob, createdAt}` and never imports projection code or interprets the selector/blob. The internal execution layer owns the projector/codec version, canonical AST digest, exact/nearest compatibility checks, replay diagnostics, synchronous `projectBranch()`/compaction, warning taint, and 512-record cadence. It supplies storage a synchronous callback over stamped records; storage invokes it before durability, atomically commits returned opaque envelopes with facts, and confirms execution only after commit and before releasing the branch writer. PostgreSQL uses generic `hyperchart_checkpoint(selector_key, blob)` columns. JSONL keeps envelopes only in shared process memory and writes no sidecar. Fork/rewind include an optional opaque envelope in the same branch mutation; clean shutdown asks execution to store an exact envelope after admitted work drains. Rewind compatibility/state selection may temporarily materialize ancestry inside the private control operation; this approved interim scaffolding returns only one match and is replaced when the deferred predecessor catalog lands.
 
-A multi-record `appendDrafts()` call is the atomicity hint: PostgreSQL inserts its flat rows in one transaction, while JSONL concatenates its flat lines into one buffer and issues one `O_APPEND` write. JSONL serializes writes only within one Node process and intentionally provides neither cross-process writer consistency nor crash-atomic all-or-none recovery for a short or torn write. Each record owns its universal sequence id, and the final record becomes the branch head. Fork creates a head without selection; checkout/view is a non-durable handle; rewind appends a head move and preserves every prior record and downstream file.
+A multi-record `appendDrafts()` call is the atomicity hint: PostgreSQL inserts its flat rows in one transaction, while JSONL concatenates its flat lines into one buffer and issues one `O_APPEND` write. JSONL serializes writes only within one Node process and intentionally provides neither cross-process writer consistency nor crash-atomic all-or-none recovery for a short or torn write. Each record owns its universal sequence id, and the final record becomes the branch head. Fork creates a head without selection; checkout/view is a non-durable handle; rewind appends a head move and preserves every prior record and downstream file. A live head move is routed through the owning runner: it closes new admission, drains the affected durable branch subtree, commits the move plus opaque checkpoint, and requires replay-gated readmission before execution resumes. Its generic storage acknowledgement includes the previous head and durable record count observed at the serialized move boundary, so live rewind results cannot report a stale pre-request snapshot.
 
 One detached runner process may execute a dynamic, non-empty set of live branch reservations concurrently. It replay-gates all initial branch seeds before starting any initial runtime; dynamically admitted branches gate independently. Each admitted branch gets one `ChartRuntime` and one host executor over the shared journal. Executor instances are deliberately branch-scoped: Pi/Claude live-session maps cannot collide across branches. The process is failed if any branch fails; `status.json` v2 publishes current live `branchIds` and terminal states use `[]`. A singleton `branchId` runner config remains accepted and is normalized to one branch.
 
@@ -54,7 +54,7 @@ The run owns two different filesystem locations. `projectDir` is the repository/
 
 ## Bounded live projection
 
-`BranchProjection` is current machine state, not a history view. It retains only open journal-native user gates; resolving, closing, or global failure removes them, while exact historical response lookup and UI history come from the storage history API. Actor and pool projections retain mailbox/current-worker control plus pending call messages only; settled non-call message history is reconstructed from durable record groups rather than accumulated in each endpoint. The retained `actorProducerVisits` counter is exact and monotonic: replay requires each enqueue to use the next producer visit and canonical `<producer>:message:<visit>:<batchIndex>` identity, preserving durable global message-id uniqueness after settled payloads leave live state.
+`BranchProjection` is current machine state, not a history view. It retains only open journal-native user gates; resolving, closing, or global failure removes them, while exact historical response lookup and UI history come from the storage history API. `liveActorMessages` is the sole mutable owner of queued, current, or unresolved-call messages; endpoint mailboxes, workers, and pending calls retain message IDs only. Settled non-call message history is reconstructed from durable record groups rather than accumulated in each endpoint. The retained `actorProducerVisits` counter is exact and monotonic: replay requires each enqueue to use the next producer visit and canonical `<producer>:message:<visit>:<batchIndex>` identity, preserving durable global message-id uniqueness after settled payloads leave live state.
 
 Accepted completion pins are projected into `artifactPins`, keyed by rendered authored path. `machine` attaches the current pin to each rendered artifact read, so `ChartRuntime` restores the accepted revision without reading ancestry or performing storage I/O from synchronous machine code.
 
@@ -73,7 +73,7 @@ That distinction supports:
 - detection of missing action provenance;
 - independent validation against the TLA+ model.
 
-It also means chart changes are not automatically safe. If an old event would route differently, `explainReplay()` reports the mismatch.
+It also means chart changes are not automatically safe. If an old event would route differently, `explainReplay()` reports the mismatch. Resolved state `input` copied onto `state_action/invoke`, `state_action/complete`, `state_action/validated`, and `user_interaction/opened` facts is informational durable provenance for journal consumers. It is intentionally excluded from replay identity, so older facts without it remain compatible and changing a copy cannot mask or relax action-definition, guard, prompt, option, event, reply-schema, or rejection checks.
 
 ## Projection
 
@@ -82,7 +82,7 @@ Projection derives:
 - the active branch;
 - one visit identity per entry;
 - accepted results by runtime state path;
-- transition inputs bound to visits;
+- transition inputs bound to visits from event selectors and durable refs;
 - map spawn generations and instance paths;
 - pending action invocations;
 - completed and stale visits;
@@ -104,7 +104,7 @@ The distinction matters for artifact lookup, state selection, rewind, and replay
 
 ## Invocations and provenance
 
-Every `state_action / invoke` record stores an `actionUid` and the normalized action definition. Replay compares that definition with the current chart.
+Every `state_action / invoke` record stores an `actionUid`, the normalized action definition, and—when declared—a JSON snapshot of the visit's resolved input. Replay compares the definition with the current chart and treats the input snapshot as informational only. The same snapshot is copied to `complete` and `validated` phase facts so journal consumers do not need to navigate ancestry to recover state identity carried through transition refs.
 
 The definition includes the action kind and settings needed to establish meaning: agent name and invocation overrides, script command/args/environment templates, schemas, reads, and artifact declarations.
 
@@ -120,6 +120,8 @@ An action completion is a claim. The runtime checks:
 4. an optional validator accepts the claim.
 
 A validation verdict is durable. Replay reads the stored verdict; it does not run validator code again.
+
+Transition ref bindings resolve while projecting the accepted completion (or positive verdict), after its result has entered the replay-derived result map and before the target state enters. They use the same resolver as prompt/effect refs. Missing results or selectors throw at that boundary, preventing a partial target input or invoke.
 
 Because validator identity is stored, changing the validator can make replay stale or broken. This is intentional: the same accepted fact must not acquire a new meaning silently.
 
@@ -157,7 +159,8 @@ The Pi package adds files that are useful but not semantic history:
 | `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-attempt UUID, written before terminal status |
 | `terminal-notification/receipts/<request-hash>/*.json` | generation-isolated, recoverable per-host/session terminal-delivery leases and confirmed receipts |
 | `terminal-notification-history/<generation>/` | complete outboxes archived when a terminal run starts another attempt; prior requests and receipts remain auditable but are no longer deliverable |
-| journal `user_interaction/opened` | fully rendered durable gate; its record seqId is the external gate identity |
+| journal `state_action/{invoke,complete,validated}` | non-user action phase fact plus the resolved state input object when declared; the optional copy is informational and replay-compatible with old records |
+| journal `user_interaction/opened` | fully rendered durable gate plus the state's resolved input object when it declares input; its record seqId is the external gate identity |
 | journal `user_interaction/resolved` | validated external input that directly completes the user action |
 | `user-interactions/<branchId>/<seqId>/receipts/*.json` | non-semantic per-host/session presentation claims and confirmations |
 | `user-interactions/<branchId>/<seqId>/receipts/*.published` | internal immutable publication-order markers used only for cross-process presentation arbitration |

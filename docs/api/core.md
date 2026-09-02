@@ -303,7 +303,8 @@ Public AST exports:
 | `JoinArtifactOfAst` | map-contained producer and optional artifact |
 | `SchemaAst` | `{ kind: "jsonSchema", schema: JsonSchema, runtimeContract?: { id: string; version: string } }` |
 | `TemplateAst` | immutable `strings` and refs |
-| `TransitionAst` | target and optional event-output bindings |
+| `TransitionAst` | target and optional event-output/ref bindings |
+| `TransitionInputAst` | `EventBindingAst` or an ordinary `InputRef` |
 | `EventBindingAst` | event-output selector |
 
 The root entry point also exports the corresponding public CST types listed in [DSL reference](dsl.md).
@@ -521,6 +522,8 @@ type DurableLogRecord =
   | StateActionCompleteLog
   | StateActionValidatedLog
   | StateActionTimerFiredLog
+  | UserInteractionOpenedLog
+  | UserInteractionResolvedLog
   | ActorCreatedLog
   | ActorMessagesEnqueuedLog
   | ActorMessageAcceptedLog
@@ -547,10 +550,12 @@ Every record carries:
 | `args` | Run arguments. |
 | `session_ref` | Persisted host session reference. |
 | `spawned` | Pinned map keys and items. |
-| `state_action/invoke` | Invocation plus action-definition provenance. |
-| `state_action/complete` | Claimed completion event. |
-| `state_action/validated` | Guard, event, and accepted/rejected verdict. |
+| `state_action/invoke` | Invocation plus action-definition provenance and optional resolved state input. |
+| `state_action/complete` | Claimed completion event and optional resolved state input. |
+| `state_action/validated` | Guard, event, accepted/rejected verdict, and optional resolved state input. |
 | `state_action/timer_fired` | Deadline won the race. |
+| `user_interaction/opened` | Fully rendered durable gate, including the resolved state input object when the state declares input. The optional input is informational and excluded from replay identity for compatibility with older records. |
+| `user_interaction/resolved` | Validated external event that answers one exact opened gate. |
 | `actor_created` | Ordinary actor or pool generation and immutable definition/input provenance. |
 | `actor_messages_enqueued` | Atomic singleton/batch FIFO transaction with exact four-way source provenance. |
 | `actor_message` | Accepted/replied/settled fact; pool facts preserve `workerIndex`. |
@@ -559,9 +564,9 @@ Every record carries:
 | `actor_scope` | Closing or quiescent stop. |
 | `failure_intent` | Reserved global failure became durable. |
 
-`StateActionInvokeLog` is exported separately because replay and integrations commonly need its `definition` provenance.
+`StateActionInvokeLog` is exported separately because replay and integrations commonly need its `definition` provenance. Resolved `input` copies are plain finite acyclic JSON, informational only, and excluded from replay identity; records written before the field existed remain compatible.
 
-Transitions are not records. Projection recomputes routing from the current chart.
+Transitions are not records. Projection recomputes routing from the current chart. Transition inputs can bind `event()` selectors or ordinary refs such as `result()`; refs resolve from the selected ancestry when the edge fires and fail closed if unavailable.
 
 ## Replay compatibility
 
@@ -689,7 +694,8 @@ ParsedChart, RegionStateAst, ReservedSystemEventType, ScriptActionAst,
 ScriptActionCst, StateActionAst, StateActionCst, StateAst, StateCst,
 StateId, StatePath, SystemEvent, TemplateAst, TemplateCst, Templatable,
 GuardOutcome, GuardRef, GuardRefAst, OnReject, OnReenterAst, OnReenterCst,
-TransitionAst, TransitionCst, TransitionMapCst, UserActionAst,
+TransitionAst, TransitionCst, TransitionInputAst, TransitionInputCst,
+TransitionMapCst, UserActionAst,
 UserActionCst, InputsOf, Paths, ValueAt,
 HyperchartInspectAgentDefaults, HyperchartInspectArtifact,
 HyperchartInspectBranch, HyperchartInspectEnv, HyperchartInspectGuard,

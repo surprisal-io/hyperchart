@@ -53,6 +53,17 @@ function storyFiles(directory: string): string[] {
 }
 
 describe("Storybook information architecture", () => {
+	it("captures resolved-input present cases through the execution loop and labels legacy logs", () => {
+		const source = readFileSync(join(storyDirectory, "ResolvedInputRecords.stories.tsx"), "utf8");
+		expect(source).toContain("await loop(runtime");
+		expect(source).toContain("scenario.runtimeRun(runtime.records");
+		expect(source).toContain("executed capture · user_interaction/opened · input recorded");
+		expect(source).toContain("executed capture · state_action/invoke · result-ref input recorded");
+		expect(source).toContain("legacy compatibility fixture · user_interaction/opened · input absent");
+		expect(source).toContain("Hand-authored pre-input durable shape");
+		expect(source).not.toContain("const recordedPrefix");
+	});
+
 	it("keeps the dedicated virtualized Runtime History board and every required case", () => {
 		const source = readFileSync(join(storyDirectory, "RuntimeHistoryVirtualizedCursorChunks.stories.tsx"), "utf8");
 		expect(source).toContain("Runtime History — Virtualized Cursor Chunks");

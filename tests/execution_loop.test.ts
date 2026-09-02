@@ -129,6 +129,59 @@ function userAst(validate = false): ChartAst {
 	return result.ast;
 }
 
+function inputUserAst(): ChartAst {
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "input-user-chart",
+			initial: "prepare",
+			states: {
+				prepare: {
+					kind: "state",
+					action: agent("preparer", { reply: z.object({ batch: z.array(z.string()) }) }),
+					transitions: { READY: { target: "ask", input: { context: event() } } },
+				},
+				ask: {
+					kind: "state",
+					input: { context: z.object({ batch: z.array(z.string()) }) },
+					action: user({ prompt: "Choose?", options: ["CHOSEN"] }),
+					transitions: { CHOSEN: "done" },
+				},
+				done: final(),
+			},
+		}),
+	);
+	if (!result.ok) throw new Error("input user chart should be valid");
+	return result.ast;
+}
+
+function transitionRefAst(): ChartAst {
+	const parsed = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "transition-ref-chart",
+			initial: "select",
+			states: {
+				select: {
+					kind: "state",
+					action: agent("selector", { reply: z.object({ decision: z.object({ hypothesisId: z.string() }) }) }),
+					transitions: { SELECTED: { target: "score", input: { hypothesisId: result("select", "decision.hypothesisId") } } },
+				},
+				score: {
+					kind: "state",
+					input: { hypothesisId: z.string() },
+					action: agent("scorer"),
+					validate: tsImport("./checks.js", "ok"),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		}),
+	);
+	if (!parsed.ok) throw new Error(`transition-ref chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+	return parsed.ast;
+}
+
 function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartAst {
 	const result = normalizeChartConfig(
 		chart({
@@ -427,6 +480,7 @@ describe("execution loop", () => {
 		const uid = actionUid(ast, "ask");
 		const events: MachineEvent[] = [];
 		const gateSeqIds: number[] = [];
+		let openedHasInput: boolean | undefined;
 		const runtime = new MockRuntime({
 			ast, logs: [invoke(uid)], events,
 			onRunEffects(effects) {
@@ -438,6 +492,7 @@ describe("execution loop", () => {
 					const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
 					if (opened?.type === "user_interaction" && opened.kind === "opened") {
 						gateSeqIds.push(opened.seqId);
+						openedHasInput = Object.hasOwn(opened, "input");
 						events.push(durableRecordsAdded([{ type: "user_interaction", kind: "resolved", gateSeqId: opened.seqId, actionUid: opened.actionUid, event: { type: "APPROVED" } }], `external:${opened.seqId}`));
 					}
 				}
@@ -446,9 +501,88 @@ describe("execution loop", () => {
 		const state = await loop(runtime);
 		expect(gateSeqIds).toHaveLength(1);
 		expect(gateSeqIds[0]).toBeGreaterThan(0);
+		expect(openedHasInput).toBe(false);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(runtime.effectBatches.flat().some((effect) => effect.kind === "user")).toBe(false);
 		expect(runtime.effectBatches.flat().some((effect) => effect.kind === "durable_records" && effect.records.some((record) => record.type === "state_action" && record.kind === "complete"))).toBe(false);
+	});
+
+	it("records the fully resolved state input on a journal-native user gate", async () => {
+		const ast = inputUserAst();
+		const events: MachineEvent[] = [];
+		let openedInput: unknown;
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, event: { type: "READY", output: { batch: ["alpha", "beta"] } } });
+					} else if (effect.kind === "durable_records") {
+						const ack = durableRecordsAdded(effect.records, effect.id);
+						if (ack.kind !== "durable_records_added") throw new Error("expected durable ack");
+						events.push(ack);
+						const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
+						if (opened?.type === "user_interaction" && opened.kind === "opened") {
+							openedInput = opened.input;
+							events.push(durableRecordsAdded([{ type: "user_interaction", kind: "resolved", gateSeqId: opened.seqId, actionUid: opened.actionUid, event: { type: "CHOSEN" } }], `external:${opened.seqId}`));
+						}
+					}
+				}
+			},
+		});
+
+		const state = await start(runtime);
+		expect(openedInput).toEqual({ context: { batch: ["alpha", "beta"] } });
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+	});
+
+	it("resolves result refs in transition inputs and records state inputs on every action phase", async () => {
+		const ast = transitionRefAst();
+		const events: MachineEvent[] = [];
+		const scoreRecords: Array<Extract<DurableRecordDraft, { type: "state_action" }>> = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push(effect.actionUid.state === "select"
+							? { kind: "agent", effectId: effect.id, event: { type: "SELECTED", output: { decision: { hypothesisId: "hypothesis-7" } } } }
+							: { kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					} else if (effect.kind === "validate") {
+						events.push({ kind: "validated", effectId: effect.id, outcome: true });
+					} else if (effect.kind === "durable_records") {
+						for (const record of effect.records) {
+							if (record.type === "state_action" && record.actionUid.state === "score") scoreRecords.push(record);
+						}
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await start(runtime);
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(scoreRecords.map((record) => record.kind)).toEqual(["invoke", "complete", "validated"]);
+		for (const record of scoreRecords) expect("input" in record ? record.input : undefined).toEqual({ hypothesisId: "hypothesis-7" });
+	});
+
+	it("fails closed when a transition result ref has no completed result", async () => {
+		const ast = transitionRefAst();
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") events.push({ kind: "agent", effectId: effect.id, event: { type: "SELECTED" } });
+					else if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+				}
+			},
+		});
+
+		await expect(start(runtime)).rejects.toThrow("Transition input in state select: no result for state select");
 	});
 
 	it("rejects an unsupported journal-native user event", async () => {

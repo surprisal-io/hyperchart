@@ -68,7 +68,8 @@ describe("JsonlLogStore branch journal", () => {
 		await main.initializeRootBranch(); await main.appendDrafts([argsDraft(), invokeDraft()]);
 		await main.createBranch("experiment", 2, { reason: "try sibling", sourceBranchId: "main", sourceSeqId: 2 });
 		const [sibling] = await main.forBranch("experiment").appendDrafts([invokeDraft()]);
-		await main.moveBranch("main", 2); const [replacement] = await main.appendDrafts([invokeDraft()]);
+		const moved = await main.moveBranch("main", 2); const [replacement] = await main.appendDrafts([invokeDraft()]);
+		expect(moved).toMatchObject({ moveSeqId: 6, previousHeadSeqId: 3, headSeqId: 2, preservedRecords: 3 });
 		expect(sibling).toMatchObject({ seqId: 5, parentId: 2, branchId: "experiment" });
 		expect(replacement).toMatchObject({ seqId: 7, parentId: 2, branchId: "main" });
 		expect((await persistedEntries(file)).map((entry) => entry.seqId)).toEqual([1, 2, 3, 4, 5, 6, 7]);
@@ -195,6 +196,19 @@ for (const backend of ["memory", "jsonl"] as const) {
 			await expect(store.readStateVisits({ snapshot, state: "work", cursor: "not-a-cursor" })).rejects.toBeInstanceOf(HistoryCursorError);
 			await store.appendDrafts([invokeDraft()]);
 			await expect(store.readStateVisits({ snapshot: await store.captureSnapshot("main"), state: "work", cursor: cursor! })).rejects.toBeInstanceOf(HistoryCursorError);
+		});
+
+		it("preserves resolved input provenance and rejects lossy JSON values before append", async () => {
+			const store = await historyStore(backend);
+			const actionUid = { chart: "chart", state: "work", action: "agent" };
+			const records = await store.appendDrafts([{
+				type: "state_action", kind: "invoke", actionUid, sessionId: "session",
+				input: { hypothesisId: "hypothesis-7", score: 1 },
+				definition: { kind: "agent", uid: actionUid, name: "worker" },
+			}]);
+			expect(records[0]).toMatchObject({ input: { hypothesisId: "hypothesis-7", score: 1 } });
+			await expect(store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid, sessionId: "invalid", input: { score: Number.POSITIVE_INFINITY }, definition: { kind: "agent", uid: actionUid, name: "worker" } }])).rejects.toThrow(/finite JSON numbers/);
+			await expect(store.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: { ...actionUid, action: "user" }, phaseSeqId: records[0]!.seqId, input: new Date(0) as never, prompt: "Choose?", options: [], events: ["OK"] }])).rejects.toThrow(/plain JSON objects/);
 		});
 
 		it("streams projection ancestry oldest-first in fixed batches", async () => {

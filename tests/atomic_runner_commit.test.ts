@@ -10,6 +10,7 @@ import { createBranchProjection } from "../packages/hyperchart/src/core/projecti
 import { prepareProjectionCheckpoint, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
 import { PostgresLogStore } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
 import {
+  BranchSealedError,
   createHyperchartRunnerController,
   type SteerableAgentExecutor,
 } from "../packages/hyperchart/src/runner/runner_main.js";
@@ -31,6 +32,19 @@ class NoopExecutor implements SteerableAgentExecutor {
   }
 }
 
+class DrainingExecutor extends NoopExecutor {
+  constructor(private readonly started: () => void, private readonly gate: Promise<void>) { super(); }
+  override async dispose(): Promise<void> { this.started(); await this.gate; }
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting for runner state");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
   if (dsn === undefined || runIds.length === 0) return;
@@ -48,7 +62,7 @@ afterEach(async () => {
   await client.end();
 });
 
-async function fixture(cadenceBoundary = false) {
+async function fixture(cadenceBoundary = false, continueAfterGate = false) {
   const root = mkdtempSync(join(tmpdir(), "hyperchart-atomic-controller-"));
   roots.push(root);
   const workDir = join(root, "work");
@@ -60,10 +74,10 @@ async function fixture(cadenceBoundary = false) {
   const chartPath = join(workDir, "chart.ts");
   writeFileSync(
     chartPath,
-    `import { chart, final, user } from "@surprisal/hyperchart";
+    `import { agent, chart, final, user } from "@surprisal/hyperchart";
      export default chart({ kind: "chart", id: "atomic-controller", initial: "ask", states: {
        ask: { kind: "state", action: user({ prompt: "Select", options: ["SELECTED"] }), transitions: { SELECTED: "done" } },
-       done: final(),
+       done: ${continueAfterGate ? `{ kind: "state", action: agent("waiting"), transitions: { FINISH: "finished" } }, finished: final()` : "final()"},
      } });`,
   );
   const parsed = parseChartModuleSync(chartPath);
@@ -110,7 +124,7 @@ async function fixture(cadenceBoundary = false) {
     )`);
   });
   await store.close();
-  return { runId, runDir, workDir, chartPath, gateSeqId: opened!.seqId };
+  return { runId, runDir, workDir, chartPath, gateSeqId: opened!.seqId, targetSeqId: invoke!.seqId };
 }
 
 describePg("atomic runner interaction commit", () => {
@@ -152,6 +166,69 @@ describePg("atomic runner interaction commit", () => {
     release();
     expect((await committing).participant).toBe("atomic-source-response");
     await aggregate;
+  }, 30_000);
+
+  it("enrolls an ordinary response before its first branch lookup so an immediate drain waits for it", async () => {
+    const f = await fixture();
+    let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built(); return new NoopExecutor(); },
+    );
+    controller.acquireHold();
+    const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
+    const responding = controller.respondToUserInteraction("main", f.gateSeqId, { type: "SELECTED" });
+    const draining = controller.stopAndDrain("main");
+    expect((await responding).idempotent).toBe(false);
+    expect((await draining).outcome).toBe("drained");
+    await expect(controller.respondToUserInteraction("main", f.gateSeqId, { type: "SELECTED" })).rejects.toBeInstanceOf(BranchSealedError);
+    await controller.stop(); await aggregate;
+  }, 30_000);
+
+  it("enrolls an atomic response before its first branch lookup so an immediate drain waits for it", async () => {
+    const f = await fixture();
+    let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built(); return new NoopExecutor(); },
+    );
+    controller.acquireHold();
+    const aggregate = controller.start(); await runtimeBuilt;
+    let participantCalls = 0;
+    const committing = controller.commitUserInteraction(
+      { branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } },
+      async () => { participantCalls++; return "admitted"; },
+    );
+    const draining = controller.stopAndDrain("main");
+    expect((await committing).participant).toBe("admitted");
+    expect(participantCalls).toBe(1);
+    expect((await draining).outcome).toBe("drained");
+    let rejectedCalls = 0;
+    await expect(controller.commitUserInteraction(
+      { branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } },
+      async () => { rejectedCalls++; return "late"; },
+    )).rejects.toBeInstanceOf(BranchSealedError);
+    expect(rejectedCalls).toBe(0);
+    await controller.stop(); await aggregate;
+  }, 30_000);
+
+  it("does not enqueue an existing atomic response acknowledgement twice under a concurrent retry", async () => {
+    const f = await fixture(false, true);
+    let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built(); return new NoopExecutor(); },
+    );
+    controller.acquireHold();
+    const aggregate = controller.start(); await runtimeBuilt;
+    const results = await Promise.all([
+      controller.commitUserInteraction({ branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } }, async () => "first"),
+      controller.commitUserInteraction({ branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } }, async () => "retry"),
+    ]);
+    expect(results.map((result) => result.response.idempotent).sort()).toEqual([false, true]);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(controller.liveBranchIds).toEqual(["main"]);
+    await controller.stop(); await aggregate;
   }, 30_000);
 
   it("commits an ordinary 511-to-512 response with its due checkpoint", async () => {
@@ -262,6 +339,47 @@ describePg("atomic runner interaction commit", () => {
     const head = (await client.query("select max(seq) as head_seq_id from hyperchart_journal where run_id = $1 and kind = 'record' and branch_id = 'main'", [f.runId])).rows[0]?.head_seq_id;
     const checkpoint = await client.query("select 1 from hyperchart_checkpoint where run_id = $1 and head_seq_id = $2", [f.runId, head]);
     await client.end(); expect(checkpoint.rows).toHaveLength(1);
+  }, 30_000);
+
+  it("orders an atomic user commit before the move seal or rejects it without invoking the participant", async () => {
+    const f = await fixture();
+    let releaseDispose!: () => void;
+    const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
+    let disposalStarted!: () => void;
+    const startedDisposal = new Promise<void>((resolve) => { disposalStarted = resolve; });
+    let built = false;
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built = true; return new DrainingExecutor(disposalStarted, disposeGate); },
+    );
+    controller.acquireHold();
+    const aggregate = controller.start();
+    await waitFor(() => built);
+
+    const moving = controller.moveBranch("main", f.targetSeqId);
+    await startedDisposal;
+    let participantCalls = 0;
+    await expect(controller.commitUserInteraction(
+      { branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } },
+      async () => { participantCalls++; return "must-not-run"; },
+    )).rejects.toBeInstanceOf(BranchSealedError);
+    expect(participantCalls).toBe(0);
+    releaseDispose();
+    const moveSeqId = await moving;
+
+    const reader = await PostgresLogStore.open({ dsn: dsn as string, runId: f.runId, branchId: "main" });
+    expect((await reader.getBranch("main")).headSeqId).toBe(f.targetSeqId);
+    expect(await reader.findUserInteractionResponse({ headSeqId: f.targetSeqId, gateSeqId: f.gateSeqId })).toBeUndefined();
+    const { Client } = await import("pg");
+    const client = new Client({ connectionString: dsn as string }); await client.connect();
+    const move = await client.query("select seq, head_seq_id from hyperchart_journal where run_id = $1 and kind = 'branch_move' and branch_id = 'main' order by seq desc limit 1", [f.runId]);
+    await client.end();
+    expect(Number(move.rows[0]?.seq)).toBe(moveSeqId);
+    expect(Number(move.rows[0]?.head_seq_id)).toBe(f.targetSeqId);
+    await reader.close();
+
+    await controller.stop();
+    await aggregate;
   }, 30_000);
 
   it("exposes one controller commit for fork, response, and application SQL", async () => {

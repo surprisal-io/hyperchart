@@ -243,7 +243,7 @@ The package root also exports an untyped `input(name, path?)` constructor.
 event(path?: string): EventBindingCst;
 ```
 
-Binds a target input to the completion event's `output`, or to a dot-path inside `output`.
+Binds a target input to the completion event's `output`, or to a dot-path inside `output`. Transition input values may also be any ordinary ref (`result()`, `arg()`, `input()`, `visit()`, `key()`, `item()`, and actor-local refs in actor workflows). Named actor-call reply routes accept the same `{ target, input }` transition objects; actor isolation and local result dominance are validated before execution.
 
 ```ts
 transitions: {
@@ -254,7 +254,19 @@ transitions: {
 }
 ```
 
-`event()` binds the whole `output` value, not the `{ type, output }` envelope.
+`event()` binds the whole `output` value, not the `{ type, output }` envelope. Ref bindings resolve when the transition fires from the selected branch's replay-derived durable state. A missing result or selector fails closed before the target state enters.
+
+```ts
+transitions: {
+  READY: {
+    target: "score",
+    input: {
+      batch: event("batch"),
+      hypothesisId: result("select", "decision.hypothesisId"),
+    },
+  },
+}
+```
 
 #### `visit(state?)`
 
@@ -378,7 +390,7 @@ type ActionStateCst = {
 | Field | Meaning |
 |---|---|
 | `action` | Work dispatched on entry. |
-| `input` | Zod schemas for visit-local transition inputs. |
+| `input` | Zod schemas for visit-local transition inputs. Incoming bindings may select the event output or resolve ordinary refs. |
 | `transitions` | Completion-event routes. |
 | `after` | Deadline while the action is running. The target is a sibling. |
 | `validate` | Acceptance guard for non-`FAILED` completion claims. |
@@ -506,7 +518,7 @@ type TransitionMapCst = Record<
   string,
   string | {
     target: string;
-    input?: Record<string, EventBindingCst>;
+    input?: Record<string, EventBindingCst | InputRef>;
   }
 >;
 ```
@@ -533,7 +545,7 @@ revise: {
 },
 ```
 
-A required input must be bound by every incoming route that can enter the state. A Zod default supplies an unbound value:
+A required input must be bound by every incoming route that can enter the state. `event()` selects from the firing output; ordinary refs resolve from the firing state's durable ancestry scope using the same resolver as templates. Missing refs fail before target entry. A Zod default supplies an unbound value:
 
 ```ts
 input: { attempt: z.number().int().default(1) }
@@ -843,7 +855,7 @@ ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst,
 EventBindingCst, FinalStateCst, InputRef,
 JoinArtifactOfCst, MapStateCst, OnReject, OnReenterCst,
 ParallelStateCst, SchemaCst, ScriptActionCst, StateActionCst, StateCst,
-TemplateCst, Templatable, TransitionCst, TransitionMapCst,
+TemplateCst, Templatable, TransitionCst, TransitionInputCst, TransitionMapCst,
 UserActionCst, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
 Paths, ValueAt
 ```

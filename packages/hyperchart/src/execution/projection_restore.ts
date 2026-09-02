@@ -16,7 +16,7 @@ import {
 } from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
-export const PROJECTOR_VERSION = 1;
+export const PROJECTOR_VERSION = 2;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
 export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
@@ -225,9 +225,10 @@ function isOpenInteractions(value: unknown): boolean {
 	});
 }
 function isOpenedInteraction(value: unknown): value is Record<string, unknown> {
-	return isExactRecord(value, ["type", "kind", "actionUid", "phaseSeqId", "prompt", "options", "events", "seqId", "parentId", "branchId", "timestamp"], ["reply", "rejection"])
+	return isExactRecord(value, ["type", "kind", "actionUid", "phaseSeqId", "prompt", "options", "events", "seqId", "parentId", "branchId", "timestamp"], ["input", "reply", "rejection"])
 		&& value.type === "user_interaction" && value.kind === "opened" && isActionUid(value.actionUid) && isPositiveInteger(value.phaseSeqId)
 		&& typeof value.prompt === "string" && isStringArray(value.options) && isStringArray(value.events) && isCoordinates(value)
+		&& (value.input === undefined || isJsonRecord(value.input))
 		&& (value.reply === undefined || isSchemaAst(value.reply)) && (value.rejection === undefined || isRejection(value.rejection));
 }
 function isRejection(value: unknown): boolean {
@@ -463,11 +464,30 @@ function concreteMapPathValid(ast: ChartAst, projection: BranchProjection, path:
 	return templatePath(path).length > 0;
 }
 function isRecordOfJsonRecords(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isJsonRecord); }
-function isRecordOfJson(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isJsonValue); }
+function isRecordOfJson(value: unknown): boolean { return isRecord(value) && Object.values(value).every((entry) => isJsonValue(entry)); }
 function isRecordOfNonEmptyStrings(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isNonEmptyString); }
 function isRecordOfPositiveIntegers(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isPositiveInteger); }
-function isJsonRecord(value: unknown): value is Record<string, unknown> { return isRecord(value) && Object.values(value).every(isJsonValue); }
-function isJsonValue(value: unknown): boolean { return value === null || typeof value === "string" || typeof value === "boolean" || typeof value === "number" && Number.isFinite(value) || Array.isArray(value) && value.every(isJsonValue) || isRecord(value) && Object.values(value).every(isJsonValue); }
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+	return isPlainRecord(value) && isJsonValue(value);
+}
+function isJsonValue(value: unknown, ancestors = new Set<object>()): boolean {
+	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+	if (typeof value === "number") return Number.isFinite(value);
+	if (typeof value !== "object") return false;
+	if (ancestors.has(value)) return false;
+	ancestors.add(value);
+	try {
+		if (Array.isArray(value)) return value.every((entry) => isJsonValue(entry, ancestors));
+		return isPlainRecord(value) && Object.values(value).every((entry) => isJsonValue(entry, ancestors));
+	} finally {
+		ancestors.delete(value);
+	}
+}
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	if (!isRecord(value)) return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
 function isStringArray(value: unknown): value is string[] { return Array.isArray(value) && value.every((entry) => typeof entry === "string"); }
 function isPath(value: unknown): value is string { return isNonEmptyString(value); }
 function isHead(value: unknown): value is number | null { return value === null || isPositiveInteger(value); }

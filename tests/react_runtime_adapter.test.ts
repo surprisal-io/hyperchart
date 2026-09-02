@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, send, t, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, send, t, tsImport, user } from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
@@ -542,6 +542,48 @@ describe("React runtime adapter", () => {
 			},
 		]);
 		expect(work?.session).toMatchObject({ status: "running", model: "provider/second-model" });
+	});
+
+	it("surfaces durable state-action and opened inputs while preserving the replay fallback", () => {
+		const chartAst = ast(chart({
+			kind: "chart",
+			id: "recorded-visit-inputs",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					input: { feedback: z.string().default("derived") },
+					action: agent("worker", { task: t`Feedback ${input("feedback")}` }),
+					transitions: { NEXT: { target: "ask", input: { context: event("context") } } },
+				},
+				ask: {
+					kind: "state",
+					input: { context: z.string() },
+					action: user({ prompt: t`Context ${input("context")}`, options: ["SELECTED"] }),
+					transitions: { SELECTED: "done" },
+				},
+				done: final(),
+			},
+		}));
+		const work = chartAst.states.work;
+		const ask = chartAst.states.ask;
+		if (work?.kind !== "state" || ask?.kind !== "state") throw new Error("missing input story actions");
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: work.action.uid, input: { feedback: "recorded invoke" }, definition: work.action, ...baseRecord(2) },
+			{ type: "state_action", kind: "complete", actionUid: work.action.uid, input: { feedback: "recorded complete" }, event: { type: "NEXT", output: { context: "derived transition" } }, ...baseRecord(3) },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: ask.action.uid, definition: ask.action, ...baseRecord(4) },
+			{ type: "user_interaction", kind: "opened", actionUid: ask.action.uid, phaseSeqId: 4, input: { context: "recorded opened" }, prompt: "Context derived transition", options: ["SELECTED"], events: ["SELECTED"], ...baseRecord(5) },
+		];
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
+		expect(run.states.find((state) => state.id === "work")?.visitHistory?.[0]).toMatchObject({
+			inputs: { feedback: "recorded complete" },
+			invocation: { task: "Feedback derived" },
+		});
+		expect(run.states.find((state) => state.id === "ask")?.visitHistory?.[0]).toMatchObject({
+			inputs: { context: "recorded opened" },
+			invocation: { prompt: "Context derived transition" },
+		});
 	});
 
 	it("marks downstream completions stale after a state is revisited", () => {

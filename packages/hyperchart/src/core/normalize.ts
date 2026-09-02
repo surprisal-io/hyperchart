@@ -22,7 +22,6 @@ import type {
 	JsonValue,
 	ArtifactAst,
 	CompoundStateAst,
-	EventBindingAst,
 	ArtifactOfAst,
 	JoinArtifactOfAst,
 	FinalStateAst,
@@ -49,6 +48,7 @@ import type {
 	TemplateAst,
 	TerminalNotificationAst,
 	TransitionAst,
+	TransitionInputAst,
 	UserActionAst,
 	ValueAst,
 } from "./types.js";
@@ -458,7 +458,7 @@ function toActorDeclarationAst(
 		diagnostics.push(diagnostic("ACTOR_INITIAL_NOT_RECEIVE", `Actor '${placement.path}' must enter through an explicit receive() state.`, `${placement.pointer}/initial`, source));
 	}
 	const resolved = protocol === undefined ? states : inferAndValidateActorReplies(placement, states, protocol, actorTargets, diagnostics, source);
-	if (input !== undefined && protocol !== undefined) validateActorIsolation(placement, resolved, input, protocol, diagnostics, source);
+	if (input !== undefined && protocol !== undefined) validateActorIsolation(placement, resolved, initial, input, protocol, diagnostics, source);
 	if (input === undefined || inputValue === undefined || protocol === undefined) return undefined;
 	if (isPool) {
 		if (concurrency === undefined) return undefined;
@@ -532,6 +532,13 @@ function toProtocolAst(
 	return protocol;
 }
 
+function actorWorkflowSuccessors(node: ActorWorkflowStateAst): StateId[] {
+	if (node.kind === "state") return [...Object.values(node.transitions).map((transition) => transition.target), ...(node.after === undefined ? [] : [node.after.target])];
+	if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "callBatch") return [node.target];
+	if (node.kind === "call") return node.target === undefined ? Object.values(node.transitions).map((transition) => transition.target) : [node.target];
+	return [];
+}
+
 function inferAndValidateActorReplies(
 	placement: RawActorPlacement,
 	states: Record<StatePath, ActorWorkflowStateAst>,
@@ -556,25 +563,19 @@ function inferAndValidateActorReplies(
 			addContext(target, message);
 		}
 	}
-	const successors = (node: ActorWorkflowStateAst): string[] => {
-		if (node.kind === "state") return [...Object.values(node.transitions).map((transition) => transition.target), ...(node.after === undefined ? [] : [node.after.target])];
-		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "callBatch") return [node.target];
-		if (node.kind === "call") return node.target === undefined ? Object.values(node.transitions).map((transition) => transition.target) : [node.target];
-		return [];
-	};
 	let changed = true;
 	while (changed) {
 		changed = false;
 		for (const [id, node] of Object.entries(states)) {
 			for (const message of contexts.get(id) ?? []) {
-				for (const target of successors(node)) if (addContext(target, message)) changed = true;
+				for (const target of actorWorkflowSuccessors(node)) if (addContext(target, message)) changed = true;
 			}
 		}
 	}
 	const result = { ...states };
 	for (const [id, node] of Object.entries(states)) {
 		const pointer = `${placement.pointer}/states/${escapePointer(id)}`;
-		for (const target of successors(node)) if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `Actor state '${id}' targets unknown state '${target}'.`, pointer, source));
+		for (const target of actorWorkflowSuccessors(node)) if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `Actor state '${id}' targets unknown state '${target}'.`, pointer, source));
 		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
 		if (node.kind !== "reply") continue;
 		const messages = [...(contexts.get(id) ?? [])];
@@ -601,7 +602,7 @@ function inferAndValidateActorReplies(
 				const state = states[stateId];
 				if (state === undefined || state.kind === "receive") return false;
 				if (state.kind === "reply") return contexts.get(stateId)?.size === 1 && contexts.get(stateId)?.has(message) === true;
-				const next = successors(state);
+				const next = actorWorkflowSuccessors(state);
 				if (next.length === 0) return false;
 				visiting.add(stateId);
 				const ok = next.every(walk);
@@ -636,52 +637,111 @@ function schemaHasPath(schema: SchemaAst, path: string | undefined): boolean {
 	return true;
 }
 
+type ActorRefUse = Readonly<{ ref: InputRef; pointer: string; allowSelfResult?: true }>;
+
 function validateActorIsolation(
 	placement: RawActorPlacement,
 	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>,
+	initial: StateId,
 	actorInputSchema: SchemaAst,
 	protocol: ProtocolAst,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
+	const dominators = actorWorkflowDominators(states, initial);
 	for (const [stateId, node] of Object.entries(states)) {
 		const pointer = `${placement.pointer}/states/${escapePointer(stateId)}`;
-		const refs: InputRef[] = [];
+		const refs: ActorRefUse[] = [];
 		if (node.kind === "state") {
-			for (const template of actionTemplates(node.action)) refs.push(...template.refs);
+			for (const template of actionTemplates(node.action)) refs.push(...template.refs.map((ref) => ({ ref, pointer })));
 			for (const read of artifactReads(node.action, pointer)) {
 				if (states[read.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor artifact read '${read.state}' must name an actor-local action state.`, read.pointer, source));
 			}
 		}
-		if (node.kind === "send") refs.push(...valueRefs(node.input));
-		if (node.kind === "sendBatch" || node.kind === "callBatch") refs.push(...valueRefs(node.inputs));
-		if (node.kind === "call") refs.push(...valueRefs(node.input));
-		if (node.kind === "reply") refs.push(...valueRefs(node.output));
-		for (const ref of refs) {
+		if ("transitions" in node) {
+			for (const [eventType, transition] of Object.entries(node.transitions)) {
+				for (const [name, binding] of Object.entries(transition.input ?? {})) {
+					if (binding.kind !== "event") refs.push({ ref: binding, pointer: `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`, allowSelfResult: true });
+				}
+			}
+		}
+		if (node.kind === "send") refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
+		if (node.kind === "sendBatch" || node.kind === "callBatch") refs.push(...valueRefs(node.inputs).map((ref) => ({ ref, pointer })));
+		if (node.kind === "call") refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
+		if (node.kind === "reply") refs.push(...valueRefs(node.output).map((ref) => ({ ref, pointer })));
+		for (const use of refs) {
+			const { ref } = use;
 			if (ref.kind === "actorInput") {
-				if (!schemaHasPath(actorInputSchema, ref.path)) diagnostics.push(diagnostic("INVALID_ACTOR_INPUT_REF", `actorInput selector '${ref.path}' does not exist.`, pointer, source));
+				if (!schemaHasPath(actorInputSchema, ref.path)) diagnostics.push(diagnostic("INVALID_ACTOR_INPUT_REF", `actorInput selector '${ref.path}' does not exist.`, use.pointer, source));
 				continue;
 			}
 			if (ref.kind === "messageInput") {
 				const message = protocol[ref.message];
-				if (message === undefined || !schemaHasPath(message.input, ref.path)) diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", `messageInput('${ref.message}', '${ref.path ?? ""}') does not match the actor protocol.`, pointer, source));
+				if (message === undefined || !schemaHasPath(message.input, ref.path)) diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", `messageInput('${ref.message}', '${ref.path ?? ""}') does not match the actor protocol.`, use.pointer, source));
 				continue;
 			}
 			if (ref.kind === "result") {
 				const producer = states[ref.state];
-				if (producer?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor result('${ref.state}') must name an actor-local action state.`, pointer, source));
-				else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path)) diagnostics.push(diagnostic("UNKNOWN_INPUT_RESULT", `Actor result selector '${ref.path}' does not exist on '${ref.state}'.`, pointer, source));
+				if (producer?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor result('${ref.state}') must name an actor-local action state.`, use.pointer, source));
+				else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path)) diagnostics.push(diagnostic("UNKNOWN_INPUT_RESULT", `Actor result selector '${ref.path}' does not exist on '${ref.state}'.`, use.pointer, source));
+				else if (use.allowSelfResult === true && ref.state !== stateId && dominators.get(stateId)?.has(ref.state) !== true) {
+					diagnostics.push(diagnostic("NON_DOMINATED_REF", `Transition input in actor state '${stateId}' reads '${ref.state}', but '${ref.state}' does not dominate '${stateId}'.`, use.pointer, source));
+				}
 				continue;
 			}
 			if (ref.kind === "input") {
 				const schema = node.kind === "state" ? node.input?.[ref.name] : undefined;
-				if (schema === undefined || !schemaHasPath(schema, ref.path)) diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor input('${ref.name}') must name an input of the current actor-local action state.`, pointer, source));
+				if (schema === undefined || !schemaHasPath(schema, ref.path)) diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor input('${ref.name}') must name an input of the current actor-local action state.`, use.pointer, source));
 				continue;
 			}
-			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor visit('${ref.state}') must name an actor-local state.`, pointer, source));
-			else if (ref.kind !== "visit") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `${ref.kind}() cannot cross an actor boundary; capture it in the actor placement input.`, pointer, source));
+			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor visit('${ref.state}') must name an actor-local state.`, use.pointer, source));
+			else if (ref.kind !== "visit") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `${ref.kind}() cannot cross an actor boundary; capture it in the actor placement input.`, use.pointer, source));
 		}
 	}
+}
+
+function actorWorkflowControlSuccessors(node: ActorWorkflowStateAst): StateId[] {
+	if (node.kind === "receive") return Object.values(node.on);
+	if (node.kind === "reply") return [node.target];
+	return actorWorkflowSuccessors(node);
+}
+
+function actorWorkflowDominators(
+	states: Readonly<Record<StatePath, ActorWorkflowStateAst>>,
+	initial: StateId,
+): ReadonlyMap<StatePath, ReadonlySet<StatePath>> {
+	const reachable = new Set<StatePath>();
+	const pending = [initial];
+	while (pending.length > 0) {
+		const state = pending.shift()!;
+		if (reachable.has(state) || states[state] === undefined) continue;
+		reachable.add(state);
+		pending.push(...actorWorkflowControlSuccessors(states[state]!));
+	}
+	const predecessors = new Map<StatePath, Set<StatePath>>();
+	for (const state of reachable) predecessors.set(state, new Set());
+	for (const state of reachable) {
+		for (const target of actorWorkflowControlSuccessors(states[state]!)) if (reachable.has(target)) predecessors.get(target)!.add(state);
+	}
+	const dominators = new Map<StatePath, Set<StatePath>>();
+	for (const state of reachable) dominators.set(state, state === initial ? new Set([state]) : new Set(reachable));
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const state of reachable) {
+			if (state === initial) continue;
+			const incoming = [...predecessors.get(state)!];
+			const common = incoming.length === 0
+				? new Set<StatePath>()
+				: incoming.slice(1).reduce((result, predecessor) => new Set([...result].filter((item) => dominators.get(predecessor)!.has(item))), new Set(dominators.get(incoming[0]!)!));
+			common.add(state);
+			if (!sameSet(dominators.get(state)!, common)) {
+				dominators.set(state, common);
+				changed = true;
+			}
+		}
+	}
+	return dominators;
 }
 
 function validateMessagingNode(
@@ -1304,6 +1364,11 @@ function validateTargets(
 		}
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			const target = transition.target;
+			for (const [name, binding] of Object.entries(transition.input ?? {})) {
+				if (binding.kind !== "event") {
+					validateInputRefs(states, path, [binding], `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`, diagnostics, source);
+				}
+			}
 			if (!(sibling(target) in states)) {
 				diagnostics.push(
 					diagnostic(
@@ -1570,7 +1635,7 @@ function validateInputs(
 ): void {
 	const edges: Array<{
 		target: StatePath;
-		bindings?: Readonly<Record<string, EventBindingAst>>;
+		bindings?: Readonly<Record<string, TransitionInputAst>>;
 		pointer: string;
 	}> = [];
 	if (initial.length > 0 && initial in states) {
@@ -1716,6 +1781,13 @@ function validateDominatedRefs(
 				check(read.state, path, `${pointer}/notify/artifacts/${index}`, "artifactOf()");
 			}
 			continue;
+		}
+		for (const [eventType, transition] of Object.entries(node.transitions)) {
+			for (const [name, binding] of Object.entries(transition.input ?? {})) {
+				if (binding.kind === "result") {
+					check(binding.state, path, `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`, "result()", true);
+				}
+			}
 		}
 		if (node.kind === "state") {
 			for (const template of actionTemplates(node.action)) {
@@ -1983,7 +2055,19 @@ function validateTemplateRefs(
 	source: ChartSource,
 	options: { includeSelfMap?: boolean } = {},
 ): void {
-	for (const ref of template.refs) {
+	validateInputRefs(states, path, template.refs, pointer, diagnostics, source, options);
+}
+
+function validateInputRefs(
+	states: Record<StatePath, StateAst>,
+	path: StatePath,
+	refs: readonly InputRef[],
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	options: { includeSelfMap?: boolean } = {},
+): void {
+	for (const ref of refs) {
 		if (ref.kind === "actorInput" || ref.kind === "messageInput") {
 			diagnostics.push(diagnostic("ACTOR_LOCAL_REF_OUTSIDE_ACTOR", `${ref.kind}() may only be used inside an actor workflow.`, pointer, source));
 		}
@@ -2826,7 +2910,7 @@ function toTransitionMap(
 			);
 			continue;
 		}
-		const bindings = toEventBindings(raw.input, `${pointer}/input`, diagnostics, source);
+		const bindings = toTransitionInputs(raw.input, `${pointer}/input`, diagnostics, source);
 		transitions[eventType] = {
 			target: raw.target,
 			...(bindings === undefined ? {} : { input: bindings }),
@@ -2835,36 +2919,40 @@ function toTransitionMap(
 	return transitions;
 }
 
-function toEventBindings(
+function toTransitionInputs(
 	input: unknown,
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): Record<string, EventBindingAst> | undefined {
+): Record<string, TransitionInputAst> | undefined {
 	if (input === undefined) return undefined;
 	if (!isRecord(input)) {
 		diagnostics.push(
-			diagnostic("INVALID_BINDING", "Transition input must be a map of name → event() binding.", path, source),
+			diagnostic("INVALID_BINDING", "Transition input must be a map of name → event() binding or ref.", path, source),
 		);
 		return undefined;
 	}
-	const bindings: Record<string, EventBindingAst> = {};
+	const bindings: Record<string, TransitionInputAst> = {};
 	for (const [name, raw] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
-		if (!isRecord(raw) || raw.kind !== "event") {
-			diagnostics.push(
-				diagnostic("INVALID_BINDING", "Transition input values must be event() bindings.", pointer, source),
-			);
+		if (!isRecord(raw)) {
+			diagnostics.push(diagnostic("INVALID_BINDING", "Transition input values must be event() bindings or refs.", pointer, source));
 			continue;
 		}
-		if (raw.path !== undefined && (typeof raw.path !== "string" || raw.path.length === 0)) {
-			diagnostics.push(diagnostic("INVALID_BINDING", "event() path must be a non-empty string.", pointer, source));
+		if (raw.kind === "event") {
+			if (raw.path !== undefined && (typeof raw.path !== "string" || raw.path.length === 0)) {
+				diagnostics.push(diagnostic("INVALID_BINDING", "event() path must be a non-empty string.", pointer, source));
+				continue;
+			}
+			bindings[name] = { kind: "event", ...(raw.path === undefined ? {} : { path: raw.path }) };
 			continue;
 		}
-		bindings[name] = {
-			kind: "event",
-			...(raw.path === undefined ? {} : { path: raw.path }),
-		};
+		if (!isInputRef(raw)) {
+			diagnostics.push(diagnostic("INVALID_BINDING", "Transition input values must be event() bindings or refs.", pointer, source));
+			continue;
+		}
+		const ref = toInputRef(raw, pointer, diagnostics, source);
+		if (ref !== undefined) bindings[name] = ref;
 	}
 	return bindings;
 }

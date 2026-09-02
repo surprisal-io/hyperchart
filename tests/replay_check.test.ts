@@ -591,16 +591,53 @@ describe("explainReplay", () => {
 		expect(explanation.skipped).toEqual([]);
 	});
 
+	it("excludes state-action input copies from replay identity and accepts old records", () => {
+		const current = ast(chart({ kind: "chart", id: "state-input-replay", initial: "work", states: {
+			work: {
+				kind: "state",
+				input: { hypothesisId: z.string().default("current") },
+				action: agent("worker"),
+				validate: tsImport("./checks.js", "ok"),
+				transitions: { DONE: "done" },
+			},
+			done: final(),
+		} }));
+		const uid = actionUid(current, "work");
+		const oldJournal = [
+			args(),
+			invoke(uid, 2, definition(current, "work")),
+			complete(uid, "DONE", 3),
+			validated(uid, "DONE", 4),
+		];
+		expect(explainReplay(current, oldJournal)).toMatchObject({ prefixEnd: 4, stale: [] });
+		const withInformationalInput: DurableLogRecord[] = [
+			oldJournal[0]!,
+			{ ...oldJournal[1]!, input: { hypothesisId: "historical-invoke" } } as DurableLogRecord,
+			{ ...oldJournal[2]!, input: { hypothesisId: "historical-complete" } } as DurableLogRecord,
+			{ ...oldJournal[3]!, input: { hypothesisId: "historical-validated" } } as DurableLogRecord,
+		];
+		expect(explainReplay(current, withInformationalInput)).toMatchObject({ prefixEnd: 4, stale: [] });
+	});
+
 	it("validates opened provenance and resolved user-event legality", () => {
 		const current = ast(chart({ kind: "chart", id: "user-replay", initial: "ask", states: {
-			ask: { kind: "state", action: user({ prompt: "Approve?", options: ["OK"] }), transitions: { OK: "done" } },
+			ask: {
+				kind: "state",
+				input: { context: z.object({ label: z.string() }).default({ label: "current" }) },
+				action: user({ prompt: "Approve?", options: ["OK"] }),
+				transitions: { OK: "done" },
+			},
 			done: final(),
 		} }));
 		const uid = actionUid(current, "ask");
+		// Pre-input-field opened records remain replay-compatible because resolved input is
+		// informational provenance rather than part of the rendered interaction identity.
 		const opened: DurableLogRecord = { type: "user_interaction", kind: "opened", actionUid: uid, phaseSeqId: 2, prompt: "Approve?", options: ["OK"], events: ["OK"], ...meta(3) };
 		const resolved: DurableLogRecord = { type: "user_interaction", kind: "resolved", gateSeqId: 3, actionUid: uid, event: { type: "OK" }, ...meta(4) };
 		const prefix = [args(), invoke(uid, 2, definition(current, "ask"))];
 		expect(explainReplay(current, [...prefix, opened, resolved])).toMatchObject({ prefixEnd: 4, stale: [] });
+		const informationalInput = explainReplay(current, [...prefix, { ...opened, input: { context: { label: "historical" } } }]);
+		expect(informationalInput.stale).toEqual([]);
 		const stale = explainReplay(current, [...prefix, { ...opened, prompt: "Changed" }]);
 		expect(stale.stale).toEqual([expect.objectContaining({ reason: "user_interaction_contract_changed", state: "ask" })]);
 		const broken = explainReplay(current, [...prefix, opened, { ...resolved, event: { type: "NOPE" } }]);

@@ -1,5 +1,5 @@
 import { actionUidKey } from "./action_uid.js";
-import type { DurableLogRecord } from "./durable_events.js";
+import type { DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
 import { actorContextForState, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath } from "./actors.js";
 import { declaredArtifactsForState } from "./normalize.js";
 import { nodeAt, templatePath } from "./paths.js";
@@ -150,7 +150,9 @@ function staleRecordsFor(
 		);
 		if (pending === undefined) return [];
 		const expected = userInteractionOpenedDraft({ ast, projection }, pending);
-		if (expected !== undefined && stableStringify(expected) === stableStringify(openedComparable(record))) return [];
+		// Resolved gate input is durable informational provenance for consumers, not replay identity.
+		// Omitting it preserves old opened records, while all pre-existing rendered-contract checks remain exact.
+		if (expected !== undefined && stableStringify(openedComparable(expected)) === stableStringify(openedComparable(record))) return [];
 		return [{
 			index,
 			seqId: record.seqId,
@@ -200,6 +202,8 @@ function staleRecordsFor(
 		return [{ index, seqId: record.seqId, record, state: record.occurrence, reason: "actor_reply_contract_changed", message: `Actor reply contract for ${record.occurrence}/${record.message} changed` }];
 	}
 	if (record.type !== "state_action") return [];
+	// Resolved state-action input is informational provenance. Replay identity remains the
+	// pre-existing explicit action-definition / guard checks, so old records may omit input.
 	const state = record.actionUid.state;
 	if (!projection.activeLeaves.includes(state) && record.kind !== "validated") return [];
 	const node = actorContextForState(ast, state)?.node ?? nodeAt(ast, state);
@@ -302,8 +306,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function openedComparable(record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "opened" }>) {
-	const { seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft } = record;
+function openedComparable(
+	record: Extract<DurableLogRecord | DurableRecordDraft, { type: "user_interaction"; kind: "opened" }>,
+) {
+	const { input: _input, ...withoutInput } = record;
+	if (!("seqId" in withoutInput)) return withoutInput;
+	const { seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft } = withoutInput;
 	return draft;
 }
 

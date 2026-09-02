@@ -335,7 +335,26 @@ describe("typed explicit actor protocols", () => {
 		expect(send({ to: declaration, event: "APPLY", input: { patch: "p" }, target: "next" }).event).toBe("APPLY");
 		expect(sendBatch({ to: declaration, event: "APPLY", inputs: [{ patch: "a" }, { patch: "b" }], target: "next" }).event).toBe("APPLY");
 		expect(call({ to: declaration, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "retry" } }).event).toBe("APPLY");
+		expect(call({
+			to: declaration,
+			event: "APPLY",
+			input: { patch: "p" },
+			transitions: { APPLIED: { target: "done", input: { commit: untypedEvent("commit") } }, REJECTED: "retry" },
+		}).transitions.APPLIED).toEqual({ target: "done", input: { commit: { kind: "event", path: "commit" } } });
 		expect(call({ to: declaration, event: "READ", input: { path: "x" }, target: "next" }).event).toBe("READ");
+		const Trigger = protocol({ START: message({ input: z.object({}).strict() }) });
+		const Caller = actor({
+			input: z.object({}).strict(), protocol: Trigger, initial: "idle",
+			states: {
+				idle: receive({ on: { START: "apply" } }),
+				apply: call({
+					to: declaration, event: "APPLY", input: { patch: "p" },
+					transitions: { APPLIED: { target: "settle", input: { commit: untypedEvent("commit") } }, REJECTED: "settle" },
+				}),
+				settle: reply({ target: "idle" }),
+			},
+		});
+		expect(Caller({}).kind).toBe("actorDeclaration");
 
 		// @ts-expect-error unknown protocol message
 		send({ to: declaration, event: "UNKNOWN", input: { patch: "p" }, target: "next" });
