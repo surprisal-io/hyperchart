@@ -156,13 +156,14 @@ async function stateVisitWithProjection(
 	const pending = projection.pendingActions.find((candidate): candidate is Extract<(typeof projection.pendingActions)[number], { phase: "running" }> => candidate.phase === "running" && candidate.invokeSeqId === item.seqId);
 	if (pending === undefined) return base;
 	const invocation = actionEffectInfo(renderPendingActionInvocation(ast, projection, pending));
-	const inputs = projection.inputs[item.state];
+	const inputs = item.invoke.input ?? projection.inputs[item.state];
+	const hasRecordedInput = item.invoke.input !== undefined;
 	const instance = nearestInstance(item.state);
 	const mapValue = instance === undefined ? undefined : projection.spawns[instance.container]?.[instance.key];
 	return {
 		...base,
 		invocation,
-		...(inputs === undefined || Object.keys(inputs).length === 0 ? {} : { inputs: { ...inputs } }),
+		...(inputs === undefined || !hasRecordedInput && Object.keys(inputs).length === 0 ? {} : { inputs: { ...inputs } }),
 		...(instance === undefined ? {} : { mapItem: { key: instance.key, ...(mapValue === undefined ? {} : { value: mapValue }) } }),
 	};
 }

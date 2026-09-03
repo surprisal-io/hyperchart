@@ -1059,7 +1059,7 @@ export async function createHyperchartRunnerController(
 		await assertChartPreflight(config.chartPath);
 		const parsed = parseChartModuleSync(config.chartPath, config.exportName === undefined ? {} : { exportName: config.exportName });
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-		const rootStore = await openRunLogStore(config.runDir, { ...(initialBranchIds[0] === undefined ? {} : { branchId: initialBranchIds[0] }), onWarn: (message) => console.warn(message), access: "writer" });
+		const rootStore = await openRunLogStore(config.runDir, { runId: config.runId, ...(initialBranchIds[0] === undefined ? {} : { branchId: initialBranchIds[0] }), onWarn: (message) => console.warn(message), access: "writer" });
 		let durableBranchIds = (await collectBranches(rootStore)).map((branch) => branch.branchId);
 		if (durableBranchIds.length === 0) {
 			const fresh = BranchExecution.fresh(parsed.ast, rootStore.branchId, rootStore);

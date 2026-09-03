@@ -28,6 +28,7 @@ export function stateVisitHistoryItemToHost(item: StateVisitHistoryItem, session
 		...(event === undefined ? {} : { completedEvent: event }),
 		...(validations.length === 0 ? {} : { validationAttempts: validations.length }),
 		...(complete?.artifacts === undefined ? {} : { artifactPins: Object.entries(complete.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size })) }),
+		...(item.invoke.input === undefined ? {} : { inputs: { ...item.invoke.input } }),
 		invocation: invocationInfo(item.invoke.definition),
 		...(session === undefined ? {} : { session }),
 	};

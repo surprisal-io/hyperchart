@@ -65,7 +65,7 @@ describe("run inspector stateless history source", () => {
 		await store.initializeRootBranch();
 		await store.appendDrafts([
 			{ type: "args", args: { topic: "cursor chunks" } },
-			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "visit-session", definition: action.action },
+			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "visit-session", input: { topic: "recorded provenance" }, definition: action.action },
 		]);
 		writeFileSync(join(runDir, "sessions", "progress.json"), JSON.stringify({
 			version: 1,
@@ -91,6 +91,7 @@ describe("run inspector stateless history source", () => {
 		const visits = await source.readStateVisits({ runId: "render-run", snapshot, stateId: "work" });
 		expect(visits.items).toHaveLength(1);
 		expect(visits.items[0]?.invocation).toMatchObject({ kind: "script", env: { TOPIC: "topic=cursor chunks" } });
+		expect(visits.items[0]?.inputs).toEqual({ topic: "recorded provenance" });
 		expect(visits.items[0]?.visit).toBe(1);
 		expect(visits.items[0]?.session).toBeUndefined();
 		await expect(source.readVisitSession({ runId: "render-run", branchId: "main", invokeSeqId: 2 })).resolves.toMatchObject({ actionKey: "history:work:script", status: "completed" });

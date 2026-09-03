@@ -16,6 +16,7 @@ import {
 	CHECKPOINT_TABLE,
 	RUN_META_TABLE,
 } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
+import { openRunLogStore } from "../packages/hyperchart/src/runtime/generic/log_store_factory.js";
 import { deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { createPiHyperchartHost } from "../packages/pi-hyperchart/src/runtime/pi/host_adapter.js";
@@ -139,6 +140,21 @@ afterAll(async () => {
 });
 
 describePg("PostgresLogStore", () => {
+	it("honors an explicit durable run id distinct from the directory basename", async () => {
+		const runId = newRunId();
+		const store = await openRunLogStore(join(tmpdir(), `encoded-${randomUUID()}`), {
+			runId,
+			access: "writer",
+		});
+		try {
+			await store.initializeRootBranch();
+			await store.appendDrafts([argsDraft()]);
+			expect(await (await openReader(runId)).countRecords()).toBe(1);
+		} finally {
+			await store.close();
+		}
+	});
+
 	it("stores run metadata in PostgreSQL without requiring meta.json", async () => {
 		const runId = newRunId();
 		const runDir = join(tmpdir(), runId);
