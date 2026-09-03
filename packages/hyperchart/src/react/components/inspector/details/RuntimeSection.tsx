@@ -233,7 +233,7 @@ function LazyStateVisits({ history, state, allStates, onSteerSession, onHighligh
 	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a visit of this state.</div>;
 	return <VirtualizedHistoryList<HyperchartVisitInfo>
 		cacheKey={historyCacheKey(history, "state-visits", stateId)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
-		identity={(visit) => String(visit.invokeSeqId)} estimateSize={88} emptyLabel="No visits in this snapshot."
+		identity={(visit) => String(visit.invokeSeqId)} emptyLabel="No visits in this snapshot."
 		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
 	/>;
 }
@@ -247,7 +247,7 @@ function LazyMapVisits({ history, state }: { history: RuntimeHistoryContext; sta
 	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a launch of this map.</div>;
 	return <VirtualizedHistoryList<HyperchartMapVisitInfo>
 		cacheKey={historyCacheKey(history, "map-visits", mapPath)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
-		identity={(visit) => String(visit.spawnSeqId)} estimateSize={62} emptyLabel="No map launches in this snapshot."
+		identity={(visit) => String(visit.spawnSeqId)} emptyLabel="No map launches in this snapshot."
 		renderItem={(visit) => <MapVisitHistory visits={[visit]} {...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })} />}
 	/>;
 }
@@ -261,7 +261,6 @@ function LazyActorGenerations({ history, logicalOccurrence }: { history: Runtime
 	return <VirtualizedHistoryList<HyperchartActorGenerationInfo>
 		cacheKey={historyCacheKey(history, "actor-generations", logicalOccurrence)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
 		identity={(generation) => `${generation.occurrencePath}:${generation.createdSeqId}`}
-		estimateSize={53}
 		emptyLabel="No actor generations in this snapshot."
 		renderItem={(generation) => <div className="rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]"><div className="font-semibold text-[var(--text-primary)]">Generation {generation.generation}</div><code className="text-[var(--text-muted)]">{generation.occurrencePath} · seq {generation.createdSeqId}</code></div>}
 	/>;
@@ -276,7 +275,6 @@ function LazyActorMessages({ history, occurrence }: { history: RuntimeHistoryCon
 	return <VirtualizedHistoryList<HyperchartActorMessageBatchInfo>
 		cacheKey={historyCacheKey(history, "actor-messages", occurrence)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
 		identity={(batch) => `${batch.occurrencePath}:${batch.enqueueSeqId}`}
-		estimateSize={80}
 		emptyLabel="No actor messages in this snapshot."
 		renderItem={(batch) => <div className="grid gap-1 rounded border border-[var(--border-secondary)] p-2"><div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Enqueue seq {batch.enqueueSeqId} · {batch.messages.length} message{batch.messages.length === 1 ? "" : "s"}</div>{batch.messages.map((message, index) => <ActorMailboxMessageRow key={message.messageId} message={message} index={index} />)}</div>}
 	/>;

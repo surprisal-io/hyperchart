@@ -6,7 +6,7 @@ import type { HyperchartInspectorDataSource } from "../packages/hyperchart/src/h
 import { RuntimeSection, useTargetCursor } from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
 import { MapVisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/MapVisitHistory.js";
 import { VisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/VisitHistory.js";
-import { HISTORY_PLAIN_LIST_ITEMS, HISTORY_PREFETCH_ITEMS, HISTORY_VIRTUAL_OVERSCAN, VirtualizedHistoryList } from "../packages/hyperchart/src/react/components/inspector/history/VirtualizedHistoryList.js";
+import { HISTORY_PREFETCH_ITEMS, HISTORY_VIRTUAL_OVERSCAN, VirtualizedHistoryList } from "../packages/hyperchart/src/react/components/inspector/history/VirtualizedHistoryList.js";
 import { mergeHistoryWindow, useHistoryWindow } from "../packages/hyperchart/src/react/components/inspector/history/useHistoryWindow.js";
 import type { HistoryChunk, HistoryCursor } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 
@@ -57,14 +57,9 @@ describe("interactive bounded history", () => {
 		expect(calls).toHaveLength(13);
 	});
 
-	it("prefetches before Safari reaches an unloaded edge and skips virtualization for short histories", async () => {
-		expect(HISTORY_VIRTUAL_OVERSCAN).toBe(40);
+	it("prefetches well before Safari reaches an unloaded edge without mounting an excessive row buffer", () => {
+		expect(HISTORY_VIRTUAL_OVERSCAN).toBe(20);
 		expect(HISTORY_PREFETCH_ITEMS).toBeGreaterThanOrEqual(40);
-		expect(HISTORY_PLAIN_LIST_ITEMS).toBe(40);
-		const source = { load: async () => ({ snapshot, items: rows(0, 6) }) };
-		render(createElement(RowHistoryList, { cacheKey: "short", source, identity: (item: { id: number }) => String(item.id), renderItem: (item: { id: number }) => createElement("div", null, item.id) }));
-		const list = await screen.findByTestId("virtualized-history");
-		expect(list.getAttribute("data-history-layout")).toBe("plain");
 	});
 
 	it("drops stale responses across subject, snapshot, and branch cache changes", async () => {
@@ -87,9 +82,6 @@ describe("interactive bounded history", () => {
 		} };
 		render(createElement(RowHistoryList, { cacheKey: "retry", source, identity: (item: { id: number }) => String(item.id), renderItem: (item: { id: number }) => createElement("div", null, item.id) }));
 		const list = await screen.findByTestId("virtualized-history");
-		expect(list.getAttribute("data-history-layout")).toBe("virtual");
-		expect(list.innerHTML).not.toContain("translateY");
-		expect(list.querySelector('[data-history-spacer="after"]')).not.toBeNull();
 		const viewport = list.querySelector(".overflow-auto");
 		if (viewport === null) throw new Error("history viewport missing");
 		fireEvent.scroll(viewport, { target: { scrollTop: 500 } });
