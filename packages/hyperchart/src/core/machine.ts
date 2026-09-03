@@ -1,3 +1,4 @@
+import { randomUUID } from "../utils/random_uuid.js";
 import assert from "./assert.js";
 import type {
 	ChartEvent,
@@ -1576,7 +1577,7 @@ function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 				type: "state_action",
 				kind: "invoke",
 				actionUid,
-				sessionId: globalThis.crypto.randomUUID(),
+				sessionId: randomUUID(),
 				...resolvedStateInput(state, actionUid),
 				definition: node.action,
 			},

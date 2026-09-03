@@ -64,17 +64,16 @@ describe("Storybook information architecture", () => {
 		expect(source).not.toContain("const recordedPrefix");
 	});
 
-	it("keeps the dedicated virtualized Runtime History board and every required case", () => {
+	it("keeps the virtualized Runtime History board focused on distinct row variants", () => {
 		const source = readFileSync(join(storyDirectory, "RuntimeHistoryVirtualizedCursorChunks.stories.tsx"), "utf8");
 		expect(source).toContain("Runtime History — Virtualized Cursor Chunks");
-		for (const story of [
-			"TenThousandStateVisits", "DeepLinkedMiddleChunk", "OppositeEdgeEvictionAndReload",
-			"VariableHeightAnchorPreservation", "TenThousandMapLaunches", "TenThousandActorGenerations",
-			"TenThousandActorMessageBatches", "EmptyHistory", "OlderEdgeFailureAndRetry",
-			"NewerEdgeFailureAndRetry", "BranchSnapshotSwitchCancelsInflight",
-			"RefreshToLatestWithOlderWindow", "TranscriptOnDemand",
-		]) expect(source).toContain(`export const ${story}`);
-		expect(source).toContain("captureRuntime(VISITS)");
+		for (const story of ["TenThousandStateVisits", "MapLaunches", "ActorGenerations", "ActorMessageBatches"])
+			expect(source).toContain(`export const ${story}`);
+		for (const removedUseCase of ["DeepLinkedMiddleChunk", "OppositeEdgeEvictionAndReload", "VariableHeightAnchorPreservation", "EmptyHistory", "OlderEdgeFailureAndRetry", "NewerEdgeFailureAndRetry", "BranchSnapshotSwitchCancelsInflight", "RefreshToLatestWithOlderWindow", "TranscriptOnDemand"])
+			expect(source).not.toContain(`export const ${removedUseCase}`);
+		expect(source).toContain("captureRuntime(STRESS_VISITS)");
+		expect(source).toContain("const STRESS_VISITS = 10_000");
+		expect(source).toContain("const VARIANT_VISITS = 200");
 		expect(source).toContain("explainReplay");
 		expect(source).toContain("stateVisitHistoryItemToHost");
 		expect(source).toContain("captureSemanticRows");
@@ -83,21 +82,16 @@ describe("Storybook information architecture", () => {
 		expect(source).toContain("withoutElapsedHistory");
 		expect(source).toContain("<RuntimeSection");
 		for (const [storyName, scenario, method, disclosure] of [
-			["TenThousandMapLaunches", "map", "readMapVisits", "Load map launch history"],
-			["TenThousandActorGenerations", "generations", "readActorGenerations", "Load actor generations"],
-			["TenThousandActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
+			["MapLaunches", "map", "readMapVisits", "Load map launch history"],
+			["ActorGenerations", "generations", "readActorGenerations", "Load actor generations"],
+			["ActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
 		] as const) {
-			expect(source).toContain(`export const ${storyName} = story(\"${scenario}\")`);
+			expect(source).toContain(`export const ${storyName} = variantStory("${scenario}")`);
 			expect(source).toMatch(new RegExp(`${method}: async \\(input\\) => \\{ const chunk = await source\\.load\\(input\\.cursor\\)`));
-			expect(source).toContain(`case \"${scenario}\": disclosure = \"${disclosure}\"`);
+			expect(source).toContain(`case "${scenario}": disclosure = "${disclosure}"`);
 		}
-		expect(source).toContain("captureTranscriptFixture");
-		expect(source).toContain("readVisitSession: async ({ invokeSeqId })");
-		expect(source).toContain('name: "View session for visit 1"');
 		expect(source).not.toContain("<VirtualizedHistoryList");
 		expect(source).toContain("data-selected-history-subject");
-		expect(source).toContain("getBoundingClientRect().top");
-		expect(source).not.toContain("toBeGreaterThanOrEqual(anchor)");
 		expect(source).not.toContain("as unknown as Extract<DurableLogRecord");
 	});
 	it("organizes every visible story by product surface", () => {
