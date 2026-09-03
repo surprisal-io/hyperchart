@@ -18,3 +18,4 @@ artifacts
 /packages/pi-hyperchart/assets/
 /packages/pi-hyperchart/skills/
 /packages/claude-hyperchart/skills/
+.tmp/
