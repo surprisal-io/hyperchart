@@ -61,7 +61,7 @@ export function VisitHistory({
 				{visits.map((visit, index) => {
 					const sessionRead = sessionReads[visit.invokeSeqId];
 					const canReadSession = visit.session !== undefined || onReadSession !== undefined && visit.invocation.kind === "agent";
-					const expanded = expandedVisits[visit.invokeSeqId] ?? (index === visits.length - 1 && visit.status === "running");
+					const expanded = expandedVisits[visit.invokeSeqId] ?? (!lazyDetails && index === visits.length - 1 && visit.status === "running");
 					return <details
 						key={visit.invokeSeqId}
 						open={expanded}
