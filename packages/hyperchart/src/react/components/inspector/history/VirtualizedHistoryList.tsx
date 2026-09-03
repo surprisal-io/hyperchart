@@ -1,27 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { HistoryCursor } from "../../../../runtime/generic/log_store.js";
 import { useHistoryWindow, type HistoryWindowSource } from "./useHistoryWindow.js";
 
 export const HISTORY_VIRTUAL_OVERSCAN = 20;
-
-export type HistoryScrollAnchor = Readonly<{ key: string; pixelOffset: number }>;
-
-/** Captures durable row identity and its pixel offset from the viewport's scroll origin. */
-export function captureHistoryScrollAnchor(keys: readonly string[], rows: readonly { index: number; start: number }[], scrollTop: number): HistoryScrollAnchor | undefined {
-	const first = rows[0];
-	if (first === undefined) return undefined;
-	const key = keys[first.index];
-	return key === undefined ? undefined : { key, pixelOffset: scrollTop - first.start };
-}
-
-/** Resolves the exact scroll position needed to preserve a captured durable-row anchor. */
-export function restoreHistoryScrollTop(anchor: HistoryScrollAnchor, keys: readonly string[], rowStart: (index: number) => number | undefined): number | undefined {
-	const index = keys.indexOf(anchor.key);
-	if (index < 0) return undefined;
-	const start = rowStart(index);
-	return start === undefined ? undefined : start + anchor.pixelOffset;
-}
+export const HISTORY_PREFETCH_ITEMS = 40;
 
 export function VirtualizedHistoryList<T>({
 	cacheKey,
@@ -43,7 +26,6 @@ export function VirtualizedHistoryList<T>({
 	className?: string;
 }) {
 	const parentRef = useRef<HTMLDivElement>(null);
-	const anchorRef = useRef<HistoryScrollAnchor | undefined>(undefined);
 	const history = useHistoryWindow({ cacheKey, source, identity, ...(initialCursor === undefined ? {} : { initialCursor }) });
 	const items = history.window.items;
 	const keys = useMemo(() => items.map(identity), [identity, items]);
@@ -55,46 +37,27 @@ export function VirtualizedHistoryList<T>({
 		initialRect: { width: 0, height: 384 },
 		getItemKey: (index) => keys[index] ?? index,
 		measureElement: (element) => element.getBoundingClientRect().height,
+		anchorTo: "end",
+		useAnimationFrameWithResizeObserver: true,
 	});
 	const virtualItems = rowVirtualizer.getVirtualItems();
-
-	useLayoutEffect(() => {
-		anchorRef.current = undefined;
-		if (parentRef.current !== null) parentRef.current.scrollTop = 0;
-	}, [cacheKey, initialCursor]);
-
-	const rememberAnchor = () => {
-		const element = parentRef.current;
-		if (element === null) return;
-		anchorRef.current = captureHistoryScrollAnchor(keys, rowVirtualizer.getVirtualItems(), element.scrollTop);
-	};
-	const loadOlder = () => {
-		rememberAnchor();
-		return history.loadOlder();
-	};
-	const loadNewer = () => {
-		rememberAnchor();
-		return history.loadNewer();
-	};
-
-	useLayoutEffect(() => {
-		const anchor = anchorRef.current;
-		const element = parentRef.current;
-		if (anchor === undefined || element === null) return;
-		rowVirtualizer.measure();
-		const scrollTop = restoreHistoryScrollTop(anchor, keys, (index) => rowVirtualizer.getOffsetForIndex(index, "start")?.[0]);
-		anchorRef.current = undefined;
-		if (scrollTop !== undefined) element.scrollTop = scrollTop;
-	}, [keys, rowVirtualizer]);
 
 	const firstIndex = virtualItems[0]?.index;
 	const lastIndex = virtualItems.at(-1)?.index;
 	useEffect(() => {
-		if (history.window.newer !== undefined && !history.newer.loading && history.newer.error === undefined && firstIndex !== undefined && firstIndex <= 5) void loadNewer();
-	}, [firstIndex, history.newer.error, history.newer.loading, history.window.newer]);
+		if (history.window.newer !== undefined && !history.newer.loading && history.newer.error === undefined && firstIndex !== undefined && firstIndex <= HISTORY_PREFETCH_ITEMS) void history.loadNewer();
+	}, [firstIndex, history.loadNewer, history.newer.error, history.newer.loading, history.window.newer]);
 	useEffect(() => {
-		if (history.window.older !== undefined && !history.older.loading && history.older.error === undefined && lastIndex !== undefined && lastIndex >= items.length - 6) void loadOlder();
-	}, [history.older.error, history.older.loading, history.window.older, items.length, lastIndex]);
+		if (history.window.older !== undefined && !history.older.loading && history.older.error === undefined && lastIndex !== undefined && lastIndex >= items.length - HISTORY_PREFETCH_ITEMS) void history.loadOlder();
+	}, [history.loadOlder, history.older.error, history.older.loading, history.window.older, items.length, lastIndex]);
+
+	const prefetchAtScrollEdge = () => {
+		const element = parentRef.current;
+		if (element === null) return;
+		const threshold = Math.max(element.clientHeight * 3, estimateSize * HISTORY_PREFETCH_ITEMS);
+		if (element.scrollTop <= threshold && history.window.newer !== undefined && !history.newer.loading && history.newer.error === undefined) void history.loadNewer();
+		if (element.scrollHeight - element.scrollTop - element.clientHeight <= threshold && history.window.older !== undefined && !history.older.loading && history.older.error === undefined) void history.loadOlder();
+	};
 
 	if (history.initial.loading && items.length === 0) return <div className="text-[10px] text-[var(--text-muted)]">Loading history…</div>;
 	if (history.initial.error !== undefined && items.length === 0) {
@@ -104,9 +67,9 @@ export function VirtualizedHistoryList<T>({
 
 	return (
 		<div className="grid gap-1.5" data-testid="virtualized-history" data-retained-items={items.length}>
-		{history.newer.error !== undefined && <HistoryError edge="newer" error={history.newer.error} onRetry={loadNewer} />}
+		{history.newer.error !== undefined && <HistoryError edge="newer" error={history.newer.error} onRetry={history.loadNewer} />}
 		{history.newer.loading && <div className="text-center text-[10px] text-[var(--text-muted)]">Loading newer…</div>}
-		<div ref={parentRef} className={`overflow-auto overscroll-contain ${className}`}>
+		<div ref={parentRef} className={`overflow-auto overscroll-contain ${className}`} onScroll={prefetchAtScrollEdge}>
 			<div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
 				{virtualItems.map((virtualRow) => {
 					const item = items[virtualRow.index];
@@ -127,7 +90,7 @@ export function VirtualizedHistoryList<T>({
 			</div>
 		</div>
 		{history.older.loading && <div className="text-center text-[10px] text-[var(--text-muted)]">Loading older…</div>}
-		{history.older.error !== undefined && <HistoryError edge="older" error={history.older.error} onRetry={loadOlder} />}
+		{history.older.error !== undefined && <HistoryError edge="older" error={history.older.error} onRetry={history.loadOlder} />}
 		</div>
 	);
 }

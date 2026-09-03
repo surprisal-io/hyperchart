@@ -17,6 +17,7 @@ export function VisitHistory({
 	onSteerSession,
 	onHighlightArtifact,
 	onReadSession,
+	lazyDetails = false,
 }: {
 	visits: HyperchartVisitInfo[];
 	state: HyperchartStateInfo;
@@ -25,8 +26,10 @@ export function VisitHistory({
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 	onReadSession?: (invokeSeqId: number) => Promise<HyperchartVisitInfo["session"]>;
+	lazyDetails?: boolean;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
+	const [expandedVisits, setExpandedVisits] = useState<Record<number, boolean>>({});
 	const [loadedSessions, setLoadedSessions] = useState<Record<number, NonNullable<HyperchartVisitInfo["session"]>>>({});
 	const [sessionReads, setSessionReads] = useState<Record<number, { loading: boolean; error?: string }>>({});
 	const openVisitSession = (visit: HyperchartVisitInfo) => {
@@ -58,9 +61,14 @@ export function VisitHistory({
 				{visits.map((visit, index) => {
 					const sessionRead = sessionReads[visit.invokeSeqId];
 					const canReadSession = visit.session !== undefined || onReadSession !== undefined && visit.invocation.kind === "agent";
+					const expanded = expandedVisits[visit.invokeSeqId] ?? (index === visits.length - 1 && visit.status === "running");
 					return <details
 						key={visit.invokeSeqId}
-						open={index === visits.length - 1 && visit.status === "running"}
+						open={expanded}
+						onToggle={(event) => {
+							const open = event.currentTarget.open;
+							setExpandedVisits((current) => current[visit.invokeSeqId] === open ? current : { ...current, [visit.invokeSeqId]: open });
+						}}
 						className="group rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]"
 					>
 						<summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] marker:hidden">
@@ -93,7 +101,7 @@ export function VisitHistory({
 							<span className="basis-full text-right text-[10px] text-[var(--text-muted)] group-open:hidden">show</span>
 							<span className="hidden basis-full text-right text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
 						</summary>
-						<div className="space-y-3 border-t border-[var(--border-primary)] px-2.5 py-2.5">
+						{(!lazyDetails || expanded) && <div className="space-y-3 border-t border-[var(--border-primary)] px-2.5 py-2.5">
 							{visit.completedEvent !== undefined && (
 								<div className="text-[10px] text-[var(--text-muted)]">
 									completed event <code className="ml-1 rounded bg-[var(--bg-code)] px-1 py-0.5 font-mono text-[var(--text-secondary)]">{visit.completedEvent}</code>
@@ -151,7 +159,7 @@ export function VisitHistory({
 								</div>
 							)}
 							<VisitInvocationDetails invocation={visit.invocation} state={state} allStates={allStates} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
-						</div>
+						</div>}
 					</details>;
 				})}
 			</div>

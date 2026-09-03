@@ -67,13 +67,14 @@ describe("Storybook information architecture", () => {
 	it("keeps the virtualized Runtime History board focused on distinct row variants", () => {
 		const source = readFileSync(join(storyDirectory, "RuntimeHistoryVirtualizedCursorChunks.stories.tsx"), "utf8");
 		expect(source).toContain("Runtime History — Virtualized Cursor Chunks");
-		for (const story of ["TenThousandStateVisits", "MapLaunches", "ActorGenerations", "ActorMessageBatches"])
+		for (const story of ["TenThousandStateVisits", "TenThousandMapLaunches", "TenThousandActorGenerations", "TenThousandActorMessageBatches"])
 			expect(source).toContain(`export const ${story}`);
 		for (const removedUseCase of ["DeepLinkedMiddleChunk", "OppositeEdgeEvictionAndReload", "VariableHeightAnchorPreservation", "EmptyHistory", "OlderEdgeFailureAndRetry", "NewerEdgeFailureAndRetry", "BranchSnapshotSwitchCancelsInflight", "RefreshToLatestWithOlderWindow", "TranscriptOnDemand"])
 			expect(source).not.toContain(`export const ${removedUseCase}`);
-		expect(source).toContain("captureRuntime(STRESS_VISITS)");
-		expect(source).toContain("const STRESS_VISITS = 10_000");
-		expect(source).toContain("const VARIANT_VISITS = 200");
+		expect(source).toContain("captureRuntime(1).then((fixture) => scaleFixture(fixture))");
+		expect(source).toContain("captureSemanticRows(kind, 1).then((fixture) => scaleFixture(fixture))");
+		expect(source).toContain("rowCount: LOAD_TEST_VISITS");
+		expect(source).toContain("const LOAD_TEST_VISITS = 10_000");
 		expect(source).toContain("explainReplay");
 		expect(source).toContain("stateVisitHistoryItemToHost");
 		expect(source).toContain("captureSemanticRows");
@@ -82,15 +83,16 @@ describe("Storybook information architecture", () => {
 		expect(source).toContain("withoutElapsedHistory");
 		expect(source).toContain("<RuntimeSection");
 		for (const [storyName, scenario, method, disclosure] of [
-			["MapLaunches", "map", "readMapVisits", "Load map launch history"],
-			["ActorGenerations", "generations", "readActorGenerations", "Load actor generations"],
-			["ActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
+			["TenThousandMapLaunches", "map", "readMapVisits", "Load map launch history"],
+			["TenThousandActorGenerations", "generations", "readActorGenerations", "Load actor generations"],
+			["TenThousandActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
 		] as const) {
-			expect(source).toContain(`export const ${storyName} = variantStory("${scenario}")`);
+			expect(source).toContain(`export const ${storyName} = loadTestStory("${scenario}")`);
 			expect(source).toMatch(new RegExp(`${method}: async \\(input\\) => \\{ const chunk = await source\\.load\\(input\\.cursor\\)`));
 			expect(source).toContain(`case "${scenario}": disclosure = "${disclosure}"`);
 		}
 		expect(source).not.toContain("<VirtualizedHistoryList");
+		expect(source).not.toContain("viewport.scrollTop");
 		expect(source).toContain("data-selected-history-subject");
 		expect(source).not.toContain("as unknown as Extract<DurableLogRecord");
 	});

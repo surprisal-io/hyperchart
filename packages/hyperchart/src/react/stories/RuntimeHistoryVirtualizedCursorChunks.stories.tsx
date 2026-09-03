@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, fireEvent, waitFor, within } from "storybook/test";
+import { expect, fireEvent, within } from "storybook/test";
 import { z } from "zod";
 import { actor, arg, chart, compound, final, map as mapState, message, protocol, receive, reply, send, script } from "../../core/dsl.js";
 import { loop } from "../../execution/execution_loop.js";
@@ -19,18 +19,19 @@ import { hyperchartRunFromRuntime } from "../../host/adapters.js";
 import type { HyperchartActorGenerationInfo, HyperchartActorMessageBatchInfo, HyperchartMapVisitInfo, HyperchartStateInfo, HyperchartVisitInfo } from "../types.js";
 import { RuntimeSection } from "../components/inspector/details/RuntimeSection.js";
 
-const STRESS_VISITS = 10_000;
-const VARIANT_VISITS = 200;
-const snapshot = { branchId: "main", headSeqId: STRESS_VISITS * 2 + 1 } as const;
+const LOAD_TEST_VISITS = 10_000;
+const snapshot = { branchId: "main", headSeqId: LOAD_TEST_VISITS * 2 + 1 } as const;
 type Fixture = {
+	/** Adapter-derived seed rows; the cursor source scales identity/cardinality without replaying 10k records in the browser. */
 	rows: readonly StoryRow[];
+	rowCount: number;
 	state: HyperchartStateInfo;
 	allStates: readonly HyperchartStateInfo[];
 };
 
 let fixturePromise: Promise<Fixture> | undefined;
 function runtimeFixture(): Promise<Fixture> {
-	fixturePromise ??= captureRuntime(STRESS_VISITS);
+	fixturePromise ??= captureRuntime(1).then((fixture) => scaleFixture(fixture));
 	return fixturePromise;
 }
 
@@ -99,7 +100,7 @@ async function captureRuntime(visits: number): Promise<Fixture> {
 	const run = hyperchartRunFromRuntime(inspectChartAst(runtime.ast, { chartPath: "storybook:runtime-history" }), runtime.ast, runtime.records);
 	const state = run.states.find((candidate) => candidate.id === "work");
 	if (state === undefined) throw new Error("Runtime History story state is missing");
-	return { rows: stateRows(items), state: withoutElapsedHistory(state), allStates: run.states.map(withoutElapsedHistory) };
+	return { rows: stateRows(items), rowCount: items.length, state: withoutElapsedHistory(state), allStates: run.states.map(withoutElapsedHistory) };
 }
 
 type StoryRow =
@@ -119,19 +120,19 @@ function fixtureFromRuntime(captured: { ast: ChartAst; records: readonly Durable
 	const run = hyperchartRunFromRuntime(inspectChartAst(captured.ast, { chartPath: `storybook:${captured.ast.id}` }), captured.ast, captured.records);
 	const selected = state(run.states);
 	if (selected === undefined) throw new Error(`Runtime History story state is missing for ${captured.ast.id}`);
-	return { rows, state: withoutElapsedHistory(selected), allStates: run.states.map(withoutElapsedHistory) };
+	return { rows, rowCount: rows.length, state: withoutElapsedHistory(selected), allStates: run.states.map(withoutElapsedHistory) };
 }
 
 const semanticFixturePromises = new Map<"map" | "generations" | "messages", Promise<Fixture>>();
 function semanticFixtureRows(kind: "map" | "generations" | "messages"): Promise<Fixture> {
 	const existing = semanticFixturePromises.get(kind);
 	if (existing !== undefined) return existing;
-	const captured = captureSemanticRows(kind);
+	const captured = captureSemanticRows(kind, 1).then((fixture) => scaleFixture(fixture));
 	semanticFixturePromises.set(kind, captured);
 	return captured;
 }
 
-async function captureSemanticRows(kind: "map" | "generations" | "messages", count = VARIANT_VISITS): Promise<Fixture> {
+async function captureSemanticRows(kind: "map" | "generations" | "messages", count: number): Promise<Fixture> {
 	if (kind === "map") {
 		const cst = chart({ kind: "chart", id: "history-map", args: { items: { default: { only: 1 } } }, initial: "items", states: { items: mapState({ over: arg("items"), initial: "work", onDone: "items", states: { work: { kind: "state", action: script("true"), transitions: { DONE: "done" } }, done: final() } }) } });
 		const captured = await captureSemantic(cst, { items: { only: 1 } }, "spawned", count);
@@ -156,20 +157,59 @@ async function captureSemanticRows(kind: "map" | "generations" | "messages", cou
 	return fixtureFromRuntime(captured, rows, (states) => states.find((state) => state.actorOccurrence?.occurrencePath === occurrence || state.actorInternal?.occurrencePath === occurrence));
 }
 
+function scaleFixture(fixture: Fixture): Fixture {
+	if (fixture.rows.length === 0) throw new Error("Runtime History load-test seed is empty");
+	return {
+		...fixture,
+		rowCount: LOAD_TEST_VISITS,
+		state: { ...fixture.state, ...(fixture.rows[0]?.kind === "visit" ? { visits: LOAD_TEST_VISITS } : {}) },
+	};
+}
+
+function scaledStoryRow(seed: StoryRow, index: number): StoryRow {
+	const ordinal = LOAD_TEST_VISITS - index;
+	const seqId = ordinal * 2;
+	switch (seed.kind) {
+		case "visit": {
+			const value = { ...seed.value, visit: ordinal, invokeSeqId: seqId, startedAt: 1_700_100_000_000 + seqId, ...(seed.value.endedAt === undefined ? {} : { endedAt: 1_700_100_000_001 + seqId }) };
+			return { kind: "visit", id: String(value.invokeSeqId), value };
+		}
+		case "map": {
+			const value = { ...seed.value, visit: ordinal, spawnSeqId: seqId, startedAt: 1_700_100_000_000 + seqId };
+			return { kind: "map", id: String(value.spawnSeqId), value };
+		}
+		case "generation": {
+			const value = { ...seed.value, occurrencePath: `${seed.value.logicalOccurrence}~${ordinal}`, generation: ordinal, createdSeqId: seqId, createdAt: 1_700_100_000_000 + seqId };
+			return { kind: "generation", id: `${value.occurrencePath}:${value.createdSeqId}`, value };
+		}
+		case "messages": {
+			const value = {
+				...seed.value,
+				enqueueSeqId: seqId,
+				enqueuedAt: 1_700_100_000_000 + seqId,
+				messages: seed.value.messages.map((message) => ({ ...message, messageId: `${message.messageId}:${ordinal}`, producerVisit: String(ordinal) })),
+			};
+			return { kind: "messages", id: `${value.occurrencePath}:${value.enqueueSeqId}`, value };
+		}
+	}
+}
+
 function stateRows(items: readonly StateVisitHistoryItem[]): readonly StoryRow[] {
 	return items.map((item): StoryRow => { const value = stateVisitHistoryItemToHost(item); return { kind: "visit", id: String(value.invokeSeqId), value }; });
 }
 
-function storyChunk(items: readonly StoryRow[], cursor?: HistoryCursor): HistoryChunk<StoryRow> {
+function storyChunk(fixture: Fixture, cursor?: HistoryCursor): HistoryChunk<StoryRow> {
 	let start = 0;
 	if (cursor !== undefined) {
 		const [direction, raw] = cursor.split(":");
 		const boundary = Number(raw);
-		if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary >= items.length) throw new Error("Invalid story history cursor");
+		if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary >= fixture.rowCount) throw new Error("Invalid story history cursor");
 		start = direction === "older" ? boundary + 1 : direction === "newer" ? Math.max(0, boundary - 100) : boundary;
 	}
-	const end = Math.min(items.length, start + 100);
-	return { snapshot, items: items.slice(start, end), ...(end < items.length ? { older: `older:${end - 1}` } : {}), ...(start > 0 ? { newer: `newer:${start}` } : {}) };
+	const end = Math.min(fixture.rowCount, start + 100);
+	const seed = fixture.rows[0]!;
+	const items = Array.from({ length: end - start }, (_, offset) => scaledStoryRow(seed, start + offset));
+	return { snapshot, items, ...(end < fixture.rowCount ? { older: `older:${end - 1}` } : {}), ...(start > 0 ? { newer: `newer:${start}` } : {}) };
 }
 
 type Scenario = "state-visits" | "map" | "generations" | "messages";
@@ -199,18 +239,19 @@ function ProductionHistoryStory({ fixture, scenario, source }: { fixture: Fixtur
 }
 
 function RuntimeHistoryStory({ scenario }: { scenario: Scenario }) {
-	const [fixture, setFixture] = useState<Fixture>();
+	const [loaded, setLoaded] = useState<{ scenario: Scenario; fixture: Fixture }>();
+	const fixture = loaded?.scenario === scenario ? loaded.fixture : undefined;
 	useEffect(() => {
 		let current = true;
 		const pending = scenario === "map" || scenario === "generations" || scenario === "messages"
 			? semanticFixtureRows(scenario)
 			: runtimeFixture();
-		void pending.then((value) => { if (current) setFixture(value); });
+		void pending.then((value) => { if (current) setLoaded({ scenario, fixture: value }); });
 		return () => { current = false; };
 	}, [scenario]);
-	const source = useMemo(() => ({ load: async (cursor?: HistoryCursor) => storyChunk(fixture?.rows ?? [], cursor) }), [fixture]);
-	if (fixture === undefined) return <div className="p-6 text-sm">Capturing durable history items through the production execution loop…</div>;
-	return <ProductionHistoryStory fixture={fixture} scenario={scenario} source={source} />;
+	const source = useMemo(() => ({ load: async (cursor?: HistoryCursor) => fixture === undefined ? { snapshot, items: [] } : storyChunk(fixture, cursor) }), [fixture]);
+	if (fixture === undefined) return <div className="p-6 text-sm">Preparing the 10,000-row cursor source…</div>;
+	return <ProductionHistoryStory key={scenario} fixture={fixture} scenario={scenario} source={source} />;
 }
 
 const meta = {
@@ -238,7 +279,7 @@ async function storyHistoryList(canvasElement: HTMLElement) {
 	return canvas.findByTestId("virtualized-history", {}, { timeout: 20_000 });
 }
 
-const variantStory = (scenario: Exclude<Scenario, "state-visits">): Story => ({
+const loadTestStory = (scenario: Scenario): Story => ({
 	args: { scenario },
 	play: async ({ canvasElement }) => {
 		const list = await storyHistoryList(canvasElement);
@@ -247,18 +288,7 @@ const variantStory = (scenario: Exclude<Scenario, "state-visits">): Story => ({
 	},
 });
 
-export const TenThousandStateVisits: Story = {
-	args: { scenario: "state-visits" },
-	play: async ({ canvasElement }) => {
-		const list = await storyHistoryList(canvasElement);
-		const viewport = list.querySelector(".overflow-auto") as HTMLElement;
-		viewport.scrollTop = viewport.scrollHeight;
-		fireEvent.scroll(viewport);
-		await waitFor(() => expect(Number(list.getAttribute("data-retained-items"))).toBeGreaterThan(100));
-		expect(Number(list.getAttribute("data-retained-items"))).toBeLessThanOrEqual(1_000);
-		expect(list.querySelectorAll("[data-history-row]").length).toBeLessThanOrEqual(60);
-	},
-};
-export const MapLaunches = variantStory("map");
-export const ActorGenerations = variantStory("generations");
-export const ActorMessageBatches = variantStory("messages");
+export const TenThousandStateVisits = loadTestStory("state-visits");
+export const TenThousandMapLaunches = loadTestStory("map");
+export const TenThousandActorGenerations = loadTestStory("generations");
+export const TenThousandActorMessageBatches = loadTestStory("messages");

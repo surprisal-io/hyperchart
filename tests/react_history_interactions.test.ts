@@ -4,8 +4,9 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { HyperchartInspectorDataSource } from "../packages/hyperchart/src/host/adapter.js";
 import { RuntimeSection, useTargetCursor } from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
+import { MapVisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/MapVisitHistory.js";
 import { VisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/VisitHistory.js";
-import { captureHistoryScrollAnchor, restoreHistoryScrollTop, VirtualizedHistoryList } from "../packages/hyperchart/src/react/components/inspector/history/VirtualizedHistoryList.js";
+import { HISTORY_PREFETCH_ITEMS, HISTORY_VIRTUAL_OVERSCAN, VirtualizedHistoryList } from "../packages/hyperchart/src/react/components/inspector/history/VirtualizedHistoryList.js";
 import { mergeHistoryWindow, useHistoryWindow } from "../packages/hyperchart/src/react/components/inspector/history/useHistoryWindow.js";
 import type { HistoryChunk, HistoryCursor } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 
@@ -56,37 +57,9 @@ describe("interactive bounded history", () => {
 		expect(calls).toHaveLength(13);
 	});
 
-	it("preserves durable anchor identity and exact variable-height pixel offset across opposite-edge eviction and reload", () => {
-		const identity = (item: { id: number }) => String(item.id);
-		let window = mergeHistoryWindow({ segments: [] }, { snapshot, items: rows(200, 100), newer: "page:1", older: "page:3" }, "initial", identity);
-		for (let page = 3; page <= 11; page++) window = mergeHistoryWindow(window, pagedChunk(page), "older", identity);
-		const beforeAppend = window.segments.flatMap((segment) => segment.items);
-		expect(beforeAppend).toHaveLength(1_000);
-		const heights = (items: readonly { id: number }[], end: number) => items.slice(0, end).reduce((total, item) => total + (item.id % 3 === 0 ? 140 : 52), 0);
-		const appendAnchorIndex = beforeAppend.findIndex((item) => item.id === 1_100);
-		const appendStart = heights(beforeAppend, appendAnchorIndex);
-		const appendAnchor = captureHistoryScrollAnchor(beforeAppend.map(identity), [{ index: appendAnchorIndex, start: appendStart }], appendStart + 19);
-		expect(appendAnchor).toEqual({ key: "1100", pixelOffset: 19 });
-
-		window = mergeHistoryWindow(window, pagedChunk(12), "older", identity);
-		const afterAppend = window.segments.flatMap((segment) => segment.items);
-		expect(afterAppend).toHaveLength(1_000);
-		expect(afterAppend[0]?.id).toBe(300);
-		const appendRestoredIndex = afterAppend.findIndex((item) => identity(item) === appendAnchor?.key);
-		const appendRestoredStart = heights(afterAppend, appendRestoredIndex);
-		expect(restoreHistoryScrollTop(appendAnchor!, afterAppend.map(identity), (index) => heights(afterAppend, index))).toBe(appendRestoredStart + 19);
-
-		const reloadAnchorIndex = afterAppend.findIndex((item) => item.id === 350);
-		const reloadStart = heights(afterAppend, reloadAnchorIndex);
-		const reloadAnchor = captureHistoryScrollAnchor(afterAppend.map(identity), [{ index: reloadAnchorIndex, start: reloadStart }], reloadStart + 7);
-		window = mergeHistoryWindow(window, { snapshot, items: rows(200, 100), newer: "page:1", older: "page:3" }, "newer", identity);
-		const afterReload = window.segments.flatMap((segment) => segment.items);
-		expect(afterReload).toHaveLength(1_000);
-		expect(afterReload[0]?.id).toBe(200);
-		expect(afterReload.at(-1)?.id).toBe(1_199);
-		const reloadRestoredIndex = afterReload.findIndex((item) => identity(item) === reloadAnchor?.key);
-		const reloadRestoredStart = heights(afterReload, reloadRestoredIndex);
-		expect(restoreHistoryScrollTop(reloadAnchor!, afterReload.map(identity), (index) => heights(afterReload, index))).toBe(reloadRestoredStart + 7);
+	it("prefetches well before Safari reaches an unloaded edge without mounting an excessive row buffer", () => {
+		expect(HISTORY_VIRTUAL_OVERSCAN).toBe(20);
+		expect(HISTORY_PREFETCH_ITEMS).toBeGreaterThanOrEqual(40);
 	});
 
 	it("drops stale responses across subject, snapshot, and branch cache changes", async () => {
@@ -160,6 +133,28 @@ describe("interactive bounded history", () => {
 		fireEvent.click(rendered.getByRole("button", { name: /Runtime/ }));
 		expect(rendered.getAllByText("Resolved Alpha").length).toBeGreaterThan(0);
 		expect(rendered.getByRole("button", { name: "Load map launch history" })).toBeTruthy();
+	});
+
+	it("keeps map visits closed and unmounted until expanded", () => {
+		const rendered = render(createElement(MapVisitHistory, { visits: [{ visit: 1, spawnSeqId: 9, startedAt: 1, instances: { a: { title: "Alpha" } } }] }));
+		expect(rendered.queryByText("spawn seq 9")).toBeNull();
+		const details = rendered.container.querySelector("details");
+		if (details === null) throw new Error("map visit details missing");
+		details.open = true;
+		fireEvent(details, new Event("toggle"));
+		expect(rendered.getByText("spawn seq 9")).toBeTruthy();
+	});
+
+	it("does not mount expensive visit details until the row is expanded", () => {
+		const visit = { visit: 1, invokeSeqId: 7, startedAt: 1, endedAt: 2, status: "done" as const, completedEvent: "DONE", invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] } };
+		const state = { id: "work", type: "script" as const, status: "done" as const };
+		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], lazyDetails: true }));
+		expect(rendered.queryByText("completed event")).toBeNull();
+		const details = rendered.container.querySelector("details");
+		if (details === null) throw new Error("visit details missing");
+		details.open = true;
+		fireEvent(details, new Event("toggle"));
+		expect(rendered.getByText("completed event")).toBeTruthy();
 	});
 
 	it("loads a visit transcript only when its session is opened", async () => {

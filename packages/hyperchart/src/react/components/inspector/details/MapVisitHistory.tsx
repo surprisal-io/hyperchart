@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { HyperchartMapVisitInfo, HyperchartOnReenterInfo } from "../../../types.js";
 import { formatHyperchartDateTime } from "../../../hyperchart-display.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
@@ -9,6 +10,7 @@ export function MapVisitHistory({
 	visits: HyperchartMapVisitInfo[];
 	onReenter?: HyperchartOnReenterInfo;
 }) {
+	const [expandedVisits, setExpandedVisits] = useState<Record<number, boolean>>({});
 	if (visits.length === 0) return null;
 	return (
 		<div className="space-y-2">
@@ -28,12 +30,17 @@ export function MapVisitHistory({
 					</div>
 				</div>
 			)}
-			{visits.map((visit, index) => {
+			{visits.map((visit) => {
 				const itemCount = Object.keys(visit.instances).length;
+				const expanded = expandedVisits[visit.spawnSeqId] === true;
 				return (
 					<details
 						key={visit.spawnSeqId}
-						open={index === visits.length - 1}
+						open={expanded}
+						onToggle={(event) => {
+							const open = event.currentTarget.open;
+							setExpandedVisits((current) => current[visit.spawnSeqId] === open ? current : { ...current, [visit.spawnSeqId]: open });
+						}}
 						className="group rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]"
 					>
 						<summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] marker:hidden">
@@ -50,10 +57,10 @@ export function MapVisitHistory({
 							<span className="ml-auto text-[10px] text-[var(--text-muted)] group-open:hidden">show</span>
 							<span className="ml-auto hidden text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
 						</summary>
-						<div className="space-y-2 border-t border-[var(--border-primary)] px-2.5 py-2.5">
+						{expanded && <div className="space-y-2 border-t border-[var(--border-primary)] px-2.5 py-2.5">
 							<div className="text-[10px] text-[var(--text-muted)]">spawn seq {visit.spawnSeqId}</div>
 							<JsonBlock value={visit.instances} previewLines={8} />
-						</div>
+						</div>}
 					</details>
 				);
 			})}

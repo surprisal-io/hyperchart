@@ -243,7 +243,7 @@ describe("Runtime inspector section", () => {
 		expect(markup).toContain("wall of text");
 	});
 
-	it("renders map visit generations and item membership", () => {
+	it("renders map visit summaries closed by default and item membership", () => {
 		const historyMarkup = renderToStaticMarkup(
 			createElement(MapVisitHistory, {
 				onReenter: { mode: "resume", messagePreview: "Continue map work with updated feedback." },
@@ -259,7 +259,8 @@ describe("Runtime inspector section", () => {
 		expect(historyMarkup).toContain("on re-enter: resume");
 		expect(historyMarkup).toContain("resume re-entry");
 		expect(historyMarkup).toContain("Continue map work with updated feedback.");
-		expect(historyMarkup).toContain("spawn seq 9");
+		expect(historyMarkup).not.toContain("spawn seq 9");
+		expect(historyMarkup).not.toContain("<details open");
 		const itemMarkup = renderToStaticMarkup(
 			createElement(MapResolvedInputList, {
 				state: {

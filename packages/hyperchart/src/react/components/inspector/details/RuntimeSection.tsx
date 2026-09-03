@@ -234,7 +234,7 @@ function LazyStateVisits({ history, state, allStates, onSteerSession, onHighligh
 	return <VirtualizedHistoryList<HyperchartVisitInfo>
 		cacheKey={historyCacheKey(history, "state-visits", stateId)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
 		identity={(visit) => String(visit.invokeSeqId)} emptyLabel="No visits in this snapshot."
-		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
+		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
 	/>;
 }
 
