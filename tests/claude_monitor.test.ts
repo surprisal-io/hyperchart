@@ -23,7 +23,7 @@ import {
 import {
 	claimUserInteractionReceipt,
 	hasUserInteractionReceipt,
-} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
+} from "../packages/hyperchart/src/runner/user_interactions.js";
 
 const roots: string[] = [];
 afterEach(() => {

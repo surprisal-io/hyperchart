@@ -20,7 +20,6 @@ import {
   runGuard,
   saveRunMeta,
   serializeEnvValue,
-  terminalStateForFinalMachine,
   type AgentDefinitionResolution,
   type AgentExecutor,
   type UserExecutor,
@@ -38,14 +37,15 @@ import {
 
 ```ts
 interface Runtime {
-  runEffects(effects: Effect[]): void;
+  readonly branchId: BranchId;
+  runEffects(effects: Effect[]): Promise<void>;
   eventsQueue(): AsyncIterable<MachineEvent>;
-  loadAst(): Promise<ChartAst>;
-  loadProjection(): Promise<BranchProjection>;
+  beginDrain?(): void;
+  dispose?(): Promise<void>;
 }
 ```
 
-The core execution loop owns machine semantics. A runtime interprets effects, returns machine events, supplies the chart, and restores one synchronous machine-ready projection through execution-owned checkpoint/replay orchestration.
+The internal execution layer owns machine semantics, projection restoration, replay diagnostics, retention, and checkpoint cadence. A runtime only interprets effects, returns machine events, and performs durable I/O. Runtime and storage never receive `BranchProjection` or interpret a checkpoint blob.
 
 `runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Effects are consumed in the supplied list order. Each `durable_records` effect is one indivisible storage commit: append every record in that effect together or append none, and never split it into multiple commits. Durable records must be committed before emitting `durable_records_added`; when one machine output contains multiple `durable_records` effects, each effect remains a separate atomic unit and both commits and acknowledgements preserve their supplied order.
 
@@ -56,14 +56,15 @@ class ChartRuntime implements Runtime {
   constructor(options: ChartRuntimeOptions);
   runEffects(effects: Effect[]): void;
   eventsQueue(): AsyncIterable<MachineEvent>;
-  loadAst(): Promise<ChartAst>;
-  loadProjection(): Promise<BranchProjection>;
+  beginDrain(): void;
   dispose(): Promise<void>;
 }
 
 type ChartRuntimeOptions = {
-  ast: ChartAst;
-  logStore: LogStore & ProjectionCheckpointStore;
+  ast: ChartAst; // authored effect schemas/rendering only
+  logStore: LogStore & CheckpointRepository;
+  prepareStampedCommit?: PrepareStampedCommit; // opaque execution callback
+  validateArtifactSnapshot?: ValidateArtifactSnapshot; // execution semantic callback
   agentExecutor: AgentExecutor;
   workDir: string;
   chartDir: string;
@@ -87,24 +88,7 @@ User actions do not dispatch an executor. The machine appends a rendered `user_i
 
 `dispose()` is idempotent and begins by refusing new effects and callbacks. It clears timers, disposes script and agent executors, drains effect preparation and completion-admission work already in flight, then closes the event queue.
 
-```ts
-import { loop } from "@surprisal/hyperchart";
-import { ChartRuntime, JsonlLogStore } from "@surprisal/hyperchart/runtime";
-
-const runtime = new ChartRuntime({
-  ast,
-  logStore: new JsonlLogStore(".hyperchart/runs/demo/log.jsonl"),
-  agentExecutor,
-  workDir: process.cwd(),
-  chartDir: new URL(".", import.meta.url).pathname,
-});
-
-try {
-  await loop(runtime);
-} finally {
-  await runtime.dispose();
-}
-```
+`ChartRuntime` is composed by the runner with an internal execution-owned branch session. Direct callers do not load or pass projections. The only execution hook visible to runtime is a synchronous `PrepareStampedCommit` callback that receives storage-stamped facts and returns opaque checkpoint envelopes plus a post-commit confirmation.
 
 ## In-process runner controller
 
@@ -132,7 +116,7 @@ await completion;
 
 ## Journal-native user input
 
-Execution restores the selected projection, validates the response with `prepareUserInteractionResponseFromProjection()`, then calls the storage-only `commitPreparedUserInteraction()` primitive. Stores never accept an AST-bearing unprepared response. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
+Execution restores the selected branch state and validates the response, then calls generic `appendDraftsAtHead()` with an expected branch head and an opaque prepare/confirm callback. Storage knows neither gates nor projection semantics. Expected-head mismatches use the typed `BranchHeadMovedError`; execution retries only that error, never participant/application failures. The public host helper routes a live response through the owning runner's typed control queue; it opens a temporary writer directly only when status proves the runner is stopped. The opened fact's `seqId` is the public gate identity. Identical selected-ancestry retries are idempotent; divergent retries conflict; a timed-out, exited, failed, missing, or off-ancestry gate is stale.
 
 JSONL serializes writes only inside one Node process, allocates against its private opened index, trusts stored entries, and rejects a stale byte boundary when detected. It provides no consistency guarantee for concurrent writers in different processes. PostgreSQL holds one session advisory writer claim for the lifetime of the runtime/store; a second live writer is rejected.
 
@@ -209,7 +193,7 @@ These helpers describe inspection configuration. Runtime launch strictness and c
 
 ## Log stores
 
-`RunLogStore` owns the journal, branch heads, immutable run metadata, and opaque disposable projection-cache rows. Writes use async `appendDrafts()`; the writer assigns durable coordinates and returns the committed facts. JSONL owns `meta.json` plus `log.jsonl`; PostgreSQL owns `hyperchart_run_meta`, `hyperchart_journal`, and `hyperchart_projection_checkpoint`. `run_dir.ts` performs lifecycle orchestration and never selects a backend.
+`RunLogStore` owns the journal, branch heads, immutable run metadata, and opaque disposable checkpoint rows. Writes use async `appendDrafts()`; the writer assigns durable coordinates and returns the committed facts. JSONL owns `meta.json` plus `log.jsonl`; PostgreSQL owns `hyperchart_run_meta`, `hyperchart_journal`, and `hyperchart_checkpoint`. `run_dir.ts` performs lifecycle orchestration and never selects a backend.
 
 ### Snapshot-pinned history
 
@@ -247,9 +231,9 @@ Storage returns AST-free durable record groups for state visits, map visits, act
 
 ### Lazy inspector history
 
-`hyperchartRunOverviewFromRunDir()` restores current graph/control state through the projection loader and returns a captured `HistorySnapshot`, the first keyset branch page, and an overview run with no elapsed `visitHistory`, map history, actor generation/message history, record tree, transcript arrays, queued mailbox `entries`, per-generation processed messages, or pool-worker message/visit histories. It retains only counts, mailbox head/current message, and current worker/session summaries. `createRunInspectorDataSource()` exposes serializable `readStateVisits`, `readMapVisits`, `readActorGenerations`, `readActorMessages`, `readRecords`, `cursorAt`, and `readVisitSession` requests bound to one run.
+`hyperchartRunOverviewFromRunDir()` asks the internal execution service for current graph/control state and returns a captured `HistorySnapshot`, the first keyset branch page, and an overview run with no elapsed `visitHistory`, map history, actor generation/message history, record tree, transcript arrays, queued mailbox `entries`, per-generation processed messages, or pool-worker message/visit histories. It retains only counts, mailbox head/current message, and current worker/session summaries. `createRunInspectorDataSource()` exposes serializable `readStateVisits`, `readMapVisits`, `readActorGenerations`, `readActorMessages`, `readRecords`, `cursorAt`, and `readVisitSession` requests bound to one run.
 
-React Runtime histories share `VirtualizedHistoryList` and `useHistoryWindow`. A browser `?seqId=<durable coordinate>` deep link mints a subject-bound starting cursor through `cursorAt()` after the user selects the corresponding state. The DOM is virtualized by `@tanstack/react-virtual` with 20-row overscan; decoded state is capped at 1,000 rows. Older/newer errors are independent and remain stable until explicit retry, overlapping chunks deduplicate by durable identity, opposite-edge eviction retains a reload cursor, and snapshot/subject changes abort or ignore stale work. Inspector polling preserves the opened snapshot until **Refresh history** is chosen. Transcript messages load only through `readVisitSession` when a visit session is opened. Pi and Claude browser inspectors use the same stateless HTTP bridge; steering requests carry and validate the currently selected branch. Pi's compact TUI polls projection state plus one recent-record page and never requests complete ancestry.
+React Runtime histories share `VirtualizedHistoryList` and `useHistoryWindow`. A browser `?seqId=<durable coordinate>` deep link mints a subject-bound starting cursor through `cursorAt()` after the user selects the corresponding state. The DOM is virtualized by `@tanstack/react-virtual` with 20-row overscan; decoded state is capped at 1,000 rows. Older/newer errors are independent and remain stable until explicit retry, overlapping chunks deduplicate by durable identity, opposite-edge eviction retains a reload cursor, and snapshot/subject changes abort or ignore stale work. Inspector polling preserves the opened snapshot until **Refresh history** is chosen. Transcript messages load only through `readVisitSession` when a visit session is opened. Pi and Claude browser inspectors use the same stateless HTTP bridge; steering requests carry and validate the currently selected branch. Pi's compact TUI polls a projection-free execution overview plus one recent-record page and never requests complete ancestry.
 
 Projection replay is a package-internal oldest-first `AsyncIterable`; each yielded batch contains at most 500 facts. It is absent from exported store interfaces and concrete class declarations and is not a host/UI history API.
 
@@ -257,19 +241,23 @@ The current PostgreSQL implementation deliberately computes these bounded result
 
 `JsonlLogStore` trusts parsed entries, fails malformed/incomplete JSON without changing the file, shares one private index across `forBranch()` handles, and rejects stale byte boundaries. `MemoryLogStore` provides the same history contract for tests and ephemeral execution.
 
-### Versioned projection checkpoints
+### Opaque execution checkpoints
+
+Runtime/storage exposes only this generic envelope:
 
 ```ts
-type ProjectionContract = { projectorVersion: number; astDigest: string };
-
-const contract = projectionContractForAst(ast);
-const loaded = await loadBranchProjection({ ast, branchId, store, contract });
-// loaded.projection is synchronous machine-ready state for the captured head.
+type OpaqueCheckpointEnvelope = {
+  checkpointId: string;
+  headSeqId: number | null;
+  selectorKey: string;
+  blob: unknown;
+  createdAt: number;
+};
 ```
 
-`astDigest` is SHA-256 over canonical normalized `ChartAst` JSON. `PROJECTOR_VERSION` identifies the current serialized `BranchProjection` semantics. The loader captures one branch head, accepts only an exact-contract checkpoint whose head still exists in that ancestry and whose versioned payload decodes, then streams the remaining ancestry oldest-first in fixed batches of at most 500. It applies `projectBranch()` and synchronous `compactProjection()` outside storage. A malformed, stale, or incompatible checkpoint is ignored; the durable journal is neither validated nor repaired. A failed rebuild saves nothing. Replay prefixes with stale, skipped, or unpinned diagnostics are also left uncached so a later replay gate cannot accidentally lose those findings.
+The internal execution layer computes the deterministic selector, AST identity, codec version, projection payload, replay diagnostics, compaction, and 512-record cadence. None of those concepts appear in runtime or backend declarations. Storage compares only `selectorKey` and ancestry coordinates and persists `blob` without opening it.
 
-PostgreSQL stores immutable opaque payloads in `hyperchart_projection_checkpoint`. Runtime startup and replay gates restore machine-ready state through the loader; appends prepare immutable cache rows outside storage and commit each due 512-record checkpoint in the same PostgreSQL transaction as its journal batch. Fork and rewind prepare the target projection first and atomically commit the new/moved head with that target checkpoint. Clean shutdown writes an exact checkpoint when a non-empty tail remains. JSONL and memory checkpoints are process-local only: JSONL creates no checkpoint or index sidecar and reopening rebuilds from durable facts. Compatibility rebuilds save only after fully successful replay, while ordinary warm startup preserves the interval tail instead of eagerly writing an exact checkpoint. A loader result remains permanently non-checkpointable when any replay batch reports stale, skipped, or unpinned facts; interval, response, fork, rewind, and shutdown orchestration propagate that state so accepting warnings cannot hide them on the next restart.
+PostgreSQL stores envelopes in `hyperchart_checkpoint(selector_key, blob)` and commits due envelopes atomically with their journal facts. JSONL and memory keep envelopes in process memory only. The store stamps records under its branch writer boundary, calls the execution-owned synchronous prepare callback before durability, commits facts plus opaque envelopes, then calls its confirmation only after commit and before admitting another branch write. Preparation failure writes nothing; uncertain PostgreSQL commit or failed post-commit confirmation poisons the writer. Malformed, stale, incompatible, skipped, or warning-bearing projection payloads are handled exclusively by execution and never reinterpreted by storage.
 
 ## Script execution
 
@@ -554,70 +542,44 @@ Notification artifact entries are authoritative absolute paths under `workDir`; 
 
 ## Complete export inventory
 
+`@surprisal/hyperchart/runtime`:
+
 ```text
-Runtime
-AgentExecutor, EmitCompletion
-AgentDefinition, AgentDefinitionResolution, ThinkingLevel,
-createAgentDefaultsResolver, resolveAgentDefaults, loadAgentDefinition, parseAgentFile
-RenderedArtifact, GuardContext, RenderedGuardInvocation, SchemaCheck, SchemaRegistry, SchemaRegistryLike
+Runtime, AgentExecutor, EmitCompletion
 ChartRuntime, ChartRuntimeOptions
-createBranchProjection, projectBranch, compactProjection, compileProjectionRetention,
-BranchProjection, ProjectionRetentionPlan, OpenProjectedUserInteraction
-USER_INTERACTIONS_DIR, USER_INTERACTION_ARBITER_DIR,
-USER_INTERACTION_CLAIM_LEASE_MS, USER_INTERACTION_WAIT_LEASE_MS,
-UserInteractionCoordinate, UserInteractionOwner, UserInteractionRequest,
-UserInteractionResponse, UserInteractionReceipt, UserInteractionArbiterRecord,
-OwnedUserInteraction, PersistUserInteractionResponseOptions,
-userInteractionDir, userInteractionReceiptPath, userInteractionArbiterPath,
-readUserInteractionResponse,
-scanOpenUserInteractions, scanOwnedOpenUserInteractions, acquireActiveUserInteraction,
-readActiveUserInteraction, releaseActiveUserInteraction,
-claimUserInteractionReceipt, markUserInteractionReceipt, hasUserInteractionReceipt,
-readUserInteractionReceipt, removeUserInteractionReceipt,
-validateAndPersistUserInteractionResponse
-DEFAULT_BRANCH_ID, HistoryCursorError,
-JsonlLogStore, MemoryLogStore, PostgresLogStore, openRunLogStore,
-JOURNAL_CHANNEL, JOURNAL_TABLE, PROJECTION_CHECKPOINT_TABLE, supportsSqlTransactions,
-PROJECTOR_VERSION, PROJECTION_CHECKPOINT_INTERVAL,
-chartAstDigest, projectionContractForAst, loadBranchProjection,
-ProjectionContract, ProjectionCheckpoint, LoadedBranchProjection,
-LogStore, RunHistoryStore, RunLogStore,
-HistorySnapshot, HistoryCursor, HistorySubject, HistoryChunk,
-BranchListCursor, BranchListChunk,
-StateVisitHistoryItem, MapVisitHistoryItem,
-ActorGenerationHistoryItem, ActorMessageHistoryItem,
-UserInteractionResponseCommit,
-OpenRunLogStoreOptions, OpenPostgresLogStoreOptions, PostgresLogAccess,
-PostgresRunTransaction, PostgresForkAndCommitInput,
-PgClientLike, PgQueryResult, SqlCommitParticipant,
-SqlCommitTransaction, SqlTransactionalRunLogStore
-ScriptRunner
-checkArtifactFile, resolveArtifactValue, serializeEnvValue,
-materializeWorkspaceFromPins
-runGuard, checkSchema, checkSchemaAsync
-createRunDir, loadRunMeta, saveRunMeta, deleteRunStorage, RunMeta
-listHyperchartBranchPage, getHyperchartBranch, forkHyperchartRun,
-ForkBranchOptions, ForkBranchResult
-terminalStateForFinalMachine, RunTerminalState
-archiveTerminalNotificationGeneration, persistTerminalNotificationRequest,
-readTerminalNotificationRequest,
-readDeliverableTerminalNotificationRequest, recoverStaleRunTerminalNotification,
-claimTerminalNotificationReceipt, markTerminalNotificationReceipt,
-hasTerminalNotificationReceipt, removeTerminalNotificationReceipt,
-removeTerminalNotificationOutbox, TerminalNotificationPayload,
-TerminalNotificationRequest, TerminalNotificationReceipt
+JsonlLogStore, MemoryLogStore, PostgresLogStore, openRunLogStore, BranchHeadMovedError
+LogStore, RunHistoryStore, RunLogStore
+OpaqueCheckpointEnvelope, CheckpointQuery, PrepareStampedCommit, PreparedStampedCommit
+HistorySnapshot, HistoryCursor, HistorySubject, HistoryChunk
+BranchListCursor, BranchListChunk
+StateVisitHistoryItem, MapVisitHistoryItem, ActorGenerationHistoryItem, ActorMessageHistoryItem
+JOURNAL_CHANNEL, JOURNAL_TABLE, CHECKPOINT_TABLE, supportsSqlTransactions
+PostgresRunTransaction, PostgresForkAndAppendInput, SqlCommitParticipant
+ScriptRunner, runGuard, checkSchema, checkSchemaAsync
+artifact, schema, executor, run-directory, settings, status, and notification I/O helpers
 ```
+
+`@surprisal/hyperchart/runner`:
+
+```text
+createHyperchartRunnerController, runHyperchartRunner, readRunnerConfig
+listHyperchartBranchPage, getHyperchartBranch, forkHyperchartRun, rewindHyperchartRun
+user-interaction scanning, receipt, response, and arbitration controls
+runner/branch/rewind/user-interaction option and result types
+```
+
+Projection restoration, checkpoint selectors/codecs, retention plans, cadence constants, and `BranchExecution` are internal execution modules and are deliberately absent from both public entrypoints.
 
 ## Live projection retention
 
-`BranchProjection` contains current synchronous machine state rather than elapsed history. `openUserInteractions` contains open gates only; actor and pool occurrences retain mailbox/current-worker control while settled call payloads survive only as long as their `pendingActorCalls` entry needs them. `artifactPins` contains the latest accepted revision for each rendered authored path and is attached to rendered artifact reads before the runtime performs asynchronous restoration.
+`BranchProjection` contains current synchronous machine state rather than elapsed history. `openUserInteractions` contains open gates only. Actor message lifecycle state has one authoritative entry in `liveActorMessages`, keyed by durable message ID; endpoint mailboxes, current worker slots, and `pendingActorCalls` retain IDs rather than duplicate mutable message objects. Settled non-call messages are removed immediately, while settled call messages remain only until the matching call-resolution fact. `artifactPins` contains the latest accepted revision for each rendered authored path and is attached to rendered artifact reads before the runtime performs asynchronous restoration.
 
-`compileProjectionRetention(ast)` returns the conservative AST-derived `ProjectionRetentionPlan`; `compactProjection(projection, ast, plan)` is the synchronous compaction seam. The initial implementation deletes only session references proven non-resumable. Inputs, results, spawns, actor generations, and counters remain when future liveness is ambiguous. The execution-owned projection loader introduced with checkpoints calls compaction after each projected batch and before serialization; callers must not add I/O to `machine` or `projectBranch`.
+The internal execution retention policy deletes session references proven non-resumable and canonical actor-message entries that have no mailbox, current-worker, or pending-call reference. Inputs, results, spawns, actor generations, and counters remain when future liveness is ambiguous. Compaction runs after projected batches and before execution encodes a checkpoint blob; runtime/storage cannot invoke or import it.
 
 ## Actor pool runtime behavior
 
-Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_reply` effect kinds for ordinary actors and pools. The core scheduler may choose any idle, receive-compatible pool worker and emits that choice as an accepted fact before worker workflow invocation. Hosts must append each `durable_records` effect atomically and acknowledge multiple effects in their supplied order. Until an accepted append is projected, the machine keeps an ordered reservation for that pool so the message is virtually dequeued and the chosen worker virtually occupied; ordinary actors and unrelated pools continue independently. On restart, restore through `loadBranchProjection()` and let bounded replay batches recover endpoint generations, worker ownership, partial batches, and drain state—never reconstruct or reassign from external worker sessions. Global failure best-effort cancels pending concrete worker actions.
+Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_reply` effect kinds for ordinary actors and pools. The core scheduler may choose any idle, receive-compatible pool worker and emits that choice as an accepted fact before worker workflow invocation. Hosts must append each `durable_records` effect atomically and acknowledge multiple effects in their supplied order. Until an accepted append is projected, the machine keeps an ordered reservation for that pool so the message is virtually dequeued and the chosen worker virtually occupied; ordinary actors and unrelated pools continue independently. On restart, the internal execution service restores bounded replay batches to recover endpoint generations, worker ownership, partial batches, and drain state—never reconstruct or reassign from external worker sessions. Global failure best-effort cancels pending concrete worker actions.
 
 ## Named branch storage API
 
-`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runDir, cursor?)` exposes the same bounded page contract for run-directory callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported from `@surprisal/hyperchart/runtime`. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.
+`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runDir, cursor?)` exposes the same bounded page contract for run-directory callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported. Runner/control helpers are imported from `@surprisal/hyperchart/runner`, separately from the projection-free runtime/storage package. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.

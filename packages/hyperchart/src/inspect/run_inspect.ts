@@ -16,13 +16,24 @@ import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
 import type { BranchHead } from "../core/durable_events.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import type { BranchListChunk, HistorySnapshot } from "../runtime/generic/log_store.js";
-import { loadBranchProjection, projectionContractForAst } from "../runtime/generic/projection_loader.js";
+import { BranchExecution, type BranchExecutionOverview } from "../execution/branch_execution.js";
 import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { readRunStatus } from "../runtime/generic/run_status.js";
-import { readRunnerConfig } from "../runtime/generic/runner_main.js";
+import { readRunnerConfig } from "../runner/runner_main.js";
 import { readSessionProgress, sessionProgressKey } from "../runtime/generic/session_progress.js";
 
 export type InvocationTranscriptBinding = Readonly<{ sessionId: string }>;
+
+/** Projection-free execution summary for non-React host surfaces. */
+export async function readBranchExecutionOverview(
+	ast: ChartAst,
+	branchId: BranchId,
+	store: import("../runtime/generic/log_store.js").RunLogStore,
+	snapshot?: HistorySnapshot,
+): Promise<BranchExecutionOverview> {
+	const semantic = await BranchExecution.restore({ ast, branchId, store, saveCheckpoint: "never", ...(snapshot === undefined ? {} : { snapshot }) });
+	return semantic.inspectionOverview();
+}
 
 export type SessionTranscriptReader = (
 	binding: InvocationTranscriptBinding,
@@ -79,8 +90,8 @@ export async function hyperchartRunFromRunDir(
 			snapshot = { branchId, headSeqId: null };
 			syntheticEmptyBranch = true;
 		}
-		const loaded = await loadBranchProjection({ ast, branchId, store, contract: projectionContractForAst(ast), snapshot, saveCheckpoint: "never" });
-		projection = loaded.projection;
+		const semantic = await BranchExecution.restore({ ast, branchId, store, snapshot, saveCheckpoint: "never" });
+		projection = semantic.inspectionProjection();
 		const [recordChunk, branchChunk] = await Promise.all([
 			syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
 			store.listBranches(),

@@ -4,7 +4,7 @@ import {
 	readRunnerConfig,
 	runHyperchartRunner,
 	type HyperchartRunnerConfig as GenericRunnerConfig,
-} from "@surprisal/hyperchart/runtime";
+} from "@surprisal/hyperchart/runner";
 import { resolvePiSubagentDefinitionDirs } from "./agent_definitions.js";
 import { PiAgentExecutor } from "./pi_agent_executor.js";
 

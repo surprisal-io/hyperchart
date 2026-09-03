@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation is authorized. Phase 0 is complete. Phase 0.5 rejected the immutable HAMT physical design; the retained benchmark remains evidence and must not be integrated.
+Implementation is authorized. Phase 0 is complete. Phase 0.5 rejected the immutable HAMT physical design; its summarized outcome remains here as design evidence, while the disposable prototype and generated reports are not retained.
 
 ### Interim execution decision (2026-09-02)
 
@@ -17,6 +17,10 @@ No public API regains `readAncestry()`, an unbounded array, or stateful reader h
 The current storage refactor removes global journal snapshots, but `readAncestry()` can still return an arbitrarily large branch history. Runtime startup, replay compatibility, user-interaction admission, artifact restoration, rewind, inspector, host adapters, and TUI can therefore still materialize or replay unbounded history.
 
 The intended outcome is to remove complete-ancestry reads while keeping `machine` and `projectBranch` strictly synchronous. Normal startup and inspection should load a reusable projection checkpoint and a small bounded tail. Historical data should be available only through snapshot-stable stateless cursor chunks or targeted lookups.
+
+### Hard projection boundary
+
+Projection semantics belong exclusively to `src/core` and the internal `src/execution` layer. `src/runtime` and every storage backend must not import, expose, retain, decode, or update `BranchProjection`, `projectBranch`, retention policy, AST digests, projector versions, or checkpoint codecs. Runtime/storage sees only a generic opaque envelope `{ checkpointId, headSeqId, selectorKey, blob, createdAt }`. Execution supplies a synchronous stamped-record prepare/confirm callback; storage calls prepare before durability, atomically persists facts plus opaque envelopes, and confirms only after commit while still holding the branch writer boundary. Runner composition lives under `src/runner`, not strict runtime. No projection loader or codec surface is publicly exported.
 
 ## Decision
 
@@ -149,6 +153,8 @@ export type ProjectedActorPoolOccurrence = {
    failure?: { origin: StatePath; error: unknown; seqId: number };
    actors: Record<StatePath, ProjectedActorOccurrence>;
    actorPools: Record<StatePath, ProjectedActorPoolOccurrence>;
++  // One authoritative mutable object per live durable message ID.
++  liveActorMessages: Record<string, ProjectedActorMessage>;
    pendingActorCalls: Record<string, PendingActorCall>;
    actorProducerVisits: Record<StatePath, number>;
  };
@@ -163,19 +169,31 @@ export type ProjectedActorPoolOccurrence = {
 
  export type ProjectedActorOccurrence = {
    // identity, definition, current state and live-control fields unchanged
-   mailbox: ProjectedActorMessage[];
+-  mailbox: ProjectedActorMessage[];
 -  messages: ProjectedActorMessage[];
-   currentMessage?: ProjectedActorMessage;
+-  currentMessage?: ProjectedActorMessage;
++  mailbox: string[];
++  currentMessageId?: string;
  };
 
  export type ProjectedActorPoolOccurrence = {
    // identity, definition, workers and live-control fields unchanged
-   mailbox: ProjectedActorMessage[];
+-  mailbox: ProjectedActorMessage[];
 -  messages: ProjectedActorMessage[];
++  mailbox: string[];
  };
++
++export type ProjectedActorPoolWorker = {
++  // identity, current state and status unchanged
++  currentMessageId?: string;
++};
++
++// Pending calls retain correlation/message IDs only. liveActorMessages owns lifecycle state.
 ```
 
 No separate asynchronous semantic-state provider is introduced. `spawns`, `inputs`, `results`, `stateVisits`, `sessions`, actor counters, and all other synchronously addressable values remain directly in `BranchProjection`.
+
+Actor message state is normalized before checkpointing: `liveActorMessages[messageId]` is the only authoritative mutable message object; endpoint mailboxes, workers, and pending calls retain durable IDs only. Settled non-call messages are deleted immediately. Settled call messages remain until their matching call-resolution fact, then are deleted. Checkpoint decoding rejects missing, orphaned, or structurally stale message references instead of relying on object aliasing lost through JSON serialization.
 
 #### What moves out of the projection
 
@@ -380,7 +398,7 @@ Public-history invariants:
 
 ### 5. Keep projection replay private and one-directional
 
-Projection replay is not a UI history query and does not share the public chunk abstraction. It is a private oldest-first single-consumer stream owned by `execution_loop`/`projection_loader`:
+Projection replay is not a UI history query and does not share the public chunk abstraction. It is a private oldest-first single-consumer stream owned by the internal execution layer:
 
 ```ts
 interface ProjectionReplaySource {
@@ -401,7 +419,7 @@ interface ProjectionRepository {
   save(checkpoint: ProjectionCheckpoint): Promise<void>;
 }
 
-// packages/hyperchart/src/runtime/generic/projection_loader.ts
+// packages/hyperchart/src/execution/projection_restore.ts
 export async function loadBranchProjection(input: {
   ast: ChartAst;
   branchId: BranchId;
@@ -459,29 +477,23 @@ RETURNING next_seq - $2 AS first_seq;
 
 Normal appends never call `MAX(seq)`. There is no backfill or compatibility path for the discarded schema.
 
-Add immutable checkpoints:
+Add immutable opaque checkpoints. PostgreSQL knows neither projection identity fields nor blob schema:
 
 ```sql
-CREATE TABLE hyperchart_projection_checkpoint (
+CREATE TABLE hyperchart_checkpoint (
   run_id text NOT NULL,
   checkpoint_id text NOT NULL,
   head_seq_id bigint,
-  projector_version integer NOT NULL,
-  ast_digest text NOT NULL,
-  projection jsonb NOT NULL,
+  selector_key text NOT NULL,
+  blob jsonb NOT NULL,
   created_at_ms bigint NOT NULL,
   PRIMARY KEY (run_id, checkpoint_id),
   FOREIGN KEY (run_id, head_seq_id)
     REFERENCES hyperchart_journal(run_id, seq)
 );
 
-CREATE UNIQUE INDEX hyperchart_projection_identity_idx
-  ON hyperchart_projection_checkpoint(
-    run_id,
-    COALESCE(head_seq_id, -1),
-    projector_version,
-    ast_digest
-  );
+CREATE UNIQUE INDEX hyperchart_checkpoint_identity_idx
+  ON hyperchart_checkpoint(run_id, COALESCE(head_seq_id, -1), selector_key);
 ```
 
 ### 7.3 PostgreSQL persistent ancestry catalog
@@ -911,16 +923,15 @@ Critical production seams:
 - `packages/hyperchart/src/core/projection.ts` — remove elapsed histories, add current artifact pins, retain synchronous semantics.
 - `packages/hyperchart/src/core/replay_check.ts` — incremental replay accumulator.
 - `packages/hyperchart/src/core/machine.ts` — adapt only to the cleaned synchronous projection shape.
-- `packages/hyperchart/src/runtime/generic/log_store.ts` — stateless bounded history-chunk contracts and private replay-stream contract; remove `readAncestry`.
+- `packages/hyperchart/src/runtime/generic/log_store.ts` — stateless bounded history-chunk contracts and private execution replay-page contract; remove `readAncestry`.
 - `packages/hyperchart/src/runtime/generic/memory_log_store.ts` — stateless history chunks and in-memory replay behavior.
-- `packages/hyperchart/src/runtime/generic/postgres_log_store.ts` — sequence counter, persistent catalog roots/nodes/links, stateless bounded history queries, private replay stream, checkpoints, and atomic writes.
-- `packages/hyperchart/src/runtime/generic/log_store_factory.ts` — open projection-aware backends once.
-- `packages/hyperchart/src/runtime/generic/projection_loader.ts` (new) — execution-owned checkpoint selection, synchronous projection/GC, and replay accumulation orchestration.
-- `packages/hyperchart/src/runtime/generic/chart_runtime.ts` and `execution_loop.ts` — call the projection loader, create the machine, and maintain incremental in-memory projection.
-- `packages/hyperchart/src/runtime/generic/runner_main.ts` — remove repeated replay/workspace/outcome ancestry reads.
-- `packages/hyperchart/src/runtime/generic/user_interaction_admission.ts` and `user_interactions.ts` — current projection plus targeted gate indexes.
-- `packages/hyperchart/src/runtime/generic/artifact_store.ts` / artifact helpers — materialize current pins without history scan.
-- `packages/hyperchart/src/runtime/generic/branches.ts` and `rewind.ts` — target checkpoints and bounded history selection.
+- `packages/hyperchart/src/runtime/generic/postgres_log_store.ts` — sequence counter, stateless bounded history queries, genuinely bounded replay pages, generic opaque checkpoint rows, and atomic writes.
+- `packages/hyperchart/src/runtime/generic/log_store_factory.ts` — select an AST-free backend once.
+- `packages/hyperchart/src/execution/projection_restore.ts`, `branch_execution.ts`, and `projection_retention.ts` — checkpoint codec/selector, synchronous projection/GC, replay diagnostics, cadence, and semantic branch state.
+- `packages/hyperchart/src/execution/execution_loop.ts`, `user_interaction.ts`, `run_outcome.ts`, and `terminal_notification.ts` — machine execution and projection-dependent semantics.
+- `packages/hyperchart/src/runtime/generic/chart_runtime.ts` — effects/events/I/O only; receives a generic opaque stamped-commit callback.
+- `packages/hyperchart/src/runner/runner_main.ts`, `branches.ts`, `user_interactions.ts`, and `rewind.ts` — composition/control outside the strict runtime boundary.
+- `packages/hyperchart/src/runtime/generic/artifact_store.ts` / artifact helpers — materialize execution-supplied current pins without history scan.
 - `packages/hyperchart/src/inspect/run_inspect.ts` — overview only; no eager records.
 - `packages/hyperchart/src/host/models.ts`, `host/adapter.ts`, and `host/adapters.ts` — overview and lazy history APIs.
 - `packages/hyperchart/src/react/components/inspector/**` — on-demand details plus shared bidirectional virtualized sliding-window histories.
@@ -946,7 +957,7 @@ Tests to update/add include `tests/log_store.test.ts`, `tests/postgres_log_store
 ## Steps
 
 - [x] Phase 0: clear the disposable PostgreSQL development data, define `next_seq` in the new initial schema, keep trusted-storage behavior, and stabilize/commit the current targeted-query refactor without adding migration/compatibility code or new ancestry callers.
-- [x] Phase 0.5: build the isolated PostgreSQL catalog prototype and run the benchmark gate below before integrating catalog code into runtime production paths. The HAMT candidate was rejected and retained as evidence.
+- [x] Phase 0.5: build the isolated PostgreSQL catalog prototype and run the benchmark gate below before integrating catalog code into runtime production paths. The HAMT candidate was rejected; only the summarized outcome below is retained.
 - [x] Phase 1: introduce snapshot-bound stateless history chunks, read-committed branch keyset pagination, `cursorAt`, capped older/newer traversal, and the private oldest-first `AsyncIterable` replay stream. Implement them first as backend-private journal traversal/filtering scaffolding; do not integrate the rejected HAMT. Preserve the final consumer-facing contracts so the deferred predecessor catalog is a storage-only replacement.
 - [x] Phase 2: remove resolved interactions and settled message histories from `BranchProjection`; add current artifact pins; compile conservative AST retention plans and synchronous projection GC; keep all synchronously required retained state; update semantic model/tests/TLA together.
 - [x] Phase 3: add projection contract digest/version, nearest-compatible PostgreSQL checkpoint persistence and loader/transaction seams; keep JSONL projection/index state in memory only; add finite-log equivalence tests. The 512-record cadence remains a policy constant only.
@@ -1034,7 +1045,7 @@ A scaled `100_000`-record version runs in automated tests and asserts structural
 
 ### Phase 0.5 benchmark outcome (2026-09-02)
 
-The isolated 16-way, canonical-JSON-node HAMT candidate was measured in a corrected four-shape 100,000-record matrix under `benchmarks/postgres-catalog/results/`. Candidate, baseline-only, and instrumentation storage are separated; TOAST and indexes are counted exactly once; measured append WAL excludes baseline facts and instrumentation writes. One hundred warm/cold samples use distinct deterministic roots and clear the driver node cache. All bounded-query, complete-key probe, arbitrary-parent equivalence, divergent-forward, sparse/missing, and shared-node deletion checks pass.
+The disposable isolated 16-way, canonical-JSON-node HAMT candidate was measured in a corrected four-shape 100,000-record matrix. The prototype and generated reports were removed after rejection; the decision-relevant measurements are summarized below. Candidate, baseline-only, and instrumentation storage were separated; TOAST and indexes were counted exactly once; measured append WAL excluded baseline facts and instrumentation writes. One hundred warm/cold samples used distinct deterministic roots and cleared the driver node cache. All bounded-query, complete-key probe, arbitrary-parent equivalence, divergent-forward, sparse/missing, and shared-node deletion checks passed.
 
 The physical candidate is nevertheless **rejected** and must not be integrated:
 

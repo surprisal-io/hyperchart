@@ -3,12 +3,12 @@
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { loadRunMeta } from "@surprisal/hyperchart/runtime";
 import {
 	acquireActiveUserInteraction,
 	claimUserInteractionReceipt,
-	loadRunMeta,
 	markUserInteractionReceipt,
-} from "@surprisal/hyperchart/runtime";
+} from "@surprisal/hyperchart/runner";
 
 function readJson(path) {
 	try {

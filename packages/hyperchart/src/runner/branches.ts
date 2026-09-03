@@ -1,11 +1,11 @@
 import { basename, resolve } from "node:path";
-import type { BranchHead, BranchId, BranchMetadata } from "../../core/durable_events.js";
-import { parseChartModuleSync } from "../../core/inspect.js";
-import { loadRunMeta } from "./run_dir.js";
-import { isRunLive, readRunStatus } from "./run_status.js";
-import { openRunLogStore } from "./log_store_factory.js";
-import { collectBranches, type BranchListChunk, type BranchListCursor } from "./log_store.js";
-import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst } from "./projection_loader.js";
+import type { BranchHead, BranchId, BranchMetadata } from "../core/durable_events.js";
+import { parseChartModuleSync } from "../core/inspect.js";
+import { loadRunMeta } from "../runtime/generic/run_dir.js";
+import { isRunLive, readRunStatus } from "../runtime/generic/run_status.js";
+import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
+import { collectBranches, type BranchListChunk, type BranchListCursor } from "../runtime/generic/log_store.js";
+import { BranchExecution } from "../execution/branch_execution.js";
 
 export type ForkBranchOptions = Readonly<{
 	runDir: string;
@@ -72,11 +72,9 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 			...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
 			sourceSeqId: options.fromSeqId,
 		};
-		const contract = projectionContractForAst(parsed.ast);
-		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: options.branchId, store, contract, saveCheckpoint: "never", snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId } });
-		branch = loaded.checkpointable
-			? await store.createBranchWithCheckpoint(options.branchId, options.fromSeqId, metadata, prepareProjectionCheckpoint(loaded.projection, contract, options.fromSeqId))
-			: await store.createBranch(options.branchId, options.fromSeqId, metadata);
+		const semantic = await BranchExecution.restore({ ast: parsed.ast, branchId: options.branchId, store, saveCheckpoint: "never", snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId } });
+		const checkpoint = semantic.prepareExactCheckpoint(options.fromSeqId);
+		branch = await store.createBranch(options.branchId, options.fromSeqId, metadata, checkpoint === undefined ? undefined : { checkpoint });
 	} finally {
 		await store.close();
 	}

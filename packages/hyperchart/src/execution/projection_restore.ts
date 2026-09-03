@@ -1,29 +1,30 @@
 import { createHash, randomUUID } from "node:crypto";
-import { createBranchProjection, projectBranch, type BranchProjection, type ProjectionSkippedRecord, type ProjectedActorEndpointOccurrence, type ProjectedActorOccurrence, type ProjectedActorPoolOccurrence } from "../../core/projection.js";
-import { actionUidKey } from "../../core/action_uid.js";
-import { actorContextForState, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "../../core/actors.js";
-import { lastSegmentKey, matchesDeclaredUid, nodeAt, templatePath } from "../../core/paths.js";
-import { replayRecordDiagnostics, type ReplayStaleRecord, type ReplayUnpinnedRecord } from "../../core/replay_check.js";
-import { compactProjection, compileProjectionRetention } from "../../core/projection_retention.js";
-import type { ChartAst } from "../../core/types.js";
-import type { BranchId } from "../../core/durable_events.js";
+import { createBranchProjection, projectBranch, type BranchProjection, type ProjectionSkippedRecord, type ProjectedActorEndpointOccurrence, type ProjectedActorOccurrence, type ProjectedActorPoolOccurrence } from "../core/projection.js";
+import { actionUidKey } from "../core/action_uid.js";
+import { actorContextForState, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "../core/actors.js";
+import { lastSegmentKey, matchesDeclaredUid, nodeAt, templatePath } from "../core/paths.js";
+import { replayRecordDiagnostics, type ReplayStaleRecord, type ReplayUnpinnedRecord } from "../core/replay_check.js";
+import { compactProjection, compileProjectionRetention } from "./projection_retention.js";
+import type { ChartAst } from "../core/types.js";
+import type { BranchId } from "../core/durable_events.js";
 import {
-	PROJECTION_READ_RECORDS,
-	openProjectionReplay,
+	openExecutionReplay,
 	type HistorySnapshot,
-	type ProjectionCheckpointLookup,
-	type ProjectionCheckpointStore,
-	type StoredProjectionCheckpoint,
-} from "./log_store.js";
+	type CheckpointQuery,
+	type CheckpointRepository,
+	type OpaqueCheckpointEnvelope,
+} from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
 export const PROJECTOR_VERSION = 1;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
+export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
 
 export type ProjectionContract = Readonly<{
 	projectorVersion: number;
 	astDigest: string;
+	selectorKey: string;
 }>;
 
 export type ProjectionCheckpoint = Readonly<{
@@ -51,18 +52,14 @@ export type LoadedBranchProjection = Readonly<{
 	}>;
 }>;
 
-type ProjectionCheckpointPayloadV1 = Readonly<{
-	schemaVersion: 1;
-	projection: unknown;
-}>;
-
 /** SHA-256 over canonical JSON for the normalized AST. */
 export function chartAstDigest(ast: ChartAst): string {
 	return createHash("sha256").update(canonicalJson(ast)).digest("hex");
 }
 
 export function projectionContractForAst(ast: ChartAst): ProjectionContract {
-	return { projectorVersion: PROJECTOR_VERSION, astDigest: chartAstDigest(ast) };
+	const astDigest = chartAstDigest(ast);
+	return { projectorVersion: PROJECTOR_VERSION, astDigest, selectorKey: `hyperchart-projection:${PROJECTOR_VERSION}:${astDigest}` };
 }
 
 /**
@@ -73,7 +70,7 @@ export function projectionContractForAst(ast: ChartAst): ProjectionContract {
 export async function loadBranchProjection(input: {
 	ast: ChartAst;
 	branchId: BranchId;
-	store: ProjectionCheckpointStore;
+	store: CheckpointRepository;
 	contract: ProjectionContract;
 	/** Phase 4 orchestration requests exact fork/rewind/shutdown checkpoints explicitly. */
 	saveCheckpoint?: "rebuild" | "always" | "never";
@@ -86,13 +83,13 @@ export async function loadBranchProjection(input: {
 	}
 	const snapshot = input.snapshot ?? await input.store.captureSnapshot(input.branchId);
 	if (snapshot.branchId !== input.branchId) throw new Error("Projection snapshot branch does not match the selected branch");
-	const lookup: ProjectionCheckpointLookup = { targetHeadSeqId: snapshot.headSeqId, ...input.contract };
-	const exact = await input.store.loadExactProjectionCheckpoint(lookup);
-	const nearest = exact === undefined ? await input.store.findNearestProjectionCheckpoint(lookup) : undefined;
+	const lookup: CheckpointQuery = { targetHeadSeqId: snapshot.headSeqId, selectorKey: input.contract.selectorKey };
+	const exact = await input.store.loadExactCheckpoint(lookup);
+	const nearest = exact === undefined ? await input.store.findNearestCheckpoint(lookup) : undefined;
 	const selected = exact ?? nearest;
 	const decoded = await acceptedCheckpoint(input.store, snapshot, input.contract, input.ast, selected);
-	if (selected !== undefined && decoded === undefined && input.store.canSaveProjectionCheckpoints) {
-		await input.store.discardProjectionCheckpoint(selected.checkpointId);
+	if (selected !== undefined && decoded === undefined && input.store.canStoreCheckpoints) {
+		await input.store.discardCheckpoint(selected.checkpointId);
 	}
 	const projection = decoded === undefined ? createBranchProjection(input.ast) : structuredClone(decoded.projection);
 	const checkpointHeadSeqId = decoded?.headSeqId ?? null;
@@ -103,11 +100,11 @@ export async function loadBranchProjection(input: {
 	let replayedRecords = 0;
 	let replayBatches = 0;
 
-	for await (const batch of openProjectionReplay(input.store, {
+	for await (const batch of openExecutionReplay(input.store, {
 		targetHeadSeqId: snapshot.headSeqId,
 		afterSeqId: checkpointHeadSeqId,
 	})) {
-		if (batch.length > PROJECTION_READ_RECORDS) throw new Error("Projection replay source exceeded its fixed batch bound");
+		if (batch.length > EXECUTION_REPLAY_BATCH_RECORDS) throw new Error("Projection replay source exceeded its fixed batch bound");
 		replayBatches++;
 		for (const record of batch) {
 			const diagnostics = replayRecordDiagnostics(input.ast, projection, replayedRecords, record);
@@ -127,8 +124,8 @@ export async function loadBranchProjection(input: {
 	const replayIsCheckpointable = skipped.length === 0 && stale.length === 0 && unpinned.length === 0;
 	const saveMode = input.saveCheckpoint ?? "rebuild";
 	const saveRequested = saveMode === "always" || saveMode === "rebuild" && decoded === undefined;
-	if (input.store.canSaveProjectionCheckpoints && replayIsCheckpointable && saveRequested && decoded?.headSeqId !== snapshot.headSeqId) {
-		await input.store.saveProjectionCheckpoint(prepareProjectionCheckpoint(projection, input.contract, snapshot.headSeqId));
+	if (input.store.canStoreCheckpoints && replayIsCheckpointable && saveRequested && decoded?.headSeqId !== snapshot.headSeqId) {
+		await input.store.storeCheckpoint(prepareProjectionCheckpoint(projection, input.contract, snapshot.headSeqId));
 		checkpointSaved = true;
 	}
 	return {
@@ -148,49 +145,47 @@ export function prepareProjectionCheckpoint(
 	projection: BranchProjection,
 	contract: ProjectionContract,
 	headSeqId: number | null = projection.seqId === 0 ? null : projection.seqId,
-): StoredProjectionCheckpoint {
+): OpaqueCheckpointEnvelope {
 	return encodeCheckpoint({ checkpointId: randomUUID(), headSeqId, contract, projection, createdAt: Date.now() });
 }
 
-export function encodeCheckpoint(checkpoint: ProjectionCheckpoint): StoredProjectionCheckpoint {
+export function encodeCheckpoint(checkpoint: ProjectionCheckpoint): OpaqueCheckpointEnvelope {
 	return {
 		checkpointId: checkpoint.checkpointId,
 		headSeqId: checkpoint.headSeqId,
-		projectorVersion: checkpoint.contract.projectorVersion,
-		astDigest: checkpoint.contract.astDigest,
-		payload: {
+		selectorKey: checkpoint.contract.selectorKey,
+		blob: {
 			schemaVersion: PROJECTION_CHECKPOINT_SCHEMA_VERSION,
+			projectorVersion: checkpoint.contract.projectorVersion,
+			astDigest: checkpoint.contract.astDigest,
 			projection: JSON.parse(JSON.stringify(checkpoint.projection)) as unknown,
-		} satisfies ProjectionCheckpointPayloadV1,
+		},
 		createdAt: checkpoint.createdAt,
 	};
 }
 
-export function decodeCheckpoint(stored: StoredProjectionCheckpoint, ast?: ChartAst): ProjectionCheckpoint | undefined {
-	if (!isNonEmptyString(stored.checkpointId) || !isHead(stored.headSeqId) || !isPositiveInteger(stored.projectorVersion)
-		|| !/^[a-f0-9]{64}$/.test(stored.astDigest) || !isNonNegativeInteger(stored.createdAt)) return undefined;
-	if (!isRecord(stored.payload) || stored.payload.schemaVersion !== PROJECTION_CHECKPOINT_SCHEMA_VERSION) return undefined;
-	const projection = decodeBranchProjection(stored.payload.projection);
+export function decodeCheckpoint(stored: OpaqueCheckpointEnvelope, ast?: ChartAst): ProjectionCheckpoint | undefined {
+	if (!isNonEmptyString(stored.checkpointId) || !isHead(stored.headSeqId) || !isNonNegativeInteger(stored.createdAt)) return undefined;
+	if (!isRecord(stored.blob) || stored.blob.schemaVersion !== PROJECTION_CHECKPOINT_SCHEMA_VERSION
+		|| !isPositiveInteger(stored.blob.projectorVersion) || typeof stored.blob.astDigest !== "string" || !/^[a-f0-9]{64}$/.test(stored.blob.astDigest)) return undefined;
+	const projection = decodeBranchProjection(stored.blob.projection);
 	if (projection === undefined) return undefined;
 	if (ast !== undefined && !projectionMatchesAst(projection, ast)) return undefined;
 	if (ast === undefined && (Object.keys(projection.actors).length > 0 || Object.keys(projection.actorPools).length > 0)) return undefined;
-	return {
-		checkpointId: stored.checkpointId,
-		headSeqId: stored.headSeqId,
-		contract: { projectorVersion: stored.projectorVersion, astDigest: stored.astDigest },
-		projection,
-		createdAt: stored.createdAt,
-	};
+	const selectorKey = `hyperchart-projection:${stored.blob.projectorVersion}:${stored.blob.astDigest}`;
+	const contract = { projectorVersion: stored.blob.projectorVersion, astDigest: stored.blob.astDigest, selectorKey };
+	if (stored.selectorKey !== selectorKey) return undefined;
+	return { checkpointId: stored.checkpointId, headSeqId: stored.headSeqId, contract, projection, createdAt: stored.createdAt };
 }
 
 async function acceptedCheckpoint(
-	store: ProjectionCheckpointStore,
+	store: CheckpointRepository,
 	snapshot: HistorySnapshot,
 	contract: ProjectionContract,
 	ast: ChartAst,
-	stored: StoredProjectionCheckpoint | undefined,
+	stored: OpaqueCheckpointEnvelope | undefined,
 ): Promise<ProjectionCheckpoint | undefined> {
-	if (stored === undefined || stored.projectorVersion !== contract.projectorVersion || stored.astDigest !== contract.astDigest) return undefined;
+	if (stored === undefined || stored.selectorKey !== contract.selectorKey) return undefined;
 	const checkpoint = decodeCheckpoint(stored, ast);
 	if (checkpoint === undefined || checkpoint.projection.seqId !== (checkpoint.headSeqId ?? 0)) return undefined;
 	if (checkpoint.headSeqId === null) return checkpoint;
@@ -200,13 +195,13 @@ async function acceptedCheckpoint(
 }
 
 function decodeBranchProjection(value: unknown): BranchProjection | undefined {
-	if (!isExactRecord(value, ["activeLeaves", "seqId", "pendingActions", "openUserInteractions", "spawns", "inputs", "results", "stateVisits", "sessions", "artifactPins", "actors", "actorPools", "pendingActorCalls", "actorProducerVisits"], ["args", "failure"])) return undefined;
+	if (!isExactRecord(value, ["activeLeaves", "seqId", "pendingActions", "openUserInteractions", "spawns", "inputs", "results", "stateVisits", "sessions", "artifactPins", "actors", "actorPools", "liveActorMessages", "pendingActorCalls", "actorProducerVisits"], ["args", "failure"])) return undefined;
 	if (!isStringArray(value.activeLeaves) || !isNonNegativeInteger(value.seqId) || !isPendingActions(value.pendingActions)
 		|| !isOpenInteractions(value.openUserInteractions) || !(value.args === undefined || isJsonRecord(value.args))
 		|| !isRecordOfJsonRecords(value.spawns) || !isRecordOfJsonRecords(value.inputs) || !isRecordOfJson(value.results)
 		|| !isRecordOfPositiveIntegers(value.stateVisits) || !isRecordOfNonEmptyStrings(value.sessions) || !isArtifactPins(value.artifactPins)
 		|| !(value.failure === undefined || isFailure(value.failure)) || !isActors(value.actors) || !isActorPools(value.actorPools)
-		|| !isPendingActorCalls(value.pendingActorCalls) || !isRecordOfPositiveIntegers(value.actorProducerVisits)) return undefined;
+		|| !isLiveActorMessages(value.liveActorMessages) || !isPendingActorCalls(value.pendingActorCalls) || !isRecordOfPositiveIntegers(value.actorProducerVisits)) return undefined;
 	return structuredClone(value) as BranchProjection;
 }
 
@@ -247,10 +242,10 @@ function isFailure(value: unknown): boolean {
 }
 function isActors(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isActor); }
 function isActor(value: unknown): boolean {
-	return isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "currentState", "mailbox", "status"], ["owner", "currentMessage"])
+	return isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "currentState", "mailbox", "status"], ["owner", "currentMessageId"])
 		&& isPath(value.declaration) && isPath(value.logicalOccurrence) && isPath(value.occurrence) && isPositiveInteger(value.generation)
 		&& (value.owner === undefined || isPath(value.owner)) && isJsonValue(value.input) && isActorDefinition(value.definition, "actor") && isPath(value.currentState)
-		&& isMessages(value.mailbox) && (value.currentMessage === undefined || isProjectedMessage(value.currentMessage))
+		&& isStringArray(value.mailbox) && (value.currentMessageId === undefined || isNonEmptyString(value.currentMessageId))
 		&& isOneOf(value.status, ["idle", "busy", "closing", "draining", "stopped", "failed", "cancelled"]);
 }
 function isActorPools(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isActorPool); }
@@ -258,16 +253,18 @@ function isActorPool(value: unknown): boolean {
 	return isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "mailbox", "workers", "status"], ["owner"])
 		&& isPath(value.declaration) && isPath(value.logicalOccurrence) && isPath(value.occurrence) && isPositiveInteger(value.generation)
 		&& (value.owner === undefined || isPath(value.owner)) && isJsonValue(value.input) && isActorDefinition(value.definition, "actorPool")
-		&& isMessages(value.mailbox) && Array.isArray(value.workers) && value.workers.every(isWorker)
+		&& isStringArray(value.mailbox) && Array.isArray(value.workers) && value.workers.every(isWorker)
 		&& isOneOf(value.status, ["idle", "busy", "closing", "draining", "stopped", "failed", "cancelled"]);
 }
 function isWorker(value: unknown): boolean {
-	return isExactRecord(value, ["index", "occurrence", "currentState", "status"], ["currentMessage"])
+	return isExactRecord(value, ["index", "occurrence", "currentState", "status"], ["currentMessageId"])
 		&& isNonNegativeInteger(value.index) && isPath(value.occurrence) && isPath(value.currentState)
-		&& (value.currentMessage === undefined || isProjectedMessage(value.currentMessage))
+		&& (value.currentMessageId === undefined || isNonEmptyString(value.currentMessageId))
 		&& isOneOf(value.status, ["idle", "busy", "draining", "stopped", "failed", "cancelled"]);
 }
-function isMessages(value: unknown): boolean { return Array.isArray(value) && value.every(isProjectedMessage); }
+function isLiveActorMessages(value: unknown): boolean {
+	return isRecord(value) && Object.entries(value).every(([messageId, message]) => messageId === (message as Record<string, unknown>)?.messageId && isProjectedMessage(message));
+}
 function isProjectedMessage(value: unknown): boolean {
 	return isExactRecord(value, ["messageId", "event", "input", "producerState", "producerVisit", "batchIndex", "status"], ["callId", "receiveState", "replyEvent", "replyOutput", "workerIndex"])
 		&& isNonEmptyString(value.messageId) && isNonEmptyString(value.event) && isJsonValue(value.input) && isPath(value.producerState)
@@ -279,9 +276,11 @@ function isProjectedMessage(value: unknown): boolean {
 function isPendingActorCalls(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isPendingActorCall); }
 function isPendingActorCall(value: unknown): boolean {
 	if (!isRecord(value) || !isNonEmptyString(value.callId) || !isPath(value.callerState) || !isPath(value.occurrence)
-		|| !isOneOf(value.status, ["enqueued", "accepted", "partial"]) || !isMessages(value.messages)) return false;
-	if (value.kind === "singleton") return isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageId", "status", "messages"], []) && isNonEmptyString(value.messageId);
-	if (value.kind === "batch") return isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageIds", "status", "messages"], []) && isStringArray(value.messageIds) && value.messageIds.every(isNonEmptyString);
+		|| !isOneOf(value.status, ["enqueued", "accepted", "partial"])) return false;
+	if (value.kind === "singleton") return isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageId", "status"], []) && isNonEmptyString(value.messageId);
+	if (value.kind === "batch") return isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageIds", "status"], [])
+		&& isStringArray(value.messageIds) && value.messageIds.length > 0 && value.messageIds.every(isNonEmptyString)
+		&& new Set(value.messageIds).size === value.messageIds.length;
 	return false;
 }
 function isActorDefinition(value: unknown, kind: "actor" | "actorPool"): boolean {
@@ -324,9 +323,37 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 	if (!Object.entries(projection.actorPools).every(([key, endpoint]) => key === endpoint.occurrence && poolMatchesAst(ast, projection, endpoint))) return false;
 	if (!Object.values(projection.pendingActorCalls).every((call) => {
 		const node = producerStateFor(ast, projection, call.callerState);
+		const messageIds = call.kind === "singleton" ? [call.messageId] : call.messageIds;
 		return (node?.kind === "call" || node?.kind === "callBatch") && projectedEndpoint(projection, call.occurrence) !== undefined
-			&& call.messages.every((message) => messageCoordinatesMatchAst(ast, projection, message));
+			&& messageIds.every((messageId) => {
+				const message = projection.liveActorMessages[messageId];
+				return message?.callId === call.callId && messageCoordinatesMatchAst(ast, projection, message);
+			});
 	})) return false;
+	const referencedMessageIds = new Set<string>();
+	const operationalMessageIds: string[] = [];
+	for (const endpoint of [...Object.values(projection.actors), ...Object.values(projection.actorPools)]) {
+		for (const messageId of endpoint.mailbox) {
+			referencedMessageIds.add(messageId);
+			operationalMessageIds.push(messageId);
+		}
+		if ("workers" in endpoint) {
+			for (const worker of endpoint.workers) if (worker.currentMessageId !== undefined) {
+				referencedMessageIds.add(worker.currentMessageId);
+				operationalMessageIds.push(worker.currentMessageId);
+			}
+		} else if (endpoint.currentMessageId !== undefined) {
+			referencedMessageIds.add(endpoint.currentMessageId);
+			operationalMessageIds.push(endpoint.currentMessageId);
+		}
+	}
+	if (new Set(operationalMessageIds).size !== operationalMessageIds.length) return false;
+	for (const call of Object.values(projection.pendingActorCalls)) {
+		if (call.kind === "singleton") referencedMessageIds.add(call.messageId);
+		else for (const messageId of call.messageIds) referencedMessageIds.add(messageId);
+	}
+	if (referencedMessageIds.size !== Object.keys(projection.liveActorMessages).length
+		|| ![...referencedMessageIds].every((messageId) => projection.liveActorMessages[messageId] !== undefined)) return false;
 	return Object.keys(projection.actorProducerVisits).every((path) => {
 		const node = producerStateFor(ast, projection, path);
 		return node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch";
@@ -356,9 +383,15 @@ function endpointMatchesAst(ast: ChartAst, projection: BranchProjection, endpoin
 	if (canonicalJson(endpoint.definition) !== canonicalJson(declaration)) return false;
 	if (!endpointIdentityMatches(ast, declaration, endpoint, projection)) return false;
 	const context = actorContextForState(ast, actorStatePath(endpoint.occurrence, endpoint.currentState));
+	const current = endpoint.currentMessageId === undefined ? undefined : projection.liveActorMessages[endpoint.currentMessageId];
 	return context !== undefined && context.declaration.path === declaration.path && context.occurrence === endpoint.occurrence
-		&& endpoint.mailbox.every((message) => messageCoordinatesMatchAst(ast, projection, message))
-		&& (endpoint.currentMessage === undefined || messageCoordinatesMatchAst(ast, projection, endpoint.currentMessage));
+		&& new Set(endpoint.mailbox).size === endpoint.mailbox.length
+		&& endpoint.mailbox.every((messageId) => {
+			const message = projection.liveActorMessages[messageId];
+			return message?.status === "queued" && messageCoordinatesMatchAst(ast, projection, message);
+		})
+		&& (endpoint.currentMessageId === undefined || (!endpoint.mailbox.includes(endpoint.currentMessageId)
+			&& current !== undefined && current.status !== "queued" && current.status !== "settled" && messageCoordinatesMatchAst(ast, projection, current)));
 }
 function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: ProjectedActorPoolOccurrence): boolean {
 	const declaration = ast.actors[endpoint.declaration];
@@ -366,14 +399,25 @@ function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: P
 	if (canonicalJson(endpoint.definition) !== canonicalJson(declaration) || !endpointIdentityMatches(ast, declaration, endpoint, projection)) return false;
 	if (endpoint.workers.length !== declaration.concurrency) return false;
 	const indexes = new Set<number>();
+	const workerMessages = new Set<string>();
 	for (const worker of endpoint.workers) {
 		if (worker.index >= declaration.concurrency || indexes.has(worker.index) || worker.occurrence !== actorPoolWorkerOccurrencePath(endpoint.occurrence, worker.index)) return false;
 		indexes.add(worker.index);
 		const context = actorContextForState(ast, actorStatePath(worker.occurrence, worker.currentState));
 		if (context === undefined || context.declaration.path !== declaration.path || context.endpointOccurrence !== endpoint.occurrence || context.workerIndex !== worker.index) return false;
-		if (worker.currentMessage !== undefined && !messageCoordinatesMatchAst(ast, projection, worker.currentMessage)) return false;
+		if (worker.currentMessageId !== undefined) {
+			const current = projection.liveActorMessages[worker.currentMessageId];
+			if (workerMessages.has(worker.currentMessageId) || endpoint.mailbox.includes(worker.currentMessageId)
+				|| current === undefined || current.status === "queued" || current.status === "settled"
+				|| !messageCoordinatesMatchAst(ast, projection, current)) return false;
+			workerMessages.add(worker.currentMessageId);
+		}
 	}
-	return endpoint.mailbox.every((message) => messageCoordinatesMatchAst(ast, projection, message));
+	return new Set(endpoint.mailbox).size === endpoint.mailbox.length
+		&& endpoint.mailbox.every((messageId) => {
+			const message = projection.liveActorMessages[messageId];
+			return message?.status === "queued" && messageCoordinatesMatchAst(ast, projection, message);
+		});
 }
 function endpointIdentityMatches(ast: ChartAst, declaration: ChartAst["actors"][string], endpoint: ProjectedActorEndpointOccurrence, projection: BranchProjection): boolean {
 	if (declaration.owner === undefined) {
@@ -399,7 +443,8 @@ function concreteMapPathValidForOwner(projection: BranchProjection, owner: strin
 function projectedEndpoint(projection: BranchProjection, occurrence: string): ProjectedActorEndpointOccurrence | undefined {
 	return projection.actors[occurrence] ?? projection.actorPools[occurrence];
 }
-function messageCoordinatesMatchAst(ast: ChartAst, projection: BranchProjection, message: { producerState: string }): boolean {
+function messageCoordinatesMatchAst(ast: ChartAst, projection: BranchProjection, message: { producerState: string } | undefined): boolean {
+	if (message === undefined) return false;
 	const node = producerStateFor(ast, projection, message.producerState);
 	return node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch";
 }
@@ -438,7 +483,7 @@ function isExactRecord(value: unknown, required: readonly string[], optional: re
 }
 function isOneOf(value: unknown, values: readonly string[]): value is string { return typeof value === "string" && values.includes(value); }
 function sameContract(left: ProjectionContract, right: ProjectionContract): boolean {
-	return left.projectorVersion === right.projectorVersion && left.astDigest === right.astDigest;
+	return left.projectorVersion === right.projectorVersion && left.astDigest === right.astDigest && left.selectorKey === right.selectorKey;
 }
 
 function canonicalJson(value: unknown): string {

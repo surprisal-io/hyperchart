@@ -9,6 +9,7 @@ This is the canonical reference for the three published packages. Task guides ex
 | `@surprisal/hyperchart` authoring DSL | [DSL reference](dsl.md) |
 | `@surprisal/hyperchart` parser, inspector, machine, projection, replay, and utilities | [Core API](core.md) |
 | `@surprisal/hyperchart/runtime` | [Runtime API](runtime.md) |
+| `@surprisal/hyperchart/runner` | Runner, branch, rewind, and user-interaction controls in [Runtime API](runtime.md) |
 | `@surprisal/hyperchart/host` | [Host API](host.md) |
 | `@surprisal/hyperchart/inspect` and `/sessions` | [Hosting API](hosting.md) |
 | `@surprisal/pi-hyperchart`, `/command`, `/pi-host`, and Pi tools | [Pi API](pi.md) |
@@ -24,6 +25,7 @@ The supported package entry points are:
 @surprisal/hyperchart
 @surprisal/hyperchart/host
 @surprisal/hyperchart/runtime
+@surprisal/hyperchart/runner
 @surprisal/hyperchart/inspect
 @surprisal/hyperchart/sessions
 @surprisal/hyperchart/package.json

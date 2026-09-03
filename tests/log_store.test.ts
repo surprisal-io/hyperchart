@@ -9,8 +9,9 @@ import {
 	HISTORY_READ_ITEMS,
 	HistoryCursorError,
 	JsonlLogStore,
-	openProjectionReplay,
+	openExecutionReplay,
 	type LogStore,
+	type MaterializedRunLogIndex,
 } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { PostgresLogStore } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
@@ -32,10 +33,10 @@ function isBranchEntry(entry: StorageEntry): boolean { return "kind" in entry &&
 
 describe("runtime replay boundary", () => {
 	it("does not expose projection replay through the public runtime or concrete stores", () => {
-		expect("openProjectionReplay" in runtimeExports).toBe(false);
-		expect("openProjectionReplay" in JsonlLogStore.prototype).toBe(false);
-		expect("openProjectionReplay" in MemoryLogStore.prototype).toBe(false);
-		expect("openProjectionReplay" in PostgresLogStore.prototype).toBe(false);
+		expect("openExecutionReplay" in runtimeExports).toBe(false);
+		expect("openExecutionReplay" in JsonlLogStore.prototype).toBe(false);
+		expect("openExecutionReplay" in MemoryLogStore.prototype).toBe(false);
+		expect("openExecutionReplay" in PostgresLogStore.prototype).toBe(false);
 	});
 });
 
@@ -199,15 +200,18 @@ for (const backend of ["memory", "jsonl"] as const) {
 		it("streams projection ancestry oldest-first in fixed batches", async () => {
 			const store = await historyStore(backend);
 			const records = await store.appendDrafts(Array.from({ length: 1_201 }, () => invokeDraft()));
+			const internals = store as unknown as { index: MaterializedRunLogIndex | (() => MaterializedRunLogIndex) };
+			const materialized = typeof internals.index === "function" ? internals.index() : internals.index;
+			materialized.materializeHistoryToHead = () => { throw new Error("replay must not materialize full ancestry"); };
 			const actual: number[][] = [];
-			for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) actual.push(batch.map((record) => record.seqId));
+			for await (const batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) actual.push(batch.map((record) => record.seqId));
 			expect(actual.map((batch) => batch.length)).toEqual([500, 500, 201]);
 			expect(actual.flat()).toEqual(records.map((record) => record.seqId));
 			const tail: number[] = [];
-			for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: records[499]!.seqId })) tail.push(...batch.map((record) => record.seqId));
+			for await (const batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: records[499]!.seqId })) tail.push(...batch.map((record) => record.seqId));
 			expect(tail).toEqual(records.slice(500).map((record) => record.seqId));
 			await expect((async () => {
-				for await (const _batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: -1 })) { /* consume */ }
+				for await (const _batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: -1 })) { /* consume */ }
 			})()).rejects.toThrow(/not in target ancestry/);
 		});
 

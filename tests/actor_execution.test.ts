@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
+import { loop, start } from "./helpers/execution.js";
 import {
 	actor,
 	actorPool,
@@ -18,7 +19,6 @@ import {
 	failed,
 	final,
 	item,
-	loop,
 	map,
 	message,
 	parallel,
@@ -37,7 +37,6 @@ import {
 	type Effect,
 	type MachineEvent,
 	type Runtime,
-	start,
 	stepMachine,
 } from "../packages/hyperchart/src/index.js";
 import { createAsyncQueue } from "../packages/hyperchart/src/utils/async_queue.js";
@@ -556,6 +555,7 @@ describe("explicit event-sourced actors", () => {
 			{ path: "c" },
 		]);
 		expect(settledMessageIds(runtime.records, "@auditor")).toHaveLength(3);
+		expect(state.projection.liveActorMessages).toEqual({});
 		const enqueue = runtime.records.filter((record) => record.type === "actor_messages_enqueued");
 		expect(enqueue).toHaveLength(1);
 	});
@@ -575,6 +575,7 @@ describe("explicit event-sourced actors", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.results.apply).toEqual({ commit: "c1" });
 		expect(state.projection.pendingActorCalls).toEqual({});
+		expect(state.projection.liveActorMessages).toEqual({});
 		expect(runtime.records.some((record) => record.type === "actor_call_resolved" && record.replyEvent === "APPLIED")).toBe(true);
 	});
 

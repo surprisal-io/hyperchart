@@ -508,26 +508,7 @@ type ChartEvent = ActionEvent | SystemEvent;
 
 ## Execution loop
 
-### `start()`
-
-```ts
-function start(
-  runtime: import("@surprisal/hyperchart/runtime").Runtime,
-  args?: Readonly<Record<string, unknown>>,
-): Promise<MachineState>;
-```
-
-If the runtime log is empty and `args` is provided, writes the run arguments as the first fact, then calls `loop()`. Calling `start(runtime)` without `args` writes no argument fact. For an existing log, durable arguments win over the passed value.
-
-### `loop()`
-
-```ts
-function loop(
-  runtime: import("@surprisal/hyperchart/runtime").Runtime,
-): Promise<MachineState>;
-```
-
-Loads AST and records, projects them, consumes the runtime event queue, and dispatches effects until final. It throws on machine errors or if the event queue closes before final.
+The runner composes the public effect-only `Runtime` port with an internal execution-owned branch session. That session restores and owns `BranchProjection`, seeds durable arguments for a fresh branch, consumes runtime events, and dispatches effects until final. The execution loop and checkpoint codec are intentionally not public package APIs: callers launch through the runner/controller rather than passing projection state into runtime.
 
 ## Durable records
 

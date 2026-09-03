@@ -1,8 +1,8 @@
-import type { BranchProjection } from "../../core/projection.js";
-import type { ChartAst, ChartEvent } from "../../core/types.js";
-import type { SchemaRegistryLike } from "../../core/schema_registry.js";
-import type { DurableRecordDraft, UserInteractionOpenedLog } from "../../core/durable_events.js";
-import { checkSchemaAsync } from "./schema.js";
+import type { BranchProjection } from "../core/projection.js";
+import type { ChartAst, ChartEvent } from "../core/types.js";
+import type { SchemaRegistryLike } from "../core/schema_registry.js";
+import type { DurableRecordDraft, UserInteractionOpenedLog } from "../core/durable_events.js";
+import { checkSchemaAsync } from "../runtime/generic/schema.js";
 
 export type RespondToUserInteractionInput = Readonly<{
 	ast: ChartAst;

@@ -31,7 +31,6 @@ export function VisitHistory({
 	const [sessionReads, setSessionReads] = useState<Record<number, { loading: boolean; error?: string }>>({});
 	const openVisitSession = (visit: HyperchartVisitInfo) => {
 		const identity = visitSessionIdentity(visit);
-		if (identity === undefined) return;
 		if (onReadSession === undefined || loadedSessions[visit.invokeSeqId] !== undefined) {
 			setOpenSessionIdentity(identity);
 			return;
@@ -58,6 +57,7 @@ export function VisitHistory({
 				<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Visit history</div>
 				{visits.map((visit, index) => {
 					const sessionRead = sessionReads[visit.invokeSeqId];
+					const canReadSession = visit.session !== undefined || onReadSession !== undefined && visit.invocation.kind === "agent";
 					return <details
 						key={visit.invokeSeqId}
 						open={index === visits.length - 1 && visit.status === "running"}
@@ -67,7 +67,7 @@ export function VisitHistory({
 							<span className="font-semibold text-[var(--text-primary)]">Visit {visit.visit}</span>
 							<StatusPill status={visit.status} />
 							<span className="text-[var(--text-muted)]">{formatHyperchartDateTime(visit.startedAt)}</span>
-							{visit.session !== undefined && (
+							{canReadSession && (
 								<button
 									type="button"
 									aria-label={`View session for visit ${visit.visit}`}
@@ -79,7 +79,7 @@ export function VisitHistory({
 									}}
 									className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-cyan-text)] hover:bg-cyan-500/15"
 								>
-									<span className={`h-1.5 w-1.5 rounded-full ${isLiveSession(visit.session.status) ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
+									<span className={`h-1.5 w-1.5 rounded-full ${visit.session !== undefined && isLiveSession(visit.session.status) ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
 									<CommandLineIcon className="h-3 w-3" aria-hidden="true" /> View session
 								</button>
 							)}
@@ -170,9 +170,8 @@ export function VisitHistory({
 	);
 }
 
-function visitSessionIdentity(visit: HyperchartVisitInfo): string | undefined {
-	if (visit.session === undefined) return undefined;
-	return `${visit.invokeSeqId}:${visit.session.actionKey}:${visit.session.startedAt ?? "unknown"}`;
+function visitSessionIdentity(visit: HyperchartVisitInfo): string {
+	return String(visit.invokeSeqId);
 }
 
 function isLiveSession(status: string): boolean {

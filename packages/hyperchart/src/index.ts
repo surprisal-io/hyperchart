@@ -149,7 +149,6 @@ export {
 	contract,
 } from "./core/dsl.js";
 
-export { loop, start } from "./core/execution_loop.js";
 export type { Runtime } from "./runtime/runtime.js";
 // zod is part of the authoring surface (schema values in reply/artifact shapes): re-exported so
 // charts depend on one package only.
@@ -248,16 +247,6 @@ export type {
 	ProjectionSkippedRecord,
 	OpenProjectedUserInteraction,
 } from "./core/projection.js";
-export { compactProjection, compileProjectionRetention } from "./core/projection_retention.js";
-export type { ProjectionRetentionPlan } from "./core/projection_retention.js";
-export {
-	PROJECTION_CHECKPOINT_INTERVAL,
-	PROJECTOR_VERSION,
-	chartAstDigest,
-	loadBranchProjection,
-	projectionContractForAst,
-} from "./runtime/generic/projection_loader.js";
-export type { LoadedBranchProjection, ProjectionCheckpoint, ProjectionContract } from "./runtime/generic/projection_loader.js";
 export { actorEndpointAdmission, createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";
 export type { AsyncQueue, MaybeAsyncIterable } from "./utils/index.js";

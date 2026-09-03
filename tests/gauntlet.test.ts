@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { actor, actorPool, agent, callBatch, compound, createBranchProjection, final, failed, json, map, message, messageInput, normalizeChartConfig, parallel, projectBranch, protocol, receive, reply, t, tsImport, z } from "../packages/hyperchart/src/index.js";
 import { arg, chart, event, input, item, key, result } from "../packages/hyperchart/src/core/dsl.js";
-import { loop, start } from "../packages/hyperchart/src/core/execution_loop.js";
+import { loop, start } from "./helpers/execution.js";
 import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../packages/hyperchart/src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 

@@ -6,7 +6,7 @@ import type {
 } from "../host/models.js";
 import type { HyperchartInspectorDataSource } from "../host/adapter.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
-import { loadBranchProjection, projectionContractForAst } from "../runtime/generic/projection_loader.js";
+import { BranchExecution } from "../execution/branch_execution.js";
 import { projectBranch } from "../core/projection.js";
 import { renderPendingActionInvocation, type ActionEffect, type RenderedArtifact } from "../core/machine.js";
 import { nearestInstance } from "../core/paths.js";
@@ -48,12 +48,11 @@ export async function createRunInspectorDataSource(
 		},
 		readStateVisits: async ({ runId: candidate, snapshot, stateId, cursor }) => {
 			assertRun(candidate);
-			const sessions = sessionSummariesByInvoke(absoluteRunDir, snapshot.branchId);
 			return withStore(async (store) => {
 				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readStateVisits({ snapshot, state: stateId, ...(cursor === undefined ? {} : { cursor }) }));
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const semanticVisits = runtimeVisitHistoriesForInspector(parsed.ast, records).get(stateId) ?? [];
-				return mapChunkAsync(chunk, (item) => stateVisitWithProjection(store, parsed.ast, snapshot.branchId, item, sessions.get(item.seqId), semanticVisits.find((visit) => visit.invokeSeqId === item.seqId)));
+				return mapChunkAsync(chunk, (item) => stateVisitWithProjection(store, parsed.ast, snapshot.branchId, item, semanticVisits.find((visit) => visit.invokeSeqId === item.seqId)));
 			});
 		},
 		readMapVisits: async ({ runId: candidate, snapshot, mapPath, cursor }) => {
@@ -148,19 +147,11 @@ async function stateVisitWithProjection(
 	ast: ChartAst,
 	branchId: string,
 	item: StateVisitHistoryItem,
-	session?: HyperchartAgentSessionInfo,
 	semanticVisit?: HyperchartVisitInfo,
 ): Promise<HyperchartVisitInfo> {
-	const base = { ...(semanticVisit ?? stateVisitHistoryItemToHost(item)), ...(session === undefined ? {} : { session }) };
-	const parent = await loadBranchProjection({
-		ast,
-		branchId,
-		store,
-		contract: projectionContractForAst(ast),
-		snapshot: { branchId, headSeqId: item.invoke.parentId },
-		saveCheckpoint: "never",
-	});
-	const projection = structuredClone(parent.projection);
+	const base = semanticVisit ?? stateVisitHistoryItemToHost(item);
+	const parent = await BranchExecution.restore({ ast, branchId, store, snapshot: { branchId, headSeqId: item.invoke.parentId }, saveCheckpoint: "never" });
+	const projection = parent.inspectionProjection();
 	projectBranch(projection, ast, [item.invoke]);
 	const pending = projection.pendingActions.find((candidate): candidate is Extract<(typeof projection.pendingActions)[number], { phase: "running" }> => candidate.phase === "running" && candidate.invokeSeqId === item.seqId);
 	if (pending === undefined) return base;
@@ -231,13 +222,6 @@ function mapChunk<A, B>(chunk: HistoryChunk<A>, map: (item: A, index: number) =>
 		...(chunk.older === undefined ? {} : { older: chunk.older }),
 		...(chunk.newer === undefined ? {} : { newer: chunk.newer }),
 	};
-}
-
-function sessionSummariesByInvoke(runDir: string, branchId: string): Map<number, HyperchartAgentSessionInfo> {
-	const progress = readSessionProgress(resolve(runDir, "sessions"));
-	return new Map(Object.values(progress.sessions)
-		.filter((session) => session.branchId === branchId)
-		.map((session) => [session.invokeSeqId, sessionFromProgress(session)]));
 }
 
 function sessionFromProgress(session: ReturnType<typeof readSessionProgress>["sessions"][string]): HyperchartAgentSessionInfo {

@@ -1,9 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import { isDurableRecordEntry, type BranchHead, type BranchId, type BranchMetadata, type DurableLogRecord, type DurableRecordDraft, type StorageEntry } from "../../core/durable_events.js";
 import {
+	BranchHeadMovedError,
 	DEFAULT_BRANCH_ID,
 	HISTORY_READ_ITEMS,
 	assertDurableRecordDraft,
+	cloneOpaqueCheckpoint,
 	cursorAtItems,
 	decodeBranchListCursor,
 	encodeBranchListCursor,
@@ -19,20 +21,22 @@ import {
 	type HistorySnapshot,
 	type HistorySubject,
 	type MapVisitHistoryItem,
-	type ProjectionCheckpointLookup,
-	type PreparedUserInteractionCommit,
+	type AppendAtHeadInput,
+	type BranchMutationOptions,
+	type CheckpointQuery,
+	type PrepareStampedCommit,
 	type RunLogStore,
 	type RunMeta,
 	type StateVisitHistoryItem,
-	type StoredProjectionCheckpoint,
-	type UserInteractionResponseCommit,
+	type OpaqueCheckpointEnvelope,
+	registerReplayPageReader,
 } from "./log_store.js";
 import type { StatePath } from "../../core/types.js";
 
 export const JOURNAL_TABLE = "hyperchart_journal";
 export const JOURNAL_CHANNEL = "hyperchart_journal";
 export const RUN_META_TABLE = "hyperchart_run_meta";
-export const PROJECTION_CHECKPOINT_TABLE = "hyperchart_projection_checkpoint";
+export const CHECKPOINT_TABLE = "hyperchart_checkpoint";
 const JOURNAL_DDL = `CREATE TABLE IF NOT EXISTS ${JOURNAL_TABLE} (
   run_id text NOT NULL,
   seq bigint NOT NULL,
@@ -74,19 +78,18 @@ const RUN_META_DDL = `CREATE TABLE IF NOT EXISTS ${RUN_META_TABLE} (
       AND chart_id IS NOT NULL AND created_at IS NOT NULL)
   )
 )`;
-const PROJECTION_CHECKPOINT_DDL = `CREATE TABLE IF NOT EXISTS ${PROJECTION_CHECKPOINT_TABLE} (
+const CHECKPOINT_DDL = `CREATE TABLE IF NOT EXISTS ${CHECKPOINT_TABLE} (
   run_id text NOT NULL,
   checkpoint_id text NOT NULL,
   head_seq_id bigint,
-  projector_version integer NOT NULL,
-  ast_digest text NOT NULL,
-  projection jsonb NOT NULL,
+  selector_key text NOT NULL,
+  blob jsonb NOT NULL,
   created_at_ms bigint NOT NULL,
   PRIMARY KEY (run_id, checkpoint_id),
   FOREIGN KEY (run_id, head_seq_id) REFERENCES ${JOURNAL_TABLE}(run_id, seq)
 )`;
-const PROJECTION_CHECKPOINT_IDENTITY_DDL = `CREATE UNIQUE INDEX IF NOT EXISTS hyperchart_projection_identity_idx
-  ON ${PROJECTION_CHECKPOINT_TABLE}(run_id, COALESCE(head_seq_id, -1), projector_version, ast_digest)`;
+const CHECKPOINT_IDENTITY_DDL = `CREATE UNIQUE INDEX IF NOT EXISTS hyperchart_checkpoint_identity_idx
+  ON ${CHECKPOINT_TABLE}(run_id, COALESCE(head_seq_id, -1), selector_key)`;
 const JOURNAL_PARENT_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_journal_parent_idx
   ON ${JOURNAL_TABLE}(run_id, parent_id) WHERE kind = 'record'`;
 const JOURNAL_BRANCH_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_journal_branch_latest_idx
@@ -130,30 +133,32 @@ export type SqlCommitTransaction = Readonly<{
 }>;
 export type SqlCommitParticipant<T> = (tx: SqlCommitTransaction) => Promise<T>;
 export type PostgresRunTransaction = SqlCommitTransaction & Readonly<{
-	appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
-	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
-	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
-	commitPreparedUserInteraction(branchId: BranchId, input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit>;
-	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void>;
+	appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
+	appendDraftsAtHead(branchId: BranchId, input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
+	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
+	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead>;
+	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void>;
 }>;
-export type PostgresForkAndCommitInput = Readonly<{
+export type PostgresForkAndAppendInput = Readonly<{
 	sourceBranchId: BranchId;
 	newBranchId: BranchId;
 	fromSeqId: number;
-	responseBranchId: BranchId;
+	appendBranchId: BranchId;
 	metadata?: BranchMetadata;
-	checkpoint?: StoredProjectionCheckpoint;
-	preparedResponse: PreparedUserInteractionCommit;
+	checkpoint?: OpaqueCheckpointEnvelope;
+	append: AppendAtHeadInput;
+	prepare?: PrepareStampedCommit;
 }>;
 export interface SqlTransactionalRunLogStore extends RunLogStore {
-	commitPreparedUserInteractionWithParticipant<T>(branchId: BranchId, response: PreparedUserInteractionCommit, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }>;
-	forkAndCommitUserInteraction<T>(input: PostgresForkAndCommitInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }>;
+	appendDraftsAtHeadWithParticipant<T>(branchId: BranchId, input: AppendAtHeadInput, prepare: PrepareStampedCommit | undefined, participate: SqlCommitParticipant<T>): Promise<{ records: readonly DurableLogRecord[]; participant: T }>;
+	forkAndAppend<T>(input: PostgresForkAndAppendInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; records: readonly DurableLogRecord[]; participant: T }>;
 }
 
 export class PostgresLogStore implements RunLogStore {
-	readonly canSaveProjectionCheckpoints: boolean;
+	readonly canStoreCheckpoints: boolean;
 	private constructor(private readonly journal: SharedPgJournal, readonly branchId: BranchId) {
-		this.canSaveProjectionCheckpoints = journal.access === "writer";
+		this.canStoreCheckpoints = journal.access === "writer";
+		registerReplayPageReader(this, (input) => readForwardReplayPageDirect(journal.client, journal.runId, input, journal.access));
 	}
 
 	static async open(options: OpenPostgresLogStoreOptions): Promise<PostgresLogStore> {
@@ -164,7 +169,7 @@ export class PostgresLogStore implements RunLogStore {
 			if (access === "writer") {
 				await ensureJournalTable(client);
 				await ensureRunMetaTable(client);
-				await ensureProjectionCheckpointTable(client);
+				await ensureCheckpointTable(client);
 				const locked = await client.query("SELECT pg_try_advisory_lock(hashtextextended('hyperchart:run:' || $1, 0)) AS locked", [options.runId]);
 				if (locked.rows[0]?.locked !== true) throw new Error(`Another live writer holds Hyperchart run '${options.runId}' in Postgres; stop it before writing`);
 			}
@@ -212,18 +217,18 @@ export class PostgresLogStore implements RunLogStore {
 		await this.awaitReadable();
 		return countRecordsDirect(this.journal.client, this.journal.runId, this.journal.access);
 	}
-	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+	async loadExactCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		await this.awaitReadable();
 		const rows = await queryRows(this.journal.client, this.journal.access,
-			`SELECT checkpoint_id, head_seq_id, projector_version, ast_digest, projection, created_at_ms
-			   FROM ${PROJECTION_CHECKPOINT_TABLE}
+			`SELECT checkpoint_id, head_seq_id, selector_key, blob, created_at_ms
+			   FROM ${CHECKPOINT_TABLE}
 			  WHERE run_id = $1 AND head_seq_id IS NOT DISTINCT FROM $2
-			    AND projector_version = $3 AND ast_digest = $4
+			    AND selector_key = $3
 			  ORDER BY created_at_ms DESC LIMIT 1`,
-			[this.journal.runId, input.targetHeadSeqId, input.projectorVersion, input.astDigest]);
+			[this.journal.runId, input.targetHeadSeqId, input.selectorKey]);
 		return rows[0] === undefined ? undefined : decodeCheckpointRow(rows[0]);
 	}
-	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+	async findNearestCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		await this.awaitReadable();
 		const rows = await queryRows(this.journal.client, this.journal.access,
 			`WITH RECURSIVE ancestry AS (
@@ -234,20 +239,21 @@ export class PostgresLogStore implements RunLogStore {
 			     FROM ancestry child JOIN ${JOURNAL_TABLE} parent
 			       ON parent.run_id = $1 AND parent.seq = child.parent_id AND parent.kind = 'record'
 			 )
-			 SELECT checkpoint_id, head_seq_id, projector_version, ast_digest, projection, created_at_ms
-			   FROM ${PROJECTION_CHECKPOINT_TABLE} checkpoint
+			 SELECT checkpoint_id, head_seq_id, selector_key, blob, created_at_ms
+			   FROM ${CHECKPOINT_TABLE} checkpoint
 			   LEFT JOIN ancestry ON ancestry.seq = checkpoint.head_seq_id
-			  WHERE checkpoint.run_id = $1 AND checkpoint.projector_version = $3 AND checkpoint.ast_digest = $4
+			  WHERE checkpoint.run_id = $1 AND checkpoint.selector_key = $3
 			    AND (checkpoint.head_seq_id IS NULL OR ancestry.seq IS NOT NULL)
 			  ORDER BY COALESCE(ancestry.depth, 2147483647), checkpoint.created_at_ms DESC LIMIT 1`,
-			[this.journal.runId, input.targetHeadSeqId, input.projectorVersion, input.astDigest]);
+			[this.journal.runId, input.targetHeadSeqId, input.selectorKey]);
 		return rows[0] === undefined ? undefined : decodeCheckpointRow(rows[0]);
 	}
-	discardProjectionCheckpoint(checkpointId: string): Promise<void> {
-		return this.transaction(async (tx) => { await tx.query(`DELETE FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 AND checkpoint_id = $2`, [this.journal.runId, checkpointId]); });
+	discardCheckpoint(checkpointId: string): Promise<void> {
+		return this.transaction(async (tx) => { await tx.query(`DELETE FROM ${CHECKPOINT_TABLE} WHERE run_id = $1 AND checkpoint_id = $2`, [this.journal.runId, checkpointId]); });
 	}
-	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> {
-		return this.transaction((tx) => tx.saveProjectionCheckpoint(checkpoint));
+	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
+		const cloned = cloneOpaqueCheckpoint(checkpoint);
+		return this.transaction((tx) => tx.storeCheckpoint(cloned));
 	}
 
 	private async readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): Promise<HistoryChunk<DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem>> {
@@ -299,7 +305,7 @@ export class PostgresLogStore implements RunLogStore {
 			const { client, runId } = this.journal;
 			try {
 				await client.query("BEGIN");
-				await client.query(`DELETE FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1`, [runId]);
+				await client.query(`DELETE FROM ${CHECKPOINT_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query("COMMIT");
@@ -314,44 +320,32 @@ export class PostgresLogStore implements RunLogStore {
 		return result.rows[0] === undefined || result.rows[0].chart_path === null ? undefined : decodeRunMeta(result.rows[0]);
 	}
 
-	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }): Promise<BranchHead> {
+	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }, options?: BranchMutationOptions): Promise<BranchHead> {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		return this.transaction(async (tx) => {
 			const impl = tx as TransactionImpl;
 			if (await impl.hasAnyEntry()) throw new Error("Cannot initialize a non-empty Hyperchart journal");
-			return impl.createRootBranch(this.branchId, metadata);
-		});
-	}
-	initializeRootBranchWithCheckpoint(metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
-		return this.transaction(async (tx) => {
-			const impl = tx as TransactionImpl;
-			if (await impl.hasAnyEntry()) throw new Error("Cannot initialize a non-empty Hyperchart journal");
-			const branch = await impl.createRootBranch(this.branchId, metadata ?? { name: this.branchId });
-			await tx.saveProjectionCheckpoint(checkpoint);
+			const branch = await impl.createRootBranch(this.branchId, metadata);
+			if (checkpoint !== undefined) await tx.storeCheckpoint(checkpoint);
 			return branch;
 		});
 	}
-	appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> { return this.appendDraftsWithCheckpoint(drafts, () => undefined); }
-	appendDraftsWithCheckpoint(
-		drafts: readonly DurableRecordDraft[],
-		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
-	): Promise<readonly DurableLogRecord[]> {
+	appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return Promise.resolve([]);
-		return this.transaction(async (tx) => {
-			const records = await tx.appendDrafts(this.branchId, drafts);
-			const prepared = prepare(records);
-			for (const checkpoint of prepared === undefined ? [] : Array.isArray(prepared) ? prepared : [prepared]) await tx.saveProjectionCheckpoint(checkpoint);
-			return records;
-		});
+		return this.transaction((tx) => tx.appendDrafts(this.branchId, drafts, prepare));
 	}
-	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> { return this.transaction((tx) => tx.createBranch(branchId, headSeqId, metadata)); }
-	createBranchWithCheckpoint(branchId: BranchId, headSeqId: number, metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
-		return this.transaction(async (tx) => { const branch = await tx.createBranch(branchId, headSeqId, metadata); await tx.saveProjectionCheckpoint(checkpoint); return branch; });
+	appendDraftsAtHead(input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+		if (input.drafts.length === 0) return Promise.resolve([]);
+		return this.transaction((tx) => tx.appendDraftsAtHead(this.branchId, input, prepare));
 	}
-	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> { return this.transaction((tx) => tx.moveBranch(branchId, headSeqId)); }
-	moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
-		return this.transaction(async (tx) => { const branch = await tx.moveBranch(branchId, headSeqId); await tx.saveProjectionCheckpoint(checkpoint); return branch; });
+	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead> {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
+		return this.transaction((tx) => tx.createBranch(branchId, headSeqId, metadata, checkpoint === undefined ? undefined : { checkpoint }));
 	}
-	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> { return this.transaction((tx) => tx.commitPreparedUserInteraction(this.branchId, input)); }
+	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead> {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
+		return this.transaction((tx) => tx.moveBranch(branchId, headSeqId, checkpoint === undefined ? undefined : { checkpoint }));
+	}
 
 	/** Managed transaction: journal mutations and host-domain SQL share one client and commit. */
 	transaction<T>(task: (tx: PostgresRunTransaction) => Promise<T>): Promise<T> {
@@ -360,9 +354,11 @@ export class PostgresLogStore implements RunLogStore {
 			let commitAttempted = false;
 			try {
 				await client.query("BEGIN");
-				const result = await task(new TransactionImpl(client, runId));
+				const tx = new TransactionImpl(client, runId);
+				const result = await task(tx);
 				commitAttempted = true;
 				await client.query("COMMIT");
+				tx.confirmCommitted();
 				return result;
 			} catch (error) {
 				if (!commitAttempted) await client.query("ROLLBACK").catch(() => {});
@@ -375,21 +371,22 @@ export class PostgresLogStore implements RunLogStore {
 		});
 	}
 
-	commitPreparedUserInteractionWithParticipant<T>(branchId: BranchId, response: PreparedUserInteractionCommit, participate: SqlCommitParticipant<T>): Promise<{ response: UserInteractionResponseCommit; participant: T }> {
-		return this.transaction(async (tx) => ({ response: await tx.commitPreparedUserInteraction(branchId, response), participant: await participate(restrictTransaction(tx)) }));
+	appendDraftsAtHeadWithParticipant<T>(branchId: BranchId, input: AppendAtHeadInput, prepare: PrepareStampedCommit | undefined, participate: SqlCommitParticipant<T>): Promise<{ records: readonly DurableLogRecord[]; participant: T }> {
+		return this.transaction(async (tx) => ({ records: await tx.appendDraftsAtHead(branchId, input, prepare), participant: await participate(restrictTransaction(tx)) }));
 	}
-	forkAndCommitUserInteraction<T>(input: PostgresForkAndCommitInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }> {
-		if (input.responseBranchId !== input.sourceBranchId && input.responseBranchId !== input.newBranchId) {
-			return Promise.reject(new Error("responseBranchId must be the source branch or the newly created branch"));
+	async forkAndAppend<T>(input: PostgresForkAndAppendInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; records: readonly DurableLogRecord[]; participant: T }> {
+		const checkpoint = input.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(input.checkpoint);
+		if (input.appendBranchId !== input.sourceBranchId && input.appendBranchId !== input.newBranchId) {
+			return Promise.reject(new Error("appendBranchId must be the source branch or the newly created branch"));
 		}
 		return this.transaction(async (tx) => {
 			const impl = tx as TransactionImpl;
 			if (!await impl.containsInBranchHistory(input.sourceBranchId, input.fromSeqId)) throw new Error(`Fork point ${input.fromSeqId} is not in source branch '${input.sourceBranchId}' ancestry`);
 			const branch = await impl.ensureExactBranch(input.newBranchId, input.fromSeqId, input.metadata);
-			if (input.checkpoint !== undefined) await tx.saveProjectionCheckpoint(input.checkpoint);
-			const response = await tx.commitPreparedUserInteraction(input.responseBranchId, input.preparedResponse);
+			if (checkpoint !== undefined) await tx.storeCheckpoint(checkpoint);
+			const records = await tx.appendDraftsAtHead(input.appendBranchId, input.append, input.prepare);
 			const participant = await participate(restrictTransaction(tx));
-			return { branch, response, participant };
+			return { branch, records, participant };
 		});
 	}
 
@@ -415,7 +412,9 @@ export class PostgresLogStore implements RunLogStore {
 }
 
 class TransactionImpl implements PostgresRunTransaction {
+	private readonly confirmations: Array<() => void> = [];
 	constructor(readonly client: PgClientLike, readonly runId: string) {}
+	confirmCommitted(): void { for (const confirm of this.confirmations) confirm(); }
 	query(text: string, values?: readonly unknown[]): Promise<PgQueryResult> { return this.client.query(text, values); }
 	async hasAnyEntry(): Promise<boolean> {
 		const result = await this.client.query(`SELECT EXISTS (SELECT 1 FROM ${JOURNAL_TABLE} WHERE run_id = $1) AS present`, [this.runId]);
@@ -426,9 +425,17 @@ class TransactionImpl implements PostgresRunTransaction {
 		await this.commitEntries([{ kind: "branch", op: "create", seqId: await this.allocateOne(), branchId, headSeqId: null, metadata, committedAt }]);
 		return { branchId, headSeqId: null, createdAt: committedAt, metadata };
 	}
-	async appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
-		if (drafts.length === 0) return [];
+	async appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+		return this.appendStamped(branchId, drafts, prepare);
+	}
+	async appendDraftsAtHead(branchId: BranchId, input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
 		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
+		if (branch.headSeqId !== input.expectedHeadSeqId) throw new BranchHeadMovedError(branchId, input.expectedHeadSeqId, branch.headSeqId);
+		return this.appendStamped(branchId, input.drafts, prepare, branch);
+	}
+	private async appendStamped(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit, knownBranch?: BranchHead): Promise<readonly DurableLogRecord[]> {
+		if (drafts.length === 0) return [];
+		const branch = knownBranch ?? requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
 		let seqId = await this.allocate(drafts.length);
 		let parentId = branch.headSeqId;
 		const now = Date.now();
@@ -438,14 +445,20 @@ class TransactionImpl implements PostgresRunTransaction {
 			parentId = record.seqId;
 			return record;
 		});
+		const prepared = prepare?.(records);
+		const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
 		await this.commitEntries(records);
+		for (const checkpoint of checkpoints) await this.storeCheckpoint(checkpoint);
+		if (prepared !== undefined) this.confirmations.push(prepared.committed);
 		return records;
 	}
-	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
+	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead> {
 		if (await findBranchDirect(this.client, this.runId, branchId, "writer") !== undefined) throw new Error(`Hyperchart branch '${branchId}' already exists`);
 		if (await findRecordDirect(this.client, this.runId, headSeqId, "writer") === undefined) throw new Error(`No durable log record with seqId ${headSeqId}`);
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		const committedAt = Date.now();
 		await this.commitEntries([{ kind: "branch", op: "create", seqId: await this.allocateOne(), branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt }]);
+		if (checkpoint !== undefined) await this.storeCheckpoint(checkpoint);
 		return { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) };
 	}
 	async ensureExactBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
@@ -456,31 +469,16 @@ class TransactionImpl implements PostgresRunTransaction {
 		}
 		return existing;
 	}
-	async moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> {
+	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead> {
 		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
 		if (headSeqId !== null && await findRecordDirect(this.client, this.runId, headSeqId, "writer") === undefined) throw new Error(`No durable log record with seqId ${headSeqId}`);
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		await this.commitEntries([{ kind: "branch", op: "move", seqId: await this.allocateOne(), branchId, headSeqId, committedAt: Date.now() }]);
+		if (checkpoint !== undefined) await this.storeCheckpoint(checkpoint);
 		return { ...branch, headSeqId };
 	}
-	async commitPreparedUserInteraction(branchId: BranchId, input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> {
-		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
-		if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${branchId}' moved while admitting user interaction ${input.gateSeqId}`);
-		const existing = findUserInteractionResponseInAncestry(await materializeHistoryToHeadDirect(this.client, this.runId, branch.headSeqId, "writer"), input.gateSeqId);
-		if (existing !== undefined) {
-			if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
-			throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
-		}
-		const gate = await findRecordDirect(this.client, this.runId, input.gateSeqId, "writer");
-		if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await containsInHistoryDirect(this.client, this.runId, branch.headSeqId, input.gateSeqId, "writer") || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
-			throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${branchId}'`);
-		}
-		const records = await this.appendDrafts(branchId, [input.draft]);
-		const record = records[0] as UserInteractionResponseCommit["record"];
-		for (const checkpoint of input.prepareCheckpoints?.(record) ?? []) await this.saveProjectionCheckpoint(checkpoint);
-		return { record, idempotent: false };
-	}
 	containsInBranchHistory(branchId: BranchId, seqId: number): Promise<boolean> { return containsInBranchHistoryDirect(this.client, this.runId, branchId, seqId, "writer"); }
-	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> { return saveCheckpointDirect(this.client, this.runId, checkpoint); }
+	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> { return saveCheckpointDirect(this.client, this.runId, cloneOpaqueCheckpoint(checkpoint)); }
 	private async allocateOne(): Promise<number> { return this.allocate(1); }
 	private async allocate(count: number): Promise<number> {
 		if (!Number.isSafeInteger(count) || count <= 0) throw new Error(`Invalid Hyperchart sequence allocation size ${count}`);
@@ -533,10 +531,10 @@ async function ensureRunMetaTable(client: PgClientLike): Promise<void> {
 	try { await client.query(RUN_META_DDL); }
 	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(RUN_META_DDL); }
 }
-async function ensureProjectionCheckpointTable(client: PgClientLike): Promise<void> {
-	try { await client.query(PROJECTION_CHECKPOINT_DDL); }
-	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(PROJECTION_CHECKPOINT_DDL); }
-	await client.query(PROJECTION_CHECKPOINT_IDENTITY_DDL);
+async function ensureCheckpointTable(client: PgClientLike): Promise<void> {
+	try { await client.query(CHECKPOINT_DDL); }
+	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(CHECKPOINT_DDL); }
+	await client.query(CHECKPOINT_IDENTITY_DDL);
 }
 async function ensureJournalTable(client: PgClientLike): Promise<void> {
 	try { await client.query(JOURNAL_DDL); }
@@ -622,6 +620,35 @@ async function materializeHistoryToHeadDirect(client: PgClientLike, runId: strin
 	if (rows.length === 0) throw new Error(`No durable log record with seqId ${headSeqId}`);
 	return rows.map((row) => decodeRecordRow(row as JournalSqlRow));
 }
+async function readForwardReplayPageDirect(
+	client: PgClientLike,
+	runId: string,
+	input: { targetHeadSeqId: number | null; afterSeqId: number | null },
+	access: PostgresLogAccess,
+): Promise<{ records: readonly DurableLogRecord[]; nextAfterSeqId?: number }> {
+	if (input.targetHeadSeqId === null) return { records: [] };
+	const rows = await queryRows(client, access,
+		`WITH RECURSIVE ancestry AS (
+		   SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms
+		     FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'
+		   UNION ALL
+		   SELECT parent.seq, parent.kind, parent.branch_id, parent.parent_id, parent.head_seq_id,
+		          parent.record_type, parent.payload, parent.metadata, parent.committed_at_ms
+		     FROM ancestry child
+		     JOIN ${JOURNAL_TABLE} parent ON parent.run_id = $1 AND parent.seq = child.parent_id
+		    WHERE parent.kind = 'record'
+		 )
+		 SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms
+		   FROM ancestry
+		  WHERE ($3::bigint IS NULL OR seq > $3)
+		  ORDER BY seq ASC LIMIT 501`, [runId, input.targetHeadSeqId, input.afterSeqId]);
+	if (rows.length === 0 && input.afterSeqId === null && await findRecordDirect(client, runId, input.targetHeadSeqId, access) === undefined) {
+		throw new Error(`No durable log record with seqId ${input.targetHeadSeqId}`);
+	}
+	const page = rows.slice(0, 500).map((row) => decodeRecordRow(row as JournalSqlRow));
+	return { records: page, ...(rows.length > 500 ? { nextAfterSeqId: page.at(-1)!.seqId } : {}) };
+}
+
 async function requireSnapshotBranchDirect(client: PgClientLike, runId: string, snapshot: HistorySnapshot, access: PostgresLogAccess): Promise<void> {
 	if (await findBranchDirect(client, runId, snapshot.branchId, access) === undefined) throw new Error(`Unknown Hyperchart branch '${snapshot.branchId}'`);
 	if (snapshot.headSeqId !== null && await findRecordDirect(client, runId, snapshot.headSeqId, access) === undefined) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
@@ -654,25 +681,24 @@ async function countRecordsDirect(client: PgClientLike, runId: string, access: P
 	const rows = await queryRows(client, access, `SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND kind = 'record'`, [runId]);
 	return rows.length === 0 ? 0 : pgNumber(rows[0]?.count);
 }
-async function saveCheckpointDirect(client: PgClientLike, runId: string, checkpoint: StoredProjectionCheckpoint): Promise<void> {
-	if (checkpoint.checkpointId.length === 0 || !Number.isSafeInteger(checkpoint.projectorVersion) || checkpoint.projectorVersion <= 0 || checkpoint.astDigest.length === 0 || !Number.isSafeInteger(checkpoint.createdAt)) {
-		throw new Error("Invalid opaque Hyperchart projection checkpoint coordinates");
+async function saveCheckpointDirect(client: PgClientLike, runId: string, checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
+	if (checkpoint.checkpointId.length === 0 || checkpoint.selectorKey.length === 0 || !Number.isSafeInteger(checkpoint.createdAt)) {
+		throw new Error("Invalid opaque Hyperchart checkpoint coordinates");
 	}
 	await client.query(
-		`INSERT INTO ${PROJECTION_CHECKPOINT_TABLE}
-		   (run_id, checkpoint_id, head_seq_id, projector_version, ast_digest, projection, created_at_ms)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+		`INSERT INTO ${CHECKPOINT_TABLE}
+		   (run_id, checkpoint_id, head_seq_id, selector_key, blob, created_at_ms)
+		 VALUES ($1, $2, $3, $4, $5::jsonb, $6)
 		 ON CONFLICT DO NOTHING`,
-		[runId, checkpoint.checkpointId, checkpoint.headSeqId, checkpoint.projectorVersion, checkpoint.astDigest, JSON.stringify(checkpoint.payload), checkpoint.createdAt],
+		[runId, checkpoint.checkpointId, checkpoint.headSeqId, checkpoint.selectorKey, JSON.stringify(checkpoint.blob), checkpoint.createdAt],
 	);
 }
-function decodeCheckpointRow(row: Record<string, unknown>): StoredProjectionCheckpoint {
+function decodeCheckpointRow(row: Record<string, unknown>): OpaqueCheckpointEnvelope {
 	return {
 		checkpointId: row.checkpoint_id as string,
 		headSeqId: row.head_seq_id === null ? null : pgNumber(row.head_seq_id),
-		projectorVersion: pgNumber(row.projector_version),
-		astDigest: row.ast_digest as string,
-		payload: row.projection,
+		selectorKey: row.selector_key as string,
+		blob: row.blob,
 		createdAt: pgNumber(row.created_at_ms),
 	};
 }

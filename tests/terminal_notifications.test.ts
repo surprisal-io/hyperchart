@@ -20,10 +20,10 @@ import {
 	readTerminalNotificationRequest,
 	recoverStaleRunTerminalNotification,
 	removeTerminalNotificationOutbox,
-	renderTerminalNotificationPayload,
 	terminalNotificationReceiptPath,
 	terminalNotificationRequestPath,
 } from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
+import { renderTerminalNotificationPayload } from "../packages/hyperchart/src/execution/terminal_notification.js";
 
 const roots: string[] = [];
 afterEach(() => {

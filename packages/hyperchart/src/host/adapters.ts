@@ -10,8 +10,11 @@ import {
 import {
 	createBranchProjection,
 	projectBranch,
+	projectedActorCurrentMessage,
 	projectedActorEndpoint,
 	projectedActorEndpoints,
+	projectedActorMailbox,
+	projectedActorMessage,
 	type BranchProjection,
 	type PendingAction,
 	type ProjectedActorMessage,
@@ -305,10 +308,13 @@ export function hyperchartRunFromRuntime(
 		const pool = actor.definition.kind === "actorPool" ? actor as ProjectedActorPoolOccurrence : undefined;
 		const ordinary = pool === undefined ? actor as ProjectedActorOccurrence : undefined;
 		const currentMessages = pool === undefined
-			? (ordinary?.currentMessage === undefined ? [] : [ordinary.currentMessage])
-			: pool.workers.flatMap((worker) => worker.currentMessage === undefined ? [] : [worker.currentMessage]);
+			? (ordinary === undefined ? [] : [projectedActorCurrentMessage(projection, ordinary)].filter((message): message is ProjectedActorMessage => message !== undefined))
+			: pool.workers.flatMap((worker) => {
+				const message = projectedActorCurrentMessage(projection, pool, worker);
+				return message === undefined ? [] : [message];
+			});
 		// Pool messages are owned by concrete worker slots, never by the endpoint mailbox itself.
-		const currentMessage = ordinary?.currentMessage;
+		const currentMessage = ordinary === undefined ? undefined : projectedActorCurrentMessage(projection, ordinary);
 		const messageInfo = (sourceActor: typeof actor, message: ProjectedActorMessage) => {
 			const replyFact = repliedByMessage.get(`${sourceActor.occurrence}\u0000${message.messageId}`);
 			return {
@@ -334,17 +340,18 @@ export function hyperchartRunFromRuntime(
 		};
 		const actorGenerations = actorGenerationsByLogicalOccurrence.get(actor.logicalOccurrence) ?? [];
 		const mailboxInstances = actorGenerations.map((candidate) => {
+			const candidateMailbox = projectedActorMailbox(projection, candidate);
 			const mailbox = {
-				totalCount: candidate.mailbox.length,
-				...(candidate.mailbox[0] === undefined ? {} : { head: messageInfo(candidate, candidate.mailbox[0]) }),
-				entries: candidate.mailbox.map((message) => messageInfo(candidate, message)),
+				totalCount: candidateMailbox.length,
+				...(candidateMailbox[0] === undefined ? {} : { head: messageInfo(candidate, candidateMailbox[0]) }),
+				entries: candidateMailbox.map((message) => messageInfo(candidate, message)),
 			};
 			const messageHistory = messagesFor(candidate)
 				.filter((message) => message.status === "settled" || message.status === "failed" || message.status === "cancelled")
 				.map((message) => messageInfo(candidate, message));
 			const candidateCurrent = candidate.definition.kind === "actorPool"
 				? undefined
-				: (candidate as ProjectedActorOccurrence).currentMessage;
+				: projectedActorCurrentMessage(projection, candidate as ProjectedActorOccurrence);
 			return {
 				occurrencePath: candidate.occurrence,
 				generation: candidate.generation,
@@ -387,8 +394,9 @@ export function hyperchartRunFromRuntime(
 			const sessions = workerFacts.flatMap(([, facts]) => facts.session === undefined ? [] : [facts.session]).sort((left, right) => sessionActivity(left) - sessionActivity(right));
 			const latestSession = sessions.at(-1);
 			const results = Object.entries(projection.results).flatMap(([statePath, value]) => statePath.startsWith(`${worker.occurrence}.`) ? [{ state: statePath.slice(worker.occurrence.length + 1), value }] : []);
+			const workerCurrent = projectedActorCurrentMessage(projection, pool!, worker);
 			const workerMessages = messagesFor(actor)
-				.filter((message) => message.workerIndex === worker.index && message.messageId !== worker.currentMessage?.messageId)
+				.filter((message) => message.workerIndex === worker.index && message.messageId !== workerCurrent?.messageId)
 				.map((message) => messageInfo(actor, message));
 			return {
 				index: worker.index,
@@ -396,7 +404,7 @@ export function hyperchartRunFromRuntime(
 				currentState: worker.currentState,
 				currentStateId: `${actorOccurrenceInspectorId(pool.logicalOccurrence)}.$worker.${worker.currentState}`,
 				status: worker.status,
-				...(worker.currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, worker.currentMessage) }),
+				...(workerCurrent === undefined ? {} : { currentMessage: messageInfo(actor, workerCurrent) }),
 				...(workerMessages.length === 0 ? {} : { messageHistory: workerMessages }),
 				...(visitHistory.length === 0 ? {} : { visits: visitHistory.length, visitHistory }),
 				...(latestSession === undefined ? {} : { session: latestSession }),
@@ -406,7 +414,7 @@ export function hyperchartRunFromRuntime(
 		const batchCalls = Object.values(projection.pendingActorCalls).flatMap((call) => {
 			if (call.kind !== "batch" || call.occurrence !== actor.occurrence) return [];
 			const items = call.messageIds.flatMap((messageId) => {
-				const message = call.messages.find((candidate) => candidate.messageId === messageId);
+				const message = projectedActorMessage(projection, messageId);
 				return message === undefined ? [] : [messageInfo(actor, message)];
 			});
 			const settled = items.filter((message) => message.status === "settled").length;
@@ -427,15 +435,18 @@ export function hyperchartRunFromRuntime(
 			...(pool === undefined ? {} : {
 				concurrency: pool.definition.concurrency,
 				activeCount: currentMessages.length,
-				idleCount: pool.workers.filter((worker) => worker.currentMessage === undefined).length,
+				idleCount: pool.workers.filter((worker) => worker.currentMessageId === undefined).length,
 				workers: workers ?? [],
 				...(batchCalls.length === 0 ? {} : { batchCalls }),
 			}),
-			mailbox: {
-				totalCount: actor.mailbox.length,
-				...(actor.mailbox[0] === undefined ? {} : { head: messageInfo(actor, actor.mailbox[0]) }),
-				entries: actor.mailbox.map((message) => messageInfo(actor, message)),
-			},
+			mailbox: (() => {
+				const messages = projectedActorMailbox(projection, actor);
+				return {
+					totalCount: messages.length,
+					...(messages[0] === undefined ? {} : { head: messageInfo(actor, messages[0]) }),
+					entries: messages.map((message) => messageInfo(actor, message)),
+				};
+			})(),
 			mailboxInstances,
 			...(messageHistory.length === 0 ? {} : { messageHistory }),
 			...(currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, currentMessage) }),
@@ -1227,7 +1238,7 @@ function actorInternalMessageHistories(
 		if (skippedRecords.has(record)) continue;
 		if (record.type === "actor_message" && record.kind === "accepted") {
 			const actor = projectedActorEndpoint(replay, record.occurrence);
-			const envelope = actor?.mailbox[0];
+			const envelope = actor === undefined ? undefined : projectedActorMessage(replay, actor.mailbox[0]);
 			if (actor !== undefined && envelope?.messageId === record.messageId) {
 				const localState = record.receiveState.slice(record.occurrence.length + 1);
 				const logicalReceiveState = `${actor.logicalOccurrence}.${localState}`;
@@ -1252,7 +1263,7 @@ function actorInternalMessageHistories(
 			const actor = projectedActorEndpoint(replay, record.occurrence);
 			const worker = actor?.definition.kind === "actorPool" && record.workerIndex !== undefined ? (actor as ProjectedActorPoolOccurrence).workers[record.workerIndex] : undefined;
 			const ordinary = actor?.definition.kind === "actor" ? actor as ProjectedActorOccurrence : undefined;
-			const envelope = worker?.currentMessage ?? ordinary?.currentMessage;
+			const envelope = actor === undefined ? undefined : projectedActorCurrentMessage(replay, actor, worker);
 			const currentState = worker?.currentState ?? ordinary?.currentState;
 			const declaration = actor === undefined ? undefined : ast.actors[actor.declaration];
 			const reply = currentState === undefined || declaration === undefined ? undefined : actorDefinitionForEndpoint(declaration).states[currentState];

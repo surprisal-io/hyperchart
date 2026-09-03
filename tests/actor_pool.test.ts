@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
+import { loop, start } from "./helpers/execution.js";
 import {
 	actor,
 	actorPool,
@@ -10,7 +11,6 @@ import {
 	createBranchProjection,
 	explainReplay,
 	final,
-	loop,
 	message,
 	messageInput,
 	normalizeChartConfig,
@@ -19,7 +19,6 @@ import {
 	receive,
 	reply,
 	result,
-	start,
 	z,
 	type DurableLogRecord,
 	type Effect,
@@ -143,6 +142,11 @@ describe("static actor pools", () => {
 		const running = start(runtime, {});
 		const worker0 = await effectFor(runtime, "@workers.$worker-0.work", 1);
 		const worker1First = await effectFor(runtime, "@workers.$worker-1.work", 1);
+		const inFlight = projectBranch(createBranchProjection(ast), ast, structuredClone(runtime.records));
+		expect(Object.keys(inFlight.liveActorMessages)).toEqual(["work:message:1:0", "work:message:1:1", "work:message:1:2"]);
+		expect(inFlight.actorPools["@workers"]?.mailbox).toEqual(["work:message:1:2"]);
+		expect(new Set(inFlight.actorPools["@workers"]?.workers.map((worker) => worker.currentMessageId))).toEqual(new Set(["work:message:1:0", "work:message:1:1"]));
+		expect(inFlight.pendingActorCalls["work:call:1"]).not.toHaveProperty("messages");
 
 		// Finish worker 1 first. It becomes the only idle slot and is persistently reused.
 		completePoolWork(runtime, worker1First);
@@ -152,6 +156,7 @@ describe("static actor pools", () => {
 
 		const state = await running;
 		expect(state.projection.results.work).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }]);
+		expect(state.projection.liveActorMessages).toEqual({});
 		expect(state.projection.actorPools["@workers"]).toMatchObject({ status: "stopped", workers: [{ index: 0, currentState: "idle" }, { index: 1, currentState: "idle" }] });
 		const accepted = runtime.records.filter((record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> => record.type === "actor_message" && record.kind === "accepted");
 		expect(new Set(accepted.slice(0, 2).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));

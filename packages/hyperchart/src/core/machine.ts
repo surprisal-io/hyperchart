@@ -41,8 +41,10 @@ import {
 	type ProjectedActorOccurrence,
 	type ProjectedActorPoolOccurrence,
 	type ProjectedActorPoolWorker,
+	projectedActorCurrentMessage,
 	projectedActorEndpoint,
 	projectedActorEndpoints,
+	projectedActorMessage,
 	projectBranch,
 } from "./projection.js";
 import {
@@ -942,7 +944,7 @@ function dueActorBatchResolutions(state: MachineState): RecordAppend[] {
 	return Object.values(state.projection.pendingActorCalls).flatMap((pending) => {
 		if (pending.kind !== "batch") return [];
 		const endpoint = projectedActorEndpoint(state.projection, pending.occurrence);
-		if (endpoint === undefined || !pending.messageIds.every((messageId) => pending.messages.find((message) => message.messageId === messageId)?.status === "settled")) return [];
+		if (endpoint === undefined || !pending.messageIds.every((messageId) => projectedActorMessage(state.projection, messageId)?.status === "settled")) return [];
 		return [{ kind: "append", id: `actor:batch-resolve:${pending.callId}`, records: [{ type: "actor_batch_call_resolved", callId: pending.callId, callerState: pending.callerState, messageIds: pending.messageIds }] }];
 	});
 }
@@ -953,7 +955,7 @@ function actorCallResolutionAfterReply(state: MachineState, effect: ActorReplyEf
 	if (pending?.kind === "batch") {
 		const endpoint = projectedActorEndpoint(state.projection, pending.occurrence);
 		const complete = endpoint !== undefined && pending.messageIds.every((messageId) =>
-			messageId === effect.messageId || pending.messages.find((message) => message.messageId === messageId)?.status === "settled");
+			messageId === effect.messageId || projectedActorMessage(state.projection, messageId)?.status === "settled");
 		return complete
 			? [{ type: "actor_batch_call_resolved", callId: pending.callId, callerState: pending.callerState, messageIds: pending.messageIds }]
 			: [];
@@ -1161,8 +1163,8 @@ function producerMayUseClosingActor(state: MachineState, producerState: StatePat
 	if (context === undefined) return false;
 	const endpoint = projectedActorEndpoint(state.projection, context.endpointOccurrence);
 	if (endpoint === undefined) return false;
-	if (context.workerIndex !== undefined && endpoint.definition.kind === "actorPool") return (endpoint as ProjectedActorPoolOccurrence).workers[context.workerIndex]?.currentMessage !== undefined;
-	return (endpoint as ProjectedActorOccurrence).currentMessage !== undefined;
+	if (context.workerIndex !== undefined && endpoint.definition.kind === "actorPool") return (endpoint as ProjectedActorPoolOccurrence).workers[context.workerIndex]?.currentMessageId !== undefined;
+	return (endpoint as ProjectedActorOccurrence).currentMessageId !== undefined;
 }
 
 function dueActorAdmissionFailures(state: MachineState): RecordAppend[] {
@@ -1245,8 +1247,8 @@ export function actorEndpointAdmission(ast: ChartAst, projection: BranchProjecti
 		const definition = actorDefinitionForEndpoint(ast.actors[endpoint.declaration] ?? endpoint.definition);
 		if (endpoint.definition.kind !== "actorPool") {
 			const actor = endpoint as ProjectedActorOccurrence;
-			if (actor.currentMessage !== undefined) continue;
-			const head = actor.mailbox[0];
+			if (actor.currentMessageId !== undefined) continue;
+			const head = projectedActorMessage(projection, actor.mailbox[0]);
 			const receive = definition.states[actor.currentState];
 			if (head === undefined || receive?.kind !== "receive") continue;
 			if (receive.on[head.event] === undefined) return { assignments: [], failure: { origin: actorStatePath(actor.occurrence, actor.currentState), error: `FIFO head '${head.event}' is unsupported by receive '${actor.currentState}'`, occurrence: actor.occurrence, messageId: head.messageId } };
@@ -1255,16 +1257,16 @@ export function actorEndpointAdmission(ast: ChartAst, projection: BranchProjecti
 		}
 		const pool = endpoint as ProjectedActorPoolOccurrence;
 		const inFlight = options.poolReservations?.get(pool.occurrence) ?? [];
-		const reservedWorkers = new Set(pool.workers.filter((worker) => worker.currentMessage !== undefined).map((worker) => worker.index));
+		const reservedWorkers = new Set(pool.workers.filter((worker) => worker.currentMessageId !== undefined).map((worker) => worker.index));
 		for (const reservation of inFlight) reservedWorkers.add(reservation.workerIndex);
 		let mailboxIndex = 0;
 		for (const reservation of inFlight) {
-			const reservedMessage = pool.mailbox[mailboxIndex];
+			const reservedMessage = projectedActorMessage(projection, pool.mailbox[mailboxIndex]);
 			assert.equal(reservedMessage?.messageId, reservation.messageId, `Pool ${pool.occurrence} in-flight reservations must remain an ordered mailbox prefix`);
 			mailboxIndex++;
 		}
 		for (; mailboxIndex < pool.mailbox.length; mailboxIndex++) {
-			const head = pool.mailbox[mailboxIndex];
+			const head = projectedActorMessage(projection, pool.mailbox[mailboxIndex]);
 			if (head === undefined) break;
 			const eligible = pool.workers.filter((candidate) => {
 				if (reservedWorkers.has(candidate.index) || candidate.status === "stopped" || candidate.status === "failed" || candidate.status === "cancelled") return false;
@@ -1350,17 +1352,22 @@ function executableActorInstances(state: MachineState): ExecutableActorInstance[
 		const definition = actorDefinitionForEndpoint(live);
 		if (endpoint.definition.kind !== "actorPool") {
 			const actor = endpoint as ProjectedActorOccurrence;
-			return [{ endpoint, occurrence: actor.occurrence, currentState: actor.currentState, ...(actor.currentMessage === undefined ? {} : { currentMessage: actor.currentMessage }), status: actor.status === "closing" ? "draining" : actor.status, definition }];
+			const currentMessage = projectedActorCurrentMessage(state.projection, actor);
+			return [{ endpoint, occurrence: actor.occurrence, currentState: actor.currentState, ...(currentMessage === undefined ? {} : { currentMessage }), status: actor.status === "closing" ? "draining" : actor.status, definition }];
 		}
-		return (endpoint as ProjectedActorPoolOccurrence).workers.map((worker) => ({
-			endpoint,
-			occurrence: worker.occurrence,
-			currentState: worker.currentState,
-			...(worker.currentMessage === undefined ? {} : { currentMessage: worker.currentMessage }),
-			status: worker.status,
-			definition,
-			workerIndex: worker.index,
-		}));
+		const pool = endpoint as ProjectedActorPoolOccurrence;
+		return pool.workers.map((worker) => {
+			const currentMessage = projectedActorCurrentMessage(state.projection, pool, worker);
+			return {
+				endpoint,
+				occurrence: worker.occurrence,
+				currentState: worker.currentState,
+				...(currentMessage === undefined ? {} : { currentMessage }),
+				status: worker.status,
+				definition,
+				workerIndex: worker.index,
+			};
+		});
 	});
 }
 
@@ -1384,8 +1391,8 @@ function dueActorScopeFacts(state: MachineState): RecordAppend[] {
 			continue;
 		}
 		const quiescent = actor.definition.kind === "actorPool"
-			? (actor as ProjectedActorPoolOccurrence).workers.every((worker) => worker.currentMessage === undefined)
-			: (actor as ProjectedActorOccurrence).currentMessage === undefined;
+			? (actor as ProjectedActorPoolOccurrence).workers.every((worker) => worker.currentMessageId === undefined)
+			: (actor as ProjectedActorOccurrence).currentMessageId === undefined;
 		if ((actor.status === "closing" || actor.status === "draining") && quiescent && actor.mailbox.length === 0) {
 			appends.push({ kind: "append", id: `actor:stopped:${actor.occurrence}`, records: [{ type: "actor_scope", kind: "stopped", occurrence: actor.occurrence }] });
 		}
@@ -1556,7 +1563,7 @@ function resolveRef(state: MachineState, ref: InputRef, stateId: string): unknow
 		return selectPath(actor.input, ref.path, ref, stateId);
 	}
 	if (ref.kind === "messageInput") {
-		const message = worker?.currentMessage ?? (actor as ProjectedActorOccurrence | undefined)?.currentMessage;
+		const message = actor === undefined ? undefined : projectedActorCurrentMessage(state.projection, actor, worker);
 		assert(message !== undefined && message.event === ref.message, `Template in state ${stateId}: messageInput('${ref.message}') does not match the current message`);
 		return selectPath(message.input, ref.path, ref, stateId);
 	}

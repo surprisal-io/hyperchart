@@ -38,6 +38,10 @@
 			"types": "./dist/runtime/index.d.ts",
 			"import": "./dist/runtime/index.js"
 		},
+		"./runner": {
+			"types": "./dist/runner/index.d.ts",
+			"import": "./dist/runner/index.js"
+		},
 		"./inspect": {
 			"types": "./dist/inspect/index.d.ts",
 			"import": "./dist/inspect/index.js"

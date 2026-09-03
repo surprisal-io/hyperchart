@@ -4,9 +4,9 @@ import { expect, fireEvent, waitFor, within } from "storybook/test";
 import { z } from "zod";
 import { actor, agent, arg, chart, compound, final, map as mapState, message, protocol, receive, reply, send, script } from "../../core/dsl.js";
 import { actionUidKey } from "../../core/action_uid.js";
-import { start } from "../../core/execution_loop.js";
+import { loop } from "../../execution/execution_loop.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
-import type { Effect, MachineEvent } from "../../core/machine.js";
+import { createMachine, type Effect, type MachineEvent } from "../../core/machine.js";
 import { createBranchProjection, projectBranch, type BranchProjection } from "../../core/projection.js";
 import { explainReplay } from "../../core/replay_check.js";
 import { normalizeChartConfig } from "../../core/normalize.js";
@@ -72,7 +72,9 @@ async function captureSemantic(cst: ChartCst, args: Readonly<Record<string, unkn
 	const normalized = normalizeChartConfig(cst, { path: "storybook:runtime-history-semantic" });
 	if (!normalized.ok) throw new Error(normalized.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const runtime = new SemanticStoryRuntime(normalized.ast, targetType, count);
-	try { await start(runtime, args); } catch (error) { if (!(error instanceof CaptureFinished)) throw error; }
+	await runtime.runEffects([{ kind: "durable_records", id: "args", records: [{ type: "args", args }] }]);
+	const semantic = { machineState: () => createMachine(normalized.ast, structuredClone(runtime.projection)) };
+	try { await loop(runtime, semantic); } catch (error) { if (!(error instanceof CaptureFinished)) throw error; }
 	const replay = explainReplay(normalized.ast, runtime.records);
 	if (replay.broken !== undefined || replay.prefixEnd !== runtime.records.length || replay.skipped.length > 0 || replay.stale.length > 0) throw new Error("Semantic Runtime History fixture failed replay validation");
 	return { ast: normalized.ast, records: runtime.records };

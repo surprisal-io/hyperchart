@@ -27,29 +27,44 @@ import type { StatePath } from "../../core/types.js";
 
 export const DEFAULT_BRANCH_ID: BranchId = "main";
 export const HISTORY_READ_ITEMS = 100;
-export const PROJECTION_READ_RECORDS = 500;
+const REPLAY_PAGE_RECORDS = 500;
 
-/** Opaque derived projection cache row. Storage must not interpret payload. */
-export type StoredProjectionCheckpoint = Readonly<{
+/** Opaque derived cache row. Runtime/storage compare selector and ancestry coordinates only. */
+export type OpaqueCheckpointEnvelope = Readonly<{
 	checkpointId: string;
 	headSeqId: number | null;
-	projectorVersion: number;
-	astDigest: string;
-	payload: unknown;
+	selectorKey: string;
+	blob: unknown;
 	createdAt: number;
 }>;
-export type ProjectionCheckpointLookup = Readonly<{
+export type CheckpointQuery = Readonly<{
 	targetHeadSeqId: number | null;
-	projectorVersion: number;
-	astDigest: string;
+	selectorKey: string;
 }>;
-/** @internal AST-free checkpoint repository consumed only by projection_loader. */
-export interface ProjectionCheckpointStore extends RunHistoryStore {
-	readonly canSaveProjectionCheckpoints: boolean;
-	loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined>;
-	findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined>;
-	discardProjectionCheckpoint(checkpointId: string): Promise<void>;
-	saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void>;
+export interface CheckpointRepository extends RunHistoryStore {
+	readonly canStoreCheckpoints: boolean;
+	loadExactCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined>;
+	findNearestCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined>;
+	discardCheckpoint(checkpointId: string): Promise<void>;
+	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void>;
+}
+
+export type PreparedStampedCommit = Readonly<{
+	checkpoints: readonly OpaqueCheckpointEnvelope[];
+	/** Synchronous execution-owned confirmation invoked only after durability succeeds. */
+	committed(): void;
+}>;
+export type PrepareStampedCommit = (records: readonly DurableLogRecord[]) => PreparedStampedCommit;
+
+/** @internal Validate and clone before any backend mutates journal or cache state. */
+export function cloneOpaqueCheckpoint(checkpoint: OpaqueCheckpointEnvelope): OpaqueCheckpointEnvelope {
+	if (typeof checkpoint.checkpointId !== "string" || checkpoint.checkpointId.length === 0
+		|| !(checkpoint.headSeqId === null || Number.isSafeInteger(checkpoint.headSeqId) && checkpoint.headSeqId > 0)
+		|| typeof checkpoint.selectorKey !== "string" || checkpoint.selectorKey.length === 0
+		|| !Number.isSafeInteger(checkpoint.createdAt) || checkpoint.createdAt < 0) {
+		throw new Error("Invalid opaque Hyperchart checkpoint coordinates");
+	}
+	return structuredClone(checkpoint);
 }
 
 export type HistorySnapshot = Readonly<{ branchId: BranchId; headSeqId: number | null }>;
@@ -108,6 +123,13 @@ export type ActorMessageHistoryItem = Readonly<{
 	enqueued: Extract<DurableLogRecord, { type: "actor_messages_enqueued" }>;
 	records: readonly DurableLogRecord[];
 }>;
+
+export class BranchHeadMovedError extends Error {
+	readonly name = "BranchHeadMovedError";
+	constructor(readonly branchId: BranchId, readonly expectedHeadSeqId: number | null, readonly actualHeadSeqId: number | null) {
+		super(`Branch '${branchId}' moved: expected head ${expectedHeadSeqId ?? "null"}, found ${actualHeadSeqId ?? "null"}`);
+	}
+}
 
 export class HistoryCursorError extends Error {
 	readonly name = "HistoryCursorError";
@@ -413,30 +435,57 @@ export function findUserInteractionResponseInAncestry(ancestry: readonly Durable
 	return undefined;
 }
 
-export function replayStart(ancestry: readonly DurableLogRecord[], afterSeqId: number | null): number {
+export function boundedForwardReplayPage(index: MaterializedRunLogIndex, input: ReplayPageInput): ReplayPage {
+	if (input.targetHeadSeqId === null) return { records: [] };
+	const retainedNewestFirst: DurableLogRecord[] = [];
+	let current: number | null = input.targetHeadSeqId;
+	let count = 0;
+	let foundBoundary = input.afterSeqId === null;
+	while (current !== null) {
+		const record = index.recordsBySeqId.get(current);
+		if (record === undefined) throw new Error(`Missing durable parent record ${current}`);
+		if (input.afterSeqId !== null && record.seqId === input.afterSeqId) { foundBoundary = true; break; }
+		retainedNewestFirst.push(record);
+		if (retainedNewestFirst.length > REPLAY_PAGE_RECORDS) retainedNewestFirst.shift();
+		count++;
+		current = record.parentId;
+	}
+	if (!foundBoundary) throw new Error(`Execution replay boundary ${input.afterSeqId} is not in target ancestry`);
+	const records = retainedNewestFirst.reverse();
+	return { records, ...(count > REPLAY_PAGE_RECORDS && records.at(-1) !== undefined ? { nextAfterSeqId: records.at(-1)!.seqId } : {}) };
+}
+
+function replayStart(ancestry: readonly DurableLogRecord[], afterSeqId: number | null): number {
 	if (afterSeqId === null) return 0;
 	const index = ancestry.findIndex((record) => record.seqId === afterSeqId);
-	if (index < 0) throw new Error(`Projection replay boundary ${afterSeqId} is not in target ancestry`);
+	if (index < 0) throw new Error(`Execution replay boundary ${afterSeqId} is not in target ancestry`);
 	return index + 1;
 }
 
-/** @internal Package-private projection stream; intentionally absent from exported store declarations. */
-export async function* openProjectionReplay(
-	reader: Pick<RunHistoryStore, "getRecord">,
-	input: { targetHeadSeqId: number | null; afterSeqId: number | null },
+type ReplayPageInput = Readonly<{ targetHeadSeqId: number | null; afterSeqId: number | null }>;
+type ReplayPage = Readonly<{ records: readonly DurableLogRecord[]; nextAfterSeqId?: number }>;
+type ReplayPageReader = (input: ReplayPageInput) => Promise<ReplayPage>;
+const replayReaders = new WeakMap<object, ReplayPageReader>();
+
+/** @internal Register a backend-private, genuinely bounded forward ancestry reader. */
+export function registerReplayPageReader(reader: object, readPage: ReplayPageReader): void {
+	replayReaders.set(reader, readPage);
+}
+
+/** @internal Execution-only replay stream; every backend call and yielded batch is capped at 500. */
+export async function* openExecutionReplay(
+	reader: RunHistoryStore,
+	input: ReplayPageInput,
 ): AsyncIterable<readonly DurableLogRecord[]> {
-	const newestFirst: DurableLogRecord[] = [];
-	let seqId = input.targetHeadSeqId;
-	while (seqId !== null) {
-		const record = await reader.getRecord(seqId);
-		if (record === undefined) throw new Error(`Missing durable parent record ${seqId}`);
-		newestFirst.push(record);
-		seqId = record.parentId;
-	}
-	const ancestry = newestFirst.reverse();
-	const start = replayStart(ancestry, input.afterSeqId);
-	for (let offset = start; offset < ancestry.length; offset += PROJECTION_READ_RECORDS) {
-		yield ancestry.slice(offset, offset + PROJECTION_READ_RECORDS);
+	const readPage = replayReaders.get(reader as object);
+	if (readPage === undefined) throw new Error("Run history backend has no execution replay port");
+	let afterSeqId = input.afterSeqId;
+	for (;;) {
+		const page = await readPage({ targetHeadSeqId: input.targetHeadSeqId, afterSeqId });
+		if (page.records.length > REPLAY_PAGE_RECORDS) throw new Error("Replay backend exceeded the 500-record page limit");
+		if (page.records.length > 0) yield page.records;
+		if (page.nextAfterSeqId === undefined) return;
+		afterSeqId = page.nextAfterSeqId;
 	}
 }
 
@@ -452,44 +501,34 @@ export async function collectBranches(reader: Pick<RunHistoryStore, "listBranche
 	return items;
 }
 
-export interface LogStore extends RunHistoryStore {
-	readonly branchId: BranchId;
-	appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]>;
-	/** @internal Stamp facts, prepare an opaque cache row, and commit both atomically when durable. */
-	appendDraftsWithCheckpoint(
-		drafts: readonly DurableRecordDraft[],
-		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
-	): Promise<readonly DurableLogRecord[]>;
-}
-
-/** Full run-journal handle: branch entries plus lifecycle, shared across branch handles. */
-export interface RunLogStore extends LogStore, ProjectionCheckpointStore {
-	forBranch(branchId: BranchId): RunLogStore;
-	readRunMeta(): Promise<RunMeta | undefined>;
-	writeRunMeta(meta: RunMeta): Promise<void>;
-	deleteRunData(): Promise<void>;
-	initializeRootBranch(metadata?: BranchMetadata): Promise<BranchHead>;
-	initializeRootBranchWithCheckpoint(metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
-	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead>;
-	createBranchWithCheckpoint(branchId: BranchId, headSeqId: number, metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
-	moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead>;
-	moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead>;
-	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit>;
-	close(): Promise<void>;
-}
-
 export type UserInteractionResponseCommit = Readonly<{
 	record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }>;
 	idempotent: boolean;
 }>;
 
-export type PreparedUserInteractionCommit = Readonly<{
+export type AppendAtHeadInput = Readonly<{
 	expectedHeadSeqId: number | null;
-	gateSeqId: number;
-	draft: Extract<DurableRecordDraft, { type: "user_interaction"; kind: "resolved" }>;
-	/** Execution-owned synchronous callback over the stamped response; storage persists only opaque rows. */
-	prepareCheckpoints?: (record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }>) => readonly StoredProjectionCheckpoint[];
+	drafts: readonly DurableRecordDraft[];
 }>;
+export type BranchMutationOptions = Readonly<{ checkpoint?: OpaqueCheckpointEnvelope }>;
+
+export interface LogStore extends RunHistoryStore {
+	readonly branchId: BranchId;
+	appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
+	appendDraftsAtHead(input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
+}
+
+/** Full run-journal handle: branch entries plus lifecycle, shared across branch handles. */
+export interface RunLogStore extends LogStore, CheckpointRepository {
+	forBranch(branchId: BranchId): RunLogStore;
+	readRunMeta(): Promise<RunMeta | undefined>;
+	writeRunMeta(meta: RunMeta): Promise<void>;
+	deleteRunData(): Promise<void>;
+	initializeRootBranch(metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
+	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
+	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead>;
+	close(): Promise<void>;
+}
 
 /** @internal Stamp drafts against the file/memory writer's materialized index. */
 export function stampDrafts(
@@ -521,20 +560,21 @@ export function materializeJournal(values: readonly unknown[]): MaterializedRunL
 type SharedJournalState = {
 	filePath: string;
 	index?: MaterializedRunLogIndex;
-	/** Disposable process-local projection cache. Never persisted beside JSONL. */
-	projectionCheckpoints: StoredProjectionCheckpoint[];
+	/** Disposable process-local opaque checkpoint cache. Never persisted beside JSONL. */
+	checkpoints: OpaqueCheckpointEnvelope[];
 	/** Exact durable byte boundary represented by the index. Shared branch handles advance it together. */
 	expectedByteLength?: number;
 	fullReadCount: number;
+	poisoned: boolean;
 };
 
 function newJournal(filePath: string): SharedJournalState {
-	return { filePath: resolve(filePath), projectionCheckpoints: [], fullReadCount: 0 };
+	return { filePath: resolve(filePath), checkpoints: [], fullReadCount: 0, poisoned: false };
 }
 
 export class JsonlLogStore implements RunLogStore {
 	private journal: SharedJournalState;
-	readonly canSaveProjectionCheckpoints = true;
+	readonly canStoreCheckpoints = true;
 
 	constructor(
 		readonly filePath: string,
@@ -542,49 +582,62 @@ export class JsonlLogStore implements RunLogStore {
 	) {
 		requireBranchId(branchId, "selected branch");
 		this.journal = newJournal(filePath);
+		this.registerReplayReader();
 	}
 
 	/** Create another branch handle over this store's already-open incremental journal. */
 	forBranch(branchId: BranchId): JsonlLogStore {
 		const store = new JsonlLogStore(this.journal.filePath, branchId);
 		store.journal = this.journal;
+		store.registerReplayReader();
 		return store;
 	}
 
 	/** Number of full-file reads performed by this shared journal. */
 	fullReadCount(): number { return this.journal.fullReadCount; }
 
-	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }): Promise<BranchHead> {
-		return this.commitBuilt((index) => {
+	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }, options?: BranchMutationOptions): Promise<BranchHead> {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
+		const branch = await this.commitBuilt((index) => {
 			if (index.entries.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
 			const committedAt = Date.now();
 			const entry: StorageEntry = { kind: "branch", op: "create", seqId: index.nextSeqId, branchId: this.branchId, headSeqId: null, metadata, committedAt };
 			return { entries: [entry], result: { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata } };
 		});
-	}
-
-	async initializeRootBranchWithCheckpoint(metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
-		const branch = await this.initializeRootBranch(metadata);
-		await this.saveProjectionCheckpoint(checkpoint);
+		if (checkpoint !== undefined) this.rememberClonedCheckpoint(checkpoint);
 		return branch;
 	}
 
-	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
-		return this.appendDraftsWithCheckpoint(drafts, () => undefined);
+	async appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+		if (drafts.length === 0) return [];
+		return enqueueJsonlWrite(this.journal.filePath, async () => {
+			if (this.journal.poisoned) throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
+			this.openJournal();
+			const records = stampDrafts(this.index(), this.branchId, drafts, Date.now());
+			const prepared = prepare?.(records);
+			const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
+			await this.appendLocked(records);
+			for (const checkpoint of checkpoints) this.rememberClonedCheckpoint(checkpoint);
+			try { prepared?.committed(); } catch (error) { this.journal.poisoned = true; throw error; }
+			return records;
+		});
 	}
 
-	async appendDraftsWithCheckpoint(
-		drafts: readonly DurableRecordDraft[],
-		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
-	): Promise<readonly DurableLogRecord[]> {
-		if (drafts.length === 0) return [];
-		const records = await this.commitBuilt((index) => {
-			const stamped = stampDrafts(index, this.branchId, drafts, Date.now());
-			return { entries: stamped, result: stamped };
+	async appendDraftsAtHead(input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+		if (input.drafts.length === 0) return [];
+		return enqueueJsonlWrite(this.journal.filePath, async () => {
+			if (this.journal.poisoned) throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
+			this.openJournal();
+			const branch = this.index().branch(this.branchId);
+			if (branch.headSeqId !== input.expectedHeadSeqId) throw new BranchHeadMovedError(this.branchId, input.expectedHeadSeqId, branch.headSeqId);
+			const records = stampDrafts(this.index(), this.branchId, input.drafts, Date.now());
+			const prepared = prepare?.(records);
+			const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
+			await this.appendLocked(records);
+			for (const checkpoint of checkpoints) this.rememberClonedCheckpoint(checkpoint);
+			try { prepared?.committed(); } catch (error) { this.journal.poisoned = true; throw error; }
+			return records;
 		});
-		const prepared = prepare(records);
-		for (const checkpoint of prepared === undefined ? [] : Array.isArray(prepared) ? prepared : [prepared]) await this.saveProjectionCheckpoint(checkpoint);
-		return records;
 	}
 
 	async captureSnapshot(branchId: BranchId): Promise<HistorySnapshot> {
@@ -641,27 +694,23 @@ export class JsonlLogStore implements RunLogStore {
 		return findUserInteractionResponseInAncestry(this.index().materializeHistoryToHead(input.headSeqId), input.gateSeqId);
 	}
 	async countRecords(): Promise<number> { return this.index().recordsBySeqId.size; }
-	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
-		const checkpoint = this.journal.projectionCheckpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest);
+	async loadExactCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
+		const checkpoint = this.journal.checkpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.selectorKey === input.selectorKey);
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
-	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+	async findNearestCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		const ancestry = this.index().materializeHistoryToHead(input.targetHeadSeqId);
 		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
-		const checkpoint = this.journal.projectionCheckpoints
-			.filter((candidate) => candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
+		const checkpoint = this.journal.checkpoints
+			.filter((candidate) => candidate.selectorKey === input.selectorKey && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
 			.sort((left, right) => checkpointDistance(left, distance) - checkpointDistance(right, distance) || right.createdAt - left.createdAt)[0];
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
-	async discardProjectionCheckpoint(checkpointId: string): Promise<void> {
-		const index = this.journal.projectionCheckpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
-		if (index >= 0) this.journal.projectionCheckpoints.splice(index, 1);
+	async discardCheckpoint(checkpointId: string): Promise<void> {
+		const index = this.journal.checkpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
+		if (index >= 0) this.journal.checkpoints.splice(index, 1);
 	}
-	async saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> {
-		const duplicate = this.journal.projectionCheckpoints.find((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.projectorVersion === checkpoint.projectorVersion && candidate.astDigest === checkpoint.astDigest);
-		if (duplicate !== undefined) return;
-		this.journal.projectionCheckpoints.push(structuredClone(checkpoint));
-	}
+	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> { this.rememberClonedCheckpoint(cloneOpaqueCheckpoint(checkpoint)); }
 	async close(): Promise<void> {}
 	async readRunMeta(): Promise<RunMeta | undefined> {
 		const path = join(dirname(this.journal.filePath), "meta.json");
@@ -676,9 +725,10 @@ export class JsonlLogStore implements RunLogStore {
 		rmSync(join(dirname(this.journal.filePath), "meta.json"), { force: true });
 		rmSync(this.journal.filePath, { force: true });
 	}
-	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
+	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
-		return this.commitBuilt((index) => {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
+		const result = await this.commitBuilt((index) => {
 			if (index.branches.has(branchId)) throw new Error(`Hyperchart branch '${branchId}' already exists`);
 			if (!index.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
 			const committedAt = Date.now();
@@ -687,16 +737,14 @@ export class JsonlLogStore implements RunLogStore {
 				result: { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) },
 			};
 		});
-	}
-	async createBranchWithCheckpoint(branchId: BranchId, headSeqId: number, metadata: BranchMetadata | undefined, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
-		const branch = await this.createBranch(branchId, headSeqId, metadata);
-		await this.saveProjectionCheckpoint(checkpoint);
-		return branch;
+		if (checkpoint !== undefined) this.rememberClonedCheckpoint(checkpoint);
+		return result;
 	}
 
-	async moveBranch(branchId: BranchId, headSeqId: number | null): Promise<BranchHead> {
+	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
-		return this.commitBuilt((index) => {
+		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
+		const result = await this.commitBuilt((index) => {
 			const branch = index.branches.get(branchId);
 			if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 			if (headSeqId !== null && !index.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
@@ -705,37 +753,18 @@ export class JsonlLogStore implements RunLogStore {
 				result: { ...branch, headSeqId },
 			};
 		});
+		if (checkpoint !== undefined) this.rememberClonedCheckpoint(checkpoint);
+		return result;
 	}
 
-	async moveBranchWithCheckpoint(branchId: BranchId, headSeqId: number | null, checkpoint: StoredProjectionCheckpoint): Promise<BranchHead> {
-		const branch = await this.moveBranch(branchId, headSeqId);
-		await this.saveProjectionCheckpoint(checkpoint);
-		return branch;
+	private rememberClonedCheckpoint(checkpoint: OpaqueCheckpointEnvelope): void {
+		const duplicate = this.journal.checkpoints.find((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.selectorKey === checkpoint.selectorKey);
+		if (duplicate === undefined) this.journal.checkpoints.push(checkpoint);
 	}
 
-	async commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> {
-		return enqueueJsonlWrite(this.journal.filePath, async () => {
-			const index = this.index();
-			const branch = index.branch(this.branchId);
-			if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${this.branchId}' moved while admitting user interaction ${input.gateSeqId}`);
-			const existing = findUserInteractionResponseInAncestry(index.materializeHistoryToHead(branch.headSeqId), input.gateSeqId);
-			if (existing !== undefined) {
-				if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
-				throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
-			}
-			const gate = index.recordsBySeqId.get(input.gateSeqId);
-			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !index.containsInBranchHistory(this.branchId, input.gateSeqId) || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
-				throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${this.branchId}'`);
-			}
-			const records = stampDrafts(index, this.branchId, [input.draft], Date.now());
-			const record = records[0] as UserInteractionResponseCommit["record"];
-			const checkpoints = input.prepareCheckpoints?.(record) ?? [];
-			await this.appendLocked(records);
-			for (const checkpoint of checkpoints) await this.saveProjectionCheckpoint(checkpoint);
-			return { record, idempotent: false };
-		});
+	private registerReplayReader(): void {
+		registerReplayPageReader(this, async (input) => boundedForwardReplayPage(this.index(), input));
 	}
-
 
 	private readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): HistoryChunk<AnyHistoryItem> {
 		const ancestry = this.ancestryForSnapshot(snapshot);
@@ -773,6 +802,7 @@ export class JsonlLogStore implements RunLogStore {
 	}
 
 	private async appendLocked(entries: readonly StorageEntry[]): Promise<void> {
+		if (this.journal.poisoned) throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
 		const index = this.journal.index;
 		const expectedByteLength = this.journal.expectedByteLength;
 		if (index === undefined || expectedByteLength === undefined) throw new Error("Hyperchart journal is not open");
@@ -833,7 +863,7 @@ export function assertDurableRecordDraft(value: DurableRecordDraft): void {
 	if ("seqId" in value || "parentId" in value || "branchId" in value || "timestamp" in value) throw new Error("Durable record coordinates are assigned only by the run writer");
 }
 
-function checkpointDistance(checkpoint: StoredProjectionCheckpoint, distance: ReadonlyMap<number, number>): number {
+function checkpointDistance(checkpoint: OpaqueCheckpointEnvelope, distance: ReadonlyMap<number, number>): number {
 	return checkpoint.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(checkpoint.headSeqId) ?? Number.MAX_SAFE_INTEGER;
 }
 

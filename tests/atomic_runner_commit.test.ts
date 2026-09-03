@@ -7,12 +7,12 @@ import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/cor
 import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/core/types.js";
 import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
 import { createBranchProjection } from "../packages/hyperchart/src/core/projection.js";
-import { prepareProjectionCheckpoint, projectionContractForAst } from "../packages/hyperchart/src/runtime/generic/projection_loader.js";
+import { prepareProjectionCheckpoint, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
 import { PostgresLogStore } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
 import {
   createHyperchartRunnerController,
   type SteerableAgentExecutor,
-} from "../packages/hyperchart/src/runtime/generic/runner_main.js";
+} from "../packages/hyperchart/src/runner/runner_main.js";
 
 const dsn = process.env.HYPERCHART_PG_DSN;
 const describePg = dsn === undefined ? describe.skip : describe;
@@ -38,7 +38,7 @@ afterEach(async () => {
   const client = new Client({ connectionString: dsn });
   await client.connect();
   const ids = runIds.splice(0);
-  await client.query("delete from hyperchart_projection_checkpoint where run_id = any($1)", [ids]);
+  await client.query("delete from hyperchart_checkpoint where run_id = any($1)", [ids]);
   await client.query("delete from hyperchart_journal where run_id = any($1)", [
     ids,
   ]);
@@ -79,7 +79,7 @@ async function fixture(cadenceBoundary = false) {
     access: "writer",
   });
   const contract = projectionContractForAst(parsed.ast);
-  await store.initializeRootBranchWithCheckpoint(undefined, prepareProjectionCheckpoint(createBranchProjection(parsed.ast), contract, null));
+  await store.initializeRootBranch(undefined, { checkpoint: prepareProjectionCheckpoint(createBranchProjection(parsed.ast), contract, null) });
   await store.appendDrafts(Array.from({ length: cadenceBoundary ? 509 : 1 }, (_, index) => ({ type: "args", args: { index } })));
   const [invoke] = await store.appendDrafts([
     {
@@ -164,8 +164,41 @@ describePg("atomic runner interaction commit", () => {
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
     const committed = await controller.respondToUserInteraction("main", f.gateSeqId, { type: "SELECTED" });
     const { Client } = await import("pg"); const client = new Client({ connectionString: dsn as string }); await client.connect();
-    const checkpoint = await client.query("select 1 from hyperchart_projection_checkpoint where run_id = $1 and head_seq_id = $2", [f.runId, committed.record.seqId]);
+    const checkpoint = await client.query("select 1 from hyperchart_checkpoint where run_id = $1 and head_seq_id = $2", [f.runId, committed.record.seqId]);
     await client.end(); expect(checkpoint.rows).toHaveLength(1); await aggregate;
+  }, 30_000);
+
+  it("re-admits an atomic response after a concurrent identical head winner", async () => {
+    const f = await fixture();
+    let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built(); return new NoopExecutor(); },
+    );
+    const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
+    let participants = 0;
+    const ordinary = controller.respondToUserInteraction("main", f.gateSeqId, { type: "SELECTED" });
+    const atomic = controller.commitUserInteraction({ branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } }, async () => ++participants);
+    const [winner, retried] = await Promise.all([ordinary, atomic]);
+    expect(retried.response.record.seqId).toBe(winner.record.seqId);
+    expect(participants).toBe(1);
+    await aggregate;
+  }, 30_000);
+
+  it("never retries a participant error whose message contains moved", async () => {
+    const f = await fixture();
+    let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built(); return new NoopExecutor(); },
+    );
+    const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
+    let calls = 0;
+    await expect(controller.commitUserInteraction({ branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } }, async () => {
+      calls++; throw new Error("application moved: retry prohibited");
+    })).rejects.toThrow("application moved: retry prohibited");
+    expect(calls).toBe(1);
+    await controller.respondToUserInteraction("main", f.gateSeqId, { type: "SELECTED" }); await aggregate;
   }, 30_000);
 
   it("rolls back both a due response checkpoint and response when its participant fails", async () => {
@@ -179,7 +212,7 @@ describePg("atomic runner interaction commit", () => {
     await expect(controller.commitUserInteraction({ branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } }, async () => { throw new Error("participant rollback"); })).rejects.toThrow(/participant rollback/);
     const { Client } = await import("pg"); const client = new Client({ connectionString: dsn as string }); await client.connect();
     const rows = await client.query("select record_type from hyperchart_journal where run_id = $1 and record_type = 'user_interaction' and payload->>'kind' = 'resolved'", [f.runId]);
-    const checkpoints = await client.query("select 1 from hyperchart_projection_checkpoint where run_id = $1 and head_seq_id is not null", [f.runId]);
+    const checkpoints = await client.query("select 1 from hyperchart_checkpoint where run_id = $1 and head_seq_id is not null", [f.runId]);
     await client.end(); expect(rows.rows).toHaveLength(0); expect(checkpoints.rows).toHaveLength(0);
     await controller.stopAndDrain("main"); await aggregate;
   }, 30_000);
@@ -206,7 +239,28 @@ describePg("atomic runner interaction commit", () => {
     const { Client } = await import("pg"); const client = new Client({ connectionString: dsn as string }); await client.connect();
     const rows = await client.query("select max(seq) as head_seq_id from hyperchart_journal where run_id = $1 and kind = 'record' and branch_id = 'main'", [f.runId]);
     const head = rows.rows[0]?.head_seq_id;
-    const checkpoint = await client.query("select 1 from hyperchart_projection_checkpoint where run_id = $1 and head_seq_id = $2", [f.runId, head]);
+    const checkpoint = await client.query("select 1 from hyperchart_checkpoint where run_id = $1 and head_seq_id = $2", [f.runId, head]);
+    await client.end(); expect(checkpoint.rows).toHaveLength(1);
+  }, 30_000);
+
+  it("signal-style stop waits for an admitted participant before the exact checkpoint", async () => {
+    const f = await fixture(true);
+    let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built(); return new NoopExecutor(); },
+    );
+    const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
+    let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void; const participantEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const committing = controller.commitUserInteraction({ branchId: "main", gateSeqId: f.gateSeqId, event: { type: "SELECTED" } }, async () => { entered(); await blocked; return "participant"; });
+    await participantEntered;
+    let stopped = false; const stopping = controller.stop().then(() => { stopped = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve)); expect(stopped).toBe(false);
+    release(); expect((await committing).participant).toBe("participant"); await stopping; await aggregate;
+    const { Client } = await import("pg"); const client = new Client({ connectionString: dsn as string }); await client.connect();
+    const head = (await client.query("select max(seq) as head_seq_id from hyperchart_journal where run_id = $1 and kind = 'record' and branch_id = 'main'", [f.runId])).rows[0]?.head_seq_id;
+    const checkpoint = await client.query("select 1 from hyperchart_checkpoint where run_id = $1 and head_seq_id = $2", [f.runId, head]);
     await client.end(); expect(checkpoint.rows).toHaveLength(1);
   }, 30_000);
 

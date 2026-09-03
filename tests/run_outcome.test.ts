@@ -5,7 +5,7 @@ import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_e
 import type { ActionUID, ChartAst, StateActionAst } from "../packages/hyperchart/src/core/types.js";
 import { createMachine, type MachineState } from "../packages/hyperchart/src/core/machine.js";
 import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
-import { finalMachineFailureMessage, terminalStateForFinalMachine } from "../packages/hyperchart/src/runtime/generic/run_outcome.js";
+import { finalMachineFailureMessage, terminalStateForFinalMachine } from "../packages/hyperchart/src/execution/run_outcome.js";
 
 function ast(config: Parameters<typeof normalizeChartConfig>[0]): ChartAst {
 	const result = normalizeChartConfig(config);

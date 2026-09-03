@@ -2,7 +2,8 @@ import { closeSync, existsSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { recoverStaleRunTerminalNotification, type HyperchartRunnerConfig } from "@surprisal/hyperchart/runtime";
+import { recoverStaleRunTerminalNotification } from "@surprisal/hyperchart/runtime";
+import type { HyperchartRunnerConfig } from "@surprisal/hyperchart/runner";
 import {
 	isRunLive,
 	isTerminalRunState,

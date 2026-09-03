@@ -1,5 +1,5 @@
 import { collectHistoryRecords } from "./helpers/history.js";
-import { commitUserInteractionResponse, prepareUserInteractionCommit } from "./helpers/user_interaction_commit.js";
+import { commitUserInteractionResponse, prepareUserInteractionCommit, type PreparedTestUserInteraction } from "./helpers/user_interaction_commit.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -8,18 +8,18 @@ import { tmpdir } from "node:os";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeChartConfig, type ChartAst, type ChartCst, type DurableRecordDraft } from "../packages/hyperchart/src/index.js";
 import { chart, final, user } from "../packages/hyperchart/src/core/dsl.js";
-import { HISTORY_READ_ITEMS, HistoryCursorError, openProjectionReplay } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { HISTORY_READ_ITEMS, HistoryCursorError, openExecutionReplay } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
 	PostgresLogStore,
-	PROJECTION_CHECKPOINT_TABLE,
+	CHECKPOINT_TABLE,
 	RUN_META_TABLE,
 } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
 import { deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { createPiHyperchartHost } from "../packages/pi-hyperchart/src/runtime/pi/host_adapter.js";
-import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/runtime/generic/projection_loader.js";
+import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
 
 const dsn = process.env.HYPERCHART_PG_DSN;
 const describePg = dsn === undefined ? describe.skip : describe;
@@ -91,6 +91,25 @@ async function journalStats(store: PostgresLogStore, runId: string): Promise<{ c
 	return { count: Number(result.rows[0]?.count), maxSeq: Number(result.rows[0]?.max_seq) };
 }
 
+async function forkAndCommitUserInteraction<T>(
+	store: PostgresLogStore,
+	input: { sourceBranchId: string; newBranchId: string; fromSeqId: number; responseBranchId: string; metadata?: import("../packages/hyperchart/src/core/durable_events.js").BranchMetadata; checkpoint?: import("../packages/hyperchart/src/runtime/generic/log_store.js").OpaqueCheckpointEnvelope; preparedResponse: PreparedTestUserInteraction },
+	participate: import("../packages/hyperchart/src/runtime/generic/postgres_log_store.js").SqlCommitParticipant<T>,
+) {
+	const prepared = input.preparedResponse;
+	const committed = await store.forkAndAppend({
+		sourceBranchId: input.sourceBranchId, newBranchId: input.newBranchId, fromSeqId: input.fromSeqId,
+		appendBranchId: input.responseBranchId, ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+		...(input.checkpoint === undefined ? {} : { checkpoint: input.checkpoint }),
+		append: { expectedHeadSeqId: prepared.expectedHeadSeqId, drafts: prepared.existing === undefined ? [prepared.draft] : [] },
+		...(prepared.existing === undefined ? { prepare: prepared.semantic.prepareStampedCommit } : {}),
+	}, participate);
+	const response = prepared.existing === undefined
+		? { record: committed.records[0] as import("../packages/hyperchart/src/runtime/generic/log_store.js").UserInteractionResponseCommit["record"], idempotent: false }
+		: { record: prepared.existing, idempotent: true };
+	return { branch: committed.branch, response, participant: committed.participant };
+}
+
 async function ensureClaimTable(store: PostgresLogStore): Promise<void> {
 	await store.transaction(async (tx) => {
 		await tx.query(`CREATE TABLE IF NOT EXISTS hyperchart_test_claims (
@@ -112,7 +131,7 @@ afterAll(async () => {
 	const { Client } = await import("pg");
 	const client = new Client({ connectionString: dsn });
 	await client.connect();
-	await client.query(`DELETE FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
+	await client.query(`DELETE FROM ${CHECKPOINT_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = ANY($1)`, [usedRunIds]).catch(() => {});
 	await client.query("DELETE FROM hyperchart_test_claims WHERE run_id = ANY($1)", [usedRunIds]).catch(() => {});
@@ -269,10 +288,10 @@ describePg("PostgresLogStore", () => {
 		const restored = await loadBranchProjection({ ast: chartAst, branchId: "fork", store: fork, contract });
 		expect(restored.checkpointHeadSeqId).toBe(prefix.at(-1)!.seqId);
 		expect(restored.replayedRecords).toBe(31);
-		const rows = await store.transaction((tx) => tx.query(`SELECT head_seq_id, projector_version, ast_digest FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY created_at_ms`, [runId]));
+		const rows = await store.transaction((tx) => tx.query(`SELECT head_seq_id, selector_key FROM ${CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY created_at_ms`, [runId]));
 		// Ordinary warm-tail restore preserves the 512-record cadence instead of eagerly caching the fork tip.
 		expect(rows.rows).toHaveLength(1);
-		expect(rows.rows.every((row) => row.projector_version === 1 && row.ast_digest === contract.astDigest)).toBe(true);
+		expect(rows.rows.every((row) => row.selector_key === contract.selectorKey)).toBe(true);
 	});
 
 	it("falls back from malformed, non-ancestral, and incompatible PostgreSQL checkpoints", async () => {
@@ -281,16 +300,16 @@ describePg("PostgresLogStore", () => {
 		const records = await store.appendDrafts([argsDraft({ index: 1 }), argsDraft({ index: 2 })]);
 		await store.createBranch("sibling", records[0]!.seqId);
 		const [siblingHead] = await store.forBranch("sibling").appendDrafts([argsDraft({ sibling: true })]);
-		await store.saveProjectionCheckpoint({ checkpointId: "sibling-only", headSeqId: siblingHead!.seqId, ...contract, payload: { schemaVersion: 1, projection: {} }, createdAt: 1 });
-		expect(await store.findNearestProjectionCheckpoint({ targetHeadSeqId: records.at(-1)!.seqId, ...contract })).toBeUndefined();
-		await store.saveProjectionCheckpoint({ checkpointId: "incompatible", headSeqId: records.at(-1)!.seqId, projectorVersion: contract.projectorVersion + 1, astDigest: contract.astDigest, payload: {}, createdAt: 2 });
-		await store.saveProjectionCheckpoint({ checkpointId: "malformed", headSeqId: records.at(-1)!.seqId, ...contract, payload: { schemaVersion: 1, projection: { seqId: records.at(-1)!.seqId, pendingActions: [{}] } }, createdAt: 3 });
+		await store.storeCheckpoint({ checkpointId: "sibling-only", headSeqId: siblingHead!.seqId, selectorKey: contract.selectorKey, blob: { schemaVersion: 1, projectorVersion: contract.projectorVersion, astDigest: contract.astDigest, projection: {} }, createdAt: 1 });
+		expect(await store.findNearestCheckpoint({ targetHeadSeqId: records.at(-1)!.seqId, selectorKey: contract.selectorKey })).toBeUndefined();
+		await store.storeCheckpoint({ checkpointId: "incompatible", headSeqId: records.at(-1)!.seqId, selectorKey: `wrong:${contract.selectorKey}`, blob: {}, createdAt: 2 });
+		await store.storeCheckpoint({ checkpointId: "malformed", headSeqId: records.at(-1)!.seqId, selectorKey: contract.selectorKey, blob: { schemaVersion: 1, projectorVersion: contract.projectorVersion, astDigest: contract.astDigest, projection: { seqId: records.at(-1)!.seqId, pendingActions: [{}] } }, createdAt: 3 });
 		const cold = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(cold.replayedRecords).toBe(2);
 		expect(cold.projection.args).toEqual({ index: 2 });
 		const warm = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(warm.replayedRecords).toBe(0);
-		const rows = await store.transaction((tx) => tx.query(`SELECT checkpoint_id FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY checkpoint_id`, [runId]));
+		const rows = await store.transaction((tx) => tx.query(`SELECT checkpoint_id FROM ${CHECKPOINT_TABLE} WHERE run_id = $1 ORDER BY checkpoint_id`, [runId]));
 		expect(rows.rows.map((row) => row.checkpoint_id)).not.toContain("malformed");
 		expect(rows.rows.map((row) => row.checkpoint_id)).toContain("incompatible");
 	});
@@ -298,19 +317,46 @@ describePg("PostgresLogStore", () => {
 	it("rolls back branch create and move when their prepared checkpoint cannot persist", async () => {
 		const runId = newRunId(); const store = await openWriter(runId); await store.initializeRootBranch();
 		const records = await store.appendDrafts([argsDraft({ index: 1 }), argsDraft({ index: 2 })]);
-		const invalid = { checkpointId: "invalid-json", headSeqId: records[0]!.seqId, projectorVersion: 1, astDigest: "a".repeat(64), payload: { value: 1n }, createdAt: Date.now() };
-		await expect(store.createBranchWithCheckpoint("rolled-back-fork", records[0]!.seqId, undefined, invalid)).rejects.toThrow();
+		const invalid = { checkpointId: "invalid-json", headSeqId: records[0]!.seqId, selectorKey: "invalid", blob: { value: 1n }, createdAt: Date.now() };
+		await expect(store.createBranch("rolled-back-fork", records[0]!.seqId, undefined, { checkpoint: invalid })).rejects.toThrow();
 		await expect(store.getBranch("rolled-back-fork")).rejects.toThrow(/Unknown/);
 		await store.createBranch("movable", records.at(-1)!.seqId);
-		await expect(store.moveBranchWithCheckpoint("movable", records[0]!.seqId, invalid)).rejects.toThrow();
+		await expect(store.moveBranch("movable", records[0]!.seqId, { checkpoint: invalid })).rejects.toThrow();
 		expect((await store.getBranch("movable")).headSeqId).toBe(records.at(-1)!.seqId);
+	});
+
+	it("rejects non-cloneable root/create/move/fork checkpoints before PostgreSQL mutation", async () => {
+		const rootStore = await openWriter(newRunId());
+		const invalidAt = (headSeqId: number | null) => ({ checkpointId: `invalid-${headSeqId ?? "root"}`, headSeqId, selectorKey: "opaque:test", blob: { fn: () => undefined }, createdAt: 1 });
+		await expect(rootStore.initializeRootBranch(undefined, { checkpoint: invalidAt(null) })).rejects.toThrow();
+		expect((await rootStore.listBranches()).items).toEqual([]);
+		await rootStore.initializeRootBranch();
+		const records = await rootStore.appendDrafts([argsDraft({ first: true }), argsDraft({ second: true })]);
+		await expect(rootStore.createBranch("invalid-create", records[0]!.seqId, undefined, { checkpoint: invalidAt(records[0]!.seqId) })).rejects.toThrow();
+		expect((await rootStore.listBranches()).items.some((branch) => branch.branchId === "invalid-create")).toBe(false);
+		await rootStore.createBranch("movable-clone", records.at(-1)!.seqId);
+		await expect(rootStore.moveBranch("movable-clone", records[0]!.seqId, { checkpoint: invalidAt(records[0]!.seqId) })).rejects.toThrow();
+		expect((await rootStore.getBranch("movable-clone")).headSeqId).toBe(records.at(-1)!.seqId);
+		let participated = 0;
+		await expect(rootStore.forkAndAppend({ sourceBranchId: "main", newBranchId: "invalid-fork-clone", fromSeqId: records[0]!.seqId, appendBranchId: "invalid-fork-clone", checkpoint: invalidAt(records[0]!.seqId), append: { expectedHeadSeqId: records[0]!.seqId, drafts: [] } }, async () => ++participated)).rejects.toThrow();
+		expect(participated).toBe(0);
+		expect((await rootStore.listBranches()).items.some((branch) => branch.branchId === "invalid-fork-clone")).toBe(false);
 	});
 
 	it("atomically rolls back a cadence append when checkpoint preparation fails", async () => {
 		const runId = newRunId();
 		const store = await openWriter(runId);
 		await store.initializeRootBranch();
-		await expect(store.appendDraftsWithCheckpoint([argsDraft({ atomic: true })], () => { throw new Error("checkpoint prepare failed"); })).rejects.toThrow(/checkpoint prepare failed/);
+		await expect(store.appendDrafts([argsDraft({ atomic: true })], () => { throw new Error("checkpoint prepare failed"); })).rejects.toThrow(/checkpoint prepare failed/);
+		expect(await store.countRecords()).toBe(0);
+	});
+
+	it("rejects non-cloneable opaque callback envelopes before PostgreSQL journal mutation", async () => {
+		const store = await openWriter(newRunId()); await store.initializeRootBranch();
+		await expect(store.appendDrafts([argsDraft({ atomic: true })], (records) => ({
+			checkpoints: [{ checkpointId: "noncloneable", headSeqId: records[0]!.seqId, selectorKey: "opaque:test", blob: { fn: () => undefined }, createdAt: 1 }],
+			committed: () => { throw new Error("must not confirm"); },
+		}))).rejects.toThrow();
 		expect(await store.countRecords()).toBe(0);
 	});
 
@@ -321,11 +367,11 @@ describePg("PostgresLogStore", () => {
 		const chartAst = userAst(); const contract = projectionContractForAst(chartAst);
 		await expect(store.transaction(async (tx) => {
 			const [record] = await tx.appendDrafts("main", [argsDraft({ rolledBack: true })]);
-			await tx.saveProjectionCheckpoint({ checkpointId: "rolled-back", headSeqId: record!.seqId, ...contract, payload: { schemaVersion: 1, projection: {} }, createdAt: Date.now() });
+			await tx.storeCheckpoint({ checkpointId: "rolled-back", headSeqId: record!.seqId, selectorKey: contract.selectorKey, blob: { schemaVersion: 1, projectorVersion: contract.projectorVersion, astDigest: contract.astDigest, projection: {} }, createdAt: Date.now() });
 			throw new Error("rollback checkpoint");
 		})).rejects.toThrow(/rollback checkpoint/);
 		expect(await store.countRecords()).toBe(0);
-		const rows = await store.transaction((tx) => tx.query(`SELECT COUNT(*)::int AS count FROM ${PROJECTION_CHECKPOINT_TABLE} WHERE run_id = $1`, [runId]));
+		const rows = await store.transaction((tx) => tx.query(`SELECT COUNT(*)::int AS count FROM ${CHECKPOINT_TABLE} WHERE run_id = $1`, [runId]));
 		expect(Number(rows.rows[0]?.count)).toBe(0);
 	});
 
@@ -431,7 +477,7 @@ describePg("PostgresLogStore", () => {
 		const gateSeqId = await appendOpenGate(store, ast);
 		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "experiment", snapshot: { branchId: "experiment", headSeqId: gateSeqId } });
 
-		const committed = await store.forkAndCommitUserInteraction({
+		const committed = await forkAndCommitUserInteraction(store, {
 			sourceBranchId: "main",
 			newBranchId: "experiment",
 			fromSeqId: gateSeqId,
@@ -452,7 +498,7 @@ describePg("PostgresLogStore", () => {
 		expect(claims.rows).toEqual([{ branch_id: "experiment" }]);
 
 		const retryPrepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "experiment" });
-		const retried = await store.forkAndCommitUserInteraction({
+		const retried = await forkAndCommitUserInteraction(store, {
 			sourceBranchId: "main",
 			newBranchId: "experiment",
 			fromSeqId: gateSeqId,
@@ -478,7 +524,7 @@ describePg("PostgresLogStore", () => {
 		expect((await store.getBranch("main")).headSeqId).not.toBe(gateSeqId);
 
 		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "historical-fork", snapshot: { branchId: "historical-fork", headSeqId: gateSeqId } });
-		const committed = await store.forkAndCommitUserInteraction({
+		const committed = await forkAndCommitUserInteraction(store, {
 			sourceBranchId: "main",
 			newBranchId: "historical-fork",
 			fromSeqId: gateSeqId,
@@ -499,7 +545,7 @@ describePg("PostgresLogStore", () => {
 		const ast = userAst();
 		const gateSeqId = await appendOpenGate(store, ast);
 		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "invalid-fork", snapshot: { branchId: "invalid-fork", headSeqId: gateSeqId } });
-		await expect(store.forkAndCommitUserInteraction({
+		await expect(forkAndCommitUserInteraction(store, {
 			sourceBranchId: "main",
 			newBranchId: "invalid-fork",
 			fromSeqId: gateSeqId + 1000,
@@ -518,7 +564,7 @@ describePg("PostgresLogStore", () => {
 		const before = (await journalStats(store, runId)).count;
 		const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, { type: "SELECTED" }, { branchId: "rolled-back", snapshot: { branchId: "rolled-back", headSeqId: gateSeqId } });
 
-		await expect(store.forkAndCommitUserInteraction({
+		await expect(forkAndCommitUserInteraction(store, {
 			sourceBranchId: "main",
 			newBranchId: "rolled-back",
 			fromSeqId: gateSeqId,
@@ -547,7 +593,7 @@ describePg("PostgresLogStore", () => {
 
 		let failure: unknown;
 		try {
-			await store.forkAndCommitUserInteraction({
+			await forkAndCommitUserInteraction(store, {
 				sourceBranchId: "main",
 				newBranchId: "loser",
 				fromSeqId: gateSeqId,
@@ -565,9 +611,9 @@ describePg("PostgresLogStore", () => {
 	it("rejects a composite response branch unrelated to source or new fork", async () => {
 		const store = await openWriter(newRunId());
 		await store.initializeRootBranch();
-		await expect(store.forkAndCommitUserInteraction({
-			sourceBranchId: "main", newBranchId: "experiment", fromSeqId: 1, responseBranchId: "unrelated",
-			preparedResponse: { expectedHeadSeqId: null, gateSeqId: 1, draft: { type: "user_interaction", kind: "resolved", gateSeqId: 1, actionUid: { chart: "chart", state: "state", action: "user" }, event: { type: "OK" } } },
+		await expect(store.forkAndAppend({
+			sourceBranchId: "main", newBranchId: "experiment", fromSeqId: 1, appendBranchId: "unrelated",
+			append: { expectedHeadSeqId: null, drafts: [] },
 		}, async () => undefined)).rejects.toThrow(/source branch or the newly created branch/);
 	});
 
@@ -643,7 +689,7 @@ describePg("PostgresLogStore", () => {
 		await store.initializeRootBranch();
 		const records = await store.appendDrafts(Array.from({ length: 1_201 }, () => invokeDraft()));
 		const batches: number[][] = [];
-		for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) batches.push(batch.map((record) => record.seqId));
+		for await (const batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) batches.push(batch.map((record) => record.seqId));
 		expect(batches.map((batch) => batch.length)).toEqual([500, 500, 201]);
 		expect(batches.flat()).toEqual(records.map((record) => record.seqId));
 	});

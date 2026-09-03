@@ -15,7 +15,7 @@ The target is one semantic durability boundary: the run journal is both executio
 
 ### Current implementation map
 
-- `packages/hyperchart/src/runtime/generic/user_interactions.ts` owns request/resolution/receipt schemas, active-gate scanning, ownership checks, validation, and atomic hard-link publication.
+- `packages/hyperchart/src/runner/user_interactions.ts` owns request/resolution/receipt schemas, active-gate scanning, ownership checks, validation, and atomic hard-link publication.
 - `packages/hyperchart/src/runtime/generic/user_executor.ts` implements mailbox polling and response delivery.
 - `packages/hyperchart/src/core/machine.ts` turns a live `user` callback into `state_action/complete`.
 - `packages/hyperchart/src/runtime/generic/chart_runtime.ts` dispatches `UserExecutor` effects and appends machine drafts.
@@ -57,7 +57,7 @@ A gate is open only when its opened fact is in the selected branch ancestry, has
 - `packages/hyperchart/src/core/machine.ts`
 - `packages/hyperchart/src/core/projection.ts`
 - `packages/hyperchart/src/core/replay_check.ts`
-- `packages/hyperchart/src/core/execution_loop.ts`
+- `packages/hyperchart/src/execution/execution_loop.ts`
 - `packages/hyperchart/src/runtime/generic/chart_runtime.ts`
 
 ### Journal writers and runner integration
@@ -66,13 +66,13 @@ A gate is open only when its opened fact is in the selected branch ancestry, has
 - `packages/hyperchart/src/runtime/generic/memory_log_store.ts`
 - `packages/hyperchart/src/runtime/generic/postgres_log_store.ts`
 - `packages/hyperchart/src/runtime/generic/log_store_factory.ts`
-- `packages/hyperchart/src/runtime/generic/runner_main.ts`
+- `packages/hyperchart/src/runner/runner_main.ts`
 - `packages/hyperchart/src/runtime/generic/runner_control.ts`
-- `packages/hyperchart/src/runtime/generic/branches.ts`
+- `packages/hyperchart/src/runner/branches.ts`
 
 ### User interaction and host surfaces
 
-- `packages/hyperchart/src/runtime/generic/user_interactions.ts`
+- `packages/hyperchart/src/runner/user_interactions.ts`
 - `packages/hyperchart/src/runtime/generic/user_executor.ts` (remove after cutover)
 - `packages/hyperchart/src/runtime/index.ts`
 - `packages/pi-hyperchart/extensions/hyperchart.ts`
@@ -99,9 +99,9 @@ A gate is open only when its opened fact is in the selected branch ancestry, has
 ## Reuse
 
 - Reuse user-effect reconstruction in `userInvocationForAction()` and pending-action identity in `packages/hyperchart/src/core/machine.ts`.
-- Reuse exact event/reply validation from `validateUserInteractionEvent()` in `packages/hyperchart/src/runtime/generic/user_interactions.ts`, moving the semantic portion to a backend-neutral admission layer.
+- Reuse exact event/reply validation from `validateUserInteractionEvent()` in `packages/hyperchart/src/runner/user_interactions.ts`, moving the semantic portion to a backend-neutral admission layer.
 - Reuse journal stamping and multi-record `appendDrafts()` calls from `packages/hyperchart/src/runtime/generic/log_store.ts`; durable storage remains flat.
-- Reuse targeted branch-history membership/response queries and restored projections as the source for open-gate checks and idempotency. Execution prepares the validated resolved draft; storage accepts only `commitPreparedUserInteraction()` and never imports the AST/projector admission layer.
+- Reuse targeted branch-history membership/response queries and restored projections as the source for open-gate checks and idempotency. Execution prepares the validated resolved draft; storage accepts only generic expected-head compare-and-append and never imports the AST/projector admission layer.
 - Reuse JSONL `acquireWriterLock()` and stale-length validation, but place validation and append in one critical section.
 - Reuse PostgreSQL advisory locking and `writeChain` serialization, adapting them to transaction-scoped composition rather than introducing a second interaction table.
 - Reuse existing ownership/session/cwd checks and presentation receipt arbitration where they remain host-delivery concerns.

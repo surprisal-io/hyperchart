@@ -33,37 +33,38 @@ import {
 	type StatePath,
 } from "@surprisal/hyperchart";
 import {
-	USER_INTERACTION_WAIT_LEASE_MS,
-	acquireActiveUserInteraction,
 	assertChartPreflight,
 	claimTerminalNotificationReceipt,
-	claimUserInteractionReceipt,
 	createRunDir,
 	deleteRunStorage,
-	forkHyperchartRun,
 	initializeRunDir,
-	listHyperchartBranchPage,
 	hasTerminalNotificationReceipt,
-	loadBranchProjection,
 	loadHostSettings,
 	loadRunMeta,
 	markTerminalNotificationReceipt,
-	markUserInteractionReceipt,
 	openRunLogStore,
-	projectionContractForAst,
 	readDeliverableTerminalNotificationRequest,
-	readRunnerConfig,
 	removeTerminalNotificationReceipt,
 	recoverStaleRunTerminalNotification,
-	rewindHyperchartRun,
 	saveRunMeta,
+	type RunMeta,
+} from "@surprisal/hyperchart/runtime";
+import {
+	USER_INTERACTION_WAIT_LEASE_MS,
+	acquireActiveUserInteraction,
+	claimUserInteractionReceipt,
+	forkHyperchartRun,
+	listHyperchartBranchPage,
+	markUserInteractionReceipt,
+	readRunnerConfig,
+	rewindHyperchartRun,
 	scanOwnedOpenUserInteractions,
 	validateAndPersistUserInteractionResponse,
 	type OwnedUserInteraction,
-	type RunMeta,
 	type RunTerminalState,
 	type UserInteractionOwner,
-} from "@surprisal/hyperchart/runtime";
+} from "@surprisal/hyperchart/runner";
+import { readBranchExecutionOverview } from "@surprisal/hyperchart/inspect";
 import {
 	getHyperchartRunsRoot,
 	getProjectHyperchartsDir,
@@ -2214,11 +2215,11 @@ async function readRunView(runDir: string, ast: ChartAst) {
 			snapshot = { branchId: store.branchId, headSeqId: null };
 			syntheticEmptyBranch = true;
 		}
-		const [loaded, records] = await Promise.all([
-			loadBranchProjection({ ast, branchId: store.branchId, store, contract: projectionContractForAst(ast), snapshot, saveCheckpoint: "never" }),
+		const [execution, records] = await Promise.all([
+			readBranchExecutionOverview(ast, store.branchId, store, snapshot),
 			syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
 		]);
-		return buildRunView(ast, [...records.items].reverse(), Date.now(), { projection: loaded.projection, branchId: snapshot.branchId });
+		return buildRunView(ast, [...records.items].reverse(), Date.now(), { execution, branchId: snapshot.branchId });
 	} finally { await store.close(); }
 }
 
@@ -2228,8 +2229,8 @@ async function loadRunArgs(runDir: string): Promise<Record<string, unknown> | un
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const store = await openRunLogStore(runDir, { access: "read" });
 	try {
-		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: store.branchId, store, contract: projectionContractForAst(parsed.ast), saveCheckpoint: "never" });
-		return loaded.projection.args === undefined ? undefined : { ...loaded.projection.args };
+		const execution = await readBranchExecutionOverview(parsed.ast, store.branchId, store);
+		return execution.args === undefined ? undefined : { ...execution.args };
 	} finally { await store.close(); }
 }
 

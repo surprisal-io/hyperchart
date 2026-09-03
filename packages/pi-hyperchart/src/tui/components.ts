@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import { getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, truncateToWidth, visibleWidth, type Component, type SelectItem, type TUI } from "@earendil-works/pi-tui";
 import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
-import { JsonlLogStore, loadBranchProjection, projectionContractForAst, type RunHistoryStore } from "@surprisal/hyperchart/runtime";
+import { JsonlLogStore, type RunHistoryStore } from "@surprisal/hyperchart/runtime";
+import { readBranchExecutionOverview } from "@surprisal/hyperchart/inspect";
 import {
 	readSessionProgress,
 	sessionProgressPath,
@@ -212,8 +213,8 @@ export class RunWidget implements Component {
 		const branchId = this.opts.branchId ?? "main";
 		const store = new JsonlLogStore(this.opts.logPath, branchId);
 		const snapshot = await store.captureSnapshot(branchId);
-		const [loaded, recordChunk, branches, recordCount] = await Promise.all([
-			loadBranchProjection({ ast: this.opts.ast, branchId, store, contract: projectionContractForAst(this.opts.ast), snapshot, saveCheckpoint: "never" }),
+		const [execution, recordChunk, branches, recordCount] = await Promise.all([
+			readBranchExecutionOverview(this.opts.ast, branchId, store, snapshot),
 			store.readRecords({ snapshot }),
 			readRunWidgetBranchOverview(store),
 			store.countRecords(),
@@ -226,7 +227,7 @@ export class RunWidget implements Component {
 			branches: branches.items.map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
 			branchCount: branches.totalCount,
 			recordCount,
-			projection: loaded.projection,
+			execution,
 		});
 		this.progress = readSessionProgress(resolve(this.opts.runDir, "sessions")).sessions;
 		this.progressPercent = summarizeHyperchartProgress(run).pct;

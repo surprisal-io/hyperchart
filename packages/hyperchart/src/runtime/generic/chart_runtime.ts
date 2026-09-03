@@ -2,20 +2,18 @@ import { promises as fsp } from "node:fs";
 import { dirname } from "node:path";
 import type { Runtime } from "../runtime.js";
 import type { ChartAst, ChartEvent, GuardOutcome } from "../../core/types.js";
-import { projectBranch, type BranchProjection } from "../../core/projection.js";
-import { compactProjection, compileProjectionRetention } from "../../core/projection_retention.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import type { AgentEffect, Effect, MachineEvent, RejectedEffect, RenderedArtifact } from "../../core/machine.js";
 import { ArtifactStore, hashFile } from "./artifact_store.js";
-import { checkArtifactContent, renderedArtifactPath } from "./artifacts.js";
+import { renderedArtifactPath } from "./artifacts.js";
+import type { SchemaCheck } from "./schema.js";
 import { actorContextForState } from "../../core/actors.js";
 import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { AgentExecutor } from "./agent_executor.js";
-import type { LogStore, ProjectionCheckpointStore } from "./log_store.js";
-import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst, PROJECTION_CHECKPOINT_INTERVAL, type LoadedBranchProjection } from "./projection_loader.js";
+import type { CheckpointRepository, LogStore, PrepareStampedCommit } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
 import { checkSchemaAsync } from "./schema.js";
@@ -24,7 +22,11 @@ export type ChartRuntimeOptions = {
 	ast: ChartAst;
 	/** Explicit non-durable branch handle for replay and every append. */
 	branchId: BranchId;
-	logStore: LogStore & ProjectionCheckpointStore;
+	logStore: LogStore & CheckpointRepository;
+	/** Execution-owned opaque prepare/confirm callback invoked under the store writer boundary. */
+	prepareStampedCommit?: PrepareStampedCommit;
+	/** Execution-owned semantic validation over runtime-acquired immutable bytes. */
+	validateArtifactSnapshot?: (artifact: RenderedArtifact, content: string) => Promise<SchemaCheck>;
 	agentExecutor: AgentExecutor;
 	/** Repository/project directory that owns the run. Scripts remain cwd-scoped to workDir. */
 	projectDir?: string;
@@ -36,16 +38,7 @@ export type ChartRuntimeOptions = {
 	schemaRegistry?: SchemaRegistryLike;
 	now?: () => number;
 	onWarn?: (msg: string) => void;
-	/** Projection already restored by the runner replay gate. */
-	initialProjection?: LoadedBranchProjection;
 };
-
-export type PreparedCommittedRecords = Readonly<{
-	records: readonly DurableLogRecord[];
-	projection: BranchProjection;
-	recordsSinceCheckpoint: number;
-	checkpoints: readonly ReturnType<typeof prepareProjectionCheckpoint>[];
-}>;
 
 export class ChartRuntime implements Runtime {
 	readonly branchId: BranchId;
@@ -63,11 +56,6 @@ export class ChartRuntime implements Runtime {
 	private quiescing = false;
 	private disposed = false;
 	private disposal?: Promise<void>;
-	private projection?: BranchProjection;
-	private recordsSinceCheckpoint = 0;
-	private checkpointable = true;
-	private readonly projectionContract;
-	private readonly retention;
 
 	constructor(private readonly options: ChartRuntimeOptions) {
 		if (options.logStore.branchId !== options.branchId) {
@@ -82,13 +70,22 @@ export class ChartRuntime implements Runtime {
 		if (options.runDir !== undefined) this.artifactStore = new ArtifactStore(options.runDir);
 		this.now = options.now ?? Date.now;
 		this.onWarn = options.onWarn ?? (() => {});
-		this.projectionContract = projectionContractForAst(options.ast);
-		this.retention = compileProjectionRetention(options.ast);
-		if (options.initialProjection !== undefined) {
-			this.projection = structuredClone(options.initialProjection.projection);
-			this.recordsSinceCheckpoint = options.initialProjection.checkpointSaved ? 0 : options.initialProjection.replayedRecords;
-			this.checkpointable = options.initialProjection.checkpointable;
-		}
+	}
+
+	/** Composition metadata used by the execution layer; contains no projection state. */
+	executionInputs(): { ast: ChartAst; store: LogStore & CheckpointRepository; schemaRegistry?: SchemaRegistryLike } {
+		return { ast: this.options.ast, store: this.options.logStore, ...(this.options.schemaRegistry === undefined ? {} : { schemaRegistry: this.options.schemaRegistry }) };
+	}
+
+	/** Composition hook: accepts an opaque callback without importing execution semantics. */
+	bindArtifactValidator(validate: (artifact: RenderedArtifact, content: string) => Promise<SchemaCheck>): void {
+		if (this.options.validateArtifactSnapshot !== undefined && this.options.validateArtifactSnapshot !== validate) throw new Error("ChartRuntime artifact validator is already bound");
+		this.options.validateArtifactSnapshot = validate;
+	}
+
+	bindStampedCommit(prepare: PrepareStampedCommit): void {
+		if (this.options.prepareStampedCommit !== undefined && this.options.prepareStampedCommit !== prepare) throw new Error("ChartRuntime commit preparer is already bound");
+		this.options.prepareStampedCommit = prepare;
 	}
 
 	runEffects(effects: Effect[]): Promise<void> {
@@ -110,23 +107,7 @@ export class ChartRuntime implements Runtime {
 				if (this.quiescing) return;
 				switch (effect.kind) {
 				case "durable_records": {
-					await this.ensureProjection();
-					let projected: BranchProjection | undefined;
-					let remaining = this.recordsSinceCheckpoint;
-					const records = await this.options.logStore.appendDraftsWithCheckpoint(effect.records, (committed) => {
-						const checkpoints = [];
-						for (const record of committed) {
-							projected = this.projectRecordsFrom(projected ?? this.projection!, [record]);
-							remaining++;
-							if (remaining === PROJECTION_CHECKPOINT_INTERVAL) {
-								if (this.checkpointable) checkpoints.push(prepareProjectionCheckpoint(projected, this.projectionContract, record.seqId));
-								remaining = 0;
-							}
-						}
-						return checkpoints;
-					});
-					if (projected !== undefined) this.projection = projected;
-					this.recordsSinceCheckpoint = remaining;
+					const records = await this.options.logStore.appendDrafts(effect.records, this.options.prepareStampedCommit);
 					if (!this.quiescing) this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 					break;
 				}
@@ -252,65 +233,14 @@ export class ChartRuntime implements Runtime {
 		}
 	}
 
-	/** Prepare projection/cache state synchronously after storage stamps external records. */
-	prepareCommittedRecords(records: readonly DurableLogRecord[]): PreparedCommittedRecords {
-		if (this.projection === undefined) throw new Error("ChartRuntime projection is not restored");
-		let projection = this.projection;
-		let remaining = this.recordsSinceCheckpoint;
-		const checkpoints: ReturnType<typeof prepareProjectionCheckpoint>[] = [];
-		for (const record of records) {
-			projection = this.projectRecordsFrom(projection, [record]);
-			remaining++;
-			if (remaining === PROJECTION_CHECKPOINT_INTERVAL) {
-				if (this.checkpointable) checkpoints.push(prepareProjectionCheckpoint(projection, this.projectionContract, record.seqId));
-				remaining = 0;
-			}
-		}
-		return { records, projection, recordsSinceCheckpoint: remaining, checkpoints };
-	}
-
-	/** Apply records committed by this runtime's own control API without a storage watcher. */
-	acknowledgePreparedCommittedRecords(prepared: PreparedCommittedRecords, effectId: string): void {
-		if (prepared.records.length === 0 || this.disposed) return;
-		this.projection = prepared.projection;
-		this.recordsSinceCheckpoint = prepared.recordsSinceCheckpoint;
-		this.send({ kind: "durable_records_added", effectId, records: prepared.records });
-	}
-
+	/** Queue records committed by an external control path; execution was confirmed under the store writer boundary. */
 	acknowledgeCommittedRecords(records: readonly DurableLogRecord[], effectId: string): void {
 		if (records.length === 0 || this.disposed) return;
-		if (this.projection === undefined) throw new Error("ChartRuntime projection is not restored");
-		const unseen = records.filter((record) => record.seqId > this.projection!.seqId);
-		if (unseen.length === 0) return;
-		const prepared = this.prepareCommittedRecords(unseen);
-		for (const checkpoint of prepared.checkpoints) this.track(this.options.logStore.saveProjectionCheckpoint(checkpoint));
-		this.acknowledgePreparedCommittedRecords(prepared, effectId);
+		this.send({ kind: "durable_records_added", effectId, records });
 	}
 
 	eventsQueue(): AsyncIterable<MachineEvent> {
 		return this.queue;
-	}
-
-	async loadAst(): Promise<ChartAst> {
-		return this.options.ast;
-	}
-
-	async loadProjection(): Promise<BranchProjection> {
-		await this.ensureProjection();
-		return structuredClone(this.projection!);
-	}
-
-	private async ensureProjection(): Promise<void> {
-		if (this.projection !== undefined) return;
-		const loaded = await loadBranchProjection({
-			ast: this.options.ast,
-			branchId: this.branchId,
-			store: this.options.logStore,
-			contract: this.projectionContract,
-		});
-		this.projection = structuredClone(loaded.projection);
-		this.recordsSinceCheckpoint = loaded.checkpointSaved ? 0 : loaded.replayedRecords;
-		this.checkpointable = loaded.checkpointable;
 	}
 
 	/** Synchronously reject new effects and late host callbacks without finalizing durable state. */
@@ -337,10 +267,6 @@ export class ChartRuntime implements Runtime {
 		const cleanupResults = await Promise.allSettled(cleanups);
 		while (this.effectRuns.size > 0) await Promise.allSettled([...this.effectRuns]);
 		await this.drainPending();
-		if (this.projection !== undefined && this.checkpointable && this.recordsSinceCheckpoint > 0) {
-			await this.options.logStore.saveProjectionCheckpoint(prepareProjectionCheckpoint(this.projection, this.projectionContract));
-			this.recordsSinceCheckpoint = 0;
-		}
 		this.queue.close();
 		const errors = [
 			...cleanupResults.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
@@ -349,18 +275,6 @@ export class ChartRuntime implements Runtime {
 		if (errors.length > 0) {
 			throw new AggregateError(errors, `ChartRuntime disposal failed: ${errors.map(errorMessage).join("; ")}`);
 		}
-	}
-
-	private projectRecords(records: readonly DurableLogRecord[]): BranchProjection {
-		if (this.projection === undefined) throw new Error("ChartRuntime projection is not restored");
-		return this.projectRecordsFrom(this.projection, records);
-	}
-
-	private projectRecordsFrom(base: BranchProjection, records: readonly DurableLogRecord[]): BranchProjection {
-		const projected = structuredClone(base);
-		projectBranch(projected, this.options.ast, records);
-		compactProjection(projected, this.options.ast, this.retention);
-		return projected;
 	}
 
 	private track(task: Promise<unknown>): void {
@@ -440,7 +354,9 @@ export class ChartRuntime implements Runtime {
 				const pin = await store.put(renderedArtifactPath(artifact, this.options.workDir));
 				if (artifact.shape !== undefined) {
 					const content = await fsp.readFile(store.objectPath(pin.hash), "utf8");
-					const check = await checkArtifactContent(artifact, content, this.options.schemaRegistry);
+					const validate = this.options.validateArtifactSnapshot;
+					if (validate === undefined) throw new Error("Execution did not provide artifact snapshot validation");
+					const check = await validate(artifact, content);
 					if (!check.ok) {
 						throw new Error(`Artifact ${artifact.path}: snapshotted content is invalid: ${check.errors.join("; ")}`);
 					}

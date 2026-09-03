@@ -3,7 +3,7 @@ import { commitUserInteractionResponse } from "./helpers/user_interaction_commit
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
 import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
 import type { ChartAst } from "../packages/hyperchart/src/core/types.js";
@@ -23,10 +23,10 @@ import {
 	userInteractionDir,
 	validateAndPersistUserInteractionResponse,
 	type UserInteractionOwner,
-} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
+} from "../packages/hyperchart/src/runner/user_interactions.js";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 async function fixture(reply = false, loadCounterKey?: string) {
 	const root = mkdtempSync(join(tmpdir(), "hyperchart-journal-input-")); roots.push(root);
@@ -91,6 +91,41 @@ describe("journal-native user interactions", () => {
 		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await collectHistoryRecords(refreshed, "main"));
 		expect(projection.openUserInteractions).toEqual({});
 		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "resolution.json"))).toBe(false);
+	});
+
+	it("reopens and reclassifies an identical stopped-JSONL head race", async () => {
+		const f = await fixture();
+		const original = JsonlLogStore.prototype.appendDraftsAtHead;
+		let raced = false;
+		vi.spyOn(JsonlLogStore.prototype, "appendDraftsAtHead").mockImplementation(async function (this: JsonlLogStore, input, prepare) {
+			if (!raced) { raced = true; await f.store.appendDrafts(input.drafts); }
+			return original.call(this, input, prepare);
+		});
+		const result = await validateAndPersistUserInteractionResponse({ runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) });
+		expect(result.idempotent).toBe(true);
+	});
+
+	it("reclassifies a divergent stopped-JSONL head race without a second append", async () => {
+		const f = await fixture();
+		const state = f.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
+		const original = JsonlLogStore.prototype.appendDraftsAtHead;
+		let raced = false;
+		vi.spyOn(JsonlLogStore.prototype, "appendDraftsAtHead").mockImplementation(async function (this: JsonlLogStore, input, prepare) {
+			if (!raced) { raced = true; await f.store.appendDrafts([{ type: "user_interaction", kind: "resolved", gateSeqId: f.gateSeqId, actionUid: state.action.uid, event: { type: "APPROVED", output: "winner" } }]); }
+			return original.call(this, input, prepare);
+		});
+		await expect(validateAndPersistUserInteractionResponse({ runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED", output: "loser" }, owner: owner(f.runsRoot, f.workDir) })).rejects.toThrow(/Conflicting response/);
+	});
+
+	it("reclassifies a gate closed by a stopped-JSONL head race", async () => {
+		const f = await fixture();
+		const original = JsonlLogStore.prototype.appendDraftsAtHead;
+		let raced = false;
+		vi.spyOn(JsonlLogStore.prototype, "appendDraftsAtHead").mockImplementation(async function (this: JsonlLogStore, input, prepare) {
+			if (!raced) { raced = true; await f.store.appendDrafts([{ type: "failure_intent", origin: "ask", error: "closed" }]); }
+			return original.call(this, input, prepare);
+		});
+		await expect(validateAndPersistUserInteractionResponse({ runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) })).rejects.toThrow(/stale or closed/);
 	});
 
 	it("routes a live response through the owning runner control API", async () => {

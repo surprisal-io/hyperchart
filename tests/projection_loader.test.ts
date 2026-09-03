@@ -9,17 +9,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import { actor, actorPool, agent, arg, artifact, call, chart, compound, final, map, message, parallel, protocol, receive, reply, t, user } from "../packages/hyperchart/src/core/dsl.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
 import { createBranchProjection, projectBranch, type BranchProjection } from "../packages/hyperchart/src/core/projection.js";
-import { compactProjection, compileProjectionRetention } from "../packages/hyperchart/src/core/projection_retention.js";
+import { compactProjection, compileProjectionRetention } from "../packages/hyperchart/src/execution/projection_retention.js";
 import type { ChartAst, ChartCst } from "../packages/hyperchart/src/core/types.js";
 import type { DurableLogRecord, DurableRecordDraft } from "../packages/hyperchart/src/core/durable_events.js";
 import type { Effect, MachineEvent } from "../packages/hyperchart/src/core/machine.js";
 import type { Runtime } from "../packages/hyperchart/src/runtime/runtime.js";
-import { start } from "../packages/hyperchart/src/core/execution_loop.js";
+import { start } from "./helpers/execution.js";
 import { createAsyncQueue } from "../packages/hyperchart/src/utils/async_queue.js";
 import { z } from "zod";
-import { JsonlLogStore, openProjectionReplay, PROJECTION_READ_RECORDS } from "../packages/hyperchart/src/runtime/generic/log_store.js";
+import { JsonlLogStore, openExecutionReplay } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import {
+	EXECUTION_REPLAY_BATCH_RECORDS,
 	PROJECTION_CHECKPOINT_INTERVAL,
 	PROJECTOR_VERSION,
 	chartAstDigest,
@@ -27,7 +28,7 @@ import {
 	encodeCheckpoint,
 	loadBranchProjection,
 	projectionContractForAst,
-} from "../packages/hyperchart/src/runtime/generic/projection_loader.js";
+} from "../packages/hyperchart/src/execution/projection_restore.js";
 
 const dirs: string[] = [];
 afterEach(async () => { await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
@@ -139,7 +140,7 @@ it("digests canonical normalized ChartAst JSON independent of object insertion o
 	const original = ast();
 	const reordered = { ...original, states: Object.fromEntries(Object.entries(original.states).reverse()) } as ChartAst;
 	expect(chartAstDigest(reordered)).toBe(chartAstDigest(original));
-	expect(projectionContractForAst(original)).toEqual({ projectorVersion: PROJECTOR_VERSION, astDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+	expect(projectionContractForAst(original)).toEqual({ projectorVersion: PROJECTOR_VERSION, astDigest: expect.stringMatching(/^[a-f0-9]{64}$/), selectorKey: expect.stringMatching(/^hyperchart-projection:/) });
 });
 
 describe("projection checkpoint schema", () => {
@@ -156,7 +157,7 @@ describe("projection checkpoint schema", () => {
 		];
 		for (const poison of poisons) {
 			const candidate = structuredClone(encoded);
-			poison((candidate.payload as { projection: Record<string, unknown> }).projection);
+			poison((candidate.blob as { projection: Record<string, unknown> }).projection);
 			expect(decodeCheckpoint(candidate)).toBeUndefined();
 		}
 	});
@@ -167,12 +168,12 @@ describe("projection checkpoint schema", () => {
 		await jsonl.initializeRootBranch();
 		const stores = [new MemoryLogStore(), jsonl];
 		for (const store of stores) {
-			const checkpoint = { checkpointId: "isolated", headSeqId: null, projectorVersion: 1, astDigest: "a".repeat(64), payload: { nested: { value: 1 } }, createdAt: 1 };
-			await store.saveProjectionCheckpoint(checkpoint);
-			const first = await store.loadExactProjectionCheckpoint({ targetHeadSeqId: null, projectorVersion: 1, astDigest: "a".repeat(64) });
-			(first!.payload as { nested: { value: number } }).nested.value = 99;
-			const second = await store.findNearestProjectionCheckpoint({ targetHeadSeqId: null, projectorVersion: 1, astDigest: "a".repeat(64) });
-			expect(second?.payload).toEqual({ nested: { value: 1 } });
+			const checkpoint = { checkpointId: "isolated", headSeqId: null, selectorKey: "test", blob: { nested: { value: 1 } }, createdAt: 1 };
+			await store.storeCheckpoint(checkpoint);
+			const first = await store.loadExactCheckpoint({ targetHeadSeqId: null, selectorKey: "test" });
+			(first!.blob as { nested: { value: number } }).nested.value = 99;
+			const second = await store.findNearestCheckpoint({ targetHeadSeqId: null, selectorKey: "test" });
+			expect(second?.blob).toEqual({ nested: { value: 1 } });
 		}
 	});
 });
@@ -182,7 +183,7 @@ describe("projection loader", () => {
 		const chartAst = bareMapAst(); const store = new MemoryLogStore(); const contract = projectionContractForAst(chartAst);
 		const projection = createBranchProjection(chartAst);
 		expect(projection.activeLeaves).toEqual(["jobs"]);
-		await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: "bare-map", headSeqId: null, contract, projection, createdAt: 1 }));
+		await store.storeCheckpoint(encodeCheckpoint({ checkpointId: "bare-map", headSeqId: null, contract, projection, createdAt: 1 }));
 		const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(loaded.projection).toEqual(projection);
 		expect(loaded.checkpointSaved).toBe(false);
@@ -191,7 +192,7 @@ describe("projection loader", () => {
 	it("falls back from a matching root checkpoint with an unknown active leaf", async () => {
 		const chartAst = ast(); const store = new MemoryLogStore(); const contract = projectionContractForAst(chartAst);
 		const poisoned = createBranchProjection(chartAst); poisoned.activeLeaves = ["missing-state"];
-		await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: "missing-root-leaf", headSeqId: null, contract, projection: poisoned, createdAt: 1 }));
+		await store.storeCheckpoint(encodeCheckpoint({ checkpointId: "missing-root-leaf", headSeqId: null, contract, projection: poisoned, createdAt: 1 }));
 		const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(loaded.replayedRecords).toBe(0);
 		expect(loaded.projection).toEqual(createBranchProjection(chartAst));
@@ -204,14 +205,14 @@ describe("projection loader", () => {
 		const chartAst = ast();
 		const contract = projectionContractForAst(chartAst);
 		const batchSizes: number[] = [];
-		for await (const batch of openProjectionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) batchSizes.push(batch.length);
+		for await (const batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null })) batchSizes.push(batch.length);
 		const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(loaded.projection).toEqual(fullyProject(chartAst, records));
 		expect(PROJECTION_CHECKPOINT_INTERVAL).toBe(512);
 		expect(loaded.replayedRecords).toBe(1_203);
 		expect(loaded.replayBatches).toBe(3);
 		expect(batchSizes).toEqual([500, 500, 203]);
-		expect(Math.max(...batchSizes)).toBe(PROJECTION_READ_RECORDS);
+		expect(Math.max(...batchSizes)).toBe(EXECUTION_REPLAY_BATCH_RECORDS);
 		expect(loaded.checkpointSaved).toBe(true);
 
 		const warm = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
@@ -286,7 +287,7 @@ describe("projection loader", () => {
 			const seededRecords = await collectHistoryRecords(store, "main");
 			const seededReference = fullyProject(chartAst, seededRecords);
 			const candidate = structuredClone(seededReference) as unknown as MutableProjection; mutate(candidate);
-			await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `coordinate-${index}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: candidate as unknown as BranchProjection, createdAt: index + 1 }));
+			await store.storeCheckpoint(encodeCheckpoint({ checkpointId: `coordinate-${index}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: candidate as unknown as BranchProjection, createdAt: index + 1 }));
 			const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 			expect(loaded.replayedRecords).toBe(seededRecords.length);
 			expect(loaded.projection).toEqual(seededReference);
@@ -313,7 +314,7 @@ describe("projection loader", () => {
 			const actor = Object.values(poisoned.actors)[0]!; const oldKey = actor.occurrence;
 			actor.owner = owner; actor.logicalOccurrence = `${owner}.@endpoint`; actor.occurrence = actor.logicalOccurrence;
 			delete poisoned.actors[oldKey]; poisoned.actors[actor.occurrence] = actor;
-			await store.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `owner-${owner}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
+			await store.storeCheckpoint(encodeCheckpoint({ checkpointId: `owner-${owner}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
 			const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 			expect(loaded.replayedRecords).toBe(seededRecords.length);
 			expect(loaded.projection).toEqual(seededReference);
@@ -337,7 +338,7 @@ describe("projection loader", () => {
 			const poisoned = structuredClone(seededReference); const actor = Object.values(poisoned.actors)[0]!; const oldKey = actor.occurrence;
 			actor.owner = `${endpoint.owner}.missing`; actor.logicalOccurrence = `${actor.owner}.${actor.declaration.split(".").at(-1)}`; actor.occurrence = actor.logicalOccurrence;
 			delete poisoned.actors[oldKey]; poisoned.actors[actor.occurrence] = actor;
-			await poisonStore.saveProjectionCheckpoint(encodeCheckpoint({ checkpointId: `poison-${ownerKind}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
+			await poisonStore.storeCheckpoint(encodeCheckpoint({ checkpointId: `poison-${ownerKind}`, headSeqId: seededRecords.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
 			const rebuilt = await loadBranchProjection({ ast: chartAst, branchId: "main", store: poisonStore, contract });
 			expect(rebuilt.replayedRecords).toBe(seededRecords.length); expect(rebuilt.projection).toEqual(seededReference);
 		}
@@ -351,13 +352,23 @@ describe("projection loader", () => {
 		await waitForRecord(store, (entry): entry is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> => entry.type === "actor_message" && entry.kind === "accepted", "actor call was not accepted");
 		const records = await collectHistoryRecords(store, "main"); const reference = fullyProject(chartAst, records);
 		expect(Object.keys(reference.pendingActorCalls)).toHaveLength(1);
-		expect(Object.values(reference.actors)[0]?.currentMessage?.status).toBe("accepted");
+		const currentMessageId = Object.values(reference.actors)[0]?.currentMessageId;
+		expect(currentMessageId === undefined ? undefined : reference.liveActorMessages[currentMessageId]?.status).toBe("accepted");
+		expect(Object.values(reference.pendingActorCalls)[0]).not.toHaveProperty("messages");
 		const contract = projectionContractForAst(chartAst);
 		const cold = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(cold.projection).toEqual(reference);
 		const warm = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(warm.replayedRecords).toBe(0);
 		expect(warm.projection).toEqual(reference);
+
+		const poisonStore = await seedMemoryLogStore(records);
+		const poisoned = structuredClone(reference);
+		delete poisoned.liveActorMessages[currentMessageId!];
+		await poisonStore.storeCheckpoint(encodeCheckpoint({ checkpointId: "missing-canonical-message", headSeqId: records.at(-1)!.seqId, contract, projection: poisoned, createdAt: 1 }));
+		const rebuilt = await loadBranchProjection({ ast: chartAst, branchId: "main", store: poisonStore, contract });
+		expect(rebuilt.replayedRecords).toBe(records.length);
+		expect(rebuilt.projection).toEqual(reference);
 	});
 
 	it("reuses the nearest shared-ancestry checkpoint across fork and rewind", async () => {
@@ -387,11 +398,11 @@ describe("projection loader", () => {
 		await store.createBranch("sibling", mainHead!.seqId);
 		const [siblingHead] = await store.forBranch("sibling").appendDrafts([args(2)]);
 		const chartAst = ast(); const contract = projectionContractForAst(chartAst);
-		await store.saveProjectionCheckpoint({ checkpointId: "wrong-contract", headSeqId: mainHead!.seqId, projectorVersion: PROJECTOR_VERSION + 1, astDigest: contract.astDigest, payload: {}, createdAt: 1 });
-		await store.saveProjectionCheckpoint({ checkpointId: "sibling-only", headSeqId: siblingHead!.seqId, ...contract, payload: { schemaVersion: 1, projection: {} }, createdAt: 2 });
+		await store.storeCheckpoint({ checkpointId: "wrong-contract", headSeqId: mainHead!.seqId, selectorKey: `wrong:${contract.selectorKey}`, blob: {}, createdAt: 1 });
+		await store.storeCheckpoint({ checkpointId: "sibling-only", headSeqId: siblingHead!.seqId, selectorKey: contract.selectorKey, blob: { schemaVersion: 1, projectorVersion: contract.projectorVersion, astDigest: contract.astDigest, projection: {} }, createdAt: 2 });
 		const poisonedProjection = fullyProject(chartAst, await collectHistoryRecords(store, "main")) as unknown as Record<string, unknown>;
 		poisonedProjection.pendingActions = [{}];
-		await store.saveProjectionCheckpoint({ checkpointId: "malformed", headSeqId: mainHead!.seqId, ...contract, payload: { schemaVersion: 1, projection: poisonedProjection }, createdAt: 3 });
+		await store.storeCheckpoint({ checkpointId: "malformed", headSeqId: mainHead!.seqId, selectorKey: contract.selectorKey, blob: { schemaVersion: 1, projectorVersion: contract.projectorVersion, astDigest: contract.astDigest, projection: poisonedProjection }, createdAt: 3 });
 		const before = await readFile(file, "utf8");
 		const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(loaded.replayedRecords).toBe(1);
@@ -415,11 +426,11 @@ describe("projection loader", () => {
 			event: { type: "DONE" },
 		}]);
 		await expect(loadBranchProjection({ ast: chartAst, branchId: "main", store, contract })).rejects.toThrow();
-		expect(await store.loadExactProjectionCheckpoint({ targetHeadSeqId: (await store.getBranch("main")).headSeqId, ...contract })).toBeUndefined();
+		expect(await store.loadExactCheckpoint({ targetHeadSeqId: (await store.getBranch("main")).headSeqId, ...contract })).toBeUndefined();
 	});
 
 	it("rejects a caller contract that is not the supplied AST contract", async () => {
 		const store = new MemoryLogStore(); const chartAst = ast();
-		await expect(loadBranchProjection({ ast: chartAst, branchId: "main", store, contract: { projectorVersion: PROJECTOR_VERSION, astDigest: "0".repeat(64) } })).rejects.toThrow(/does not match/);
+		await expect(loadBranchProjection({ ast: chartAst, branchId: "main", store, contract: { projectorVersion: PROJECTOR_VERSION, astDigest: "0".repeat(64), selectorKey: "wrong" } })).rejects.toThrow(/does not match/);
 	});
 });

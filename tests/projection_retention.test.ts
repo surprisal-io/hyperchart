@@ -3,9 +3,7 @@ import {
 	agent,
 	arg,
 	chart,
-	compactProjection,
 	compound,
-	compileProjectionRetention,
 	createBranchProjection,
 	final,
 	map,
@@ -17,6 +15,7 @@ import {
 } from "../packages/hyperchart/src/index.js";
 import type { ChartAst, ChartCst } from "../packages/hyperchart/src/index.js";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
+import { compactProjection, compileProjectionRetention } from "../packages/hyperchart/src/execution/projection_retention.js";
 
 function parsed(config: ChartCst): ChartAst {
 	const normalized = normalizeChartConfig(config);
@@ -144,6 +143,7 @@ describe("projection retention", () => {
 		projection.spawns.items = { one: 1 };
 		projection.stateVisits["compact:restart:agent"] = 4;
 		projection.actorProducerVisits.sender = 3;
+		projection.liveActorMessages.orphan = { messageId: "orphan", event: "TEST", input: {}, producerState: "sender", producerVisit: 3, batchIndex: 0, status: "settled" };
 		const retainedActors = projection.actors;
 		const retainedPools = projection.actorPools;
 
@@ -156,6 +156,7 @@ describe("projection retention", () => {
 		expect(projection.spawns.items).toEqual({ one: 1 });
 		expect(projection.stateVisits["compact:restart:agent"]).toBe(4);
 		expect(projection.actorProducerVisits.sender).toBe(3);
+		expect(projection.liveActorMessages).toEqual({});
 		expect(projection.actors).toBe(retainedActors);
 		expect(projection.actorPools).toBe(retainedPools);
 	});

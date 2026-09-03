@@ -1,8 +1,8 @@
-import { readRunnerConfig, runHyperchartRunner } from "@surprisal/hyperchart/runtime";
+import { readRunnerConfig, runHyperchartRunner } from "@surprisal/hyperchart/runner";
 import { ClaudeAgentExecutor } from "./claude_agent_executor.js";
 import { resolveClaudeSubagentDefinitionDirs } from "./agent_definitions.js";
 
-export type { HyperchartRunnerConfig } from "@surprisal/hyperchart/runtime";
+export type { HyperchartRunnerConfig } from "@surprisal/hyperchart/runner";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
 	const configPath = argv[0];

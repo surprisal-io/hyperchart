@@ -1,5 +1,6 @@
-export { hyperchartRunFromRunDir, hyperchartRunOverviewFromRunDir } from "./run_inspect.js";
+export { hyperchartRunFromRunDir, hyperchartRunOverviewFromRunDir, readBranchExecutionOverview } from "./run_inspect.js";
 export { createRunInspectorDataSource } from "./run_history.js";
+export type { BranchExecutionOverview } from "../execution/branch_execution.js";
 export type {
 	HyperchartRunFromRunDirBaseOptions,
 	HyperchartRunFromRunDirOptions,

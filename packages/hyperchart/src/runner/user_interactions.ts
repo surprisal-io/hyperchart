@@ -2,16 +2,15 @@ import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { parseChartModuleSync } from "../../core/inspect.js";
-import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../../core/durable_events.js";
-import type { ActionUID, ChartEvent, SchemaAst } from "../../core/types.js";
-import { loadRunMeta } from "./run_dir.js";
-import { openRunLogStore } from "./log_store_factory.js";
-import { collectBranches } from "./log_store.js";
-import { loadBranchProjection, projectionContractForAst } from "./projection_loader.js";
-import { requestLiveRunnerUserResponse, RunnerControlUnavailableError } from "./runner_control.js";
-import { isRunLive, readRunStatus } from "./run_status.js";
-import { prepareUserInteractionResponseFromProjection } from "./user_interaction_admission.js";
+import { parseChartModuleSync } from "../core/inspect.js";
+import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../core/durable_events.js";
+import type { ActionUID, ChartEvent, SchemaAst } from "../core/types.js";
+import { loadRunMeta } from "../runtime/generic/run_dir.js";
+import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
+import { BranchHeadMovedError, collectBranches } from "../runtime/generic/log_store.js";
+import { BranchExecution } from "../execution/branch_execution.js";
+import { requestLiveRunnerUserResponse, RunnerControlUnavailableError } from "../runtime/generic/runner_control.js";
+import { isRunLive, readRunStatus } from "../runtime/generic/run_status.js";
 
 /** Presentation-only directory. Semantic requests and answers live exclusively in the journal. */
 export const USER_INTERACTIONS_DIR = "user-interactions";
@@ -193,12 +192,8 @@ export async function scanOpenUserInteractions(runDir: string, branchId?: Branch
 		const result: UserInteractionRequest[] = [];
 		for (const selected of branchIds) {
 			if (!branches.some((branch) => branch.branchId === selected)) continue;
-			const projection = (await loadBranchProjection({ ast: parsed.ast, branchId: selected, store: store.forBranch(selected), contract: projectionContractForAst(parsed.ast), saveCheckpoint: "never" })).projection;
-			if (projection.failure !== undefined) continue;
-			for (const gate of Object.values(projection.openUserInteractions)) {
-				const pending = projection.pendingActions.some((entry) => entry.gateSeqId === gate.opened.seqId && (entry.phase === "running" || entry.phase === "rejected"));
-				if (pending) result.push(requestFromOpened(basename(resolve(runDir)), selected, gate.opened));
-			}
+			const semantic = await BranchExecution.restore({ ast: parsed.ast, branchId: selected, store: store.forBranch(selected), saveCheckpoint: "never" });
+			for (const gate of semantic.openUserInteractions()) result.push(requestFromOpened(basename(resolve(runDir)), selected, gate));
 		}
 		return result.sort(compareCoordinates);
 	} finally { await store.close(); }
@@ -253,20 +248,33 @@ async function commitOfflineUserInteractionResponse(options: PersistUserInteract
 	const meta = await loadRunMeta(options.runDir);
 	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-	const store = await openRunLogStore(options.runDir, { access: "writer", branchId: options.branchId });
+	let store = await openRunLogStore(options.runDir, { access: "writer", branchId: options.branchId });
 	try {
-		const snapshot = await store.captureSnapshot(options.branchId);
-		const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId: options.seqId });
-		if (existing !== undefined) {
-			if (!isDeepStrictEqual(existing.event, options.event)) throw new Error(`Conflicting response for user interaction ${options.seqId}`);
-			return { response: responseFromResolved(options.runId, options.branchId, existing), idempotent: true };
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const snapshot = await store.captureSnapshot(options.branchId);
+			const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId: options.seqId });
+			if (existing !== undefined) {
+				if (!isDeepStrictEqual(existing.event, options.event)) throw new Error(`Conflicting response for user interaction ${options.seqId}`);
+				return { response: responseFromResolved(options.runId, options.branchId, existing), idempotent: true };
+			}
+			const gate = await store.getRecord(options.seqId);
+			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId })) throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
+			const semantic = await BranchExecution.restore({ ast: parsed.ast, branchId: options.branchId, store, saveCheckpoint: "never", snapshot });
+			const draft = await semantic.prepareUserInteraction(gate, options.event, parsed.schemaRegistry);
+			try {
+				const records = await store.appendDraftsAtHead({ expectedHeadSeqId: snapshot.headSeqId, drafts: [draft] }, semantic.prepareStampedCommit);
+				const record = records[0] as UserInteractionResolvedLog;
+				return { response: responseFromResolved(options.runId, options.branchId, record), idempotent: false };
+			} catch (error) {
+				const retryable = error instanceof BranchHeadMovedError || error instanceof Error && error.message.includes("Stale Hyperchart journal writer");
+				if (!retryable || attempt === 2) throw error;
+				if (error.message.includes("Stale Hyperchart journal writer")) {
+					await store.close();
+					store = await openRunLogStore(options.runDir, { access: "writer", branchId: options.branchId });
+				}
+			}
 		}
-		const gate = await store.getRecord(options.seqId);
-		if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId })) throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
-		const loaded = await loadBranchProjection({ ast: parsed.ast, branchId: options.branchId, store, contract: projectionContractForAst(parsed.ast), saveCheckpoint: "never", snapshot });
-		const draft = await prepareUserInteractionResponseFromProjection(loaded.projection, options.branchId, gate, { ast: parsed.ast, gateSeqId: options.seqId, event: options.event, schemaRegistry: parsed.schemaRegistry });
-		const committed = await store.commitPreparedUserInteraction({ expectedHeadSeqId: snapshot.headSeqId, gateSeqId: options.seqId, draft });
-		return { response: responseFromResolved(options.runId, options.branchId, committed.record), idempotent: committed.idempotent };
+		throw new Error("Unreachable offline user response retry state");
 	} finally { await store.close(); }
 }
 

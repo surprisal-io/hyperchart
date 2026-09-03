@@ -4,14 +4,16 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { normalizeChartConfig, start } from "../packages/hyperchart/src/index.js";
+import { start } from "./helpers/execution.js";
+import { normalizeChartConfig } from "../packages/hyperchart/src/index.js";
 import { agent, arg, chart, final, map, user } from "../packages/hyperchart/src/core/dsl.js";
 import type { ChartAst, ChartCst, DurableLogRecord, Effect } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { ArtifactStore } from "../packages/hyperchart/src/runtime/generic/artifact_store.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
-import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/runtime/generic/projection_loader.js";
+import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
+import { BranchExecution } from "../packages/hyperchart/src/execution/branch_execution.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];
@@ -142,11 +144,13 @@ describe("ChartRuntime", () => {
 		const contract = projectionContractForAst(ast);
 		const dirty = await loadBranchProjection({ ast, branchId: "main", store, contract, saveCheckpoint: "never" });
 		expect(dirty.checkpointable).toBe(false); expect(dirty.replay.stale.length).toBeGreaterThan(0);
-		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), initialProjection: dirty });
+		const semantic = await BranchExecution.restore({ ast, branchId: "main", store, saveCheckpoint: "never" });
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), prepareStampedCommit: semantic.prepareStampedCommit });
 		await runtime.runEffects([{ kind: "durable_records", id: "dirty-cadence", records: Array.from({ length: 512 }, (_, index) => ({ type: "args", args: { index } })) }]);
 		await runtime.dispose();
+		await semantic.storeExactCheckpoint();
 		const snapshot = await store.captureSnapshot("main");
-		expect(await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract })).toBeUndefined();
+		expect(await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract })).toBeUndefined();
 		const restarted = await loadBranchProjection({ ast, branchId: "main", store, contract, saveCheckpoint: "never" });
 		expect(restarted.checkpointable).toBe(false); expect(restarted.replay.stale.length).toBeGreaterThan(0);
 	});
@@ -155,21 +159,55 @@ describe("ChartRuntime", () => {
 		for (const count of [511, 512, 513]) {
 			const ast = linearChart();
 			const store = new MemoryLogStore();
-			const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd() });
+			const semantic = await BranchExecution.restore({ ast, branchId: "main", store });
+			const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), prepareStampedCommit: semantic.prepareStampedCommit });
 			await runtime.runEffects([{ kind: "durable_records", id: `batch-${count}`, records: Array.from({ length: count }, (_, index) => ({ type: "args", args: { index } })) }]);
 			const snapshot = await store.captureSnapshot("main");
 			const contract = projectionContractForAst(ast);
-			const exact = await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
+			const exact = await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
 			if (count === 512) expect(exact?.headSeqId).toBe(snapshot.headSeqId);
 			else expect(exact).toBeUndefined();
 			if (count === 513) {
-				const nearest = await store.findNearestProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
+				const nearest = await store.findNearestCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
 				expect(nearest?.headSeqId).toBe(snapshot.headSeqId! - 1);
 			}
 			await runtime.dispose();
-			const shutdown = await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
+			await semantic.storeExactCheckpoint();
+			const shutdown = await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
 			expect(shutdown?.headSeqId).toBe(snapshot.headSeqId);
 		}
+	});
+
+	it("normalizes a 688-record restart tail before the next cadence boundary", async () => {
+		const ast = linearChart(); const store = new MemoryLogStore();
+		await store.appendDrafts(Array.from({ length: 688 }, (_, index) => ({ type: "args", args: { index } })));
+		const semantic = await BranchExecution.restore({ ast, branchId: "main", store, saveCheckpoint: "never" });
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), prepareStampedCommit: semantic.prepareStampedCommit });
+		await runtime.runEffects([{ kind: "durable_records", id: "tail", records: Array.from({ length: 336 }, (_, index) => ({ type: "args", args: { tail: index } })) }]);
+		const snapshot = await store.captureSnapshot("main"); const contract = projectionContractForAst(ast);
+		expect((await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, selectorKey: contract.selectorKey }))?.headSeqId).toBe(snapshot.headSeqId);
+		await runtime.dispose();
+	});
+
+	it("taints only committed live warning facts and never checkpoints them", async () => {
+		const ast = linearChart(); const store = new MemoryLogStore();
+		const action = ast.states.work;
+		if (action?.kind !== "state" || action.action.kind !== "agent") throw new Error("expected work agent");
+		const semantic = await BranchExecution.restore({ ast, branchId: "main", store, saveCheckpoint: "never" });
+		const stagedRecord = { type: "state_action", kind: "invoke", actionUid: action.action.uid, definition: { ...action.action, name: "old-worker" }, sessionId: "staged", seqId: 2, parentId: null, branchId: "main", timestamp: 1 } as const;
+		semantic.prepareStampedCommit([stagedRecord]);
+		expect(semantic.checkpointable()).toBe(true);
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), prepareStampedCommit: semantic.prepareStampedCommit });
+		await runtime.runEffects([{ kind: "durable_records", id: "dirty-live", records: [
+			{ type: "args", args: {} },
+			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, definition: { ...action.action, name: "old-worker" }, sessionId: "dirty" },
+			{ type: "state_action", kind: "complete", actionUid: action.action.uid, event: { type: "DONE" } },
+			...Array.from({ length: 509 }, (_, index) => ({ type: "args" as const, args: { index } })),
+		] }]);
+		expect(semantic.checkpointable()).toBe(false);
+		await runtime.dispose(); await semantic.storeExactCheckpoint();
+		const snapshot = await store.captureSnapshot("main"); const contract = projectionContractForAst(ast);
+		expect(await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, selectorKey: contract.selectorKey })).toBeUndefined();
 	});
 
 	it("waits for an in-flight append before writing the clean-shutdown checkpoint", async () => {
@@ -178,19 +216,20 @@ describe("ChartRuntime", () => {
 		let entered!: () => void;
 		const started = new Promise<void>((resolve) => { entered = resolve; });
 		class DelayedStore extends MemoryLogStore {
-			override async appendDraftsWithCheckpoint(...args: Parameters<MemoryLogStore["appendDraftsWithCheckpoint"]>) {
-				entered(); await gate; return super.appendDraftsWithCheckpoint(...args);
+			override async appendDrafts(...args: Parameters<MemoryLogStore["appendDrafts"]>) {
+				entered(); await gate; return super.appendDrafts(...args);
 			}
 		}
 		const ast = linearChart(); const store = new DelayedStore();
-		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd() });
+		const semantic = await BranchExecution.restore({ ast, branchId: "main", store });
+		const runtime = new ChartRuntime({ ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), workDir: process.cwd(), chartDir: process.cwd(), prepareStampedCommit: semantic.prepareStampedCommit });
 		const effects = runtime.runEffects([{ kind: "durable_records", id: "in-flight", records: [{ type: "args", args: { value: 1 } }] }]);
 		await started;
 		let disposed = false; const disposal = runtime.dispose().then(() => { disposed = true; });
 		await new Promise<void>((resolve) => setImmediate(resolve)); expect(disposed).toBe(false);
-		release(); await effects; await disposal;
+		release(); await effects; await disposal; await semantic.storeExactCheckpoint();
 		const snapshot = await store.captureSnapshot("main"); const contract = projectionContractForAst(ast);
-		expect((await store.loadExactProjectionCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract }))?.headSeqId).toBe(snapshot.headSeqId);
+		expect((await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract }))?.headSeqId).toBe(snapshot.headSeqId);
 	});
 
 	it("appends and acknowledges durable effects in supplied order", async () => {

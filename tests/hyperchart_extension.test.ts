@@ -20,7 +20,7 @@ import {
 import {
 	hasUserInteractionReceipt,
 	readUserInteractionResponse,
-} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
+} from "../packages/hyperchart/src/runner/user_interactions.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { readSessionProgress, sessionProgressKey, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import {

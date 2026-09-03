@@ -1,6 +1,7 @@
 import type { ChartAst, StateAst } from "@surprisal/hyperchart/internal/core/types";
 import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
-import { createBranchProjection, isFinalState, type BranchProjection, type PendingAction, projectBranch } from "@surprisal/hyperchart/internal/core/projection";
+import { createBranchProjection, isFinalState, type PendingAction, projectBranch } from "@surprisal/hyperchart/internal/core/projection";
+import type { BranchExecutionOverview } from "@surprisal/hyperchart/inspect";
 import { underScope } from "@surprisal/hyperchart/internal/core/paths";
 
 export type PendingView = {
@@ -59,10 +60,10 @@ export function buildRunView(
 	ast: ChartAst,
 	log: readonly DurableLogRecord[],
 	now: number,
-	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; branchCount?: number; recordCount?: number; projection?: BranchProjection } = {},
+	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; branchCount?: number; recordCount?: number; execution?: BranchExecutionOverview } = {},
 ): RunView {
-	const projection = branch.projection ?? projectBranch(createBranchProjection(ast), ast, log);
-	const final = isFinalState(projection, ast);
+	const projection = branch.execution ?? projectBranch(createBranchProjection(ast), ast, log);
+	const final = "final" in projection ? projection.final : isFinalState(projection, ast);
 	const finalLeaf = projection.activeLeaves[0];
 	return {
 		chartId: ast.id,
@@ -72,7 +73,7 @@ export function buildRunView(
 		branchCount: branch.branchCount ?? branch.branches?.length ?? 0,
 		recordCount: branch.recordCount ?? log.length,
 		final,
-		failedTerminal: final && projection.activeLeaves.some((leaf) => ast.states[leaf]?.kind === "final" && ast.states[leaf]?.outcome === "failed"),
+		failedTerminal: "failedTerminal" in projection ? projection.failedTerminal : final && projection.activeLeaves.some((leaf) => ast.states[leaf]?.kind === "final" && ast.states[leaf]?.outcome === "failed"),
 		...(projection.args === undefined ? {} : { args: { ...projection.args } }),
 		rows: buildRows(ast, projection.activeLeaves, projection.spawns),
 		graph: buildGraphRows(

@@ -67,12 +67,33 @@ describe("run inspector stateless history source", () => {
 			{ type: "args", args: { topic: "cursor chunks" } },
 			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "visit-session", definition: action.action },
 		]);
+		writeFileSync(join(runDir, "sessions", "progress.json"), JSON.stringify({
+			version: 1,
+			updatedAt: 3,
+			sessions: {
+				visit: {
+					actionKey: "history:work:script",
+					actionUid: action.action.uid,
+					branchId: "main",
+					invokeSeqId: 2,
+					visit: 1,
+					actionName: "script",
+					status: "completed",
+					startedAt: 2,
+					lastActivityAt: 3,
+					turnCount: 0,
+					toolCount: 0,
+				},
+			},
+		}));
 		const source = await createRunInspectorDataSource(runDir);
 		const snapshot = await store.captureSnapshot("main");
 		const visits = await source.readStateVisits({ runId: "render-run", snapshot, stateId: "work" });
 		expect(visits.items).toHaveLength(1);
 		expect(visits.items[0]?.invocation).toMatchObject({ kind: "script", env: { TOPIC: "topic=cursor chunks" } });
 		expect(visits.items[0]?.visit).toBe(1);
+		expect(visits.items[0]?.session).toBeUndefined();
+		await expect(source.readVisitSession({ runId: "render-run", branchId: "main", invokeSeqId: 2 })).resolves.toMatchObject({ actionKey: "history:work:script", status: "completed" });
 	});
 
 	it("uses full replay semantics for a timed-out lazy visit", async () => {

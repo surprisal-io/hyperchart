@@ -15,7 +15,7 @@ import {
 	hasUserInteractionReceipt,
 	markUserInteractionReceipt,
 	readUserInteractionResponse,
-} from "../packages/hyperchart/src/runtime/generic/user_interactions.js";
+} from "../packages/hyperchart/src/runner/user_interactions.js";
 import { actionUidKey, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { closeRunInspectorServer } from "../packages/hyperchart/src/inspect/inspector_server.js";
 import {

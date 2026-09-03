@@ -8,7 +8,7 @@ import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/core/type
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
-import { createHyperchartRunnerController, runnerBranchIds, runHyperchartRunner, type SteerableAgentExecutor } from "../packages/hyperchart/src/runtime/generic/runner_main.js";
+import { createHyperchartRunnerController, runnerBranchIds, runHyperchartRunner, type SteerableAgentExecutor } from "../packages/hyperchart/src/runner/runner_main.js";
 
 const roots: string[] = [];
 const originalCwd = process.cwd();

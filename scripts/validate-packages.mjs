@@ -23,6 +23,7 @@ try {
 				"dist/index.js",
 				"dist/index.d.ts",
 				"dist/runtime/index.js",
+				"dist/runner/index.js",
 				"dist/inspect/index.js",
 				"dist/sessions/index.js",
 				"dist/react/index.js",
@@ -200,6 +201,7 @@ import { createJiti } from "jiti";
 import * as core from "@surprisal/hyperchart";
 import * as host from "@surprisal/hyperchart/host";
 import * as runtime from "@surprisal/hyperchart/runtime";
+import * as runner from "@surprisal/hyperchart/runner";
 import * as inspect from "@surprisal/hyperchart/inspect";
 import * as sessions from "@surprisal/hyperchart/sessions";
 import * as coreReact from "@surprisal/hyperchart/react";
@@ -207,10 +209,11 @@ import * as claudeHost from "@surprisal/claude-hyperchart";
 import * as command from "@surprisal/pi-hyperchart/command";
 import * as piHost from "@surprisal/pi-hyperchart/pi-host";
 import * as react from "@surprisal/pi-hyperchart/react";
-if (typeof core.refs !== "function" || typeof core.start !== "function") throw new Error("core exports missing");
+if (typeof core.refs !== "function" || "start" in core || "loadBranchProjection" in core) throw new Error("core exports invalid");
 if (typeof host.hyperchartRunFromInspectResult !== "function" || "hyperchartRunFromRuntime" in host) throw new Error("host exports invalid");
-if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !== "function" || typeof runtime.listHyperchartBranchPage !== "function" || typeof runtime.materializeWorkspaceFromPins !== "function") throw new Error("runtime exports missing");
-if ("listHyperchartBranches" in runtime || "latestPinsByPath" in runtime || "materializeWorkspace" in runtime || "finalMachineFailureMessage" in runtime) throw new Error("runtime compatibility exports remain");
+if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !== "function" || typeof runtime.materializeWorkspaceFromPins !== "function") throw new Error("runtime exports missing");
+if (typeof runner.listHyperchartBranchPage !== "function" || typeof runner.createHyperchartRunnerController !== "function") throw new Error("runner exports missing");
+if ("listHyperchartBranchPage" in runtime || "loadBranchProjection" in runtime || "PROJECTOR_VERSION" in runtime || "listHyperchartBranches" in runtime || "latestPinsByPath" in runtime || "materializeWorkspace" in runtime || "finalMachineFailureMessage" in runtime) throw new Error("runtime compatibility/projection exports remain");
 if (typeof inspect.hyperchartRunFromRunDir !== "function" || typeof inspect.openRunInspector !== "function") throw new Error("inspect exports missing");
 if (typeof sessions.updateSessionProgress !== "function" || typeof sessions.queueSessionSteering !== "function") throw new Error("sessions exports missing");
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");

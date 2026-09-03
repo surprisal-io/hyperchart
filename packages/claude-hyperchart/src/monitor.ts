@@ -1,22 +1,24 @@
 import { existsSync, readdirSync, realpathSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
-	USER_INTERACTION_WAIT_LEASE_MS,
-	acquireActiveUserInteraction,
 	claimTerminalNotificationReceipt,
-	claimUserInteractionReceipt,
 	hasTerminalNotificationReceipt,
 	loadRunMeta,
 	markTerminalNotificationReceipt,
-	markUserInteractionReceipt,
 	readDeliverableTerminalNotificationRequest,
-	readUserInteractionReceipt,
 	recoverStaleRunTerminalNotification,
+	type TerminalNotificationRequest,
+} from "@surprisal/hyperchart/runtime";
+import {
+	USER_INTERACTION_WAIT_LEASE_MS,
+	acquireActiveUserInteraction,
+	claimUserInteractionReceipt,
+	markUserInteractionReceipt,
+	readUserInteractionReceipt,
 	scanOwnedOpenUserInteractions,
 	type OwnedUserInteraction,
-	type TerminalNotificationRequest,
 	type UserInteractionOwner,
-} from "@surprisal/hyperchart/runtime";
+} from "@surprisal/hyperchart/runner";
 import { serializeModelEnvelope, summarizeUserGate } from "@surprisal/hyperchart/host";
 
 export type ClaudeMonitorOptions = {

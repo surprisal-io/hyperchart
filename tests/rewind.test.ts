@@ -4,11 +4,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
-import { forkHyperchartRun, listHyperchartBranchPage } from "../packages/hyperchart/src/runtime/generic/branches.js";
+import { forkHyperchartRun, listHyperchartBranchPage } from "../packages/hyperchart/src/runner/branches.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
-import { rewindHyperchartRun, semanticStatesForRecord } from "../packages/hyperchart/src/runtime/generic/rewind.js";
+import { rewindHyperchartRun, semanticStatesForRecord } from "../packages/hyperchart/src/runner/rewind.js";
 
 const tempDirs: string[] = [];
 const stamp = (seqId: number) => ({ seqId, parentId: seqId === 1 ? null : seqId - 1, branchId: "main", timestamp: seqId });

@@ -40,7 +40,8 @@ Optional chart-level `args` metadata gives hosts serializable descriptions and J
 | Import | Purpose |
 |---|---|
 | `@surprisal/hyperchart` | DSL, types, parsing, inspection, machine, projection, replay |
-| `@surprisal/hyperchart/runtime` | generic runtime, log stores, scripts, guards, artifacts |
+| `@surprisal/hyperchart/runtime` | projection-free effect runtime, log stores, scripts, guards, artifacts |
+| `@surprisal/hyperchart/runner` | runner/controller, branch, rewind, and user-interaction controls |
 | `@surprisal/hyperchart/host` | canonical chart/run models and adapters |
 | `@surprisal/hyperchart/react` | optional React inspector and run surfaces |
 | `@surprisal/hyperchart/react/styles.css` | required inspector stylesheet |
@@ -72,4 +73,4 @@ Static actor pools are available through `actorPool()`. Use singleton `send()`/`
 
 ## Branch storage
 
-The runtime exports v2 storage mutation/branch types, normalized tree queries, `JsonlLogStore`, cursor-paged `listHyperchartBranchPage`, `getHyperchartBranch`, `forkHyperchartRun`, and append-only `rewindHyperchartRun`. History is snapshot-pinned and cursor-paged at no more than 100 items; stores expose no `readAncestry()`, full-history array, or replay-stream method. Versioned projection contracts and `loadBranchProjection()` restore a captured head from disposable PostgreSQL or process-local checkpoints plus package-private replay batches capped at 500 facts. Live PostgreSQL runners atomically checkpoint each 512-record boundary, fork/rewind targets, and non-empty clean-shutdown tails; see [Runtime and durability](../../docs/runtime-and-durability.md#append-only-branch-storage). Every runner/inspection uses an explicit branch handle. Detached runners distinguish the owning repository `projectDir` from each isolated `<runDir>/workspaces/<branchId>` action cwd; scripts receive both as `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE`.
+`@surprisal/hyperchart/runtime` exports projection-free storage/effect APIs and opaque checkpoint envelopes; branch and runner controls live in `@surprisal/hyperchart/runner`. History is snapshot-pinned and cursor-paged at no more than 100 items; stores expose no `readAncestry()`, full-history array, projection loader, or replay-stream method. The internal execution layer alone restores and compacts projections and encodes opaque blobs from package-private replay pages capped at 500 facts. PostgreSQL atomically persists each due 512-record envelope, fork/rewind targets, and non-empty clean-shutdown tails without interpreting its selector or blob; see [Runtime and durability](../../docs/runtime-and-durability.md#append-only-branch-storage). Every runner/inspection uses an explicit branch handle. Detached runners distinguish the owning repository `projectDir` from each isolated `<runDir>/workspaces/<branchId>` action cwd; scripts receive both as `HYPERCHART_PROJECT_DIR` and `HYPERCHART_BRANCH_WORKSPACE`.

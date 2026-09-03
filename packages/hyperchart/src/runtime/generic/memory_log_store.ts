@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from "node:util";
 import type {
 	BranchHead,
 	BranchId,
@@ -7,6 +6,7 @@ import type {
 	StorageEntry,
 } from "../../core/durable_events.js";
 import {
+	BranchHeadMovedError,
 	DEFAULT_BRANCH_ID,
 	HISTORY_READ_ITEMS,
 	type ActorGenerationHistoryItem,
@@ -18,9 +18,13 @@ import {
 	type HistorySnapshot,
 	type HistorySubject,
 	type LogStore,
+	type AppendAtHeadInput,
+	type PrepareStampedCommit,
 	type MapVisitHistoryItem,
-	type ProjectionCheckpointLookup,
-	type StoredProjectionCheckpoint,
+	type CheckpointQuery,
+	type OpaqueCheckpointEnvelope,
+	boundedForwardReplayPage,
+	cloneOpaqueCheckpoint,
 	cursorAtItems,
 	decodeBranchListCursor,
 	encodeBranchListCursor,
@@ -28,38 +32,31 @@ import {
 	historyChunkFromItems,
 	historyItemsForSubject,
 	materializeJournal,
+	registerReplayPageReader,
 	stampDrafts,
-	type PreparedUserInteractionCommit,
 	type StateVisitHistoryItem,
-	type UserInteractionResponseCommit,
 } from "./log_store.js";
 
 export class MemoryLogStore implements LogStore {
 	private readonly index;
-	private readonly projectionCheckpoints: StoredProjectionCheckpoint[] = [];
+	private readonly checkpoints: OpaqueCheckpointEnvelope[] = [];
 	private writeChain: Promise<void> = Promise.resolve();
-	readonly canSaveProjectionCheckpoints = true;
+	private poisoned = false;
+	readonly canStoreCheckpoints = true;
 
 	constructor(readonly branchId: BranchId = DEFAULT_BRANCH_ID) {
 		assertBranchId(branchId);
 		this.index = materializeJournal([
 			{ kind: "branch", op: "create", seqId: 1, branchId, headSeqId: null, metadata: { name: branchId }, committedAt: Date.now() },
 		]);
+		registerReplayPageReader(this, async (input) => boundedForwardReplayPage(this.index, input));
 	}
 
-	async appendDrafts(drafts: readonly DurableRecordDraft[]): Promise<readonly DurableLogRecord[]> {
-		return this.appendDraftsWithCheckpoint(drafts, () => undefined);
+	async appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+		return this.enqueueCommit(undefined, drafts, prepare);
 	}
-	async appendDraftsWithCheckpoint(
-		drafts: readonly DurableRecordDraft[],
-		prepare: (records: readonly DurableLogRecord[]) => StoredProjectionCheckpoint | readonly StoredProjectionCheckpoint[] | undefined,
-	): Promise<readonly DurableLogRecord[]> {
-		if (drafts.length === 0) return [];
-		const records = stampDrafts(this.index, this.branchId, drafts, Date.now());
-		const prepared = prepare(records);
-		for (const record of records) this.index.applyEntry(record);
-		for (const checkpoint of prepared === undefined ? [] : Array.isArray(prepared) ? prepared : [prepared]) await this.saveProjectionCheckpoint(checkpoint);
-		return records;
+	async appendDraftsAtHead(input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+		return this.enqueueCommit(input.expectedHeadSeqId, input.drafts, prepare, true);
 	}
 
 	async captureSnapshot(branchId: BranchId): Promise<HistorySnapshot> { return { branchId, headSeqId: this.index.branch(branchId).headSeqId }; }
@@ -98,25 +95,24 @@ export class MemoryLogStore implements LogStore {
 		return findUserInteractionResponseInAncestry(this.index.materializeHistoryToHead(input.headSeqId), input.gateSeqId);
 	}
 	async countRecords(): Promise<number> { return this.index.recordsBySeqId.size; }
-	async loadExactProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
-		const checkpoint = this.projectionCheckpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest);
+	async loadExactCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
+		const checkpoint = this.checkpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.selectorKey === input.selectorKey);
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
-	async findNearestProjectionCheckpoint(input: ProjectionCheckpointLookup): Promise<StoredProjectionCheckpoint | undefined> {
+	async findNearestCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		const ancestry = this.index.materializeHistoryToHead(input.targetHeadSeqId);
 		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
-		const checkpoint = this.projectionCheckpoints
-			.filter((candidate) => candidate.projectorVersion === input.projectorVersion && candidate.astDigest === input.astDigest && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
+		const checkpoint = this.checkpoints
+			.filter((candidate) => candidate.selectorKey === input.selectorKey && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
 			.sort((left, right) => (left.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(left.headSeqId)!) - (right.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(right.headSeqId)!) || right.createdAt - left.createdAt)[0];
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
-	async discardProjectionCheckpoint(checkpointId: string): Promise<void> {
-		const index = this.projectionCheckpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
-		if (index >= 0) this.projectionCheckpoints.splice(index, 1);
+	async discardCheckpoint(checkpointId: string): Promise<void> {
+		const index = this.checkpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
+		if (index >= 0) this.checkpoints.splice(index, 1);
 	}
-	async saveProjectionCheckpoint(checkpoint: StoredProjectionCheckpoint): Promise<void> {
-		if (this.projectionCheckpoints.some((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.projectorVersion === checkpoint.projectorVersion && candidate.astDigest === checkpoint.astDigest)) return;
-		this.projectionCheckpoints.push(structuredClone(checkpoint));
+	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
+		this.rememberClonedCheckpoint(cloneOpaqueCheckpoint(checkpoint));
 	}
 
 	private readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): HistoryChunk<DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem> {
@@ -128,23 +124,25 @@ export class MemoryLogStore implements LogStore {
 		return this.index.materializeHistoryToHead(snapshot.headSeqId);
 	}
 
-	commitPreparedUserInteraction(input: PreparedUserInteractionCommit): Promise<UserInteractionResponseCommit> {
+	private enqueueCommit(expectedHeadSeqId: number | null | undefined, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit, compareHead = false): Promise<readonly DurableLogRecord[]> {
+		if (drafts.length === 0) return Promise.resolve([]);
 		return this.enqueue(async () => {
+			if (this.poisoned) throw new Error("Memory Hyperchart journal is unusable after a post-commit confirmation failure");
 			const branch = this.index.branch(this.branchId);
-			if (branch.headSeqId !== input.expectedHeadSeqId) throw new Error(`Branch '${this.branchId}' moved while admitting user interaction ${input.gateSeqId}`);
-			const existing = findUserInteractionResponseInAncestry(this.index.materializeHistoryToHead(branch.headSeqId), input.gateSeqId);
-			if (existing !== undefined) {
-				if (isDeepStrictEqual(existing.event, input.draft.event)) return { record: existing, idempotent: true };
-				throw new Error(`Conflicting response for user interaction ${input.gateSeqId}`);
-			}
-			const gate = this.index.recordsBySeqId.get(input.gateSeqId);
-			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !this.index.containsInBranchHistory(this.branchId, input.gateSeqId) || !isDeepStrictEqual(gate.actionUid, input.draft.actionUid)) {
-				throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${this.branchId}'`);
-			}
-			const records = stampDrafts(this.index, this.branchId, [input.draft], Date.now());
+			if (compareHead && branch.headSeqId !== expectedHeadSeqId) throw new BranchHeadMovedError(this.branchId, expectedHeadSeqId ?? null, branch.headSeqId);
+			const records = stampDrafts(this.index, this.branchId, drafts, Date.now());
+			const prepared = prepare?.(records);
+			const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
 			for (const record of records) this.index.applyEntry(record);
-			return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
+			for (const checkpoint of checkpoints) this.rememberClonedCheckpoint(checkpoint);
+			try { prepared?.committed(); } catch (error) { this.poisoned = true; throw error; }
+			return records;
 		});
+	}
+
+	private rememberClonedCheckpoint(checkpoint: OpaqueCheckpointEnvelope): void {
+		if (this.checkpoints.some((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.selectorKey === checkpoint.selectorKey)) return;
+		this.checkpoints.push(checkpoint);
 	}
 
 	private enqueue<T>(task: () => Promise<T>): Promise<T> {

@@ -1,7 +1,7 @@
-import { actionUidKey } from "./action_uid.js";
-import { childPath, nodeAt, parentPath, siblingPath, templatePath } from "./paths.js";
-import type { BranchProjection } from "./projection.js";
-import type { ActionStateAst, ChartAst, StatePath } from "./types.js";
+import { actionUidKey } from "../core/action_uid.js";
+import { childPath, nodeAt, parentPath, siblingPath, templatePath } from "../core/paths.js";
+import type { BranchProjection } from "../core/projection.js";
+import type { ActionStateAst, ChartAst, StatePath } from "../core/types.js";
 
 export type ProjectionRetentionPlan = Readonly<{
 	/** Result producer template path -> every statically discovered reader template path. */
@@ -103,6 +103,20 @@ export function compactProjection(
 		const templateKey = templateActionKey(key);
 		if (templateKey === undefined || retention.resumableActions.has(templateKey)) continue;
 		delete projection.sessions[key];
+	}
+	const retainedMessageIds = new Set<string>();
+	for (const endpoint of [...Object.values(projection.actors), ...Object.values(projection.actorPools)]) {
+		for (const messageId of endpoint.mailbox) retainedMessageIds.add(messageId);
+		if ("workers" in endpoint) {
+			for (const worker of endpoint.workers) if (worker.currentMessageId !== undefined) retainedMessageIds.add(worker.currentMessageId);
+		} else if (endpoint.currentMessageId !== undefined) retainedMessageIds.add(endpoint.currentMessageId);
+	}
+	for (const call of Object.values(projection.pendingActorCalls)) {
+		if (call.kind === "singleton") retainedMessageIds.add(call.messageId);
+		else for (const messageId of call.messageIds) retainedMessageIds.add(messageId);
+	}
+	for (const messageId of Object.keys(projection.liveActorMessages)) {
+		if (!retainedMessageIds.has(messageId)) delete projection.liveActorMessages[messageId];
 	}
 	void ast;
 }

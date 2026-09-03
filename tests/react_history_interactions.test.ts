@@ -164,7 +164,7 @@ describe("interactive bounded history", () => {
 
 	it("loads a visit transcript only when its session is opened", async () => {
 		const readVisitSession = vi.fn().mockResolvedValue({ actionKey: "chart:work:agent", status: "completed", messages: [{ role: "assistant", text: "on demand transcript" }] });
-		const visit = { visit: 1, invokeSeqId: 7, startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const }, session: { actionKey: "chart:work:agent", status: "completed" as const } };
+		const visit = { visit: 1, invokeSeqId: 7, startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const } };
 		const state = { id: "work", type: "agent" as const, status: "done" as const };
 		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], onReadSession: readVisitSession }));
 		expect(readVisitSession).not.toHaveBeenCalled();
@@ -178,7 +178,7 @@ describe("interactive bounded history", () => {
 		const readVisitSession = vi.fn()
 			.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
 			.mockResolvedValueOnce({ actionKey: "chart:work:agent", status: "completed", messages: [{ role: "assistant", text: "recovered transcript" }] });
-		const visit = { visit: 1, invokeSeqId: 17, startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const }, session: { actionKey: "chart:work:agent", status: "completed" as const } };
+		const visit = { visit: 1, invokeSeqId: 17, startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const } };
 		const state = { id: "work", type: "agent" as const, status: "done" as const };
 		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], onReadSession: readVisitSession }));
 		fireEvent.click(rendered.getByRole("button", { name: "View session for visit 1" }));

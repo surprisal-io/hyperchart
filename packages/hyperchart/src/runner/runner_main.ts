@@ -2,38 +2,36 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { start } from "../../core/execution_loop.js";
-import { parseChartModuleSync } from "../../core/inspect.js";
-import type { ReplayExplanation } from "../../core/replay_check.js";
-import type { ChartAst, ChartEvent } from "../../core/types.js";
-import type { BranchHead, BranchId, BranchMetadata, DurableLogRecord, UserInteractionOpenedLog } from "../../core/durable_events.js";
-import type { SchemaRegistry } from "../../core/schema_registry.js";
-import type { MachineState } from "../../core/machine.js";
-import { createBranchProjection } from "../../core/projection.js";
-import { ChartRuntime, type PreparedCommittedRecords } from "./chart_runtime.js";
-import { ArtifactStore } from "./artifact_store.js";
-import { materializeWorkspaceFromPins } from "./artifact_workspace.js";
-import { loadBranchProjection, prepareProjectionCheckpoint, projectionContractForAst, type LoadedBranchProjection } from "./projection_loader.js";
-import { collectBranches, openProjectionReplay, type PreparedUserInteractionCommit, type RunLogStore, type UserInteractionResponseCommit } from "./log_store.js";
-import { openRunLogStore } from "./log_store_factory.js";
+import { start } from "../execution/execution_loop.js";
+import { BranchExecution } from "../execution/branch_execution.js";
+import { artifactSnapshotValidator } from "../execution/artifact_admission.js";
+import { parseChartModuleSync } from "../core/inspect.js";
+import type { ReplayExplanation } from "../core/replay_check.js";
+import type { ChartAst, ChartEvent } from "../core/types.js";
+import type { BranchHead, BranchId, BranchMetadata } from "../core/durable_events.js";
+import type { SchemaRegistry } from "../core/schema_registry.js";
+import { ChartRuntime } from "../runtime/generic/chart_runtime.js";
+import { ArtifactStore } from "../runtime/generic/artifact_store.js";
+import { materializeWorkspaceFromPins } from "../runtime/generic/artifact_workspace.js";
+import { BranchHeadMovedError, collectBranches, type AppendAtHeadInput, type RunLogStore, type UserInteractionResponseCommit } from "../runtime/generic/log_store.js";
+import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import {
 	supportsSqlTransactions,
 	type SqlCommitParticipant,
-} from "./postgres_log_store.js";
-import { finalMachineFailureMessage, terminalStateForFinalMachine, type RunTerminalState } from "./run_outcome.js";
-import { markRunHeartbeat, patchRunStatus } from "./run_status.js";
+} from "../runtime/generic/postgres_log_store.js";
+import type { RunTerminalState } from "../execution/run_outcome.js";
+import { markRunHeartbeat, patchRunStatus } from "../runtime/generic/run_status.js";
 import {
 	archiveTerminalNotificationGeneration,
 	defaultFailedTerminalNotificationPayload,
 	persistTerminalNotificationRequest,
-	renderTerminalNotificationPayload,
-} from "./terminal_notifications.js";
-import { watchSessionSteering } from "./session_steering.js";
-import { watchRunnerUserResponses } from "./runner_control.js";
-import { assertChartPreflight } from "./chart_typecheck.js";
-import type { AgentExecutor } from "./agent_executor.js";
-import { errorMessage } from "../../utils/errors.js";
-import { prepareUserInteractionResponseFromProjection } from "./user_interaction_admission.js";
+} from "../runtime/generic/terminal_notifications.js";
+import type { TerminalNotificationPayload } from "../runtime/generic/terminal_notifications.js";
+import { watchSessionSteering } from "../runtime/generic/session_steering.js";
+import { watchRunnerUserResponses } from "../runtime/generic/runner_control.js";
+import { assertChartPreflight } from "../runtime/generic/chart_typecheck.js";
+import type { AgentExecutor } from "../runtime/generic/agent_executor.js";
+import { errorMessage } from "../utils/errors.js";
 
 export type RunnerCommonConfig = {
 	runId: string;
@@ -77,7 +75,6 @@ export type ExecutorContext = {
 export type RunnerBranchOutcome = Readonly<{
 	branchId: BranchId;
 	outcome: "complete" | "failed" | "drained";
-	state?: MachineState;
 	error?: string;
 }>;
 
@@ -144,12 +141,14 @@ type BranchEntry = {
 	execution?: Promise<void>;
 	executor?: SteerableAgentExecutor;
 	runtime?: ChartRuntime;
+	semantic?: BranchExecution;
 	draining: boolean;
 	operations: Set<Promise<unknown>>;
 	drain?: Promise<RunnerBranchOutcome>;
 	disposal?: Promise<void>;
 };
-type ReplayGate = { warnings: string[]; loaded?: LoadedBranchProjection; error?: string };
+type ReplayGate = { warnings: string[]; semantic?: BranchExecution; error?: string };
+type PreparedUserResponse = { semantic: BranchExecution; input: AppendAtHeadInput; gateSeqId: number; existing?: UserInteractionResponseCommit["record"] };
 type ExecutorFactory = (context: ExecutorContext) => Promise<SteerableAgentExecutor> | SteerableAgentExecutor;
 
 export function runnerBranchIds(config: Pick<HyperchartRunnerConfig, "branchId" | "branchIds">): BranchId[] {
@@ -202,6 +201,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	private readonly admitted = new Set<BranchId>();
 	private readonly knownDurableBranches: Set<BranchId>;
 	private readonly outcomes: RunnerBranchOutcome[] = [];
+	private readonly notificationRenderers = new Map<BranchId, (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload>();
 	private readonly executors = new Map<BranchId, SteerableAgentExecutor>();
 	private readonly completion = deferred<void>();
 	private readonly initialReplayBarrier = deferred<void>();
@@ -246,10 +246,8 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 	async activeBranchIds(): Promise<readonly BranchId[]> {
 		const active = await Promise.all([...this.live.entries()].map(async ([branchId, entry]) => {
 			if (entry.draining) return undefined;
-			const projection = entry.runtime === undefined
-				? (await loadBranchProjection({ ast: this.ast, branchId, store: entry.store, contract: projectionContractForAst(this.ast), saveCheckpoint: "never" })).projection
-				: await entry.runtime.loadProjection();
-			return Object.keys(projection.openUserInteractions).length === 0 ? branchId : undefined;
+			const semantic = entry.semantic ?? await BranchExecution.restore({ ast: this.ast, branchId, store: entry.store, saveCheckpoint: "never" });
+			return semantic.openUserInteractions().length === 0 ? branchId : undefined;
 		}));
 		return active.filter((branchId): branchId is BranchId => branchId !== undefined);
 	}
@@ -289,11 +287,9 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			options.sourceBranchId === undefined ? [] : [options.sourceBranchId],
 			"fork a branch",
 			async () => {
-				const contract = projectionContractForAst(this.ast);
-				const loaded = await loadBranchProjection({ ast: this.ast, branchId: options.branchId, store: this.rootStore, contract, saveCheckpoint: "never", snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId } });
-				const branch = loaded.checkpointable
-					? await this.rootStore.createBranchWithCheckpoint(options.branchId, options.fromSeqId, forkMetadata(options), prepareProjectionCheckpoint(loaded.projection, contract, options.fromSeqId))
-					: await this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options));
+				const semantic = await BranchExecution.restore({ ast: this.ast, branchId: options.branchId, store: this.rootStore, saveCheckpoint: "never", snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId } });
+				const checkpoint = semantic.prepareExactCheckpoint(options.fromSeqId);
+				const branch = await this.rootStore.createBranch(options.branchId, options.fromSeqId, forkMetadata(options), checkpoint === undefined ? undefined : { checkpoint });
 				this.knownDurableBranches.add(branch.branchId);
 				return branch;
 			},
@@ -307,22 +303,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		await store.getBranch(branchId);
 		return this.trackBranchOperation([branchId], "respond to a user interaction", async () => {
 			await this.awaitLiveBranchReadiness(branchId, "respond to a user interaction");
-			const snapshot = await store.captureSnapshot(branchId);
-			const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId });
-			if (existing !== undefined) {
-				if (!isDeepStrictEqual(existing.event, event)) throw new Error(`Conflicting response for user interaction ${gateSeqId}`);
-				const committed = { record: existing, idempotent: true } as const;
-				this.acknowledgeUserInteraction(branchId, gateSeqId, committed, "control:user-response");
-				return committed;
-			}
-			const gate = await store.getRecord(gateSeqId);
-			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: gateSeqId })) throw new Error(`User interaction ${gateSeqId} is stale or missing from branch '${branchId}'`);
-			const loaded = await loadBranchProjection({ ast: this.ast, branchId, store, contract: projectionContractForAst(this.ast), saveCheckpoint: "never", snapshot });
-			const draft = await prepareUserInteractionResponseFromProjection(loaded.projection, branchId, gate as UserInteractionOpenedLog, { ast: this.ast, gateSeqId, event, schemaRegistry: this.schemaRegistry });
-			const runtimeCommit = this.runtimeAwareUserCommit(branchId, { expectedHeadSeqId: snapshot.headSeqId, gateSeqId, draft });
-			const committed = await store.commitPreparedUserInteraction(runtimeCommit.input);
-			runtimeCommit.acknowledge(committed, "control:user-response");
-			return committed;
+			return this.commitUserResponse(store, branchId, gateSeqId, event, "control:user-response");
 		});
 	}
 
@@ -334,11 +315,20 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		await store.getBranch(options.branchId);
 		return this.trackBranchOperation([options.branchId], "atomically commit a user interaction", async () => {
 			await this.awaitLiveBranchReadiness(options.branchId, "atomically commit a user interaction");
-			const prepared = await this.prepareUserInteractionCommit(store.forBranch(options.branchId), options.branchId, options.gateSeqId, options.event);
-			const runtimeCommit = this.runtimeAwareUserCommit(options.branchId, prepared);
-			const committed = await store.commitPreparedUserInteractionWithParticipant(options.branchId, runtimeCommit.input, participate);
-			runtimeCommit.acknowledge(committed.response, "control:atomic-user-response");
-			return committed;
+			for (let attempt = 0; attempt < 3; attempt++) {
+				const prepared = await this.prepareUserInteractionCommit(store.forBranch(options.branchId), options.branchId, options.gateSeqId, options.event);
+				try {
+					const committed = await store.appendDraftsAtHeadWithParticipant(options.branchId, prepared.input, prepared.input.drafts.length === 0 ? undefined : prepared.semantic.prepareStampedCommit, participate);
+					const response = prepared.existing === undefined
+						? { record: committed.records[0] as UserInteractionResponseCommit["record"], idempotent: false }
+						: { record: prepared.existing, idempotent: true };
+					this.acknowledgeUserInteraction(options.branchId, options.gateSeqId, response, "control:atomic-user-response");
+					return { response, participant: committed.participant };
+				} catch (error) {
+					if (!isHeadMovedError(error) || attempt === 2) throw error;
+				}
+			}
+			throw new Error("Unreachable atomic user response retry state");
 		});
 	}
 
@@ -352,32 +342,38 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		this.assertBranchesNotDraining([sourceBranchId, options.responseBranchId], "atomically fork and commit a user interaction");
 		return this.trackBranchOperation([sourceBranchId, options.responseBranchId], "atomically fork and commit a user interaction", async () => {
 			await this.awaitLiveBranchReadiness(options.responseBranchId, "atomically fork and commit a user interaction");
-			const contract = projectionContractForAst(this.ast);
 			const forkSnapshot = { branchId: options.branchId, headSeqId: options.fromSeqId } as const;
-			const loaded = await loadBranchProjection({ ast: this.ast, branchId: options.branchId, store, contract, saveCheckpoint: "never", snapshot: forkSnapshot });
-			const responseStore = options.responseBranchId === options.branchId ? store : store.forBranch(options.responseBranchId);
-			const responseSnapshot = options.responseBranchId !== options.branchId
-				? undefined
-				: this.knownDurableBranches.has(options.branchId)
-					? await store.captureSnapshot(options.branchId)
-					: forkSnapshot;
-			const preparedResponse = await this.prepareUserInteractionCommit(responseStore, options.responseBranchId, options.gateSeqId, options.event, responseSnapshot);
-			const runtimeCommit = this.runtimeAwareUserCommit(options.responseBranchId, preparedResponse);
-			const committed = await store.forkAndCommitUserInteraction(
-				{
-					sourceBranchId,
-					newBranchId: options.branchId,
-					fromSeqId: options.fromSeqId,
-					responseBranchId: options.responseBranchId,
-					metadata: forkMetadata(options),
-					...(loaded.checkpointable ? { checkpoint: prepareProjectionCheckpoint(loaded.projection, contract, options.fromSeqId) } : {}),
-					preparedResponse: runtimeCommit.input,
-				},
-				participate,
-			);
-			this.knownDurableBranches.add(committed.branch.branchId);
-			runtimeCommit.acknowledge(committed.response, "control:atomic-fork-response");
-			return committed;
+			const forkSemantic = await BranchExecution.restore({ ast: this.ast, branchId: options.branchId, store, saveCheckpoint: "never", snapshot: forkSnapshot });
+			const checkpoint = forkSemantic.prepareExactCheckpoint(options.fromSeqId);
+			for (let attempt = 0; attempt < 3; attempt++) {
+				const responseStore = options.responseBranchId === options.branchId ? store : store.forBranch(options.responseBranchId);
+				let responseSnapshot: Readonly<{ branchId: BranchId; headSeqId: number | null }> | undefined;
+				if (options.responseBranchId === options.branchId) {
+					try { responseSnapshot = await store.captureSnapshot(options.branchId); }
+					catch (error) {
+						if (!(error instanceof Error) || !error.message.includes("Unknown Hyperchart branch")) throw error;
+						responseSnapshot = forkSnapshot;
+					}
+				}
+				const prepared = await this.prepareUserInteractionCommit(responseStore, options.responseBranchId, options.gateSeqId, options.event, responseSnapshot);
+				try {
+					const committed = await store.forkAndAppend({
+						sourceBranchId, newBranchId: options.branchId, fromSeqId: options.fromSeqId,
+						appendBranchId: options.responseBranchId, metadata: forkMetadata(options),
+						...(checkpoint === undefined ? {} : { checkpoint }), append: prepared.input,
+						...(prepared.input.drafts.length === 0 ? {} : { prepare: prepared.semantic.prepareStampedCommit }),
+					}, participate);
+					this.knownDurableBranches.add(committed.branch.branchId);
+					const response = prepared.existing === undefined
+						? { record: committed.records[0] as UserInteractionResponseCommit["record"], idempotent: false }
+						: { record: prepared.existing, idempotent: true };
+					this.acknowledgeUserInteraction(options.responseBranchId, options.gateSeqId, response, "control:atomic-fork-response");
+					return { branch: committed.branch, response, participant: committed.participant };
+				} catch (error) {
+					if (!isHeadMovedError(error) || attempt === 2) throw error;
+				}
+			}
+			throw new Error("Unreachable atomic fork response retry state");
 		});
 	}
 
@@ -387,39 +383,37 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		gateSeqId: number,
 		event: ChartEvent,
 		fixedSnapshot?: Readonly<{ branchId: BranchId; headSeqId: number | null }>,
-	): Promise<PreparedUserInteractionCommit> {
+	): Promise<PreparedUserResponse> {
 		const snapshot = fixedSnapshot ?? await store.captureSnapshot(branchId);
+		const liveSemantic = this.live.get(branchId)?.semantic;
+		const semantic = liveSemantic !== undefined && liveSemantic.headSeqId() === snapshot.headSeqId
+			? liveSemantic
+			: await BranchExecution.restore({ ast: this.ast, branchId, store, saveCheckpoint: "never", snapshot });
 		const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId });
 		if (existing !== undefined) {
 			if (!isDeepStrictEqual(existing.event, event)) throw new Error(`Conflicting response for user interaction ${gateSeqId}`);
-			return { expectedHeadSeqId: snapshot.headSeqId, gateSeqId, draft: { type: "user_interaction", kind: "resolved", gateSeqId, actionUid: existing.actionUid, event } };
+			return { semantic, input: { expectedHeadSeqId: snapshot.headSeqId, drafts: [] }, gateSeqId, existing };
 		}
 		const gate = await store.getRecord(gateSeqId);
 		if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: gateSeqId })) throw new Error(`User interaction ${gateSeqId} is stale or missing from branch '${branchId}'`);
-		const loaded = await loadBranchProjection({ ast: this.ast, branchId, store, contract: projectionContractForAst(this.ast), saveCheckpoint: "never", snapshot });
-		const draft = await prepareUserInteractionResponseFromProjection(loaded.projection, branchId, gate, { ast: this.ast, gateSeqId, event, schemaRegistry: this.schemaRegistry });
-		return { expectedHeadSeqId: snapshot.headSeqId, gateSeqId, draft };
+		const draft = await semantic.prepareUserInteraction(gate, event, this.schemaRegistry);
+		return { semantic, input: { expectedHeadSeqId: snapshot.headSeqId, drafts: [draft] }, gateSeqId };
 	}
 
-	private runtimeAwareUserCommit(branchId: BranchId, input: PreparedUserInteractionCommit): {
-		input: PreparedUserInteractionCommit;
-		acknowledge: (committed: UserInteractionResponseCommit, source: string) => void;
-	} {
-		const runtime = this.live.get(branchId)?.runtime;
-		let prepared: PreparedCommittedRecords | undefined;
-		return {
-			input: runtime === undefined ? input : {
-				...input,
-				prepareCheckpoints: (record) => {
-					prepared = runtime.prepareCommittedRecords([record]);
-					return prepared.checkpoints;
-				},
-			},
-			acknowledge: (committed, source) => {
-				if (runtime !== undefined && prepared !== undefined) runtime.acknowledgePreparedCommittedRecords(prepared, `${source}:${input.gateSeqId}:${committed.record.seqId}`);
-				else this.acknowledgeUserInteraction(branchId, input.gateSeqId, committed, source);
-			},
-		};
+	private async commitUserResponse(store: RunLogStore, branchId: BranchId, gateSeqId: number, event: ChartEvent, source: string): Promise<UserInteractionResponseCommit> {
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const prepared = await this.prepareUserInteractionCommit(store, branchId, gateSeqId, event);
+			if (prepared.existing !== undefined) return { record: prepared.existing, idempotent: true };
+			try {
+				const records = await store.appendDraftsAtHead(prepared.input, prepared.semantic.prepareStampedCommit);
+				const committed = { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
+				this.acknowledgeUserInteraction(branchId, gateSeqId, committed, source);
+				return committed;
+			} catch (error) {
+				if (!isHeadMovedError(error) || attempt === 2) throw error;
+			}
+		}
+		throw new Error("Unreachable user response retry state");
 	}
 
 	private acknowledgeUserInteraction(branchId: BranchId, gateSeqId: number, committed: UserInteractionResponseCommit, source: string): void {
@@ -533,24 +527,19 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 
 	private async replayGate(entry: BranchEntry): Promise<ReplayGate> {
 		try {
-			const loaded = await loadBranchProjection({
-				ast: this.ast,
-				branchId: entry.branchId,
-				store: entry.store,
-				contract: projectionContractForAst(this.ast),
-			});
+			const semantic = await BranchExecution.restore({ ast: this.ast, branchId: entry.branchId, store: entry.store });
 			const explanation: ReplayExplanation = {
-				prefixEnd: loaded.replayedRecords,
-				...(loaded.snapshot.headSeqId === null ? {} : { seqId: loaded.snapshot.headSeqId }),
-				skipped: loaded.replay.skipped.map((entry, index) => ({ ...entry, index, seqId: entry.record.seqId })),
-				stale: loaded.replay.stale,
-				unpinned: loaded.replay.unpinned,
+				prefixEnd: semantic.replayedRecords,
+				...(semantic.snapshot.headSeqId === null ? {} : { seqId: semantic.snapshot.headSeqId }),
+				skipped: semantic.replay.skipped.map((item, index) => ({ ...item, index, seqId: item.record.seqId })),
+				stale: semantic.replay.stale,
+				unpinned: semantic.replay.unpinned,
 			};
 			const warnings = formatReplayWarnings(explanation).map((warning) => `[branch ${entry.branchId}] ${warning}`);
 			if (warnings.length > 0 && this.config.ignoreReplayWarnings !== true) {
 				return { warnings: [], error: formatReplayWarningsError(this.config.runDir, warnings) };
 			}
-			return { warnings, loaded };
+			return { warnings, semantic };
 		} catch (error) {
 			return { warnings: [], error: `[branch ${entry.branchId}] Replay gate failed: ${error instanceof Error ? error.message : String(error)}` };
 		}
@@ -568,8 +557,9 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		};
 		let executor: SteerableAgentExecutor;
 		try {
-			if (gate.loaded === undefined) throw new Error("Replay gate did not restore a projection");
-			await materializeWorkspaceFromPins(gate.loaded.projection.artifactPins, this.artifactStore, workDir);
+			if (gate.semantic === undefined) throw new Error("Replay gate did not restore execution state");
+			entry.semantic = gate.semantic;
+			await materializeWorkspaceFromPins(gate.semantic.artifactPins(), this.artifactStore, workDir);
 			if (!this.isRunnable(entry)) {
 				entry.ready.resolve();
 				return;
@@ -594,7 +584,9 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			entry.runtime = new ChartRuntime({
 				ast: this.ast, branchId: entry.branchId, logStore: entry.store, agentExecutor: executor,
 				projectDir: this.config.workDir, workDir, chartDir: dirname(this.config.chartPath), runDir: this.config.runDir,
-				schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message), initialProjection: gate.loaded,
+				schemaRegistry: this.schemaRegistry, onWarn: (message) => console.warn(message),
+				prepareStampedCommit: gate.semantic.prepareStampedCommit,
+				validateArtifactSnapshot: artifactSnapshotValidator(this.schemaRegistry),
 			});
 		} catch (error) {
 			entry.ready.resolve();
@@ -609,19 +601,12 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 
 	private async runEntry(entry: BranchEntry): Promise<void> {
 		try {
-			if (!this.isRunnable(entry) || entry.runtime === undefined) return;
-			const state = await start(entry.runtime, this.config.args);
+			if (!this.isRunnable(entry) || entry.runtime === undefined || entry.semantic === undefined) return;
+			const state = await start(entry.runtime, entry.semantic, this.config.args);
 			if (!this.isRunnable(entry)) return;
-			const outcome = terminalStateForFinalMachine(state);
-			let error: string | undefined;
-			if (outcome === "failed") {
-				// Interim private replay is permitted until the predecessor catalog can
-				// provide final-transition provenance without walking the durable chain.
-				const facts: DurableLogRecord[] = [];
-				for await (const batch of openProjectionReplay(entry.store, { targetHeadSeqId: state.projection.seqId === 0 ? null : state.projection.seqId, afterSeqId: null })) facts.push(...batch);
-				error = finalMachineFailureMessage(state, facts);
-			}
-			await this.settle(entry, { branchId: entry.branchId, state, outcome, ...(error === undefined ? {} : { error }) });
+			const classified = await entry.semantic.finalOutcome(state);
+			this.notificationRenderers.set(entry.branchId, entry.semantic.notificationRenderer(state, { runId: this.config.runId, runDir: this.config.runDir, workDir: join(this.config.runDir, "workspaces", entry.branchId) }));
+			await this.settle(entry, { branchId: entry.branchId, outcome: classified.terminal, ...(classified.error === undefined ? {} : { error: classified.error }) });
 		} catch (error) {
 			if (this.isRunnable(entry)) await this.settle(entry, { branchId: entry.branchId, outcome: "failed", error: error instanceof Error ? error.message : String(error) });
 		}
@@ -631,11 +616,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		let outcome: RunnerBranchOutcome = { branchId: entry.branchId, outcome: "drained" };
 		const results = [];
 		results.push(await Promise.resolve(entry.setup ?? Promise.resolve()).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
-		while (entry.operations.size > 0) {
-			const operations = [...entry.operations];
-			results.push(...await Promise.allSettled(operations));
-			for (const operation of operations) entry.operations.delete(operation);
-		}
+		results.push(...await this.awaitAdmittedOperations(entry));
 		results.push(await this.disposeEntry(entry).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
 		results.push(await Promise.resolve(entry.execution ?? Promise.resolve()).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
 		const errors = results.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []);
@@ -650,12 +631,23 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		return outcome;
 	}
 
+	private async awaitAdmittedOperations(entry: BranchEntry): Promise<PromiseSettledResult<unknown>[]> {
+		const results: PromiseSettledResult<unknown>[] = [];
+		while (entry.operations.size > 0) {
+			const operations = [...entry.operations];
+			results.push(...await Promise.allSettled(operations));
+			for (const operation of operations) entry.operations.delete(operation);
+		}
+		return results;
+	}
+
 	private disposeEntry(entry: BranchEntry): Promise<void> {
 		entry.disposal ??= (async () => {
 			await entry.ready.promise;
 			try {
 				if (entry.runtime !== undefined) await entry.runtime.dispose();
 				else if (entry.executor !== undefined) await entry.executor.dispose();
+				if (entry.semantic !== undefined) await entry.semantic.storeExactCheckpoint();
 			} finally {
 				this.executors.delete(entry.branchId);
 			}
@@ -665,8 +657,13 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 
 	private async settle(entry: BranchEntry, outcome: RunnerBranchOutcome): Promise<void> {
 		if (!this.isRunnable(entry)) return;
+		entry.draining = true;
+		entry.runtime?.beginDrain();
 		let settledOutcome = outcome;
 		try {
+			const operationResults = await this.awaitAdmittedOperations(entry);
+			const operationErrors = operationResults.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []);
+			if (operationErrors.length > 0) settledOutcome = { ...outcome, outcome: "failed", error: `${outcome.error === undefined ? "Branch operation failed" : outcome.error}: ${operationErrors.join("; ")}` };
 			await this.disposeEntry(entry);
 		} catch (error) {
 			const disposalError = error instanceof Error ? error.message : String(error);
@@ -676,7 +673,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 				error: outcome.error === undefined ? `Executor disposal failed: ${disposalError}` : `${outcome.error}; executor disposal failed: ${disposalError}`,
 			};
 		}
-		if (!this.isRunnable(entry)) return;
+		if (this.phase !== "accepting" || this.live.get(entry.branchId) !== entry) return;
 		this.outcomes.push(settledOutcome);
 		entry.outcome.resolve(settledOutcome);
 		this.live.delete(entry.branchId);
@@ -705,9 +702,10 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		const error = failed.length === 0 ? undefined : failed.map((entry) => `${entry.branchId}: ${entry.error ?? "machine failed"}`).join("; ");
 		this.stopLifetimeResources();
 		try {
-			persistTerminalNotificationRequest(this.config.runDir, representative.state === undefined
+			const renderNotification = this.notificationRenderers.get(representative.branchId);
+			persistTerminalNotificationRequest(this.config.runDir, renderNotification === undefined
 				? defaultFailedTerminalNotificationPayload({ runId: this.config.runId, branchId: representative.branchId, runDir: this.config.runDir, chartId: this.ast.id, error: representative.error ?? "branch runtime failed" })
-				: renderTerminalNotificationPayload(representative.state, { runId: this.config.runId, branchId: representative.branchId, runDir: this.config.runDir, workDir: join(this.config.runDir, "workspaces", representative.branchId), outcome: terminalState, ...(error === undefined ? {} : { error }) }));
+				: renderNotification(terminalState, error));
 			patchRunStatus(this.config.runDir, {
 				runId: this.config.runId, chartId: this.ast.id, state: terminalState, branchIds: [],
 				pid: process.pid, heartbeatAt: Date.now(), exitCode: terminalState === "failed" ? 1 : 0, error,
@@ -789,21 +787,22 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			error: `Runner stopped by ${signal}`,
 		});
 		for (const entry of entries) {
+			entry.draining = true;
+			entry.runtime?.beginDrain();
 			// A reservation with no replay/build in flight has nothing to quiesce.
 			if (entry.setupState === "reserved") entry.ready.resolve();
 			entry.outcome.resolve(stoppedOutcome(entry));
 		}
-		const disposals = entries.map((entry) => this.disposeEntry(entry));
-		const [setupResults, disposalResults] = await Promise.all([
-			Promise.allSettled(entries.map((entry) => entry.setup ?? Promise.resolve())),
-			Promise.allSettled(disposals),
-		]);
+		const setupResults = await Promise.allSettled(entries.map((entry) => entry.setup ?? Promise.resolve()));
+		const operationResults = await Promise.all(entries.map((entry) => this.awaitAdmittedOperations(entry)));
+		const disposalResults = await Promise.allSettled(entries.map((entry) => this.disposeEntry(entry)));
 		if (this.phase !== "closing" || this.shutdownSignal !== signal) return;
 		this.live.clear();
 		const cleanupErrors = [
 			...setupResults.flatMap((result, index) => result.status === "rejected"
 				? [`${entries[index]!.branchId} setup: ${errorMessage(result.reason)}`]
 				: []),
+			...operationResults.flatMap((results, index) => results.flatMap((result) => result.status === "rejected" ? [`${entries[index]!.branchId} operation: ${errorMessage(result.reason)}`] : [])),
 			...disposalResults.flatMap((result, index) => result.status === "rejected"
 				? [`${entries[index]!.branchId} disposal: ${errorMessage(result.reason)}`]
 				: []),
@@ -852,8 +851,9 @@ export async function createHyperchartRunnerController(
 		const rootStore = await openRunLogStore(config.runDir, { ...(initialBranchIds[0] === undefined ? {} : { branchId: initialBranchIds[0] }), onWarn: (message) => console.warn(message), access: "writer" });
 		let durableBranchIds = (await collectBranches(rootStore)).map((branch) => branch.branchId);
 		if (durableBranchIds.length === 0) {
-			const contract = projectionContractForAst(parsed.ast);
-			await rootStore.initializeRootBranchWithCheckpoint(undefined, prepareProjectionCheckpoint(createBranchProjection(parsed.ast), contract, null));
+			const fresh = BranchExecution.fresh(parsed.ast, rootStore.branchId, rootStore);
+			const checkpoint = fresh.prepareExactCheckpoint(null);
+			await rootStore.initializeRootBranch(undefined, checkpoint === undefined ? undefined : { checkpoint });
 			durableBranchIds = [rootStore.branchId];
 		}
 		return new HyperchartRunnerControllerImpl(config, initialBranchIds, attemptId, parsed.ast, parsed.schemaRegistry, rootStore, durableBranchIds, join(config.runDir, "sessions"), buildExecutor);
@@ -919,6 +919,10 @@ function formatReplayWarnings(explanation: ReplayExplanation): string[] {
 	}
 	return warnings;
 }
+function isHeadMovedError(error: unknown): error is BranchHeadMovedError {
+	return error instanceof BranchHeadMovedError;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function stringEntries(value: Record<string, unknown>): Record<string, string> { return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string")); }
 function stringArrayEntries(value: Record<string, unknown>): Record<string, string[]> { return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((item) => typeof item === "string"))); }
