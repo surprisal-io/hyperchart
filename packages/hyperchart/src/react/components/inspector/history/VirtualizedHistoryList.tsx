@@ -3,8 +3,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { HistoryCursor } from "../../../../runtime/generic/log_store.js";
 import { useHistoryWindow, type HistoryWindowSource } from "./useHistoryWindow.js";
 
-export const HISTORY_VIRTUAL_OVERSCAN = 20;
+export const HISTORY_VIRTUAL_OVERSCAN = 40;
 export const HISTORY_PREFETCH_ITEMS = 40;
+export const HISTORY_PLAIN_LIST_ITEMS = 40;
 
 export function VirtualizedHistoryList<T>({
 	cacheKey,
@@ -28,6 +29,8 @@ export function VirtualizedHistoryList<T>({
 	const parentRef = useRef<HTMLDivElement>(null);
 	const history = useHistoryWindow({ cacheKey, source, identity, ...(initialCursor === undefined ? {} : { initialCursor }) });
 	const items = history.window.items;
+	const hasMoreHistory = history.window.newer !== undefined || history.window.older !== undefined;
+	const usePlainLayout = !hasMoreHistory && items.length <= HISTORY_PLAIN_LIST_ITEMS;
 	const keys = useMemo(() => items.map(identity), [identity, items]);
 	const rowVirtualizer = useVirtualizer({
 		count: items.length,
@@ -38,9 +41,12 @@ export function VirtualizedHistoryList<T>({
 		getItemKey: (index) => keys[index] ?? index,
 		measureElement: (element) => element.getBoundingClientRect().height,
 		anchorTo: "end",
-		useAnimationFrameWithResizeObserver: true,
 	});
 	const virtualItems = rowVirtualizer.getVirtualItems();
+	const firstVirtualItem = virtualItems[0];
+	const lastVirtualItem = virtualItems.at(-1);
+	const beforeSize = firstVirtualItem?.start ?? 0;
+	const afterSize = Math.max(0, rowVirtualizer.getTotalSize() - (lastVirtualItem?.end ?? 0));
 
 	const firstIndex = virtualItems[0]?.index;
 	const lastIndex = virtualItems.at(-1)?.index;
@@ -65,12 +71,29 @@ export function VirtualizedHistoryList<T>({
 	}
 	if (items.length === 0) return <div className="text-[10px] text-[var(--text-muted)]">{emptyLabel}</div>;
 
+	if (usePlainLayout) {
+		return (
+			<div className="grid gap-1.5" data-testid="virtualized-history" data-history-layout="plain" data-retained-items={items.length}>
+				<div className={`overflow-auto overscroll-contain ${className}`}>
+					<div className="w-full">
+						{items.map((item, index) => (
+							<div key={identity(item)} data-history-row={identity(item)} className="pb-2">
+								{renderItem(item, index)}
+							</div>
+						))}
+					</div>
+				</div>
+			</div>
+		);
+	}
+
 	return (
-		<div className="grid gap-1.5" data-testid="virtualized-history" data-retained-items={items.length}>
+		<div className="grid gap-1.5" data-testid="virtualized-history" data-history-layout="virtual" data-retained-items={items.length}>
 		{history.newer.error !== undefined && <HistoryError edge="newer" error={history.newer.error} onRetry={history.loadNewer} />}
 		{history.newer.loading && <div className="text-center text-[10px] text-[var(--text-muted)]">Loading newer…</div>}
 		<div ref={parentRef} className={`overflow-auto overscroll-contain ${className}`} onScroll={prefetchAtScrollEdge}>
-			<div className="relative w-full" style={{ height: `${rowVirtualizer.getTotalSize()}px` }}>
+			<div className="w-full">
+				{beforeSize > 0 && <div aria-hidden="true" data-history-spacer="before" style={{ height: `${beforeSize}px` }} />}
 				{virtualItems.map((virtualRow) => {
 					const item = items[virtualRow.index];
 					if (item === undefined) return null;
@@ -80,13 +103,13 @@ export function VirtualizedHistoryList<T>({
 							data-index={virtualRow.index}
 							data-history-row={identity(item)}
 							ref={rowVirtualizer.measureElement}
-							className="absolute left-0 top-0 w-full pb-2"
-							style={{ transform: `translateY(${virtualRow.start}px)` }}
+							className="w-full pb-2"
 						>
 							{renderItem(item, virtualRow.index)}
 						</div>
 					);
 				})}
+				{afterSize > 0 && <div aria-hidden="true" data-history-spacer="after" style={{ height: `${afterSize}px` }} />}
 			</div>
 		</div>
 		{history.older.loading && <div className="text-center text-[10px] text-[var(--text-muted)]">Loading older…</div>}

@@ -71,6 +71,7 @@ export function HyperchartInspectorSidePanel({
 		<aside
 			data-hyperchart-root
 			data-theme={resolved}
+			style={{ paddingRight: "1.5rem", scrollbarGutter: "stable" }}
 			className={`min-h-0 overflow-y-auto overscroll-contain p-2 [-webkit-overflow-scrolling:touch] md:p-3 ${className}`}
 		>
 			{selectedState ? (

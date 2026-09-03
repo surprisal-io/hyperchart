@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { HyperchartInspectorDialog } from "../packages/hyperchart/src/react/HyperchartInspectorDialog.js";
+import { HyperchartInspectorSidePanel } from "../packages/hyperchart/src/react/components/inspector/HyperchartInspectorSidePanel.js";
 import type { HyperchartRunInfo } from "../packages/hyperchart/src/react/types.js";
 
 const run: HyperchartRunInfo = {
@@ -32,5 +33,13 @@ describe("HyperchartInspectorDialog desktop layout", () => {
 		expect(markup).not.toContain("lg:border-r");
 		expect(markup).toContain("visibility:visible");
 		expect(markup).not.toContain("visibility:hidden");
+	});
+
+	it("reserves space for the side panel scrollbar instead of overlaying detail cards", () => {
+		const markup = renderToStaticMarkup(createElement(HyperchartInspectorSidePanel, { run }));
+
+		expect(markup).toContain("padding-right:1.5rem");
+		expect(markup).toContain("scrollbar-gutter:stable");
+		expect(markup).not.toContain("pr-6");
 	});
 });
