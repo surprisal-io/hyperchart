@@ -123,7 +123,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && node ../../scripts/copy-react-styles.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"prepack": "npm run build && node ../../scripts/stage-package-resources.mjs stage pi",
+		"prepack": "node ../../scripts/prepare-git-package.mjs @surprisal/pi-hyperchart && node ../../scripts/stage-package-resources.mjs stage pi",
 		"postpack": "node ../../scripts/stage-package-resources.mjs clean pi"
 	}
 }

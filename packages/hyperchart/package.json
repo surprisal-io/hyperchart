@@ -83,7 +83,7 @@
 	"scripts": {
 		"build": "tsc -p tsconfig.build.json && node ../../scripts/build-react-styles.mjs && node ../../scripts/build-inspector-web.mjs",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"prepack": "npm run build"
+		"prepack": "node ../../scripts/prepare-git-package.mjs @surprisal/hyperchart"
 	},
 	"peerDependencies": {
 		"@xyflow/react": "^12.11.1",
