@@ -11,10 +11,11 @@ import type {
 } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
 import type { HyperchartInfo, HyperchartRunInfo, HyperchartRunSummaryInfo, HyperchartSummaryInfo } from "@surprisal/hyperchart/host";
-import { loadRunMeta } from "@surprisal/hyperchart/runtime";
+import { loadRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
 import { getHyperchartRunsRoot, getProjectHyperchartsDir, getSharedHyperchartsDir, listProjectHypercharts } from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { createPiFileTranscriptReader } from "./run_inspect.js";
+import { createAsyncGate, createAsyncMemo, type AsyncMemo } from "./async_gate.js";
 import { readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
 
 
@@ -23,8 +24,18 @@ export interface PiHyperchartHostOptions {
 	agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined;
 }
 
+const MAX_CONCURRENT_RUN_META_READS = 8;
+
 export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): HyperchartHostAdapter {
 	const failedRunMetaFingerprints = new Map<string, string>();
+	const limitRunMetaRead = createAsyncGate(MAX_CONCURRENT_RUN_META_READS);
+	const limitedRunMetaRead = (runDir: string) => limitRunMetaRead(() => loadRunMeta(runDir));
+	// Postgres run metadata is immutable after its initial write. Cache successful
+	// reads so per-cwd dashboard polling does not reopen every global run on every
+	// tick. Promise caching also coalesces simultaneous cwd snapshots.
+	const readRunMeta = process.env.HYPERCHART_PG_DSN
+		? createAsyncMemo(limitedRunMetaRead)
+		: limitedRunMetaRead;
 	const agentDir = resolve(options.agentDir ?? defaultAgentDir());
 	const runDirFor = (runId: string) => {
 		if (basename(runId) !== runId) throw new Error("Invalid Hyperchart run id");
@@ -36,7 +47,7 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 
 	return {
 		readSessionSnapshot: (cwd, snapshotOptions = {}) =>
-			readSessionSnapshot(resolve(cwd), agentDir, snapshotOptions, failedRunMetaFingerprints),
+			readSessionSnapshot(resolve(cwd), agentDir, snapshotOptions, failedRunMetaFingerprints, readRunMeta),
 		readChartSnapshot: async (cwd, chartName) => {
 			const resolvedCwd = resolve(cwd);
 			const chart = (await discoverHypercharts(resolvedCwd, agentDir)).find((candidate) => candidate.name === chartName);
@@ -75,10 +86,11 @@ async function readSessionSnapshot(
 	agentDir: string,
 	options: HyperchartSnapshotOptions,
 	failedRunMetaFingerprints: Map<string, string>,
+	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartSessionSnapshot> {
 	const [hypercharts, runs] = await Promise.all([
 		readHypercharts(cwd, agentDir),
-		readRuns(cwd, agentDir, options.runLimit ?? 50, failedRunMetaFingerprints),
+		readRuns(cwd, agentDir, options.runLimit ?? 50, failedRunMetaFingerprints, readRunMeta),
 	]);
 	return { hypercharts, runs };
 }
@@ -265,6 +277,7 @@ async function readRuns(
 	agentDir: string,
 	limit: number,
 	failedRunMetaFingerprints: Map<string, string>,
+	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartRunSummaryInfo[]> {
 	const root = getHyperchartRunsRoot(agentDir);
 	let entries;
@@ -277,7 +290,7 @@ async function readRuns(
 	const runs = await Promise.all(
 		entries
 			.filter((entry) => entry.isDirectory())
-			.map((entry) => readRunSummary(join(root, entry.name), cwd, failedRunMetaFingerprints)),
+			.map((entry) => readRunSummary(join(root, entry.name), cwd, failedRunMetaFingerprints, readRunMeta)),
 	);
 	return runs
 		.filter((run): run is HyperchartRunSummaryInfo => run !== undefined)
@@ -289,12 +302,13 @@ async function readRunSummary(
 	runDir: string,
 	cwd: string,
 	failedRunMetaFingerprints: Map<string, string>,
+	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartRunSummaryInfo | undefined> {
 	const metaFingerprint = process.env.HYPERCHART_PG_DSN ? undefined : await fileFingerprint(join(runDir, "meta.json"));
 	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
 	let meta;
 	try {
-		meta = await loadRunMeta(runDir);
+		meta = await readRunMeta(runDir);
 		failedRunMetaFingerprints.delete(runDir);
 	} catch (error) {
 		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runDir, metaFingerprint);

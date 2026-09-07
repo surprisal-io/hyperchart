@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { parseChartModuleSync } from "../core/inspect.js";
 import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../core/durable_events.js";
 import type { ActionUID, ChartEvent, SchemaAst } from "../core/types.js";
-import { loadRunMeta } from "../runtime/generic/run_dir.js";
+import { loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import { BranchHeadMovedError, collectBranches } from "../runtime/generic/log_store.js";
 import { BranchExecution } from "../execution/branch_execution.js";
@@ -21,6 +21,22 @@ export const USER_INTERACTION_WAIT_LEASE_MS = 5 * 60_000;
 const MAX_SCAN_CHART_CACHE_ENTRIES = 64;
 type ParsedChartModule = Extract<ReturnType<typeof parseChartModuleSync>, { ok: true }>;
 const scanChartCache = new Map<string, { sourceHash: string; parsed: ParsedChartModule }>();
+// Run metadata becomes immutable after its initial durable write. Interaction
+// coordinators scan the shared runs root frequently, so retain successful reads
+// and coalesce concurrent scans instead of reconnecting to Postgres per run.
+const scanRunMetaCache = new Map<string, Promise<RunMeta>>();
+
+function loadRunMetaForOwnedScan(runDir: string): Promise<RunMeta> {
+	const key = canonicalPath(runDir);
+	const cached = scanRunMetaCache.get(key);
+	if (cached !== undefined) return cached;
+	const pending = loadRunMeta(runDir);
+	scanRunMetaCache.set(key, pending);
+	void pending.catch(() => {
+		if (scanRunMetaCache.get(key) === pending) scanRunMetaCache.delete(key);
+	});
+	return pending;
+}
 
 export type UserInteractionCoordinate = Readonly<{ runId: string; branchId: BranchId; seqId: number }>;
 export type UserInteractionRequest = Readonly<{
@@ -183,7 +199,14 @@ function parseChartForInteractionScan(chartPath: string, exportName?: string): P
 }
 
 export async function scanOpenUserInteractions(runDir: string, branchId?: BranchId): Promise<UserInteractionRequest[]> {
-	const meta = await loadRunMeta(runDir);
+	return scanOpenUserInteractionsWithMeta(runDir, await loadRunMeta(runDir), branchId);
+}
+
+async function scanOpenUserInteractionsWithMeta(
+	runDir: string,
+	meta: RunMeta,
+	branchId?: BranchId,
+): Promise<UserInteractionRequest[]> {
 	const parsed = parseChartForInteractionScan(meta.chartPath, meta.exportName);
 	const store = await openRunLogStore(runDir, { access: "read", ...(branchId === undefined ? {} : { branchId }) });
 	try {
@@ -207,8 +230,9 @@ export async function scanOwnedOpenUserInteractions(ownerInput: UserInteractionO
 		if (!entry.isDirectory()) continue;
 		const runDir = join(owner.runsRoot, entry.name);
 		try {
-			await assertUserInteractionOwner(owner, runDir, entry.name);
-			for (const request of await scanOpenUserInteractions(runDir)) {
+			const meta = await loadRunMetaForOwnedScan(runDir);
+			await assertUserInteractionOwner(owner, runDir, entry.name, meta);
+			for (const request of await scanOpenUserInteractionsWithMeta(runDir, meta)) {
 				const receipt = receiptState(runDir, request, owner.host, owner.sessionId);
 				result.push({ runDir, request, presentation: receipt.presentation, ...(receipt.order === undefined ? {} : { presentationOrder: receipt.order }) });
 			}
@@ -354,10 +378,15 @@ function writeJsonExclusive(path: string, value: unknown): void {
 	writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { flag: "wx" });
 	try { linkSync(temp, path); } finally { rmSync(temp, { force: true }); }
 }
-async function assertUserInteractionOwner(ownerInput: UserInteractionOwner, runDir: string, runId: string): Promise<void> {
+async function assertUserInteractionOwner(
+	ownerInput: UserInteractionOwner,
+	runDir: string,
+	runId: string,
+	knownMeta?: RunMeta,
+): Promise<void> {
 	const owner = normalizeOwner(ownerInput);
 	if (canonicalPath(runDir) !== canonicalPath(join(owner.runsRoot, runId))) throw new Error(`Run '${runId}' is outside the configured runs root`);
-	const meta = await loadRunMeta(runDir);
+	const meta = knownMeta ?? await loadRunMeta(runDir);
 	if (meta.originSessionId !== owner.sessionId) throw new Error(`Run '${runId}' is not owned by this session`);
 	if (canonicalPath(meta.workDir) !== owner.workDir) throw new Error(`Run '${runId}' belongs to another working directory`);
 }
