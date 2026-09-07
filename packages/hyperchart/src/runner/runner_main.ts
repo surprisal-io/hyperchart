@@ -133,6 +133,8 @@ export interface HyperchartRunnerController {
 	moveBranch(branchId: BranchId, targetHeadSeqId: number | null): Promise<number>;
 	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. Drained branches are replay-gated before readmission. */
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
+	/** Release an idle user-gated branch runtime without writing a new checkpoint. The branch remains replay-gated and eligible for readmission. */
+	unloadBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
 	/** Seal one live branch and drain all already admitted work. A successful drain remains eligible for replay-gated readmission. */
 	stopAndDrain(branchId: BranchId): Promise<RunnerBranchOutcome>;
 }
@@ -476,6 +478,35 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		return entry.outcome.promise;
 	}
 
+	async unloadBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {
+		this.assertAccepting("unload a branch");
+		if (!this.started) throw new Error("Hyperchart runner must be started before unloading a branch; call controller.start() first");
+		assertRunnerBranchId(branchId);
+		const entry = this.live.get(branchId);
+		if (entry === undefined) throw new Error(`Hyperchart branch '${branchId}' is not live in this runner attempt`);
+		if (entry.drain !== undefined) return entry.drain;
+		entry.admissionClosed = true;
+		try {
+			await entry.ready.promise;
+			const idle = await this.enqueueWriterStep(async () => {
+				if (this.live.get(branchId) !== entry || entry.semantic === undefined) return false;
+				const snapshot = await entry.store.captureSnapshot(branchId);
+				const semantic = entry.semantic.headSeqId() === snapshot.headSeqId
+					? entry.semantic
+					: await BranchExecution.restore({ ast: this.ast, branchId, store: entry.store, saveCheckpoint: "never", snapshot });
+				return semantic.openUserInteractions().length > 0;
+			});
+			if (!idle) throw new Error(`Hyperchart branch '${branchId}' is not idle at a durable user gate`);
+			entry.draining = true;
+			entry.runtime?.beginDrain();
+			entry.drain = this.drainEntry(entry, false, false);
+			return entry.drain;
+		} catch (error) {
+			entry.admissionClosed = false;
+			throw error;
+		}
+	}
+
 	stopAndDrain(branchId: BranchId): Promise<RunnerBranchOutcome> {
 		this.assertAccepting("stop and drain a branch");
 		if (!this.started) throw new Error("Hyperchart runner must be started before stopping and draining a branch; call controller.start() first");
@@ -812,7 +843,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		}
 	}
 
-	private async drainEntry(entry: BranchEntry): Promise<RunnerBranchOutcome> {
+	private async drainEntry(entry: BranchEntry, saveCheckpoint = true, leaveSealed = true): Promise<RunnerBranchOutcome> {
 		let outcome: RunnerBranchOutcome = { branchId: entry.branchId, outcome: "drained" };
 		const results = [];
 		results.push(await Promise.resolve(entry.setup ?? Promise.resolve()).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
@@ -820,10 +851,13 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		entry.runtime?.beginDrain();
 		results.push(...await this.awaitAdmittedOperations(entry));
 		results.push(await this.enqueueWriterStep(() => { this.sealedBranches.add(entry.branchId); }).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
-		results.push(await this.disposeEntry(entry).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
+		results.push(await this.disposeEntry(entry, saveCheckpoint).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
 		results.push(await Promise.resolve(entry.execution ?? Promise.resolve()).then(() => ({ status: "fulfilled" as const, value: undefined }), (reason) => ({ status: "rejected" as const, reason })));
 		const errors = results.flatMap((result) => result.status === "rejected" ? [errorMessage(result.reason)] : []);
 		if (errors.length > 0) outcome = { branchId: entry.branchId, outcome: "failed", error: `Branch drain failed: ${errors.join("; ")}` };
+		if (outcome.outcome === "drained" && !leaveSealed) {
+			await this.enqueueWriterStep(() => { this.sealedBranches.delete(entry.branchId); });
+		}
 		if (this.live.get(entry.branchId) === entry) {
 			this.outcomes.push(outcome);
 			if (outcome.outcome === "drained") {
@@ -848,13 +882,13 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		return results;
 	}
 
-	private disposeEntry(entry: BranchEntry): Promise<void> {
+	private disposeEntry(entry: BranchEntry, saveCheckpoint = true): Promise<void> {
 		entry.disposal ??= (async () => {
 			await entry.ready.promise;
 			try {
 				if (entry.runtime !== undefined) await entry.runtime.dispose();
 				else if (entry.executor !== undefined) await entry.executor.dispose();
-				if (entry.semantic !== undefined) await entry.semantic.storeExactCheckpoint();
+				if (saveCheckpoint && entry.semantic !== undefined) await entry.semantic.storeExactCheckpoint();
 			} finally {
 				this.executors.delete(entry.branchId);
 			}

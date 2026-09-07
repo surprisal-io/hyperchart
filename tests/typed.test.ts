@@ -20,6 +20,7 @@ import {
 	send,
 	sendBatch,
 	t,
+	tsAction,
 	z,
 } from "../packages/hyperchart/src/index.js";
 import { arg as untypedArg, artifactOf as untypedArtifactOf, event as untypedEvent, result as untypedResult } from "../packages/hyperchart/src/core/dsl.js";
@@ -140,6 +141,30 @@ describe("typed refs (TS-first)", () => {
 		>();
 		// @ts-expect-error artifact name drifted
 		wrongArtifact.chart(body);
+	});
+
+	it("includes imported function replies, artifacts, and env refs in typed chart registries", () => {
+		const Reply = z.object({ ok: z.boolean() });
+		const body = {
+			kind: "chart",
+			id: "typed-imported-action",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: tsAction("./actions.mjs", "run", {
+						env: { TOPIC: t`${arg("topic")}` },
+						artifacts: { report: "report.json" },
+						reply: Reply,
+					}),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		} as const;
+		const typed = refs<Args, { work: z.infer<typeof Reply> }, { work: { report: unknown } }>();
+		expect(typed.chart(body).id).toBe("typed-imported-action");
+		expect(typed.artifactOf("work", { artifact: "report" })).toEqual({ kind: "artifactOf", state: "work", artifact: "report" });
 	});
 
 	it("includes guard-produced artifacts in the typed Files registry", () => {

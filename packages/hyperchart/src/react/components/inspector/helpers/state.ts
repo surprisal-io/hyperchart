@@ -4,6 +4,7 @@ import {
 	ChatBubbleLeftRightIcon,
 	CheckBadgeIcon,
 	CommandLineIcon,
+	CodeBracketSquareIcon,
 	FolderIcon,
 	MapIcon,
 	QueueListIcon,
@@ -84,6 +85,13 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 				Icon: CommandLineIcon,
 				className: "border-slate-500/45 bg-slate-500/10 text-[var(--hc-slate-text)]",
 				iconClassName: "text-[var(--hc-slate-text)]",
+			};
+		case "tsImport":
+			return {
+				label: "tsAction",
+				Icon: CodeBracketSquareIcon,
+				className: "border-fuchsia-500/45 bg-fuchsia-500/10 text-[var(--hc-purple-text)]",
+				iconClassName: "text-[var(--hc-purple-text)]",
 			};
 		case "parallel":
 			return {
@@ -183,6 +191,8 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 			return "reply()";
 		case "script":
 			return state.commandPreview?.split("\n")[0] ?? "script";
+		case "tsImport":
+			return state.module === undefined ? "tsAction" : `${state.module}#${state.export ?? "default"}`;
 		case "map": {
 			const progress = state.subProgress;
 			if (progress)

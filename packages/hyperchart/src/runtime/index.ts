@@ -63,6 +63,9 @@ export type { SchemaRegistryLike } from "../core/schema_registry.js";
 export { checkSchema, checkSchemaAsync } from "./generic/schema.js";
 export type { SchemaCheck } from "./generic/schema.js";
 export { ScriptRunner } from "./generic/script_runner.js";
+export { FunctionRunner } from "./generic/function_runner.js";
+export type { ImportedActionContext, ImportedActionFunction, ValidationAttempt } from "./generic/function_runner.js";
+export { validateActionCompletion } from "./generic/completion_validation.js";
 export { buildFinishSchema, finishableEvents, validateFinishParams } from "./generic/finish_protocol.js";
 export type { CompletionSink, FinishParams } from "./generic/finish_protocol.js";
 export {

@@ -58,6 +58,7 @@ class SemanticStoryRuntime implements Runtime {
 				if (this.targetCount >= this.count) throw new CaptureFinished();
 				this.push({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "script") this.push({ kind: "script", effectId: effect.id, event: { type: "DONE" } });
+			else if (effect.kind === "tsImport") this.push({ kind: "tsImport", effectId: effect.id, event: { type: "DONE" } });
 			else if (effect.kind === "agent") this.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
 			else if (effect.kind === "actor_create" || effect.kind === "actor_enqueue" || effect.kind === "actor_reply") this.push({ kind: "actor_effect", effectId: effect.id, operation: effect.kind === "actor_create" ? "create" : effect.kind === "actor_enqueue" ? "enqueue" : "reply", ok: true });
 			else if (effect.kind !== "cancel") throw new Error(`Unexpected semantic story effect ${effect.kind}`);

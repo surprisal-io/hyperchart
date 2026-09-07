@@ -64,6 +64,25 @@ describe("Agent inspector details", () => {
 		expect(markup).not.toContain("type Context");
 	});
 
+	it("renders imported function identity, resolved params, and artifacts", () => {
+		const state: HyperchartStateInfo = { id: "score", type: "tsImport", status: "running", module: "./score.mjs", export: "score" };
+		const markup = renderToStaticMarkup(createElement(VisitInvocationDetails, {
+			state,
+			allStates: [state],
+			invocation: {
+				kind: "tsImport",
+				module: "./score.mjs",
+				export: "score",
+				params: { node: { path: "node.json", select: "value" } },
+				artifacts: [{ name: "reward", path: "reward.json" }],
+			},
+		}));
+		expect(markup).toContain("resolved function");
+		expect(markup).toContain("./score.mjs#score");
+		expect(markup).toContain("resolved params");
+		expect(markup).toContain("reward.json");
+	});
+
 	it("renders the loaded agent description", () => {
 		const state: HyperchartStateInfo = {
 			id: "analyze",

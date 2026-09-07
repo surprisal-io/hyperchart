@@ -16,6 +16,7 @@ import type { AgentExecutor } from "./agent_executor.js";
 import type { CheckpointRepository, LogStore, PrepareStampedCommit } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
 import { ScriptRunner } from "./script_runner.js";
+import { FunctionRunner } from "./function_runner.js";
 import { checkSchemaAsync } from "./schema.js";
 
 export type ChartRuntimeOptions = {
@@ -45,6 +46,7 @@ export class ChartRuntime implements Runtime {
 	private readonly queue: AsyncQueue<MachineEvent> = createAsyncQueue<MachineEvent>();
 	private readonly timers = new Map<string, NodeJS.Timeout>();
 	private readonly scripts: ScriptRunner;
+	private readonly functions: FunctionRunner;
 	private readonly artifactStore?: ArtifactStore;
 	private readonly now: () => number;
 	private readonly onWarn: (msg: string) => void;
@@ -63,6 +65,12 @@ export class ChartRuntime implements Runtime {
 		}
 		this.branchId = options.branchId;
 		this.scripts = new ScriptRunner({
+			workDir: options.workDir,
+			projectDir: options.projectDir ?? options.workDir,
+			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
+		});
+		this.functions = new FunctionRunner({
+			chartDir: options.chartDir,
 			workDir: options.workDir,
 			projectDir: options.projectDir ?? options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
@@ -179,6 +187,19 @@ export class ChartRuntime implements Runtime {
 							}),
 					);
 					break;
+				case "tsImport":
+					this.track(
+						this.functions
+							.run(effect, undefined, () => this.restorePinnedReads(envArtifacts(effect.env)))
+							.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts))
+							.then((admitted) => {
+								if (admitted !== undefined) this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
+							})
+							.catch((error: unknown) => {
+								this.send({ kind: "tsImport", effectId: effect.id, event: toFailedEvent(error) });
+							}),
+					);
+					break;
 				case "validate": {
 					this.track(
 						runGuard(
@@ -215,6 +236,7 @@ export class ChartRuntime implements Runtime {
 					const cancellations = [
 						this.options.agentExecutor.cancel(effect.actionUid),
 						this.scripts.cancel(effect.actionUid),
+						this.functions.cancel(effect.actionUid),
 					];
 					this.track(Promise.allSettled(cancellations).then((results) => {
 						for (const result of results) {
@@ -262,6 +284,7 @@ export class ChartRuntime implements Runtime {
 	private async performDispose(): Promise<void> {
 		const cleanups = [
 			Promise.resolve().then(() => this.scripts.dispose()),
+			Promise.resolve().then(() => this.functions.dispose()),
 			Promise.resolve().then(() => this.options.agentExecutor.dispose()),
 		];
 		const cleanupResults = await Promise.allSettled(cleanups);
@@ -418,6 +441,32 @@ export class ChartRuntime implements Runtime {
 					})
 					.catch((error: unknown) => {
 						this.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) });
+					}),
+			);
+			return;
+		}
+		if (state.action.kind === "tsImport") {
+			const functionEffect = effect.invocation.kind === "tsImport" ? effect.invocation : undefined;
+			if (functionEffect === undefined) {
+				this.send({
+					kind: "tsImport",
+					effectId: effect.id,
+					event: toFailedEvent("Cannot retry rejected imported action: replay-derived invocation is missing"),
+				});
+				return;
+			}
+			this.track(
+				this.functions
+					.run(functionEffect, {
+						n: effect.validationAttempts,
+						...(effect.reason === undefined ? {} : { reason: effect.reason }),
+					})
+					.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, functionEffect.artifacts))
+					.then((admitted) => {
+						if (admitted !== undefined) this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
+					})
+					.catch((error: unknown) => {
+						this.send({ kind: "tsImport", effectId: effect.id, event: toFailedEvent(error) });
 					}),
 			);
 			return;

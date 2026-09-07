@@ -128,6 +128,38 @@ async function fixture(cadenceBoundary = false, continueAfterGate = false) {
 }
 
 describePg("atomic runner interaction commit", () => {
+  it("unloads an idle gate without checkpoint churn and readmits after an offline response", async () => {
+    const f = await fixture();
+    let built = 0;
+    const controller = await createHyperchartRunnerController(
+      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      () => { built += 1; return new NoopExecutor(); },
+    );
+    const hold = controller.acquireHold();
+    const aggregate = controller.start();
+    await waitFor(() => built === 1);
+
+    const { Client } = await import("pg");
+    const client = new Client({ connectionString: dsn as string });
+    await client.connect();
+    const checkpointCount = async () => Number((await client.query(
+      "select count(*)::int as count from hyperchart_checkpoint where run_id = $1",
+      [f.runId],
+    )).rows[0]!.count);
+    const before = await checkpointCount();
+
+    expect(await controller.unloadBranch("main")).toEqual({ branchId: "main", outcome: "drained" });
+    expect(controller.liveBranchIds).toEqual([]);
+    expect(await checkpointCount()).toBe(before);
+
+    await controller.respondToUserInteraction("main", f.gateSeqId, { type: "SELECTED" });
+    await expect(controller.startBranch("main")).resolves.toMatchObject({ branchId: "main", outcome: "complete" });
+    expect(built).toBe(2);
+    await client.end();
+    hold.release();
+    await aggregate;
+  }, 30_000);
+
   it("serializes a live response with executor construction and completes without restart", async () => {
     const f = await fixture();
     let entered!: () => void; const constructionEntered = new Promise<void>((resolve) => { entered = resolve; });

@@ -2,9 +2,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { actionUidKey } from "../../core/action_uid.js";
 import type { ActionUID, ChartEvent, GuardOutcome, GuardRefAst, SchemaAst } from "../../core/types.js";
 import type { RenderedArtifact, ScriptEffect } from "../../core/machine.js";
-import { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./artifacts.js";
-import { checkSchemaAsync } from "./schema.js";
+import { resolveArtifactValue, serializeEnvValue } from "./artifacts.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
+import { replyValidationError, validateActionCompletion, validateArtifacts } from "./completion_validation.js";
 
 export type RenderedScriptEnv = Readonly<Record<string, string | RenderedArtifact>>;
 
@@ -38,7 +38,11 @@ export class ScriptRunner {
 			if (result.code !== 0) {
 				return { type: "FAILED", error: { code: result.code, signal: result.signal, stderr: tail(result.stderr, 2000) } };
 			}
-			return this.validateEvent(effect, eventFromStdout(result.stdout, effect.events));
+			return validateActionCompletion(effect, eventFromStdout(result.stdout, effect.events), {
+				workDir: this.opts.workDir,
+				...(this.opts.schemaRegistry === undefined ? {} : { schemaRegistry: this.opts.schemaRegistry }),
+				label: "script",
+			});
 		} finally {
 			this.finish(key, live);
 		}
@@ -74,10 +78,10 @@ export class ScriptRunner {
 
 			if (reply !== undefined) {
 				const replyEvent = eventFromStdout(result.stdout, ["DONE"]);
-				const error = await this.replyValidationError(reply, replyEvent);
+				const error = await replyValidationError(reply, replyEvent, this.opts.schemaRegistry);
 				if (error !== undefined) return { ok: false, reason: `script guard ${error}` };
 			}
-			const artifactErrors = await this.validateArtifacts(artifacts);
+			const artifactErrors = await validateArtifacts(artifacts, this.opts.workDir, this.opts.schemaRegistry);
 			if (artifactErrors.length > 0) {
 				return { ok: false, reason: `script guard deliverables are invalid: ${artifactErrors.join("; ")}` };
 			}
@@ -206,34 +210,6 @@ export class ScriptRunner {
 		return env;
 	}
 
-	private async validateEvent(effect: ScriptEffect, event: ChartEvent): Promise<ChartEvent> {
-		if (!effect.events.includes(event.type)) {
-			return { type: "FAILED", error: `script emitted unsupported event '${event.type}'; allowed: ${effect.events.join(", ")}` };
-		}
-		if (event.type === "FAILED") {
-			if (!("error" in event)) return { type: "FAILED", error: "script emitted FAILED without an error" };
-		} else if (effect.reply !== undefined) {
-			const error = await this.replyValidationError(effect.reply, event);
-			if (error !== undefined) return { type: "FAILED", error: `script ${error}` };
-		}
-		const artifactErrors = await this.validateArtifacts(effect.artifacts);
-		if (artifactErrors.length > 0) return { type: "FAILED", error: `script deliverables are invalid: ${artifactErrors.join("; ")}` };
-		return event;
-	}
-
-	private async replyValidationError(reply: SchemaAst, event: ChartEvent): Promise<string | undefined> {
-		const check = await checkSchemaAsync(reply, "output" in event ? event.output : undefined, this.opts.schemaRegistry);
-		return check.ok ? undefined : `output does not match reply schema: ${check.errors.join("; ")}`;
-	}
-
-	private async validateArtifacts(artifacts: readonly RenderedArtifact[] | undefined): Promise<string[]> {
-		const errors: string[] = [];
-		for (const artifact of artifacts ?? []) {
-			const check = await checkArtifactFile(artifact, this.opts.workDir, this.opts.schemaRegistry);
-			if (!check.ok) errors.push(...check.errors);
-		}
-		return errors;
-	}
 }
 
 function eventFromStdout(stdout: string, events: readonly string[]): ChartEvent {

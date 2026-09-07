@@ -123,6 +123,7 @@ function invocationInfo(action: StateActionAst): HyperchartVisitInfo["invocation
 	switch (action.kind) {
 		case "agent": return { kind: "agent", ...(action.task === undefined ? {} : { task: templatePreview(action.task) }) };
 		case "script": return { kind: "script", command: action.command, args: [...action.args] };
+		case "tsImport": return { kind: "tsImport", module: action.module, export: action.export };
 		case "user": return { kind: "user", prompt: templatePreview(action.prompt) };
 	}
 }

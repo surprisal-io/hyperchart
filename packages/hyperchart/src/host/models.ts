@@ -23,6 +23,7 @@ export type HyperchartStateType =
 	| "agent"
 	| "user"
 	| "script"
+	| "tsImport"
 	| "send"
 	| "sendBatch"
 	| "call"
@@ -357,6 +358,13 @@ export type HyperchartVisitInvocationInfo =
 			env?: Record<string, unknown>;
 			artifacts?: HyperchartRenderedArtifactInfo[];
 	  }
+	| {
+			kind: "tsImport";
+			module: string;
+			export: string;
+			params?: Record<string, unknown>;
+			artifacts?: HyperchartRenderedArtifactInfo[];
+	  }
 	| { kind: "user"; prompt: string }
 	| { kind: "actor" };
 
@@ -494,6 +502,8 @@ export interface HyperchartStateInfo {
 	taskPreview?: string;
 	taskPrompt?: string;
 	commandPreview?: string;
+	module?: string;
+	export?: string;
 	artifacts?: HyperchartArtifactInfo[];
 	replySchema?: HyperchartSchemaInfo;
 	env?: HyperchartEnvInfo[];

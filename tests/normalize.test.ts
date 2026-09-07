@@ -17,6 +17,7 @@ import {
 	reply,
 	send,
 	t,
+	tsAction,
 	tsImport,
 	user,
 	z,
@@ -191,6 +192,59 @@ describe("normalizeChartConfig", () => {
 		}));
 		expect(parsed.ok).toBe(false);
 		expect(parsed.diagnostics.filter((diagnostic) => diagnostic.code === "NON_DOMINATED_REF")).toHaveLength(2);
+	});
+
+	it("normalizes imported function actions as serializable tsImport definitions", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "imported-action",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: tsAction("./actions.mjs", "run", {
+							env: { TOPIC: t`${arg("topic")}` },
+							artifacts: { report: artifact("report.json") },
+							reply: z.object({ ok: z.boolean() }),
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) throw new Error("expected valid chart");
+		const work = result.ast.states.work;
+		if (work?.kind !== "state") throw new Error("expected action state");
+		expect(work.action).toMatchObject({
+			kind: "tsImport",
+			uid: { chart: "imported-action", state: "work", action: "tsImport" },
+			module: "./actions.mjs",
+			export: "run",
+			env: { TOPIC: { kind: "template", refs: [{ kind: "arg", name: "topic" }] } },
+			artifacts: { report: { path: { kind: "template", strings: ["report.json"], refs: [] } } },
+		});
+		expect(Object.isFrozen(work.action)).toBe(true);
+		expect(() => JSON.stringify(work.action)).not.toThrow();
+	});
+
+	it("diagnoses empty imported function module and export names", () => {
+		const result = normalizeChartConfig({
+			kind: "chart",
+			id: "bad-imported-action",
+			initial: "work",
+			states: {
+				work: { kind: "state", action: { kind: "tsImport", module: "", export: "" }, transitions: {} },
+			},
+		});
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((diagnostic) => [diagnostic.code, diagnostic.path])).toEqual([
+			["INVALID_TS_IMPORT", "/states/work/action/module"],
+			["INVALID_TS_IMPORT", "/states/work/action/export"],
+		]);
 	});
 
 	it("normalizes validate with a default onReject of resume", () => {

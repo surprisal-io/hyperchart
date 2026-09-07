@@ -86,7 +86,9 @@ export default chart({
 });
 ```
 
-A successful script with one non-`FAILED` transition emits that event implicitly. Ask Pi to inspect the chart with `hyperchart` with `action: "inspect"`, then start it:
+A successful script with one non-`FAILED` transition emits that event implicitly. For measured subprocess hot paths, `tsAction("./actions.mjs", "run", options)` executes a trusted imported function in the runner process while preserving the same durable invoke/completion provenance, validation, and artifact pinning. It requires an explicit returned event; cancellation suppresses late results but cannot terminate CPU work. See [Function actions](docs/core-authoring.md#function-actions) and the [trust boundary](docs/safety.md#in-process-function-actions).
+
+Ask Pi to inspect the chart with `hyperchart` with `action: "inspect"`, then start it:
 
 ```text
 Use hyperchart action=inspect on .pi/hypercharts/hello.chart.ts

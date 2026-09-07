@@ -21,6 +21,7 @@ import type {
 	OnReenterAst,
 	SchemaAst,
 	ScriptActionAst,
+	ImportedActionAst,
 	StatePath,
 	TemplateAst,
 	Templatable,
@@ -152,7 +153,23 @@ export type ScriptEffect = Readonly<{
 	reply?: SchemaAst;
 }>;
 
-export type ActionEffect = AgentEffect | UserEffect | ScriptEffect;
+// A trusted in-process imported function invocation. The runtime resolves `env` values into the
+// function's `params` argument and supplies paths/cancellation separately in its context.
+export type ImportedActionEffect = Readonly<{
+	kind: "tsImport";
+	id: EffectId;
+	actionUid: ActionUID;
+	action: ImportedActionAst;
+	module: string;
+	export: string;
+	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	artifacts?: readonly RenderedArtifact[];
+	events: readonly string[];
+	reply?: SchemaAst;
+	input?: Readonly<Record<string, JsonValue>>;
+}>;
+
+export type ActionEffect = AgentEffect | UserEffect | ScriptEffect | ImportedActionEffect;
 
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
@@ -256,6 +273,7 @@ export type Effect =
 	| AgentEffect
 	| UserEffect
 	| ScriptEffect
+	| ImportedActionEffect
 	| DurableRecordsEffect
 	| ActorEffect
 	| ValidateEffect
@@ -283,6 +301,13 @@ export type AgentMachineEvent = Readonly<{
 // outcome (exit code, parsed stdout) into a chart event.
 export type ScriptMachineEvent = Readonly<{
 	kind: "script";
+	effectId: EffectId;
+	event: ChartEvent;
+	artifacts?: Readonly<Record<string, ArtifactPin>>;
+}>;
+
+export type ImportedActionMachineEvent = Readonly<{
+	kind: "tsImport";
 	effectId: EffectId;
 	event: ChartEvent;
 	artifacts?: Readonly<Record<string, ArtifactPin>>;
@@ -323,6 +348,7 @@ export type MachineEvent =
 	| MachineStartEvent
 	| AgentMachineEvent
 	| ScriptMachineEvent
+	| ImportedActionMachineEvent
 	| DurableRecordsAddedMachineEvent
 	| ValidatedMachineEvent
 	| TimerMachineEvent
@@ -589,6 +615,8 @@ function actionInvocationForAction(
 			return agentInvocationForAction(state, actionUid, action, id, sessionId);
 		case "script":
 			return scriptInvocationForAction(state, actionUid, action, id);
+		case "tsImport":
+			return importedActionInvocationForAction(state, actionUid, action, id);
 		case "user":
 			return userInvocationForAction(state, actionUid, action, id, seqId);
 	}
@@ -695,6 +723,25 @@ function scriptInvocationForAction(
 	};
 }
 
+function importedActionInvocationForAction(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: ImportedActionAst,
+	id: EffectId,
+): ImportedActionEffect {
+	return {
+		kind: "tsImport",
+		id,
+		actionUid,
+		action,
+		module: action.module,
+		export: action.export,
+		events: allowedEventsForAction(state.ast, actionUid.state),
+		...renderScriptOptions(state, action, actionUid.state),
+		...resolvedStateInput(state, actionUid),
+	};
+}
+
 function userInvocationForAction(
 	state: MachineState,
 	actionUid: ActionUID,
@@ -769,7 +816,8 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 	) return createMachineOutput(state, []);
 	switch (event.kind) {
 		case "agent":
-		case "script": {
+		case "script":
+		case "tsImport": {
 			const pending = findPendingAction(state, event.effectId);
 			if (pending === null) {
 				// The action is no longer pending — it lost a race (e.g. its timer fired first).

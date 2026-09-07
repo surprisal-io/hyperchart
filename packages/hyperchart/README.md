@@ -33,7 +33,7 @@ export default chart({
 });
 ```
 
-Optional chart-level `args` metadata gives hosts serializable descriptions and JSON defaults for on-demand launch forms; it is inspection metadata, not executable validation or automatic runtime input. `refs<Args>().chart()` accepts subset or empty metadata and rejects every key outside `Args`, including typos mixed with valid keys. A script with one successful transition may select it implicitly on exit code `0`. Top-level `final()` and `failed()` terminals explicitly select `complete` or `failed` run outcome; optional terminal notifications can append a scoped prompt and authoritative paths for declared artifacts. Runner/host delivery uses a persist-once outbox and per-session receipts.
+Optional chart-level `args` metadata gives hosts serializable descriptions and JSON defaults for on-demand launch forms; it is inspection metadata, not executable validation or automatic runtime input. `refs<Args>().chart()` accepts subset or empty metadata and rejects every key outside `Args`, including typos mixed with valid keys. A script with one successful transition may select it implicitly on exit code `0`. `tsAction(module, exportName, options)` is the trusted in-process alternative for measured subprocess hot paths; it preserves durable action provenance, shared completion validation, and artifact pinning, but cancellation cannot terminate continuing CPU work or side effects. Top-level `final()` and `failed()` terminals explicitly select `complete` or `failed` run outcome; optional terminal notifications can append a scoped prompt and authoritative paths for declared artifacts. Runner/host delivery uses a persist-once outbox and per-session receipts.
 
 ## Entry points
 

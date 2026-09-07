@@ -126,6 +126,7 @@ describe("Storybook information architecture", () => {
 		}
 		expect(inspectorPanelSpecs.find((spec) => spec.title === "Rich agent")?.graphAtlas).not.toBe(false);
 		expect(inspectorPanelSpecs.find((spec) => spec.title === "Validation failure")?.graphAtlas).not.toBe(false);
+		expect(inspectorPanelSpecs.find((spec) => spec.title === "Imported function action")?.group).toBe("tsImport");
 		const visualState = (title: string) => {
 			const spec = inspectorPanelSpecs.find((candidate) => candidate.title === title);
 			expect(spec?.graphAtlas, title).not.toBe(false);
@@ -135,6 +136,11 @@ describe("Storybook information architecture", () => {
 		expect(visualState("Send batch state")).toMatchObject({
 			type: "sendBatch",
 			actorMessageLink: { kind: "sendBatch", to: "@editor", event: "APPLY" },
+		});
+		expect(visualState("Imported function action")).toMatchObject({
+			type: "tsImport",
+			module: "./actions/score.mjs",
+			export: "scoreCandidate",
 		});
 		expect(visualState("Call batch state")).toMatchObject({
 			type: "callBatch",

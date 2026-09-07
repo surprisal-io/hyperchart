@@ -121,12 +121,14 @@ export type HyperchartInspectState = {
 	scopeParentId?: string;
 	runtimeStatePath?: string;
 	actorInternal?: { declarationPath: string; localState: string; occurrencePath?: string };
-	kind: "agent" | "user" | "script" | "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply" | "map" | "parallel" | "compound" | "region" | "final";
+	kind: "agent" | "user" | "script" | "tsImport" | "send" | "sendBatch" | "call" | "callBatch" | "receive" | "reply" | "map" | "parallel" | "compound" | "region" | "final";
 	initial?: boolean;
 	definitionSource?: string;
 	agent?: string;
 	task?: string;
 	command?: string;
+	module?: string;
+	export?: string;
 	env?: HyperchartInspectEnv[];
 	reads?: string[];
 	readArtifacts?: HyperchartInspectArtifact[];
@@ -436,7 +438,9 @@ function branchInfos(ast: ChartAst, _path: string, regions: string[]): Hyperchar
 			? undefined
 			: action.kind === "script"
 				? [action.command, ...action.args].join(" ")
-				: templatePreview(action.kind === "agent" ? action.task : action.prompt);
+				: action.kind === "tsImport"
+					? `${action.module}#${action.export}`
+					: templatePreview(action.kind === "agent" ? action.task : action.prompt);
 		return {
 			id: regionPath,
 			...(action?.kind === "agent" ? { agent: action.name } : {}),
@@ -501,6 +505,16 @@ function actionStateFromAst(ast: ChartAst, path: string, state: Extract<StateAst
 			...base,
 			kind: "script",
 			command: [action.command, ...action.args].join(" "),
+			...(env === undefined ? {} : { env }),
+		};
+	}
+	if (action.kind === "tsImport") {
+		const env = envInfo(action.env, ast, path);
+		return {
+			...base,
+			kind: "tsImport",
+			module: action.module,
+			export: action.export,
 			...(env === undefined ? {} : { env }),
 		};
 	}
@@ -694,7 +708,7 @@ function actionRefs(action: StateActionAst): HyperchartInspectRef[] {
 	if (action.kind === "agent") {
 		for (const read of action.reads ?? []) appendReadRefs(refs, read);
 		appendTemplateRefs(refs, action.task);
-	} else if (action.kind === "script") {
+	} else if (action.kind === "script" || action.kind === "tsImport") {
 		for (const value of Object.values(action.env ?? {})) appendReadRefs(refs, value);
 	} else {
 		appendTemplateRefs(refs, action.prompt);

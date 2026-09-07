@@ -290,6 +290,7 @@ function actionDsl(action: StateActionAst): string {
 		return options === "{}" ? `agent(${stringDsl(action.name)})` : `agent(${stringDsl(action.name)}, ${options})`;
 	}
 	if (action.kind === "script") return scriptDsl(action);
+	if (action.kind === "tsImport") return importedActionDsl(action);
 	return `user(${objectDsl([
 		["prompt", templateDsl(action.prompt)],
 		["options", action.options.length === 0 ? undefined : arrayDsl(action.options.map(stringDsl))],
@@ -309,6 +310,15 @@ function scriptDsl(value: Extract<StateActionAst, { kind: "script" }> | Extract<
 		...(options === "{}" ? [] : [options]),
 	];
 	return `script(${callArgs.join(", ")})`;
+}
+
+function importedActionDsl(value: Extract<StateActionAst, { kind: "tsImport" }>): string {
+	const options = objectDsl([
+		["env", envDsl(value.env)],
+		["artifacts", artifactsDsl(value.artifacts)],
+		["reply", value.reply === undefined ? undefined : schemaDsl(value.reply)],
+	]);
+	return `tsAction(${stringDsl(value.module)}, ${stringDsl(value.export)}${options === "{}" ? "" : `, ${options}`})`;
 }
 
 function guardDsl(value: GuardRefAst): string {
