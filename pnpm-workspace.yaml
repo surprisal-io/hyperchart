@@ -1,0 +1,12 @@
+packages:
+  - "packages/*"
+linkWorkspacePackages: true
+preferWorkspacePackages: true
+hoistWorkspacePackages: true
+publicHoistPattern:
+  - "@surprisal/*"
+allowBuilds:
+  '@google/genai': true
+  esbuild: true
+  protobufjs: true
+nodeLinker: hoisted

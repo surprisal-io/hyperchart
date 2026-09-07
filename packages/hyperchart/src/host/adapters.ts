@@ -602,6 +602,8 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 					...(state.kind === "agent" || state.kind === "user" ? { taskPrompt: state.task } : {}),
 				}),
 		...(state.command === undefined ? {} : { commandPreview: state.command }),
+		...(state.module === undefined ? {} : { module: state.module }),
+		...(state.export === undefined ? {} : { export: state.export }),
 		...(state.env === undefined
 			? {}
 			: {
@@ -1477,6 +1479,23 @@ function visitInvocationInfo(effect: ActionEffect): HyperchartVisitInvocationInf
 					? {}
 					: {
 							env: Object.fromEntries(
+								Object.entries(effect.env).map(([name, value]) => [
+									name,
+									typeof value === "string" ? value : renderedArtifactInfo(value),
+								]),
+							),
+						}),
+				...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
+			};
+		case "tsImport":
+			return {
+				kind: "tsImport",
+				module: effect.module,
+				export: effect.export,
+				...(effect.env === undefined
+					? {}
+					: {
+							params: Object.fromEntries(
 								Object.entries(effect.env).map(([name, value]) => [
 									name,
 									typeof value === "string" ? value : renderedArtifactInfo(value),

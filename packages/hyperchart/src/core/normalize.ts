@@ -39,6 +39,7 @@ import type {
 	RegionStateAst,
 	ReplyStateAst,
 	ScriptActionAst,
+	ImportedActionAst,
 	SendStateAst,
 	SendBatchStateAst,
 	StateActionAst,
@@ -1405,7 +1406,7 @@ function validateTargets(
 			if (node.action.kind !== "user" || node.validate?.kind === "script") {
 				const actionArtifactRefs = [
 					...(node.action.kind === "agent" ? (node.action.reads ?? []) : []),
-					...(node.action.kind === "script" ? Object.values(node.action.env ?? {}) : []),
+					...(node.action.kind === "script" || node.action.kind === "tsImport" ? Object.values(node.action.env ?? {}) : []),
 				];
 				const guardArtifactRefs = node.validate?.kind === "script" ? Object.values(node.validate.env ?? {}) : [];
 				const artifactRefs = [...actionArtifactRefs, ...guardArtifactRefs].filter(
@@ -1837,7 +1838,7 @@ function artifactReads(action: StateActionAst, basePointer: string): Array<{ sta
 			if (read.kind === "artifactOf" || read.kind === "joinArtifactOf") reads.push({ state: read.state, pointer: `${basePointer}/action/reads/${index}` });
 		}
 	}
-	if (action.kind === "script") {
+	if (action.kind === "script" || action.kind === "tsImport") {
 		for (const [name, value] of Object.entries(action.env ?? {})) {
 			if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") reads.push({ state: value.state, pointer: `${basePointer}/action/env/${escapePointer(name)}` });
 		}
@@ -2173,7 +2174,7 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	}
 	return [
 		...(action.kind === "agent" && action.task ? [action.task] : []),
-		...(action.kind === "script"
+		...(action.kind === "script" || action.kind === "tsImport"
 			? Object.values(action.env ?? {}).filter((value): value is TemplateAst => value.kind === "template")
 			: []),
 		...Object.values(action.artifacts ?? {}).map((declared) => declared.path),
@@ -2641,7 +2642,7 @@ function toScriptOptions(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
-	code: "INVALID_SCRIPT" | "INVALID_GUARD",
+	code: "INVALID_SCRIPT" | "INVALID_GUARD" | "INVALID_TS_IMPORT",
 ): {
 	args?: readonly string[];
 	env?: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>;
@@ -2730,6 +2731,33 @@ function toStateActionAst(
 				...(options.reply === undefined ? {} : { reply: options.reply }),
 			} satisfies ScriptActionAst);
 		}
+		case "tsImport": {
+			if (typeof input.module !== "string" || input.module.length === 0) {
+				diagnostics.push(
+					diagnostic("INVALID_TS_IMPORT", "Imported action module must be a non-empty string.", `${path}/module`, source),
+				);
+			}
+			if (typeof input.export !== "string" || input.export.length === 0) {
+				diagnostics.push(
+					diagnostic("INVALID_TS_IMPORT", "Imported action export must be a non-empty string.", `${path}/export`, source),
+				);
+			}
+			const options = toScriptOptions(input, path, diagnostics, source, schemaRegistry, "INVALID_TS_IMPORT");
+			const uid: ActionUID = {
+				chart: chartId,
+				state: statePath,
+				action: "tsImport",
+			};
+			return deepFreeze({
+				kind: "tsImport",
+				uid,
+				module: typeof input.module === "string" ? input.module : "",
+				export: typeof input.export === "string" ? input.export : "",
+				...(options.env === undefined ? {} : { env: options.env }),
+				...(options.artifacts === undefined ? {} : { artifacts: options.artifacts }),
+				...(options.reply === undefined ? {} : { reply: options.reply }),
+			} satisfies ImportedActionAst);
+		}
 		case "user": {
 			const prompt = toTemplate(input.prompt, `${path}/prompt`, diagnostics, source);
 			if (prompt === undefined) {
@@ -2770,7 +2798,7 @@ function toStateActionAst(
 		}
 		default:
 			diagnostics.push(
-				diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent', 'user' or 'script'.", `${path}/kind`, source),
+				diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent', 'user', 'script' or 'tsImport'.", `${path}/kind`, source),
 			);
 			return undefined;
 	}

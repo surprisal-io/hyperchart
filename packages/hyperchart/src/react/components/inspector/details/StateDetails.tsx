@@ -134,6 +134,7 @@ export function StateDetails({
 		onHighlightReply?.(state.id, path);
 	};
 	const isScriptState = state.type === "script";
+	const isImportedActionState = state.type === "tsImport";
 	const isMapState = state.type === "map";
 	const mapOver = isMapState ? state.mapConfig?.over : undefined;
 	const mapOverSchema = isMapState ? state.mapConfig?.overSchema : undefined;
@@ -420,8 +421,14 @@ export function StateDetails({
 				/>
 			)}
 
-			{isScriptState && (
-				<Section title="Arguments" icon={CodeBracketSquareIcon} defaultOpen={false}>
+			{(isScriptState || isImportedActionState) && (
+				<Section title={isImportedActionState ? "Function action" : "Arguments"} icon={CodeBracketSquareIcon} defaultOpen={isImportedActionState}>
+					{isImportedActionState && state.module !== undefined && (
+						<div className="grid gap-1 rounded border border-fuchsia-500/20 bg-fuchsia-500/5 p-2 font-mono text-[11px]">
+							<div><span className="text-[var(--text-muted)]">module </span><span className="text-[var(--text-primary)]">{state.module}</span></div>
+							<div><span className="text-[var(--text-muted)]">export </span><span className="text-[var(--text-primary)]">{state.export}</span></div>
+						</div>
+					)}
 					{state.commandPreview && (
 						<div>
 							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">command</div>
@@ -440,7 +447,7 @@ export function StateDetails({
 					)}
 					{state.env?.length ? (
 						<div>
-							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">env</div>
+							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{isImportedActionState ? "params" : "env"}</div>
 							<div className="grid gap-1">
 								{state.env.map((env) => (
 									<div
@@ -473,8 +480,8 @@ export function StateDetails({
 							</div>
 						</div>
 					) : null}
-					{!state.commandPreview && !state.env?.length && (
-						<div className="text-[var(--text-muted)]">No script arguments.</div>
+					{!state.commandPreview && !state.module && !state.env?.length && (
+						<div className="text-[var(--text-muted)]">No action arguments.</div>
 					)}
 				</Section>
 			)}

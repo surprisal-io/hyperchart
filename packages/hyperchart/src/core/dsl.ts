@@ -47,6 +47,7 @@ import type {
 	StaticActorPoolDeclaration,
 	ParallelStateCst,
 	ScriptActionCst,
+	ImportedActionCst,
 	Templatable,
 	TemplateCst,
 	UserActionCst,
@@ -331,6 +332,15 @@ export function joinArtifactOf(state: string, opts: { artifact?: string } = {}):
 
 export function tsImport(module: string, exportName: string): GuardRef {
 	return { kind: "tsImport", module, export: exportName };
+}
+
+/** Declare a trusted in-process imported function action without embedding a closure in the chart. */
+export function tsAction<const O extends Omit<ImportedActionCst, "kind" | "module" | "export">>(
+	module: string,
+	exportName: string,
+	opts: O = {} as O,
+): { kind: "tsImport"; module: string; export: string } & O {
+	return { kind: "tsImport", module, export: exportName, ...opts };
 }
 
 // Doubles as a guard (validate: script(...)) and as a command action (action: script(...)) —

@@ -1,8 +1,7 @@
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { ActionUID, ChartEvent, GuardOutcome, GuardRefAst, SchemaAst } from "../../core/types.js";
 import type { RenderedArtifact } from "../../core/machine.js";
 import { ScriptRunner, type RenderedScriptEnv } from "./script_runner.js";
+import { importedModuleSpecifier } from "./imported_module.js";
 
 export type GuardContext = Readonly<{
 	chartDir: string;
@@ -26,10 +25,7 @@ export async function runGuard(
 	invocation?: RenderedGuardInvocation,
 ): Promise<GuardOutcome> {
 	if (guard.kind === "tsImport") {
-		const moduleUrl =
-			guard.module.startsWith("./") || guard.module.startsWith("../")
-				? pathToFileURL(resolve(ctx.chartDir, guard.module)).href
-				: guard.module;
+		const moduleUrl = importedModuleSpecifier(guard.module, ctx.chartDir);
 		const mod = (await import(moduleUrl)) as Record<string, unknown>;
 		const fn = mod[guard.export];
 		if (typeof fn !== "function") {

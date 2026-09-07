@@ -7,6 +7,7 @@ import {
   ChartRuntime,
   JsonlLogStore,
   MemoryLogStore,
+  FunctionRunner,
   ScriptRunner,
   checkArtifactFile,
   checkSchema,
@@ -77,7 +78,7 @@ type ChartRuntimeOptions = {
 `ChartRuntime` provides:
 
 - JSONL or custom durable logging;
-- generic script execution;
+- generic script and trusted in-process function execution;
 - TypeScript and script guards;
 - timers and cancellation;
 - validation rejection dispatch;
@@ -86,7 +87,7 @@ type ChartRuntimeOptions = {
 
 User actions do not dispatch an executor. The machine appends a rendered `user_interaction/opened` fact and waits. For a live run, the typed runner-control API sends the answer to the detached runtime that already owns the journal; that sole writer appends `user_interaction/resolved` and acknowledges the committed record directly to its machine. A stopped run temporarily opens the same writer API and consumes the fact on later replay. Storage is not an event bus and `LogStore` has no subscription/watch contract.
 
-`dispose()` is idempotent and begins by refusing new effects and callbacks. It clears timers, disposes script and agent executors, drains effect preparation and completion-admission work already in flight, then closes the event queue.
+`dispose()` is idempotent and begins by refusing new effects and callbacks. It clears timers, disposes function, script, and agent executors, drains effect preparation and completion-admission work already in flight, then closes the event queue. Function disposal aborts signals and retires tracked invocations immediately; it never waits for user function promises that may not settle.
 
 `ChartRuntime` is composed by the runner with an internal execution-owned branch session. Direct callers do not load or pass projections. The only execution hook visible to runtime is a synchronous `PrepareStampedCommit` callback that receives storage-stamped facts and returns opaque checkpoint envelopes plus a post-commit confirmation.
 
@@ -312,6 +313,55 @@ HYPERCHART_REJECT_REASON=<reason, when present>
 ```
 
 `cancel()` sends `SIGTERM`, then schedules `SIGKILL` after `killGraceMs` (default five seconds) if needed.
+
+Script and function actions use the exported `validateActionCompletion()` boundary for allowed-event, `FAILED`, reply, and artifact validation. `ChartRuntime` then applies the shared artifact admission/pinning boundary to successful completions.
+
+## In-process function execution
+
+### `FunctionRunner`
+
+```ts
+type ValidationAttempt = Readonly<{ n: number; reason?: string }>;
+
+type ImportedActionContext = Readonly<{
+  input?: Readonly<Record<string, JsonValue>>;
+  events: readonly string[];
+  actionUid: ActionUID;
+  chartDir: string;
+  workDir: string;
+  projectDir: string;
+  artifacts: Readonly<Record<string, string>>; // absolute paths
+  signal: AbortSignal;
+  validationAttempt?: ValidationAttempt;
+}>;
+
+type ImportedActionFunction = (
+  params: Readonly<Record<string, unknown>>,
+  context: ImportedActionContext,
+) => ChartEvent | Promise<ChartEvent>;
+
+class FunctionRunner {
+  constructor(options: {
+    chartDir: string;
+    workDir: string;
+    projectDir?: string;
+    schemaRegistry?: SchemaRegistryLike;
+  });
+  run(
+    effect: ImportedActionEffect,
+    validationAttempt?: ValidationAttempt,
+    prepare?: () => Promise<void>,
+  ): Promise<ChartEvent | undefined>;
+  cancel(actionUid: ActionUID): Promise<void>;
+  dispose(): Promise<void>;
+}
+```
+
+Relative action modules resolve from absolute `chartDir`; bare package specifiers pass to native `import()`. Rendered effect env becomes `params`: strings stay strings and selected artifact values are loaded, decoded, and schema-checked. The context receives a cloned resolved visit input, allowed events, copied identity, absolute runtime directories, and absolute paths keyed by artifact name. The function must return an explicit ChartEvent; unlike script stdout, there is no implicit single-event success.
+
+A validation retry invokes the function again with one-based `{ n, reason? }` metadata. Exceptions and rejected promises become `FAILED` at `ChartRuntime`. Normal returns pass through `validateActionCompletion()` and then artifact admission/pinning.
+
+`cancel()` aborts the signal and immediately settles the tracked invocation without awaiting user code. A result or rejection that arrives after abort is observed and discarded. `dispose()` aborts all live invocations and also returns immediately, allowing branch drain and rewind to finish even when a function ignores its signal or never settles. This only prevents late completion admission; continuing CPU work and side effects cannot be terminated in-process. Native imports are cached for the runner lifetime. See [Recovery and safety](../safety.md#in-process-function-actions).
 
 ## Guards
 
@@ -561,7 +611,7 @@ BranchListCursor, BranchListChunk
 StateVisitHistoryItem, MapVisitHistoryItem, ActorGenerationHistoryItem, ActorMessageHistoryItem
 JOURNAL_CHANNEL, JOURNAL_TABLE, CHECKPOINT_TABLE, supportsSqlTransactions
 PostgresRunTransaction, PostgresForkAndAppendInput, SqlCommitParticipant
-ScriptRunner, runGuard, checkSchema, checkSchemaAsync
+ScriptRunner, FunctionRunner, validateActionCompletion, runGuard, checkSchema, checkSchemaAsync
 artifact, schema, executor, run-directory, settings, status, and notification I/O helpers
 ```
 

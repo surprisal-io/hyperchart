@@ -18,6 +18,7 @@ import {
 	receive,
 	reply,
 	send,
+	tsAction,
 	tsImport,
 	user,
 	z,
@@ -495,6 +496,44 @@ describe("explainReplay", () => {
 
 		expect(explanation.broken).toBeUndefined();
 		expect(explanation.stale).toMatchObject([{ seqId: 2, state: "work", reason: "action_definition_changed" }]);
+	});
+
+	it("reports script-to-tsAction replay as broken at the invoke identity boundary", () => {
+		const old = ast(chart({
+			kind: "chart", id: "action-kind-change", initial: "work",
+			states: { work: { kind: "state", action: script("node"), transitions: { DONE: "done" } }, done: final() },
+		}));
+		const current = ast(chart({
+			kind: "chart", id: "action-kind-change", initial: "work",
+			states: { work: { kind: "state", action: tsAction("./actions.mjs", "run"), transitions: { DONE: "done" } }, done: final() },
+		}));
+		const work = actionUid(old, "work");
+		const explanation = explainReplay(current, [args(), invoke(work, 2, definition(old, "work"))]);
+
+		expect(explanation.prefixEnd).toBe(1);
+		expect(explanation.broken).toMatchObject({ seqId: 2, state: "work", invokeSeqId: 2 });
+		expect(explanation.broken?.error).toContain("Invalid action invoke for state work");
+	});
+
+	it("marks imported action module, export, and env changes as stale provenance", () => {
+		const make = (module: string, exportName: string, value: string) => ast(chart({
+			kind: "chart", id: "imported-action-provenance", initial: "work",
+			states: {
+				work: { kind: "state", action: tsAction(module, exportName, { env: { VALUE: value } }), transitions: { DONE: "done" } },
+				done: final(),
+			},
+		}));
+		const old = make("./old.mjs", "run", "one");
+		const uid = actionUid(old, "work");
+		for (const current of [
+			make("./new.mjs", "run", "one"),
+			make("./old.mjs", "renamed", "one"),
+			make("./old.mjs", "run", "two"),
+		]) {
+			const explanation = explainReplay(current, [args(), invoke(uid, 2, definition(old, "work"))]);
+			expect(explanation.broken).toBeUndefined();
+			expect(explanation.stale).toMatchObject([{ seqId: 2, state: "work", reason: "action_definition_changed" }]);
+		}
 	});
 
 	it("does not mark edge binding changes as stale", () => {

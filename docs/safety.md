@@ -19,6 +19,23 @@ Before loading an unfamiliar chart:
 
 See [Pi Security](https://pi.dev/docs/latest/security) and [Pi Containerization](https://pi.dev/docs/latest/containerization) for host-level isolation.
 
+## In-process function actions
+
+`tsAction(module, exportName, options)` imports and executes trusted chart-owned code inside the detached runner process. It is not a worker, subprocess, VM, permission boundary, or sandbox. One runner may host several branches, so imported module state and process globals are shared across those branches.
+
+Only use function actions whose code is trusted, re-entrant, and cooperative:
+
+- a CPU-bound loop blocks every branch, timer, gate, and runner heartbeat on the event loop;
+- `process.exit()`, `process.chdir()`, or mutation of `process.env` affects the whole runner;
+- relative filesystem paths use the runner process cwd (normally the owning project), **not** the branch workspace; use the absolute `context.workDir` and `context.artifacts` paths;
+- module-scope mutable state is shared by concurrent branch invocations;
+- native `import()` caches a module for the process lifetime, so edits require a runner restart;
+- `.ts` modules depend on the supported Node version's erasable type stripping and do not get the chart loader's Jiti aliases; prefer `.mjs`/`.js` or erasable-only TypeScript.
+
+Cancellation calls `context.signal.abort()`. Hyperchart immediately retires the tracked invocation and suppresses any late result, so stop, rewind, and runtime disposal do not wait forever for a non-settling promise. Cancellation cannot terminate continuing user code or roll back its side effects. A function that ignores the signal may therefore keep consuming resources or mutating external state after its durable action lost a race.
+
+The durable invoke fact records the `tsImport` descriptor, not module bytes. Changing module/export/env options is reported as stale action provenance. Changing an existing state from `script` to `tsAction` changes `uid.action`; replay is broken at the first old invoke and requires rewind or restart rather than a warning override.
+
 ## External effects are not rolled back
 
 Scripts and agents can modify files, repositories, APIs, databases, and remote services. Hyperchart records invocation and accepted completion facts, but it does not wrap those systems in a transaction.

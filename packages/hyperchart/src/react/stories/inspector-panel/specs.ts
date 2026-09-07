@@ -17,6 +17,7 @@ import {
 	resume,
 	script,
 	t,
+	tsAction,
 	tsImport,
 	user,
 	visit,
@@ -48,7 +49,7 @@ export type InspectorPanelRuntime = {
 	sessionProgress?: (ast: ChartAst) => HyperchartRuntimeSessionProgressFile;
 };
 
-export type InspectorPanelGroupId = "overview" | "agent" | "actors" | "user" | "script" | "map" | "parallel" | "compound" | "final";
+export type InspectorPanelGroupId = "overview" | "agent" | "actors" | "user" | "script" | "tsImport" | "map" | "parallel" | "compound" | "final";
 
 export type InspectorPanelSpecInput = {
 	group: InspectorPanelGroupId;
@@ -93,6 +94,12 @@ export const inspectorPanelGroups: Array<{ id: InspectorPanelGroupId; title: str
 			title: "Script states",
 			description: "Script command arguments, env values, contracts, and skipped state.",
 			storyId: "hyperchart-visual-tests-inspector-panel--script-states",
+		},
+		{
+			id: "tsImport",
+			title: "Function actions",
+			description: "Trusted in-process module/export identity, parameter declarations, and contracts.",
+			storyId: "hyperchart-visual-tests-inspector-panel--function-actions",
 		},
 		{
 			id: "map",
@@ -873,6 +880,26 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				return b.records;
 			},
 		},
+	},
+	{
+		group: "tsImport",
+		title: "Imported function action",
+		description: "Definition-only tsAction card with module/export identity, declared params, artifacts, and reply contract.",
+		graphAtlas: true,
+		chart: panelChart("inspector-function-action", "prepare", {
+			score: {
+				kind: "state",
+				action: tsAction("./actions/score.mjs", "scoreCandidate", {
+					env: { WEIGHTS: "simulation-v2", PRIOR: t`${json(result("prepare"))}` },
+					artifacts: { reward: artifact("artifacts/reward.json", z.object({ reward: z.number() })) },
+					reply: z.object({ reward: z.number() }),
+				}),
+				transitions: { SCORED: "done" },
+			},
+			prepare: { kind: "state", action: agent("planner", { reply: z.object({ seed: z.number() }) }), transitions: { DONE: "score" } },
+			done: final(),
+		}),
+		runtime: { selectedStateId: "score", mode: "static" },
 	},
 	{
 		group: "script",

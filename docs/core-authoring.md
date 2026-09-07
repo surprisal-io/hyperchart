@@ -232,6 +232,36 @@ A script completes as follows:
 3. if there is exactly one allowed non-`FAILED` event, exit `0` may select it implicitly;
 4. validate the event type, reply schema, and declared artifacts.
 
+### Function actions
+
+Use `tsAction()` for trusted, short in-process work when starting a subprocess is the measured bottleneck:
+
+```ts
+tsAction("./actions/score.mjs", "scoreCandidate", {
+  env: {
+    WEIGHTS: artifactOf("prepare", { artifact: "weights", select: "values" }),
+    MODE: "simulation",
+  },
+  artifacts: { reward: artifact("artifacts/reward.json", Reward) },
+  reply: z.object({ reward: z.number() }),
+})
+```
+
+The chart stores only the serializable descriptor `{ kind: "tsImport", module, export, env?, artifacts?, reply? }`; closures are never embedded. Relative modules resolve from the chart directory, while bare specifiers use normal `import()` resolution. Module contents are cached by Node and are not part of replay identity, so restart the runner after editing an action module.
+
+The named export is called as `fn(params, context)` and must return an explicit `ChartEvent` object:
+
+```ts
+export async function scoreCandidate(params, context) {
+  await writeFile(context.artifacts.reward, JSON.stringify({ reward: 0.75 }));
+  return { type: "SCORED", output: { reward: 0.75 } };
+}
+```
+
+`params` contains rendered `env` declarations. Selected artifact refs are schema-checked and decoded; other entries remain strings. `context` contains the resolved visit `input`, allowed `events`, `actionUid`, absolute `chartDir`, branch `workDir`, owning `projectDir`, absolute declared artifact paths, an `AbortSignal`, and optional `{ n, reason }` retry metadata. It never exposes projection state or a runtime handle. The returned event, reply, and artifacts use the same completion validator as scripts, and accepted deliverables go through the same artifact pinning boundary.
+
+Cancellation is cooperative. Hyperchart aborts the signal, suppresses late results, and lets runtime drain finish without waiting for a function that ignores the signal, but it cannot stop that function's CPU work or side effects. See [Recovery and safety](safety.md#in-process-function-actions).
+
 ### User actions
 
 ```ts

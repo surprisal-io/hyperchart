@@ -298,6 +298,7 @@ function actionLabel(state: Extract<StateAst, { kind: "state" }>): string {
 	const action = state.action;
 	if (action.kind === "agent") return `agent:${action.name}`;
 	if (action.kind === "script") return `script:${[action.command, ...action.args].join(" ")}`;
+	if (action.kind === "tsImport") return `tsAction:${action.module}#${action.export}`;
 	return "user";
 }
 

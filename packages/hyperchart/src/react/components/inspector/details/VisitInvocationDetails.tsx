@@ -15,6 +15,28 @@ export function VisitInvocationDetails({ invocation, state, allStates, onHighlig
 			</div>
 		);
 	}
+	if (invocation.kind === "tsImport") {
+		return (
+			<div className="space-y-2">
+				<div>
+					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved function</div>
+					<ExpandablePre collapsedLines={3}>{`${invocation.module}#${invocation.export}`}</ExpandablePre>
+				</div>
+				{invocation.params !== undefined && Object.keys(invocation.params).length > 0 && (
+					<div>
+						<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved params</div>
+						<JsonBlock value={invocation.params} previewLines={9} />
+					</div>
+				)}
+				{invocation.artifacts !== undefined && invocation.artifacts.length > 0 && (
+					<div>
+						<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">artifacts</div>
+						<JsonBlock value={invocation.artifacts} previewLines={7} />
+					</div>
+				)}
+			</div>
+		);
+	}
 	if (invocation.kind === "script") {
 		return (
 			<div className="space-y-2">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeChartConfig } from "../packages/hyperchart/src/index.js";
-import { agent, arg, chart, final, failed, map, tsImport } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, arg, chart, final, failed, map, tsAction, tsImport } from "../packages/hyperchart/src/core/dsl.js";
 import type { ActionUID, ChartAst, ChartCst, DurableLogRecord, StateActionAst } from "../packages/hyperchart/src/index.js";
 import { buildRunView } from "../packages/pi-hyperchart/src/tui/run_view.js";
 
@@ -81,6 +81,26 @@ describe("buildRunView", () => {
 			sinceMs: 1000,
 		});
 		expect(view.tail.at(-1)?.text).toBe("invoke work");
+	});
+
+	it("preserves imported function action identity in the TUI graph", () => {
+		const ast = make(chart({
+			kind: "chart", id: "view-function", initial: "score",
+			states: { score: { kind: "state", action: tsAction("./score.mjs", "score"), transitions: { DONE: "done" } }, done: final() },
+		}));
+		const state = ast.states.score;
+		if (state?.kind !== "state") throw new Error("expected score state");
+		const log: DurableLogRecord[] = [{
+			type: "state_action", kind: "invoke", sessionId: "function-session",
+			actionUid: state.action.uid, definition: state.action,
+			parentId: null, seqId: 1, branchId: "main", timestamp: 100,
+		}];
+
+		const view = buildRunView(ast, log, 200);
+		expect(view.graph.find((row) => row.path === "score")).toMatchObject({
+			status: "running",
+			action: "tsAction:./score.mjs#score",
+		});
 	});
 
 	it("shows rejected validation reason", () => {

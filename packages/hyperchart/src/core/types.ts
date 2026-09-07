@@ -261,7 +261,7 @@ type ActionValues<Action> = Action extends { kind: "agent" }
 	? TemplateValues<Action extends { task: infer Task } ? Task : never>
 		| (Action extends { reads: infer Reads } ? Reads : never)
 		| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
-	: Action extends { kind: "script" }
+	: Action extends { kind: "script" | "tsImport" }
 		? (Action extends { env: infer Env } ? Env[keyof Env] : never)
 			| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
 		: Action extends { kind: "user" }
@@ -414,7 +414,19 @@ export type ScriptActionCst = {
 	reply?: SchemaCst;
 };
 
-export type StateActionCst = AgentActionCst | UserActionCst | ScriptActionCst;
+// A trusted in-process imported function. Like script(), the definition is serializable and all
+// dynamic parameters are declared through env; unlike a script, the function also receives the
+// resolved state input and runtime paths in its invocation context.
+export type ImportedActionCst = {
+	kind: "tsImport";
+	module: string;
+	export: string;
+	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
+	artifacts?: Record<string, Templatable | ArtifactCst>;
+	reply?: SchemaCst;
+};
+
+export type StateActionCst = AgentActionCst | UserActionCst | ScriptActionCst | ImportedActionCst;
 
 // Serializable reference to validation code. Inline closures are not allowed: the chart stays
 // plain data. A validator is an acceptance check on the action's completion claim — it runs live
@@ -830,7 +842,16 @@ export type ScriptActionAst = Readonly<{
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;
-export type StateActionAst = AgentActionAst | UserActionAst | ScriptActionAst;
+export type ImportedActionAst = Readonly<{
+	kind: "tsImport";
+	uid: ActionUID;
+	module: string;
+	export: string;
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+	artifacts?: Readonly<Record<string, ArtifactAst>>;
+	reply?: SchemaAst;
+}>;
+export type StateActionAst = AgentActionAst | UserActionAst | ScriptActionAst | ImportedActionAst;
 
 // Absolute path of a state in the chart: local ids joined with "." (e.g. "review.analyze").
 // Top-level states' paths equal their ids, so flat charts keep their addresses.

@@ -195,14 +195,15 @@ type HyperchartInspectResult = {
 | Field | Type | Meaning |
 |---|---|---|
 | `id` | `string` | Absolute state path. |
-| `kind` | `"agent" \| "user" \| "script" \| "map" \| "parallel" \| "compound" \| "region" \| "final"` | Normalized display kind. |
+| `kind` | `"agent" \| "user" \| "script" \| "tsImport" \| "map" \| "parallel" \| "compound" \| "region" \| "final"` | Normalized display kind. `tsImport` is an in-process `tsAction`. |
 | `description` | `string?` | Agent description from host agent defaults. |
 | `initial` | `boolean?` | State selected by the chart root or an enclosing compound, region, or map `initial` declaration. |
 | `definitionSource` | `string?` | Generated DSL for this state. |
 | `agent` | `string?` | Agent definition name. |
 | `task` | `string?` | Static template preview. |
 | `command` | `string?` | Script command preview. |
-| `env` | `HyperchartInspectEnv[]?` | Script environment declarations. |
+| `module` / `export` | `string?` | Imported function action identity. |
+| `env` | `HyperchartInspectEnv[]?` | Script environment or function parameter declarations. |
 | `reads` | `string[]?` | Authored agent read declarations, including raw paths, templates, and artifact refs. |
 | `readArtifacts` | `HyperchartInspectArtifact[]?` | Producer artifact contracts referenced by `reads`, retaining paths and JSON schemas for Inspector presentation. |
 | `refs` | `HyperchartInspectRef[]?` | Structured refs used by the state. |
@@ -297,6 +298,7 @@ Public AST exports:
 | `MapStateAst` | `id`, `parent?`, `input?`, `over`, `concurrency?`, `onReenter?`, `initial`, `transitions`, `onDone` |
 | `AgentActionAst` | `uid`, `name`, `task?`, `artifacts?`, `reads?`, model options, `reply?` |
 | `ScriptActionAst` | `uid`, `command`, `args`, `env?`, `artifacts?`, `reply?` |
+| `ImportedActionAst` | `kind: "tsImport"`, `uid`, `module`, `export`, `env?`, `artifacts?`, `reply?` |
 | `UserActionAst` | `uid`, `prompt`, `options`, `reply?` |
 | `ArtifactAst` | normalized `path` template and optional schema |
 | `ArtifactOfAst` | producer state, optional artifact and selector |
@@ -461,6 +463,7 @@ Handle the third variant with `output.kind === "error"`; it contains `state` and
 |---|---|---|
 | `AgentEffect` | `agent` | Start or resume an agent invocation and emit a chart event. |
 | `ScriptEffect` | `script` | Run a process and emit a chart event. |
+| `ImportedActionEffect` | `tsImport` | Run a trusted imported function in-process and emit a chart event. |
 | `UserEffect` | `user` | Ask a host user and emit a chart event. |
 | `DurableRecordsEffect` | `durable_records` | Append records atomically, then acknowledge them. |
 | `ValidateEffect` | `validate` | Run the guard and return `ValidatedMachineEvent`. |
@@ -485,7 +488,7 @@ type ValidateEffect = {
 };
 ```
 
-`GuardRefAst` is the normalized guard union: `GuardRef` plus a script variant whose `env`, `artifacts`, and `reply` are normalized AST values. Env, guard artifacts, and guard reply are resolved/validated only for the pending guard. Reply output is validation-only; guard artifacts remain part of the containing state's declared Files surface. Artifact values are never durable facts or stdin/context fields. `ActionEffect` is `AgentEffect | ScriptEffect | UserEffect`. `ResumeRequest` contains a rendered message and optional session file. `RecordAppend` is an unstamped append request used before durable seqIds and timestamps are assigned.
+`GuardRefAst` is the normalized guard union: `GuardRef` plus a script variant whose `env`, `artifacts`, and `reply` are normalized AST values. Env, guard artifacts, and guard reply are resolved/validated only for the pending guard. Reply output is validation-only; guard artifacts remain part of the containing state's declared Files surface. Artifact values are never durable facts or stdin/context fields. `ActionEffect` is `AgentEffect | ScriptEffect | ImportedActionEffect | UserEffect`. `ImportedActionEffect` carries rendered `env`, declared artifacts/events/reply, and a copied resolved state `input`; it never carries projection state. `ResumeRequest` contains a rendered message and optional session file. `RecordAppend` is an unstamped append request used before durable seqIds and timestamps are assigned.
 
 ### Machine events
 
@@ -493,6 +496,7 @@ type ValidateEffect = {
 
 - `AgentMachineEvent`;
 - `ScriptMachineEvent`;
+- `ImportedActionMachineEvent`;
 - `UserMachineEvent`;
 - `DurableRecordsAddedMachineEvent`;
 - `ValidatedMachineEvent`;
@@ -691,7 +695,7 @@ JoinArtifactOfCst, JsonPrimitive, JsonSchema, JsonValue, MapStateAst, MapStateCs
 RuntimeContract, RuntimeContractMetadata, SchemaAst, SchemaCst,
 SchemaRegistryLike, ParallelStateAst, ParallelStateCst,
 ParsedChart, RegionStateAst, ReservedSystemEventType, ScriptActionAst,
-ScriptActionCst, StateActionAst, StateActionCst, StateAst, StateCst,
+ScriptActionCst, ImportedActionAst, ImportedActionCst, StateActionAst, StateActionCst, StateAst, StateCst,
 StateId, StatePath, SystemEvent, TemplateAst, TemplateCst, Templatable,
 GuardOutcome, GuardRef, GuardRefAst, OnReject, OnReenterAst, OnReenterCst,
 TransitionAst, TransitionCst, TransitionInputAst, TransitionInputCst,
@@ -706,7 +710,7 @@ ParseChartModuleOptions, ActionEffect, AgentEffect, AgentMachineEvent,
 CancelEffect,
 DurableRecordsAddedMachineEvent, DurableRecordsEffect, Effect,
 RecordAppend, RejectedEffect, ResumeRequest, ScriptEffect,
-ScriptMachineEvent, TimerEffect, TimerMachineEvent, ValidateEffect,
+ScriptMachineEvent, ImportedActionEffect, ImportedActionMachineEvent, TimerEffect, TimerMachineEvent, ValidateEffect,
 ValidatedMachineEvent, EffectId, MachineEvent, MachineStartEvent, MachineOutput,
 MachineOutputEffect, MachineOutputError, MachineOutputFinal,
 MachineState, RenderedArtifact, UserEffect,

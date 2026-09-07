@@ -45,7 +45,7 @@ function completedVisitCount(states: HyperchartStateInfo[]): number {
 		if (state.visitHistory !== undefined) {
 			return count + state.visitHistory.filter((visit) => visit.status === "done" || visit.status === "failed").length;
 		}
-		const actionState = state.type === undefined || state.type === "agent" || state.type === "user" || state.type === "script";
+		const actionState = state.type === undefined || state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport";
 		return count + (state.final !== true && actionState && (state.status === "done" || state.status === "failed") ? 1 : 0);
 	}, 0);
 }

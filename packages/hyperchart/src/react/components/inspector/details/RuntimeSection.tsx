@@ -436,7 +436,7 @@ export function RuntimeSection({
 						usage: {formatHyperchartUsage(state.usage) ?? JSON.stringify(state.usage)}
 					</div>
 				)}
-				{history !== undefined && state.visitHistory === undefined && (state.type === "agent" || state.type === "user" || state.type === "script") && (
+				{history !== undefined && state.visitHistory === undefined && (state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport") && (
 					<LazyStateVisits history={history} state={state} allStates={allStates} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
 				)}
 				{history !== undefined && state.type === "map" && state.mapConfig?.visitHistory === undefined && <HistoryDisclosure label="map launch history"><LazyMapVisits history={history} state={state} /></HistoryDisclosure>}

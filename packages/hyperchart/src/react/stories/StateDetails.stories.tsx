@@ -63,7 +63,7 @@ export const Index: Story = {
 			</div>
 		</BoardPage>
 	),
-	parameters: { docs: { description: { story: "Navigation index for the nine focused panel boards." } } },
+	parameters: { docs: { description: { story: "Navigation index for the ten focused panel boards." } } },
 };
 
 function groupStory(groupId: InspectorPanelGroupId, name: string, description: string): Story {
@@ -79,6 +79,7 @@ export const AgentStates = groupStory("agent", "agent states", "Agent prompts, c
 export const ActorStates = groupStory("actors", "actor states", "Actor declarations, occurrences/mailboxes, protocols, receive states, internal actions, and replies.");
 export const UserStates = groupStory("user", "user states", "User-input prompts and transition details.");
 export const ScriptStates = groupStory("script", "script states", "Script arguments, environment, contracts, and skipped states.");
+export const FunctionActions = groupStory("tsImport", "function actions", "Trusted imported module/export actions, params, and contracts.");
 export const MapStates = groupStory("map", "map states", "Map parent status and mapped worker details.");
 export const ParallelStates = groupStory("parallel", "parallel states", "Parallel fan-out branches and progress states.");
 export const CompoundStates = groupStory("compound", "compound states", "Nested compound scopes, agents, and contracts.");

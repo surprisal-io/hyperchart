@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, event, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t } from "../packages/hyperchart/src/core/dsl.js";
+import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, event, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t, tsAction } from "../packages/hyperchart/src/core/dsl.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
 import { hyperchartSource } from "../packages/hyperchart/src/core/source.js";
 
@@ -67,6 +67,33 @@ describe("hyperchart source", () => {
 		const source = sourceForScript();
 		expect(source).toMatch(/script\("echo", \[\], \{\s+env:/);
 		expect(source).toContain('FOO: "bar"');
+	});
+
+	it("renders tsAction definitions and round-trips their options", () => {
+		const parsed = normalizeChartConfig(chart({
+			kind: "chart", id: "function-source", initial: "run",
+			states: {
+				run: {
+					kind: "state",
+					action: tsAction("./actions.mjs", "score", {
+						env: { TOPIC: "durability" },
+						artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+						reply: z.object({ score: z.number() }),
+					}),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		}));
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain('tsAction("./actions.mjs", "score", {');
+		expect(source).toContain('TOPIC: "durability"');
+		const scope = { artifact, chart, final, tsAction, z };
+		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
+		const roundTrip = normalizeChartConfig(rebuilt);
+		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));
+		expect(roundTrip.ast).toEqual(parsed.ast);
 	});
 
 	it("prints complete and failed terminals with notification options", () => {

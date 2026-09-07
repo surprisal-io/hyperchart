@@ -19,6 +19,7 @@ import {
   resume,
   script,
   t,
+  tsAction,
   tsImport,
   user,
   visit,
@@ -376,7 +377,7 @@ Every `Templatable` field accepts either a plain string or `t` template.
 ```ts
 type ActionStateCst = {
   kind: "state";
-  action: AgentActionCst | ScriptActionCst | UserActionCst;
+  action: AgentActionCst | ScriptActionCst | ImportedActionCst | UserActionCst;
   input?: Record<string, z.ZodType>;
   transitions?: TransitionMapCst;
   after?: { delayMs: number; target: string };
@@ -476,6 +477,30 @@ On success, a script should print a JSON completion envelope as its last non-emp
 If exactly one non-`FAILED` event is reachable, exit code 0 may omit the envelope. With multiple possible events, the envelope is required. A non-zero exit becomes `FAILED`.
 
 The same `script(command, args, { env, artifacts, reply })` value can be used as a validation guard. Guard scripts use the same env renderer and artifact/reply validation as script actions. Guard reply output is validation-only and is not stored as the action result; guard-produced artifacts become downstream-declarable artifacts of the containing state. Stdin remains the plain ChartEvent; no guard-only artifacts field or TypeScript context artifacts are injected. Missing or invalid reads reject closed.
+
+### `tsAction(module, exportName, options?)`
+
+```ts
+function tsAction(module: string, exportName: string, options?: {
+  env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
+  artifacts?: Record<string, Templatable | ArtifactCst>;
+  reply?: z.ZodType;
+}): ImportedActionCst;
+```
+
+Declares a trusted function action without placing a closure in chart data. The normalized action kind and UID action are both `"tsImport"`; source rendering emits `tsAction(...)` in action position and `tsImport(...)` only for guards.
+
+```ts
+action: tsAction("./actions/score.mjs", "scoreCandidate", {
+  env: { CANDIDATE: t`${json(input("candidate"))}` },
+  artifacts: { reward: artifact("artifacts/reward.json", Reward) },
+  reply: z.object({ reward: z.number() }),
+}),
+```
+
+Relative modules resolve from the chart directory. The named export is invoked as `fn(params, context)` and must return an explicit `{ type, output? }` or `{ type: "FAILED", error }` event; there is no implicit single-event completion rule. Rendered env entries become `params`. `context` contains resolved visit input, allowed events, action identity, absolute chart/work/project directories, absolute artifact paths, an `AbortSignal`, and optional validation-attempt metadata. Returned events, replies, and artifacts share script completion validation and artifact pinning.
+
+This executes in the runner process. Cancellation suppresses late results and never waits for the function promise, but it cannot terminate CPU work or undo side effects. See [Recovery and safety](../safety.md#in-process-function-actions).
 
 ### `user(options)`
 
@@ -841,7 +866,7 @@ Values:
 ```text
 actor, actorPool, actorInput, call, callBatch, chart, agent, artifact, compound,
 contract, event, final, input, json, map, message, messageInput, parallel,
-protocol, receive, refs, reply, resume, script, self, send, sendBatch, t, tsImport,
+protocol, receive, refs, reply, resume, script, self, send, sendBatch, t, tsAction, tsImport,
 user, visit, z
 ```
 
@@ -854,7 +879,7 @@ ActionStateCst, ActorSelfTarget, AgentActionCst, ArtifactCst, ArtifactOfCst, Aft
 ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst,
 EventBindingCst, FinalStateCst, InputRef,
 JoinArtifactOfCst, MapStateCst, OnReject, OnReenterCst,
-ParallelStateCst, SchemaCst, ScriptActionCst, StateActionCst, StateCst,
+ImportedActionCst, ParallelStateCst, SchemaCst, ScriptActionCst, StateActionCst, StateCst,
 TemplateCst, Templatable, TransitionCst, TransitionInputCst, TransitionMapCst,
 UserActionCst, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
 Paths, ValueAt
