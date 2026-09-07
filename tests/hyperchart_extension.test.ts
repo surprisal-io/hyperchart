@@ -103,6 +103,26 @@ afterEach(async () => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
+it("loads Pi imports in project config from the host extension runtime", () => {
+	const fakePackageDir = join(projectDir, "node_modules", "@earendil-works", "pi-coding-agent");
+	mkdirSync(fakePackageDir, { recursive: true });
+	writeFileSync(
+		join(fakePackageDir, "package.json"),
+		JSON.stringify({ name: "@earendil-works/pi-coding-agent", type: "commonjs", main: "index.cjs" }),
+	);
+	writeFileSync(join(fakePackageDir, "index.cjs"), 'throw new Error("loaded fake project Pi package");\n');
+	mkdirSync(join(projectDir, ".pi"), { recursive: true });
+	writeFileSync(
+		join(projectDir, ".pi", "hyperchart.config.ts"),
+		`import { SessionManager } from "@earendil-works/pi-coding-agent";
+if (typeof SessionManager !== "function") throw new Error("host SessionManager unavailable");
+export default { transcriptReaderForRun: async () => [] };
+`,
+	);
+
+	expect(() => registeredCommand()).not.toThrow();
+});
+
 describe("hyperchart extension", () => {
 	it("registers one consolidated hyperchart tool", () => {
 		expect(registeredToolNames()).toEqual(["hyperchart"]);

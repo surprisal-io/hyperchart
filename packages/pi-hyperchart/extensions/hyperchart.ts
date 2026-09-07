@@ -15,6 +15,7 @@ import {
 import { createRequire } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import * as hostPiCodingAgent from "@earendil-works/pi-coding-agent";
 import {
 	defineTool,
 	type ExtensionAPI,
@@ -321,7 +322,11 @@ function filterCompletions(items: readonly AutocompleteItem[], current: string):
 function loadHyperchartExtensionOptions(cwd: string): HyperchartExtensionOptions {
 	const configPath = join(cwd, ".pi", "hyperchart.config.ts");
 	if (!existsSync(configPath)) return { transcriptReaderForRun: createPiFileTranscriptReader };
-	const module = createJiti(pathToFileURL(configPath).href, { interopDefault: true, moduleCache: false })(configPath) as unknown;
+	const module = createJiti(pathToFileURL(configPath).href, {
+		interopDefault: true,
+		moduleCache: false,
+		virtualModules: { "@earendil-works/pi-coding-agent": hostPiCodingAgent },
+	})(configPath) as unknown;
 	const loaded = (typeof module === "object" && module !== null && "default" in module ? module.default : module) as Partial<HyperchartExtensionOptions>;
 	if (typeof loaded.transcriptReaderForRun !== "function") {
 		throw new Error(`${configPath} must export transcriptReaderForRun(runDir)`);
