@@ -5,6 +5,7 @@ import { explainReplay } from "../packages/hyperchart/src/core/replay_check.js";
 import { buildGraph } from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
 import { inspectorPanelSpecs } from "../packages/hyperchart/src/react/stories/inspector-panel/specs.js";
 import { inspectorPanelScenario } from "../packages/hyperchart/src/react/stories/inspector-panel/runtime.js";
+import { captureExecutionBoardRun } from "../packages/hyperchart/src/react/fixtures/execution-board-fixture.js";
 import {
 	actorBrokenReplayRun,
 	actorBusyFifoRun,
@@ -44,12 +45,16 @@ import {
 const storyDirectory = join(process.cwd(), "packages/hyperchart/src/react/stories");
 const forbiddenTitleSegments = ["Components", "Features", "Examples", "Visual Tests", "Internal"];
 
-function storyFiles(directory: string): string[] {
+function sourceFiles(directory: string, include: (name: string) => boolean): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
 		const path = join(directory, entry.name);
-		if (entry.isDirectory()) return storyFiles(path);
-		return entry.name.endsWith(".stories.tsx") ? [path] : [];
+		if (entry.isDirectory()) return sourceFiles(path, include);
+		return include(entry.name) ? [path] : [];
 	});
+}
+
+function storyFiles(directory: string): string[] {
+	return sourceFiles(directory, (name) => name.endsWith(".stories.tsx"));
 }
 
 describe("Storybook information architecture", () => {
@@ -375,12 +380,25 @@ describe("Storybook information architecture", () => {
 		expect(dialogSource).toContain("thinking: draftAction.thinking");
 	});
 
+	it("builds the Execution board from execution-loop durable facts", async () => {
+		const run = await captureExecutionBoardRun();
+		expect(run.states.find((state) => state.id === "workers")?.mapConfig?.items).toHaveLength(4);
+		expect(run.states.filter((state) => state.scopeParentId?.startsWith("workers#") === true)).toHaveLength(16);
+		expect(run.states.find((state) => state.id === "fanout")?.parallelConfig?.branches).toHaveLength(2);
+		expect(run.states.find((state) => state.id === "dispatch")?.actorMessageLink?.kind).toBe("sendBatch");
+		expect(run.states.find((state) => state.id === "request")?.actorMessageLink?.kind).toBe("call");
+		expect(run.states.find((state) => state.id === "@worker.process")?.visitHistory).toHaveLength(3);
+		expect(run.states.find((state) => state.id === "publish")?.visitHistory?.at(-1)?.status).toBe("running");
+		expect(run.states.find((state) => state.id === "plan")?.visitHistory?.at(-1)?.status).toBe("done");
+	});
+
 	it("does not restore hand-authored semantic Storybook models", () => {
 		const semanticFiles = [
 			...storyFiles(storyDirectory),
-			join(process.cwd(), "packages/hyperchart/src/react/fixtures/actor-fixtures.ts"),
-			join(process.cwd(), "packages/hyperchart/src/react/fixtures/actor-runtime-fixtures.ts"),
-			join(process.cwd(), "packages/hyperchart/src/react/fixtures/hyperchart-fixtures.ts"),
+			...sourceFiles(
+				join(process.cwd(), "packages/hyperchart/src/react/fixtures"),
+				(name) => name.endsWith(".ts") || name.endsWith(".tsx"),
+			),
 		];
 		for (const file of semanticFiles) {
 			const source = readFileSync(file, "utf8");
@@ -434,6 +452,13 @@ describe("Storybook information architecture", () => {
 		expect(atlasSource).toMatch(/name: "Show history"/);
 		expect(atlasSource).toMatch(/userEvent\.click\(receive\.getAllByRole\("button"\)\[0\]!\)/);
 		expect(atlasSource).toMatch(/Pool Worker History · persistent reuse/);
+	});
+
+	it("keeps repeated action visits on the production Inspector dialog surface", () => {
+		const source = readFileSync(join(storyDirectory, "InspectorDialog.stories.tsx"), "utf8");
+		expect(source).toContain("export const ActionVisitReentry");
+		expect(source).toContain("reentryScenario.runtimeRun(reentryRecords");
+		expect(source).toContain('name: "Action Visit History · Re-entry"');
 	});
 
 	it("does not restore mechanism-named story files", () => {

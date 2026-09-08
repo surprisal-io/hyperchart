@@ -3,7 +3,9 @@ import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
-import { Theme, initTheme } from "@earendil-works/pi-coding-agent";
+// Import only the theme module. The package root eagerly loads the full Pi CLI and couples
+// Storybook startup to pi-tui exports that the preview renderer never uses.
+import { Theme, initTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import {
 	RunHistoryOverlay,
@@ -50,8 +52,8 @@ const bgKeys = new Set([
 ]);
 
 function loadPiTheme(name: ThemeName): Theme {
-	const entry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-	const jsonPath = resolve(dirname(entry), "modes/interactive/theme", `${name}.json`);
+	const themeModule = fileURLToPath(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js", import.meta.url));
+	const jsonPath = resolve(dirname(themeModule), `${name}.json`);
 	const source = JSON.parse(readFileSync(jsonPath, "utf8")) as ThemeJson;
 	const resolved = Object.fromEntries(
 		Object.entries(source.colors).map(([key, value]) => [

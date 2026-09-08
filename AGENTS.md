@@ -1,5 +1,11 @@
 # Agent notes
 
+## Inspector and Storybook render only production-derived data
+
+Every Inspector, Execution, Structure, history, and Storybook visualization must render the exact output of the production data pipeline. Runtime stories must start from a real captured durable log produced by the execution loop, pass replay validation, and be projected through the production host adapter. Definition-only stories must start from a normalized Chart DSL/AST and use the production inspect adapter.
+
+Never hand-author, clone, patch, merge, or fabricate `HyperchartRunInfo`, `HyperchartStateInfo`, action visits, runtime statuses, map workers, actor occurrences, or other semantic UI models for visual coverage. A synthetic scenario is allowed only when it is executed as a valid chart and the resulting durable facts are captured; replay-valid records assembled by hand are not a substitute for execution-loop output. React components must receive and render those projected objects directly, without story-only semantic transformations. If a desired visual state cannot be produced by a real chart execution, the story must not claim or display it.
+
 ## Changing execution semantics? Update the log contract and the model.
 
 The execution semantics live in three places that MUST stay in sync. A change
