@@ -18,6 +18,7 @@ export function VisitHistory({
 	onHighlightArtifact,
 	onReadSession,
 	lazyDetails = false,
+	selectedInvokeSeqId,
 }: {
 	visits: HyperchartVisitInfo[];
 	state: HyperchartStateInfo;
@@ -25,8 +26,9 @@ export function VisitHistory({
 	agentName?: string;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
-	onReadSession?: (invokeSeqId: number) => Promise<HyperchartVisitInfo["session"]>;
+	onReadSession?: (invokeSeqId: number, originBranchId?: string) => Promise<HyperchartVisitInfo["session"]>;
 	lazyDetails?: boolean;
+	selectedInvokeSeqId?: number;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
 	const [expandedVisits, setExpandedVisits] = useState<Record<number, boolean>>({});
@@ -39,7 +41,7 @@ export function VisitHistory({
 			return;
 		}
 		setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: true } }));
-		void onReadSession(visit.invokeSeqId).then((session) => {
+		void onReadSession(visit.invokeSeqId, visit.originBranchId).then((session) => {
 			if (session === undefined) {
 				setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: "Transcript is unavailable." } }));
 				return;
@@ -61,15 +63,17 @@ export function VisitHistory({
 				{visits.map((visit, index) => {
 					const sessionRead = sessionReads[visit.invokeSeqId];
 					const canReadSession = visit.session !== undefined || onReadSession !== undefined && visit.invocation.kind === "agent";
-					const expanded = expandedVisits[visit.invokeSeqId] ?? (!lazyDetails && index === visits.length - 1 && visit.status === "running");
+					const selected = visit.invokeSeqId === selectedInvokeSeqId;
+					const expanded = selected || (expandedVisits[visit.invokeSeqId] ?? (!lazyDetails && index === visits.length - 1 && visit.status === "running"));
 					return <details
 						key={visit.invokeSeqId}
 						open={expanded}
+						aria-current={selected ? "true" : undefined}
 						onToggle={(event) => {
 							const open = event.currentTarget.open;
 							setExpandedVisits((current) => current[visit.invokeSeqId] === open ? current : { ...current, [visit.invokeSeqId]: open });
 						}}
-						className="group rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]"
+						className={`group rounded-lg border bg-[var(--bg-secondary)] ${selected ? "border-blue-500/60 ring-1 ring-blue-500/25" : "border-[var(--border-secondary)]"}`}
 					>
 						<summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] marker:hidden">
 							<span className="font-semibold text-[var(--text-primary)]">Visit {visit.visit}</span>

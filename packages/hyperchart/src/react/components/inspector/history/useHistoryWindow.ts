@@ -4,6 +4,8 @@ import type { HistoryChunk, HistoryCursor, HistorySnapshot } from "../../../../r
 export const HISTORY_WINDOW_ITEMS = 1_000;
 
 export type HistoryWindow<T> = Readonly<{
+	/** Snapshot actually represented by the retained items. */
+	snapshot?: HistorySnapshot;
 	items: readonly T[];
 	older?: HistoryCursor;
 	newer?: HistoryCursor;
@@ -123,6 +125,8 @@ export function useHistoryWindow<T>(options: {
 	}, []);
 
 	useEffect(() => {
+		void cacheKey;
+		void source;
 		generation.current += 1;
 		for (const controller of Object.values(controllers.current)) controller?.abort();
 		controllers.current = {};
@@ -136,7 +140,7 @@ export function useHistoryWindow<T>(options: {
 			for (const controller of Object.values(controllers.current)) controller?.abort();
 			controllers.current = {};
 		};
-	}, [cacheKey, initialCursor, request]);
+	}, [cacheKey, initialCursor, request, source]);
 
 	const loadOlder = useCallback(() => {
 		const cursor = windowRef.current.older;
@@ -152,6 +156,7 @@ export function useHistoryWindow<T>(options: {
 
 	return {
 		window: {
+			...(window.snapshot === undefined ? {} : { snapshot: window.snapshot }),
 			items: window.segments.flatMap((segment) => segment.items),
 			...(window.older === undefined ? {} : { older: window.older }),
 			...(window.newer === undefined ? {} : { newer: window.newer }),

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { FolderIcon, EyeIcon, EyeSlashIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { FolderIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { Controls, MiniMap, ReactFlow, type NodeMouseHandler } from "@xyflow/react";
 import {
 	formatHyperchartTime,
@@ -20,6 +20,8 @@ import { immediateMapScopeId, scopeStackForState, stateScopeParentId, visibleSta
 import { StatusPill } from "../ui/StatusPill.js";
 import { useModalDialog } from "../../support/useModalDialog.js";
 import { HyperchartInspectorSidePanel } from "./HyperchartInspectorSidePanel.js";
+import { ActionVisitGraph } from "./history/ActionVisitGraph.js";
+import type { ActionVisitRow } from "./helpers/actionVisits.js";
 
 const nodeTypes = { hyperchartState: HyperchartStateGraphNode };
 const edgeTypes = { transition: HyperchartTransitionEdge };
@@ -93,6 +95,8 @@ export function HyperchartInspectorDialogInner({
 	selectedRunId,
 	onSelectRun,
 	onSelectBranch,
+	embedded = false,
+	initialCanvasMode = "structure",
 	onForkBranch,
 	onRewindBranch,
 	onClose,
@@ -117,39 +121,42 @@ export function HyperchartInspectorDialogInner({
 	const runRef = useRef(run);
 	runRef.current = run;
 	usePauseBackgroundAnimations(run !== undefined);
-	useModalDialog({ dialogRef, initialFocusRef: closeButtonRef, onClose, open: run !== undefined });
+	useModalDialog({ dialogRef, initialFocusRef: closeButtonRef, onClose, open: run !== undefined && !embedded });
 	const [selectedStateId, setSelectedStateId] = useState<string | null>(null);
-	const [showDone, setShowDone] = useState(true);
-	const [showPending, setShowPending] = useState(true);
-	const [showSkipped, setShowSkipped] = useState(false);
-	const [showMapWorkers, setShowMapWorkers] = useState(false);
+	const [selectedVisit, setSelectedVisit] = useState<ActionVisitRow | null>(null);
+	const [selectedExecutionNodeId, setSelectedExecutionNodeId] = useState<string | null>(null);
+	const [canvasMode, setCanvasMode] = useState<"execution" | "structure">(initialCanvasMode);
 	const [scopeStack, setScopeStack] = useState<string[]>([]);
 	const [visibleBranches, setVisibleBranches] = useState(run?.branches ?? []);
 	const [branchCursor, setBranchCursor] = useState(run?.branchListNext);
 	const [branchLoadError, setBranchLoadError] = useState<string>();
+	const [historySnapshot, setHistorySnapshot] = useState(run?.historySnapshot);
+	const pinnedHistorySnapshot = historySnapshot?.branchId === (run?.branchId ?? "main")
+		? historySnapshot
+		: run?.historySnapshot;
+	const historyRun = useMemo(
+		() => run === undefined || pinnedHistorySnapshot === undefined
+			? run
+			: { ...run, historySnapshot: pinnedHistorySnapshot },
+		[pinnedHistorySnapshot, run],
+	);
 
 	useEffect(() => {
 		void run?.runId;
 		setSelectedStateId(null);
+		setSelectedVisit(null);
+		setSelectedExecutionNodeId(null);
 		setScopeStack([]);
 		setVisibleBranches(run?.branches ?? []);
 		setBranchCursor(run?.branchListNext);
 		setBranchLoadError(undefined);
+		setHistorySnapshot(run?.historySnapshot);
 	}, [run?.runId, run?.branchId]);
 
 	const currentScopeId = scopeStack.at(-1) ?? null;
 	const visibleIds = useMemo(
-		() =>
-			run
-				? visibleStateIdsForScope(run.states, {
-						scopeId: currentScopeId,
-						showDone,
-						showPending,
-						showSkipped,
-						showMapWorkers,
-					})
-				: new Set<string>(),
-		[currentScopeId, run, showDone, showPending, showSkipped, showMapWorkers],
+		() => run ? visibleStateIdsForScope(run.states, { scopeId: currentScopeId }) : new Set<string>(),
+		[currentScopeId, run],
 	);
 
 	const graph = useGraphLayout(run, visibleIds);
@@ -165,18 +172,51 @@ export function HyperchartInspectorDialogInner({
 	const openScope = useCallback((stateId: string) => {
 		const latestRun = runRef.current;
 		const state = latestRun?.states.find((candidate) => candidate.id === stateId);
-		const hasChildScope = latestRun?.states.some((candidate) => stateScopeParentId(candidate) === state?.id);
+		const hasChildScope = latestRun?.states.some((candidate) => {
+			const parentId = stateScopeParentId(candidate);
+			return parentId === state?.id || parentId?.startsWith(`${state?.id}#`) === true;
+		});
 		if (!state || !hasChildScope) return;
 		setScopeStack((prev) => [...prev, state.id]);
 		setSelectedStateId(null);
+		setSelectedVisit(null);
 	}, []);
 	const navigateToState = useCallback((stateId: string) => {
 		const latestRun = runRef.current;
 		if (latestRun?.states.some((state) => state.id === stateId) !== true) return;
 		setScopeStack(scopeStackForState(latestRun.states, stateId));
 		setSelectedStateId(stateId);
+		setSelectedVisit(null);
 	}, []);
-	const clearStateSelection = useCallback(() => setSelectedStateId(null), []);
+	const selectVisit = useCallback((visit: ActionVisitRow) => {
+		setSelectedVisit(visit);
+		setSelectedExecutionNodeId(`visit-${visit.invokeSeqId}`);
+		if (visit.graphStateId === undefined) {
+			setSelectedStateId(null);
+			return;
+		}
+		const latestRun = runRef.current;
+		setScopeStack(scopeStackForState(latestRun?.states ?? [], visit.graphStateId));
+		setSelectedStateId(visit.graphStateId);
+	}, []);
+	const selectExecutionState = useCallback((stateId: string, nodeId: string, targetSeqId?: number) => {
+		const latestRun = runRef.current;
+		if (latestRun?.states.some((state) => state.id === stateId) !== true) return;
+		setScopeStack(scopeStackForState(latestRun.states, stateId));
+		setSelectedStateId(stateId);
+		setSelectedVisit(targetSeqId === undefined ? null : {
+			invokeSeqId: targetSeqId,
+			statePath: stateId,
+			graphStateId: stateId,
+			originBranchId: latestRun.branchId ?? "main",
+		});
+		setSelectedExecutionNodeId(nodeId);
+	}, []);
+	const clearStateSelection = useCallback(() => {
+		setSelectedStateId(null);
+		setSelectedVisit(null);
+		setSelectedExecutionNodeId(null);
+	}, []);
 	const loadMoreBranches = useCallback(async () => {
 		const latestRun = runRef.current;
 		if (latestRun === undefined || historyDataSource === undefined || branchCursor === undefined) return;
@@ -187,33 +227,37 @@ export function HyperchartInspectorDialogInner({
 			setBranchLoadError(undefined);
 		} catch (error) { setBranchLoadError(error instanceof Error ? error.message : String(error)); }
 	}, [branchCursor, historyDataSource]);
-	const handleNodeClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => setSelectedStateId(node.id), []);
+	const handleNodeClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => {
+		setSelectedStateId(node.id);
+		setSelectedVisit(null);
+		setSelectedExecutionNodeId(null);
+	}, []);
 	const handleNodeDoubleClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => openScope(node.id), [openScope]);
 
-	if (!run) return null;
+	if (!run || !historyRun) return null;
 
 	return (
 		<DialogPortal>
 			<div
 				data-hyperchart-root
 				data-theme={resolved}
-				className={`fixed inset-0 z-[70] flex ${isMobile ? "items-stretch justify-stretch p-0" : "items-center justify-center p-5"}`}
+				className={embedded ? "absolute inset-0 flex" : `fixed inset-0 z-[70] flex ${isMobile ? "items-stretch justify-stretch p-0" : "items-center justify-center p-5"}`}
 				data-testid="hyperchart-inspector-dialog"
 			>
-				<button
+				{!embedded && <button
 					type="button"
 					tabIndex={-1}
 					className="absolute inset-0 cursor-default bg-[var(--bg-overlay)]"
 					onClick={onClose}
 					aria-label="Close hyperchart inspector"
-				/>
+				/>}
 				<div
 					ref={dialogRef}
 					tabIndex={-1}
 					role="dialog"
 					aria-modal="true"
 					aria-labelledby={titleId}
-					className={`relative flex w-full flex-col overflow-hidden border border-[var(--border-secondary)] bg-[var(--bg-secondary)] shadow-2xl ${isMobile ? "h-[100svh] max-h-[100svh] overscroll-contain rounded-none border-0" : "h-[94vh] max-w-[1500px] rounded-2xl"}`}
+					className={`relative flex w-full flex-col overflow-hidden bg-[var(--bg-secondary)] ${embedded ? "h-full border-0 shadow-none" : `border border-[var(--border-secondary)] shadow-2xl ${isMobile ? "h-[100svh] max-h-[100svh] overscroll-contain rounded-none border-0" : "h-[94vh] max-w-[1500px] rounded-2xl"}`}`}
 				>
 					<header
 						className={`flex flex-wrap items-center gap-2 border-b border-[var(--border-primary)] py-2 ${isMobile ? "px-3" : "px-4"}`}
@@ -234,18 +278,21 @@ export function HyperchartInspectorDialogInner({
 							</div>
 						</div>
 						{visibleBranches.length > 0 && (
-							<div className="flex items-center gap-1" data-testid="hyperchart-branch-navigation">
-								{visibleBranches.map((branch) => (
-									<button
-										type="button"
-										key={branch.branchId}
-										onClick={() => onSelectBranch?.(run.runId, branch.branchId)}
-										className={`rounded border px-2 py-1 text-xs ${branch.branchId === run.branchId ? "border-blue-500/60 bg-blue-500/10 text-[var(--hc-blue-text)]" : "border-[var(--border-secondary)] text-[var(--text-secondary)]"}`}
-										title={`Head ${branch.headSeqId ?? "empty"}${run.runnerBranchIds?.includes(branch.branchId) === true ? " · live runner" : ""}`}
-									>
-										{branch.branchId}{run.runnerBranchIds?.includes(branch.branchId) === true ? " ▶" : ""}
-									</button>
-								))}
+							<div className="flex items-center gap-1.5" data-testid="hyperchart-branch-navigation">
+								<label className="sr-only" htmlFor={`${titleId}-branch`}>Branch</label>
+								<select
+									id={`${titleId}-branch`}
+									value={run.branchId ?? "main"}
+									onChange={(event) => onSelectBranch?.(run.runId, event.currentTarget.value)}
+									className="max-w-64 rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)]"
+									aria-label="Branch"
+								>
+									{visibleBranches.map((branch) => (
+										<option key={branch.branchId} value={branch.branchId}>
+											{branch.branchId}{run.runnerBranchIds?.includes(branch.branchId) === true ? " · live" : ""}
+										</option>
+									))}
+								</select>
 								{onForkBranch && run.branchId && (
 									<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => {
 										const head = visibleBranches.find((branch) => branch.branchId === run.branchId)?.headSeqId;
@@ -266,7 +313,10 @@ export function HyperchartInspectorDialogInner({
 							</div>
 						)}
 						{historyDataSource !== undefined && run.historySnapshot !== undefined && onRefreshHistory !== undefined && (
-							<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)]" onClick={() => void onRefreshHistory(run.runId)}>Refresh history</button>
+							<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)]" onClick={() => {
+								setHistorySnapshot(run.historySnapshot);
+								void onRefreshHistory(run.runId);
+							}}>Refresh history</button>
 						)}
 						{run.status === "running" && onAbort && (
 							<button
@@ -286,7 +336,7 @@ export function HyperchartInspectorDialogInner({
 								Resume
 							</button>
 						)}
-						<button
+						{!embedded && <button
 							ref={closeButtonRef}
 							type="button"
 							onClick={onClose}
@@ -294,7 +344,7 @@ export function HyperchartInspectorDialogInner({
 							aria-label="Close hyperchart inspector"
 						>
 							<XMarkIcon className="h-5 w-5" aria-hidden="true" />
-						</button>
+						</button>}
 					</header>
 
 					{runs.length > 1 && (
@@ -320,7 +370,11 @@ export function HyperchartInspectorDialogInner({
 							className={`flex min-h-0 flex-col border-[var(--border-primary)] ${isMobile ? "border-b" : "border-r"}`}
 						>
 							<div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-primary)] px-3 py-2 text-xs">
-								<div className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-1.5 py-1 text-[11px]">
+								<div className="inline-flex shrink-0 rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-0.5">
+									<button type="button" onClick={() => setCanvasMode("execution")} className={`rounded-md px-2.5 py-1 font-medium ${canvasMode === "execution" ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-muted)]"}`}>Execution</button>
+									<button type="button" onClick={() => setCanvasMode("structure")} className={`rounded-md px-2.5 py-1 font-medium ${canvasMode === "structure" ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-muted)]"}`}>Structure</button>
+								</div>
+								{canvasMode === "structure" && <div className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-1.5 py-1 text-[11px]">
 									<button
 										type="button"
 										onClick={() => {
@@ -350,96 +404,50 @@ export function HyperchartInspectorDialogInner({
 											</React.Fragment>
 										);
 									})}
-								</div>
-								<button
-									type="button"
-									onClick={() => setShowDone((value) => !value)}
-									className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${showDone ? "border-green-500/35 bg-green-500/10 text-[var(--hc-green-text)]" : "border-[var(--border-secondary)] text-[var(--text-secondary)]"}`}
-								>
-									{showDone ? (
-										<EyeIcon className="h-3 w-3" aria-hidden="true" />
-									) : (
-										<EyeSlashIcon className="h-3 w-3" aria-hidden="true" />
-									)}{" "}
-									done
-								</button>
-								<button
-									type="button"
-									onClick={() => setShowPending((value) => !value)}
-									className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${showPending ? "border-purple-500/35 bg-purple-500/10 text-[var(--hc-purple-text)]" : "border-[var(--border-secondary)] text-[var(--text-secondary)]"}`}
-								>
-									{showPending ? (
-										<EyeIcon className="h-3 w-3" aria-hidden="true" />
-									) : (
-										<EyeSlashIcon className="h-3 w-3" aria-hidden="true" />
-									)}{" "}
-									pending
-								</button>
-								<button
-									type="button"
-									onClick={() => setShowSkipped((value) => !value)}
-									className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${showSkipped ? "border-[var(--border-secondary)] text-[var(--text-secondary)]" : "border-[var(--border-secondary)] text-[var(--text-muted)]"}`}
-								>
-									{showSkipped ? (
-										<EyeIcon className="h-3 w-3" aria-hidden="true" />
-									) : (
-										<EyeSlashIcon className="h-3 w-3" aria-hidden="true" />
-									)}{" "}
-									skipped
-								</button>
-								<button
-									type="button"
-									onClick={() => setShowMapWorkers((value) => !value)}
-									className={`inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 ${showMapWorkers ? "border-cyan-500/35 bg-cyan-500/10 text-[var(--hc-cyan-text)]" : "border-[var(--border-secondary)] text-[var(--text-muted)]"}`}
-								>
-									{showMapWorkers ? (
-										<EyeIcon className="h-3 w-3" aria-hidden="true" />
-									) : (
-										<EyeSlashIcon className="h-3 w-3" aria-hidden="true" />
-									)}{" "}
-									map workers
-								</button>
-								<button
-									type="button"
-									onClick={() => {
-										setShowDone(true);
-										setShowPending(true);
-										setShowSkipped(true);
-										setShowMapWorkers(true);
-									}}
-									className="shrink-0 rounded border border-[var(--border-secondary)] px-2 py-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-								>
-									show all
-								</button>
+								</div>}
 								<span className="ml-auto shrink-0 text-[11px] text-[var(--text-tertiary)]">
 									updated {formatHyperchartTime(run.updatedAt)}
 								</span>
 							</div>
-							<div className="min-h-0 flex-1 bg-[var(--bg-primary)]">
-								<InspectorGraphCanvas
-									runId={run.runId}
-									graph={focusedGraph}
-									isMobile={isMobile}
-									miniMapMaskColor={miniMapMaskColor}
-									miniMapBackgroundColor={miniMapBackgroundColor}
-									onNodeClick={handleNodeClick}
-									onNodeDoubleClick={handleNodeDoubleClick}
-									onPaneClick={clearStateSelection}
-								/>
+							<div className="flex min-h-0 flex-1 bg-[var(--bg-primary)]">
+								{canvasMode === "execution" ? (
+									<ActionVisitGraph
+										run={historyRun}
+										{...(historyDataSource === undefined ? {} : { dataSource: historyDataSource })}
+										{...(selectedExecutionNodeId === null ? {} : { selectedNodeId: selectedExecutionNodeId })}
+										onSelectVisit={selectVisit}
+										onSelectState={selectExecutionState}
+									/>
+								) : (
+									<InspectorGraphCanvas
+										runId={run.runId}
+										graph={focusedGraph}
+										isMobile={isMobile}
+										miniMapMaskColor={miniMapMaskColor}
+										miniMapBackgroundColor={miniMapBackgroundColor}
+										onNodeClick={handleNodeClick}
+										onNodeDoubleClick={handleNodeDoubleClick}
+										onPaneClick={clearStateSelection}
+									/>
+								)}
 							</div>
 						</main>
-						<HyperchartInspectorSidePanel
-							run={run}
-							selectedStateId={selectedState?.id ?? null}
-							onClearSelection={clearStateSelection}
-							onOpenScope={openScope}
-							onNavigateToState={navigateToState}
-							{...(historyDataSource === undefined ? {} : { historyDataSource })}
-							{...(historyTargetSeqId === undefined ? {} : { historyTargetSeqId })}
-							{...(onSteerSession === undefined
-								? {}
-								: { onSteerSession: (actionKey: string, message: string) => onSteerSession(run.runId, actionKey, message) })}
-						/>
+						<div className="flex min-h-0 flex-col">
+							<HyperchartInspectorSidePanel
+								run={historyRun}
+								selectedStateId={selectedState?.id ?? null}
+								onClearSelection={clearStateSelection}
+								onOpenScope={openScope}
+								onNavigateToState={navigateToState}
+								className="flex-1"
+								{...(selectedVisit === null ? {} : { selectedInvokeSeqId: selectedVisit.invokeSeqId })}
+								{...(historyDataSource === undefined ? {} : { historyDataSource })}
+								{...(historyTargetSeqId === undefined ? {} : { historyTargetSeqId })}
+								{...(onSteerSession === undefined
+									? {}
+									: { onSteerSession: (actionKey: string, message: string) => onSteerSession(run.runId, actionKey, message) })}
+							/>
+						</div>
 					</div>
 				</div>
 			</div>

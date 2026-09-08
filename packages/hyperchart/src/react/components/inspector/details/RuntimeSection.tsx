@@ -77,22 +77,33 @@ function ActorInternalGenerationRuntime({
 	onNavigateToState,
 	onSteerSession,
 	onHighlightArtifact,
+	selectedInvokeSeqId,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
 	onNavigateToState?: (stateId: string) => void;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
+	selectedInvokeSeqId?: number;
 }) {
 	const [showHistory, setShowHistory] = useState(false);
 	const generations = state.actorInternal?.generations ?? [];
+	const selectedInPreviousGeneration = selectedInvokeSeqId !== undefined && generations
+		.slice(0, -1)
+		.some((generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true);
+	useEffect(() => {
+		if (selectedInPreviousGeneration) setShowHistory(true);
+	}, [selectedInPreviousGeneration]);
 	const latest = generations.at(-1);
 	if (latest === undefined) return null;
 	const previous = generations.slice(0, -1).reverse();
 	const renderGeneration = (generation: (typeof generations)[number], latestInstance: boolean) => {
-		const messages = generation.actorMessageHistory ?? [];
-		const sentMessages = generation.actorMessages ?? [];
-		const visits = generation.visitHistory ?? [];
+		const focused = selectedInvokeSeqId !== undefined;
+		const messages = focused ? [] : generation.actorMessageHistory ?? [];
+		const sentMessages = focused ? [] : generation.actorMessages ?? [];
+		const visits = focused
+			? (generation.visitHistory ?? []).filter((visit) => visit.invokeSeqId === selectedInvokeSeqId)
+			: generation.visitHistory ?? [];
 		return (
 			<section key={generation.occurrencePath} className={latestInstance ? "" : "border-t border-[var(--border-secondary)] pt-2"}>
 				<div className="mb-2 flex flex-wrap items-center gap-2 text-[10px]">
@@ -116,6 +127,7 @@ function ActorInternalGenerationRuntime({
 						state={state}
 						allStates={allStates}
 						{...(state.agent === undefined ? {} : { agentName: state.agent })}
+						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					/>
@@ -124,6 +136,10 @@ function ActorInternalGenerationRuntime({
 			</section>
 		);
 	};
+	if (selectedInvokeSeqId !== undefined) {
+		const selectedGeneration = generations.find((generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true);
+		if (selectedGeneration !== undefined) return <div className="grid gap-2">{renderGeneration(selectedGeneration, selectedGeneration === latest)}</div>;
+	}
 	return (
 		<div className="grid gap-2">
 			{renderGeneration(latest, true)}
@@ -227,26 +243,34 @@ function LazyStateVisits({ history, state, allStates, onSteerSession, onHighligh
 }) {
 	const stateId = state.runtimeStatePath ?? state.id;
 	const target = useTargetCursor(history, { kind: "state-visits", state: stateId });
-	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readStateVisits({ runId: history.runId, snapshot: history.snapshot, stateId, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, stateId]);
+	const source = useMemo(() => ({ load: async (cursor?: HistoryCursor) => {
+		const chunk = await history.dataSource.readStateVisits({ runId: history.runId, snapshot: history.snapshot, stateId, ...(cursor === undefined ? {} : { cursor }) });
+		if (history.targetSeqId === undefined) return chunk;
+		return { snapshot: chunk.snapshot, items: chunk.items.filter((visit) => visit.invokeSeqId === history.targetSeqId) };
+	} }), [history.dataSource, history.runId, history.snapshot, history.targetSeqId, stateId]);
 	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
 	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
 	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a visit of this state.</div>;
 	return <VirtualizedHistoryList<HyperchartVisitInfo>
-		cacheKey={historyCacheKey(history, "state-visits", stateId)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+		cacheKey={`${historyCacheKey(history, "state-visits", stateId)}:${history.targetSeqId ?? "all"}`} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
 		identity={(visit) => String(visit.invokeSeqId)} estimateSize={88} emptyLabel="No visits in this snapshot."
-		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
+		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(history.targetSeqId === undefined ? {} : { selectedInvokeSeqId: history.targetSeqId })} {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId, originBranchId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: originBranchId ?? history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
 	/>;
 }
 
 function LazyMapVisits({ history, state }: { history: RuntimeHistoryContext; state: HyperchartStateInfo }) {
 	const mapPath = state.runtimeStatePath ?? state.id;
 	const target = useTargetCursor(history, { kind: "map-visits", mapPath });
-	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readMapVisits({ runId: history.runId, snapshot: history.snapshot, mapPath, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, mapPath]);
+	const source = useMemo(() => ({ load: async (cursor?: HistoryCursor) => {
+		const chunk = await history.dataSource.readMapVisits({ runId: history.runId, snapshot: history.snapshot, mapPath, ...(cursor === undefined ? {} : { cursor }) });
+		if (history.targetSeqId === undefined) return chunk;
+		return { snapshot: chunk.snapshot, items: chunk.items.filter((visit) => visit.spawnSeqId === history.targetSeqId) };
+	} }), [history.dataSource, history.runId, history.snapshot, history.targetSeqId, mapPath]);
 	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
 	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
 	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a launch of this map.</div>;
 	return <VirtualizedHistoryList<HyperchartMapVisitInfo>
-		cacheKey={historyCacheKey(history, "map-visits", mapPath)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+		cacheKey={`${historyCacheKey(history, "map-visits", mapPath)}:${history.targetSeqId ?? "all"}`} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
 		identity={(visit) => String(visit.spawnSeqId)} estimateSize={62} emptyLabel="No map launches in this snapshot."
 		renderItem={(visit) => <MapVisitHistory visits={[visit]} {...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })} />}
 	/>;
@@ -289,6 +313,7 @@ export function RuntimeSection({
 	onHighlightArtifact,
 	onNavigateToState,
 	history,
+	selectedInvokeSeqId,
 }: {
 	state: HyperchartStateInfo;
 	allStates?: HyperchartStateInfo[];
@@ -296,6 +321,7 @@ export function RuntimeSection({
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 	onNavigateToState?: (stateId: string) => void;
 	history?: RuntimeHistoryContext;
+	selectedInvokeSeqId?: number;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
 	const session = state.session;
@@ -317,8 +343,8 @@ export function RuntimeSection({
 				key={`runtime:${sessionIdentity}`}
 				title="Runtime"
 				icon={BoltIcon}
-				defaultOpen={sessionIsLive || actorOccurrence !== undefined || actorInternalGenerations !== undefined}
-				forceOpen={sessionIsLive}
+				defaultOpen={sessionIsLive || actorOccurrence !== undefined || actorInternalGenerations !== undefined || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
+				forceOpen={sessionIsLive || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
 			>
 				{session !== undefined && actorInternalGenerations === undefined && (
 					<div className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 p-2">
@@ -378,6 +404,7 @@ export function RuntimeSection({
 								visits={actorOccurrence.generationHistory}
 								state={state}
 								allStates={allStates}
+								{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 								{...(onSteerSession === undefined ? {} : { onSteerSession })}
 								{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 							/>
@@ -392,6 +419,7 @@ export function RuntimeSection({
 						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 					/>
 				)}
 				{actorInternalGenerations === undefined && actorInternalMessages !== undefined && <ActorInternalMessageHistory state={state} messages={actorInternalMessages} />}
@@ -444,17 +472,18 @@ export function RuntimeSection({
 				{history !== undefined && historyOccurrence !== undefined && <HistoryDisclosure label="actor message history"><LazyActorMessages history={history} occurrence={historyOccurrence} /></HistoryDisclosure>}
 				{actorInternalGenerations === undefined && state.visitHistory !== undefined && (
 					<VisitHistory
-						visits={state.visitHistory}
+						visits={selectedInvokeSeqId === undefined ? state.visitHistory : state.visitHistory.filter((visit) => visit.invokeSeqId === selectedInvokeSeqId)}
 						state={state}
 						allStates={allStates}
 						{...(state.agent === undefined ? {} : { agentName: state.agent })}
+						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					/>
 				)}
 				{state.type === "map" && state.mapConfig?.visitHistory !== undefined && (
 					<MapVisitHistory
-						visits={state.mapConfig.visitHistory}
+						visits={selectedInvokeSeqId === undefined ? state.mapConfig.visitHistory : state.mapConfig.visitHistory.filter((visit) => visit.spawnSeqId === selectedInvokeSeqId)}
 						{...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })}
 					/>
 				)}

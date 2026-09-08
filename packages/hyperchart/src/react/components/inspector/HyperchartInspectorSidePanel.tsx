@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftIcon } from "@heroicons/react/24/outline";
 import type { HyperchartInspectorDataSource, HyperchartRunInfo } from "../../types.js";
 import { useHyperchartTheme } from "../../support/theme-context.js";
-import { stateScopeParentId } from "./helpers/scope.js";
+import { immediateMapScopeId, stateScopeParentId } from "./helpers/scope.js";
 import { RunOverview } from "./details/RunOverview.js";
 import { StateDetails } from "./details/StateDetails.js";
 
@@ -17,6 +17,8 @@ export interface HyperchartInspectorSidePanelProps {
 	definitionSource?: string;
 	historyDataSource?: HyperchartInspectorDataSource;
 	historyTargetSeqId?: number;
+	/** Exact visit selected by the Inspector chronology, including embedded snapshots. */
+	selectedInvokeSeqId?: number;
 }
 
 export function HyperchartInspectorSidePanel({
@@ -30,6 +32,7 @@ export function HyperchartInspectorSidePanel({
 	definitionSource,
 	historyDataSource,
 	historyTargetSeqId,
+	selectedInvokeSeqId,
 }: HyperchartInspectorSidePanelProps) {
 	const { resolved } = useHyperchartTheme();
 	const selectedState = selectedStateId ? (run.states.find((state) => state.id === selectedStateId) ?? null) : null;
@@ -59,10 +62,17 @@ export function HyperchartInspectorSidePanel({
 		}, 5_000);
 		return () => window.clearTimeout(timeout);
 	}, [highlightedReply, highlightedArtifact, highlightedInputName, highlightedRefValue]);
-	const scopeChildIds = useMemo(
-		() => new Set(run.states.map(stateScopeParentId).filter((id): id is string => id !== undefined)),
-		[run],
-	);
+	const scopeChildIds = useMemo(() => {
+		const ids = new Set<string>();
+		for (const state of run.states) {
+			const parentId = stateScopeParentId(state);
+			if (parentId === undefined) continue;
+			ids.add(parentId);
+			const mapId = immediateMapScopeId(parentId);
+			if (mapId !== undefined) ids.add(mapId);
+		}
+		return ids;
+	}, [run]);
 	const effectiveDefinitionSource = definitionSource ?? (selectedState === null ? run.definitionSource : selectedState.definitionSource);
 	const scopeProps = onOpenScope
 		? { onOpenScope, canOpenScope: selectedState ? scopeChildIds.has(selectedState.id) : false }
@@ -127,7 +137,8 @@ export function HyperchartInspectorSidePanel({
 							setHighlightedInputName(null);
 						}}
 						{...scopeProps}
-						{...(historyDataSource === undefined || run.historySnapshot === undefined ? {} : { history: { runId: run.runId, snapshot: run.historySnapshot, dataSource: historyDataSource, ...(historyTargetSeqId === undefined ? {} : { targetSeqId: historyTargetSeqId }) } })}
+						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
+						{...(historyDataSource === undefined || run.historySnapshot === undefined ? {} : { history: { runId: run.runId, snapshot: run.historySnapshot, dataSource: historyDataSource, ...((selectedInvokeSeqId ?? historyTargetSeqId) === undefined ? {} : { targetSeqId: selectedInvokeSeqId ?? historyTargetSeqId }) } })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 					/>
 				</>

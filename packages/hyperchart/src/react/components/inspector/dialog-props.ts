@@ -10,6 +10,10 @@ export interface HyperchartInspectorDialogProps {
 	onForkBranch?: (runId: string, fromSeqId: number, branchId: string) => void | Promise<void>;
 	onRewindBranch?: (runId: string, branchId: string, seqId: number) => void | Promise<void>;
 	onClose: () => void;
+	/** Render as an in-document surface (for example inside an iframe), without modal chrome or close affordances. */
+	embedded?: boolean;
+	/** Initial canvas shown when the Inspector opens. */
+	initialCanvasMode?: "execution" | "structure";
 	onResume?: (runId: string) => void;
 	onAbort?: () => void;
 	onSteerSession?: (runId: string, actionKey: string, message: string) => void | Promise<void>;

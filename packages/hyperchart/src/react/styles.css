@@ -270,3 +270,10 @@ html[data-hyperchart-inspector-open]
 	> :not([data-testid="hyperchart-inspector-dialog"]):not(:has([data-testid="hyperchart-inspector-dialog"])) {
 	animation-play-state: paused !important;
 }
+
+/* Execution is a top-to-bottom chronology. Override the shared card's inline
+   48%/52% offsets without changing Structure's bidirectional connection points. */
+[data-hyperchart-execution] .react-flow__handle[data-handleid="source-bottom"],
+[data-hyperchart-execution] .react-flow__handle[data-handleid="target-top"] {
+	left: 50% !important;
+}

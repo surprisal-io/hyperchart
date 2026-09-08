@@ -22,7 +22,7 @@ export function scopeStackForState(states: readonly HyperchartStateInfo[], state
 		const parentId = stateScopeParentId(cursor);
 		if (parentId === undefined || seen.has(parentId)) break;
 		seen.add(parentId);
-		const parent = byId.get(parentId);
+		const parent = byId.get(parentId) ?? byId.get(immediateMapScopeId(parentId) ?? "");
 		if (parent === undefined) break;
 		stack.unshift(parent.id);
 		cursor = parent;
@@ -32,31 +32,18 @@ export function scopeStackForState(states: readonly HyperchartStateInfo[], state
 
 export function visibleStateIdsForScope(
 	states: HyperchartStateInfo[],
-	options: {
-		scopeId?: string | null;
-		showDone?: boolean;
-		showPending?: boolean;
-		showSkipped?: boolean;
-		showMapWorkers?: boolean;
-	} = {},
+	options: { scopeId?: string | null } = {},
 ): Set<string> {
 	const visible = new Set<string>();
 	const scopeId = options.scopeId ?? null;
-	const showDone = options.showDone ?? true;
-	const showPending = options.showPending ?? true;
-	const showSkipped = options.showSkipped ?? false;
-	const showMapWorkers = options.showMapWorkers ?? false;
+	const scopeHasDirectChildren = scopeId !== null && states.some((state) => stateScopeParentId(state) === scopeId);
 	for (const state of states) {
 		if (isImplicitFailedFinal(state)) continue;
-		if (!state.final) {
-			if (!showDone && state.status === "done") continue;
-			if (!showPending && (state.status === "pending" || state.status === "stale")) continue;
-			if (!showSkipped && state.status === "skipped") continue;
-		}
 		const directScope = stateScopeParentId(state);
 		if (scopeId) {
-			if (directScope !== scopeId) continue;
-		} else if (!showMapWorkers && directScope !== undefined) {
+			const insideUnmaterializedMapWorker = !scopeHasDirectChildren && directScope?.startsWith(`${scopeId}#`) === true;
+			if (directScope !== scopeId && !insideUnmaterializedMapWorker) continue;
+		} else if (directScope !== undefined) {
 			continue;
 		}
 		visible.add(state.id);

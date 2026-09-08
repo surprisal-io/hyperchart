@@ -56,6 +56,7 @@ export function StateDetails({
 	onHighlightRef,
 	onSteerSession,
 	history,
+	selectedInvokeSeqId,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -75,6 +76,7 @@ export function StateDetails({
 	onHighlightRef?: (value: string) => void;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	history?: { runId: string; snapshot: HistorySnapshot; dataSource: HyperchartInspectorDataSource; targetSeqId?: number };
+	selectedInvokeSeqId?: number;
 }) {
 	const kind = stateKindMeta(state);
 	const DetailKindIcon = kind.Icon;
@@ -396,6 +398,7 @@ export function StateDetails({
 						state={state}
 						allStates={allStates}
 						{...(history === undefined ? {} : { history })}
+						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
@@ -415,6 +418,7 @@ export function StateDetails({
 					state={state}
 					allStates={allStates}
 					{...(history === undefined ? {} : { history })}
+					{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 					{...(onSteerSession === undefined ? {} : { onSteerSession })}
 					{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
