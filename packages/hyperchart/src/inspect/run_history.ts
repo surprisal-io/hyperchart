@@ -2,11 +2,13 @@ import { basename, resolve } from "node:path";
 import type {
 	HyperchartActorMessageBatchInfo,
 	HyperchartAgentSessionInfo,
+	HyperchartRecordInfo,
 	HyperchartVisitInfo,
 } from "../host/models.js";
 import type { HyperchartInspectorDataSource } from "../host/adapter.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
 import { BranchExecution } from "../execution/branch_execution.js";
+import type { DurableLogRecord } from "../core/durable_events.js";
 import { projectBranch } from "../core/projection.js";
 import { renderPendingActionInvocation, type ActionEffect, type RenderedArtifact } from "../core/machine.js";
 import { nearestInstance } from "../core/paths.js";
@@ -26,18 +28,34 @@ import { runtimeVisitHistoriesForInspector } from "../host/adapters.js";
 
 export async function createRunInspectorDataSource(
 	runDir: string,
-	options: { readTranscript?: SessionTranscriptReader } = {},
+	options: {
+		runId?: string;
+		ast?: ChartAst;
+		readTranscript?: SessionTranscriptReader;
+	} = {},
 ): Promise<HyperchartInspectorDataSource> {
 	const absoluteRunDir = resolve(runDir);
-	const runId = basename(absoluteRunDir);
-	const meta = await loadRunMeta(absoluteRunDir);
-	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	const runId = options.runId ?? basename(absoluteRunDir);
+	const meta = await loadRunMeta(absoluteRunDir, { runId });
+	const parsed =
+		options.ast === undefined
+			? parseChartModuleSync(
+					meta.chartPath,
+					meta.exportName === undefined ? {} : { exportName: meta.exportName },
+				)
+			: { ok: true as const, ast: options.ast };
+	if (!parsed.ok)
+		throw new Error(
+			parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+		);
 	const assertRun = (candidate: string) => {
 		if (candidate !== runId) throw new Error(`Inspector data source is bound to run '${runId}'`);
 	};
 	const withStore = async <T>(operation: (store: Awaited<ReturnType<typeof openRunLogStore>>) => Promise<T>): Promise<T> => {
-		const store = await openRunLogStore(absoluteRunDir, { access: "read" });
+		const store = await openRunLogStore(absoluteRunDir, {
+			access: "read",
+			runId,
+		});
 		try { return await operation(store); }
 		finally { await store.close(); }
 	};
@@ -78,12 +96,17 @@ export async function createRunInspectorDataSource(
 				return { ...chunk, items };
 			});
 		},
-		readRecords: async ({ runId: candidate, snapshot, cursor }) => {
+		readRecords: async ({ runId: candidate, snapshot, cursor, includeActionVisits }) => {
 			assertRun(candidate);
-			return withStore(async (store) => mapChunk(
-				await readChunkOrEmpty(store, snapshot, () => store.readRecords({ snapshot, ...(cursor === undefined ? {} : { cursor }) })),
-				durableRecordToHost,
-			));
+			return withStore(async (store) => {
+				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readRecords({ snapshot, ...(cursor === undefined ? {} : { cursor }) }));
+				if (includeActionVisits !== true || !chunk.items.some(isActionInvoke)) return mapChunk(chunk, durableRecordToHost);
+				const ancestry = await collectSnapshotRecordsForMapping(store, snapshot);
+				return {
+					...chunk,
+					items: actionVisitRecordsToHost(chunk.items, parsed.ast, ancestry),
+				};
+			});
 		},
 		cursorAt: async ({ runId: candidate, ...input }) => {
 			assertRun(candidate);
@@ -98,7 +121,23 @@ export async function createRunInspectorDataSource(
 		readVisitSession: async ({ runId: candidate, branchId, invokeSeqId }) => {
 			assertRun(candidate);
 			const progress = readSessionProgress(resolve(absoluteRunDir, "sessions"));
-			const match = Object.values(progress.sessions).find((session) => session.branchId === branchId && session.invokeSeqId === invokeSeqId);
+			const sessions = Object.values(progress.sessions);
+			let match = sessions.find((session) => session.branchId === branchId && session.invokeSeqId === invokeSeqId);
+			if (match === undefined) {
+				const originBranchId = await withStore(async (store) => {
+					try {
+						const branch = await store.getBranch(branchId);
+						if (!await store.containsInHistory({ headSeqId: branch.headSeqId, seqId: invokeSeqId })) return undefined;
+						const record = await store.getRecord(invokeSeqId);
+						return isActionInvoke(record) ? record.branchId : undefined;
+					} catch {
+						return undefined;
+					}
+				});
+				match = originBranchId === undefined
+					? undefined
+					: sessions.find((session) => session.branchId === originBranchId && session.invokeSeqId === invokeSeqId);
+			}
 			if (match === undefined) return undefined;
 			const summary = sessionFromProgress(match);
 			const messages = options.readTranscript === undefined || match.sessionId === undefined
@@ -115,6 +154,29 @@ export function stateVisitHistoryChunkToHost(chunk: HistoryChunk<StateVisitHisto
 
 export function actorMessageHistoryChunkToHost(chunk: HistoryChunk<ActorMessageHistoryItem>): HistoryChunk<HyperchartActorMessageBatchInfo> {
 	return mapChunk(chunk, (item) => actorMessageHistoryItemToHost(item));
+}
+
+export function actionVisitRecordsToHost(
+	pageRecords: readonly DurableLogRecord[],
+	ast: ChartAst,
+	ancestry: readonly DurableLogRecord[],
+): HyperchartRecordInfo[] {
+	const requested = new Set(pageRecords.filter(isActionInvoke).map((record) => record.seqId));
+	const visitsBySeqId = new Map<number, HyperchartVisitInfo>();
+	const semantic = runtimeVisitHistoriesForInspector(ast, ancestry);
+	for (const visits of semantic.values()) {
+		for (const visit of visits) if (requested.has(visit.invokeSeqId)) visitsBySeqId.set(visit.invokeSeqId, visit);
+		if (visitsBySeqId.size === requested.size) break;
+	}
+	return pageRecords.map((record) => {
+		const base = durableRecordToHost(record);
+		const actionVisit = isActionInvoke(record) ? visitsBySeqId.get(record.seqId) : undefined;
+		return actionVisit === undefined ? base : { ...base, actionVisit };
+	});
+}
+
+function isActionInvoke(record: DurableLogRecord | undefined): record is Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }> {
+	return record?.type === "state_action" && record.kind === "invoke";
 }
 
 async function readChunkOrEmpty<T>(

@@ -70,7 +70,7 @@ export interface HyperchartInspectorDataSource {
 	readMapVisits(input: { runId: string; snapshot: HistorySnapshot; mapPath: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartMapVisitInfo>>;
 	readActorGenerations(input: { runId: string; snapshot: HistorySnapshot; logicalOccurrence: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartActorGenerationInfo>>;
 	readActorMessages(input: { runId: string; snapshot: HistorySnapshot; occurrence: string; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartActorMessageBatchInfo>>;
-	readRecords(input: { runId: string; snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<HyperchartRecordInfo>>;
+	readRecords(input: { runId: string; snapshot: HistorySnapshot; cursor?: HistoryCursor; includeActionVisits?: boolean }): Promise<HistoryChunk<HyperchartRecordInfo>>;
 	cursorAt(input: { runId: string; snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined>;
 	readVisitSession(input: { runId: string; branchId: string; invokeSeqId: number }): Promise<HyperchartAgentSessionInfo | undefined>;
 }

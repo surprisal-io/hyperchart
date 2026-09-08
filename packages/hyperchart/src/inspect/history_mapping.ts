@@ -22,6 +22,7 @@ export function stateVisitHistoryItemToHost(item: StateVisitHistoryItem, session
 	return {
 		visit: item.visit,
 		invokeSeqId: item.seqId,
+		originBranchId: item.invoke.branchId,
 		startedAt: item.invoke.timestamp,
 		...(completed === undefined ? {} : { endedAt: completed.timestamp }),
 		status: completed === undefined ? "running" : event === "FAILED" ? "failed" : completed.type === "state_action" && completed.kind === "timer_fired" ? "cancelled" : "done",

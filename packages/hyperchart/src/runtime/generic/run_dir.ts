@@ -30,8 +30,14 @@ export async function initializeRunDir(runDir: string): Promise<void> {
 	}
 }
 
-export async function loadRunMeta(runDir: string): Promise<RunMeta> {
-	const store = await openRunLogStore(runDir, { access: "read" });
+export async function loadRunMeta(
+	runDir: string,
+	options: { runId?: string } = {},
+): Promise<RunMeta> {
+	const store = await openRunLogStore(runDir, {
+		access: "read",
+		...(options.runId === undefined ? {} : { runId: options.runId }),
+	});
 	try {
 		const meta = await store.readRunMeta();
 		if (meta === undefined) throw missingRunMeta(runDir);

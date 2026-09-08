@@ -1094,7 +1094,11 @@ function runtimeFacts(
 	const issuesByState = new Map<StatePath, HyperchartIssueInfo[]>();
 	const actorOwnerVisits = new Map<StatePath, Array<{ generation: number; seqId: number }>>();
 	const skippedRecords = new Set(skipped.map((entry) => entry.record));
-	for (const [stateId, history] of actorInternalMessageHistories(ast, records, messagesByOccurrence, skippedRecords)) {
+	const completeReplayPrefix = records[0]?.parentId === null;
+	const actorHistories = completeReplayPrefix
+		? actorInternalMessageHistories(ast, records, messagesByOccurrence, skippedRecords)
+		: new Map<StatePath, HyperchartActorMessageInfo[]>();
+	for (const [stateId, history] of actorHistories) {
 		const facts = byState.get(stateId) ?? {};
 		facts.actorMessageHistory = history;
 		byState.set(stateId, facts);
@@ -1127,6 +1131,8 @@ function runtimeFacts(
 				...(facts.actorMessages ?? []),
 				...record.messages.map((message) => ({
 					messageId: message.messageId,
+					enqueueSeqId: record.seqId,
+					enqueuedAt: record.timestamp,
 					producerVisit: message.producerVisit,
 					batchIndex: message.batchIndex,
 					input: message.input,
@@ -1210,12 +1216,13 @@ function runtimeFacts(
 		facts.visits = visits;
 		byState.set(path, facts);
 	}
-	for (const [stateId, visitHistory] of runtimeVisitHistories(ast, records, skippedRecords)) {
-		const facts = byState.get(stateId) ?? {};
-		facts.visitHistory = visitHistory;
-		facts.visits = visitHistory.length;
-		byState.set(stateId, facts);
-	}
+	if (completeReplayPrefix)
+		for (const [stateId, visitHistory] of runtimeVisitHistories(ast, records, skippedRecords)) {
+			const facts = byState.get(stateId) ?? {};
+			facts.visitHistory = visitHistory;
+			facts.visits = visitHistory.length;
+			byState.set(stateId, facts);
+		}
 	const mapVisitHistoryByState = runtimeMapVisitHistories(records, skippedRecords);
 	const waitingLeaves = concurrencyBlockedActionLeaves(ast, projection);
 	appendSessionFacts(byState, sessionProgress);
@@ -1230,6 +1237,7 @@ function actorInternalMessageHistories(
 	skippedRecords: ReadonlySet<DurableLogRecord>,
 ): Map<StatePath, HyperchartActorMessageInfo[]> {
 	const histories = new Map<StatePath, HyperchartActorMessageInfo[]>();
+	if (Object.keys(ast.actors).length === 0) return histories;
 	const replay = createBranchProjection(ast);
 	const acceptedAt = new Map<string, number>();
 	const keyFor = (occurrence: string, messageId: string) => `${occurrence}\u0000${messageId}`;
@@ -1385,6 +1393,7 @@ function runtimeVisitHistories(
 			const visit: HyperchartVisitInfo = {
 				visit: pending.visitId,
 				invokeSeqId: record.seqId,
+				originBranchId: record.branchId,
 				startedAt: record.timestamp,
 				status: "running",
 				...(inputs === undefined || (!hasRecordedInput && Object.keys(inputs).length === 0) ? {} : { inputs: { ...inputs } }),

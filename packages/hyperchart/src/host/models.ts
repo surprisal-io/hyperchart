@@ -184,6 +184,9 @@ export interface HyperchartActorMessageInfo {
 
 export interface HyperchartActorSentMessageInfo {
 	messageId: string;
+	/** Durable enqueue coordinate used to place messaging actions in execution chronology. */
+	enqueueSeqId: number;
+	enqueuedAt: number;
 	producerVisit: number;
 	batchIndex: number;
 	input?: unknown;
@@ -378,6 +381,8 @@ export interface HyperchartArtifactPinInfo {
 export interface HyperchartVisitInfo {
 	visit: number;
 	invokeSeqId: number;
+	/** Durable branch that originally appended this invocation; inherited visits retain their ancestor branch. */
+	originBranchId?: string;
 	startedAt: number;
 	endedAt?: number;
 	status: "running" | "done" | "failed" | "cancelled";
@@ -456,6 +461,8 @@ export interface HyperchartRecordInfo {
 	type: string;
 	timestamp: number;
 	record: unknown;
+	/** Present for invoke records when readRecords requests batched action-visit hydration. */
+	actionVisit?: HyperchartVisitInfo;
 }
 
 export interface HyperchartStateInfo {

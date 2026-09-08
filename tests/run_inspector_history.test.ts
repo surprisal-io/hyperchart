@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { DurableLogRecord, DurableRecordDraft } from "../packages/hyperchart/src/core/durable_events.js";
-import { createRunInspectorDataSource } from "../packages/hyperchart/src/inspect/run_history.js";
+import { actionVisitRecordsToHost, createRunInspectorDataSource } from "../packages/hyperchart/src/inspect/run_history.js";
 import { actorMessageHistoryItemToHost, stateVisitHistoryItemToHost } from "../packages/hyperchart/src/inspect/history_mapping.js";
 import { actorPoolAst, actorPoolCompleteRecords, actorPoolOutOfOrderRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
@@ -63,10 +63,12 @@ describe("run inspector stateless history source", () => {
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.writeRunMeta({ chartPath, workDir: root, chartId: "render", createdAt: new Date(0).toISOString() });
 		await store.initializeRootBranch();
-		await store.appendDrafts([
+		const appended = await store.appendDrafts([
 			{ type: "args", args: { topic: "cursor chunks" } },
 			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "visit-session", input: { topic: "recorded provenance" }, definition: action.action },
 		]);
+		const invokeSeqId = appended.find((record) => record.type === "state_action" && record.kind === "invoke")?.seqId;
+		if (invokeSeqId === undefined) throw new Error("visit invoke missing");
 		writeFileSync(join(runDir, "sessions", "progress.json"), JSON.stringify({
 			version: 1,
 			updatedAt: 3,
@@ -75,7 +77,7 @@ describe("run inspector stateless history source", () => {
 					actionKey: "history:work:script",
 					actionUid: action.action.uid,
 					branchId: "main",
-					invokeSeqId: 2,
+					invokeSeqId,
 					visit: 1,
 					actionName: "script",
 					status: "completed",
@@ -94,7 +96,13 @@ describe("run inspector stateless history source", () => {
 		expect(visits.items[0]?.inputs).toEqual({ topic: "recorded provenance" });
 		expect(visits.items[0]?.visit).toBe(1);
 		expect(visits.items[0]?.session).toBeUndefined();
-		await expect(source.readVisitSession({ runId: "render-run", branchId: "main", invokeSeqId: 2 })).resolves.toMatchObject({ actionKey: "history:work:script", status: "completed" });
+		const records = await source.readRecords({ runId: "render-run", snapshot, includeActionVisits: true });
+		expect(records.items.find((record) => record.seqId === invokeSeqId)?.actionVisit).toMatchObject({
+			invokeSeqId,
+			originBranchId: "main",
+			invocation: { kind: "script", env: { TOPIC: "topic=cursor chunks" } },
+		});
+		await expect(source.readVisitSession({ runId: "render-run", branchId: "main", invokeSeqId })).resolves.toMatchObject({ actionKey: "history:work:script", status: "completed" });
 	});
 
 	it("uses full replay semantics for a timed-out lazy visit", async () => {
@@ -164,11 +172,68 @@ describe("run inspector stateless history source", () => {
 		}
 	});
 
+	it("returns only requested page visits when semantic replay contains more than 1,000 non-visible visits", () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-action-page-")); roots.push(root);
+		const chartPath = join(root, "loop.chart.ts");
+		writeFileSync(chartPath, `import { agent, chart } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "loop", initial: "work", states: { work: { kind: "state", action: agent("worker"), transitions: { LOOP: "work" } } } });`);
+		const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error("loop fixture invalid");
+		const state = parsed.ast.states.work; if (state?.kind !== "state") throw new Error("loop action missing");
+		const ancestry: DurableLogRecord[] = [{ type: "args", args: {}, seqId: 1, parentId: null, branchId: "main", timestamp: 1 }];
+		for (let visit = 1; visit <= 1_001; visit++) {
+			const invokeSeqId = ancestry.length + 1;
+			ancestry.push({ type: "state_action", kind: "invoke", actionUid: state.action.uid, sessionId: `session-${visit}`, definition: state.action, seqId: invokeSeqId, parentId: invokeSeqId - 1, branchId: "main", timestamp: invokeSeqId });
+			const completeSeqId = ancestry.length + 1;
+			ancestry.push({ type: "state_action", kind: "complete", actionUid: state.action.uid, event: { type: "LOOP" }, seqId: completeSeqId, parentId: completeSeqId - 1, branchId: "main", timestamp: completeSeqId });
+		}
+		const visibleInvoke = ancestry.at(-2)!;
+		const page = actionVisitRecordsToHost([visibleInvoke], parsed.ast, ancestry);
+		expect(page).toHaveLength(1);
+		expect(page[0]?.actionVisit).toMatchObject({ invokeSeqId: visibleInvoke.seqId, visit: 1_001, status: "done" });
+	});
+
+	it("resolves inherited and fork-resumed transcripts without exposing sibling sessions", async () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-history-branch-session-")); roots.push(root);
+		const runDir = join(root, "branch-run"); mkdirSync(join(runDir, "sessions"), { recursive: true });
+		const chartPath = join(root, "branch.chart.ts");
+		writeFileSync(chartPath, `import { agent, chart } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "branch-history", initial: "work", states: { work: { kind: "state", action: agent("worker"), transitions: { LOOP: "work" } } } });`);
+		const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error("branch fixture invalid");
+		const state = parsed.ast.states.work; if (state?.kind !== "state") throw new Error("branch action missing");
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
+		await store.writeRunMeta({ chartPath, workDir: root, chartId: "branch-history", createdAt: new Date(0).toISOString() });
+		await store.initializeRootBranch();
+		const mainRecords = await store.appendDrafts([
+			{ type: "args", args: {} },
+			{ type: "state_action", kind: "invoke", actionUid: state.action.uid, sessionId: "ancestor-session", definition: state.action },
+			{ type: "state_action", kind: "complete", actionUid: state.action.uid, event: { type: "LOOP" } },
+		]);
+		await store.createBranch("fork", mainRecords.at(-1)!.seqId);
+		const forkStore = new JsonlLogStore(join(runDir, "log.jsonl"), "fork");
+		const forkRecords = await forkStore.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, sessionId: "fork-session", definition: state.action }]);
+		writeFileSync(join(runDir, "sessions", "progress.json"), JSON.stringify({
+			version: 1,
+			updatedAt: 5,
+			sessions: {
+				ancestor: { actionKey: "branch:work:ancestor", actionUid: state.action.uid, branchId: "main", invokeSeqId: mainRecords[1]!.seqId, visit: 1, actionName: "worker", sessionId: "ancestor-session", status: "completed", startedAt: 2, lastActivityAt: 3, turnCount: 1, toolCount: 0 },
+				fork: { actionKey: "branch:work:fork", actionUid: state.action.uid, branchId: "fork", invokeSeqId: forkRecords[0]!.seqId, visit: 2, actionName: "worker", sessionId: "fork-session", status: "running", startedAt: 4, lastActivityAt: 5, turnCount: 1, toolCount: 0 },
+			},
+		}));
+		const source = await createRunInspectorDataSource(runDir);
+		const forkSnapshot = await forkStore.captureSnapshot("fork");
+		const forkHistory = await source.readRecords({ runId: "branch-run", snapshot: forkSnapshot, includeActionVisits: true });
+		expect(forkHistory.items.filter((record) => record.actionVisit !== undefined).map((record) => [record.seqId, record.actionVisit?.originBranchId])).toEqual([
+			[forkRecords[0]!.seqId, "fork"],
+			[mainRecords[1]!.seqId, "main"],
+		]);
+		await expect(source.readVisitSession({ runId: "branch-run", branchId: "fork", invokeSeqId: mainRecords[1]!.seqId })).resolves.toMatchObject({ actionKey: "branch:work:ancestor" });
+		await expect(source.readVisitSession({ runId: "branch-run", branchId: "fork", invokeSeqId: forkRecords[0]!.seqId })).resolves.toMatchObject({ actionKey: "branch:work:fork" });
+		await expect(source.readVisitSession({ runId: "branch-run", branchId: "main", invokeSeqId: forkRecords[0]!.seqId })).resolves.toBeUndefined();
+	});
+
 	it("binds every request to its run and snapshot", async () => {
 		const { runDir, store } = await fixture();
 		const source = await createRunInspectorDataSource(runDir);
 		const snapshot = await store.captureSnapshot("main");
-		await expect(source.readRecords({ runId: "another-run", snapshot })).rejects.toThrow(/bound to run/);
+		await expect(source.readRecords({ runId: "another-run", snapshot, includeActionVisits: true })).rejects.toThrow(/bound to run/);
 		const records = await source.readRecords({ runId: "run-1", snapshot });
 		expect(records.items.length).toBeLessThanOrEqual(100);
 		expect(records.items.every((record) => record.record !== undefined)).toBe(true);

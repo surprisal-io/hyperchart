@@ -40,6 +40,8 @@ export type SessionTranscriptReader = (
 ) => Promise<HyperchartSessionMessageInfo[] | undefined>;
 
 export type HyperchartRunFromRunDirBaseOptions = {
+	/** Explicit durable identity when it differs from the run directory basename. */
+	runId?: string;
 	/** Explicit non-durable branch selection; defaults only for internal/static callers. */
 	branchId?: BranchId;
 	meta?: RunMeta;
@@ -65,7 +67,11 @@ export async function hyperchartRunFromRunDir(
 	options: HyperchartRunFromRunDirOptions = {},
 ): Promise<HyperchartRunInfo> {
 	const absoluteRunDir = resolve(runDir);
-	const meta = options.meta ?? await loadRunMeta(absoluteRunDir);
+	const meta =
+		options.meta ??
+		(await loadRunMeta(absoluteRunDir, {
+			...(options.runId === undefined ? {} : { runId: options.runId }),
+		}));
 	const ast = options.ast ?? parsedRunAst(meta);
 	const agentDefaults = runAgentDefaults(absoluteRunDir, options.agentDefaults);
 	const inspect = inspectChartAst(ast, {
@@ -80,7 +86,11 @@ export async function hyperchartRunFromRunDir(
 	let initialBranches: BranchListChunk | undefined;
 	let snapshot: HistorySnapshot | undefined;
 	let projection: BranchProjection | undefined;
-	const store = await openRunLogStore(absoluteRunDir, { access: "read", branchId });
+	const store = await openRunLogStore(absoluteRunDir, {
+		access: "read",
+		branchId,
+		...(options.runId === undefined ? {} : { runId: options.runId }),
+	});
 	try {
 		let syntheticEmptyBranch = false;
 		try {
@@ -110,7 +120,7 @@ export async function hyperchartRunFromRunDir(
 			Object.entries(rawSessionProgress.sessions).filter(([, session]) => session.branchId === branchId),
 		),
 	};
-	const runId = status?.runId ?? basename(absoluteRunDir);
+	const runId = options.runId ?? status?.runId ?? basename(absoluteRunDir);
 	const runtimeRecords = records;
 	const overviewSessionProgress = projection !== undefined && options.includeTranscripts !== true
 		? currentSessionProgress(branchSessionProgress, projection)
@@ -157,7 +167,11 @@ export async function hyperchartRunOverviewFromRunDir(
 ): Promise<HyperchartRunOverview> {
 	const run = await hyperchartRunFromRunDir(runDir, { ...options, includeTranscripts: false });
 	if (run.historySnapshot === undefined) throw new Error("Bounded run overview did not capture a history snapshot");
-	const store = await openRunLogStore(resolve(runDir), { access: "read", branchId: run.historySnapshot.branchId });
+	const store = await openRunLogStore(resolve(runDir), {
+		access: "read",
+		branchId: run.historySnapshot.branchId,
+		...(options.runId === undefined ? {} : { runId: options.runId }),
+	});
 	try {
 		const initialBranches = await store.listBranches();
 		return { run, branchCount: initialBranches.totalCount, initialBranches, snapshot: run.historySnapshot };
