@@ -172,8 +172,9 @@ function resolveTypeScriptCompiler(): string {
 
 function resolveHyperchartTypeEntry(): string {
 	try {
-		const nodeModules = resolve(dirname(require.resolve("typescript/package.json")), "..");
-		const entry = join(nodeModules, "@surprisal", "hyperchart", "dist", "index.d.ts");
+		// Package self-resolution is independent of TypeScript's physical install location (pnpm).
+		const packageDir = dirname(require.resolve("@surprisal/hyperchart/package.json"));
+		const entry = join(packageDir, "dist", "index.d.ts");
 		if (existsSync(entry)) return entry;
 		throw new Error(`missing ${entry}`);
 	} catch (error) {
