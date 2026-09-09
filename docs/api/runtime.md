@@ -34,6 +34,39 @@ import {
 } from "@surprisal/hyperchart/runtime";
 ```
 
+## Embedded Pi workers
+
+`PiAgentExecutor` and `PiExecutorOptions` are exported from
+`@surprisal/pi-hyperchart/pi-runner`. `extensionPolicy: "ambient" | "isolated"`
+controls extension initialization, independently of the tool allowlist:
+
+- `"ambient"` (generic default) uses Pi's normal project/user/configured extension discovery.
+- `"isolated"` disables ambient extension loading for background workers. Built-in tools,
+  invocation `customTools` (plus `finish`), agent instructions and model resolution through
+  the supplied `ModelRuntime` remain available. This does not change interactive Pi or
+  global settings. Hosts needing extension-provided tools/providers must select `"ambient"`
+  or supply their required tools/models directly; isolation does not import those extensions.
+
+The executor retains a session through prompt, finish and artifact retries. Before delivering
+completion it stops progress subscriptions, aborts/settles Pi, emits `session_shutdown`
+(`reason: "quit"`) while extension contexts are still valid, disposes Pi and closes/drains
+its session recorder. Rejection resumes from the durable transcript (or starts a new attempt
+for `onReject: "restart"`), not a retained `AgentSession`. Cancellation, replacement and
+executor disposal share exactly-once session teardown. Teardown also waits for the actual
+in-flight SDK prompt, including asynchronous extension preflight: SDK `abort()` alone may
+report idle before `before_agent_start` has settled. Cancellation therefore waits for such
+hooks to finish rather than invalidating a context they can still use. The prompt is tracked
+separately from the enclosing run to avoid a cleanup/finally dependency cycle.
+Cleanup does not create chart events
+or mutate the journal; recorder failures prevent successful completion delivery.
+A thrown shutdown notification error does not replace an accepted completion: disposal
+and recorder close still run, and the error is reported by executor `dispose()`.
+
+Known SDK compatibility boundary: versions enforcing alphanumeric/local session IDs reject
+Hyperchart's existing `:attempt:N` ID for `onReject: "restart"`. This is independent of
+session teardown; hosts using such SDK versions must not assume restart works. Resume uses
+the unchanged original ID and is covered by the PostgreSQL embedding regression.
+
 ## `Runtime`
 
 ```ts

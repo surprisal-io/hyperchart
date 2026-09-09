@@ -157,7 +157,8 @@ export class BranchExecution {
 		this.recordsSinceCheckpoint = 0;
 	}
 	notificationRenderer(state: MachineState, input: { runId: string; runDir: string; workDir: string }): (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload {
-		return (outcome, error) => renderTerminalNotificationPayload(state, { ...input, branchId: this.branchId, outcome, ...(error === undefined ? {} : { error }) });
+		const branchId = this.branchId;
+		return (outcome, error) => renderTerminalNotificationPayload(state, { ...input, branchId, outcome, ...(error === undefined ? {} : { error }) });
 	}
 
 	async finalOutcome(state: MachineState): Promise<{ terminal: RunTerminalState; error?: string }> {

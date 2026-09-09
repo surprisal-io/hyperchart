@@ -149,6 +149,7 @@ describe("PiAgentExecutor cancellation", () => {
 		let disposals = 0;
 		let prompts = 0;
 		const lateSession = {
+			extensionRunner: { emit: async () => undefined },
 			abort: async () => { aborts++; },
 			dispose: () => { disposals++; },
 			prompt: async () => { prompts++; },
@@ -199,12 +200,12 @@ describe("PiAgentExecutor cancellation", () => {
 		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir, branchId: "main", modelRuntime: {} as never });
 		const internal = executor as unknown as {
 			generations: { next(key: string): number };
-			live: Map<string, { session: { abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number }>;
+			live: Map<string, { session: { extensionRunner: { emit(): Promise<void> }; abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number }>;
 		};
 		const key = actionUidKey(target.actionUid);
 		const generation = internal.generations.next(key);
 		internal.live.set(key, {
-			session: { abort: () => abort, dispose: () => { disposed = true; } },
+			session: { extensionRunner: { emit: async () => undefined }, abort: () => abort, dispose: () => { disposed = true; } },
 			effect: target,
 			sink: { captured: undefined },
 			generation,

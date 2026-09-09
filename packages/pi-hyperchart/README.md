@@ -62,10 +62,16 @@ Supported actions:
 |---|---|
 | `@surprisal/pi-hyperchart` | same in-process command API as `/command` |
 | `@surprisal/pi-hyperchart/command` | in-process `/hyperchart` request event |
+| `@surprisal/pi-hyperchart/pi-runner` | embedded Pi executor, session services and typed extension policy |
 | `@surprisal/pi-hyperchart/pi-host` | Pi host adapter: summary-only session lists plus on-demand full chart definitions (including launch metadata) and inspector runs; exposes originating Pi session for new runs |
 | `@surprisal/pi-hyperchart/react` | inspector, graph, run strip, launch dialog, UI providers |
 | `@surprisal/pi-hyperchart/react/styles.css` | required React stylesheet |
 | `@surprisal/pi-hyperchart/package.json` | package metadata and Pi manifest |
+
+Embedded background workers can set `PiExecutorOptions.extensionPolicy: "isolated"`
+to avoid initializing interactive host extensions. The generic default is `"ambient"`.
+Completed/replaced sessions are shut down and released after transcript durability and
+local retries; see the canonical [runtime API](https://github.com/surprisal-io/hyperchart/blob/main/docs/api/runtime.md#embedded-pi-workers).
 
 ## Bundled documentation
 

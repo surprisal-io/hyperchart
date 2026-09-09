@@ -45,6 +45,9 @@ import { createThrottledProgressWriter, updateSessionProgress } from "@surprisal
 export { buildSessionPlan, shouldRecoverRestoredFinish, validateDeclaredReadPaths };
 export type { SessionPlan };
 
+/** Ambient discovery is the generic Pi default; isolated workers load no host extensions. */
+export type PiExtensionPolicy = "ambient" | "isolated";
+
 export type PiSessionOverridesContext = Readonly<{
 	branchId: string;
 	actionUid: ActionUID;
@@ -84,6 +87,7 @@ type PiExecutorOptionsBase = {
 	/** Repository/project directory that owns the run. */
 	projectDir?: string;
 	agentDir?: string;
+	extensionPolicy?: PiExtensionPolicy;
 	definitionDirs?: string[];
 	sessionsDir: string;
 	branchId: string;
@@ -149,10 +153,11 @@ class SessionCleanupError extends AggregateError {}
 export class PiAgentExecutor implements AgentExecutor {
 	private readonly live = new Map<string, LiveAgent>();
 	private readonly runs = new Map<string, Map<number, Promise<void>>>();
-	private readonly cancellations = new Map<string, Promise<void>>();
-	private readonly cleanupTasks = new Set<Promise<void>>();
+	private readonly cancellations = new Map<string, { generation: number; promise: Promise<void> }>();
 	private readonly generations = new GenerationTracker();
 	private readonly cleanupFailures: unknown[] = [];
+	private readonly sessionCleanups = new WeakMap<AgentSession, Promise<void>>();
+	private readonly sessionPrompts = new WeakMap<AgentSession, Promise<void>>();
 	private readonly sessionHandles = new WeakMap<AgentSession, PiSessionHandle>();
 	private readonly agentDir: string;
 	private readonly definitionDirs: string[];
@@ -172,6 +177,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			return;
 		}
 		const key = actionUidKey(effect.actionUid);
+		const previous = this.cancelAction(effect.actionUid, true);
 		const generation = this.generations.next(key);
 		this.launch(key, generation, this.run(
 			effect,
@@ -184,6 +190,7 @@ export class PiAgentExecutor implements AgentExecutor {
 					: { resumePrompt: effect.resume.message, resumeSessionFile: effect.resume.session }),
 			},
 			generation,
+			previous,
 		).catch((error: unknown) => this.handleRunFailure(key, generation, effect, emit, error)));
 	}
 
@@ -202,37 +209,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			return;
 		}
 
-		const live = this.live.get(key);
-		if (live !== undefined) {
-			this.generations.markCancelled(key, live.generation);
-			live.unsubscribeProgress?.();
-			this.live.delete(key);
-			if (effect.onReject === "restart") {
-				this.trackCleanup(this.cleanupSession(live.session));
-				const generation = this.generations.next(key);
-				this.launch(key, generation, this.run(
-					retryEffect,
-					emit,
-					{
-						forceNewSession: true,
-						sessionAttempt: effect.validationAttempts,
-						...(effect.reason === undefined ? {} : { rejectReason: effect.reason }),
-					},
-					generation,
-				).catch((error: unknown) => this.handleRunFailure(key, generation, retryEffect, emit, error)));
-				return;
-			}
-
-			this.trackCleanup(this.disposeSession(live.session));
-			const generation = this.generations.next(key);
-			this.launch(key, generation, this.run(
-				retryEffect,
-				emit,
-				{ forceNewSession: false, sessionAttempt: 0, resumePrompt: buildRejectPrompt(effect) },
-				generation,
-			).catch((error: unknown) => this.handleRunFailure(key, generation, retryEffect, emit, error)));
-			return;
-		}
+		const previous = this.cancelAction(effect.actionUid, true);
 
 		const generation = this.generations.next(key);
 		const runOptions: RunOptions =
@@ -243,7 +220,7 @@ export class PiAgentExecutor implements AgentExecutor {
 						...(effect.reason === undefined ? {} : { rejectReason: effect.reason }),
 					}
 				: { forceNewSession: false, sessionAttempt: 0, resumePrompt: buildRejectPrompt(effect) };
-		this.launch(key, generation, this.run(retryEffect, emit, runOptions, generation)
+		this.launch(key, generation, this.run(retryEffect, emit, runOptions, generation, previous)
 			.catch((error: unknown) => this.handleRunFailure(key, generation, retryEffect, emit, error)));
 	}
 
@@ -256,27 +233,46 @@ export class PiAgentExecutor implements AgentExecutor {
 	}
 
 	cancel(actionUid: ActionUID): Promise<void> {
+		return this.cancelAction(actionUid, false);
+	}
+
+	private cancelAction(actionUid: ActionUID, superseded: boolean): Promise<void> {
 		if (this.disposed) return this.disposal ?? Promise.resolve();
 		const key = actionUidKey(actionUid);
-		const existing = this.cancellations.get(key);
-		if (existing !== undefined) return existing;
 		const generation = this.generations.current(key);
 		if (generation === undefined) return Promise.resolve();
-		this.generations.markCancelled(key, generation);
+		const existing = this.cancellations.get(key);
+		if (existing?.generation === generation) return existing.promise;
+		// Replacement immediately advances the generation; do not accumulate a
+		// cancelled-generation tombstone for every normally completed visit.
+		if (!superseded) this.generations.markCancelled(key, generation);
+		const failures: unknown[] = [];
 		const live = this.live.get(key);
 		if (live !== undefined) {
 			this.live.delete(key);
-			live.unsubscribeProgress?.();
-			this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
+			try {
+				this.detachProgress(live);
+			} catch (error) {
+				failures.push(error);
+			}
+			try {
+				this.updateProgress(live.effect, { status: "cancelled", completedAt: Date.now() });
+			} catch (error) {
+				failures.push(error);
+			}
 		}
 		const run = this.runs.get(key)?.get(generation);
 		const cancellation = (async () => {
-			if (live !== undefined) await live.session.abort().finally(() => live.session.dispose());
-			await run;
+			const results = await Promise.allSettled([
+				...(live === undefined ? [] : [this.cleanupSession(live.session)]),
+				...(run === undefined ? [] : [run]),
+			]);
+			failures.push(...results.flatMap((result) => result.status === "rejected" ? [result.reason] : []));
+			if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to cancel Pi agent action");
 		})();
-		this.cancellations.set(key, cancellation);
+		this.cancellations.set(key, { generation, promise: cancellation });
 		const clearCancellation = () => {
-			if (this.cancellations.get(key) === cancellation) this.cancellations.delete(key);
+			if (this.cancellations.get(key)?.promise === cancellation) this.cancellations.delete(key);
 		};
 		void cancellation.then(clearCancellation, clearCancellation);
 		return cancellation;
@@ -296,7 +292,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		const cleanup = [...this.live.entries()].map(([key, live]) => {
 			this.generations.markCancelled(key, live.generation);
 			try {
-				live.unsubscribeProgress?.();
+				this.detachProgress(live);
 			} catch (error) {
 				this.cleanupFailures.push(error);
 			}
@@ -310,8 +306,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		const pending = [
 			...cleanup,
 			...[...this.runs.values()].flatMap((runs) => [...runs.values()]),
-			...this.cancellations.values(),
-			...this.cleanupTasks,
+			...[...this.cancellations.values()].map((cancellation) => cancellation.promise),
 		];
 		const results = await Promise.allSettled(pending);
 		const failures = [
@@ -326,7 +321,6 @@ export class PiAgentExecutor implements AgentExecutor {
 		this.live.clear();
 		this.runs.clear();
 		this.cancellations.clear();
-		this.cleanupTasks.clear();
 		this.cleanupFailures.length = 0;
 		if (failures.length > 0) throw new AggregateError(failures, "Failed to dispose Pi agent executor cleanly");
 	}
@@ -344,10 +338,25 @@ export class PiAgentExecutor implements AgentExecutor {
 			if (current.size === 0) this.runs.delete(key);
 		});
 		runs.set(generation, tracked);
-		void tracked;
+		void tracked.catch(() => undefined);
 	}
 
 	private async run(
+		effect: AgentEffect,
+		emit: EmitCompletion,
+		runOptions: RunOptions,
+		generation: number,
+		previous: Promise<void> = Promise.resolve(),
+	): Promise<void> {
+		await previous;
+		let completion: ChartEvent | undefined;
+		await this.runSession(effect, (event) => { completion = event; }, runOptions, generation);
+		// Guard rejection reopens the durable transcript. Close its recorder before
+		// delivering completion so a synchronous retry cannot race the old session.
+		if (completion !== undefined) this.safeEmit(actionUidKey(effect.actionUid), generation, emit, completion);
+	}
+
+	private async runSession(
 		effect: AgentEffect,
 		emit: EmitCompletion,
 		runOptions: RunOptions,
@@ -396,39 +405,44 @@ export class PiAgentExecutor implements AgentExecutor {
 			return;
 		}
 		const live: LiveAgent = { session, effect, sink, generation };
-		live.unsubscribeProgress = this.attachProgress(session, effect, definition);
-		if (this.isStopped(key, generation)) {
-			live.unsubscribeProgress();
-			await this.cleanupSession(session);
-			return;
-		}
 		this.live.set(key, live);
-
-		const restored = this.sessionHandles.get(session)?.restored ?? latest !== undefined;
-		if (restored && shouldRecoverRestoredFinish(runOptions)) {
-			const captured = await findCapturedFinish(session.messages, effect, this.options.schemaRegistry);
+		try {
+			live.unsubscribeProgress = this.attachProgress(session, effect, definition);
 			if (this.isStopped(key, generation)) return;
-			if (captured !== undefined) {
-				sink.captured = captured;
-				await this.acceptanceLoop(key, generation, emit, live);
+
+			const restored = this.sessionHandles.get(session)?.restored ?? latest !== undefined;
+			if (restored && shouldRecoverRestoredFinish(runOptions)) {
+				const captured = await findCapturedFinish(session.messages, effect, this.options.schemaRegistry);
+				if (this.isStopped(key, generation)) return;
+				if (captured !== undefined) {
+					sink.captured = captured;
+					await this.acceptanceLoop(key, generation, emit, live);
+					return;
+				}
+			}
+			if (restored) {
+				await this.promptAndAccept(key, generation, emit, live, runOptions.resumePrompt ?? buildResumePrompt(effect));
 				return;
 			}
-		}
-		if (restored) {
-			await this.promptAndAccept(key, generation, emit, live, runOptions.resumePrompt ?? buildResumePrompt(effect));
-			return;
-		}
 
-		const taskPrompt = [
-			runOptions.resumePrompt,
-			runOptions.rejectReason === undefined
-				? undefined
-				: `Previous validation attempt was rejected. Reason: ${runOptions.rejectReason}. Start fresh and fix it.`,
-			buildTaskPrompt(effect, reads),
-		]
-			.filter((part): part is string => part !== undefined)
-			.join("\n\n");
-		await this.promptAndAccept(key, generation, emit, live, taskPrompt);
+			const taskPrompt = [
+				runOptions.resumePrompt,
+				runOptions.rejectReason === undefined
+					? undefined
+					: `Previous validation attempt was rejected. Reason: ${runOptions.rejectReason}. Start fresh and fix it.`,
+				buildTaskPrompt(effect, reads),
+			]
+				.filter((part): part is string => part !== undefined)
+				.join("\n\n");
+			await this.promptAndAccept(key, generation, emit, live, taskPrompt);
+		} finally {
+			if (this.live.get(key) === live) this.live.delete(key);
+			try {
+				this.detachProgress(live);
+			} finally {
+				await this.cleanupSession(session);
+			}
+		}
 	}
 
 	private async createSession(
@@ -454,7 +468,8 @@ export class PiAgentExecutor implements AgentExecutor {
 		});
 		if (isStopped()) return undefined;
 		const modelRef = overrides?.model ?? plan.modelRef;
-		const tools = overrides?.tools ?? plan.tools;
+		const requestedTools = overrides?.tools ?? plan.tools;
+		const tools = requestedTools === undefined ? undefined : [...new Set([...requestedTools, "finish"])];
 		const invocationSystemPrompt = [
 			definition.systemPrompt,
 			overrides?.appendSystemPrompt,
@@ -466,6 +481,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		const resourceLoader = new DefaultResourceLoader({
 			cwd: this.options.workDir,
 			agentDir: this.agentDir,
+			noExtensions: this.options.extensionPolicy === "isolated",
 			...(plan.promptMode === "append"
 				? { appendSystemPromptOverride: (base: string[]) => [...base, invocationSystemPrompt] }
 				: {
@@ -484,7 +500,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			);
 		}
 		if (isStopped()) {
-			await sessionHandle?.close();
+			await this.closeSessionHandle(sessionHandle);
 			return undefined;
 		}
 		const sessionManager =
@@ -494,41 +510,52 @@ export class PiAgentExecutor implements AgentExecutor {
 						id: sessionIdForAttempt(effect.sessionId, runOptions.sessionAttempt),
 					  })
 				: SessionManager.open(latest, dir, this.options.workDir));
-		const { session } = await createAgentSession({
-			cwd: this.options.workDir,
-			agentDir: this.agentDir,
-			modelRuntime: this.options.modelRuntime,
-			...(model === undefined ? {} : { model }),
-			...(plan.thinkingLevel === undefined ? {} : { thinkingLevel: plan.thinkingLevel }),
-			...(tools === undefined ? {} : { tools }),
-			customTools: createInvocationCustomTools(
-				effect,
-				sink,
-				this.options.schemaRegistry,
-				overrides?.customTools,
-			),
-			resourceLoader,
-			sessionManager,
-		});
+		let session: AgentSession;
+		try {
+			({ session } = await createAgentSession({
+				cwd: this.options.workDir,
+				agentDir: this.agentDir,
+				modelRuntime: this.options.modelRuntime,
+				...(model === undefined ? {} : { model }),
+				...(plan.thinkingLevel === undefined ? {} : { thinkingLevel: plan.thinkingLevel }),
+				...(tools === undefined ? {} : { tools }),
+				customTools: createInvocationCustomTools(
+					effect,
+					sink,
+					this.options.schemaRegistry,
+					overrides?.customTools,
+				),
+				resourceLoader,
+				sessionManager,
+			}));
+		} catch (error) {
+			await this.closeSessionHandle(sessionHandle);
+			throw error;
+		}
 		if (sessionHandle !== undefined) this.sessionHandles.set(session, sessionHandle);
 		if (isStopped()) {
 			await this.cleanupSession(session);
 			return undefined;
 		}
-		const sessionFile = session.sessionManager.getSessionFile();
-		this.updateProgress(effect, {
-			actionName: definition.name,
-			status: "running",
-			sessionId: sessionManager.getSessionId(),
-			sessionAttempt: runOptions.sessionAttempt,
-			...(sessionFile === undefined ? {} : { sessionFile }),
-			...(definition.role === undefined ? {} : { role: definition.role }),
-			...(modelRef === undefined ? {} : { model: modelRef }),
-			...(plan.thinkingLevel === undefined ? {} : { thinking: plan.thinkingLevel }),
-			...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
-			...(tools === undefined ? {} : { tools }),
-		});
-		return session;
+		try {
+			const sessionFile = session.sessionManager.getSessionFile();
+			this.updateProgress(effect, {
+				actionName: definition.name,
+				status: "running",
+				sessionId: sessionManager.getSessionId(),
+				sessionAttempt: runOptions.sessionAttempt,
+				...(sessionFile === undefined ? {} : { sessionFile }),
+				...(definition.role === undefined ? {} : { role: definition.role }),
+				...(modelRef === undefined ? {} : { model: modelRef }),
+				...(plan.thinkingLevel === undefined ? {} : { thinking: plan.thinkingLevel }),
+				...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
+				...(tools === undefined ? {} : { tools }),
+			});
+			return session;
+		} catch (error) {
+			await this.cleanupSession(session);
+			throw error;
+		}
 	}
 
 	private async promptAndAccept(
@@ -539,10 +566,21 @@ export class PiAgentExecutor implements AgentExecutor {
 		prompt: string,
 	): Promise<void> {
 		if (this.isStopped(key, generation)) return;
-		await live.session.prompt(prompt);
+		await this.promptSession(live.session, prompt);
 		await this.sessionHandles.get(live.session)?.drain();
 		if (this.isStopped(key, generation)) return;
 		await this.acceptanceLoop(key, generation, emit, live);
+	}
+
+	private async promptSession(session: AgentSession, text: string): Promise<void> {
+		// Register before invoking SDK/extension code, including asynchronous preflight.
+		const prompt = Promise.resolve().then(() => session.prompt(text));
+		this.sessionPrompts.set(session, prompt);
+		try {
+			await prompt;
+		} finally {
+			if (this.sessionPrompts.get(session) === prompt) this.sessionPrompts.delete(session);
+		}
 	}
 
 	private async acceptanceLoop(key: string, generation: number, emit: EmitCompletion, live: LiveAgent): Promise<void> {
@@ -553,7 +591,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			isCancelled: () => this.generations.isCancelled(key, generation),
 			prompt: async (text) => {
 				if (this.isStopped(key, generation)) return;
-				await live.session.prompt(text);
+				await this.promptSession(live.session, text);
 				await this.sessionHandles.get(live.session)?.drain();
 			},
 			lastAssistantText: () => lastAssistantText(live.session.messages),
@@ -670,39 +708,53 @@ export class PiAgentExecutor implements AgentExecutor {
 		emit: EmitCompletion,
 		error: unknown,
 	): void {
-		if (this.disposed && error instanceof SessionCleanupError) this.cleanupFailures.push(error);
+		if (this.isStopped(key, generation) && error instanceof SessionCleanupError) throw error;
 		if (!this.isStopped(key, generation)) this.markProgressFailed(effect, errorMessage(error));
 		this.safeEmit(key, generation, emit, { type: "FAILED", error: errorMessage(error) });
 	}
 
-	private trackCleanup(cleanup: Promise<void>): void {
-		const tracked = cleanup.finally(() => this.cleanupTasks.delete(tracked));
-		this.cleanupTasks.add(tracked);
-		void tracked.catch((error: unknown) => this.cleanupFailures.push(error));
+	private detachProgress(live: LiveAgent): void {
+		const unsubscribe = live.unsubscribeProgress;
+		delete live.unsubscribeProgress;
+		unsubscribe?.();
 	}
 
-	private async disposeSession(session: AgentSession): Promise<void> {
-		const failures: unknown[] = [];
+	private async closeSessionHandle(handle: PiSessionHandle | undefined): Promise<void> {
 		try {
-			session.dispose();
+			await handle?.close();
 		} catch (error) {
-			failures.push(error);
+			throw new SessionCleanupError([error], "Failed to close Pi session recorder");
 		}
-		try {
-			await this.sessionHandles.get(session)?.close();
-		} catch (error) {
-			failures.push(error);
-		}
-		if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to dispose Pi agent session");
 	}
 
-	private async cleanupSession(session: AgentSession): Promise<void> {
+	private cleanupSession(session: AgentSession): Promise<void> {
+		const existing = this.sessionCleanups.get(session);
+		if (existing !== undefined) return existing;
+		const cleanup = Promise.resolve().then(() => this.closeSession(session));
+		this.sessionCleanups.set(session, cleanup);
+		return cleanup;
+	}
+
+	private async closeSession(session: AgentSession): Promise<void> {
 		const failures: unknown[] = [];
 		try {
 			await session.abort();
 		} catch (error) {
 			failures.push(error);
 		}
+		// SDK abort()/waitForIdle() can return during before_agent_start preflight.
+		// Await the prompt, NOT the overall run (whose finally awaits this cleanup).
+		// Prompt failures are handled by the run; they must not skip shutdown.
+		await this.sessionPrompts.get(session)?.catch(() => undefined);
+		try {
+			// SDK dispose invalidates extension contexts, but does not notify their
+			// shutdown handlers (sockets, timers and bus subscriptions live there).
+			await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+		} catch (error) {
+			// A notification failure must not replace an already accepted finish.
+			// Still surface it at executor disposal, after releasing SDK/recorder resources.
+			this.cleanupFailures.push(error);
+		}
 		try {
 			session.dispose();
 		} catch (error) {
@@ -712,6 +764,8 @@ export class PiAgentExecutor implements AgentExecutor {
 			await this.sessionHandles.get(session)?.close();
 		} catch (error) {
 			failures.push(error);
+		} finally {
+			this.sessionHandles.delete(session);
 		}
 		if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to clean up Pi agent session");
 	}
