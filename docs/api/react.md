@@ -386,3 +386,26 @@ HyperchartRuntimeSessionProgressFile, HyperchartRuntimeSessionProgressInfo
 The Inspector graph represents a pool as one endpoint and one canonical `$worker` workflow scope. Runtime node previews show active/concurrency. Selecting the endpoint opens the Workers section with concurrency, active/idle counts, backlog/next assignment, concrete `$worker-N` state links, worker-local message/visit/result/session history, and ordered partial `callBatch` membership. Worker links navigate to the canonical workflow state while retaining the concrete occurrence in the slot card. Actor-local self-sends render a distinct `self()` target badge with the resolved endpoint and a dashed graph edge labelled `self`; pool self-edges terminate at the shared endpoint rather than a worker slot. The cards use adapter-derived data and support dark/light themes and narrow overflow; no React-only semantic fixture model is supported.
 
 Execution centers the top/bottom card handles and draws one-to-one chronology links as straight lines. Fan-out and join links retain smooth orthogonal routing; Structure handle placement is unchanged.
+
+### Inspecting a historical branch boundary
+
+`hyperchartRunFromRunDir(runDir, { snapshot: { branchId, headSeqId }, ... })`
+restores the semantic projection and reads history at the same immutable boundary.
+An explicit `branchId` must match the snapshot. No branch is moved and no journal
+facts are written. Historical inspection excludes live runner status and mutable
+session-progress overlays; embedded transcripts are reconstructed only for durable
+invocations no longer pending at that boundary. Timestamped transcript messages
+after the boundary and messages without timestamps are omitted. The selected branch entry and
+`historySnapshot` retain the requested head rather than the live branch head.
+This lets a host display an unanswered user gate even after that branch continued.
+
+Visit-session reads require `{ runId, snapshot, invokeSeqId }`, not an origin
+branch. The selected snapshot proves ancestry even for inherited invocations.
+Session identity comes from the durable invoke record (not timestamps or the
+latest state session); completion status and transcript boundaries come from the
+same semantic visit. Validator retries remain part of that invocation's session.
+The Runtime summary and Visit history session buttons share one snapshot-scoped
+reader and promise cache. Snapshot/data-source refresh invalidates that cache;
+late responses from an earlier reader are ignored. Historical reads exclude later
+invocations and transcript messages; a still-pending invocation at the current
+branch head may expose its current live transcript.

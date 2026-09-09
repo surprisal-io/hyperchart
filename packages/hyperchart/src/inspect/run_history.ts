@@ -1,3 +1,4 @@
+import { actionUidKey } from "../core/action_uid.js";
 import { basename, resolve } from "node:path";
 import type {
 	HyperchartActorMessageBatchInfo,
@@ -118,32 +119,35 @@ export async function createRunInspectorDataSource(
 				}
 			});
 		},
-		readVisitSession: async ({ runId: candidate, branchId, invokeSeqId }) => {
+		readVisitSession: async ({ runId: candidate, snapshot, invokeSeqId }) => {
 			assertRun(candidate);
-			const progress = readSessionProgress(resolve(absoluteRunDir, "sessions"));
-			const sessions = Object.values(progress.sessions);
-			let match = sessions.find((session) => session.branchId === branchId && session.invokeSeqId === invokeSeqId);
-			if (match === undefined) {
-				const originBranchId = await withStore(async (store) => {
-					try {
-						const branch = await store.getBranch(branchId);
-						if (!await store.containsInHistory({ headSeqId: branch.headSeqId, seqId: invokeSeqId })) return undefined;
-						const record = await store.getRecord(invokeSeqId);
-						return isActionInvoke(record) ? record.branchId : undefined;
-					} catch {
-						return undefined;
-					}
-				});
-				match = originBranchId === undefined
-					? undefined
-					: sessions.find((session) => session.branchId === originBranchId && session.invokeSeqId === invokeSeqId);
-			}
-			if (match === undefined) return undefined;
-			const summary = sessionFromProgress(match);
-			const messages = options.readTranscript === undefined || match.sessionId === undefined
-				? undefined
-				: await options.readTranscript({ sessionId: match.sessionId });
-			return { ...summary, ...(messages === undefined ? {} : { messages }) };
+			return withStore(async (store) => {
+				const live = await store.captureSnapshot(snapshot.branchId);
+				if (snapshot.headSeqId !== null && !await store.containsInHistory({ headSeqId: live.headSeqId, seqId: snapshot.headSeqId })) return undefined;
+				if (!await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: invokeSeqId })) return undefined;
+				const record = await store.getRecord(invokeSeqId);
+				if (!isActionInvoke(record)) return undefined;
+				const records = await collectSnapshotRecordsForMapping(store, snapshot);
+				const visit = runtimeVisitHistoriesForInspector(parsed.ast, records).get(record.actionUid.state)?.find((item) => item.invokeSeqId === invokeSeqId);
+				if (visit === undefined) return undefined;
+				const liveBoundary = live.headSeqId === snapshot.headSeqId;
+				const boundary = records.at(-1)?.timestamp;
+				const end = visit.endedAt ?? (liveBoundary ? Date.now() : boundary);
+				const progress = readSessionProgress(resolve(absoluteRunDir, "sessions"));
+				const match = Object.values(progress.sessions).filter((session) =>
+					session.sessionId === record.sessionId && session.branchId === record.branchId
+					&& session.invokeSeqId >= invokeSeqId && session.invokeSeqId <= (snapshot.headSeqId ?? 0)
+				).sort((a, b) => b.invokeSeqId - a.invokeSeqId)[0];
+				const messages = await options.readTranscript?.({ sessionId: record.sessionId });
+				return {
+					...(match === undefined ? {} : sessionFromProgress(match)),
+					actionKey: actionUidKey(record.actionUid),
+					status: visit.status === "done" ? "completed" : visit.status,
+					startedAt: visit.startedAt,
+					...(end === undefined ? {} : { lastActivityAt: end }),
+					...(messages === undefined ? {} : { messages: messages.filter((message) => message.timestamp !== undefined && message.timestamp >= visit.startedAt && end !== undefined && message.timestamp <= end) }),
+				};
+			});
 		},
 	};
 }

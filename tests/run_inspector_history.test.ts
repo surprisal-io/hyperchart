@@ -102,7 +102,7 @@ describe("run inspector stateless history source", () => {
 			originBranchId: "main",
 			invocation: { kind: "script", env: { TOPIC: "topic=cursor chunks" } },
 		});
-		await expect(source.readVisitSession({ runId: "render-run", branchId: "main", invokeSeqId })).resolves.toMatchObject({ actionKey: "history:work:script", status: "completed" });
+		await expect(source.readVisitSession({ runId: "render-run", snapshot, invokeSeqId })).resolves.toMatchObject({ actionKey: "render:work:script", status: "running" });
 	});
 
 	it("uses full replay semantics for a timed-out lazy visit", async () => {
@@ -224,9 +224,9 @@ describe("run inspector stateless history source", () => {
 			[forkRecords[0]!.seqId, "fork"],
 			[mainRecords[1]!.seqId, "main"],
 		]);
-		await expect(source.readVisitSession({ runId: "branch-run", branchId: "fork", invokeSeqId: mainRecords[1]!.seqId })).resolves.toMatchObject({ actionKey: "branch:work:ancestor" });
-		await expect(source.readVisitSession({ runId: "branch-run", branchId: "fork", invokeSeqId: forkRecords[0]!.seqId })).resolves.toMatchObject({ actionKey: "branch:work:fork" });
-		await expect(source.readVisitSession({ runId: "branch-run", branchId: "main", invokeSeqId: forkRecords[0]!.seqId })).resolves.toBeUndefined();
+		await expect(source.readVisitSession({ runId: "branch-run", snapshot: forkSnapshot, invokeSeqId: mainRecords[1]!.seqId })).resolves.toMatchObject({ actionKey: "branch-history:work:agent" });
+		await expect(source.readVisitSession({ runId: "branch-run", snapshot: forkSnapshot, invokeSeqId: forkRecords[0]!.seqId })).resolves.toMatchObject({ actionKey: "branch-history:work:agent" });
+		await expect(source.readVisitSession({ runId: "branch-run", snapshot: await store.captureSnapshot("main"), invokeSeqId: forkRecords[0]!.seqId })).resolves.toBeUndefined();
 	});
 
 	it("binds every request to its run and snapshot", async () => {

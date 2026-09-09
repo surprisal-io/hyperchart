@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CommandLineIcon } from "@heroicons/react/24/outline";
 import type { HyperchartStateInfo, HyperchartVisitInfo } from "../../../types.js";
 import { formatHyperchartDateTime } from "../../../hyperchart-display.js";
@@ -34,6 +34,13 @@ export function VisitHistory({
 	const [expandedVisits, setExpandedVisits] = useState<Record<number, boolean>>({});
 	const [loadedSessions, setLoadedSessions] = useState<Record<number, NonNullable<HyperchartVisitInfo["session"]>>>({});
 	const [sessionReads, setSessionReads] = useState<Record<number, { loading: boolean; error?: string }>>({});
+	const readerRef = useRef(onReadSession);
+	readerRef.current = onReadSession;
+	useEffect(() => {
+		setOpenSessionIdentity(undefined);
+		setLoadedSessions({});
+		setSessionReads({});
+	}, [onReadSession]);
 	const openVisitSession = (visit: HyperchartVisitInfo) => {
 		const identity = visitSessionIdentity(visit);
 		if (onReadSession === undefined || loadedSessions[visit.invokeSeqId] !== undefined) {
@@ -41,7 +48,9 @@ export function VisitHistory({
 			return;
 		}
 		setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: true } }));
-		void onReadSession(visit.invokeSeqId, visit.originBranchId).then((session) => {
+		const reader = onReadSession;
+		void reader(visit.invokeSeqId, visit.originBranchId).then((session) => {
+			if (readerRef.current !== reader) return;
 			if (session === undefined) {
 				setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: "Transcript is unavailable." } }));
 				return;
@@ -50,6 +59,7 @@ export function VisitHistory({
 			setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false } }));
 			setOpenSessionIdentity(identity);
 		}, (error: unknown) => {
+			if (readerRef.current !== reader) return;
 			setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: error instanceof Error ? error.message : String(error) } }));
 		});
 	};

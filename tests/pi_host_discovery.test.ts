@@ -416,19 +416,19 @@ console.log(JSON.stringify(snapshot.runs));`;
 			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]), "utf8");
 		const transcriptFile = join(sessionsDir, "transcript.jsonl");
-		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload" } })}\n`, "utf8");
+		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload", timestamp: 3 } })}\n`, "utf8");
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
 			sessionId: "session-id",
 			sessionFile: transcriptFile,
-		}, "sample:work:agent:1:2");
+		}, "sample:work:agent:1:3");
 
 		const host = createPiHyperchartHost({ agentDir });
 		const summary = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
 		const overview = await host.readRunOverview(projectDir, "transcript-run");
 		const fullSession = overview?.run.states.find((state) => state.id === "work")?.session;
-		const loadedSession = await host.readVisitSession({ runId: "transcript-run", branchId: "main", invokeSeqId: 2 });
+		const loadedSession = await host.readVisitSession({ runId: "transcript-run", snapshot: overview!.snapshot, invokeSeqId: 3 });
 
 		expect(summary.runs[0]).toMatchObject({ runId: "transcript-run" });
 		expect(summary.runs[0]).not.toHaveProperty("states");
@@ -436,7 +436,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 		expect(JSON.stringify(summary)).not.toContain("large transcript payload");
 		expect(fullSession?.messages).toBeUndefined();
 		expect(loadedSession?.messages).toEqual([
-			{ id: "message-1", role: "assistant", text: "large transcript payload" },
+			{ id: "message-1", role: "assistant", text: "large transcript payload", timestamp: 3 },
 		]);
 	});
 

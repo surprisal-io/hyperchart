@@ -234,7 +234,26 @@ function TargetCursorError({ error, onRetry }: { error: string; onRetry: () => v
 	return <div className="flex items-center gap-2 text-[10px] text-[var(--danger)]"><span>Could not locate history item: {error}</span><button type="button" className="text-[var(--hc-cyan-text)]" onClick={onRetry}>Retry</button></div>;
 }
 
-function LazyStateVisits({ history, state, allStates, onSteerSession, onHighlightArtifact }: {
+type VisitSessionReader = NonNullable<Parameters<typeof VisitHistory>[0]["onReadSession"]>;
+
+/** One canonical promise per invocation and selected-branch snapshot, shared by both session buttons. */
+export function useVisitSessionReader(history: RuntimeHistoryContext | undefined): VisitSessionReader | undefined {
+	return useMemo(() => {
+		if (history === undefined) return undefined;
+		const cache = new Map<number, ReturnType<VisitSessionReader>>();
+		return (invokeSeqId: number) => {
+			const existing = cache.get(invokeSeqId);
+			if (existing !== undefined) return existing;
+			const pending = history.dataSource.readVisitSession({ runId: history.runId, snapshot: history.snapshot, invokeSeqId });
+			cache.set(invokeSeqId, pending);
+			void pending.catch(() => cache.delete(invokeSeqId));
+			return pending;
+		};
+	}, [history?.dataSource, history?.runId, history?.snapshot.branchId, history?.snapshot.headSeqId]);
+}
+
+function LazyStateVisits({ history, state, allStates, onSteerSession, onHighlightArtifact, readSession }: {
+ readSession: VisitSessionReader;
 	history: RuntimeHistoryContext;
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -254,7 +273,7 @@ function LazyStateVisits({ history, state, allStates, onSteerSession, onHighligh
 	return <VirtualizedHistoryList<HyperchartVisitInfo>
 		cacheKey={`${historyCacheKey(history, "state-visits", stateId)}:${history.targetSeqId ?? "all"}`} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
 		identity={(visit) => String(visit.invokeSeqId)} estimateSize={88} emptyLabel="No visits in this snapshot."
-		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(history.targetSeqId === undefined ? {} : { selectedInvokeSeqId: history.targetSeqId })} {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={(invokeSeqId, originBranchId) => history.dataSource.readVisitSession({ runId: history.runId, branchId: originBranchId ?? history.snapshot.branchId, invokeSeqId })} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
+		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(history.targetSeqId === undefined ? {} : { selectedInvokeSeqId: history.targetSeqId })} {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={readSession} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
 	/>;
 }
 
@@ -324,8 +343,23 @@ export function RuntimeSection({
 	selectedInvokeSeqId?: number;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
-	const session = state.session;
-	const sessionIdentity = `${state.id}:${session?.actionKey ?? "none"}:${session?.startedAt ?? "unknown"}`;
+	const readSession = useVisitSessionReader(history);
+	const targetInvoke = history?.targetSeqId ?? selectedInvokeSeqId ?? state.visitHistory?.at(-1)?.invokeSeqId;
+	const sessionScope = `${history?.runId ?? "embedded"}:${history?.snapshot.branchId ?? ""}:${history?.snapshot.headSeqId ?? "root"}:${targetInvoke ?? "none"}`;
+	const [resolvedSession, setResolvedSession] = useState<{ key: string; value?: HyperchartVisitInfo["session"]; error?: string }>();
+	useEffect(() => {
+		if (readSession === undefined || targetInvoke === undefined) return;
+		let current = true;
+		void readSession(targetInvoke).then((value) => {
+			if (current) setResolvedSession({ key: sessionScope, value });
+		}, (error: unknown) => {
+			if (current) setResolvedSession({ key: sessionScope, error: error instanceof Error ? error.message : String(error) });
+		});
+		return () => { current = false; };
+	}, [readSession, targetInvoke, sessionScope]);
+	const session = readSession === undefined ? state.session
+		: resolvedSession?.key === sessionScope ? resolvedSession.value : undefined;
+	const sessionIdentity = `${sessionScope}:${state.id}:${session?.actionKey ?? "none"}:${session?.startedAt ?? "unknown"}`;
 	if (!stateHasRuntimeDetails(state)) return null;
 	const sessionIsLive = session?.status === "running" || session?.status === "starting";
 	const actorOccurrence = state.actorOccurrence;
@@ -340,12 +374,13 @@ export function RuntimeSection({
 	return (
 		<>
 			<Section
-				key={`runtime:${sessionIdentity}`}
+				key={`runtime:${state.id}:${targetInvoke ?? "state"}`}
 				title="Runtime"
 				icon={BoltIcon}
 				defaultOpen={sessionIsLive || actorOccurrence !== undefined || actorInternalGenerations !== undefined || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
 				forceOpen={sessionIsLive || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
 			>
+				{resolvedSession?.key === sessionScope && resolvedSession.error !== undefined && <div role="alert">Could not load session: {resolvedSession.error}</div>}
 				{session !== undefined && actorInternalGenerations === undefined && (
 					<div className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 p-2">
 						<div className="flex flex-wrap items-start justify-between gap-2">
@@ -465,7 +500,7 @@ export function RuntimeSection({
 					</div>
 				)}
 				{history !== undefined && state.visitHistory === undefined && (state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport") && (
-					<LazyStateVisits history={history} state={state} allStates={allStates} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
+					<LazyStateVisits readSession={readSession!} history={history} state={state} allStates={allStates} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
 				)}
 				{history !== undefined && state.type === "map" && state.mapConfig?.visitHistory === undefined && <HistoryDisclosure label="map launch history"><LazyMapVisits history={history} state={state} /></HistoryDisclosure>}
 				{history !== undefined && historyLogicalOccurrence !== undefined && <HistoryDisclosure label="actor generations"><LazyActorGenerations history={history} logicalOccurrence={historyLogicalOccurrence} /></HistoryDisclosure>}
@@ -473,6 +508,7 @@ export function RuntimeSection({
 				{actorInternalGenerations === undefined && state.visitHistory !== undefined && (
 					<VisitHistory
 						visits={selectedInvokeSeqId === undefined ? state.visitHistory : state.visitHistory.filter((visit) => visit.invokeSeqId === selectedInvokeSeqId)}
+						{...(readSession === undefined ? {} : { onReadSession: readSession })}
 						state={state}
 						allStates={allStates}
 						{...(state.agent === undefined ? {} : { agentName: state.agent })}

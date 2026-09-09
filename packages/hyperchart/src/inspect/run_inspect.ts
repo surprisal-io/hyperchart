@@ -40,6 +40,8 @@ export type SessionTranscriptReader = (
 ) => Promise<HyperchartSessionMessageInfo[] | undefined>;
 
 export type HyperchartRunFromRunDirBaseOptions = {
+	/** Read-only historical boundary for both semantic state and history. */
+	snapshot?: HistorySnapshot;
 	/** Explicit durable identity when it differs from the run directory basename. */
 	runId?: string;
 	/** Explicit non-durable branch selection; defaults only for internal/static callers. */
@@ -79,8 +81,10 @@ export async function hyperchartRunFromRunDir(
 		...(meta.exportName === undefined ? {} : { exportName: meta.exportName }),
 		...(agentDefaults === undefined ? {} : { agentDefaults }),
 	});
-	const status = readRunStatus(absoluteRunDir);
-	const branchId = options.branchId ?? "main";
+	const status = options.snapshot === undefined ? readRunStatus(absoluteRunDir) : undefined;
+	const branchId = options.branchId ?? options.snapshot?.branchId ?? "main";
+	if (options.snapshot !== undefined && options.snapshot.branchId !== branchId)
+		throw new Error("Inspector snapshot branch does not match selected branch");
 	let records: readonly DurableLogRecord[] = [];
 	let branches: readonly BranchHead[] | undefined;
 	let initialBranches: BranchListChunk | undefined;
@@ -94,7 +98,7 @@ export async function hyperchartRunFromRunDir(
 	try {
 		let syntheticEmptyBranch = false;
 		try {
-			snapshot = await store.captureSnapshot(branchId);
+			snapshot = options.snapshot ?? await store.captureSnapshot(branchId);
 		} catch (error) {
 			if (await store.countRecords() !== 0) throw error;
 			snapshot = { branchId, headSeqId: null };
@@ -117,7 +121,7 @@ export async function hyperchartRunFromRunDir(
 	const branchSessionProgress = {
 		...rawSessionProgress,
 		sessions: Object.fromEntries(
-			Object.entries(rawSessionProgress.sessions).filter(([, session]) => session.branchId === branchId),
+			Object.entries(rawSessionProgress.sessions).filter(([, session]) => options.snapshot === undefined && session.branchId === branchId),
 		),
 	};
 	const runId = options.runId ?? status?.runId ?? basename(absoluteRunDir);
@@ -125,11 +129,18 @@ export async function hyperchartRunFromRunDir(
 	const overviewSessionProgress = projection !== undefined && options.includeTranscripts !== true
 		? currentSessionProgress(branchSessionProgress, projection)
 		: branchSessionProgress;
+	const pending = new Set(projection?.pendingActions.map((action) => action.invokeSeqId));
+	const historicalTranscriptRecords = options.snapshot === undefined ? runtimeRecords
+		: runtimeRecords.filter((record) => !pending.has(record.seqId));
+	const snapshotTime = options.snapshot === undefined ? undefined : records.at(-1)?.timestamp;
 	const sessionProgress = options.includeTranscripts === true
 		? await sessionProgressWithVisitTranscripts(
-				runtimeRecords,
+				historicalTranscriptRecords,
 				branchSessionProgress,
-				options.readTranscript,
+				options.snapshot === undefined ? options.readTranscript : async (binding) => {
+					const messages = await options.readTranscript(binding);
+					return messages?.filter((message) => snapshotTime !== undefined && message.timestamp !== undefined && message.timestamp <= snapshotTime);
+				},
 			)
 		: overviewSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
@@ -153,7 +164,7 @@ export async function hyperchartRunFromRunDir(
 		...(branches === undefined ? {} : {
 			branches: branches.map((branch) => ({
 				branchId: branch.branchId,
-				headSeqId: branch.headSeqId,
+				headSeqId: options.snapshot !== undefined && branch.branchId === branchId ? options.snapshot.headSeqId : branch.headSeqId,
 				...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }),
 				...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }),
 			})),
