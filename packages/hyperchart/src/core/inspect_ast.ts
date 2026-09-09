@@ -567,15 +567,26 @@ function jsonTemplateSchema(template: TemplateAst, ast: ChartAst, statePath: str
 	return inputRefSchema(ref, ast, statePath);
 }
 
+function actorForInspectState(ast: ChartAst, statePath: string): { actor: ActorEndpointDeclarationAst; definition: ActorDefinitionAst; localState: string } | undefined {
+	for (const actor of Object.values(ast.actors)) {
+		const definition = actorDefinition(actor);
+		const base = actor.kind === "actorPool" ? `${actor.path}.$worker` : actor.path;
+		const localState = statePath.startsWith(`${base}.`) ? statePath.slice(base.length + 1) : undefined;
+		if (localState !== undefined && definition.states[localState] !== undefined) return { actor, definition, localState };
+	}
+	return undefined;
+}
+
 function inputRefSchema(ref: InputRef, ast: ChartAst, statePath: string): JsonSchema | undefined {
+	const actorContext = actorForInspectState(ast, statePath);
 	switch (ref.kind) {
 		case "result": {
-			const state = ast.states[ref.state];
+			const state = actorContext?.definition.states[ref.state] ?? ast.states[ref.state];
 			const schema = state?.kind === "state" ? state.action.reply?.schema : undefined;
 			return schema === undefined ? undefined : jsonSchemaAtPath(schema, ref.path);
 		}
 		case "input": {
-			const state = ast.states[statePath];
+			const state = actorContext === undefined ? ast.states[statePath] : actorContext.definition.states[actorContext.localState];
 			const schema = state?.kind === "state" || state?.kind === "map" ? state.input?.[ref.name]?.schema : undefined;
 			return schema === undefined ? undefined : jsonSchemaAtPath(schema, ref.path);
 		}
@@ -583,8 +594,14 @@ function inputRefSchema(ref: InputRef, ast: ChartAst, statePath: string): JsonSc
 			return { type: "integer" };
 		case "key":
 			return { type: "string" };
-		case "actorInput":
-		case "messageInput":
+		case "actorInput": {
+			const schema = actorContext?.definition.input.schema;
+			return schema === undefined ? undefined : jsonSchemaAtPath(schema, ref.path);
+		}
+		case "messageInput": {
+			const schema = actorContext?.definition.protocol[ref.message]?.input.schema;
+			return schema === undefined ? undefined : jsonSchemaAtPath(schema, ref.path);
+		}
 		default:
 			return undefined;
 	}

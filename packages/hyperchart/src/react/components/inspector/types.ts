@@ -52,7 +52,7 @@ export type FanoutStatusSummary = {
 	entries: FanoutStatusEntry[];
 };
 
-export type PromptInterpolationTone = "input" | "result" | "visit" | "plain";
+export type PromptInterpolationTone = "input" | "actorInput" | "messageInput" | "result" | "visit" | "plain";
 
 export type PromptInterpolationAction = {
 	title: string;
@@ -62,6 +62,8 @@ export type PromptInterpolationAction = {
 
 export type PromptInterpolationRef =
 	| { kind: "input"; name: string; path?: string }
+	| { kind: "actorInput"; path?: string }
+	| { kind: "messageInput"; message: string; path?: string }
 	| { kind: "result"; state: string; path?: string }
 	| { kind: "visit"; state?: string }
 	| { kind: "key"; state?: string }

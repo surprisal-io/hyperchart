@@ -425,6 +425,7 @@ describe("Storybook information architecture", () => {
 		const exports = [...dialogSource.matchAll(/export const (\w+): Story/g)].map((match) => match[1]);
 		expect(exports).toEqual([
 			"RootActorIdle",
+			"ActorLocalReferenceTypes",
 			"BusyFifoMailbox",
 			"ActorReentry",
 			"PoolIdle",

@@ -23,10 +23,17 @@ import { inspectorPanelSpecs } from "../packages/hyperchart/src/react/stories/in
 
 describe("React actor inspector structure", () => {
 	it("builds every actor inspector board case from normalized runtime data", () => {
-		const actorSpecs = inspectorPanelSpecs.filter((spec) => spec.group === "actors");
+		const actorGroups = new Set(["actorDefinitions", "actorMessaging", "actorRuntime"]);
+		const actorSpecs = inspectorPanelSpecs.filter((spec) => actorGroups.has(spec.group));
+		expect(Object.fromEntries([...actorGroups].map((group) => [group, actorSpecs.filter((spec) => spec.group === group).length]))).toEqual({
+			actorDefinitions: 3,
+			actorMessaging: 8,
+			actorRuntime: 4,
+		});
 		expect(actorSpecs.map((spec) => spec.title)).toEqual([
 			"Actor definition-only",
 			"Actor runtime and mailbox",
+			"Actor-local prompt references",
 			"Mailbox across re-entry",
 			"Actor pool definition-only",
 			"Actor pool workers and backlog",

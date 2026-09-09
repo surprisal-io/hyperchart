@@ -24,6 +24,50 @@ describe("Inspector prompt interpolation", () => {
 		}
 	});
 
+	it("renders actor-local input references with their protocol types", () => {
+		const actorDeclaration: HyperchartStateInfo = {
+			id: "@editor",
+			type: "actor-declaration",
+			status: "pending",
+			actorDeclaration: {
+				kind: "actor",
+				declarationPath: "@editor",
+				inputSchema: {
+					schema: { type: "object", properties: { file: { type: "string" } }, required: ["file"] },
+				},
+				inputValue: { file: "README.md" },
+				initialReceive: "idle",
+				protocol: [{
+					event: "APPLY",
+					input: {
+						schema: { type: "object", properties: { patch: { type: "string" }, metadata: { type: "object" } }, required: ["patch"] },
+					},
+					reply: { kind: "void" },
+				}],
+			},
+		};
+		const actorState: HyperchartStateInfo = {
+			id: "@editor.work",
+			type: "agent",
+			status: "running",
+			actorInternal: { declarationPath: "@editor", localState: "work" },
+		};
+		const actorResultState: HyperchartStateInfo = {
+			id: "@editor.prepare",
+			type: "script",
+			status: "done",
+			actorInternal: { declarationPath: "@editor", localState: "prepare" },
+			replySchema: { schema: { type: "object", properties: { plan: { type: "string" } }, required: ["plan"] } },
+		};
+		const allStates = [actorDeclaration, actorState, actorResultState];
+
+		expect(interpolationAction('actorInput("file")', actorState, allStates, {})).toMatchObject({ title: "string", tone: "actorInput" });
+		expect(interpolationAction('messageInput("APPLY", "patch")', actorState, allStates, {})).toMatchObject({ title: "string", tone: "messageInput" });
+		expect(interpolationAction('json(messageInput("APPLY", "metadata"))', actorState, allStates, {})).toMatchObject({ title: "Record<string, unknown>", tone: "messageInput" });
+		expect(interpolationAction('result("prepare", "plan")', actorState, allStates, {})).toMatchObject({ title: "string", tone: "result" });
+		expect(hasInterpolation('Apply {messageInput("APPLY", "patch")}')).toBe(true);
+	});
+
 	it("renders json-wrapped result references as source types instead of raw DSL", () => {
 		const screenshotState: HyperchartStateInfo = {
 			id: "screenshot-report",

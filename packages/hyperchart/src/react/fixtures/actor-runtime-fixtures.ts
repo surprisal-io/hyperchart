@@ -2,16 +2,20 @@ import { z } from "zod";
 import {
 	agent,
 	actor,
+	actorInput,
 	call,
 	chart,
 	failed,
 	final,
+	json,
 	message,
+	messageInput,
 	protocol,
 	receive,
 	reply,
 	send,
 	sendBatch,
+	t,
 } from "../../core/dsl.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { ChartAst, ChartCst } from "../../core/types.js";
@@ -69,7 +73,7 @@ export const Editor = actor({
 		apply: {
 			kind: "state",
 			action: agent("actor-editor", {
-				task: "Apply the accepted patch inside the actor occurrence.",
+				task: t`Apply ${messageInput("APPLY", "patch")} to ${actorInput("file")} inside the actor occurrence.`,
 				reply: z.object({ commit: z.string() }).strict(),
 			}),
 			transitions: { DONE: "settle" },
@@ -78,7 +82,7 @@ export const Editor = actor({
 		review: {
 			kind: "state",
 			action: agent("actor-reviewer", {
-				task: "Review the accepted revision, policy, and reviewer roster.",
+				task: t`Review revision ${json(messageInput("REVIEW", "revision"))} under policy ${json(messageInput("REVIEW", "policy"))} for ${actorInput("file")}.`,
 				reply: z.object({ reviewer: z.string(), timestamp: z.string() }).strict(),
 			}),
 			transitions: { DONE: "approve" },

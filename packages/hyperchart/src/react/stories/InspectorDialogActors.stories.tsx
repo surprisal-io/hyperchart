@@ -58,6 +58,28 @@ export const RootActorIdle: Story = {
 		await expect(canvas.getByRole("button", { name: "Actor" })).toBeVisible();
 	},
 };
+export const ActorLocalReferenceTypes: Story = {
+	name: "Actor-local Reference Types",
+	args: { runs: [actorIdleRun], selectedRunId: actorIdleRun.runId },
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement.ownerDocument.body);
+		const graph = within(canvas.getByRole("main"));
+		await userEvent.click(await graph.findByTitle("@editor"));
+		await userEvent.click(canvas.getByRole("button", { name: "Open scope" }));
+		await userEvent.click(await graph.findByTitle("@editor.review"));
+
+		const messageRef = await canvas.findByText('{json(messageInput("REVIEW", "revision"))}');
+		await userEvent.hover(messageRef);
+		await expect(canvas.getByRole("tooltip")).toHaveTextContent("files: Array");
+		await expect(canvas.getByRole("tooltip")).toHaveTextContent("changes:");
+		await userEvent.unhover(messageRef);
+
+		const actorRef = canvas.getByText('{actorInput("file")}');
+		await userEvent.hover(actorRef);
+		await expect(canvas.getByRole("tooltip")).toHaveTextContent("string");
+	},
+};
+
 export const BusyFifoMailbox: Story = {
 	name: "Busy FIFO Mailbox",
 	args: { runs: [actorBusyFifoRun], selectedRunId: actorBusyFifoRun.runId },
