@@ -1,5 +1,7 @@
 # Claude Code plugin
 
+Monitor calls resolve storage from explicit options: `storage` when provided, otherwise literal JSONL under `runsRoot`. An unrelated ambient storage scope never overrides that root. MCP passes its configured backend/root/layout explicitly to monitor scans.
+
 `@surprisal/claude-hyperchart` runs Hyperchart workflows from Claude Code. Chart agent actions execute as real Claude sessions through the Claude Agent SDK; runs are detached background processes with durable state, a live browser inspector, and session steering.
 
 ## Install and launch
@@ -28,7 +30,7 @@ The bundled MCP server exposes nine tools. Claude picks them up through the `hyp
 | Move a stopped named branch head without deleting history | `hyperchart_rewind` |
 | Open the browser inspector and return its URL | `hyperchart_view` |
 
-All MCP responses are hard-bounded digests. `hyperchart_inspect` and `hyperchart_run_inspect` never return full definitions, schemas, runtime states, visit histories, or transcripts; the deprecated `verbose: true` input is rejected. `hyperchart_run` returns only identifiers, the absolute run directory, compact status/boundary fields, and bounded diagnostics. `hyperchart_view` is the only full inspection surface and returns exactly `{ "url": string }` while the browser fetches complete data on demand, so full inspection payloads never enter Claude session logs.
+All MCP responses are hard-bounded digests. `hyperchart_inspect` and `hyperchart_run_inspect` never return full definitions, schemas, runtime states, visit histories, or transcripts; the deprecated `verbose: true` input is rejected. `hyperchart_run` returns only run/branch identifiers, compact status/boundary fields, and bounded diagnostics. `hyperchart_view` is the only full inspection surface and returns exactly `{ "url": string }` while the browser fetches complete data on demand, so full inspection payloads never enter Claude session logs.
 
 `hyperchart_run` accepts exactly one of `branchId` or a non-empty unique `branchIds` array and is asynchronous by default. A fresh chart must select exactly the singleton `main`; start it, fork durable branch heads, then resume the existing run with `branchId` or `branchIds`. One detached process replay-gates that resumed initial set, then runs one runtime and one branch-scoped Claude executor per branch concurrently over one shared incremental journal. Its `status.json` v2 keeps those `branchIds` stable and reports failure if any branch fails. A live run is attached rather than duplicated. The plugin's always-on monitor scans immediately and periodically for both terminal requests and durable `user()` gates owned by the exact Claude session and canonical working directory. Each notification is emitted as one physical stdout line and confirmed only after stdout accepts it; embedded prompt newlines remain escaped in JSON. Terminal delivery waits for `status.json` to match the request outcome, and stale dead runs are recovered through the same durable outbox operation used by waited calls.
 
@@ -81,3 +83,5 @@ Remote setups are configured through environment variables — set them in the `
 ## Not yet included
 
 Marketplace packaging, model-id mapping between hosts, and cross-host run interop (Pi and Claude use separate run roots).
+
+All MCP run-target inputs use `runId` only. `runDir` and arbitrary path aliases are rejected. `HyperchartMcpDeps.storage` selects backend/root/layout; the default retains the existing Claude literal-ID layout. See [runtime storage scope](api/runtime.md#run-identity-and-storage-scope).

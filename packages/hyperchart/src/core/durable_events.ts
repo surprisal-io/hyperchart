@@ -96,7 +96,9 @@ type StateActionCompleteLog = {
 	/** Resolved visit input; informational provenance excluded from replay identity. */
 	input?: ResolvedStateInput;
 	event: ChartEvent;
-	// Revisions of the declared deliverables observed when this completion was admitted, keyed by
+	// Revisions of declared deliverables observed when this completion was admitted. On guarded
+	// actions these are provisional until validated(true), and are not accepted ancestry pins.
+	// Same-branch retry recovery may materialize them without accepting them. Keyed by
 	// rendered path. The pin is provenance: replay never re-hashes. Absent on pre-versioning logs
 	// and on runtimes without an artifact store — such completions are unpinned, not invalid.
 	artifacts?: Readonly<Record<string, ArtifactPin>>;

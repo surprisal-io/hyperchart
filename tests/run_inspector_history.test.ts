@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,12 +16,14 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 async function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "hyperchart-history-source-"));
 	roots.push(root);
-	const runDir = join(root, "run-1");
+	const runId = "run-1";
+	const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+	const runDir = resolveRunPaths(runId, storage).runDir;
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const chartPath = join(root, "chart.ts");
 	writeFileSync(chartPath, `import { chart, final } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "history", initial: "done", states: { done: final() } });\n`);
 	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
-	await store.writeRunMeta({ chartPath, workDir: root, chartId: "history", createdAt: new Date(0).toISOString() });
+	await store.writeRunMeta({ runId, chartPath, workDir: root, chartId: "history", createdAt: new Date(0).toISOString() });
 	await store.initializeRootBranch();
 	for (let batch = 0; batch < 101; batch++) {
 		await store.appendDrafts([{
@@ -45,14 +48,16 @@ async function fixture() {
 			})),
 		} as unknown as DurableRecordDraft]);
 	}
-	return { runDir, store };
+	return { runId, storage, runDir, store };
 }
 
 describe("run inspector stateless history source", () => {
 	it("maps a visit with the AST and its parent projection so rendered inputs stay concrete", async () => {
 		const root = mkdtempSync(join(tmpdir(), "hyperchart-history-render-"));
 		roots.push(root);
-		const runDir = join(root, "render-run");
+		const runId = "render-run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
 		const chartPath = join(root, "render.chart.ts");
 		writeFileSync(chartPath, `import { arg, chart, final, script, t } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "render", initial: "work", states: { work: { kind: "state", action: script("echo", [], { env: { TOPIC: t\`topic=\${arg("topic")}\` } }), transitions: { DONE: "done" } }, done: final() } });\n`);
@@ -61,7 +66,7 @@ describe("run inspector stateless history source", () => {
 		const action = parsed.ast.states.work;
 		if (action?.kind !== "state") throw new Error("work action missing");
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
-		await store.writeRunMeta({ chartPath, workDir: root, chartId: "render", createdAt: new Date(0).toISOString() });
+		await store.writeRunMeta({ runId, chartPath, workDir: root, chartId: "render", createdAt: new Date(0).toISOString() });
 		await store.initializeRootBranch();
 		const appended = await store.appendDrafts([
 			{ type: "args", args: { topic: "cursor chunks" } },
@@ -88,7 +93,7 @@ describe("run inspector stateless history source", () => {
 				},
 			},
 		}));
-		const source = await createRunInspectorDataSource(runDir);
+		const source = await withRunStorage(storage, () => createRunInspectorDataSource(runId));
 		const snapshot = await store.captureSnapshot("main");
 		const visits = await source.readStateVisits({ runId: "render-run", snapshot, stateId: "work" });
 		expect(visits.items).toHaveLength(1);
@@ -107,14 +112,16 @@ describe("run inspector stateless history source", () => {
 
 	it("uses full replay semantics for a timed-out lazy visit", async () => {
 		const root = mkdtempSync(join(tmpdir(), "hyperchart-history-timeout-")); roots.push(root);
-		const runDir = join(root, "timeout-run"); mkdirSync(join(runDir, "sessions"), { recursive: true });
+		const runId = "timeout-run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir; mkdirSync(join(runDir, "sessions"), { recursive: true });
 		const chartPath = join(root, "timeout.chart.ts");
 		writeFileSync(chartPath, `import { chart, final, script } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "timeout", initial: "work", states: { work: { kind: "state", action: script("true"), after: { delayMs: 10, target: "timed" }, transitions: { DONE: "done" } }, timed: final(), done: final() } });`);
 		const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error("timeout fixture invalid");
 		const action = parsed.ast.states.work; if (action?.kind !== "state") throw new Error("timeout action missing");
-		const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.writeRunMeta({ chartPath, workDir: root, chartId: "timeout", createdAt: new Date(0).toISOString() }); await store.initializeRootBranch();
+		const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.writeRunMeta({ runId, chartPath, workDir: root, chartId: "timeout", createdAt: new Date(0).toISOString() }); await store.initializeRootBranch();
 		await store.appendDrafts([{ type: "args", args: {} }, { type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "session", definition: action.action }, { type: "state_action", kind: "timer_fired", actionUid: action.action.uid }]);
-		const source = await createRunInspectorDataSource(runDir); const snapshot = await store.captureSnapshot("main");
+		const source = await withRunStorage(storage, () => createRunInspectorDataSource(runId)); const snapshot = await store.captureSnapshot("main");
 		const visits = await source.readStateVisits({ runId: "timeout-run", snapshot, stateId: "work" });
 		expect(visits.items[0]).toMatchObject({ status: "cancelled", endedReason: "timed_out" });
 	});
@@ -129,8 +136,8 @@ describe("run inspector stateless history source", () => {
 	});
 
 	it("keeps multi-message enqueues as bounded batch rows without overflow or drops", async () => {
-		const { runDir, store } = await fixture();
-		const source = await createRunInspectorDataSource(runDir);
+		const { runId, storage, store } = await fixture();
+		const source = await withRunStorage(storage, () => createRunInspectorDataSource(runId));
 		const snapshot = await store.captureSnapshot("main");
 		const first = await source.readActorMessages({ runId: "run-1", snapshot, occurrence: "worker" });
 		expect(first.items).toHaveLength(100);
@@ -193,13 +200,15 @@ describe("run inspector stateless history source", () => {
 
 	it("resolves inherited and fork-resumed transcripts without exposing sibling sessions", async () => {
 		const root = mkdtempSync(join(tmpdir(), "hyperchart-history-branch-session-")); roots.push(root);
-		const runDir = join(root, "branch-run"); mkdirSync(join(runDir, "sessions"), { recursive: true });
+		const runId = "branch-run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir; mkdirSync(join(runDir, "sessions"), { recursive: true });
 		const chartPath = join(root, "branch.chart.ts");
 		writeFileSync(chartPath, `import { agent, chart } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "branch-history", initial: "work", states: { work: { kind: "state", action: agent("worker"), transitions: { LOOP: "work" } } } });`);
 		const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error("branch fixture invalid");
 		const state = parsed.ast.states.work; if (state?.kind !== "state") throw new Error("branch action missing");
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
-		await store.writeRunMeta({ chartPath, workDir: root, chartId: "branch-history", createdAt: new Date(0).toISOString() });
+		await store.writeRunMeta({ runId, chartPath, workDir: root, chartId: "branch-history", createdAt: new Date(0).toISOString() });
 		await store.initializeRootBranch();
 		const mainRecords = await store.appendDrafts([
 			{ type: "args", args: {} },
@@ -217,7 +226,7 @@ describe("run inspector stateless history source", () => {
 				fork: { actionKey: "branch:work:fork", actionUid: state.action.uid, branchId: "fork", invokeSeqId: forkRecords[0]!.seqId, visit: 2, actionName: "worker", sessionId: "fork-session", status: "running", startedAt: 4, lastActivityAt: 5, turnCount: 1, toolCount: 0 },
 			},
 		}));
-		const source = await createRunInspectorDataSource(runDir);
+		const source = await withRunStorage(storage, () => createRunInspectorDataSource(runId));
 		const forkSnapshot = await forkStore.captureSnapshot("fork");
 		const forkHistory = await source.readRecords({ runId: "branch-run", snapshot: forkSnapshot, includeActionVisits: true });
 		expect(forkHistory.items.filter((record) => record.actionVisit !== undefined).map((record) => [record.seqId, record.actionVisit?.originBranchId])).toEqual([
@@ -230,8 +239,8 @@ describe("run inspector stateless history source", () => {
 	});
 
 	it("binds every request to its run and snapshot", async () => {
-		const { runDir, store } = await fixture();
-		const source = await createRunInspectorDataSource(runDir);
+		const { runId, storage, store } = await fixture();
+		const source = await withRunStorage(storage, () => createRunInspectorDataSource(runId));
 		const snapshot = await store.captureSnapshot("main");
 		await expect(source.readRecords({ runId: "another-run", snapshot, includeActionVisits: true })).rejects.toThrow(/bound to run/);
 		const records = await source.readRecords({ runId: "run-1", snapshot });

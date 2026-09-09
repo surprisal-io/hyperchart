@@ -13,7 +13,7 @@ import { isRunLive, patchRunStatus, readRunStatus } from "../runtime/generic/run
 export type RewindMode = "before" | "after";
 
 export type RewindOptions = {
-	runDir: string;
+	runId: string;
 	branchId: BranchId;
 	state?: string;
 	seqId?: number;
@@ -25,7 +25,6 @@ export type RewindOptions = {
 
 export type RewindResult = {
 	runId: string;
-	runDir: string;
 	chartId: string;
 	branchId: BranchId;
 	targetLabel: string;
@@ -42,15 +41,15 @@ export type RewindResult = {
 export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindResult> {
 	const targetCount = [opts.state, opts.seqId, opts.to].filter((target) => target !== undefined).length;
 	if (targetCount !== 1) throw new Error("rewind requires exactly one of state, seqId, or to=compatible");
-	const status = readRunStatus(opts.runDir);
+	const status = readRunStatus(opts.runId);
 	const live = isRunLive(status);
-	if (!live) assertStoppedRun(opts.runDir, "rewinding");
-	await assertRunOwnership(opts.runDir, opts.cwd);
-	const meta = await loadRunMeta(opts.runDir);
+	if (!live) assertStoppedRun(opts.runId, "rewinding");
+	await assertRunOwnership(opts.runId, opts.cwd);
+	const meta = await loadRunMeta(opts.runId);
 	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 
-	const store = await openRunLogStore(opts.runDir, { branchId: opts.branchId, access: live ? "read" : "writer" });
+	const store = await openRunLogStore(opts.runId, { branchId: opts.branchId, access: live ? "read" : "writer" });
 	let match: RewindMatch;
 	let moveCommit: RunnerMoveBranchCommit | undefined;
 	try {
@@ -69,15 +68,14 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 		await store.close();
 	}
 	if (live) {
-		if (status?.attemptId === undefined) throw new Error(`Live run '${basename(opts.runDir)}' has no runner attempt identity`);
-		moveCommit = await requestLiveRunnerBranchMove(opts.runDir, {
+		if (status?.attemptId === undefined) throw new Error(`Live run '${opts.runId}' has no runner attempt identity`);
+		moveCommit = await requestLiveRunnerBranchMove(opts.runId, {
 			attemptId: status.attemptId,
 			branchId: opts.branchId,
 			targetHeadSeqId: match.targetHeadSeqId,
 		});
 	} else {
-		patchRunStatus(opts.runDir, {
-			runId: basename(opts.runDir),
+		patchRunStatus(opts.runId, {
 			chartId: parsed.ast.id,
 			branchIds: [opts.branchId],
 			state: "stopped",
@@ -89,8 +87,7 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	}
 	if (moveCommit === undefined) throw new Error("Branch move completed without commit metadata");
 	return {
-		runId: basename(opts.runDir),
-		runDir: opts.runDir,
+		runId: opts.runId,
 		chartId: parsed.ast.id,
 		branchId: opts.branchId,
 		targetLabel: match.label,

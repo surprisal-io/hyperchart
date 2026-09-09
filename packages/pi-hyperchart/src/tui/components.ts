@@ -1,3 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { resolveRunPaths, openRunLogStore } from "@surprisal/hyperchart/runtime";
+import { readRunStatus } from "@surprisal/hyperchart/sessions";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
@@ -10,14 +13,12 @@ import {
 	sessionProgressPath,
 	type HyperchartSessionProgress,
 } from "@surprisal/hyperchart/sessions";
-import { hyperchartRunFromRunDir } from "../runtime/pi/run_inspect.js";
+import { hyperchartRunFromRunId } from "../runtime/pi/run_inspect.js";
 import { summarizeHyperchartProgress } from "@surprisal/hyperchart/host";
 import { buildRunView, type GraphRow, type RunView } from "./run_view.js";
 
 export type RunComponentOptions = {
 	runId: string;
-	runDir: string;
-	logPath: string;
 	ast: ChartAst;
 	branchId?: string;
 	live?: boolean;
@@ -27,7 +28,6 @@ export type RunComponentOptions = {
 export type RunHistoryItem = {
 	runId: string;
 	branchId?: string;
-	runDir: string;
 	chartId: string;
 	state: string;
 	live: boolean;
@@ -204,14 +204,15 @@ export class RunWidget implements Component {
 		clearInterval(this.timer);
 	}
 
-	private async refresh(): Promise<void> {
+	private readonly refresh = AsyncLocalStorage.bind(async (): Promise<void> => {
 		if (this.disposed) return;
-		const progressPath = sessionProgressPath(resolve(this.opts.runDir, "sessions"));
-		const stat = `${statKeyFor(this.opts.logPath)}:${statKeyFor(progressPath)}`;
+		const progressPath = sessionProgressPath(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions"));
+		const stat = `${readRunStatus(this.opts.runId)?.updatedAt ?? 0}:${statKeyFor(progressPath)}`;
 		if (stat === this.lastStat && this.view !== undefined) return;
 		this.lastStat = stat;
 		const branchId = this.opts.branchId ?? "main";
-		const store = new JsonlLogStore(this.opts.logPath, branchId);
+		const store = await openRunLogStore(this.opts.runId, { branchId });
+		try {
 		const snapshot = await store.captureSnapshot(branchId);
 		const [execution, recordChunk, branches, recordCount] = await Promise.all([
 			readBranchExecutionOverview(this.opts.ast, branchId, store, snapshot),
@@ -220,7 +221,7 @@ export class RunWidget implements Component {
 			store.countRecords(),
 		]);
 		const records = [...recordChunk.items].reverse();
-		const run = await hyperchartRunFromRunDir(this.opts.runDir, { ast: this.opts.ast, branchId });
+		const run = await hyperchartRunFromRunId(this.opts.runId, { ast: this.opts.ast, branchId });
 		this.view = buildRunView(this.opts.ast, records, Date.now(), {
 			branchId,
 			...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
@@ -229,11 +230,12 @@ export class RunWidget implements Component {
 			recordCount,
 			execution,
 		});
-		this.progress = readSessionProgress(resolve(this.opts.runDir, "sessions")).sessions;
+		this.progress = readSessionProgress(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions")).sessions;
 		this.progressPercent = summarizeHyperchartProgress(run).pct;
 		this.refreshError = undefined;
 		this.tui.requestRender();
-	}
+		} finally { await store.close(); }
+	});
 
 	private handleRefreshError(cause: unknown): void {
 		if (this.disposed) return;

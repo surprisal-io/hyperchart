@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { collectHistoryRecords } from "./helpers/history.js";
 import { commitUserInteractionResponse } from "./helpers/user_interaction_commit.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -30,7 +31,10 @@ afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSy
 
 async function fixture(reply = false, loadCounterKey?: string) {
 	const root = mkdtempSync(join(tmpdir(), "hyperchart-journal-input-")); roots.push(root);
-	const runsRoot = join(root, "runs"), workDir = join(root, "project"), runDir = join(runsRoot, "run-a"), chartPath = join(workDir, "chart.ts");
+	const runsRoot = join(root, "runs"), workDir = join(root, "project"), chartPath = join(workDir, "chart.ts");
+	const runId = "run-a";
+	const storage: RunStorage = { kind: "jsonl", rootDir: runsRoot, layout: "sha256" };
+	const runDir = resolveRunPaths(runId, storage).runDir;
 	mkdirSync(runsRoot); mkdirSync(workDir);
 	writeFileSync(chartPath, `
 		import { chart, final, user } from "@surprisal/hyperchart";
@@ -41,25 +45,25 @@ async function fixture(reply = false, loadCounterKey?: string) {
 		} });
 	`);
 	const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error(parsed.diagnostics.map((d) => d.message).join("\n"));
-	await saveRunMeta(runDir, { chartPath, workDir, chartId: "chart", createdAt: new Date().toISOString(), originSessionId: "session-a" });
+	await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir, chartId: "chart", createdAt: new Date().toISOString(), originSessionId: "session-a" }));
 	const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.initializeRootBranch();
 	const state = parsed.ast.states.ask; if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
 	await store.appendDrafts([{ type: "args", args: {} }]);
 	const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
 	const replySchema = reply ? { kind: "jsonSchema" as const, schema: { type: "object", properties: { note: { type: "string" } }, required: ["note"], additionalProperties: false } } : undefined;
 	const [opened] = await store.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: state.action.uid, phaseSeqId: invoke!.seqId, prompt: "Approve?", options: ["APPROVED"], events: ["APPROVED"], ...(replySchema === undefined ? {} : { reply: replySchema }) }]);
-	return { root, runsRoot, workDir, runDir, chartPath, ast: parsed.ast, store, gateSeqId: opened!.seqId };
+	return { root, runId, storage, runsRoot, workDir, runDir, chartPath, ast: parsed.ast, store, gateSeqId: opened!.seqId };
 }
 function owner(runsRoot: string, workDir: string): UserInteractionOwner { return { runsRoot, workDir, sessionId: "session-a", host: "test" }; }
 
 describe("journal-native user interactions", () => {
 	it("derives an open rendered gate from selected journal ancestry without request.json", async () => {
 		const f = await fixture();
-		const requests = await scanOpenUserInteractions(f.runDir, "main");
+		const requests = await withRunStorage(f.storage, () => scanOpenUserInteractions(f.runId, "main"));
 		expect(requests).toEqual([expect.objectContaining({ version: 2, runId: "run-a", branchId: "main", seqId: f.gateSeqId, prompt: "Approve?", events: ["APPROVED"] })]);
 		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await collectHistoryRecords(f.store, "main"));
 		expect(Object.keys(projection.openUserInteractions)).toEqual([String(f.gateSeqId)]);
-		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "request.json"))).toBe(false);
+		expect(existsSync(join(withRunStorage(f.storage, () => userInteractionDir(f.runId, "main", f.gateSeqId)), "request.json"))).toBe(false);
 	});
 
 	it("reuses a parsed chart across interaction scans and invalidates it when source changes", async () => {
@@ -68,12 +72,12 @@ describe("journal-native user interactions", () => {
 		try {
 			const f = await fixture(false, counterKey);
 			expect(state[counterKey]).toBe(1);
-			await scanOpenUserInteractions(f.runDir, "main");
+			await withRunStorage(f.storage, () => scanOpenUserInteractions(f.runId, "main"));
 			expect(state[counterKey]).toBe(2);
-			await scanOpenUserInteractions(f.runDir, "main");
+			await withRunStorage(f.storage, () => scanOpenUserInteractions(f.runId, "main"));
 			expect(state[counterKey]).toBe(2);
 			writeFileSync(f.chartPath, `${readFileSync(f.chartPath, "utf8")}\n// invalidate scan cache\n`);
-			await scanOpenUserInteractions(f.runDir, "main");
+			await withRunStorage(f.storage, () => scanOpenUserInteractions(f.runId, "main"));
 			expect(state[counterKey]).toBe(3);
 		} finally {
 			delete state[counterKey];
@@ -82,15 +86,15 @@ describe("journal-native user interactions", () => {
 
 	it("commits one resolved journal fact, retries identically, and conflicts divergently", async () => {
 		const f = await fixture();
-		const input = { runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) } as const;
-		expect((await validateAndPersistUserInteractionResponse(input)).idempotent).toBe(false);
-		expect((await validateAndPersistUserInteractionResponse(input)).idempotent).toBe(true);
-		await expect(validateAndPersistUserInteractionResponse({ ...input, event: { type: "APPROVED", output: "different" } })).rejects.toThrow(/Conflicting response/);
-		expect((await readUserInteractionResponse(f.runDir, "main", f.gateSeqId))?.event).toEqual({ type: "APPROVED" });
+		const input = { runId: f.runId, branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) } as const;
+		expect((await withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse(input))).idempotent).toBe(false);
+		expect((await withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse(input))).idempotent).toBe(true);
+		await expect(withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({ ...input, event: { type: "APPROVED", output: "different" } }))).rejects.toThrow(/Conflicting response/);
+		expect((await withRunStorage(f.storage, () => readUserInteractionResponse(f.runId, "main", f.gateSeqId)))?.event).toEqual({ type: "APPROVED" });
 		const refreshed = new JsonlLogStore(join(f.runDir, "log.jsonl"));
 		const projection = projectBranch(createBranchProjection(f.ast), f.ast, await collectHistoryRecords(refreshed, "main"));
 		expect(projection.openUserInteractions).toEqual({});
-		expect(existsSync(join(userInteractionDir(f.runDir, "main", f.gateSeqId), "resolution.json"))).toBe(false);
+		expect(existsSync(join(withRunStorage(f.storage, () => userInteractionDir(f.runId, "main", f.gateSeqId)), "resolution.json"))).toBe(false);
 	});
 
 	it("reopens and reclassifies an identical stopped-JSONL head race", async () => {
@@ -101,7 +105,7 @@ describe("journal-native user interactions", () => {
 			if (!raced) { raced = true; await f.store.appendDrafts(input.drafts); }
 			return original.call(this, input, prepare);
 		});
-		const result = await validateAndPersistUserInteractionResponse({ runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) });
+		const result = await withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({ runId: f.runId, branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) }));
 		expect(result.idempotent).toBe(true);
 	});
 
@@ -114,7 +118,7 @@ describe("journal-native user interactions", () => {
 			if (!raced) { raced = true; await f.store.appendDrafts([{ type: "user_interaction", kind: "resolved", gateSeqId: f.gateSeqId, actionUid: state.action.uid, event: { type: "APPROVED", output: "winner" } }]); }
 			return original.call(this, input, prepare);
 		});
-		await expect(validateAndPersistUserInteractionResponse({ runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED", output: "loser" }, owner: owner(f.runsRoot, f.workDir) })).rejects.toThrow(/Conflicting response/);
+		await expect(withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({ runId: f.runId, branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED", output: "loser" }, owner: owner(f.runsRoot, f.workDir) }))).rejects.toThrow(/Conflicting response/);
 	});
 
 	it("reclassifies a gate closed by a stopped-JSONL head race", async () => {
@@ -125,33 +129,33 @@ describe("journal-native user interactions", () => {
 			if (!raced) { raced = true; await f.store.appendDrafts([{ type: "failure_intent", origin: "ask", error: "closed" }]); }
 			return original.call(this, input, prepare);
 		});
-		await expect(validateAndPersistUserInteractionResponse({ runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) })).rejects.toThrow(/stale or closed/);
+		await expect(withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({ runId: f.runId, branchId: "main", seqId: f.gateSeqId, event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir) }))).rejects.toThrow(/stale or closed/);
 	});
 
 	it("routes a live response through the owning runner control API", async () => {
 		const f = await fixture();
 		const attemptId = "attempt-live";
-		patchRunStatus(f.runDir, {
-			runId: "run-a", chartId: "chart", state: "running", branchIds: ["main"], attemptId,
+		withRunStorage(f.storage, () => patchRunStatus(f.runId, {
+			chartId: "chart", state: "running", branchIds: ["main"], attemptId,
 			pid: process.pid, heartbeatAt: Date.now(),
-		});
-		const stop = watchRunnerUserResponses(f.runDir, attemptId, (request) =>
-			commitUserInteractionResponse(f.store, f.ast, request.gateSeqId, request.event));
+		}));
+		const stop = withRunStorage(f.storage, () => watchRunnerUserResponses(f.runId, attemptId, (request) =>
+			commitUserInteractionResponse(f.store, f.ast, request.gateSeqId, request.event)));
 		try {
-			const committed = await validateAndPersistUserInteractionResponse({
-				runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId,
+			const committed = await withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({
+				runId: f.runId, branchId: "main", seqId: f.gateSeqId,
 				event: { type: "APPROVED" }, owner: owner(f.runsRoot, f.workDir),
-			});
+			}));
 			expect(committed.idempotent).toBe(false);
-			expect((await readUserInteractionResponse(f.runDir, "main", f.gateSeqId))?.event).toEqual({ type: "APPROVED" });
+			expect((await withRunStorage(f.storage, () => readUserInteractionResponse(f.runId, "main", f.gateSeqId)))?.event).toEqual({ type: "APPROVED" });
 		} finally { stop(); }
 	});
 
 	it("validates reply schema before append", async () => {
 		const f = await fixture(true);
-		const base = { runDir: f.runDir, runId: "run-a", branchId: "main", seqId: f.gateSeqId, owner: owner(f.runsRoot, f.workDir) } as const;
-		await expect(validateAndPersistUserInteractionResponse({ ...base, event: { type: "APPROVED", output: { note: 1 } } })).rejects.toThrow(/reply schema/);
-		expect((await validateAndPersistUserInteractionResponse({ ...base, event: { type: "APPROVED", output: { note: "ok" } } })).idempotent).toBe(false);
+		const base = { runId: f.runId, branchId: "main", seqId: f.gateSeqId, owner: owner(f.runsRoot, f.workDir) } as const;
+		await expect(withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({ ...base, event: { type: "APPROVED", output: { note: 1 } } }))).rejects.toThrow(/reply schema/);
+		expect((await withRunStorage(f.storage, () => validateAndPersistUserInteractionResponse({ ...base, event: { type: "APPROVED", output: { note: "ok" } } }))).idempotent).toBe(false);
 	});
 
 	it("allows offline response and treats timeout as a closed gate", async () => {
@@ -185,15 +189,15 @@ describe("journal-native user interactions", () => {
 	it("does not expose gates after durable failure", async () => {
 		const f = await fixture();
 		await f.store.appendDrafts([{ type: "failure_intent", origin: "ask", error: "failed" }]);
-		expect(await scanOpenUserInteractions(f.runDir, "main")).toEqual([]);
+		expect(await withRunStorage(f.storage, () => scanOpenUserInteractions(f.runId, "main"))).toEqual([]);
 	});
 
 	it("keeps presentation receipts as sidecars without changing semantic openness", async () => {
 		const f = await fixture(); const owned = owner(f.runsRoot, f.workDir);
-		const active = await acquireActiveUserInteraction(owned); expect(active?.request.seqId).toBe(f.gateSeqId);
-		expect(claimUserInteractionReceipt(f.runDir, "main", f.gateSeqId, "test", "session-a")).toBe(true);
-		markUserInteractionReceipt(f.runDir, "main", f.gateSeqId, "test", "session-a");
-		expect(hasUserInteractionReceipt(f.runDir, "main", f.gateSeqId, "test", "session-a")).toBe(true);
-		const scanned = await scanOwnedOpenUserInteractions(owned); expect(scanned[0]?.presentation).toBe("confirmed");
+		const active = await withRunStorage(f.storage, () => acquireActiveUserInteraction(owned)); expect(active?.request.seqId).toBe(f.gateSeqId);
+		expect(withRunStorage(f.storage, () => claimUserInteractionReceipt(f.runId, "main", f.gateSeqId, "test", "session-a"))).toBe(true);
+		withRunStorage(f.storage, () => markUserInteractionReceipt(f.runId, "main", f.gateSeqId, "test", "session-a"));
+		expect(withRunStorage(f.storage, () => hasUserInteractionReceipt(f.runId, "main", f.gateSeqId, "test", "session-a"))).toBe(true);
+		const scanned = await withRunStorage(f.storage, () => scanOwnedOpenUserInteractions(owned)); expect(scanned[0]?.presentation).toBe("confirmed");
 	});
 });

@@ -35,7 +35,11 @@ describe("hierarchical execution graph", () => {
 		]);
 		const actionNodes = graph.nodes.filter((node) => node.type === "hyperchartState");
 		expect(actionNodes).not.toHaveLength(0);
+		expect(actionNodes.every((node) => node.width === 270 && node.height === 118)).toBe(true);
 		expect(actionNodes.every((node) => node.style?.width === 270 && node.style?.height === 118)).toBe(true);
+		expect(actionNodes.every((node) => node.handles?.some((handle) => handle.id === "target-top" && handle.x === 135 && handle.y === 0))).toBe(true);
+		expect(actionNodes.every((node) => node.handles?.some((handle) => handle.id === "source-bottom" && handle.x === 135 && handle.y === 118))).toBe(true);
+		expect(graph.nodes.every((node) => node.width === node.style?.width && node.height === node.style?.height)).toBe(true);
 		const mapNode = graph.nodes.find((node) => node.type === "mapVisitGroup");
 		expect(mapNode?.data).toEqual({ state: expect.objectContaining({ id: "samples", type: "map" }), stateId: "samples", targetSeqId: 1 });
 		expect(mapNode?.selectable).not.toBe(false);

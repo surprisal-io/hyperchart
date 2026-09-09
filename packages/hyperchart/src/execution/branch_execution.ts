@@ -146,6 +146,15 @@ export class BranchExecution {
 	openUserInteraction(gateSeqId: number): UserInteractionOpenedLog | undefined { return this.projection.openUserInteractions[gateSeqId]?.opened; }
 	openUserInteractions(): readonly UserInteractionOpenedLog[] { return Object.values(this.projection.openUserInteractions).map((entry) => entry.opened); }
 	artifactPins(): Readonly<Record<string, ArtifactPin>> { return structuredClone(this.projection.artifactPins); }
+	/** Same-branch retry overlay; never part of accepted ancestry or inherited by forks. */
+	workspaceArtifactPins(): Readonly<Record<string, ArtifactPin>> {
+		const pins = structuredClone(this.projection.artifactPins);
+		for (const pending of this.projection.pendingActions) {
+			if (pending.phase !== "running" && pending.completionArtifacts?.branchId === this.branchId)
+				Object.assign(pins, pending.completionArtifacts.pins);
+		}
+		return pins;
+	}
 	checkpointable(): boolean { return this.checkpointableValue; }
 	prepareExactCheckpoint(headSeqId: number | null = this.headSeqId()): OpaqueCheckpointEnvelope | undefined {
 		return this.checkpointableValue ? prepareProjectionCheckpoint(this.projection, this.contract, headSeqId) : undefined;
@@ -156,7 +165,7 @@ export class BranchExecution {
 		await this.store.storeCheckpoint(prepareProjectionCheckpoint(this.projection, this.contract));
 		this.recordsSinceCheckpoint = 0;
 	}
-	notificationRenderer(state: MachineState, input: { runId: string; runDir: string; workDir: string }): (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload {
+	notificationRenderer(state: MachineState, input: { runId: string; workDir: string }): (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload {
 		const branchId = this.branchId;
 		return (outcome, error) => renderTerminalNotificationPayload(state, { ...input, branchId, outcome, ...(error === undefined ? {} : { error }) });
 	}

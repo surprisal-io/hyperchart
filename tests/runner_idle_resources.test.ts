@@ -1,3 +1,4 @@
+import { resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,7 +10,8 @@ import { collectHistoryRecords } from "./helpers/history.js";
 
 it("unloads and readmits real journal-native gates repeatedly, preserving active work and fork ancestry", async () => {
 	const root = mkdtempSync(join(tmpdir(), "hyperchart-idle-resources-"));
-	const runDir = join(root, "run");
+	const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+	const runDir = resolveRunPaths("idle-resources", storage).runDir;
 	mkdirSync(runDir);
 	const chartPath = join(root, "chart.mjs");
 	writeFileSync(chartPath, `export default { kind: "chart", id: "idle-resources", initial: "ask", states: {
@@ -21,7 +23,7 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
 	const emissions = new Map<string, (event: ChartEvent) => void>();
 	let resident = 0;
 	let built = 0;
-	const controller = await createHyperchartRunnerController({ runId: "idle-resources", runDir, chartPath, chartId: "idle-resources", workDir: root, branchId: "main" }, ({ config }) => {
+	const controller = await createHyperchartRunnerController({ runId: "idle-resources", storage, chartPath, chartId: "idle-resources", workDir: root, branchId: "main" }, ({ config }) => {
 		resident++; built++;
 		return {
 			start(_effect, emit) { emissions.set(config.branchId, emit); },

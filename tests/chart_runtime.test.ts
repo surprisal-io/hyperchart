@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { collectHistoryRecords } from "./helpers/history.js";
 import { commitUserInteractionResponse } from "./helpers/user_interaction_commit.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -256,7 +257,9 @@ describe("ChartRuntime", () => {
 
 	it("quiesces delayed pinned-read restoration without starting an executor after disposal", async () => {
 		const root = await makeTempDir();
-		const runDir = join(root, "run");
+		const runId = "run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		await mkdir(runDir);
 		const source = join(root, "pinned-source.txt");
 		await writeFile(source, "pinned");
@@ -275,10 +278,10 @@ describe("ChartRuntime", () => {
 			return source;
 		});
 		const executor = new FakeAgentExecutor();
-		const runtime = new ChartRuntime({
+		const runtime = withRunStorage(storage, () => new ChartRuntime({
 			ast, branchId: "main", logStore: store, agentExecutor: executor,
-			workDir: root, chartDir: root, runDir,
-		});
+			workDir: root, chartDir: root, runId,
+		}));
 		runtime.runEffects([{
 			kind: "agent",
 			id: "delayed-read",

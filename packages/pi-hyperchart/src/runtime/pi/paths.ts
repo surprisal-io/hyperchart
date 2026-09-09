@@ -39,9 +39,6 @@ export function getHyperchartRunsRoot(agentDir: string = defaultAgentDir()): str
 	return piHostPaths(agentDir).getRunsRoot();
 }
 
-export function resolveHyperchartRunDir(spec: string, cwd: string, agentDir: string = defaultAgentDir()): string {
-	return piHostPaths(agentDir).resolveRunDir(spec, cwd);
-}
 
 export function resolveHyperchartPath(spec: string, cwd: string, agentDir: string = defaultAgentDir()): string {
 	return piHostPaths(agentDir).resolveChartPath(spec, cwd);

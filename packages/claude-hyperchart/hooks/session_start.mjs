@@ -1,9 +1,10 @@
+import { readRunStatus } from "@surprisal/hyperchart/sessions";
 // SessionStart recovery: surface only this exact Claude session's live runs and
 // the shared arbiter's one pinned unanswered user gate.
 import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { loadRunMeta } from "@surprisal/hyperchart/runtime";
+import { loadRunMeta, listRunIds, withRunStorage } from "@surprisal/hyperchart/runtime";
 import {
 	acquireActiveUserInteraction,
 	claimUserInteractionReceipt,
@@ -80,6 +81,7 @@ async function main() {
 	const sessionId = typeof input.session_id === "string" ? input.session_id : undefined;
 	const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 	const runsRoot = process.env.HYPERCHART_RUNS_ROOT ?? join(configDir, "hypercharts", "runs");
+	return withRunStorage({kind: "jsonl", rootDir: runsRoot, layout: "run-id"}, async () => {
 	if (!existsSync(runsRoot)) return;
 	const now = Date.now();
 	const lines = [];
@@ -88,7 +90,7 @@ async function main() {
 		const owner = { runsRoot, host: "claude", sessionId, workDir: cwd };
 		active = await acquireActiveUserInteraction(owner);
 		if (active?.presentation === "pending") {
-			claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", sessionId, { source: "session-start" });
+			claimUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", sessionId, { source: "session-start" });
 		}
 		// Re-arbitrate after claiming so a concurrent lower coordinate cannot also be
 		// presented by the monitor/wait path.
@@ -96,9 +98,8 @@ async function main() {
 		if (active !== undefined) lines.push(gateContext(active));
 	}
 	const liveLines = [];
-	for (const entry of readdirSync(runsRoot)) {
-		const runDir = join(runsRoot, entry);
-		const meta = await loadRunMeta(runDir).catch(() => undefined);
+	for (const runId of await listRunIds()) {
+		const meta = await loadRunMeta(runId).catch(() => undefined);
 		if (
 			meta === undefined ||
 			typeof meta.workDir !== "string" ||
@@ -106,9 +107,9 @@ async function main() {
 			sessionId === undefined ||
 			meta.originSessionId !== sessionId
 		) continue;
-		const status = readJson(join(runDir, "status.json"));
+		const status = readRunStatus(runId);
 		if (!isLive(status, now)) continue;
-		liveLines.push(`- ${entry} (chart ${status.chartId ?? meta.chartId}, ${status.state}, dir ${runDir})`);
+		liveLines.push(`- ${runId} (chart ${status.chartId ?? meta.chartId}, ${status.state})`);
 	}
 	if (liveLines.length > 0) {
 		lines.push([
@@ -123,11 +124,12 @@ async function main() {
 	// same pinned gate remains recoverable by the monitor or another SessionStart.
 	if (active !== undefined && sessionId !== undefined) {
 		try {
-			markUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", sessionId);
+			markUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", sessionId);
 		} catch {
 			// A concurrent machine close/response won after context was constructed.
 		}
 	}
+	});
 }
 
 await main();

@@ -48,6 +48,30 @@ function envGuard(env: Record<string, Templatable | ArtifactOfCst | JoinArtifact
 }
 
 describe("validation script env", () => {
+	it("exposes the originating invocation across rejection and distinguishes repeated visits", async () => {
+		const dir = await tempDir();
+		const guard = script(node, ["-e", `let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
+			const e = JSON.parse(s);
+			require("node:fs").appendFileSync("identities.jsonl", JSON.stringify({id:process.env.HYPERCHART_INVOCATION_ID, branch:process.env.HYPERCHART_BRANCH_ID, action:JSON.parse(process.env.HYPERCHART_ACTION_UID)})+"\\n");
+			process.exit(e.output.accept ? 0 : 1);
+		});`], { env: { HYPERCHART_INVOCATION_ID: "spoof", HYPERCHART_BRANCH_ID: "spoof", HYPERCHART_ACTION_UID: "spoof" } });
+		const executor = new FakeAgentExecutor({ work: [
+			{ type: "AGAIN", output: { accept: false } },
+			{ type: "AGAIN", output: { accept: true } },
+			{ type: "DONE", output: { accept: true } },
+		] });
+		const ast = parsed(chart({ kind: "chart", id: "identity", initial: "work", states: {
+			work: { kind: "state", action: agent("worker"), validate: guard, onReject: "resume", transitions: { AGAIN: "work", DONE: "done" } }, done: final(),
+		} })).ast;
+		expect((await run(ast, dir, undefined, executor)).projection.activeLeaves).toEqual(["done"]);
+		const seen = (await readFile(join(dir, "identities.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+		expect(seen).toHaveLength(3);
+		expect(seen[0]).toEqual(seen[1]);
+		expect(seen[0]).toEqual({ id: executor.starts[0]!.sessionId, branch: "main", action: executor.starts[0]!.actionUid });
+		expect(seen[2].id).toBe(executor.starts[1]!.sessionId);
+		expect(seen[2].id).not.toBe(seen[0].id);
+	});
+
 	it("renders args, results, input, and visit through the same template path as script actions", async () => {
 		const dir = await tempDir();
 		const prepare = script(node, ["-e", 'console.log(JSON.stringify({type:"DONE",output:{value:"from-result"}}))']);

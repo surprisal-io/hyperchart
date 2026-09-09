@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { collectHistoryRecords } from "./helpers/history.js";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -45,42 +46,44 @@ async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
 async function createStoppedRun() {
 	const root = await mkdtemp(join(tmpdir(), "hyperchart-rewind-"));
 	tempDirs.push(root);
-	const runDir = join(root, "run");
+	const runId = "run";
+	const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+	const runDir = resolveRunPaths(runId, storage).runDir;
 	const chartPath = resolve("examples/quickstart.chart.ts");
-	await saveRunMeta(runDir, {
+	await withRunStorage(storage, () => saveRunMeta(runId, {
 		chartPath,
 		workDir: root,
 		chartId: "quickstart",
 		createdAt: new Date().toISOString(),
-	});
-	patchRunStatus(runDir, { runId: "run", branchIds: ["main"], chartId: "quickstart", state: "stopped" });
+	}));
+	withRunStorage(storage, () => patchRunStatus(runId, { branchIds: ["main"], chartId: "quickstart", state: "stopped" }));
 	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 	await store.initializeRootBranch();
-	return { root, runDir, store };
+	return { root, runId, storage, runDir, store };
 }
 
 describe("append-only branch rewind", () => {
 	it("forks without selecting/starting and moves a branch head without deleting the old tail", async () => {
-		const { root, runDir, store } = await createStoppedRun();
+		const { root, runId, storage, runDir, store } = await createStoppedRun();
 		await store.appendDrafts([
 			{ type: "args", args: {} },
 			{ type: "session_ref", index: 1, file: "one.jsonl" },
 			{ type: "session_ref", index: 2, file: "two.jsonl" },
 		]);
-		const fork = await forkHyperchartRun({ runDir, fromSeqId: 3, branchId: "experiment", reason: "preserve B", cwd: root, sourceBranchId: "main" });
+		const fork = await withRunStorage(storage, () => forkHyperchartRun({ runId, fromSeqId: 3, branchId: "experiment", reason: "preserve B", cwd: root, sourceBranchId: "main" }));
 		expect(fork).toMatchObject({ selectedBranchChanged: false, started: false, branch: { branchId: "experiment", headSeqId: 3 } });
 		const bytesBeforeCheckout = await readFile(join(runDir, "log.jsonl"), "utf8");
 		await store.listBranches();
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).toBe(bytesBeforeCheckout);
 
-		const rewind = await rewindHyperchartRun({ runDir, branchId: "main", seqId: 3, mode: "after", cwd: root });
+		const rewind = await withRunStorage(storage, () => rewindHyperchartRun({ runId, branchId: "main", seqId: 3, mode: "after", cwd: root }));
 		expect(rewind).toMatchObject({ branchId: "main", previousHeadSeqId: 4, headSeqId: 3, preservedRecords: 3 });
 		// Reopen after a separate host operation; an opened journal never rereads itself.
 		const replacementStore = new JsonlLogStore(join(runDir, "log.jsonl"));
 		const replacement = await replacementStore.appendDrafts([{ type: "session_ref", index: 3, file: "replacement.jsonl" }]);
 		expect(replacement[0]).toMatchObject({ seqId: 7, parentId: 3, branchId: "main" });
 
-		await rewindHyperchartRun({ runDir, branchId: "main", seqId: 4, mode: "after", cwd: root });
+		await withRunStorage(storage, () => rewindHyperchartRun({ runId, branchId: "main", seqId: 4, mode: "after", cwd: root }));
 		const continuationStore = new JsonlLogStore(join(runDir, "log.jsonl"));
 		const oldTailContinuation = await continuationStore.appendDrafts([{ type: "session_ref", index: 4, file: "old-tail.jsonl" }]);
 		expect(oldTailContinuation[0]).toMatchObject({ seqId: 9, parentId: 4, branchId: "main" });
@@ -88,21 +91,21 @@ describe("append-only branch rewind", () => {
 		expect(storedEntries.filter((entry) => entry.kind !== "branch").map((record) => record.seqId)).toEqual([2, 3, 4, 7, 9]);
 		expect((await collectHistoryRecords(continuationStore, "main")).map((record) => record.seqId)).toEqual([2, 3, 4, 9]);
 		expect((await collectHistoryRecords(continuationStore, "experiment")).map((record) => record.seqId)).toEqual([2, 3]);
-		expect((await listHyperchartBranchPage(runDir)).items.map((branch) => branch.branchId)).toEqual(["main", "experiment"]);
+		expect((await withRunStorage(storage, () => listHyperchartBranchPage(runId))).items.map((branch) => branch.branchId)).toEqual(["main", "experiment"]);
 		expect(await readFile(join(runDir, "log.jsonl"), "utf8")).not.toContain("rewind-backups");
 	});
 
 	it("pages more than 100 run-directory branches without overlap", async () => {
-		const { runDir, store } = await createStoppedRun();
+		const { runId, storage, runDir, store } = await createStoppedRun();
 		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
 		for (let index = 0; index < 105; index++) {
 			await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
 		}
-		const first = await listHyperchartBranchPage(runDir);
+		const first = await withRunStorage(storage, () => listHyperchartBranchPage(runId));
 		expect(first.items).toHaveLength(100);
 		expect(first.totalCount).toBe(106);
 		expect(first.next).toBeTypeOf("string");
-		const second = await listHyperchartBranchPage(runDir, first.next);
+		const second = await withRunStorage(storage, () => listHyperchartBranchPage(runId, first.next));
 		expect(second.items).toHaveLength(6);
 		expect(second.totalCount).toBe(106);
 		expect(second.next).toBeUndefined();
@@ -114,7 +117,9 @@ describe("append-only branch rewind", () => {
 	it("reports live rewind metadata from the controller move boundary after a concurrent append", async () => {
 		const root = await mkdtemp(join(tmpdir(), "hyperchart-live-rewind-race-"));
 		tempDirs.push(root);
-		const runDir = join(root, "run");
+		const runId = "run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		const chartPath = join(root, "chart.mjs");
 		await mkdir(runDir, { recursive: true });
 		await writeFile(chartPath, `export default {
@@ -124,11 +129,11 @@ describe("append-only branch rewind", () => {
     done: { kind: "final" }
   }
 };\n`);
-		await saveRunMeta(runDir, { chartPath, workDir: root, chartId: "live-rewind-race", createdAt: new Date().toISOString() });
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: root, chartId: "live-rewind-race", createdAt: new Date().toISOString() }));
 		const seed = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await seed.initializeRootBranch();
 		const controller = await createHyperchartRunnerController({
-			runId: "run", runDir, chartPath, chartId: "live-rewind-race", workDir: root, branchId: "main",
+			runId, storage, chartPath, chartId: "live-rewind-race", workDir: root, branchId: "main",
 		}, () => new LiveExecutor());
 		controller.acquireHold();
 		const aggregate = controller.start();
@@ -158,7 +163,7 @@ describe("append-only branch rewind", () => {
 			return originalClose.call(this);
 		});
 
-		const rewinding = rewindHyperchartRun({ runDir, branchId: "main", seqId: target.seqId, mode: "before", cwd: root });
+		const rewinding = withRunStorage(storage, () => rewindHyperchartRun({ runId, branchId: "main", seqId: target.seqId, mode: "before", cwd: root }));
 		await atClose;
 		const response = await controller.respondToUserInteraction("main", opened.seqId, { type: "SELECTED" });
 		releaseClose();
@@ -174,7 +179,9 @@ describe("append-only branch rewind", () => {
 	it("routes a live rewind through the owning controller control channel", async () => {
 		const root = await mkdtemp(join(tmpdir(), "hyperchart-live-rewind-"));
 		tempDirs.push(root);
-		const runDir = join(root, "run");
+		const runId = "run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		const chartPath = join(root, "chart.mjs");
 		await mkdir(runDir, { recursive: true });
 		await writeFile(chartPath, `export default {
@@ -184,12 +191,12 @@ describe("append-only branch rewind", () => {
     done: { kind: "final" }
   }
 };\n`);
-		await saveRunMeta(runDir, { chartPath, workDir: root, chartId: "live-rewind", createdAt: new Date().toISOString() });
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: root, chartId: "live-rewind", createdAt: new Date().toISOString() }));
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		const executor = new LiveExecutor();
 		const controller = await createHyperchartRunnerController({
-			runId: "run", runDir, chartPath, chartId: "live-rewind", workDir: root, branchId: "main",
+			runId, storage, chartPath, chartId: "live-rewind", workDir: root, branchId: "main",
 		}, () => executor);
 		controller.acquireHold();
 		const aggregate = controller.start();
@@ -199,7 +206,7 @@ describe("append-only branch rewind", () => {
 		const beforeRecords = await collectHistoryRecords(beforeStore, "main");
 		const targetRecord = beforeRecords[0]!;
 
-		const result = await rewindHyperchartRun({ runDir, branchId: "main", seqId: targetRecord.seqId, mode: "before", cwd: root });
+		const result = await withRunStorage(storage, () => rewindHyperchartRun({ runId, branchId: "main", seqId: targetRecord.seqId, mode: "before", cwd: root }));
 		expect(result).toMatchObject({
 			branchId: "main",
 			previousHeadSeqId: beforeBranch.headSeqId,

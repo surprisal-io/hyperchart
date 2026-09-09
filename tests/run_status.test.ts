@@ -1,4 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,9 +19,12 @@ afterEach(async () => {
 
 describe("run status", () => {
 	it("persists v2 live branch transitions and clears them at terminal state", async () => {
-		const dir = await makeTempDir();
-		patchRunStatus(dir, {
-			runId: "run",
+		const root = await makeTempDir();
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runId = "run";
+		const dir = resolveRunPaths(runId, storage).runDir;
+		await mkdir(dir);
+		withRunStorage(storage, () => patchRunStatus(runId, {
 			branchIds: ["main", "experiment"],
 			chartId: "chart",
 			state: "failed",
@@ -28,10 +32,10 @@ describe("run status", () => {
 			error: "boom",
 			exitCode: 1,
 			heartbeatAt: 100,
-		});
-		patchRunStatus(dir, { state: "running", error: undefined, exitCode: undefined, heartbeatAt: Date.now() });
+		}));
+		withRunStorage(storage, () => patchRunStatus(runId, { state: "running", error: undefined, exitCode: undefined, heartbeatAt: Date.now() }));
 
-		const status = readRunStatus(dir);
+		const status = withRunStorage(storage, () => readRunStatus(runId));
 		expect(status).toMatchObject({
 			version: 2,
 			runId: "run",
@@ -44,10 +48,10 @@ describe("run status", () => {
 		expect(status?.exitCode).toBeUndefined();
 		expect(isRunLive(status)).toBe(true);
 
-		patchRunStatus(dir, { branchIds: ["experiment"] });
-		expect(readRunStatus(dir)?.branchIds).toEqual(["experiment"]);
-		patchRunStatus(dir, { state: "complete", branchIds: [], attemptId: "attempt-b" });
-		expect(readRunStatus(dir)).toMatchObject({
+		withRunStorage(storage, () => patchRunStatus(runId, { branchIds: ["experiment"] }));
+		expect(withRunStorage(storage, () => readRunStatus(runId))?.branchIds).toEqual(["experiment"]);
+		withRunStorage(storage, () => patchRunStatus(runId, { state: "complete", branchIds: [], attemptId: "attempt-b" }));
+		expect(withRunStorage(storage, () => readRunStatus(runId))).toMatchObject({
 			state: "complete",
 			branchIds: [],
 			attemptId: "attempt-b",
@@ -55,20 +59,28 @@ describe("run status", () => {
 	});
 
 	it("refreshes a starting heartbeat without promoting the runner state", async () => {
-		const dir = await makeTempDir();
-		patchRunStatus(dir, { runId: "run", branchIds: ["main"], chartId: "chart", state: "starting" });
+		const root = await makeTempDir();
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runId = "run";
+		const dir = resolveRunPaths(runId, storage).runDir;
+		await mkdir(dir);
+		withRunStorage(storage, () => patchRunStatus(runId, { branchIds: ["main"], chartId: "chart", state: "starting" }));
 
-		const heartbeat = markRunHeartbeat(dir);
+		const heartbeat = withRunStorage(storage, () => markRunHeartbeat(runId));
 
 		expect(heartbeat).toMatchObject({ state: "starting", pid: process.pid, heartbeatAt: expect.any(Number) });
-		expect(readRunStatus(dir)?.state).toBe("starting");
+		expect(withRunStorage(storage, () => readRunStatus(runId))?.state).toBe("starting");
 	});
 
 	it("reads legacy singleton status for terminal-notification compatibility", async () => {
-		const dir = await makeTempDir();
+		const root = await makeTempDir();
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runId = "run";
+		const dir = resolveRunPaths(runId, storage).runDir;
+		await mkdir(dir);
 		await writeFile(join(dir, "status.json"), JSON.stringify({
 			version: 1,
-			runId: "legacy",
+			runId,
 			runDir: dir,
 			chartId: "chart",
 			state: "complete",
@@ -76,6 +88,6 @@ describe("run status", () => {
 			startedAt: 1,
 			updatedAt: 2,
 		}));
-		expect(readRunStatus(dir)).toMatchObject({ version: 2, branchIds: ["main"], state: "complete" });
+		expect(withRunStorage(storage, () => readRunStatus(runId))).toMatchObject({ version: 2, branchIds: ["main"], state: "complete" });
 	});
 });

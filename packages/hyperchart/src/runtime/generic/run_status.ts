@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { resolveRunPaths } from "./run_paths.js";
 import type { BranchId } from "../../core/durable_events.js";
 
 export type HyperchartRunState = "starting" | "running" | "complete" | "failed" | "stopping" | "stopped";
@@ -7,7 +8,6 @@ export type HyperchartRunState = "starting" | "running" | "complete" | "failed" 
 export type HyperchartRunStatus = {
 	version: 2;
 	runId: string;
-	runDir: string;
 	chartId: string;
 	state: HyperchartRunState;
 	/** Current live runner reservations; operational ownership, never durable selection. Terminal states use []. */
@@ -23,31 +23,31 @@ export type HyperchartRunStatus = {
 	replayWarnings?: string[];
 };
 
-export function runStatusPath(runDir: string): string { return join(runDir, "status.json"); }
+export function runStatusPath(runId: string): string { return join(resolveRunPaths(runId).runDir, "status.json"); }
 
-export function readRunStatus(runDir: string): HyperchartRunStatus | undefined {
-	const path = runStatusPath(runDir);
+export function readRunStatus(runId: string): HyperchartRunStatus | undefined {
+	const path = runStatusPath(runId);
 	if (!existsSync(path)) return undefined;
-	try { return normalizeStatus(JSON.parse(readFileSync(path, "utf8")) as unknown, runDir); }
+	try { return normalizeStatus(JSON.parse(readFileSync(path, "utf8")) as unknown, runId); }
 	catch { return undefined; }
 }
 
-export function writeRunStatus(runDir: string, status: HyperchartRunStatus): void {
-	const path = runStatusPath(runDir);
+export function writeRunStatus(runId: string, status: HyperchartRunStatus): void {
+	const path = runStatusPath(runId);
 	const temp = join(dirname(path), `.status.${process.pid}.${Date.now()}.tmp`);
 	writeFileSync(temp, `${JSON.stringify(status, null, 2)}\n`, "utf8");
 	renameSync(temp, path);
 }
 
 type RunStatusPatch = {
-	[K in keyof Omit<HyperchartRunStatus, "version" | "runDir" | "startedAt">]?:
-		| Omit<HyperchartRunStatus, "version" | "runDir" | "startedAt">[K]
+	[K in keyof Omit<HyperchartRunStatus, "version" | "runId" | "startedAt">]?:
+		| Omit<HyperchartRunStatus, "version" | "runId" | "startedAt">[K]
 		| undefined;
 };
 
-export function patchRunStatus(runDir: string, patch: RunStatusPatch): HyperchartRunStatus {
+export function patchRunStatus(runId: string, patch: RunStatusPatch): HyperchartRunStatus {
 	const now = Date.now();
-	const previous = readRunStatus(runDir);
+	const previous = readRunStatus(runId);
 	const pid = valueFor("pid", patch, previous);
 	const heartbeatAt = valueFor("heartbeatAt", patch, previous);
 	const exitCode = valueFor("exitCode", patch, previous);
@@ -58,8 +58,7 @@ export function patchRunStatus(runDir: string, patch: RunStatusPatch): Hyperchar
 	assertBranchIds(branchIds);
 	const next: HyperchartRunStatus = {
 		version: 2,
-		runId: valueFor("runId", patch, previous) ?? "unknown",
-		runDir,
+		runId: runId,
 		chartId: valueFor("chartId", patch, previous) ?? "unknown",
 		state: valueFor("state", patch, previous) ?? "starting",
 		branchIds: [...branchIds],
@@ -72,12 +71,12 @@ export function patchRunStatus(runDir: string, patch: RunStatusPatch): Hyperchar
 		...(error === undefined ? {} : { error }),
 		...(replayWarnings === undefined ? {} : { replayWarnings }),
 	};
-	writeRunStatus(runDir, next);
+	writeRunStatus(runId, next);
 	return next;
 }
 
-export function markRunHeartbeat(runDir: string): HyperchartRunStatus {
-	return patchRunStatus(runDir, { pid: process.pid, heartbeatAt: Date.now() });
+export function markRunHeartbeat(runId: string): HyperchartRunStatus {
+	return patchRunStatus(runId, { pid: process.pid, heartbeatAt: Date.now() });
 }
 
 export function isTerminalRunState(state: HyperchartRunState): boolean { return state === "complete" || state === "failed" || state === "stopped"; }
@@ -92,8 +91,8 @@ function valueFor<K extends keyof RunStatusPatch>(key: K, patch: RunStatusPatch,
 	return Object.hasOwn(patch, key) ? patch[key] : previous?.[key];
 }
 
-function normalizeStatus(value: unknown, fallbackRunDir: string): HyperchartRunStatus | undefined {
-	if (!isRecord(value) || typeof value.runId !== "string" || typeof value.chartId !== "string") return undefined;
+function normalizeStatus(value: unknown, expectedRunId: string): HyperchartRunStatus | undefined {
+	if (!isRecord(value) || value.runId !== expectedRunId || typeof value.chartId !== "string") return undefined;
 	const state = normalizeState(value.state);
 	if (state === undefined) return undefined;
 	// v1 is read-only compatibility for terminal delivery and existing run discovery;
@@ -108,7 +107,6 @@ function normalizeStatus(value: unknown, fallbackRunDir: string): HyperchartRunS
 	return {
 		version: 2,
 		runId: value.runId,
-		runDir: typeof value.runDir === "string" ? value.runDir : fallbackRunDir,
 		chartId: value.chartId,
 		state,
 		branchIds: [...branchIds],

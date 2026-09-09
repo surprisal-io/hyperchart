@@ -1,3 +1,4 @@
+import { resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +9,6 @@ import {
 	getProjectHyperchartsDir,
 	listProjectHypercharts,
 	resolveHyperchartPath,
-	resolveHyperchartRunDir,
 } from "../packages/pi-hyperchart/src/runtime/pi/paths.js";
 
 const tempDirs: string[] = [];
@@ -71,7 +71,8 @@ describe("pi hyperchart paths", () => {
 		const agentDir = await makeTempDir();
 
 		expect(getHyperchartRunsRoot(agentDir)).toBe(join(agentDir, "hypercharts", "runs"));
-		expect(resolveHyperchartRunDir("run-1", project, agentDir)).toBe(join(agentDir, "hypercharts", "runs", "run-1"));
-		expect(resolveHyperchartRunDir("./local-run", project, agentDir)).toBe(join(project, "local-run"));
+		const storage: RunStorage = { kind: "jsonl", rootDir: getHyperchartRunsRoot(agentDir), layout: "run-id" };
+		expect(resolveRunPaths("run-1", storage).runDir).toBe(join(agentDir, "hypercharts", "runs", "run-1"));
+		expect(() => resolveRunPaths("./local-run", storage)).toThrow(/not a path/);
 	});
 });

@@ -1,3 +1,4 @@
+import { withRunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -111,7 +112,7 @@ async function createComponent(kind: ComponentKind, themeName: ThemeName, width:
 			},
 		});
 	} else {
-		session.component = new RunWidget(tui, theme, preset === "manyRunning" ? data.manyRunning : data.primary);
+		session.component = withRunStorage(data.storage, () => new RunWidget(tui, theme, preset === "manyRunning" ? data.manyRunning : data.primary));
 	}
 	await waitForData(session.component, width);
 	return session;

@@ -1,3 +1,4 @@
+import { withRunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { initTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
@@ -15,7 +16,7 @@ beforeAll(() => initTheme("dark", false));
 const items: RunHistoryItem[] = [
 	{
 		runId: "first-run",
-		branchId: "main",		runDir: "/tmp/first-run",
+		branchId: "main",
 		chartId: "demo",
 		state: "running",
 		live: true,
@@ -26,7 +27,7 @@ const items: RunHistoryItem[] = [
 	},
 	{
 		runId: "second-run",
-		branchId: "main",		runDir: "/tmp/second-run",
+		branchId: "main",
 		chartId: "demo",
 		state: "complete",
 		live: false,
@@ -67,12 +68,11 @@ describe("minimal Hyperchart TUI", () => {
 	});
 
 	it("renders refresh failures instead of leaking an unhandled rejection", async () => {
-		const widget = new RunWidget(fakeTui(), testTheme, {
+		const widget = withRunStorage({ kind: "jsonl", rootDir: "/definitely-missing-hyperchart-storage", layout: "run-id" }, () => new RunWidget(fakeTui(), testTheme, {
 			runId: "broken-run",
-			branchId: "main",			runDir: "/definitely-missing-hyperchart-run",
-			logPath: "/definitely-missing-hyperchart-run/log.jsonl",
+			branchId: "main",
 			ast: {} as never,
-		});
+		}));
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(widget.render(120).join("\n")).toContain("inspect failed");
 		widget.dispose();

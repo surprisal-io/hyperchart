@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -91,7 +92,9 @@ describe("FunctionRunner and tsAction", () => {
 		const chartDir = join(root, "chart");
 		const workDir = join(root, "workspace");
 		const projectDir = join(root, "project");
-		const runDir = join(root, "run");
+		const runId = "run";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		await Promise.all([mkdir(chartDir), mkdir(workDir), mkdir(projectDir), mkdir(runDir)]);
 		await writeFile(
 			join(chartDir, "actions.mjs"),
@@ -149,7 +152,7 @@ export async function consume(params, ctx) {
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
 		const store = new MemoryLogStore();
-		const runtime = new ChartRuntime({
+		const runtime = withRunStorage(storage, () => new ChartRuntime({
 			ast: parsed.ast,
 			branchId: "main",
 			logStore: store,
@@ -157,9 +160,9 @@ export async function consume(params, ctx) {
 			chartDir,
 			workDir,
 			projectDir,
-			runDir,
+			runId,
 			schemaRegistry: parsed.schemaRegistry,
-		});
+		}));
 
 		const state = await withTimeout(start(runtime, { topic: "durable functions" }));
 		await runtime.dispose();

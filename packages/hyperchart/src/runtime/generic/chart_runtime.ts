@@ -1,3 +1,4 @@
+import { resolveRunPaths } from "./run_paths.js";
 import { promises as fsp } from "node:fs";
 import { dirname } from "node:path";
 import type { Runtime } from "../runtime.js";
@@ -35,7 +36,7 @@ export type ChartRuntimeOptions = {
 	workDir: string;
 	chartDir: string;
 	/** Enables artifact pinning: accepted deliverables are snapshotted into `<runDir>/artifact_store`. */
-	runDir?: string;
+	runId?: string;
 	schemaRegistry?: SchemaRegistryLike;
 	now?: () => number;
 	onWarn?: (msg: string) => void;
@@ -75,7 +76,7 @@ export class ChartRuntime implements Runtime {
 			projectDir: options.projectDir ?? options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
 		});
-		if (options.runDir !== undefined) this.artifactStore = new ArtifactStore(options.runDir);
+		if (options.runId !== undefined) this.artifactStore = new ArtifactStore(resolveRunPaths(options.runId).runDir);
 		this.now = options.now ?? Date.now;
 		this.onWarn = options.onWarn ?? (() => {});
 	}
@@ -202,10 +203,13 @@ export class ChartRuntime implements Runtime {
 					break;
 				case "validate": {
 					this.track(
-						runGuard(
+						(effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId
+							? Promise.resolve<GuardOutcome>({ ok: false, reason: foreignCompletionReason(effect.completionBranchId, this.branchId) })
+							: runGuard(
 							effect.guard,
 							effect.event,
-							{ chartDir: this.options.chartDir, workDir: this.options.workDir },
+							{ chartDir: this.options.chartDir, workDir: this.options.workDir,
+								invocation: { branchId: this.branchId, actionUid: effect.actionUid, invocationId: effect.invocationId } },
 							{
 								scripts: this.scripts,
 								...(effect.env === undefined ? {} : { env: effect.env }),
@@ -213,7 +217,7 @@ export class ChartRuntime implements Runtime {
 								...(effect.reply === undefined ? {} : { reply: effect.reply }),
 								actionUid: effect.actionUid,
 							} satisfies RenderedGuardInvocation,
-						)
+						))
 							.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
 							.then((outcome) => this.send({ kind: "validated", effectId: effect.id, outcome })),
 					);
@@ -394,6 +398,9 @@ export class ChartRuntime implements Runtime {
 
 	private dispatchRejected(effect: RejectedEffect): void {
 		if (this.quiescing) return;
+		if (effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId) {
+			effect = { ...effect, reason: [foreignCompletionReason(effect.completionBranchId, this.branchId), effect.reason].filter(Boolean).join("\n") };
+		}
 		const mainState = nodeAt(this.options.ast, effect.actionUid.state);
 		const actorState = actorContextForState(this.options.ast, effect.actionUid.state)?.node;
 		const state = mainState?.kind === "state" ? mainState : actorState?.kind === "state" ? actorState : undefined;
@@ -489,4 +496,8 @@ async function matchesHash(path: string, hash: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+function foreignCompletionReason(sourceBranchId: string, branchId: string): string {
+	return `Completion artifacts from branch '${sourceBranchId}' are provisional and were not inherited by '${branchId}'. Produce a fresh branch-local completion and its declared artifacts before validation; do not reuse the inherited result with older accepted files. The declared onReject policy and retry budget still apply.`;
 }

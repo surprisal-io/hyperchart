@@ -1,3 +1,4 @@
+import { resolveRunPaths } from "../runtime/generic/run_paths.js";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { actionUidKey } from "../core/action_uid.js";
@@ -39,11 +40,9 @@ export type SessionTranscriptReader = (
 	binding: InvocationTranscriptBinding,
 ) => Promise<HyperchartSessionMessageInfo[] | undefined>;
 
-export type HyperchartRunFromRunDirBaseOptions = {
+export type HyperchartRunFromRunIdBaseOptions = {
 	/** Read-only historical boundary for both semantic state and history. */
 	snapshot?: HistorySnapshot;
-	/** Explicit durable identity when it differs from the run directory basename. */
-	runId?: string;
 	/** Explicit non-durable branch selection; defaults only for internal/static callers. */
 	branchId?: BranchId;
 	meta?: RunMeta;
@@ -52,7 +51,7 @@ export type HyperchartRunFromRunDirBaseOptions = {
 	now?: number;
 };
 
-export type HyperchartRunFromRunDirOptions = HyperchartRunFromRunDirBaseOptions & (
+export type HyperchartRunFromRunIdOptions = HyperchartRunFromRunIdBaseOptions & (
 	| {
 			/** Compact inspection without transcript message payloads. */
 			includeTranscripts?: false;
@@ -64,16 +63,14 @@ export type HyperchartRunFromRunDirOptions = HyperchartRunFromRunDirBaseOptions 
 	  }
 );
 
-export async function hyperchartRunFromRunDir(
-	runDir: string,
-	options: HyperchartRunFromRunDirOptions = {},
+export async function hyperchartRunFromRunId(
+	runId: string,
+	options: HyperchartRunFromRunIdOptions = {},
 ): Promise<HyperchartRunInfo> {
-	const absoluteRunDir = resolve(runDir);
+	const absoluteRunDir = resolveRunPaths(runId).runDir;
 	const meta =
 		options.meta ??
-		(await loadRunMeta(absoluteRunDir, {
-			...(options.runId === undefined ? {} : { runId: options.runId }),
-		}));
+		(await loadRunMeta(runId));
 	const ast = options.ast ?? parsedRunAst(meta);
 	const agentDefaults = runAgentDefaults(absoluteRunDir, options.agentDefaults);
 	const inspect = inspectChartAst(ast, {
@@ -81,7 +78,7 @@ export async function hyperchartRunFromRunDir(
 		...(meta.exportName === undefined ? {} : { exportName: meta.exportName }),
 		...(agentDefaults === undefined ? {} : { agentDefaults }),
 	});
-	const status = options.snapshot === undefined ? readRunStatus(absoluteRunDir) : undefined;
+	const status = options.snapshot === undefined ? readRunStatus(runId) : undefined;
 	const branchId = options.branchId ?? options.snapshot?.branchId ?? "main";
 	if (options.snapshot !== undefined && options.snapshot.branchId !== branchId)
 		throw new Error("Inspector snapshot branch does not match selected branch");
@@ -90,10 +87,9 @@ export async function hyperchartRunFromRunDir(
 	let initialBranches: BranchListChunk | undefined;
 	let snapshot: HistorySnapshot | undefined;
 	let projection: BranchProjection | undefined;
-	const store = await openRunLogStore(absoluteRunDir, {
+	const store = await openRunLogStore(runId, {
 		access: "read",
 		branchId,
-		...(options.runId === undefined ? {} : { runId: options.runId }),
 	});
 	try {
 		let syntheticEmptyBranch = false;
@@ -124,7 +120,6 @@ export async function hyperchartRunFromRunDir(
 			Object.entries(rawSessionProgress.sessions).filter(([, session]) => options.snapshot === undefined && session.branchId === branchId),
 		),
 	};
-	const runId = options.runId ?? status?.runId ?? basename(absoluteRunDir);
 	const runtimeRecords = records;
 	const overviewSessionProgress = projection !== undefined && options.includeTranscripts !== true
 		? currentSessionProgress(branchSessionProgress, projection)
@@ -172,16 +167,15 @@ export async function hyperchartRunFromRunDir(
 	};
 }
 
-export async function hyperchartRunOverviewFromRunDir(
-	runDir: string,
-	options: Omit<HyperchartRunFromRunDirOptions, "includeTranscripts" | "readTranscript"> = {},
+export async function hyperchartRunOverviewFromRunId(
+	runId: string,
+	options: Omit<HyperchartRunFromRunIdOptions, "includeTranscripts" | "readTranscript"> = {},
 ): Promise<HyperchartRunOverview> {
-	const run = await hyperchartRunFromRunDir(runDir, { ...options, includeTranscripts: false });
+	const run = await hyperchartRunFromRunId(runId, { ...options, includeTranscripts: false });
 	if (run.historySnapshot === undefined) throw new Error("Bounded run overview did not capture a history snapshot");
-	const store = await openRunLogStore(resolve(runDir), {
+	const store = await openRunLogStore(runId, {
 		access: "read",
 		branchId: run.historySnapshot.branchId,
-		...(options.runId === undefined ? {} : { runId: options.runId }),
 	});
 	try {
 		const initialBranches = await store.listBranches();
@@ -379,8 +373,8 @@ function agentInvocationsByAction(records: readonly DurableLogRecord[]): Map<str
 
 function runAgentDefaults(
 	runDir: string,
-	resolver: HyperchartRunFromRunDirOptions["agentDefaults"],
-): HyperchartRunFromRunDirOptions["agentDefaults"] {
+	resolver: HyperchartRunFromRunIdOptions["agentDefaults"],
+): HyperchartRunFromRunIdOptions["agentDefaults"] {
 	if (resolver === undefined) return undefined;
 	const configPath = resolve(runDir, "runner.config.json");
 	if (!existsSync(configPath)) return resolver;

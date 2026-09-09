@@ -1,3 +1,5 @@
+import { basename as fixtureRunId, dirname as fixtureRoot } from "node:path";
+import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { collectHistoryRecords } from "./helpers/history.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,7 +134,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture();
     let built = 0;
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built += 1; return new NoopExecutor(); },
     );
     const hold = controller.acquireHold();
@@ -165,7 +167,7 @@ describePg("atomic runner interaction commit", () => {
     let entered!: () => void; const constructionEntered = new Promise<void>((resolve) => { entered = resolve; });
     let release!: () => void; const constructionGate = new Promise<void>((resolve) => { release = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       async () => { entered(); await constructionGate; return new NoopExecutor(); },
     );
     const aggregate = controller.start();
@@ -182,7 +184,7 @@ describePg("atomic runner interaction commit", () => {
     let entered!: () => void; const constructionEntered = new Promise<void>((resolve) => { entered = resolve; });
     let release!: () => void; const constructionGate = new Promise<void>((resolve) => { release = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       async () => { entered(); await constructionGate; return new NoopExecutor(); },
     );
     const aggregate = controller.start();
@@ -204,7 +206,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture();
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     controller.acquireHold();
@@ -221,7 +223,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture();
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     controller.acquireHold();
@@ -248,7 +250,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture(false, true);
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     controller.acquireHold();
@@ -267,7 +269,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture(true);
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
@@ -281,7 +283,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture();
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
@@ -298,7 +300,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture();
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
@@ -314,7 +316,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture(true);
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
@@ -330,7 +332,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture(true);
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
@@ -356,7 +358,7 @@ describePg("atomic runner interaction commit", () => {
     const f = await fixture(true);
     let built!: () => void; const runtimeBuilt = new Promise<void>((resolve) => { built = resolve; });
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built(); return new NoopExecutor(); },
     );
     const aggregate = controller.start(); await runtimeBuilt; await new Promise((resolve) => setTimeout(resolve, 25));
@@ -381,7 +383,7 @@ describePg("atomic runner interaction commit", () => {
     const startedDisposal = new Promise<void>((resolve) => { disposalStarted = resolve; });
     let built = false;
     const controller = await createHyperchartRunnerController(
-      { runId: f.runId, runDir: f.runDir, chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
+      { runId: f.runId, storage: fixtureStorage(f.runDir), chartPath: f.chartPath, chartId: "atomic-controller", workDir: f.workDir, branchId: "main" },
       () => { built = true; return new DrainingExecutor(disposalStarted, disposeGate); },
     );
     controller.acquireHold();
@@ -419,7 +421,7 @@ describePg("atomic runner interaction commit", () => {
     const controller = await createHyperchartRunnerController(
       {
         runId: f.runId,
-        runDir: f.runDir,
+        storage: fixtureStorage(f.runDir),
         chartPath: f.chartPath,
         chartId: "atomic-controller",
         workDir: f.workDir,
@@ -487,3 +489,8 @@ describePg("atomic runner interaction commit", () => {
     await reader.close();
   }, 30_000);
 });
+
+/** Explicit storage configuration for this suite's generated literal-layout fixtures. */
+function fixtureStorage(runDirectory: string): RunStorage {
+ return {kind: "postgres", dsn: dsn!, rootDir: fixtureRoot(runDirectory), layout: "run-id"};
+}

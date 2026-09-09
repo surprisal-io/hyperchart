@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { networkInterfaces } from "node:os";
@@ -36,9 +37,9 @@ export async function openRunInspector(options: OpenRunInspectorOptions): Promis
 	const token = randomBytes(18).toString("base64url");
 	state.entries.set(token, {
 		runId: options.runId,
-		loadRun: options.loadRun,
+		loadRun: AsyncLocalStorage.bind(options.loadRun),
 		...(options.historyDataSource === undefined ? {} : { historyDataSource: options.historyDataSource }),
-		...(options.steerSession === undefined ? {} : { steerSession: options.steerSession }),
+		...(options.steerSession === undefined ? {} : { steerSession: AsyncLocalStorage.bind(options.steerSession) }),
 		touchedAt: Date.now(),
 	});
 	trimEntries(state.entries);

@@ -162,7 +162,7 @@ After editing this pattern, call `hyperchart` with `action: "inspect"`; do not r
 1. Inspect the chart first with `hyperchart` with `action: "inspect"`. It runs the same TypeScript/source-lint preflight as `run` and returns a bounded digest; full inspection is browser-only through `action: "view"`.
 2. Verify every named agent definition is available.
 3. Call `hyperchart({ action: "run", chartPath, args })`.
-4. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; Pi routes owned gates and the terminal prompt to that exact originating session/canonical working directory. Do not start a polling watcher.
+4. Use `wait: true` only when the current task must block. Otherwise retain the returned run id; Pi routes owned gates and the terminal prompt to that exact originating session/canonical working directory. Do not start a polling watcher.
 5. A waited call can return terminal status **or** `boundary: "user"` for the globally active owned gate, possibly from another run that sorts earlier. Handle the gate before waiting again.
 6. Inspect the concrete result with `hyperchart({ action: "run_inspect", runId, branchId })` before reporting completion. `branchId` may be omitted only for a run with exactly one durable branch.
 
@@ -191,13 +191,13 @@ Multiple gates are serialized across parallel/map branches and owned runs by lex
 
 ## View a run
 
-Call `hyperchart({ action: "view", runId, branchId })` to open the localhost browser inspector and receive exactly `{ url }`. `runDir` is an equivalent run-coordinate alias; omit `branchId` only for a single-branch run. Pass `open: false` when only the URL should be returned. The inspector shows the live graph, declared role/toolset names with resolved model/tool allowlists, per-state runtime details, session transcripts, and steering controls for the selected run. This is the only full inspection surface: tool responses are capped digests and never place definitions, schemas, runtime snapshots, visit histories, or transcripts into session logs.
+Call `hyperchart({ action: "view", runId, branchId })` to open the localhost browser inspector and receive exactly `{ url }`. Only `runId` addresses runs; omit `branchId` only for a single-branch run. Pass `open: false` when only the URL should be returned. The inspector shows the live graph, declared role/toolset names with resolved model/tool allowlists, per-state runtime details, session transcripts, and steering controls for the selected run. This is the only full inspection surface: tool responses are capped digests and never place definitions, schemas, runtime snapshots, visit histories, or transcripts into session logs.
 
 ## Resume a run
 
 Read [Recovery and safety](../../docs/safety.md), then:
 
-1. Call `hyperchart({ action: "run_inspect", runId, branchId })` with the existing run id/directory and selected branch. `runDir` is an equivalent alias; a single durable branch can be inferred.
+1. Call `hyperchart({ action: "run_inspect", runId, branchId })` with the existing run id and selected branch. Directory aliases are rejected; a single durable branch can be inferred.
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
 4. Resume with `hyperchart({ action: "run", runId, branchId })`. The branch may be omitted only when the run has exactly one durable head. Create a different run with `chartPath`; it defaults to fresh branch `main`.
@@ -223,7 +223,7 @@ Read [Recovery and safety](../../docs/safety.md), then:
 
 ## Report
 
-Include the chart id, run id, absolute run directory, current or terminal status, artifact paths, and unresolved validation, replay, session, or external-side-effect risks.
+Include the chart id, run id, current or terminal status, artifact paths, and unresolved validation, replay, session, or external-side-effect risks.
 
 ## Explicit actors
 

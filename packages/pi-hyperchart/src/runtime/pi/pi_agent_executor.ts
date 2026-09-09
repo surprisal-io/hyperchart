@@ -49,6 +49,8 @@ export type { SessionPlan };
 export type PiExtensionPolicy = "ambient" | "isolated";
 
 export type PiSessionOverridesContext = Readonly<{
+	/** Original durable session identity; stable across retries, not the SDK attempt ID. */
+	invocationId: string;
 	branchId: string;
 	actionUid: ActionUID;
 	agentName: string;
@@ -460,6 +462,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			...(this.options.toolsets === undefined ? {} : { toolsets: this.options.toolsets }),
 		});
 		const overrides = await this.options.resolveSessionOverrides?.({
+			invocationId: effect.sessionId,
 			branchId: this.options.branchId,
 			actionUid: effect.actionUid,
 			agentName: definition.name,

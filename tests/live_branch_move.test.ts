@@ -1,3 +1,5 @@
+import { basename as fixtureRunId, dirname as fixtureRoot } from "node:path";
+import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -92,7 +94,7 @@ async function fixture(
 	})).join("\n") + "\n");
 	const executors = new Map<string, PausingExecutor[]>();
 	const controller = await createHyperchartRunnerController({
-		runId: "run", runDir, chartPath, chartId: "live-move", workDir, branchIds: [...branchIds],
+		runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "live-move", workDir, branchIds: [...branchIds],
 	}, ({ config }) => {
 		const executor = new PausingExecutor(config.branchId, disposeGates.get(config.branchId));
 		const branchExecutors = executors.get(config.branchId) ?? [];
@@ -217,3 +219,8 @@ describe("live branch sealing and move", () => {
 		await f.completion;
 	});
 });
+
+/** Explicit storage configuration for this suite's generated literal-layout fixtures. */
+function fixtureStorage(runDirectory: string): RunStorage {
+ return {kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id"};
+}

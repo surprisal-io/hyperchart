@@ -19,6 +19,8 @@ Pi host libraries remain optional peers supplied through Pi's in-process extensi
 
 This requires a filesystem-backed Node.js Pi installation. Compiled Bun Pi binaries expose host modules virtually rather than as importable files and are not currently supported for detached runners.
 
+Each extension registration owns its operational RunManager and storage scope. Identical IDs in different registrations cannot share an active AST, stop waiter, or completion cleanup; stale completion callbacks cannot remove a newer reservation. Synchronous run-ID autocomplete uses an ownership-filtered metadata cache refreshed on session startup and after commands/tools, including stopped runs for resume/restart/delete. Unavailable metadata clears suggestions instead of exposing stale entries.
+
 ## Command bridge
 
 ```ts
@@ -136,7 +138,7 @@ Singleton created with default options.
 
 ## Agent tool
 
-The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `branches`, `fork`, `rewind`, `stop`, or `respond`. The schema is not a JavaScript export. Run-target actions accept either `runDir` or `runId` as equivalent coordinates and reject conflicting simultaneous values; `respond` deliberately accepts only its exact durable `runId` identity.
+The Pi extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `branches`, `fork`, `rewind`, `stop`, or `respond`. The schema is not a JavaScript export. Every run-target action accepts only `runId`; directory aliases are rejected. `respond` requires the exact `(runId, branchId, seqId)`.
 
 ### `action: "list"`
 
@@ -202,7 +204,6 @@ Starts a new run, attaches to a live run, or resumes an existing stopped run.
   action: "run";
   chartPath?: string;
   args?: Record<string, unknown>;
-  runDir?: string;
   runId?: string;
   branchId?: string;
   branchIds?: string[];
@@ -215,7 +216,7 @@ Starts a new run, attaches to a live run, or resumes an existing stopped run.
 Rules:
 
 - A new run requires `chartPath`. When both branch selectors are omitted, it starts singleton branch `main`.
-- A resume can provide `runDir` or `runId`; selected-backend run metadata supplies chart path, export name, and working directory (`hyperchart_run_meta` under PostgreSQL, otherwise `meta.json`). Both names accept a run id or path resolved by the extension, but conflicting simultaneous values are rejected.
+- A resume provides `runId`; selected-backend run metadata supplies chart path, export name, and working directory (`hyperchart_run_meta` under PostgreSQL, otherwise `meta.json`). Paths and legacy aliases are rejected.
 - A run must belong to the current Pi working directory.
 - `branchId` and `branchIds` are mutually exclusive. `branchIds` must be non-empty and unique. A fresh chart can select only singleton `main`; after forking durable heads, resume the existing run with an explicit `branchId` or `branchIds`. Omission is accepted only when the existing run has exactly one durable branch, which is inferred; a multi-branch run fails closed rather than silently selecting a head.
 - `wait` defaults to `false`.
@@ -226,7 +227,6 @@ Without `wait`, result details contain only the bounded startup result below. Th
 ```ts
 {
   runId: string;
-  runDir: string;
   chartId: string;
   final: false;
   status: "started";
@@ -240,7 +240,6 @@ Terminal details contain compact status and identifiers only:
 ```ts
 {
   runId: string;
-  runDir: string;
   chartId: string;
   boundary: "terminal";
   final: true;
@@ -272,7 +271,7 @@ Start example:
 }
 ```
 
-Resume example for a single-branch run (the equivalent `runDir` spelling is also accepted):
+Resume example for a single-branch run:
 
 ```json
 {
@@ -290,7 +289,6 @@ The extension type-checks the chart, normalizes it, creates or loads run metadat
 ```ts
 {
   action: "run_inspect";
-  runDir?: string;
   runId?: string;
   branchId?: string;
   /** Deprecated: true is rejected; use action: "view". */
@@ -298,7 +296,7 @@ The extension type-checks the chart, normalizes it, creates or loads run metadat
 }
 ```
 
-Pass one of `runDir` or `runId`. `branchId` may be omitted only when the run has exactly one durable branch; multi-branch inspection requires it. The tool always returns a bounded `RunInspectSummary`, including the selected `branchId`; `verbose: true` is rejected. Its collections use digest names such as `stateDigests`, `pendingStateIds`, and `sessionDigest`, and every capped collection carries its corresponding omission count. Full runtime states, visit histories, schemas, and transcripts are fetched only by the browser inspector and never returned in tool `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
+Pass `runId`. `branchId` may be omitted only when the run has exactly one durable branch; multi-branch inspection requires it. The tool always returns a bounded `RunInspectSummary`, including the selected `branchId`; `verbose: true` is rejected. Its collections use digest names such as `stateDigests`, `pendingStateIds`, and `sessionDigest`, and every capped collection carries its corresponding omission count. Full runtime states, visit histories, schemas, and transcripts are fetched only by the browser inspector and never returned in tool `details`. Agent states preserve declared `role`/`toolset` and expose `resolvedModel`/`resolvedTools` from the run's persisted `runner.config.json`; session snapshots may also include the actual role, model, toolset, and tool allowlist used at launch.
 
 ```json
 {
@@ -345,7 +343,6 @@ The host requires the exact originating Pi session and canonical working directo
 ```ts
 {
   action: "view";
-  runDir?: string;
   runId?: string;
   branchId?: string;
   chartPath?: string;
@@ -353,7 +350,7 @@ The host requires the exact originating Pi session and canonical working directo
 }
 ```
 
-Use exactly one of `runDir`/`runId` or `chartPath`; they are mutually exclusive. A run view may omit `branchId` only when the run has one durable branch; multi-branch views require an explicit branch. Starts or reuses the Pi process's localhost inspector server, registers the selected run when viewing a run, or loads a static chart view when `chartPath` is provided.
+Use exactly one of `runId` or `chartPath`; they are mutually exclusive. A run view may omit `branchId` only when the run has one durable branch; multi-branch views require an explicit branch. Starts or reuses the Pi process's localhost inspector server, registers the selected run when viewing a run, or loads a static chart view when `chartPath` is provided.
 
 For both run and static views, result details are exactly URL-only:
 
@@ -366,7 +363,7 @@ The run coordinate must identify a run belonging to the current working director
 ```json
 {
   "action": "view",
-  "runDir": "review-20260711-180000",
+  "runId": "review-20260711-180000",
   "open": false
 }
 ```
@@ -376,16 +373,15 @@ The run coordinate must identify a run belonging to the current working director
 ```ts
 {
   action: "stop";
-  runDir?: string;
   runId?: string;
   all?: boolean;
 }
 ```
 
-Stop one run or every active run owned by current working directory. Exactly one of `runDir`/`runId` or `all: true` is required.
+Stop one run or every active run owned by current working directory. Exactly one of `runId` or `all: true` is required.
 
 ```json
-{ "action": "stop", "runDir": "review-20260711-180000" }
+{ "action": "stop", "runId": "review-20260711-180000" }
 ```
 
 ```json
@@ -396,12 +392,12 @@ Live runners receive `SIGTERM`. Stale active statuses become `stopped` without s
 
 ### `action: "branches"`
 
-Lists one creation-ordered page of at most 100 durable named heads. Pass either `runDir` or `runId`, and pass the returned opaque `next` as `cursor` for the following page. The result includes `branches`, `totalCount`, and optional `next`. This is read-only and does not change the selected view.
+Lists one creation-ordered page of at most 100 durable named heads. Pass `runId`, and pass the returned opaque `next` as `cursor` for the following page. The result includes `branches`, `totalCount`, and optional `next`. This is read-only and does not change the selected view.
 
 ### `action: "fork"`
 
 ```ts
-{ action: "fork", runDir?: string, runId?: string, branchId: string, fromSeqId: number, sourceBranchId?: string, reason?: string }
+{ action: "fork", runId?: string, branchId: string, fromSeqId: number, sourceBranchId?: string, reason?: string }
 ```
 
 Creates a durable named branch pointer. Fork never selects or starts it and rejects duplicate names or missing records.
@@ -411,7 +407,6 @@ Creates a durable named branch pointer. Fork never selects or starts it and reje
 ```ts
 {
   action: "rewind";
-  runDir?: string;
   runId?: string;
   branchId: string;
   state?: string;

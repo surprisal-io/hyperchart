@@ -83,7 +83,6 @@ function storyRunStatus(
 	const exitCode = spec.runtime.run?.exitCode ?? (spec.runtime.run?.statusError === undefined ? undefined : 1);
 	return {
 		runId: `inspector-panel-${key}`,
-		runDir: `/tmp/pi-hyperchart/storybook/${key}`,
 		chartId: ast.id,
 		state: storyRuntimeStatus(spec.runtime.run?.status),
 		startedAt: 1_700_000_000_000,

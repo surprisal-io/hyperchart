@@ -13,6 +13,7 @@
 // ${CLAUDE_CONFIG_DIR:-~/.claude}/hypercharts/runs.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { listRunIds, resolveRunPaths } from "@surprisal/hyperchart/runtime";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -25,6 +26,7 @@ const RESET = "\x1b[0m";
 
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const runsRoot = process.env.HYPERCHART_RUNS_ROOT ?? join(configDir, "hypercharts", "runs");
+const storage = {kind: "jsonl", rootDir: runsRoot, layout: "run-id"};
 
 function readJson(path) {
 	try {
@@ -69,15 +71,15 @@ function terminalLabel(status) {
 
 let entries = [];
 try {
-	entries = readdirSync(runsRoot);
+	entries = await listRunIds(storage);
 } catch {
 	// no runs directory yet
 }
 
 const live = [];
 const recent = [];
-for (const name of entries) {
-	const dir = join(runsRoot, name);
+for (const runId of entries) {
+	const dir = resolveRunPaths(runId, storage).runDir;
 	const statusPath = join(dir, "status.json");
 	const status = readJson(statusPath);
 	if (status === undefined || typeof status.chartId !== "string") continue;

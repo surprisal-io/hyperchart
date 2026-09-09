@@ -222,6 +222,10 @@ export type ActorEffect = ActorCreateEffect | ActorEnqueueEffect | ActorReplyEff
 // answers with a `validated` event; the completion is not processed until then.
 export type ValidateEffect = Readonly<{
 	kind: "validate";
+	/** Provisional artifact ownership; a fork must obtain a local completion first. */
+	completionBranchId?: string;
+	/** Identity of the originating action, not this validation phase. */
+	invocationId: string;
 	id: EffectId;
 	actionUid: ActionUID;
 	guard: GuardRefAst;
@@ -237,6 +241,7 @@ export type ValidateEffect = Readonly<{
 // must deliver the feedback per onReject, and the action completes again with a fixed result.
 export type RejectedEffect = Readonly<{
 	kind: "rejected";
+	completionBranchId?: string;
 	id: EffectId;
 	/** Durable rejected-validation fact that caused this retry phase. */
 	seqId: number;
@@ -552,6 +557,8 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 			// the rendered paths. This also makes a replayed pending completion deterministic.
 			return {
 				kind: "validate",
+				...(pending.completionArtifacts === undefined ? {} : { completionBranchId: pending.completionArtifacts.branchId }),
+				invocationId: pending.sessionId,
 				id,
 				actionUid: pending.actionUid,
 				guard: node.validate,
@@ -564,6 +571,7 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 		case "rejected":
 			return {
 				kind: "rejected",
+				...(pending.completionArtifacts === undefined ? {} : { completionBranchId: pending.completionArtifacts.branchId }),
 				id,
 				seqId: pending.seqId,
 				actionUid: pending.actionUid,
@@ -1533,7 +1541,8 @@ export function renderRead(
 		throw new Error(`Read in state ${stateId}: cannot resolve artifact '${read.artifact ?? "*"}' of ${read.state}`);
 	}
 	const rendered = renderArtifact(state, declared, producerState);
-	const pin = state.projection.artifactPins[rendered.path];
+	// A validator reading its own output needs provisional bytes, not a stale accepted pin.
+	const pin = producerState === selfActionArtifactsState ? undefined : state.projection.artifactPins[rendered.path];
 	return {
 		...rendered,
 		...(name === undefined ? {} : { name }),

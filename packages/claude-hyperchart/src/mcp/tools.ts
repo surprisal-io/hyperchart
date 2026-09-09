@@ -1,3 +1,4 @@
+import { assertRunId, resolveRunPaths, listRunIds, withRunStorage, type RunStorage } from "@surprisal/hyperchart/runtime";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
@@ -6,8 +7,8 @@ import { inspectChartAst, parseChartModuleSync } from "@surprisal/hyperchart";
 import {
 	assertChartPreflight,
 	claimTerminalNotificationReceipt,
-	createRunDir,
-	initializeRunDir,
+	createRun,
+	initializeRun,
 	listHyperchartFiles,
 	loadHostSettings,
 	loadRunMeta,
@@ -36,7 +37,7 @@ import {
 } from "@surprisal/hyperchart/host";
 import {
 	createRunInspectorDataSource,
-	hyperchartRunFromRunDir,
+	hyperchartRunFromRunId,
 	openRunInspector,
 	readNeutralSessionTranscript,
 	type SessionTranscriptReader,
@@ -58,6 +59,7 @@ export type HyperchartMcpDeps = {
 	/** Working directory of the Claude session the MCP server belongs to. */
 	cwd: string;
 	runsRoot?: string;
+	storage?: RunStorage;
 	/** Owning Claude Code session, captured once by the MCP server. */
 	sessionId?: string;
 	/** Test seam: replaces opening the system browser for hyperchart_view. */
@@ -90,15 +92,13 @@ function fileTranscriptReader(sessionsDir: string): SessionTranscriptReader {
 }
 
 export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcpTool[] {
-	const runsRoot = () => deps.runsRoot ?? claudeRunsRoot();
+	const storage: RunStorage = deps.storage ?? { kind: "jsonl", rootDir: deps.runsRoot ?? claudeRunsRoot(), layout: "run-id" };
+	const runsRoot = () => storage.rootDir;
 	const cwdOf = (args: Record<string, unknown>) => (typeof args.cwd === "string" ? args.cwd : deps.cwd);
 	const interactionOwner = (cwd: string): UserInteractionOwner | undefined => deps.sessionId === undefined
 		? undefined
 		: { runsRoot: runsRoot(), host: "claude", sessionId: deps.sessionId, workDir: cwd };
-	const resolveRunDirArg = (spec: string, cwd: string) => {
-		if (spec.includes("/") || spec.includes("\\") || spec.startsWith(".")) return resolve(cwd, spec);
-		return resolve(runsRoot(), spec);
-	};
+	const resolveRunIdArg = (runId: string, _cwd: string) => { assertRunId(runId); return runId; };
 
 	const tools: HyperchartMcpTool[] = [
 		{
@@ -125,13 +125,12 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						chartsByName.set(name, { name, scope, chartPath });
 					}
 				}
-				const allRunDirs = await runDirsFor(runsRoot(), cwd);
-				const runs = await Promise.all(allRunDirs.slice(0, 20).map(async (runDir) => {
-					const status = readRunStatus(runDir);
-					const meta = await loadRunMeta(runDir);
+				const allRunIds = await runIdsFor(runsRoot(), cwd);
+				const runs = await Promise.all(allRunIds.slice(0, 20).map(async (runId) => {
+					const status = readRunStatus(runId);
+					const meta = await loadRunMeta(runId);
 					return {
-						runId: truncateToolText(basename(runDir)),
-						runDir: truncateToolText(runDir, 1_000),
+						runId: truncateToolText(runId),
 						chartId: truncateToolText(status?.chartId ?? meta.chartId),
 						state: status?.state ?? "unknown",
 						updatedAt: status?.updatedAt,
@@ -148,7 +147,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					charts,
 					runs,
 					...(chartsByName.size === charts.length ? {} : { omittedChartCount: chartsByName.size - charts.length }),
-					...(allRunDirs.length === runs.length ? {} : { omittedRunCount: allRunDirs.length - runs.length }),
+					...(allRunIds.length === runs.length ? {} : { omittedRunCount: allRunIds.length - runs.length }),
 				});
 			},
 		},
@@ -185,7 +184,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				"Start a chart as a detached background run, or resume an existing run directory. Updates are delivered automatically by the Hyperchart plugin monitor; Claude must not start Bash/Monitor polling watchers. wait=true returns at either terminal status or the session arbiter's active user-input gate.",
 			inputSchema: {
 				chartPath: z.string().optional(),
-				runDir: z.string().optional().describe("Existing run id or directory to resume"),
+				runId: z.string().optional().describe("Existing run identity to resume"),
 				branchId: z.string().min(1).optional().describe("Singleton branch handle"),
 				branchIds: z.array(z.string().min(1)).min(1).optional().describe("Initial branches to run concurrently"),
 				args: z.record(z.string(), z.unknown()).optional(),
@@ -201,15 +200,15 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const branchIds = Array.isArray(args.branchIds) ? args.branchIds as string[] : [args.branchId as string];
 				if (new Set(branchIds).size !== branchIds.length) return fail("branchIds must be unique");
 				const branchId = branchIds[0]!;
-				const requestedRunDir = typeof args.runDir === "string" ? resolveRunDirArg(args.runDir, cwd) : undefined;
+				const requestedRunId = typeof args.runId === "string" ? resolveRunIdArg(args.runId, cwd) : undefined;
 				let meta: RunMeta | undefined;
 				let chartPath: string;
 				let exportName = typeof args.exportName === "string" ? args.exportName : undefined;
 				let workDir = cwd;
-				if (requestedRunDir !== undefined && typeof args.chartPath !== "string") {
-					meta = await loadRunMeta(requestedRunDir);
+				if (requestedRunId !== undefined && typeof args.chartPath !== "string") {
+					meta = await loadRunMeta(requestedRunId);
 					if (resolve(meta.workDir) !== resolve(cwd)) {
-						return fail(`Run '${basename(requestedRunDir)}' belongs to ${meta.workDir}; run from that directory`);
+						return fail(`Run '${requestedRunId}' belongs to ${meta.workDir}; run from that directory`);
 					}
 					chartPath = meta.chartPath;
 					exportName = meta.exportName;
@@ -217,7 +216,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				} else if (typeof args.chartPath === "string") {
 					chartPath = claudeHostPaths().resolveChartPath(args.chartPath, cwd);
 				} else {
-					return fail("hyperchart_run requires chartPath unless runDir points at an existing run");
+					return fail("hyperchart_run requires chartPath unless runId points at an existing run");
 				}
 				if (meta === undefined && (branchIds.length !== 1 || branchIds[0] !== "main")) {
 					return fail("A fresh run must select exactly branch 'main'; start main, fork durable branches, then resume the existing run with branchId or branchIds");
@@ -227,10 +226,10 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				const parsed = parseChartModuleSync(chartPath, exportName === undefined ? {} : { exportName });
 				if (!parsed.ok) return fail(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 
-				const runDir = requestedRunDir ?? (await createRunDir(workDir, parsed.ast.id, { rootDir: runsRoot() }));
+				const runId = requestedRunId ?? (await createRun(parsed.ast.id));
 				if (meta === undefined) {
-					if (requestedRunDir !== undefined) await initializeRunDir(runDir);
-					await saveRunMeta(runDir, {
+					if (requestedRunId !== undefined) await initializeRun(runId);
+					await saveRunMeta(runId, {
 						chartPath,
 						...(exportName === undefined ? {} : { exportName }),
 						workDir,
@@ -239,21 +238,20 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						...(deps.sessionId === undefined ? {} : { originSessionId: deps.sessionId }),
 					});
 				}
-				mkdirSync(resolve(runDir, "sessions"), { recursive: true });
-				const runId = basename(runDir);
-				const existingStatus = readRunStatus(runDir);
+				mkdirSync(resolve(resolveRunPaths(runId).runDir, "sessions"), { recursive: true });
+				assertRunId(runId);
+				const existingStatus = readRunStatus(runId);
 				if (isRunLive(existingStatus)) {
 					if (args.wait === true) {
-						const boundary = await watchClaudeRunBoundary(runDir, interactionOwner(cwd));
-						if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, runDir, chartId: parsed.ast.id });
-						return waitedRunResult(runDir, meta ?? await loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status: compactRunStatus(boundary.status) });
+						const boundary = await watchClaudeRunBoundary(runId, interactionOwner(cwd));
+						if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, chartId: parsed.ast.id });
+						return waitedRunResult(runId, meta ?? await loadRunMeta(runId), deps.sessionId, { runId, chartId: parsed.ast.id, status: compactRunStatus(boundary.status) });
 					}
-					return ok({ runId, runDir, chartId: parsed.ast.id, attached: true, status: compactRunStatus(existingStatus) });
+					return ok({ runId, chartId: parsed.ast.id, attached: true, status: compactRunStatus(existingStatus) });
 				}
 
 				const attemptId = randomUUID();
-				patchRunStatus(runDir, {
-					runId,
+				patchRunStatus(runId, {
 					chartId: parsed.ast.id,
 					state: "starting",
 					branchIds,
@@ -273,8 +271,8 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					"claude",
 				);
 				const config: HyperchartRunnerConfig = {
+					storage,
 					runId,
-					runDir,
 					chartPath,
 					chartId: parsed.ast.id,
 					workDir,
@@ -289,15 +287,14 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				};
 				const pid = spawnDetachedRunner(config);
 				// The child runner alone promotes starting -> running after every replay gate passes.
-				patchRunStatus(runDir, { runId, chartId: parsed.ast.id, branchIds, pid, heartbeatAt: Date.now() });
+				patchRunStatus(runId, { chartId: parsed.ast.id, branchIds, pid, heartbeatAt: Date.now() });
 				if (args.wait === true) {
-					const boundary = await watchClaudeRunBoundary(runDir, interactionOwner(cwd));
-					if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, runDir, chartId: parsed.ast.id });
-					return waitedRunResult(runDir, await loadRunMeta(runDir), deps.sessionId, { runId, runDir, chartId: parsed.ast.id, status: compactRunStatus(boundary.status) });
+					const boundary = await watchClaudeRunBoundary(runId, interactionOwner(cwd));
+					if (boundary.kind === "user") return waitedUserInteractionResult(boundary.interaction, { runId, chartId: parsed.ast.id });
+					return waitedRunResult(runId, await loadRunMeta(runId), deps.sessionId, { runId, chartId: parsed.ast.id, status: compactRunStatus(boundary.status) });
 				}
 				return ok({
 					runId,
-					runDir,
 					chartId: parsed.ast.id,
 					pid,
 					updates: "Terminal updates are automatic; do not start Bash/Monitor polling watchers.",
@@ -332,16 +329,13 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 						type: args.event as string,
 						...(args.output === undefined ? {} : { output: args.output }),
 					};
-					const runDir = resolve(runsRoot(), runId);
-					if (basename(runId) !== runId || dirname(canonicalPath(runDir)) !== canonicalPath(runsRoot())) {
-						return fail(`Run coordinate '${runId}' is not a run id under the configured runs root`);
-					}
-					const meta = await loadRunMeta(runDir);
+					assertRunId(runId);
+
+					const meta = await loadRunMeta(runId);
 					if (meta.originSessionId !== owner.sessionId) return fail(`Run '${runId}' is not owned by this session`);
 					if (canonicalPath(meta.workDir) !== canonicalPath(cwd)) return fail(`Run '${runId}' belongs to another working directory`);
 
 					const committed = await validateAndPersistUserInteractionResponse({
-						runDir,
 						runId,
 						branchId,
 						seqId,
@@ -359,7 +353,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			description:
 				"Inspect one run and return only a bounded status/activity digest. Full runtime state, visits, schemas, and transcripts are available only through hyperchart_view.",
 			inputSchema: {
-				runDir: z.string().describe("Run id or directory"),
+				runId: z.string().describe("Run identity"),
 				branchId: z.string().min(1),
 				verbose: z.boolean().optional().describe("Deprecated and rejected; use hyperchart_view for full inspection"),
 				...cwdField,
@@ -367,9 +361,9 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			handler: async (args) => {
 				if (args.verbose === true) return fail("verbose=true is no longer supported in tool responses; use hyperchart_view for full browser inspection");
 				const cwd = cwdOf(args);
-				const runDir = resolveRunDirArg(args.runDir as string, cwd);
-				const meta = await loadRunMeta(runDir);
-				const run = await hyperchartRunFromRunDir(runDir, {
+				const runId = resolveRunIdArg(args.runId as string, cwd);
+				const meta = await loadRunMeta(runId);
+				const run = await hyperchartRunFromRunId(runId, {
 					branchId: args.branchId as string,
 					includeTranscripts: false,
 					agentDefaults: createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath),
@@ -377,6 +371,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 				return ok({
 					...summarizeRunInspect(run),
 					userInteractions: boundedUserInteractions(await ownedClaudeUserInteractionSummary({
+						storage,
 						runsRoot: runsRoot(),
 						cwd,
 						...(deps.sessionId === undefined ? {} : { sessionId: deps.sessionId }),
@@ -388,25 +383,24 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			name: "hyperchart_stop",
 			description: "Stop one run (SIGTERM to its runner) or all active runs for this directory.",
 			inputSchema: {
-				runDir: z.string().optional(),
+				runId: z.string().optional(),
 				all: z.boolean().optional(),
 				...cwdField,
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				if ((typeof args.runDir === "string") === (args.all === true)) {
-					return fail("hyperchart_stop requires exactly one of runDir or all=true");
+				if ((typeof args.runId === "string") === (args.all === true)) {
+					return fail("hyperchart_stop requires exactly one of runId or all=true");
 				}
 				const targets =
 					args.all === true
-						? await activeRunDirsForWorkDir(runsRoot(), cwd)
-						: [resolveRunDirArg(args.runDir as string, cwd)];
-				const stopped = await Promise.all(targets.map((runDir) => stopRunDirectory(runDir, cwd)));
+						? await activeRunIdsForWorkDir(runsRoot(), cwd)
+						: [resolveRunIdArg(args.runId as string, cwd)];
+				const stopped = await Promise.all(targets.map((runId) => stopRun(runId, cwd)));
 				return ok({
 					stoppedCount: stopped.length,
 					stopped: stopped.slice(0, 20).map((run) => ({
 						runId: truncateToolText(run.runId),
-						runDir: truncateToolText(run.runDir, 1_000),
 						...(run.pid === undefined ? {} : { pid: run.pid }),
 					})),
 					...(stopped.length <= 20 ? {} : { omittedStoppedCount: stopped.length - 20 }),
@@ -416,19 +410,19 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		{
 			name: "hyperchart_branches",
 			description: "List one cursor-paged set of durable named branch heads for a run. This read-only operation does not select a branch or write the journal.",
-			inputSchema: { runDir: z.string(), cursor: z.string().optional(), ...cwdField },
+			inputSchema: { runId: z.string(), cursor: z.string().optional(), ...cwdField },
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				const runDir = resolveRunDirArg(args.runDir as string, cwd);
-				const page = await listHyperchartBranchPage(runDir, args.cursor as string | undefined);
-				return ok({ runDir, branches: page.items.map(({ branchId, headSeqId, createdAt }) => ({ branchId, headSeqId, createdAt })), totalCount: page.totalCount, ...(page.next === undefined ? {} : { next: page.next }) });
+				const runId = resolveRunIdArg(args.runId as string, cwd);
+				const page = await listHyperchartBranchPage(runId, args.cursor as string | undefined);
+				return ok({ runId, branches: page.items.map(({ branchId, headSeqId, createdAt }) => ({ branchId, headSeqId, createdAt })), totalCount: page.totalCount, ...(page.next === undefined ? {} : { next: page.next }) });
 			},
 		},
 		{
 			name: "hyperchart_fork",
 			description: "Create a durable named branch at a historical record without selecting or starting it.",
 			inputSchema: {
-				runDir: z.string(),
+				runId: z.string(),
 				fromSeqId: z.number().int().positive(),
 				branchId: z.string().min(1),
 				sourceBranchId: z.string().min(1).optional(),
@@ -437,9 +431,9 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				const runDir = resolveRunDirArg(args.runDir as string, cwd);
+				const runId = resolveRunIdArg(args.runId as string, cwd);
 				return ok(await forkHyperchartRun({
-					runDir,
+					runId,
 					fromSeqId: args.fromSeqId as number,
 					branchId: args.branchId as string,
 					...(typeof args.sourceBranchId === "string" ? { sourceBranchId: args.sourceBranchId } : {}),
@@ -453,7 +447,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			description:
 				"Append-only move of one stopped run branch head. All records, sessions, gates, notifications, and artifacts are preserved.",
 			inputSchema: {
-				runDir: z.string().describe("Existing run directory or run id to rewind"),
+				runId: z.string().describe("Existing run identity to rewind"),
 				branchId: z.string().min(1),
 				state: z.string().optional().describe("State path to rewind to, e.g. plan.verify-beats#key.verify"),
 				seqId: z.number().optional().describe("Durable log seqId to rewind to"),
@@ -463,9 +457,9 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				const runDir = resolveRunDirArg(args.runDir as string, cwd);
+				const runId = resolveRunIdArg(args.runId as string, cwd);
 				const result = await rewindHyperchartRun({
-					runDir,
+					runId,
 					branchId: args.branchId as string,
 					...(typeof args.state === "string" ? { state: args.state } : {}),
 					...(typeof args.seqId === "number" ? { seqId: args.seqId } : {}),
@@ -480,7 +474,7 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			name: "hyperchart_steer",
 			description: "Queue a steering message for a live agent session of a run (delivered after its current tool call).",
 			inputSchema: {
-				runDir: z.string(),
+				runId: z.string(),
 				branchId: z.string().min(1).describe("Branch owning the live session"),
 				actionKey: z.string().describe("Action key of the live session, as shown by hyperchart_run_inspect"),
 				message: z.string(),
@@ -488,8 +482,8 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				const runDir = resolveRunDirArg(args.runDir as string, cwd);
-				const sessionsDir = resolve(runDir, "sessions");
+				const runId = resolveRunIdArg(args.runId as string, cwd);
+				const sessionsDir = resolve(resolveRunPaths(runId).runDir, "sessions");
 				try {
 					const { request, session } = queueLiveSessionSteering(sessionsDir, args.branchId as string, args.actionKey as string, args.message as string);
 					return ok({ queued: true, requestId: truncateToolText(request.id), actionName: truncateToolText(session.actionName) });
@@ -501,20 +495,20 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		{
 			name: "hyperchart_view",
 			description:
-				"Open the localhost browser inspector and return its URL. Pass runDir for a live/finished run, or chartPath for a static view of a chart definition (reloads the chart on refresh).",
+				"Open the localhost browser inspector and return its URL. Pass runId for a live/finished run, or chartPath for a static view of a chart definition (reloads the chart on refresh).",
 			inputSchema: {
-				runDir: z.string().optional(),
-				branchId: z.string().min(1).optional().describe("Required with runDir; non-durable view selection"),
+				runId: z.string().optional(),
+				branchId: z.string().min(1).optional().describe("Required with runId; non-durable view selection"),
 				chartPath: z.string().optional().describe("Chart name or path to view statically (no run required)"),
 				open: z.boolean().optional().describe("Set false to return the URL without opening a browser"),
 				...cwdField,
 			},
 			handler: async (args) => {
 				const cwd = cwdOf(args);
-				if ((typeof args.runDir === "string") === (typeof args.chartPath === "string")) {
-					return fail("hyperchart_view requires exactly one of runDir or chartPath");
+				if ((typeof args.runId === "string") === (typeof args.chartPath === "string")) {
+					return fail("hyperchart_view requires exactly one of runId or chartPath");
 				}
-				if (typeof args.runDir === "string" && typeof args.branchId !== "string") return fail("hyperchart_view runDir requires branchId");
+				if (typeof args.runId === "string" && typeof args.branchId !== "string") return fail("hyperchart_view runId requires branchId");
 				const openBrowser =
 					args.open === false
 						? { openBrowser: () => undefined }
@@ -538,15 +532,15 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 					});
 					return ok({ url });
 				}
-				const runDir = resolveRunDirArg(args.runDir as string, cwd);
-				const meta = await loadRunMeta(runDir);
-				const sessionsDir = resolve(runDir, "sessions");
+				const runId = resolveRunIdArg(args.runId as string, cwd);
+				const meta = await loadRunMeta(runId);
+				const sessionsDir = resolve(resolveRunPaths(runId).runDir, "sessions");
 				const agentDefaults = createClaudeAgentDefaultsResolver(meta.workDir, meta.chartPath);
 				const readTranscript = fileTranscriptReader(sessionsDir);
 				const { url } = await openRunInspector({
-					runId: basename(runDir),
-					historyDataSource: await createRunInspectorDataSource(runDir, { readTranscript }),
-					loadRun: (branchId) => hyperchartRunFromRunDir(runDir, {
+					runId: runId,
+					historyDataSource: await createRunInspectorDataSource(runId, { readTranscript }),
+					loadRun: (branchId) => hyperchartRunFromRunId(runId, {
 						branchId: branchId ?? args.branchId as string,
 						agentDefaults,
 						includeTranscripts: false,
@@ -564,7 +558,8 @@ export function createHyperchartMcpTools(deps: HyperchartMcpDeps): HyperchartMcp
 		...tool,
 		handler: async (args) => {
 			try {
-				return await tool.handler(args);
+				if ("runDir" in args) throw new Error("runDir is not supported; pass runId");
+				return await withRunStorage(storage, () => tool.handler(args));
 			} catch (error) {
 				return fail(error instanceof Error ? error.message : String(error));
 			}
@@ -576,8 +571,8 @@ type ClaudeRunBoundary =
 	| { kind: "terminal"; status: Awaited<ReturnType<typeof watchRun>> }
 	| { kind: "user"; interaction: OwnedUserInteraction };
 
-function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | undefined): Promise<ClaudeRunBoundary> {
-	if (owner === undefined) return watchRun(runDir).then((status) => ({ kind: "terminal" as const, status }));
+function watchClaudeRunBoundary(runId: string, owner: UserInteractionOwner | undefined): Promise<ClaudeRunBoundary> {
+	if (owner === undefined) return watchRun(runId).then((status) => ({ kind: "terminal" as const, status }));
 	return new Promise((resolveBoundary, rejectBoundary) => {
 		let settled = false;
 		const finish = (boundary: ClaudeRunBoundary) => {
@@ -596,7 +591,7 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 				if (active.presentation === "pending") {
 					// Pin only. The MCP tool result has not yet been delivered, so confirmation
 					// here would make a crash in the return window suppress recovery.
-					claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", owner.sessionId, {
+					claimUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", owner.sessionId, {
 						source: "wait",
 						leaseMs: USER_INTERACTION_WAIT_LEASE_MS,
 					});
@@ -612,7 +607,7 @@ function watchClaudeRunBoundary(runDir: string, owner: UserInteractionOwner | un
 		};
 		const timer = setInterval(() => void inspectInteraction(), 100);
 		timer.unref();
-		watchRun(runDir).then(
+		watchRun(runId).then(
 			(status) => finish({ kind: "terminal", status }),
 			(error) => {
 				if (settled) return;
@@ -629,7 +624,7 @@ function interactionCoordinateKey(interaction: OwnedUserInteraction): string {
 	return `${interaction.request.runId}\0${interaction.request.branchId}\0${interaction.request.seqId}`;
 }
 
-function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRun: { runId: string; runDir: string; chartId: string }): ToolResult {
+function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRun: { runId: string; chartId: string }): ToolResult {
 	let summary: ReturnType<typeof compactUserInteraction>;
 	try {
 		summary = compactUserInteraction(interaction);
@@ -641,8 +636,7 @@ function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRu
 		final: false,
 		runId: interaction.request.runId,
 		branchId: interaction.request.branchId,
-		runDir: interaction.runDir,
-		chartId: interaction.request.actionUid.chart,
+				chartId: interaction.request.actionUid.chart,
 		interaction: summary,
 		instruction: "Call AskUserQuestion once for this delivery attempt using the bounded preview and output hint, then call hyperchart_respond with this exact runId/branchId/seqId and an allowed event.",
 		waitedRun,
@@ -650,7 +644,7 @@ function waitedUserInteractionResult(interaction: OwnedUserInteraction, waitedRu
 	});
 }
 
-function waitedRunResult(runDir: string, meta: RunMeta, sessionId: string | undefined, value: Record<string, unknown>): ToolResult {
+function waitedRunResult(runId: string, meta: RunMeta, sessionId: string | undefined, value: Record<string, unknown>): ToolResult {
 	if (sessionId === undefined) {
 		return ok({
 			...value,
@@ -662,9 +656,9 @@ function waitedRunResult(runDir: string, meta: RunMeta, sessionId: string | unde
 	if (meta.originSessionId !== sessionId) {
 		return ok({ ...value, boundary: "terminal", final: true, limitation: "This run is not owned by the current Claude session; its terminal notification was not receipted here." });
 	}
-	const request = readDeliverableTerminalNotificationRequest(runDir);
+	const request = readDeliverableTerminalNotificationRequest(runId);
 	if (request === undefined) return ok({ ...value, boundary: "terminal", final: true });
-	if (!claimTerminalNotificationReceipt(runDir, request.requestId, "claude", sessionId)) {
+	if (!claimTerminalNotificationReceipt(runId, request.requestId, "claude", sessionId)) {
 		return ok({ ...value, boundary: "terminal", final: true, deliveryNotice: "Terminal notification delivery is already confirmed or in progress for this Claude session." });
 	}
 	return ok({
@@ -705,7 +699,6 @@ function boundedUserInteractions(summary: Awaited<ReturnType<typeof ownedClaudeU
 function compactRewindResult(result: Awaited<ReturnType<typeof rewindHyperchartRun>>) {
 	return {
 		runId: result.runId,
-		runDir: result.runDir,
 		chartId: result.chartId,
 		branchId: result.branchId,
 		targetLabel: truncateToolText(result.targetLabel, 400),
@@ -746,9 +739,8 @@ function chartNameFor(chartPath: string, root: string): string {
 	return rel.replace(/(?:\.chart)?\.ts$/, "");
 }
 
-async function runDirsFor(root: string, cwd: string): Promise<string[]> {
-	if (!existsSync(root)) return [];
-	const candidates = readdirSync(root).map((entry) => resolve(root, entry));
+async function runIdsFor(root: string, cwd: string): Promise<string[]> {
+	const candidates = await listRunIds();
 	const owned = await Promise.all(candidates.map(async (path) => {
 		try {
 			return resolve((await loadRunMeta(path)).workDir) === resolve(cwd) ? path : undefined;
@@ -758,27 +750,27 @@ async function runDirsFor(root: string, cwd: string): Promise<string[]> {
 	}));
 	return owned
 		.filter((path): path is string => path !== undefined)
-		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
+		.sort();
 }
 
-async function activeRunDirsForWorkDir(root: string, cwd: string): Promise<string[]> {
-	return (await runDirsFor(root, cwd)).filter((runDir) => {
-		const status = readRunStatus(runDir);
+async function activeRunIdsForWorkDir(root: string, cwd: string): Promise<string[]> {
+	return (await runIdsFor(root, cwd)).filter((runId) => {
+		const status = readRunStatus(runId);
 		return status !== undefined && (isRunLive(status) || ["starting", "running", "stopping"].includes(status.state));
 	});
 }
 
-async function stopRunDirectory(runDir: string, cwd: string): Promise<{ runId: string; runDir: string; pid?: number }> {
-	const meta = await loadRunMeta(runDir);
+async function stopRun(runId: string, cwd: string): Promise<{ runId: string; pid?: number }> {
+	const meta = await loadRunMeta(runId);
 	if (resolve(meta.workDir) !== resolve(cwd)) {
-		throw new Error(`Run '${basename(runDir)}' belongs to ${meta.workDir}; run from that directory`);
+		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; run from that directory`);
 	}
-	const status = readRunStatus(runDir);
-	patchRunStatus(runDir, { state: "stopping" });
+	const status = readRunStatus(runId);
+	patchRunStatus(runId, { state: "stopping" });
 	const pid = status?.pid !== undefined && isPidAlive(status.pid) ? status.pid : undefined;
-	if (pid === undefined) patchRunStatus(runDir, { state: "stopped", exitCode: 0, error: "runner was not live" });
+	if (pid === undefined) patchRunStatus(runId, { state: "stopped", exitCode: 0, error: "runner was not live" });
 	else process.kill(pid, "SIGTERM");
-	return { runId: basename(runDir), runDir, ...(pid === undefined ? {} : { pid }) };
+	return { runId: runId, ...(pid === undefined ? {} : { pid }) };
 }
 
 function canonicalPath(path: string): string {

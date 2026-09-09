@@ -20,6 +20,10 @@ import { useActionVisitHistory } from "./useActionVisitHistory.js";
 const ACTION_WIDTH = 270;
 const ACTION_HEIGHT = 118;
 const ACTION_GAP_Y = 44;
+const ACTION_HANDLES: NonNullable<StateNode["handles"]> = [
+	{ id: "target-top", type: "target", position: Position.Top, x: ACTION_WIDTH / 2, y: 0, width: 1, height: 1 },
+	{ id: "source-bottom", type: "source", position: Position.Bottom, x: ACTION_WIDTH / 2, y: ACTION_HEIGHT, width: 1, height: 1 },
+];
 const WORKER_PADDING_X = 18;
 const WORKER_HEADER = 38;
 const WORKER_PADDING_BOTTOM = 18;
@@ -148,6 +152,8 @@ export function executionGraph(run: HyperchartRunInfo, rows: readonly ActionVisi
 				id: mapNodeId,
 				type: "mapVisitGroup",
 				position: { x, y },
+				width: block.width,
+				height: block.height,
 				data: {
 					state: scopeTemplate ?? { id: block.groupId, type: block.groupType, status: "pending" },
 					stateId: block.groupId,
@@ -183,6 +189,8 @@ export function executionGraph(run: HyperchartRunInfo, rows: readonly ActionVisi
 					type: "workerLane",
 					parentId: mapNodeId,
 					extent: "parent",
+					width: workerWidth,
+					height: workerHeight,
 					position: {
 						x: MAP_PADDING_X + laneIndex * (workerWidth + WORKER_GAP_X),
 						y: MAP_HEADER,
@@ -301,6 +309,9 @@ function actionNode(entry: VisitEntry, position: { x: number; y: number }): Stat
 		id: nodeId(entry.row),
 		type: "hyperchartState",
 		position,
+		width: ACTION_WIDTH,
+		height: ACTION_HEIGHT,
+		handles: ACTION_HANDLES,
 		style: { width: ACTION_WIDTH, height: ACTION_HEIGHT },
 		data: {
 			state: visitState(entry.template, entry.row),

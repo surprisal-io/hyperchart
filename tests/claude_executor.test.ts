@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -471,14 +472,16 @@ describe("claude runner", () => {
 export default chart({ kind: "chart", id: "simple", initial: "done", states: { done: final() } });
 `,
 		);
-		const runDir = join(root, "run");
+		const runId = "run-1";
+		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		mkdirSync(runDir, { recursive: true });
 		const configPath = join(runDir, "runner.config.json");
 		writeFileSync(
 			configPath,
 			JSON.stringify({
 				runId: "run-1",
-				branchId: "main",				runDir,
+				branchId: "main", storage,
 				chartPath,
 				chartId: "simple",
 				workDir: root,
@@ -492,7 +495,7 @@ export default chart({ kind: "chart", id: "simple", initial: "done", states: { d
 			process.chdir(previousCwd);
 		}
 		const { readRunStatus } = await import("../packages/hyperchart/src/runtime/generic/run_status.js");
-		const status = readRunStatus(runDir);
+		const status = withRunStorage(storage, () => readRunStatus(runId));
 		expect(status?.state).toBe("complete");
 		expect(readdirSync(runDir)).toContain("sessions");
 	});

@@ -7,11 +7,11 @@ import type { RunTerminalState } from "./run_outcome.js";
 
 export function renderTerminalNotificationPayload(
 	state: MachineState,
-	input: { runId: string; branchId: BranchId; runDir: string; workDir: string; outcome: RunTerminalState; error?: string },
+	input: { runId: string; branchId: BranchId; workDir: string; outcome: RunTerminalState; error?: string },
 ): TerminalNotificationPayload {
 	const standard = input.outcome === "failed"
-		? `Hyperchart run ${input.runId} (${state.ast.id}) failed${input.error === undefined ? "" : `: ${input.error}`}. Inspect the durable run at ${input.runDir}.`
-		: `Hyperchart run ${input.runId} (${state.ast.id}) completed successfully. Inspect the durable run at ${input.runDir}.`;
+		? `Hyperchart run ${input.runId} (${state.ast.id}) failed${input.error === undefined ? "" : `: ${input.error}`}. Inspect run ${input.runId}.`
+		: `Hyperchart run ${input.runId} (${state.ast.id}) completed successfully. Inspect run ${input.runId}.`;
 	const custom: string[] = [];
 	const artifactPaths: string[] = [];
 	for (const leaf of state.projection.activeLeaves) {
@@ -30,7 +30,6 @@ export function renderTerminalNotificationPayload(
 	return {
 		runId: input.runId,
 		branchId: input.branchId,
-		runDir: resolve(input.runDir),
 		chartId: state.ast.id,
 		outcome: input.outcome,
 		prompt: sections.join("\n\n"),

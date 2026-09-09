@@ -22,7 +22,6 @@ export type HostPaths = {
 	/** Host-neutral shared charts dir under the project root, or undefined when the host does not configure one. */
 	getSharedHyperchartsDir(cwd: string): string | undefined;
 	getRunsRoot(): string;
-	resolveRunDir(spec: string, cwd: string): string;
 	resolveChartPath(spec: string, cwd: string): string;
 	listProjectHypercharts(cwd: string): string[];
 	findNearestProjectRoot(cwd: string): string | undefined;
@@ -45,10 +44,6 @@ export function createHostPaths(config: HostPathsConfig): HostPaths {
 		getProjectHyperchartsDir,
 		getSharedHyperchartsDir,
 		getRunsRoot: () => config.runsRoot,
-		resolveRunDir(spec, cwd) {
-			if (isPathLike(spec)) return resolve(cwd, spec);
-			return join(config.runsRoot, spec);
-		},
 		resolveChartPath(spec, cwd) {
 			const candidates = chartPathCandidates(
 				spec,
@@ -106,9 +101,6 @@ function hasKnownModuleExtension(spec: string): boolean {
 	return [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"].some((extension) => spec.endsWith(extension));
 }
 
-function isPathLike(spec: string): boolean {
-	return isAbsolute(spec) || spec.startsWith(".") || spec.includes("/") || spec.includes("\\");
-}
 
 function findNearestProjectRoot(cwd: string, markers: readonly string[]): string | undefined {
 	let current = resolve(cwd);

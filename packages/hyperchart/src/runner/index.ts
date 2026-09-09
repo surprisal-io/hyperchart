@@ -34,12 +34,15 @@ export type { ForkBranchOptions, ForkBranchResult } from "./branches.js";
 export { findRewindMatch, rewindHyperchartRun, semanticStatesForRecord } from "./rewind.js";
 export type { RunTerminalState } from "../execution/run_outcome.js";
 export type { RewindMode, RewindOptions, RewindResult } from "./rewind.js";
-export { BranchSealedError, createHyperchartRunnerController, readRunnerConfig, runnerBranchIds, runHyperchartRunner } from "./runner_main.js";
+export { requestLiveRunnerBranchMove, requestLiveRunnerUserResponse, RunnerControlUnavailableError } from "../runtime/generic/runner_control.js";
+export type { RunnerMoveBranchCommit } from "../runtime/generic/runner_control.js";
+export { BranchAdmissionError, BranchDrainError, BranchSealedError, createHyperchartRunnerController, readRunnerConfig, runnerBranchIds, runHyperchartRunner } from "./runner_main.js";
 export type {
 	BranchHyperchartRunnerConfig,
 	ExecutorContext,
 	HyperchartRunnerConfig,
 	HyperchartRunnerController,
+	RunnerBranchMoveHandler,
 	RunnerBranchOutcome,
 	RunnerCommitUserInteractionOptions,
 	RunnerForkAndCommitUserInteractionOptions,

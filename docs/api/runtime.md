@@ -13,7 +13,8 @@ import {
   checkSchema,
   checkSchemaAsync,
   createAgentDefaultsResolver,
-  createRunDir,
+  createRun,
+  withRunStorage,
   deleteRunStorage,
   loadRunMeta,
   resolveAgentDefaults,
@@ -144,7 +145,9 @@ await completion;
 
 `startBranch()` verifies the controller's compact durable-branch set, reserves the branch before its replay gate or executor construction, then resolves with that branch's `complete`, `failed`, or externally `drained` outcome. Each admitted branch owns a branch-scoped agent executor and runtime. Dynamic branches replay-gate independently; a gate/setup failure builds no runtime, contributes a failed aggregate outcome, and does not stop siblings. Duplicate attempt admission is rejected.
 
-`stopAndDrain(branchId)` operates only on a branch currently live in the same started controller attempt. It closes public operation admission synchronously, lets in-flight setup publish readiness when an already enrolled operation needs it, then makes the reservation non-runnable and begins runtime drain before queueing the durable seal. It resolves only after setup, runtime execution, completion admission, durable appends already in flight, and executor/script disposal have settled. The durable branch head is unchanged and sibling reservations keep running. Concurrent calls while the same drain is pending return the same promise. The corresponding `startBranch()` promise resolves with `outcome: "drained"`; cleanup failure produces a failed branch outcome. A successfully drained branch remains sealed until `startBranch()` replay-gates and readmits it.
+`stopAndDrain(branchId)` operates only on a branch currently live in the same started controller attempt. It closes public operation admission synchronously, lets in-flight setup publish readiness when an already enrolled operation needs it, then makes the reservation non-runnable and begins runtime drain before queueing the durable seal. It resolves only after setup, runtime execution, completion admission, durable appends already in flight, and executor/script disposal have settled. The durable branch head is unchanged and sibling reservations keep running. Concurrent calls while the same drain is pending return the same promise. The corresponding `startBranch()` promise resolves with `outcome: "drained"`; cleanup failure produces a failed branch outcome. A successfully drained branch remains sealed until `startBranch()` replay-gates and readmits it. A move whose cleanup fails throws `BranchDrainError` to its local owning move hook, preserving the original failure in `cause` (possibly an `AggregateError`). A retained admission fence rejects `startBranch()` with `BranchAdmissionError`; this is distinct from the retryable `BranchSealedError`. Owners must fail the attempt on these unrecoverable errors rather than treat a disappeared live reservation as successfully released. The local hook handles classification before transport serializes the error for the remote caller.
+
+`setBranchMoveHandler(handler)` installs one owning scheduler around both direct and transported moves. The handler receives the actual move operation, awaits its commit, and reconciles application projections/admission before acknowledging transport. It must call the supplied operation, not recursively call `moveBranch`. AutoDiscovery serializes selection/commit/admission with this boundary, settles drained generations, publishes the projection and requeues eligible work under its existing budget/capacity policy. A failed move also reconciles drained reservations. No machine/log facts change.
 
 `moveBranch(branchId, targetHeadSeqId)` seals the branch and every durable descendant, drains affected live reservations, then atomically appends the head move and an execution-prepared opaque target checkpoint. Independent branches remain writable while the subtree drains. A live `rewindHyperchartRun()` request uses the runner control channel rather than opening a competing writer. Readmission restores the current moved head while sealed, verifies that the head did not change during setup, and only then installs the runtime and removes the seal. `BranchSealedError` distinguishes rejected post-seal mutations from ordinary admission failures.
 
@@ -267,7 +270,7 @@ Storage returns AST-free durable record groups for state visits, map visits, act
 
 ### Lazy inspector history
 
-`hyperchartRunOverviewFromRunDir()` asks the internal execution service for current graph/control state and returns a captured `HistorySnapshot`, the first keyset branch page, and an overview run with no elapsed `visitHistory`, map history, actor generation/message history, record tree, transcript arrays, queued mailbox `entries`, per-generation processed messages, or pool-worker message/visit histories. It retains only counts, mailbox head/current message, and current worker/session summaries. `createRunInspectorDataSource()` exposes serializable `readStateVisits`, `readMapVisits`, `readActorGenerations`, `readActorMessages`, `readRecords`, `cursorAt`, and `readVisitSession` requests bound to one run.
+`hyperchartRunOverviewFromRunId()` asks the internal execution service for current graph/control state and returns a captured `HistorySnapshot`, the first keyset branch page, and an overview run with no elapsed `visitHistory`, map history, actor generation/message history, record tree, transcript arrays, queued mailbox `entries`, per-generation processed messages, or pool-worker message/visit histories. It retains only counts, mailbox head/current message, and current worker/session summaries. `createRunInspectorDataSource()` exposes serializable `readStateVisits`, `readMapVisits`, `readActorGenerations`, `readActorMessages`, `readRecords`, `cursorAt`, and `readVisitSession` requests bound to one run.
 
 React Runtime histories share `VirtualizedHistoryList` and `useHistoryWindow`. A browser `?seqId=<durable coordinate>` deep link mints a subject-bound starting cursor through `cursorAt()` after the user selects the corresponding state. The DOM is virtualized by `@tanstack/react-virtual` with 20-row overscan; decoded state is capped at 1,000 rows. Older/newer errors are independent and remain stable until explicit retry, overlapping chunks deduplicate by durable identity, opposite-edge eviction retains a reload cursor, and snapshot/subject changes abort or ignore stale work. Inspector polling preserves the opened snapshot until **Refresh history** is chosen. Transcript messages load only through `readVisitSession` when a visit session is opened. Pi and Claude browser inspectors use the same stateless HTTP bridge; steering requests carry and validate the currently selected branch. Pi's compact TUI polls a projection-free execution overview plus one recent-record page and never requests complete ancestry.
 
@@ -529,26 +532,46 @@ function serializeEnvValue(value: unknown): string;
 
 Returns strings unchanged and serializes every other value with `JSON.stringify()`. It throws `Environment value is not JSON-serializable` when serialization produces no string, including `undefined`, functions, and symbols.
 
-## Run directories
+## Run identity and storage scope
 
-### `createRunDir()`
+`runId` is the only public run selector. Never pass a run directory, infer an ID
+from an arbitrary path, or provide both coordinates. All metadata, inspection,
+history, branch, status, control, and notification helpers share one declared
+backend/root/layout scope:
 
 ```ts
-function createRunDir(
-  workDir: string,
-  chartId: string,
-  options?: { rootDir?: string },
-): Promise<string>;
+type RunStorage = {
+  rootDir: string;
+  layout: "run-id" | "sha256";
+} & ({ kind: "jsonl" } | { kind: "postgres"; dsn: string });
+
+await withRunStorage({ kind: "jsonl", rootDir: "/my/runs", layout: "run-id" }, async () => {
+  const runId = await createRun("review");
+  await saveRunMeta(runId, {
+    chartPath: "/project/chart.ts", workDir: "/project",
+    chartId: "review", createdAt: new Date().toISOString(),
+  });
+  const meta = await loadRunMeta(runId);
+});
 ```
 
-Creates a unique directory and its `sessions/` child. The default root is `<workDir>/.hyperchart/runs`; hosts can supply another root.
+`createRun(chartId)` returns a generated ID (sanitized chart name plus UUID).
+`initializeRun(runId)` creates the root branch for a known ID. `listRunIds()`
+enumerates authoritative backend keys. `openRunLogStore(runId, {storage?})` uses
+explicit configuration or the current async scope, never per-run persisted
+backend inference or `HYPERCHART_PG_DSN`. The environment is not changed.
 
-Directory names use the sanitized chart id, local timestamp, and a numeric collision suffix when needed.
-
-### `RunMeta`
+The existing framework layout is `rootDir/<runId>`; literal keys must be single
+segments. AutoDiscovery explicitly uses `rootDir/sha256(runId)`. Hashed IDs may
+contain semantic separators; they are hashed as opaque bytes, never resolved as
+paths. No alternate-layout probing, registry, relocation, or metadata migration
+is performed. Existing literal JSONL metadata remains readable without a stored
+ID. New hashed JSONL metadata includes its ID for enumeration; PostgreSQL's
+`run_id` primary key remains authoritative. Symlink escapes are rejected.
 
 ```ts
 type RunMeta = {
+  runId?: string; // populated by loadRunMeta; stored for new hashed JSONL runs
   chartPath: string;
   exportName?: string;
   workDir: string;
@@ -556,31 +579,20 @@ type RunMeta = {
   createdAt: string;
   originSessionId?: string;
 };
+function saveRunMeta(runId: string, meta: RunMeta): Promise<void>;
+function loadRunMeta(runId: string): Promise<RunMeta>;
+function deleteRunStorage(runId: string): Promise<void>;
 ```
 
-### `saveRunMeta()`
+Missing metadata raises `ENOENT`; host ownership checks reject a foreign working
+directory separately. Physical artifact/session/workspace paths remain storage
+implementation details, not selectors. Controllers capture their storage scope
+at construction; deferred inspection/history and control callbacks retain their
+own scope even when another host registers a different backend later.
 
-```ts
-function saveRunMeta(runDir: string, meta: RunMeta): Promise<void>;
-```
-
-Ensures `sessions/` exists and writes metadata to the selected run-storage backend. With `HYPERCHART_PG_DSN`, metadata is stored in `hyperchart_run_meta` and no `meta.json` is required. Without PostgreSQL, it writes formatted `meta.json`.
-
-### `loadRunMeta()`
-
-```ts
-function loadRunMeta(runDir: string): Promise<RunMeta>;
-```
-
-The selected `RunLogStore` implementation reads its own metadata: PostgreSQL reads `hyperchart_run_meta` by run id, while JSONL reads `meta.json`. `chartPath` and `workDir` are returned as absolute paths.
-
-### `deleteRunStorage()`
-
-```ts
-function deleteRunStorage(runDir: string): Promise<void>;
-```
-
-Deletes the PostgreSQL metadata and journal rows atomically when PostgreSQL is configured. The host remains responsible for removing the local run directory. It is a no-op for the JSONL backend.
+Run inspection exports are `hyperchartRunFromRunId`,
+`hyperchartRunOverviewFromRunId`, and `createRunInspectorDataSource(runId, options)`.
+There are no `FromRunDir` aliases.
 
 ## Terminal outcome helpers
 
@@ -671,4 +683,4 @@ Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_re
 
 ## Named branch storage API
 
-`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runDir, cursor?)` exposes the same bounded page contract for run-directory callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported. Runner/control helpers are imported from `@surprisal/hyperchart/runner`, separately from the projection-free runtime/storage package. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is a stopped-only append-only move and has no cleanup/backup options.
+`RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runId, cursor?)` exposes the same bounded page contract for run-ID callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported. Runner/control helpers are imported from `@surprisal/hyperchart/runner`, separately from the projection-free runtime/storage package. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is an append-only move; live moves use the owning runner transport. It has no cleanup/backup options.

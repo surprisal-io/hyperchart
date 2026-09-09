@@ -1,35 +1,35 @@
-import { basename, resolve } from "node:path";
 import type { BranchId } from "../../core/durable_events.js";
 import { DEFAULT_BRANCH_ID, JsonlLogStore, type RunLogStore } from "./log_store.js";
 import { PostgresLogStore, type PostgresLogAccess } from "./postgres_log_store.js";
+import { currentRunStorage, resolveRunPaths, withRunStorage, type RunStorage } from "./run_paths.js";
+
+export type RunLogStorage = RunStorage;
+export const withRunLogStorage = withRunStorage;
+export const currentRunLogStorage = currentRunStorage;
 
 export type OpenRunLogStoreOptions = Readonly<{
 	branchId?: BranchId;
 	onWarn?: (message: string) => void;
-	/** Explicit durable identity when it differs from the run directory basename. */
-	runId?: string;
-	/** Writers take the run's exclusive claim; read-only opens never do. Defaults to "read". */
 	access?: PostgresLogAccess;
+	storage?: RunLogStorage;
 }>;
 
-/**
- * Open the durable journal for one run directory. The backend is selected by
- * HYPERCHART_PG_DSN: when set, the journal lives in Postgres keyed by the explicit
- * run id or the directory basename; otherwise it is the run-local log.jsonl file. Both
- * backends open lazily; targeted reads decide what data is loaded.
- */
-export async function openRunLogStore(runDir: string, options: OpenRunLogStoreOptions = {}): Promise<RunLogStore> {
+/** Open a known durable identity in exactly one configured storage namespace. */
+export async function openRunLogStore(runId: string, options: OpenRunLogStoreOptions = {}): Promise<RunLogStore> {
+	const { runDir, storage } = resolveRunPaths(runId, options.storage);
 	const branchId = options.branchId ?? DEFAULT_BRANCH_ID;
-	const onWarn = options.onWarn ?? (() => {});
-	const dsn = process.env.HYPERCHART_PG_DSN;
-	if (dsn !== undefined && dsn.length > 0) {
-		return PostgresLogStore.open({
-			dsn,
-			runId: options.runId ?? basename(resolve(runDir)),
-			branchId,
-			onWarn,
-			access: options.access ?? "read",
-		});
+	switch (storage.kind) {
+		case "jsonl": return new JsonlLogStore(`${runDir}/log.jsonl`, branchId);
+		case "postgres": return PostgresLogStore.open({ dsn: storage.dsn, runId, branchId, onWarn: options.onWarn ?? (() => {}), access: options.access ?? "read" });
 	}
-	return new JsonlLogStore(resolve(runDir, "log.jsonl"), branchId);
+}
+
+export function parseRunLogStorage(value: unknown): RunLogStorage | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const candidate = value as Partial<RunLogStorage>;
+	if (typeof candidate.rootDir !== "string" || candidate.rootDir.length === 0 || (candidate.layout !== "run-id" && candidate.layout !== "sha256")) return undefined;
+	if (candidate.kind === "jsonl") return { kind: "jsonl", rootDir: candidate.rootDir, layout: candidate.layout };
+	if (candidate.kind === "postgres" && typeof candidate.dsn === "string" && candidate.dsn.length > 0)
+		return { kind: "postgres", dsn: candidate.dsn, rootDir: candidate.rootDir, layout: candidate.layout };
+	return undefined;
 }

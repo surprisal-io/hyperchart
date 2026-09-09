@@ -59,7 +59,7 @@ Put every substantial or reusable result in a declared artifact with a Zod shape
 
 1. Inspect the chart first with `hyperchart_inspect` and verify every named agent definition is available. Inspect tools always return bounded digests. Never pass `verbose: true`; it is rejected. Use `hyperchart_view` for full source, schemas, states, visits, or transcripts.
 2. Call `hyperchart_run` with `chartPath` and `args`.
-3. Use `wait: true` only when the current task must block. Otherwise retain the returned run id and directory; the monitor routes owned user gates and the terminal prompt to this exact originating Claude session/canonical working directory. Never start Bash/Monitor polling watchers.
+3. Use `wait: true` only when the current task must block. Otherwise retain the returned run id; the monitor routes owned user gates and the terminal prompt to this exact originating Claude session/canonical working directory. Never start Bash/Monitor polling watchers.
 4. A waited call can return terminal status **or** `boundary: "user"` for the globally active owned gate, possibly from another run that sorts earlier. Handle the gate before waiting again.
 5. Inspect concrete result with `hyperchart_run_inspect` before reporting completion.
 
@@ -86,10 +86,10 @@ Multiple gates from parallel/map branches and separate owned runs are serialized
 
 ## Resume a run
 
-1. Call `hyperchart_run_inspect` with the existing run id or directory.
+1. Call `hyperchart_run_inspect` with the existing run id.
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
-4. Resume with `hyperchart_run` and `runDir`. Create a different run with `chartPath` and no `runDir`.
+4. Resume with `hyperchart_run` and `runId`. Create a different run with `chartPath` and no `runId`.
 5. If a `failure_intent` was durably recorded, plain resume replays back into global failure quiescence or the failed outcome. Recover with `hyperchart_rewind`: stop the run, rewind to before the failure intent (`state` or `seqId`), then resume. Rewind appends a move of the explicit branch head; all records and downstream files remain.
 6. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
 
@@ -103,7 +103,7 @@ Multiple gates from parallel/map branches and separate owned runs are serialized
 
 ## Report
 
-Include the chart id, run id, absolute run directory, current or terminal status, artifact paths, and unresolved validation, replay, session, or external-side-effect risks.
+Include the chart id, run id, current or terminal status, artifact paths, and unresolved validation, replay, session, or external-side-effect risks.
 
 ## Explicit actors
 

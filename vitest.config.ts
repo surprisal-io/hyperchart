@@ -11,6 +11,7 @@ export default defineConfig({
 		alias: [
 			{ find: "@surprisal/hyperchart/host", replacement: core("host/index.ts") },
 			{ find: "@surprisal/hyperchart/runtime", replacement: core("runtime/index.ts") },
+			{ find: "@surprisal/hyperchart/runner", replacement: core("runner/index.ts") },
 			{ find: "@surprisal/hyperchart/inspect", replacement: core("inspect/index.ts") },
 			{ find: "@surprisal/hyperchart/sessions", replacement: core("sessions/index.ts") },
 			{ find: "@surprisal/hyperchart/react/styles.css", replacement: core("react/styles.css") },

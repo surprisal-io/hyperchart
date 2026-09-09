@@ -95,7 +95,7 @@ Options:
 | Option | Meaning |
 |---|---|
 | `--args <json>` | run arguments object |
-| `--run-dir <run-id-or-path>` | existing run to resume, or explicit destination directory |
+| `--run-id <run-id>` | existing durable run identity to resume |
 | `--export <name>` | named chart export instead of the default export |
 | `--wait` | wait until terminal status or the session's globally active user gate |
 | `--ignore-replay-warnings` | continue despite stale or skipped replay records |
@@ -166,7 +166,7 @@ Delete recursively removes the run directory, including its durable log with eve
 
 ## Agent tool
 
-The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `branches`, `fork`, `rewind`, `stop`, or `respond`. Run-target actions accept either `runDir` or `runId` and reject conflicting values; `respond` requires its exact `runId`. The slash command remains the direct human interface.
+The extension registers one `hyperchart` tool. Set `action` to `list`, `inspect`, `run`, `run_inspect`, `view`, `branches`, `fork`, `rewind`, `stop`, or `respond`. Run-target actions accept only `runId`, never directory aliases; `respond` requires its exact `runId`. The slash command remains the direct human interface.
 
 ### `hyperchart` with `action: "list"`
 
@@ -209,9 +209,9 @@ Start or resume a run.
 
 | Parameter | Required | Meaning |
 |---|---:|---|
-| `chartPath` | no | chart name or module path; omit when `runDir` identifies an existing run |
+| `chartPath` | no | chart name or module path; omit when `runId` identifies an existing run |
 | `args` | no | run arguments object |
-| `runDir` / `runId` | no | existing run directory/id or destination directory; aliases, not conflicting coordinates |
+| `runId` | no | existing durable run identity; not a destination path |
 | `branchId` / `branchIds` | no | one branch or non-empty unique branch list; fresh omission defaults to `main`, existing omission requires exactly one durable branch |
 | `exportName` | no | named export |
 | `wait` | no | wait for terminal status or the shared active user gate before returning |
@@ -251,7 +251,7 @@ Load a concrete run and return the runtime-enriched inspector model.
 
 | Parameter | Required | Meaning |
 |---|---:|---|
-| `runDir` / `runId` | yes | existing run directory/id; equivalent aliases |
+| `runId` | yes | existing durable run identity |
 | `branchId` | conditionally | inferred for exactly one durable branch; required when multiple branches exist |
 | `verbose` | no | deprecated; `true` is rejected with a direction to `hyperchart view` |
 
@@ -259,12 +259,12 @@ The result is always a bounded digest: run identity and selected branch/status, 
 
 ### `hyperchart` with `action: "view"`
 
-Open the localhost browser inspector and return exactly `{ "url": string }`. Pass exactly one of `runDir`/`runId` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run. A single run branch is inferred; a multi-branch run requires `branchId`.
+Open the localhost browser inspector and return exactly `{ "url": string }`. Pass exactly one of `runId` or `chartPath`; `chartPath` opens a static inspector for a chart definition without a run. A single run branch is inferred; a multi-branch run requires `branchId`.
 
 ```json
 {
   "action": "view",
-  "runDir": "review-20260711-142500"
+  "runId": "review-20260711-142500"
 }
 ```
 
@@ -281,7 +281,7 @@ Set `"open": false` to start the inspector and return its URL without opening th
 Stop one run:
 
 ```json
-{ "action": "stop", "runDir": "review-20260711-142500" }
+{ "action": "stop", "runId": "review-20260711-142500" }
 ```
 
 Stop every active run owned by current working directory:
@@ -290,14 +290,14 @@ Stop every active run owned by current working directory:
 { "action": "stop", "all": true }
 ```
 
-Exactly one of `runDir`/`runId` or `all: true` is required.
+Exactly one of `runId` or `all: true` is required.
 
 ### Branch actions and non-destructive rewind
 
-Run accepts either singleton `branchId`, a non-empty unique `branchIds` array, or omission. Omission starts fresh `main` or infers the only branch of an existing run; a multi-branch run requires an explicit selector. Explicit fresh selection can only be singleton `main`. Attaching to an already-live run never spawns another process. Run inspection and view likewise infer only an unambiguous single branch; response, rewind, and steering keep exact explicit `branchId` coordinates. Use `action: "branches"` with `runDir` or `runId` to list durable named heads. `action: "fork"` accepts either run-coordinate spelling plus a new `branchId` and `fromSeqId`; it creates the pointer without selecting or starting it.
+Run accepts either singleton `branchId`, a non-empty unique `branchIds` array, or omission. Omission starts fresh `main` or infers the only branch of an existing run; a multi-branch run requires an explicit selector. Explicit fresh selection can only be singleton `main`. Attaching to an already-live run never spawns another process. Run inspection and view likewise infer only an unambiguous single branch; response, rewind, and steering keep exact explicit `branchId` coordinates. Use `action: "branches"` with `runId` to list durable named heads. `action: "fork"` accepts `runId` plus a new `branchId` and `fromSeqId`; it creates the pointer without selecting or starting it.
 
 ```json
-{ "action": "rewind", "runDir": "review-20260711-142500", "branchId": "main", "seqId": 42, "mode": "after" }
+{ "action": "rewind", "runId": "review-20260711-142500", "branchId": "main", "seqId": 42, "mode": "after" }
 ```
 
 Rewind is stopped-only and appends a move of only that branch head. Select exactly one of `state`, `seqId`, or `to: "compatible"`. It preserves every record, session, gate, notification, and artifact. `start: true` starts exactly the named branch. Checkout/view is non-durable and never writes `log.jsonl`.

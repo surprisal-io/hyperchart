@@ -37,7 +37,7 @@ const MODEL_ENVELOPE_FIELDS = new Set([
 	"next", "onReject", "open", "optional", "options", "originalBytes", "originalChars", "omittedChars", "outcome", "output", "outputHint", "outputRequired", "over", "path", "pattern", "pendingStateIds",
 	"pid", "presentation", "preservedRecords", "previousHeadSeqId", "preview", "projectChartsDir", "promptPreview", "propertyNames", "queued", "queuedCount", "reads", "records", "regions", "label",
 	"removedByState", "replayWarningCount", "requestId", "required", "resolvedModel", "resolvedTools",
-	"retries", "role", "runDir", "runId", "runnerBranchIds", "runs", "running", "scope", "seqId", "sessionDigest",
+	"retries", "role", "runId", "runnerBranchIds", "runs", "running", "scope", "seqId", "sessionDigest",
 	"selectedBranchChanged", "severity", "sourceBranchId", "stale", "started", "state", "stateCount", "stateDigests", "stateId", "status", "stopped", "stoppedCount",
 	"subProgress", "target", "targetLabel", "text", "thinking", "toolCount", "tools", "toolset", "total", "totalUsage", "tupleItems",
 	"tokenCount", "totalCount", "transitionDigests", "turnCount", "type", "types", "unavailableAgents", "uniqueItems", "updatedAt", "updates", "url", "userChartsDir", "userInteractions", "value",

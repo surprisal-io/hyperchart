@@ -1,3 +1,4 @@
+import { resolveRunPaths, currentRunStorage, withRunStorage } from "./run_paths.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -79,7 +80,7 @@ export class RunnerControlUnavailableError extends Error {
 
 /** Submit a gate response through the owning live runtime and wait for its durable acknowledgement. */
 export async function requestLiveRunnerUserResponse(
-	runDir: string,
+	runId: string,
 	input: { attemptId: string; branchId: BranchId; gateSeqId: number; event: ChartEvent },
 	options: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<UserInteractionResponseCommit> {
@@ -93,14 +94,14 @@ export async function requestLiveRunnerUserResponse(
 		event: input.event,
 		createdAt: Date.now(),
 	};
-	const result = await publishAndWait(runDir, request, options);
+	const result = await publishAndWait(runId, request, options);
 	if (result.kind !== "respond_user_interaction") throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
 	return { record: result.record, idempotent: result.idempotent };
 }
 
 /** Submit a live branch-head move through the owning runtime's sealed writer. */
 export async function requestLiveRunnerBranchMove(
-	runDir: string,
+	runId: string,
 	input: { attemptId: string; branchId: BranchId; targetHeadSeqId: number | null },
 	options: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<RunnerMoveBranchCommit> {
@@ -113,14 +114,14 @@ export async function requestLiveRunnerBranchMove(
 		targetHeadSeqId: input.targetHeadSeqId,
 		createdAt: Date.now(),
 	};
-	const result = await publishAndWait(runDir, request, options);
+	const result = await publishAndWait(runId, request, options);
 	if (result.kind !== "move_branch") throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
 	return { moveSeqId: result.moveSeqId, previousHeadSeqId: result.previousHeadSeqId, preservedRecords: result.preservedRecords };
 }
 
 /** Runner-owned control drain. Commands are transport only; the journal remains semantic truth. */
 export function watchRunnerControl(
-	runDir: string,
+	runId: string,
 	attemptId: string,
 	deliver: (request: RunnerControlRequest) => Promise<RunnerControlCommit>,
 ): () => void {
@@ -130,9 +131,9 @@ export function watchRunnerControl(
 		if (disposed || draining) return;
 		draining = true;
 		try {
-			for (const file of requestFiles(runDir)) {
+			for (const file of requestFiles(runId)) {
 				if (disposed) break;
-				const path = join(requestsDir(runDir), file);
+				const path = join(requestsDir(runId), file);
 				const request = readRequest(path);
 				if (request === undefined) { safeUnlink(path); continue; }
 				if (request.attemptId !== attemptId) { safeUnlink(path); continue; }
@@ -149,7 +150,7 @@ export function watchRunnerControl(
 				} catch (error) {
 					result = { version: CONTROL_VERSION, kind: request.kind, requestId: request.id, attemptId, ok: false, error: error instanceof Error ? error.message : String(error), completedAt: Date.now() };
 				}
-				try { publishJsonExclusive(resultPath(runDir, request.id), result); }
+				try { publishJsonExclusive(resultPath(runId, request.id), result); }
 				catch (error) { if (!isNodeError(error) || error.code !== "EEXIST") continue; }
 				safeUnlink(path);
 			}
@@ -164,27 +165,27 @@ export function watchRunnerControl(
 
 /** Backward-compatible response-only watcher used by focused admission tests. */
 export function watchRunnerUserResponses(
-	runDir: string,
+	runId: string,
 	attemptId: string,
 	deliver: (request: RunnerUserResponseRequest) => Promise<UserInteractionResponseCommit>,
 ): () => void {
-	return watchRunnerControl(runDir, attemptId, (request) => {
+	return watchRunnerControl(runId, attemptId, (request) => {
 		if (request.kind !== "respond_user_interaction") return Promise.reject(new Error("This runner control watcher does not accept branch moves"));
 		return deliver(request);
 	});
 }
 
 async function publishAndWait(
-	runDir: string,
+	runId: string,
 	request: RunnerControlRequest,
 	options: { timeoutMs?: number; pollMs?: number },
 ): Promise<Extract<RunnerControlResult, { ok: true }>> {
-	publishJsonExclusive(requestPath(runDir, request.id), request);
-	return waitForResult(runDir, request, options);
+	publishJsonExclusive(requestPath(runId, request.id), request);
+	return waitForResult(runId, request, options);
 }
 
 function waitForResult(
-	runDir: string,
+	runId: string,
 	request: RunnerControlRequest,
 	options: { timeoutMs?: number; pollMs?: number },
 ): Promise<Extract<RunnerControlResult, { ok: true }>> {
@@ -194,22 +195,22 @@ function waitForResult(
 	return new Promise((resolveResult, rejectResult) => {
 		const finish = (callback: () => void) => { clearInterval(timer); callback(); };
 		const check = () => {
-			const result = readResult(resultPath(runDir, request.id));
+			const result = readResult(resultPath(runId, request.id));
 			if (result !== undefined) {
 				return finish(() => {
-					rmSync(resultPath(runDir, request.id), { force: true });
+					rmSync(resultPath(runId, request.id), { force: true });
 					if (result.attemptId !== request.attemptId) return rejectResult(new RunnerControlUnavailableError("Runner attempt changed before control acknowledgement"));
 					if (result.kind !== request.kind) return rejectResult(new RunnerControlUnavailableError("Runner returned the wrong control result kind"));
 					if (!result.ok) return rejectResult(new Error(result.error));
 					resolveResult(result);
 				});
 			}
-			const status = readRunStatus(runDir);
+			const status = readRunStatus(runId);
 			if (!isRunLive(status) || status?.attemptId !== request.attemptId) {
-				return finish(() => { rmSync(requestPath(runDir, request.id), { force: true }); rejectResult(new RunnerControlUnavailableError("Owning Hyperchart runtime stopped before control acknowledgement")); });
+				return finish(() => { rmSync(requestPath(runId, request.id), { force: true }); rejectResult(new RunnerControlUnavailableError("Owning Hyperchart runtime stopped before control acknowledgement")); });
 			}
 			if (Date.now() - started >= timeoutMs) {
-				return finish(() => { rmSync(requestPath(runDir, request.id), { force: true }); rejectResult(new RunnerControlUnavailableError("Timed out waiting for owning Hyperchart runtime control acknowledgement")); });
+				return finish(() => { rmSync(requestPath(runId, request.id), { force: true }); rejectResult(new RunnerControlUnavailableError("Timed out waiting for owning Hyperchart runtime control acknowledgement")); });
 			}
 		};
 		const timer = setInterval(check, pollMs);
@@ -218,13 +219,13 @@ function waitForResult(
 	});
 }
 
-function controlDir(runDir: string): string { return resolve(runDir, "runner-control", "user-responses"); }
-function requestsDir(runDir: string): string { return join(controlDir(runDir), "requests"); }
-function resultsDir(runDir: string): string { return join(controlDir(runDir), "results"); }
-function requestPath(runDir: string, id: string): string { return join(requestsDir(runDir), `${id}.json`); }
-function resultPath(runDir: string, id: string): string { return join(resultsDir(runDir), `${id}.json`); }
-function requestFiles(runDir: string): string[] {
-	try { return readdirSync(requestsDir(runDir)).filter((file) => file.endsWith(".json")).sort(); }
+function controlDir(runId: string): string { return resolve(resolveRunPaths(runId).runDir, "runner-control", "user-responses"); }
+function requestsDir(runId: string): string { return join(controlDir(runId), "requests"); }
+function resultsDir(runId: string): string { return join(controlDir(runId), "results"); }
+function requestPath(runId: string, id: string): string { return join(requestsDir(runId), `${id}.json`); }
+function resultPath(runId: string, id: string): string { return join(resultsDir(runId), `${id}.json`); }
+function requestFiles(runId: string): string[] {
+	try { return readdirSync(requestsDir(runId)).filter((file) => file.endsWith(".json")).sort(); }
 	catch { return []; }
 }
 function publishJsonExclusive(path: string, value: unknown): void {

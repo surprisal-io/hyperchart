@@ -1,3 +1,4 @@
+import { resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ const RUNTIME_NOW = Date.now();
 
 export type ProductionTuiFixture = {
 	root: string;
+	storage: RunStorage;
 	ast: ChartAst;
 	primary: RunComponentOptions;
 	manyRunning: RunComponentOptions;
@@ -251,7 +253,7 @@ function session(
 	};
 }
 
-function writeRun(root: string, ast: ChartAst, variant: "running" | "many-running" | "stopped" | "stale") {
+function writeRun(storage: RunStorage, ast: ChartAst, variant: "running" | "many-running" | "stopped" | "stale") {
 	const runId =
 		variant === "running"
 			? "deck-director-20260714-114800"
@@ -260,7 +262,7 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 				: variant === "stopped"
 					? "deck-director-20260713-172100"
 					: "deck-director-20260712-093000";
-	const runDir = join(root, runId);
+	const runDir = resolveRunPaths(runId, storage).runDir;
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const records = deckLog(ast, variant === "many-running" ? "many" : "single");
 	writeJsonl(join(runDir, "log.jsonl"), [
@@ -273,7 +275,7 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 	);
 	writeFileSync(
 		join(runDir, "status.json"),
-		`${JSON.stringify({ version: 1, runId, branchId: "main", runDir, chartId: ast.id, state: variant === "stale" ? "stopped" : variant === "many-running" ? "running" : variant, startedAt: STORY_NOW - 720_000, updatedAt: STORY_NOW - 5_000, ...(variant === "stale" ? { replayWarnings: ["Runner heartbeat expired; durable state remains resumable."] } : {}) }, null, 2)}\n`,
+		`${JSON.stringify({ version: 2, runId, branchIds: ["main"], chartId: ast.id, state: variant === "stale" ? "stopped" : variant === "many-running" ? "running" : variant, startedAt: STORY_NOW - 720_000, updatedAt: STORY_NOW - 5_000, ...(variant === "stale" ? { replayWarnings: ["Runner heartbeat expired; durable state remains resumable."] } : {}) }, null, 2)}\n`,
 	);
 	const planUid = action(ast, "plan").uid;
 	const officialUid = action(ast, "research#official.scout").uid;
@@ -345,16 +347,16 @@ function writeRun(root: string, ast: ChartAst, variant: "running" | "many-runnin
 
 export function materializeProductionTuiFixture(): ProductionTuiFixture {
 	const root = mkdtempSync(join(tmpdir(), `pi-hyperchart-storybook-tui-${process.pid}-`));
+	const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "run-id" };
 	const ast = normalizeDeckDirector();
-	const running = writeRun(root, ast, "running");
-	const manyRunning = writeRun(root, ast, "many-running");
-	const stopped = writeRun(root, ast, "stopped");
-	const stale = writeRun(root, ast, "stale");
+	const running = writeRun(storage, ast, "running");
+	const manyRunning = writeRun(storage, ast, "many-running");
+	const stopped = writeRun(storage, ast, "stopped");
+	const stale = writeRun(storage, ast, "stale");
 	const history: RunHistoryItem[] = [
 		{
 			runId: running.runId,
 			branchId: "main",
-			runDir: running.runDir,
 			chartId: ast.id,
 			state: "running",
 			live: true,
@@ -366,7 +368,6 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		{
 			runId: stopped.runId,
 			branchId: "main",
-			runDir: stopped.runDir,
 			chartId: ast.id,
 			state: "stopped",
 			live: false,
@@ -378,7 +379,6 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		{
 			runId: stale.runId,
 			branchId: "main",
-			runDir: stale.runDir,
 			chartId: ast.id,
 			state: "stopped",
 			live: false,
@@ -390,11 +390,10 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 	];
 	return {
 		root,
+		storage,
 		ast,
 		primary: {
 			runId: running.runId,
-			runDir: running.runDir,
-			logPath: join(running.runDir, "log.jsonl"),
 			ast,
 			branchId: "main",
 			live: true,
@@ -402,8 +401,6 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		},
 		manyRunning: {
 			runId: manyRunning.runId,
-			runDir: manyRunning.runDir,
-			logPath: join(manyRunning.runDir, "log.jsonl"),
 			ast,
 			branchId: "main",
 			live: true,

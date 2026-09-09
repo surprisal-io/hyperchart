@@ -7,7 +7,7 @@ Claude Code plugin for [Hyperchart](https://github.com/surprisal-io/hyperchart):
 - **`hyperchart_*` MCP tools** — `list`, `inspect`, `run`, `respond`, `run_inspect`, `rewind`, `steer`, `stop`, `view` — exposed to Claude by a bundled stdio MCP server. Every response is bounded: full definitions, schemas, runtime snapshots, visit histories, and transcripts never enter Claude session logs. Deprecated `verbose: true` inspection calls are rejected; `view` is the sole full inspection surface.
 - **Detached background runs** — chart runner survives Claude session.
   Run directory stores durable state.
-  Always-on plugin monitor routes terminal prompts and durable user gates to the exact originating Claude session/canonical workDir.
+  Always-on plugin monitor routes terminal prompts and durable user gates to the exact originating Claude session/canonical workDir. Explicit monitor root/storage options take precedence over unrelated ambient storage; see the [Claude integration contract](../../docs/claude-code.md).
   `wait: true` uses the same cross-run arbiter and returns terminal status or the globally active gate.
   Delivery/presentation uses at-least-once recovery semantics.
   A user gate is identified by `(runId, branchId, seqId)`; identical response retries are idempotent and divergent answers conflict.
@@ -79,3 +79,5 @@ Marketplace packaging, model-id mapping between hosts, and cross-host run intero
 ## Named branches
 
 Claude tools require explicit branch handles for run/inspection/view/response/rewind and provide cursor-paged `hyperchart_branches` (at most 100 heads, `totalCount`, optional `next`) plus `hyperchart_fork`. Checkout is read-only; fork never selects; rewind only moves the named durable head.
+
+Runs are addressed only by `runId`. Host storage config declares backend, root and `run-id` or `sha256` layout; existing literal framework and hashed AutoDiscovery layouts remain unchanged. See the [canonical runtime identity contract](../../docs/api/runtime.md#run-identity-and-storage-scope).

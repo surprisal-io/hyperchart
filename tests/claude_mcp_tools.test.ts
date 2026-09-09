@@ -1,7 +1,8 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
@@ -46,6 +47,7 @@ afterEach(async () => {
 function makeWorld(sessionId?: string): {
 	cwd: string;
 	runsRoot: string;
+	storage: RunStorage;
 	tools: Map<string, HyperchartMcpTool>;
 	chartPath: string;
 	chartsDir: string;
@@ -60,6 +62,7 @@ function makeWorld(sessionId?: string): {
 	const chartsDir = join(cwd, ".claude", "hypercharts");
 	mkdirSync(chartsDir, { recursive: true });
 	const runsRoot = join(root, "runs-root");
+	const storage: RunStorage = { kind: "jsonl", rootDir: runsRoot, layout: "run-id" };
 	const chartPath = join(chartsDir, "simple.chart.ts");
 	writeFileSync(
 		chartPath,
@@ -68,9 +71,9 @@ export default chart({ kind: "chart", id: "simple", initial: "done", states: { d
 `,
 	);
 	const tools = new Map(
-		createHyperchartMcpTools({ cwd, runsRoot, ...(sessionId === undefined ? {} : { sessionId }), openBrowser: () => undefined }).map((tool) => [tool.name, tool]),
+		createHyperchartMcpTools({ cwd, runsRoot, storage, ...(sessionId === undefined ? {} : { sessionId }), openBrowser: () => undefined }).map((tool) => [tool.name, tool]),
 	);
-	return { cwd, runsRoot, tools, chartPath, chartsDir, userChartsDir };
+	return { cwd, runsRoot, storage, tools, chartPath, chartsDir, userChartsDir };
 }
 
 function text(result: { content: Array<{ text: string }> }): string {
@@ -103,19 +106,20 @@ function complexGateSchema(): Record<string, unknown> {
 
 describe("hyperchart MCP tools", () => {
 	it("pages more than 100 branches through the MCP cursor contract", async () => {
-		const { cwd, runsRoot, tools, chartPath } = makeWorld();
-		const runDir = join(runsRoot, "paged-branches");
-		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		const { storage, cwd, runsRoot, tools, chartPath } = makeWorld();
+		const runId = "paged-branches";
+		const runDir = resolveRunPaths(runId, storage).runDir;
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() }));
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
 		for (let index = 0; index < 105; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
-		const firstResult = await tools.get("hyperchart_branches")!.handler({ runDir, cwd });
+		const firstResult = await tools.get("hyperchart_branches")!.handler({ runId, cwd });
 		const first = JSON.parse(text(firstResult)) as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
 		expect(first.branches).toHaveLength(100);
 		expect(first.totalCount).toBe(106);
 		expect(first.next).toBeTypeOf("string");
-		const secondResult = await tools.get("hyperchart_branches")!.handler({ runDir, cwd, cursor: first.next });
+		const secondResult = await tools.get("hyperchart_branches")!.handler({ runId, cwd, cursor: first.next });
 		const second = JSON.parse(text(secondResult)) as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
 		expect(second.branches).toHaveLength(6);
 		expect(second.totalCount).toBe(106);
@@ -124,7 +128,7 @@ describe("hyperchart MCP tools", () => {
 	});
 
 	it("registers the full tool surface", () => {
-		const { tools } = makeWorld();
+		const { storage, tools } = makeWorld();
 		expect([...tools.keys()].sort()).toEqual([
 			"hyperchart_branches",
 			"hyperchart_fork",
@@ -141,7 +145,7 @@ describe("hyperchart MCP tools", () => {
 	});
 
 	it("always returns compact inspect digests and rejects the former verbose escape hatch", async () => {
-		const { tools } = makeWorld();
+		const { storage, tools } = makeWorld();
 		const digest = JSON.parse(text(await tools.get("hyperchart_inspect")!.handler({ chartPath: "simple" })));
 		expect(digest.chartId).toBe("simple");
 		expect(digest.definitionSource).toBeUndefined();
@@ -154,14 +158,14 @@ describe("hyperchart MCP tools", () => {
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true })));
 		expect(run).not.toHaveProperty("inspector");
 		expect(run).not.toHaveProperty("notification");
-		const runDigest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: run.runId })));
+		const runDigest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runId: run.runId })));
 		expect(runDigest.runId).toBe(run.runId);
 		expect(runDigest.status).toBe("completed");
 		expect(runDigest.stateDigests.every((state: object) => !("definitionSource" in state))).toBe(true);
 	}, 30_000);
 
 	it("requires fresh runs to select exactly main", async () => {
-		const { tools } = makeWorld();
+		const { storage, tools } = makeWorld();
 		for (const selector of [{ branchId: "experiment" }, { branchIds: ["main", "experiment"] }]) {
 			const result = await tools.get("hyperchart_run")!.handler({ chartPath: "simple", ...selector });
 			expect(result.isError).toBe(true);
@@ -170,21 +174,23 @@ describe("hyperchart MCP tools", () => {
 	});
 
 	it("returns only bounded startup coordinates for wait=false", async () => {
-		const { tools } = makeWorld();
+		const { storage, tools } = makeWorld();
 		const started = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: false })));
-		expect(started).toMatchObject({ chartId: "simple", runId: expect.any(String), runDir: expect.stringMatching(/^\//) });
+		expect(started).toMatchObject({ chartId: "simple", runId: expect.any(String) });
+		expect(started).not.toHaveProperty("runDir");
 		expect(started).not.toHaveProperty("inspector");
 		expect(started).not.toHaveProperty("states");
 		expect(started).not.toHaveProperty("messages");
-		await tools.get("hyperchart_run")!.handler({ branchId: "main", runDir: started.runId, wait: true });
+		await tools.get("hyperchart_run")!.handler({ branchId: "main", runId: started.runId, wait: true });
 	}, 30_000);
 
 	it("never loads transcripts into run inspection tool responses", async () => {
-		const { tools, runsRoot, cwd, chartPath } = makeWorld();
-		const runDir = join(runsRoot, "verbose-run");
+		const { storage, tools, runsRoot, cwd, chartPath } = makeWorld();
+		const runId = "verbose-run";
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		const sessionsDir = join(runDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
-		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() }));
 		const actionUid = { chart: "simple", state: "done", action: "agent" };
 		const transcriptFile = join(sessionsDir, "verbose.jsonl");
 		writeFileSync(transcriptFile, [
@@ -198,36 +204,36 @@ describe("hyperchart MCP tools", () => {
 			sessionFile: transcriptFile,
 		}, "simple:done:agent:1:2");
 
-		const compact = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: "verbose-run" })));
-		const rejected = await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: "verbose-run", verbose: true });
+		const compact = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runId: "verbose-run" })));
+		const rejected = await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runId: "verbose-run", verbose: true });
 		expect(JSON.stringify(compact)).not.toContain("verbose transcript");
 		expect(rejected.isError).toBe(true);
 		expect(text(rejected)).toContain("hyperchart_view");
 	});
 
 	it("owns runs by the injected session and leases wait delivery without pre-confirming", async () => {
-		const { tools, runsRoot, cwd } = makeWorld("session-a");
+		const { storage, tools, runsRoot, cwd } = makeWorld("session-a");
 		const first = await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true });
 		expect(JSON.parse(text(first))).toMatchObject({ boundary: "terminal", final: true, status: { state: "complete" } });
 		const [runId] = readdirSync(runsRoot);
 		if (runId === undefined) throw new Error("expected run");
-		const runDir = join(runsRoot, runId);
-		expect((await loadRunMeta(runDir)).originSessionId).toBe("session-a");
-		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-a")).toBe(false);
-		const firstRequestId = readTerminalNotificationRequest(runDir)!.requestId;
+		const runDir = resolveRunPaths(runId, storage).runDir;
+		expect((await withRunStorage(storage, () => loadRunMeta(runId))).originSessionId).toBe("session-a");
+		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(false);
+		const firstRequestId = withRunStorage(storage, () => readTerminalNotificationRequest(runId))!.requestId;
 
-		const second = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", runDir: runId, wait: true })));
+		const second = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", runId: runId, wait: true })));
 		expect(second.deliveryNotice).toContain("terminal boundary");
-		expect(readTerminalNotificationRequest(runDir)!.requestId).not.toBe(firstRequestId);
+		expect(withRunStorage(storage, () => readTerminalNotificationRequest(runId))!.requestId).not.toBe(firstRequestId);
 
-		const foreignTools = new Map(createHyperchartMcpTools({ cwd, runsRoot, sessionId: "session-b" }).map((tool) => [tool.name, tool]));
-		const foreign = JSON.parse(text(await foreignTools.get("hyperchart_run")!.handler({ branchId: "main", runDir: runId, wait: true })));
+		const foreignTools = new Map(createHyperchartMcpTools({ cwd, runsRoot, storage, sessionId: "session-b" }).map((tool) => [tool.name, tool]));
+		const foreign = JSON.parse(text(await foreignTools.get("hyperchart_run")!.handler({ branchId: "main", runId: runId, wait: true })));
 		expect(foreign.limitation).toContain("not owned");
-		expect(hasTerminalNotificationReceipt(runDir, "claude", "session-b")).toBe(false);
+		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-b"))).toBe(false);
 	}, 30_000);
 
 	it("publishes the actual FAILED error before matching failed status", async () => {
-		const { tools, chartsDir } = makeWorld();
+		const { storage, tools, chartsDir } = makeWorld();
 		writeFileSync(join(chartsDir, "failure.chart.ts"), `import { chart, failed, script } from "@surprisal/hyperchart";
 export default chart({ kind: "chart", id: "failure", initial: "work", states: {
 	work: { kind: "state", action: script("node", ["-e", "console.error('specific boom'); process.exit(9)"]), transitions: { ERROR: "failed" } },
@@ -236,13 +242,13 @@ export default chart({ kind: "chart", id: "failure", initial: "work", states: {
 `);
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "failure", wait: true })));
 		expect(run.status).toMatchObject({ state: "failed", error: expect.stringContaining("specific boom") });
-		const request = readTerminalNotificationRequest(run.runDir);
+		const request = withRunStorage(storage, () => readTerminalNotificationRequest(run.runId));
 		expect(request?.payload).toMatchObject({ outcome: "failed", error: expect.stringContaining("specific boom") });
 		expect(request?.payload.prompt).toContain("specific boom");
 	}, 30_000);
 
 	it("marks finals entered through a container's onDone as done", async () => {
-		const { tools, chartsDir } = makeWorld();
+		const { storage, tools, chartsDir } = makeWorld();
 		writeFileSync(
 			join(chartsDir, "pardone.chart.ts"),
 			`import { chart, compound, final, parallel, script } from "@surprisal/hyperchart";
@@ -274,7 +280,7 @@ export default chart({
 		);
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "pardone", wait: true })));
 		expect(run.status.state).toBe("complete");
-		const digest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: run.runId })));
+		const digest = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runId: run.runId })));
 		const statusOf = (id: string) =>
 			digest.stateDigests.find((state: { id: string }) => state.id === id)?.status ??
 			(digest.pendingStateIds.includes(id) ? "pending" : undefined);
@@ -284,7 +290,7 @@ export default chart({
 	}, 30_000);
 
 	it("discovers charts and host-sectioned settings from the shared .hypercharts dir", async () => {
-		const { tools, cwd } = makeWorld();
+		const { storage, tools, cwd } = makeWorld();
 		const sharedDir = join(cwd, ".hypercharts");
 		mkdirSync(sharedDir, { recursive: true });
 		writeFileSync(
@@ -311,13 +317,13 @@ export default chart({ kind: "chart", id: "common", initial: "done", states: { d
 
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "common", wait: true })));
 		expect(run.status.state).toBe("complete");
-		const config = JSON.parse(readFileSync(join(run.runDir, "runner.config.json"), "utf8"));
+		const config = JSON.parse(readFileSync(join(resolveRunPaths(run.runId, storage).runDir, "runner.config.json"), "utf8"));
 		expect(config.modelRoles).toEqual({ reviewer: "claude-haiku-4-5" });
 		expect(config.toolsets).toEqual({ reading: ["Read"] });
 	}, 30_000);
 
 	it("opens a static chart view without a run", async () => {
-		const { tools } = makeWorld();
+		const { storage, tools } = makeWorld();
 		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ chartPath: "simple", open: false })));
 		expect(viewed).toEqual({ url: expect.stringContaining("/runs/") });
 		const both = await tools.get("hyperchart_view")!.handler({});
@@ -325,7 +331,7 @@ export default chart({ kind: "chart", id: "common", initial: "done", states: { d
 	});
 
 	it("rewinds a completed run and replays it to completion", async () => {
-		const { tools, chartsDir } = makeWorld();
+		const { storage, tools, chartsDir } = makeWorld();
 		writeFileSync(
 			join(chartsDir, "steps.chart.ts"),
 			`import { chart, final, script } from "@surprisal/hyperchart";
@@ -342,24 +348,24 @@ export default chart({
 		);
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "steps", wait: true })));
 		expect(run.status.state).toBe("complete");
-		const originalRequestId = readTerminalNotificationRequest(run.runDir)?.requestId;
+		const originalRequestId = withRunStorage(storage, () => readTerminalNotificationRequest(run.runId))?.requestId;
 
-		const terminalBefore = readFileSync(join(run.runDir, "terminal-notification", "request.json"), "utf8");
-		const rewindResult = await tools.get("hyperchart_rewind")!.handler({ branchId: "main", runDir: run.runId, state: "work" });
+		const terminalBefore = readFileSync(join(resolveRunPaths(run.runId, storage).runDir, "terminal-notification", "request.json"), "utf8");
+		const rewindResult = await tools.get("hyperchart_rewind")!.handler({ branchId: "main", runId: run.runId, state: "work" });
 		expect(rewindResult.isError, text(rewindResult)).toBeUndefined();
 		const rewound = JSON.parse(text(rewindResult));
 		expect(rewound).toMatchObject({ branchId: "main", preservedRecords: expect.any(Number) });
 		expect(rewound.previousHeadSeqId).toBeGreaterThan(0);
 		expect(rewound.headSeqId).toBeNull();
-		expect(readFileSync(join(run.runDir, "terminal-notification", "request.json"), "utf8")).toBe(terminalBefore);
+		expect(readFileSync(join(resolveRunPaths(run.runId, storage).runDir, "terminal-notification", "request.json"), "utf8")).toBe(terminalBefore);
 
-		const resumed = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", runDir: run.runId, wait: true })));
+		const resumed = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", runId: run.runId, wait: true })));
 		expect(resumed.status.state).toBe("complete");
-		expect(readTerminalNotificationRequest(run.runDir)?.requestId).not.toBe(originalRequestId);
+		expect(withRunStorage(storage, () => readTerminalNotificationRequest(run.runId))?.requestId).not.toBe(originalRequestId);
 	}, 30_000);
 
 	it("lists charts, runs a chart to completion, and inspects the run", async () => {
-		const { tools, runsRoot } = makeWorld();
+		const { storage, tools, runsRoot } = makeWorld();
 		const listed = JSON.parse(text(await tools.get("hyperchart_list")!.handler({})));
 		expect(listed.charts).toEqual([
 			{ name: "simple", scope: "project", chartPath: join(listed.projectChartsDir, "simple.chart.ts") },
@@ -371,9 +377,9 @@ export default chart({
 
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true })));
 		expect(run.status.state).toBe("complete");
-		expect(run.runDir.startsWith(runsRoot)).toBe(true);
+		expect(resolveRunPaths(run.runId, storage).runDir.startsWith(runsRoot)).toBe(true);
 
-		const runInfo = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runDir: run.runId })));
+		const runInfo = JSON.parse(text(await tools.get("hyperchart_run_inspect")!.handler({ branchId: "main", runId: run.runId })));
 		expect(runInfo.runId).toBe(run.runId);
 		expect(runInfo.stateDigests.some((state: { id: string }) => state.id === "done")).toBe(true);
 
@@ -382,7 +388,7 @@ export default chart({
 	}, 30_000);
 
 	it("lists user-scope charts and lets a same-named project chart win", async () => {
-		const { tools, chartsDir, userChartsDir } = makeWorld();
+		const { storage, tools, chartsDir, userChartsDir } = makeWorld();
 		mkdirSync(join(userChartsDir, "bundle"), { recursive: true });
 		writeFileSync(join(userChartsDir, "bundle", "chart.ts"), "export default {};\n");
 		writeFileSync(join(userChartsDir, "simple.chart.ts"), "export default {};\n");
@@ -397,7 +403,7 @@ export default chart({
 	});
 
 	it("rejects multi-branch selection for a fresh chart with fork/resume guidance", async () => {
-		const { tools } = makeWorld();
+		const { storage, tools } = makeWorld();
 		const result = await tools.get("hyperchart_run")!.handler({
 			chartPath: "simple",
 			branchIds: ["main", "experiment"],
@@ -407,7 +413,7 @@ export default chart({
 	});
 
 	it("passes merged model roles and toolsets from settings into the runner config", async () => {
-		const { tools, chartsDir, userChartsDir } = makeWorld();
+		const { storage, tools, chartsDir, userChartsDir } = makeWorld();
 		mkdirSync(userChartsDir, { recursive: true });
 		writeFileSync(
 			join(userChartsDir, "settings.json"),
@@ -419,23 +425,24 @@ export default chart({
 		);
 
 		const run = JSON.parse(text(await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true })));
-		const config = JSON.parse(readFileSync(join(run.runDir, "runner.config.json"), "utf8"));
+		const config = JSON.parse(readFileSync(join(resolveRunPaths(run.runId, storage).runDir, "runner.config.json"), "utf8"));
 
 		expect(config.modelRoles).toEqual({ reviewer: "opus", scout: "haiku" });
 		expect(config.toolsets).toEqual({ reading: ["Read", "Grep"], coding: ["Read", "Edit", "Bash"] });
 	}, 30_000);
 
 	it("queues steering for a live session and rejects dead sessions", async () => {
-		const { tools, runsRoot, cwd, chartPath } = makeWorld();
-		const runDir = join(runsRoot, "steer-run");
+		const { storage, tools, runsRoot, cwd, chartPath } = makeWorld();
+		const runId = "steer-run";
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
-		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() }));
 		const actionUid = { chart: "simple", state: "work", action: "agent" };
 		const actionKey = actionUidKey(actionUid);
 		updateSessionProgress(join(runDir, "sessions"), actionUid, { actionName: "worker", status: "running" }, `${actionKey}:1:7`);
 
 		const queued = await tools.get("hyperchart_steer")!.handler({
-			runDir: "steer-run",
+			runId: "steer-run",
 			branchId: "main",
 			actionKey,
 			message: "focus",
@@ -447,7 +454,7 @@ export default chart({
 
 		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "completed" }, `${actionKey}:1:7`);
 		const rejected = await tools.get("hyperchart_steer")!.handler({
-			runDir: "steer-run",
+			runId: "steer-run",
 			branchId: "main",
 			actionKey,
 			message: "late",
@@ -457,7 +464,7 @@ export default chart({
 		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "running" }, `${actionKey}:2:8`);
 		updateSessionProgress(join(runDir, "sessions"), actionUid, { status: "running" }, `${actionKey}:3:9`);
 		const ambiguous = await tools.get("hyperchart_steer")!.handler({
-			runDir: "steer-run",
+			runId: "steer-run",
 			branchId: "main",
 			actionKey,
 			message: "which one",
@@ -467,59 +474,66 @@ export default chart({
 	});
 
 	it("stops a run that is not live by marking it stopped", async () => {
-		const { tools, runsRoot, cwd, chartPath } = makeWorld();
-		const runDir = join(runsRoot, "stop-run");
+		const { storage, tools, runsRoot, cwd, chartPath } = makeWorld();
+		const runId = "stop-run";
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
-		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
-		patchRunStatus(runDir, { runId: "stop-run", branchIds: ["main"], chartId: "simple", state: "running" });
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() }));
+		withRunStorage(storage, () => patchRunStatus(runId, { branchIds: ["main"], chartId: "simple", state: "running" }));
 
-		const stopped = JSON.parse(text(await tools.get("hyperchart_stop")!.handler({ runDir: "stop-run" })));
+		const stopped = JSON.parse(text(await tools.get("hyperchart_stop")!.handler({ runId: "stop-run" })));
 		expect(stopped.stopped).toHaveLength(1);
 		const status = JSON.parse(readFileSync(join(runDir, "status.json"), "utf8"));
 		expect(status.state).toBe("stopped");
 	});
 
 	it("opens the browser inspector with overview-only data and loads transcripts on demand", async () => {
-		const { tools, runsRoot, cwd, chartPath } = makeWorld();
-		const runDir = join(runsRoot, "view-run");
+		const { storage, tools, runsRoot, cwd, chartPath } = makeWorld();
+		const runId = "view-run";
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		const sessionsDir = join(runDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
-		await saveRunMeta(runDir, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() });
-		const actionUid = { chart: "simple", state: "done", action: "agent" };
+		await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir: cwd, chartId: "simple", createdAt: new Date().toISOString() }));
+		writeFileSync(chartPath, `export default { kind: "chart", id: "simple", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };`);
+		const actionUid = { chart: "simple", state: "work", action: "agent" };
+		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
+		await store.initializeRootBranch();
+		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" } }]);
+		const timestamp = invoke!.timestamp;
 		const transcriptFile = join(sessionsDir, "view-run.jsonl");
 		writeFileSync(transcriptFile, [
 			JSON.stringify({ hyperchartTranscript: 1, sessionId: "view-session", createdAt: 1 }),
-			JSON.stringify({ id: "assistant-1", role: "assistant", text: "inspector transcript" }),
+			JSON.stringify({ id: "assistant-1", role: "assistant", text: "inspector transcript", timestamp }),
 		].join("\n") + "\n");
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
 			sessionId: "session-id",
 			sessionFile: transcriptFile,
-		}, `${actionUidKey(actionUid)}:1:11`, "main");
+		}, `${actionUidKey(actionUid)}:1:${invoke!.seqId}`, "main");
 		updateSessionProgress(sessionsDir, actionUid, {
 			actionName: "worker",
 			status: "running",
 			sessionId: "experiment-session",
-		}, `${actionUidKey(actionUid)}:1:11`, "experiment");
+		}, `${actionUidKey(actionUid)}:1:${invoke!.seqId}`, "experiment");
 
-		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ runDir: "view-run", branchId: "main", open: false })));
+		const viewed = JSON.parse(text(await tools.get("hyperchart_view")!.handler({ runId: "view-run", branchId: "main", open: false })));
 		expect(viewed.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/runs\/[A-Za-z0-9_-]+$/);
 		const response = await fetch(viewed.url.replace("/runs/", "/api/runs/"));
 		expect(response.status).toBe(200);
 		const payload = (await response.json()) as {
-			run: { runId: string; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
+			run: { runId: string; historySnapshot: { branchId: string; headSeqId: number | null }; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
 		};
 		expect(payload.run.runId).toBe("view-run");
 		expect(payload.run.states.find((state) => state.id === "done")?.session?.messages).toBeUndefined();
 		const sessionResponse = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/history`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ operation: "readVisitSession", input: { branchId: "main", invokeSeqId: 11 } }),
+			body: JSON.stringify({ operation: "readVisitSession", input: { snapshot: payload.run.historySnapshot, invokeSeqId: invoke!.seqId } }),
 		});
 		expect(sessionResponse.status).toBe(200);
 		const sessionPayload = await sessionResponse.json() as { result: { messages?: unknown[] } };
-		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript" }]);
+		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript", timestamp }]);
 
 		// The inspector's steering endpoint must land in the run's file queue.
 		const steer = await fetch(`${viewed.url.replace("/runs/", "/api/runs/")}/steer`, {
@@ -548,14 +562,14 @@ describe("session start hook", () => {
 		writeFileSync(join(liveDir, "meta.json"), JSON.stringify({ chartPath: join(cwd, "one.chart.ts"), workDir: cwd, chartId: "one", createdAt: new Date().toISOString(), originSessionId: "s1" }));
 		writeFileSync(
 			join(liveDir, "status.json"),
-			JSON.stringify({ chartId: "one", state: "running", pid: process.pid, heartbeatAt: Date.now() }),
+			JSON.stringify({ version: 2, runId: "live-run", branchIds: ["main"], chartId: "one", state: "running", pid: process.pid, heartbeatAt: Date.now() }),
 		);
 		writeFileSync(join(deadDir, "meta.json"), JSON.stringify({ chartPath: join(cwd, "two.chart.ts"), workDir: cwd, chartId: "two", createdAt: new Date().toISOString(), originSessionId: "s1" }));
-		writeFileSync(join(deadDir, "status.json"), JSON.stringify({ chartId: "two", state: "complete" }));
+		writeFileSync(join(deadDir, "status.json"), JSON.stringify({ version: 2, runId: "dead-run", branchIds: [], chartId: "two", state: "complete" }));
 		writeFileSync(join(foreignDir, "meta.json"), JSON.stringify({ chartPath: join(root, "three.chart.ts"), workDir: root, chartId: "three", createdAt: new Date().toISOString(), originSessionId: "s1" }));
 		writeFileSync(
 			join(foreignDir, "status.json"),
-			JSON.stringify({ chartId: "three", state: "running", pid: process.pid, heartbeatAt: Date.now() }),
+			JSON.stringify({ version: 2, runId: "foreign-run", branchIds: ["main"], chartId: "three", state: "running", pid: process.pid, heartbeatAt: Date.now() }),
 		);
 
 		const output = execFileSync(

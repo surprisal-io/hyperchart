@@ -20,6 +20,6 @@ describe("neutral host boundary", () => {
 		const source = readFileSync(join(hostDir, "index.ts"), "utf8");
 
 		expect(source).not.toContain("readHyperchartSessionSnapshot");
-		expect(source).not.toContain("hyperchartRunFromRunDir");
+		expect(source).not.toContain("hyperchartRunFromRunId");
 	});
 });

@@ -1,3 +1,4 @@
+import { listRunIds, currentRunStorage, withRunStorage, type RunStorage } from "@surprisal/hyperchart/runtime";
 import { existsSync, readdirSync, realpathSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
@@ -23,6 +24,7 @@ import { serializeModelEnvelope, summarizeUserGate } from "@surprisal/hyperchart
 
 export type ClaudeMonitorOptions = {
 	runsRoot: string;
+	storage?: RunStorage;
 	cwd: string;
 	sessionId?: string;
 	writeLine?: (line: string) => void;
@@ -31,25 +33,24 @@ export type ClaudeMonitorOptions = {
 /** Backwards-compatible name retained for callers that only scan terminal notifications. */
 export type ClaudeTerminalMonitorOptions = ClaudeMonitorOptions;
 
-export type OwnedClaudeTerminalRequest = { runDir: string; request: TerminalNotificationRequest };
+export type OwnedClaudeTerminalRequest = { runId: string; request: TerminalNotificationRequest };
 
 export function claudeInteractionOwner(options: ClaudeMonitorOptions & { sessionId: string }): UserInteractionOwner {
 	return { runsRoot: options.runsRoot, host: "claude", sessionId: options.sessionId, workDir: options.cwd };
 }
 
 export async function pendingOwnedClaudeTerminalRequests(options: ClaudeMonitorOptions): Promise<OwnedClaudeTerminalRequest[]> {
-	if (options.sessionId === undefined || !existsSync(options.runsRoot)) return [];
+	if (!hasMonitorStorageScope(options)) return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () => pendingOwnedClaudeTerminalRequests(options));
+	if (options.sessionId === undefined) return [];
 	const pending: OwnedClaudeTerminalRequest[] = [];
-	for (const entry of readdirSync(options.runsRoot, { withFileTypes: true })) {
-		if (!entry.isDirectory()) continue;
-		const runDir = join(options.runsRoot, entry.name);
+	for (const runId of await listRunIds()) {
 		try {
-			const meta = await loadRunMeta(runDir);
+			const meta = await loadRunMeta(runId);
 			if (canonicalPath(meta.workDir) !== canonicalPath(options.cwd) || meta.originSessionId !== options.sessionId) continue;
-			recoverStaleRunTerminalNotification(runDir);
-			const request = readDeliverableTerminalNotificationRequest(runDir);
-			if (request === undefined || hasTerminalNotificationReceipt(runDir, "claude", options.sessionId)) continue;
-			pending.push({ runDir, request });
+			recoverStaleRunTerminalNotification(runId);
+			const request = readDeliverableTerminalNotificationRequest(runId);
+			if (request === undefined || hasTerminalNotificationReceipt(runId, "claude", options.sessionId)) continue;
+			pending.push({ runId, request });
 		} catch {
 			// A concurrently-created or unrelated malformed run must not break monitor routing.
 		}
@@ -58,6 +59,7 @@ export async function pendingOwnedClaudeTerminalRequests(options: ClaudeMonitorO
 }
 
 export async function activeOwnedClaudeUserInteraction(options: ClaudeMonitorOptions): Promise<OwnedUserInteraction | undefined> {
+	if (!hasMonitorStorageScope(options)) return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () => activeOwnedClaudeUserInteraction(options));
 	if (options.sessionId === undefined) return undefined;
 	return acquireActiveUserInteraction(claudeInteractionOwner({ ...options, sessionId: options.sessionId }));
 }
@@ -66,6 +68,7 @@ export async function ownedClaudeUserInteractionSummary(options: ClaudeMonitorOp
 	active?: ReturnType<typeof claudeUserInteractionDetails> & { presentation: OwnedUserInteraction["presentation"] };
 	queued: Array<ReturnType<typeof claudeUserInteractionDetails> & { presentation: OwnedUserInteraction["presentation"] }>;
 }> {
+	if (!hasMonitorStorageScope(options)) return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () => ownedClaudeUserInteractionSummary(options));
 	if (options.sessionId === undefined) return { queued: [] };
 	const owner = claudeInteractionOwner({ ...options, sessionId: options.sessionId });
 	const interactions = await scanOwnedOpenUserInteractions(owner);
@@ -114,12 +117,13 @@ export function claudeUserInteractionNotification(interaction: OwnedUserInteract
 
 /** Emit each prompt as JSON so embedded newlines remain one physical stdout line, then receipt it. */
 export async function emitPendingClaudeTerminalNotifications(options: ClaudeMonitorOptions): Promise<number> {
+	if (!hasMonitorStorageScope(options)) return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () => emitPendingClaudeTerminalNotifications(options));
 	if (options.sessionId === undefined) return 0;
 	const writeLine = options.writeLine ?? ((line: string) => { writeSync(process.stdout.fd, `${line}\n`); });
 	let delivered = 0;
 	for (const pending of await pendingOwnedClaudeTerminalRequests(options)) {
-		if (!claimTerminalNotificationReceipt(pending.runDir, pending.request.requestId, "claude", options.sessionId)) continue;
-		if (readDeliverableTerminalNotificationRequest(pending.runDir)?.requestId !== pending.request.requestId) continue;
+		if (!claimTerminalNotificationReceipt(pending.runId, pending.request.requestId, "claude", options.sessionId)) continue;
+		if (readDeliverableTerminalNotificationRequest(pending.runId)?.requestId !== pending.request.requestId) continue;
 		// Confirm only after stdout accepts the line. A crash between write and confirmation
 		// intentionally permits at-least-once redelivery.
 		writeLine(serializeMonitorEnvelope({
@@ -129,12 +133,11 @@ export async function emitPendingClaudeTerminalNotifications(options: ClaudeMoni
 			details: {
 				requestId: pending.request.requestId,
 				runId: pending.request.payload.runId,
-				runDir: pending.request.payload.runDir,
 				chartId: pending.request.payload.chartId,
 				outcome: pending.request.payload.outcome,
 			},
 		}));
-		markTerminalNotificationReceipt(pending.runDir, pending.request.requestId, "claude", options.sessionId);
+		markTerminalNotificationReceipt(pending.runId, pending.request.requestId, "claude", options.sessionId);
 		delivered++;
 	}
 	return delivered;
@@ -142,10 +145,11 @@ export async function emitPendingClaudeTerminalNotifications(options: ClaudeMoni
 
 /** Emit at most the arbiter's one pinned user gate, never a queued branch request. */
 export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions): Promise<number> {
+	if (!hasMonitorStorageScope(options)) return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () => emitPendingClaudeUserInteraction(options));
 	if (options.sessionId === undefined) return 0;
 	const active = await activeOwnedClaudeUserInteraction(options);
 	if (active === undefined || active.presentation === "confirmed") return 0;
-	const existingClaim = readUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId);
+	const existingClaim = readUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", options.sessionId);
 	// A waited MCP result is already the delivery path into this Claude turn. Do not
 	// re-notify it after the normal monitor lease while AskUserQuestion is still open;
 	// SessionStart recovery will re-surface it if that turn/session is interrupted.
@@ -158,9 +162,9 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 			(!Number.isFinite(leaseUntil) && Number.isFinite(fallbackUntil) && Date.now() < fallbackUntil)) return 0;
 	}
 	// Defense in depth around the shared owner's canonical/session checks.
-	const meta = await loadRunMeta(active.runDir);
+	const meta = await loadRunMeta(active.runId);
 	if (meta.originSessionId !== options.sessionId || canonicalPath(meta.workDir) !== canonicalPath(options.cwd)) return 0;
-	if (!claimUserInteractionReceipt(active.runDir, active.request.branchId, active.request.seqId, "claude", options.sessionId, { source: "monitor" })) return 0;
+	if (!claimUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", options.sessionId, { source: "monitor" })) return 0;
 	// Claim and selection are separate filesystem operations. Re-arbitrate after the
 	// exclusive claim so a concurrently-created lower coordinate cannot be presented too.
 	const current = await activeOwnedClaudeUserInteraction(options);
@@ -178,12 +182,13 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 		};
 	}
 	writeLine(serializeMonitorEnvelope(notification));
-	markUserInteractionReceipt(current.runDir, current.request.branchId, current.request.seqId, "claude", options.sessionId);
+	markUserInteractionReceipt(current.runId, current.request.branchId, current.request.seqId, "claude", options.sessionId);
 	return 1;
 }
 
 /** Combined persistent-monitor scan for terminal notifications and the one active user gate. */
 export async function emitPendingClaudeNotifications(options: ClaudeMonitorOptions): Promise<number> {
+	if (!hasMonitorStorageScope(options)) return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () => emitPendingClaudeNotifications(options));
 	return await emitPendingClaudeTerminalNotifications(options) + await emitPendingClaudeUserInteraction(options);
 }
 
@@ -201,7 +206,7 @@ function serializeMonitorEnvelope(value: ClaudeMonitorEnvelope): string {
 		customType: "hyperchart-boundary-error",
 		requestId: digest,
 		content: `Hyperchart notification exceeded the model boundary (${digest}). Open hyperchart_view.`,
-		details: { requestId: digest, runId: "unavailable", runDir: "unavailable", chartId: "unavailable", outcome: "failed", error: "model-envelope-too-large", digest, originalBytes, maxBytes },
+		details: { requestId: digest, runId: "unavailable", chartId: "unavailable", outcome: "failed", error: "model-envelope-too-large", digest, originalBytes, maxBytes },
 	}) as ClaudeMonitorEnvelope);
 }
 
@@ -216,4 +221,16 @@ function canonicalPath(path: string): string {
 	} catch {
 		return absolute;
 	}
+}
+
+function hasMonitorStorageScope(options: ClaudeMonitorOptions): boolean {
+	const active = currentRunStorage();
+	if (active === undefined) return false;
+	const configured: RunStorage = options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" };
+	return (
+		active.kind === configured.kind &&
+		active.layout === configured.layout &&
+		resolve(active.rootDir) === resolve(configured.rootDir) &&
+		(active.kind !== "postgres" || (configured.kind === "postgres" && active.dsn === configured.dsn))
+	);
 }

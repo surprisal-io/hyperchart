@@ -296,7 +296,8 @@ export class PostgresLogStore implements RunLogStore {
 					[runId, meta.chartPath, meta.exportName ?? null, meta.workDir, meta.chartId, meta.createdAt, meta.originSessionId ?? null],
 				);
 				const stored = await this.readRunMetaDirect();
-				if (stored === undefined || !isDeepStrictEqual(stored, meta)) throw new Error(`Conflicting metadata for Hyperchart run '${runId}'`);
+				const { runId: metadataRunId, ...fields } = meta;
+				if ((metadataRunId !== undefined && metadataRunId !== runId) || stored === undefined || !isDeepStrictEqual(stored, fields)) throw new Error(`Conflicting metadata for Hyperchart run '${runId}'`);
 				await client.query("COMMIT");
 			} catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
 		});

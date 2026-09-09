@@ -1,3 +1,4 @@
+import { resolveRunPaths } from "@surprisal/hyperchart/runtime";
 import { closeSync, existsSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,10 +27,10 @@ function runnerEntry(): string {
 
 /** Spawns the detached runner process for a prepared run directory and returns its pid. */
 export function spawnDetachedRunner(config: HyperchartRunnerConfig): number {
-	const configPath = resolve(config.runDir, "runner.config.json");
+	const configPath = resolve(resolveRunPaths(config.runId, config.storage).runDir, "runner.config.json");
 	writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
-	const stdoutFd = openSync(resolve(config.runDir, "runner.stdout.log"), "a");
-	const stderrFd = openSync(resolve(config.runDir, "runner.stderr.log"), "a");
+	const stdoutFd = openSync(resolve(resolveRunPaths(config.runId, config.storage).runDir, "runner.stdout.log"), "a");
+	const stderrFd = openSync(resolve(resolveRunPaths(config.runId, config.storage).runDir, "runner.stderr.log"), "a");
 	try {
 		const child = spawn(process.execPath, [runnerEntry(), configPath], {
 			cwd: config.workDir,
@@ -47,10 +48,10 @@ export function spawnDetachedRunner(config: HyperchartRunnerConfig): number {
 }
 
 /** Resolves when the run reaches terminal status, recovering a dead runner through the durable outbox helper. */
-export function watchRun(runDir: string): Promise<HyperchartRunStatus> {
+export function watchRun(runId: string): Promise<HyperchartRunStatus> {
 	return new Promise((resolveDone) => {
 		const timer = setInterval(() => {
-			const status = readRunStatus(runDir);
+			const status = readRunStatus(runId);
 			if (status === undefined) return;
 			if (isTerminalRunState(status.state)) {
 				clearInterval(timer);
@@ -58,8 +59,8 @@ export function watchRun(runDir: string): Promise<HyperchartRunStatus> {
 				return;
 			}
 			if (!isRunLive(status) && Date.now() - status.updatedAt > 20_000) {
-				recoverStaleRunTerminalNotification(runDir);
-				const recovered = readRunStatus(runDir);
+				recoverStaleRunTerminalNotification(runId);
+				const recovered = readRunStatus(runId);
 				if (recovered !== undefined && isTerminalRunState(recovered.state)) {
 					clearInterval(timer);
 					resolveDone(recovered);

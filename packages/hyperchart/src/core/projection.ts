@@ -45,6 +45,8 @@ export type PendingAction =
 			gateSeqId?: number;
 			event: ChartEvent;
 			validationAttempts: number;
+			/** Provisional completion bytes: recover only on their originating branch. */
+			completionArtifacts?: { branchId: string; pins: Readonly<Record<string, ArtifactPin>> };
 	  }
 	| {
 			actionUid: ActionUID;
@@ -56,6 +58,8 @@ export type PendingAction =
 			gateSeqId?: number;
 			event: ChartEvent;
 			validationAttempts: number;
+			/** Provisional completion bytes: recover only on their originating branch. */
+			completionArtifacts?: { branchId: string; pins: Readonly<Record<string, ArtifactPin>> };
 			reason?: string;
 	  };
 
@@ -478,6 +482,9 @@ export function projectBranch(
 							throw new Error(`No pending validation for action in state ${record.actionUid.state}`);
 						}
 						if (record.outcome === true) {
+							if (validating.completionArtifacts !== undefined && validating.completionArtifacts.branchId !== record.branchId)
+								throw new Error(`Cannot accept provisional artifacts from branch '${validating.completionArtifacts.branchId}' on '${record.branchId}'; a branch-local completion is required`);
+							if (validating.completionArtifacts !== undefined) Object.assign(projection.artifactPins, validating.completionArtifacts.pins);
 							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
@@ -500,6 +507,7 @@ export function projectBranch(
 							phase: "rejected",
 							event: validating.event,
 							validationAttempts,
+							...(validating.completionArtifacts === undefined ? {} : { completionArtifacts: validating.completionArtifacts }),
 							...(typeof record.outcome === "object" ? { reason: record.outcome.reason } : {}),
 						};
 						break;
@@ -633,9 +641,8 @@ function applyActionCompletion(
 		return;
 	}
 	assertActiveActionUid(ast, actionUid.state, actionUid, "complete");
-	if (record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined) {
-		for (const [path, pin] of Object.entries(record.artifacts)) projection.artifactPins[path] = pin;
-	}
+	const completionArtifacts = record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined
+		? { branchId: record.branchId, pins: record.artifacts } : undefined;
 	const state = actionStateAt(ast, actionUid.state);
 	if (state?.kind === "state" && state.validate !== undefined && event.type !== "FAILED") {
 		const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
@@ -649,11 +656,13 @@ function applyActionCompletion(
 			invokeSeqId: previous.invokeSeqId,
 			sessionId: previous.sessionId,
 			phase: "validating",
+			...(completionArtifacts === undefined ? {} : { completionArtifacts }),
 			event,
 			validationAttempts,
 		});
 		return;
 	}
+	if (completionArtifacts !== undefined) Object.assign(projection.artifactPins, completionArtifacts.pins);
 	recordResult(projection, actionUid.state, event);
 	removePendingAction(projection, actionUid);
 	applyTransition(projection, ast, actionUid.state, event.type, abandoned, event);

@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +29,7 @@ describe("hyperchart runner replay warning policy", () => {
 
 		await main([paths.configPath]);
 
-		const status = readRunStatus(paths.runDir);
+		const status = withRunStorage(paths.storage, () => readRunStatus(paths.runId));
 		expect(status).toMatchObject({ state: "failed", exitCode: 1 });
 		expect(status?.error).toContain("Replay over the current chart produced warning-level compatibility issues");
 		expect(status?.error).toContain("stale provenance");
@@ -40,17 +41,19 @@ describe("hyperchart runner replay warning policy", () => {
 
 		await main([paths.configPath]);
 
-		const status = readRunStatus(paths.runDir);
+		const status = withRunStorage(paths.storage, () => readRunStatus(paths.runId));
 		expect(status).toMatchObject({ state: "complete", exitCode: 0 });
 		expect(status?.replayWarnings?.join("\n")).toContain("stale provenance");
 		expect(process.exitCode).toBeUndefined();
 	});
 });
 
-function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: string; configPath: string } {
+function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runId: string; storage: RunStorage; configPath: string } {
 	const workDir = join(tempDir, "work");
 	const agentDir = join(tempDir, "agent");
-	const runDir = join(tempDir, "run");
+	const runId = "run";
+	const storage: RunStorage = { kind: "jsonl", rootDir: tempDir, layout: "sha256" };
+	const runDir = resolveRunPaths(runId, storage).runDir;
 	mkdirSync(workDir, { recursive: true });
 	mkdirSync(agentDir, { recursive: true });
 	mkdirSync(runDir, { recursive: true });
@@ -99,7 +102,7 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 	const config: HyperchartRunnerConfig = {
 		runId: "run",
 		branchId: "main",
-		runDir,
+		storage,
 		chartPath,
 		chartId: "demo",
 		workDir,
@@ -111,5 +114,5 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runDir: str
 	writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 	// Sanity guard: the config should be readable in failure assertions if a test breaks.
 	JSON.parse(readFileSync(configPath, "utf8"));
-	return { runDir, configPath };
+	return { runId, storage, configPath };
 }

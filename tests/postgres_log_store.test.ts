@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { collectHistoryRecords } from "./helpers/history.js";
 import { commitUserInteractionResponse, prepareUserInteractionCommit, type PreparedTestUserInteraction } from "./helpers/user_interaction_commit.js";
 import { randomUUID } from "node:crypto";
@@ -17,7 +18,7 @@ import {
 	RUN_META_TABLE,
 } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
 import { openRunLogStore } from "../packages/hyperchart/src/runtime/generic/log_store_factory.js";
-import { deleteRunStorage, initializeRunDir, loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
+import { deleteRunStorage, initializeRun, loadRunMeta, saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { createPiHyperchartHost } from "../packages/pi-hyperchart/src/runtime/pi/host_adapter.js";
 import { loadBranchProjection, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
@@ -142,8 +143,10 @@ afterAll(async () => {
 describePg("PostgresLogStore", () => {
 	it("honors an explicit durable run id distinct from the directory basename", async () => {
 		const runId = newRunId();
-		const store = await openRunLogStore(join(tmpdir(), `encoded-${randomUUID()}`), {
-			runId,
+		const storage: RunStorage = { kind: "postgres", dsn: dsn as string, rootDir: tmpdir(), layout: "sha256" };
+		expect(resolveRunPaths(runId, storage).runDir).not.toBe(join(tmpdir(), runId));
+		const store = await openRunLogStore(runId, {
+			storage,
 			access: "writer",
 		});
 		try {
@@ -157,9 +160,10 @@ describePg("PostgresLogStore", () => {
 
 	it("stores run metadata in PostgreSQL without requiring meta.json", async () => {
 		const runId = newRunId();
-		const runDir = join(tmpdir(), runId);
+		const storage: RunStorage = { kind: "postgres", dsn: dsn as string, rootDir: tmpdir(), layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		await mkdir(runDir, { recursive: true });
-		await initializeRunDir(runDir);
+		await withRunStorage(storage, () => initializeRun(runId));
 		const meta = {
 			chartPath: join(runDir, "workflow.chart.ts"),
 			workDir: runDir,
@@ -168,11 +172,11 @@ describePg("PostgresLogStore", () => {
 			originSessionId: "session-meta",
 		};
 		try {
-			await saveRunMeta(runDir, meta);
+			await withRunStorage(storage, () => saveRunMeta(runId, meta));
 			expect(existsSync(join(runDir, "meta.json"))).toBe(false);
-			expect(await loadRunMeta(runDir)).toEqual(meta);
-			await deleteRunStorage(runDir);
-			await expect(loadRunMeta(runDir)).rejects.toMatchObject({ code: "ENOENT" });
+			expect(await withRunStorage(storage, () => loadRunMeta(runId))).toEqual({ ...meta, runId });
+			await withRunStorage(storage, () => deleteRunStorage(runId));
+			await expect(withRunStorage(storage, () => loadRunMeta(runId))).rejects.toMatchObject({ code: "ENOENT" });
 			expect(await (await openReader(runId)).listBranches()).toEqual({ items: [], totalCount: 0 });
 		} finally {
 			await rm(runDir, { recursive: true, force: true });
@@ -184,54 +188,57 @@ describePg("PostgresLogStore", () => {
 		const root = join(tmpdir(), `postgres-meta-host-${randomUUID()}`);
 		const agentDir = join(root, "agent");
 		const workDir = join(root, "project");
-		const runDir = join(agentDir, "hypercharts", "runs", runId);
+		const storage: RunStorage = { kind: "postgres", dsn: dsn as string, rootDir: join(agentDir, "hypercharts", "runs"), layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		const chartPath = join(workDir, "postgres-meta.chart.ts");
 		await mkdir(workDir, { recursive: true });
 		await writeFile(chartPath, `import { chart, final } from "@surprisal/hyperchart";\nexport default chart({ kind: "chart", id: "postgres-meta-host", initial: "done", states: { done: final() } });\n`);
 		try {
-			await initializeRunDir(runDir);
-			await saveRunMeta(runDir, { chartPath, workDir, chartId: "postgres-meta-host", createdAt: new Date().toISOString(), originSessionId: "session-host" });
-			patchRunStatus(runDir, { runId, chartId: "postgres-meta-host", state: "stopped", branchIds: ["main"] });
+			await withRunStorage(storage, () => initializeRun(runId));
+			await withRunStorage(storage, () => saveRunMeta(runId, { chartPath, workDir, chartId: "postgres-meta-host", createdAt: new Date().toISOString(), originSessionId: "session-host" }));
+			withRunStorage(storage, () => patchRunStatus(runId, { chartId: "postgres-meta-host", state: "stopped", branchIds: ["main"] }));
 			expect(existsSync(join(runDir, "meta.json"))).toBe(false);
-			const snapshot = await createPiHyperchartHost({ agentDir }).readSessionSnapshot(workDir);
+			const snapshot = await createPiHyperchartHost({ agentDir, storage }).readSessionSnapshot(workDir);
 			expect(snapshot.runs).toEqual([expect.objectContaining({ runId, chartName: "postgres-meta-host", cwd: workDir, originSessionId: "session-host" })]);
 		} finally {
-			await deleteRunStorage(runDir).catch(() => {});
+			await withRunStorage(storage, () => deleteRunStorage(runId)).catch(() => {});
 			await rm(root, { recursive: true, force: true });
 		}
 	});
 
 	it("loads metadata without hydrating or validating the PostgreSQL journal", async () => {
 		const runId = newRunId();
-		const runDir = join(tmpdir(), runId);
+		const storage: RunStorage = { kind: "postgres", dsn: dsn as string, rootDir: tmpdir(), layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		await mkdir(runDir, { recursive: true });
 		const meta = { chartPath: join(runDir, "chart.ts"), workDir: runDir, chartId: "metadata-only", createdAt: new Date().toISOString() };
 		try {
-			await initializeRunDir(runDir);
+			await withRunStorage(storage, () => initializeRun(runId));
 			const writer = await openWriter(runId);
 			await writer.appendDrafts([argsDraft()]);
 			await writer.close();
-			await saveRunMeta(runDir, meta);
+			await withRunStorage(storage, () => saveRunMeta(runId, meta));
 			const { Client } = await import("pg");
 			const client = new Client({ connectionString: dsn });
 			await client.connect();
 			await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = 1`, [runId]);
 			await client.end();
-			expect(await loadRunMeta(runDir)).toEqual(meta);
+			expect(await withRunStorage(storage, () => loadRunMeta(runId))).toEqual({ ...meta, runId });
 		} finally {
-			await deleteRunStorage(runDir).catch(() => {});
+			await withRunStorage(storage, () => deleteRunStorage(runId)).catch(() => {});
 			await rm(runDir, { recursive: true, force: true });
 		}
 	});
 
 	it("rejects conflicting PostgreSQL metadata for the same run id", async () => {
 		const runId = newRunId();
-		const runDir = join(tmpdir(), runId);
+		const storage: RunStorage = { kind: "postgres", dsn: dsn as string, rootDir: tmpdir(), layout: "sha256" };
+		const runDir = resolveRunPaths(runId, storage).runDir;
 		await mkdir(runDir, { recursive: true });
 		const meta = { chartPath: join(runDir, "one.chart.ts"), workDir: runDir, chartId: "one", createdAt: new Date().toISOString() };
 		try {
-			await saveRunMeta(runDir, meta);
-			await expect(saveRunMeta(runDir, { ...meta, chartId: "two" })).rejects.toThrow(/Conflicting metadata/);
+			await withRunStorage(storage, () => saveRunMeta(runId, meta));
+			await expect(withRunStorage(storage, () => saveRunMeta(runId, { ...meta, chartId: "two" }))).rejects.toThrow(/Conflicting metadata/);
 		} finally {
 			await rm(runDir, { recursive: true, force: true });
 		}

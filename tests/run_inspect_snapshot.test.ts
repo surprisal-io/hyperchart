@@ -1,3 +1,5 @@
+import { basename as fixtureRunId, dirname as fixtureRoot } from "node:path";
+import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { createRunInspectorDataSource } from "../packages/hyperchart/src/inspect/run_history.js";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -6,7 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
 import { createBranchProjection } from "../packages/hyperchart/src/core/projection.js";
 import type { Effect, MachineEvent } from "../packages/hyperchart/src/core/machine.js";
-import { hyperchartRunFromRunDir } from "../packages/hyperchart/src/inspect/run_inspect.js";
+import { hyperchartRunFromRunId } from "../packages/hyperchart/src/inspect/run_inspect.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { loop } from "./helpers/execution.js";
 
@@ -103,12 +105,12 @@ it("restores an unanswered gate without future action state, transcripts or movi
 	const readTranscript = vi.fn(async () => [
 		{ id: "future", role: "assistant" as const, text: "future session message", timestamp: Number.MAX_SAFE_INTEGER },
 	]);
-	const historical = await hyperchartRunFromRunDir(runDir, {
+	const historical = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), {
 		ast,
 		snapshot: { branchId: "main", headSeqId: gateSeqId },
 		includeTranscripts: true,
 		readTranscript,
-	});
+	}));
 	expect(historical.states.find((state) => state.id === "choose")?.status).toBe("waiting");
 	expect(historical.states.find((state) => state.id === "work")?.status).toBe("pending");
 	expect(historical.historySnapshot).toEqual({ branchId: "main", headSeqId: gateSeqId });
@@ -118,19 +120,24 @@ it("restores an unanswered gate without future action state, transcripts or movi
 	const generate = historical.states.find(state => state.id === "generate")!.visitHistory![0]!;
 	const work = (await store.readRecords({ snapshot: before })).items.find(record => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "work")!;
 	const finalTranscript = vi.fn(async () => [{ id: "finish", role: "tool" as const, toolName: "finish", toolStatus: "completed" as const, timestamp: generate.endedAt!, toolOutput: "Recorded" }, { id:"later", role:"assistant" as const, text:"future", timestamp:Number.MAX_SAFE_INTEGER }]);
-	const source = await createRunInspectorDataSource(runDir, { ast, readTranscript: finalTranscript });
+	const source = await withRunStorage(fixtureStorage(runDir), () => createRunInspectorDataSource(fixtureRunId(runDir), { ast, readTranscript: finalTranscript }));
 	const session = await source.readVisitSession({ runId: "run", snapshot: historical.historySnapshot!, invokeSeqId: generate.invokeSeqId });
 	expect(session).toMatchObject({ status: "completed", messages: [{ id: "finish", toolName: "finish", toolStatus: "completed" }] });
 	await expect(source.readVisitSession({ runId: "run", snapshot: historical.historySnapshot!, invokeSeqId: work.seqId })).resolves.toBeUndefined();
 	expect(await store.captureSnapshot("main")).toEqual(before);
-	const current = await hyperchartRunFromRunDir(runDir, { ast, includeTranscripts: true, readTranscript });
+	const current = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), { ast, includeTranscripts: true, readTranscript }));
 	expect(current.states.find((state) => state.id === "work")?.status).toBe("done");
 	await expect(
-		hyperchartRunFromRunDir(runDir, {
+		withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), {
 			ast,
 			branchId: "different",
 			snapshot: { branchId: "main", headSeqId: gateSeqId },
-		}),
+		})),
 	).rejects.toThrow("does not match");
 	await store.close();
 });
+
+/** Explicit storage configuration for this suite's generated literal-layout fixtures. */
+function fixtureStorage(runDirectory: string): RunStorage {
+ return {kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id"};
+}

@@ -1,9 +1,9 @@
-export { hyperchartRunFromRunDir, hyperchartRunOverviewFromRunDir, readBranchExecutionOverview } from "./run_inspect.js";
+export { hyperchartRunFromRunId, hyperchartRunOverviewFromRunId, readBranchExecutionOverview } from "./run_inspect.js";
 export { createRunInspectorDataSource } from "./run_history.js";
 export type { BranchExecutionOverview } from "../execution/branch_execution.js";
 export type {
-	HyperchartRunFromRunDirBaseOptions,
-	HyperchartRunFromRunDirOptions,
+	HyperchartRunFromRunIdBaseOptions,
+	HyperchartRunFromRunIdOptions,
 	InvocationTranscriptBinding,
 	SessionTranscriptReader,
 } from "./run_inspect.js";

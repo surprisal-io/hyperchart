@@ -6,6 +6,8 @@ import { resolveArtifactValue, serializeEnvValue } from "./artifacts.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import { replyValidationError, validateActionCompletion, validateArtifacts } from "./completion_validation.js";
 
+import type { GuardContext } from "./guards.js";
+
 export type RenderedScriptEnv = Readonly<Record<string, string | RenderedArtifact>>;
 
 type ProcessResult = Readonly<{
@@ -55,6 +57,7 @@ export class ScriptRunner {
 		artifacts?: readonly RenderedArtifact[],
 		reply?: SchemaAst,
 		actionUid?: ActionUID,
+		invocation?: GuardContext["invocation"],
 	): Promise<GuardOutcome> {
 		const hasRawOptions = guard.env !== undefined || ("artifacts" in guard && guard.artifacts !== undefined) || ("reply" in guard && guard.reply !== undefined);
 		if (hasRawOptions && renderedEnv === undefined && artifacts === undefined && reply === undefined) {
@@ -64,6 +67,15 @@ export class ScriptRunner {
 		const live = this.begin(key);
 		try {
 			const env = await this.resolveEnv(renderedEnv, undefined);
+			// Authored/inherited env must not spoof runtime identity.
+			delete env.HYPERCHART_INVOCATION_ID;
+			delete env.HYPERCHART_BRANCH_ID;
+			delete env.HYPERCHART_ACTION_UID;
+			if (invocation !== undefined) {
+				env.HYPERCHART_INVOCATION_ID = invocation.invocationId;
+				env.HYPERCHART_BRANCH_ID = invocation.branchId;
+				env.HYPERCHART_ACTION_UID = JSON.stringify(invocation.actionUid);
+			}
 			if (live.cancelled) return { ok: false, reason: "script guard cancelled before process start" };
 			const result = await this.runProcess(
 				guard.command,

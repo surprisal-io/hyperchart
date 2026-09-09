@@ -8,7 +8,7 @@ import { collectBranches, type BranchListChunk, type BranchListCursor } from "..
 import { BranchExecution } from "../execution/branch_execution.js";
 
 export type ForkBranchOptions = Readonly<{
-	runDir: string;
+	runId: string;
 	fromSeqId: number;
 	branchId: BranchId;
 	reason?: string;
@@ -19,26 +19,25 @@ export type ForkBranchOptions = Readonly<{
 
 export type ForkBranchResult = Readonly<{
 	runId: string;
-	runDir: string;
 	branch: BranchHead;
 	/** Fork never changes a caller/UI selection. */
 	selectedBranchChanged: false;
 	started: false;
 }>;
 
-export async function listHyperchartBranchPage(runDir: string, cursor?: BranchListCursor): Promise<BranchListChunk> {
-	const store = await openRunLogStore(runDir);
+export async function listHyperchartBranchPage(runId: string, cursor?: BranchListCursor): Promise<BranchListChunk> {
+	const store = await openRunLogStore(runId);
 	try {
-		return store.listBranches(cursor);
+		return await store.listBranches(cursor);
 	} finally {
 		await store.close();
 	}
 }
 
-export async function getHyperchartBranch(runDir: string, branchId: BranchId): Promise<BranchHead> {
-	const store = await openRunLogStore(runDir);
+export async function getHyperchartBranch(runId: string, branchId: BranchId): Promise<BranchHead> {
+	const store = await openRunLogStore(runId);
 	try {
-		return store.getBranch(branchId);
+		return await store.getBranch(branchId);
 	} finally {
 		await store.close();
 	}
@@ -46,12 +45,12 @@ export async function getHyperchartBranch(runDir: string, branchId: BranchId): P
 
 /** Create a durable named pointer without selecting it and without starting a runner. */
 export async function forkHyperchartRun(options: ForkBranchOptions): Promise<ForkBranchResult> {
-	assertStoppedRun(options.runDir, "forking");
-	await assertRunOwnership(options.runDir, options.cwd);
-	const meta = await loadRunMeta(options.runDir);
+	assertStoppedRun(options.runId, "forking");
+	await assertRunOwnership(options.runId, options.cwd);
+	const meta = await loadRunMeta(options.runId);
 	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
-	const store = await openRunLogStore(options.runDir, { access: "writer" });
+	const store = await openRunLogStore(options.runId, { access: "writer" });
 	let branch: BranchHead;
 	try {
 		if (await store.getRecord(options.fromSeqId) === undefined) {
@@ -79,23 +78,22 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 		await store.close();
 	}
 	return {
-		runId: basename(options.runDir),
-		runDir: options.runDir,
+		runId: options.runId,
 		branch,
 		selectedBranchChanged: false,
 		started: false,
 	};
 }
 
-export function assertStoppedRun(runDir: string, operation: string): void {
-	const status = readRunStatus(runDir);
-	if (isRunLive(status)) throw new Error(`Run '${basename(runDir)}' is live; stop it before ${operation}`);
+export function assertStoppedRun(runId: string, operation: string): void {
+	const status = readRunStatus(runId);
+	if (isRunLive(status)) throw new Error(`Run '${runId}' is live; stop it before ${operation}`);
 }
 
-export async function assertRunOwnership(runDir: string, cwd: string | undefined): Promise<void> {
+export async function assertRunOwnership(runId: string, cwd: string | undefined): Promise<void> {
 	if (cwd === undefined) return;
-	const meta = await loadRunMeta(runDir);
+	const meta = await loadRunMeta(runId);
 	if (resolve(meta.workDir) !== resolve(cwd)) {
-		throw new Error(`Run '${basename(runDir)}' belongs to ${meta.workDir}; open that directory first`);
+		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; open that directory first`);
 	}
 }

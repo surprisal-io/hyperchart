@@ -389,7 +389,7 @@ Execution centers the top/bottom card handles and draws one-to-one chronology li
 
 ### Inspecting a historical branch boundary
 
-`hyperchartRunFromRunDir(runDir, { snapshot: { branchId, headSeqId }, ... })`
+`hyperchartRunFromRunId(runId, { snapshot: { branchId, headSeqId }, ... })`
 restores the semantic projection and reads history at the same immutable boundary.
 An explicit `branchId` must match the snapshot. No branch is moved and no journal
 facts are written. Historical inspection excludes live runner status and mutable

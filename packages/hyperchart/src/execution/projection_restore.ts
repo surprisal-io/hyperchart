@@ -16,7 +16,7 @@ import {
 } from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
-export const PROJECTOR_VERSION = 2;
+export const PROJECTOR_VERSION = 4;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
 export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
@@ -211,9 +211,10 @@ function isPendingAction(value: unknown): boolean {
 		|| !isPositiveInteger(value.invokeSeqId) || !isNonEmptyString(value.sessionId) || !(value.gateSeqId === undefined || isPositiveInteger(value.gateSeqId))) return false;
 	if (value.phase === "running") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "timestamp", "phase"], ["gateSeqId"])
 		&& isNonNegativeFinite(value.timestamp);
-	if (value.phase === "validating") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId"])
+	if (value.completionArtifacts !== undefined && (!isExactRecord(value.completionArtifacts, ["branchId", "pins"], []) || !isNonEmptyString(value.completionArtifacts.branchId) || !isArtifactPins(value.completionArtifacts.pins))) return false;
+	if (value.phase === "validating") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "completionArtifacts"])
 		&& isChartEvent(value.event) && isNonNegativeInteger(value.validationAttempts);
-	if (value.phase === "rejected") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "reason"])
+	if (value.phase === "rejected") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "reason", "completionArtifacts"])
 		&& isChartEvent(value.event) && isNonNegativeInteger(value.validationAttempts) && (value.reason === undefined || typeof value.reason === "string");
 	return false;
 }

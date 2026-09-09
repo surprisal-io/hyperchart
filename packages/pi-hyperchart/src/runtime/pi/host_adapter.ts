@@ -1,9 +1,10 @@
+import { assertRunId, listRunIds, resolveRunPaths, withRunStorage, type RunStorage } from "@surprisal/hyperchart/runtime";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import * as ts from "typescript";
 import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect";
-import { createRunInspectorDataSource, hyperchartRunOverviewFromRunDir } from "@surprisal/hyperchart/inspect";
+import { createRunInspectorDataSource, hyperchartRunOverviewFromRunId } from "@surprisal/hyperchart/inspect";
 import type {
 	HyperchartHostAdapter,
 	HyperchartSessionSnapshot,
@@ -20,6 +21,7 @@ import { readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/s
 
 
 export interface PiHyperchartHostOptions {
+	storage?: RunStorage;
 	agentDir?: string;
 	agentDefaults?: (agentName: string) => HyperchartInspectAgentDefaults | undefined;
 }
@@ -29,23 +31,18 @@ const MAX_CONCURRENT_RUN_META_READS = 8;
 export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): HyperchartHostAdapter {
 	const failedRunMetaFingerprints = new Map<string, string>();
 	const limitRunMetaRead = createAsyncGate(MAX_CONCURRENT_RUN_META_READS);
-	const limitedRunMetaRead = (runDir: string) => limitRunMetaRead(() => loadRunMeta(runDir));
-	// Postgres run metadata is immutable after its initial write. Cache successful
-	// reads so per-cwd dashboard polling does not reopen every global run on every
-	// tick. Promise caching also coalesces simultaneous cwd snapshots.
-	const readRunMeta = process.env.HYPERCHART_PG_DSN
-		? createAsyncMemo(limitedRunMetaRead)
-		: limitedRunMetaRead;
+	const limitedRunMetaRead = (runId: string) => limitRunMetaRead(() => loadRunMeta(runId));
+	// Run metadata is immutable after its initial write. Cache successful reads so
+	// per-cwd dashboard polling does not reopen every global run on every tick.
+	// Promise caching also coalesces simultaneous cwd snapshots across backends.
+	const readRunMeta = createAsyncMemo(limitedRunMetaRead);
 	const agentDir = resolve(options.agentDir ?? defaultAgentDir());
-	const runDirFor = (runId: string) => {
-		if (basename(runId) !== runId) throw new Error("Invalid Hyperchart run id");
-		return join(getHyperchartRunsRoot(agentDir), runId);
-	};
-	const dataSourceFor = (runId: string) => createRunInspectorDataSource(runDirFor(runId), {
-		readTranscript: createPiFileTranscriptReader(runDirFor(runId)),
+	const storage: RunStorage = options.storage ?? { kind: "jsonl", rootDir: getHyperchartRunsRoot(agentDir), layout: "run-id" };
+	const dataSourceFor = (runId: string) => createRunInspectorDataSource(runId, {
+		readTranscript: createPiFileTranscriptReader(runId),
 	});
 
-	return {
+	const adapter: HyperchartHostAdapter = {
 		readSessionSnapshot: (cwd, snapshotOptions = {}) =>
 			readSessionSnapshot(resolve(cwd), agentDir, snapshotOptions, failedRunMetaFingerprints, readRunMeta),
 		readChartSnapshot: async (cwd, chartName) => {
@@ -55,11 +52,10 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 			return readChart(chart.source, chart.root, chart.scope, resolvedCwd, agentDir, options.agentDefaults);
 		},
 		readRunOverview: async (cwd, runId, branchId) => {
-			if (basename(runId) !== runId) return undefined;
-			const runDir = runDirFor(runId);
-			const meta = await loadRunMeta(runDir);
+			assertRunId(runId);
+			const meta = await loadRunMeta(runId);
 			if (resolve(meta.workDir) !== resolve(cwd)) return undefined;
-			return hyperchartRunOverviewFromRunDir(runDir, {
+			return hyperchartRunOverviewFromRunId(runId, {
 				...(branchId === undefined ? {} : { branchId }),
 				agentDefaults: options.agentDefaults ?? createAgentDefaultsResolver(resolve(cwd), agentDir, meta.chartPath),
 			});
@@ -73,6 +69,10 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 		cursorAt: async (input) => (await dataSourceFor(input.runId)).cursorAt(input),
 		readVisitSession: async (input) => (await dataSourceFor(input.runId)).readVisitSession(input),
 	};
+	return new Proxy(adapter, { get(target, key) {
+		const value = Reflect.get(target, key, target) as unknown;
+		return typeof value === "function" ? (...args: unknown[]) => withRunStorage(storage, () => value.apply(target, args)) : value;
+	} });
 }
 
 export const piHyperchartHost: HyperchartHostAdapter = createPiHyperchartHost();
@@ -279,19 +279,8 @@ async function readRuns(
 	failedRunMetaFingerprints: Map<string, string>,
 	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartRunSummaryInfo[]> {
-	const root = getHyperchartRunsRoot(agentDir);
-	let entries;
-	try {
-		entries = await readdir(root, { withFileTypes: true });
-	} catch {
-		return [];
-	}
+	const runs = await Promise.all((await listRunIds()).map((runId) => readRunSummary(runId, cwd, failedRunMetaFingerprints, readRunMeta)));
 
-	const runs = await Promise.all(
-		entries
-			.filter((entry) => entry.isDirectory())
-			.map((entry) => readRunSummary(join(root, entry.name), cwd, failedRunMetaFingerprints, readRunMeta)),
-	);
 	return runs
 		.filter((run): run is HyperchartRunSummaryInfo => run !== undefined)
 		.sort((left, right) => right.updatedAt - left.updatedAt)
@@ -299,29 +288,29 @@ async function readRuns(
 }
 
 async function readRunSummary(
-	runDir: string,
+	runId: string,
 	cwd: string,
 	failedRunMetaFingerprints: Map<string, string>,
 	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartRunSummaryInfo | undefined> {
-	const metaFingerprint = process.env.HYPERCHART_PG_DSN ? undefined : await fileFingerprint(join(runDir, "meta.json"));
-	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runDir) === metaFingerprint) return undefined;
+	const metaFingerprint = await fileFingerprint(join(resolveRunPaths(runId).runDir, "meta.json"));
+	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runId) === metaFingerprint) return undefined;
 	let meta;
 	try {
-		meta = await readRunMeta(runDir);
-		failedRunMetaFingerprints.delete(runDir);
+		meta = await readRunMeta(runId);
+		failedRunMetaFingerprints.delete(runId);
 	} catch (error) {
-		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runDir, metaFingerprint);
-		console.warn(`[pi-hyperchart] Failed to inspect run ${runDir}:`, error);
+		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runId, metaFingerprint);
+		console.warn(`[pi-hyperchart] Failed to inspect run ${runId}:`, error);
 		return undefined;
 	}
 	if (resolve(meta.workDir) !== cwd) return undefined;
-	const persistedStatus = readRunStatus(runDir);
+	const persistedStatus = readRunStatus(runId);
 	const metaCreatedAt = Date.parse(meta.createdAt);
 	const createdAt = persistedStatus?.startedAt ?? (Number.isFinite(metaCreatedAt) ? metaCreatedAt : 0);
-	const updatedAt = persistedStatus?.updatedAt ?? await runUpdatedAt(runDir, createdAt);
+	const updatedAt = persistedStatus?.updatedAt ?? await runUpdatedAt(runId, createdAt);
 	return {
-		runId: persistedStatus?.runId ?? basename(runDir),
+		runId: runId,
 		chartName: persistedStatus?.chartId ?? meta.chartId,
 		branchId: "main",
 		...(persistedStatus === undefined ? {} : { runnerBranchIds: persistedStatus.branchIds }),
@@ -347,11 +336,11 @@ function summaryRunStatus(status: HyperchartRunStatus | undefined): HyperchartRu
 	}
 }
 
-async function runUpdatedAt(runDir: string, fallback: number): Promise<number> {
+async function runUpdatedAt(runId: string, fallback: number): Promise<number> {
 	const timestamps = await Promise.all(
 		["meta.json", "status.json", "log.jsonl"].map(async (name) => {
 			try {
-				return (await stat(join(runDir, name))).mtimeMs;
+				return (await stat(join(resolveRunPaths(runId).runDir, name))).mtimeMs;
 			} catch {
 				return 0;
 			}

@@ -52,7 +52,8 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 		async readTranscript() { return undefined; },
 		async close() { expect(counts.handles).toBe(0); },
 	};
-	const executor = new PiAgentExecutor({ workDir: root, projectDir: root, agentDir: root, definitionDirs: [root], sessionsDir: join(root, "sessions"), branchId: "main", modelRuntime, ...(extensionPolicy === "ambient" ? {} : { extensionPolicy }), sessionService: service });
+	const overrides = vi.fn(async () => undefined);
+	const executor = new PiAgentExecutor({ resolveSessionOverrides: overrides, workDir: root, projectDir: root, agentDir: root, definitionDirs: [root], sessionsDir: join(root, "sessions"), branchId: "main", modelRuntime, ...(extensionPolicy === "ambient" ? {} : { extensionPolicy }), sessionService: service });
 	const subscribe = AgentSession.prototype.subscribe;
 	vi.spyOn(AgentSession.prototype, "subscribe").mockImplementation(function (this: AgentSession, listener) {
 		counts.subscriptions++;
@@ -88,7 +89,7 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 		const finish = this.agent.state.tools.find((tool) => tool.name === "finish")!;
 		await finish.execute("finish-call", { event: "DONE" });
 	});
-	return { root, executor, counts, order, prompts, prompt, stored, opened, service };
+	return { root, executor, counts, order, prompts, prompt, stored, opened, service, overrides };
 }
 
 function complete(executor: PiAgentExecutor, invocation: AgentEffect): Promise<ChartEvent> {
@@ -323,4 +324,13 @@ export default function(pi) {
 			else await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
 		} finally { await f.executor.dispose(); }
 	});
+});
+
+it("supplies the durable invocation ID to session overrides rather than an SDK session ID", async () => {
+	const { executor, overrides } = await fixture();
+	await complete(executor, effect(1));
+	await complete(executor, effect(2));
+	expect(overrides).toHaveBeenNthCalledWith(1, expect.objectContaining({ invocationId: effect(1).sessionId, branchId: "main", actionUid: effect(1).actionUid }));
+	expect(overrides).toHaveBeenNthCalledWith(2, expect.objectContaining({ invocationId: effect(2).sessionId }));
+	await executor.dispose();
 });

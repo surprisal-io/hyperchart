@@ -1,3 +1,4 @@
+import { resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,22 +48,23 @@ export default chart({
 `,
 		);
 		const runsRoot = join(root, "runs");
-		const tools = new Map(createHyperchartMcpTools({ cwd, runsRoot }).map((tool) => [tool.name, tool]));
+		const storage: RunStorage = { kind: "jsonl", rootDir: runsRoot, layout: "sha256" };
+		const tools = new Map(createHyperchartMcpTools({ cwd, runsRoot, storage }).map((tool) => [tool.name, tool]));
 
 		const result = await tools.get("hyperchart_run")!.handler({ chartPath: "e2e", wait: true });
 		const run = JSON.parse(result.content[0]?.text ?? "{}") as {
 			runId: string;
-			runDir: string;
 			status: { state: string; error?: string };
 		};
+		const runDir = resolveRunPaths(run.runId, storage).runDir;
 		if (run.status.state !== "complete") {
-			const stderr = readFileSync(join(run.runDir, "runner.stderr.log"), "utf8");
+			const stderr = readFileSync(join(runDir, "runner.stderr.log"), "utf8");
 			throw new Error(`run ended ${run.status.state}: ${run.status.error}\n${stderr.slice(-2000)}`);
 		}
 
-		const log = readFileSync(join(run.runDir, "log.jsonl"), "utf8");
+		const log = readFileSync(join(runDir, "log.jsonl"), "utf8");
 		expect(log).toContain('"DONE"');
-		const sessionsDir = join(run.runDir, "sessions");
+		const sessionsDir = join(runDir, "sessions");
 		const progress = Object.values(readSessionProgress(sessionsDir).sessions)[0];
 		expect(progress?.status).toBe("completed");
 		const transcript = readNeutralSessionTranscript(sessionsDir, progress?.sessionFile);

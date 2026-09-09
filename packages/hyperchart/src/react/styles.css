@@ -271,6 +271,12 @@ html[data-hyperchart-inspector-open]
 	animation-play-state: paused !important;
 }
 
+/* Execution nodes have explicit dimensions. Keep React Flow from leaving them
+   hidden after a host re-render or container resize invalidates measurements. */
+[data-hyperchart-execution] .react-flow__node {
+	visibility: visible !important;
+}
+
 /* Execution is a top-to-bottom chronology. Override the shared card's inline
    48%/52% offsets without changing Structure's bidirectional connection points. */
 [data-hyperchart-execution] .react-flow__handle[data-handleid="source-bottom"],

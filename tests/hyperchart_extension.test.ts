@@ -1,3 +1,4 @@
+import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,11 +48,16 @@ type HyperchartTool = {
 type Notification = { message: string; type: "info" | "warning" | "error" | undefined };
 
 let previousAgentDir: string | undefined;
+let previousHyperchartPgDsn: string | undefined;
 let previousCwd = process.cwd();
 let tempDir = "";
 let agentDir = "";
 let projectDir = "";
 let otherProjectDir = "";
+
+function testStorage(): RunStorage {
+	return { kind: "jsonl", rootDir: join(agentDir, "hypercharts", "runs"), layout: "run-id" };
+}
 
 function writeV2Log(runDir: string, records: readonly Record<string, unknown>[]): void {
 	writeFileSync(join(runDir, "log.jsonl"), [
@@ -81,6 +87,8 @@ function writeTwoBranchFinalLog(runDir: string): void {
 
 beforeEach(() => {
 	previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+	previousHyperchartPgDsn = process.env.HYPERCHART_PG_DSN;
+	delete process.env.HYPERCHART_PG_DSN;
 	previousCwd = process.cwd();
 	tempDir = mkdtempSync(join(tmpdir(), "hyperchart-extension-"));
 	agentDir = join(tempDir, "agent");
@@ -100,7 +108,26 @@ afterEach(async () => {
 	process.chdir(previousCwd);
 	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
 	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	if (previousHyperchartPgDsn === undefined) delete process.env.HYPERCHART_PG_DSN;
+	else process.env.HYPERCHART_PG_DSN = previousHyperchartPgDsn;
 	rmSync(tempDir, { recursive: true, force: true });
+});
+
+it("preserves ambient storage while capturing project options", () => {
+	process.env.HYPERCHART_PG_DSN = "postgres://inherited.invalid/example";
+
+	registeredToolNames();
+
+	expect(process.env.HYPERCHART_PG_DSN).toBe("postgres://inherited.invalid/example");
+});
+
+it("preserves ambient storage when project config loading fails", () => {
+	mkdirSync(join(projectDir, ".pi"), { recursive: true });
+	writeFileSync(join(projectDir, ".pi", "hyperchart.config.ts"), "export default {};\n");
+	process.env.HYPERCHART_PG_DSN = "postgres://inherited.invalid/example";
+
+	expect(() => registeredToolNames()).toThrow(/must export transcriptReaderForRun/);
+	expect(process.env.HYPERCHART_PG_DSN).toBe("postgres://inherited.invalid/example");
 });
 
 it("loads Pi imports in project config from the host extension runtime", () => {
@@ -138,12 +165,13 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			commandContext(projectDir).ctx,
 		);
-		const details = result.details as { runDir: string; inspector?: unknown; notification?: unknown };
-		const runDir = details.runDir;
+		const details = result.details as { runId: string; inspector?: unknown; notification?: unknown };
+		const runId = details.runId;
 
+		expect(details).not.toHaveProperty("runDir");
 		expect(details.inspector).toBeUndefined();
 		expect(details.notification).toBeUndefined();
-		expect((await loadRunMeta(runDir)).originSessionId).toBe("session-a");
+		expect((await withRunStorage(testStorage(), () => loadRunMeta(runId))).originSessionId).toBe("session-a");
 	});
 
 	it("returns only bounded startup coordinates for wait=false and rejects verbose static inspection", async () => {
@@ -158,11 +186,12 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			ctx,
 		);
-		const details = started.details as Record<string, unknown> & { runDir: string };
-		expect(details).toMatchObject({ chartId: "bounded-start", runId: expect.any(String), runDir: expect.stringMatching(/^\//), final: false });
+		const details = started.details as Record<string, unknown> & { runId: string };
+		expect(details).toMatchObject({ chartId: "bounded-start", runId: expect.any(String), final: false });
+		expect(details).not.toHaveProperty("runDir");
 		expect(details).not.toHaveProperty("inspector");
 		expect(details).not.toHaveProperty("states");
-		await tool.execute("finish-bounded", { action: "run", branchId: "main", runDir: details.runDir, wait: true }, new AbortController().signal, () => undefined, ctx);
+		await tool.execute("finish-bounded", { action: "run", branchId: "main", runId: details.runId, wait: true }, new AbortController().signal, () => undefined, ctx);
 		await expect(tool.execute(
 			"verbose-static",
 			{ action: "inspect", chartPath, verbose: true },
@@ -203,10 +232,11 @@ describe("hyperchart extension", () => {
 		const ctx = commandContext(projectDir).ctx;
 		const fresh = await tool.execute("default-main", { action: "run", chartPath, wait: true }, new AbortController().signal, () => undefined, ctx);
 		expect(fresh.details).toMatchObject({ boundary: "terminal", status: { state: "complete" } });
-		const freshConfig = JSON.parse(readFileSync(join((fresh.details as { runDir: string }).runDir, "runner.config.json"), "utf8"));
+		const freshConfig = JSON.parse(readFileSync(join(resolveRunPaths((fresh.details as { runId: string }).runId, testStorage()).runDir, "runner.config.json"), "utf8"));
 		expect(freshConfig.branchId).toBe("main");
+		expect(freshConfig.storage).toEqual(testStorage());
 		const resumed = await tool.execute(
-			"resume-single-branch-alias",
+			"resume-single-branch-id",
 			{ action: "run", runId: (fresh.details as { runId: string }).runId, wait: true },
 			new AbortController().signal,
 			() => undefined,
@@ -222,9 +252,9 @@ describe("hyperchart extension", () => {
 
 	it("fails closed when a resumed run has multiple branches and no selector", async () => {
 		const runId = "ambiguous-resume";
-		const runDir = createRun(runId, projectDir, writeChart("ambiguous-resume"));
+		const { runDir } = createRun(runId, projectDir, writeChart("ambiguous-resume"));
 		writeTwoBranchV2Log(runDir);
-		patchRunStatus(runDir, { runId, branchIds: [], chartId: "demo", state: "stopped" });
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: [], chartId: "demo", state: "stopped" }));
 		await expect(registeredTool("hyperchart").execute(
 			"ambiguous-resume",
 			{ action: "run", runId },
@@ -236,9 +266,9 @@ describe("hyperchart extension", () => {
 
 	it("fails closed when slash-command resume omits a multi-branch selector", async () => {
 		const runId = "ambiguous-command-resume";
-		const runDir = createRun(runId, projectDir, writeChart("ambiguous-command-resume"));
+		const { runDir } = createRun(runId, projectDir, writeChart("ambiguous-command-resume"));
 		writeTwoBranchV2Log(runDir);
-		patchRunStatus(runDir, { runId, branchIds: [], chartId: "demo", state: "stopped" });
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: [], chartId: "demo", state: "stopped" }));
 		const { ctx, notifications } = commandContext(projectDir);
 
 		await registeredCommand().handler(`resume ${runId}`, ctx);
@@ -247,16 +277,16 @@ describe("hyperchart extension", () => {
 			message: expect.stringMatching(/action=run requires branchId.*2 durable branches.*main, experiment/),
 			type: "error",
 		});
-		expect(readRunStatus(runDir)).toMatchObject({ state: "stopped" });
+		expect(withRunStorage(testStorage(), () => readRunStatus(runId))).toMatchObject({ state: "stopped" });
 	});
 
 	it("resumes the selected branch through the slash command and advertises the option", async () => {
 		const runId = "selected-command-resume";
 		const chartPath = join(tempDir, "selected-command-resume.mjs");
 		writeFileSync(chartPath, `export default { kind: "chart", id: "demo", initial: "done", states: { done: { kind: "final" } } };\n`);
-		const runDir = createRun(runId, projectDir, chartPath);
+		const { runDir } = createRun(runId, projectDir, chartPath);
 		writeTwoBranchFinalLog(runDir);
-		patchRunStatus(runDir, { runId, branchIds: [], chartId: "demo", state: "stopped" });
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: [], chartId: "demo", state: "stopped" }));
 		const command = registeredCommand();
 		const { ctx, notifications } = commandContext(projectDir);
 
@@ -268,7 +298,7 @@ describe("hyperchart extension", () => {
 
 		expect(notifications.filter((notification) => notification.type === "error")).toEqual([]);
 		expect(JSON.parse(readFileSync(join(runDir, "runner.config.json"), "utf8"))).toMatchObject({ branchIds: ["experiment"] });
-		await vi.waitFor(() => expect(readRunStatus(runDir)).toMatchObject({ state: "complete" }), { timeout: 60_000 });
+		await vi.waitFor(() => expect(withRunStorage(testStorage(), () => readRunStatus(runId))).toMatchObject({ state: "complete" }), { timeout: 60_000 });
 		await registeredTool("hyperchart").execute(
 			"stop-selected-command-resume",
 			{ action: "stop", runId },
@@ -302,7 +332,8 @@ describe("hyperchart extension", () => {
 			() => undefined,
 			commandContext(projectDir).ctx,
 		);
-		const runDir = (result.details as { runDir: string }).runDir;
+		const runId = (result.details as { runId: string }).runId;
+		const runDir = resolveRunPaths(runId, testStorage()).runDir;
 		const config = JSON.parse(readFileSync(join(runDir, "runner.config.json"), "utf8"));
 
 		expect(config.modelRoles).toEqual({ reviewer: "project/model", scout: "user/scout" });
@@ -318,10 +349,10 @@ describe("hyperchart extension", () => {
 		createRun("foreign-session", projectDir, chartPath, "session-b");
 		createRun("legacy-unowned", projectDir, chartPath);
 		createRun("foreign-project", otherProjectDir, chartPath, "session-a");
-		const failedRunDir = createRun("owned-failed", projectDir, chartPath, "session-a");
-		patchRunStatus(failedRunDir, { runId: "owned-failed", branchIds: ["main"], chartId: "demo", state: "failed", exitCode: 1 });
-		const completedRunDir = createRun("owned-complete", projectDir, chartPath, "session-a");
-		patchRunStatus(completedRunDir, { runId: "owned-complete", branchIds: ["main"], chartId: "demo", state: "complete", exitCode: 0 });
+		const { runId: failedRunId, runDir: failedRunDir } = createRun("owned-failed", projectDir, chartPath, "session-a");
+		withRunStorage(testStorage(), () => patchRunStatus(failedRunId, { branchIds: ["main"], chartId: "demo", state: "failed", exitCode: 1 }));
+		const { runId: completedRunId, runDir: completedRunDir } = createRun("owned-complete", projectDir, chartPath, "session-a");
+		withRunStorage(testStorage(), () => patchRunStatus(completedRunId, { branchIds: ["main"], chartId: "demo", state: "complete", exitCode: 0 }));
 
 		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
 		const pi = {
@@ -353,7 +384,7 @@ describe("hyperchart extension", () => {
 		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 		const state = parsed.ast.states.ask;
 		if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("invalid user gate fixture");
-		const runDir = createRun("observable-user-gate", projectDir, chartPath, "session-a");
+		const { runId, runDir } = createRun("observable-user-gate", projectDir, chartPath, "session-a");
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		await store.appendDrafts([{ type: "args", args: {} }]);
@@ -376,7 +407,7 @@ describe("hyperchart extension", () => {
 			message: expect.objectContaining({ customType: "hyperchart-user-request", display: true }),
 			options: { deliverAs: "followUp", triggerTurn: true },
 		})]);
-		expect(hasUserInteractionReceipt(runDir, "main", opened!.seqId, "pi", "session-a")).toBe(true);
+		expect(withRunStorage(testStorage(), () => hasUserInteractionReceipt(runId, "main", opened!.seqId, "pi", "session-a"))).toBe(true);
 	});
 
 	it("recovers terminal notifications only into the exact owning session and workDir", async () => {
@@ -384,23 +415,23 @@ describe("hyperchart extension", () => {
 		const owned = createRun("owned-terminal", projectDir, chartPath, "session-a");
 		const foreignSession = createRun("foreign-terminal", projectDir, chartPath, "session-b");
 		const foreignWorkDir = createRun("foreign-workdir-terminal", otherProjectDir, chartPath, "session-a");
-		for (const runDir of [owned, foreignSession, foreignWorkDir]) {
-			persistTerminalNotificationRequest(runDir, {
-				runId: runDir.split("/").at(-1)!,
-				branchId: "main",				runDir,
+		for (const { runId, runDir } of [owned, foreignSession, foreignWorkDir]) {
+			withRunStorage(testStorage(), () => persistTerminalNotificationRequest(runId, {
+				runId,
+				branchId: "main",
 				chartId: "demo",
 				outcome: "complete",
 				prompt: `terminal ${runDir}`,
 				artifacts: [],
-			});
-			patchRunStatus(runDir, { runId: runDir.split("/").at(-1)!, branchIds: ["main"], chartId: "demo", state: "complete" });
+			}));
+			withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: ["main"], chartId: "demo", state: "complete" }));
 		}
 		// Created last so it is scanned first: its malformed outbox must not prevent the
 		// valid owned run from being recovered.
 		const malformed = createRun("malformed-terminal", projectDir, chartPath, "session-a");
-		mkdirSync(join(malformed, "terminal-notification"), { recursive: true });
-		writeFileSync(join(malformed, "terminal-notification", "request.json"), "{not-json\n");
-		patchRunStatus(malformed, { runId: "malformed-terminal", branchIds: ["main"], chartId: "demo", state: "complete" });
+		mkdirSync(join(malformed.runDir, "terminal-notification"), { recursive: true });
+		writeFileSync(join(malformed.runDir, "terminal-notification", "request.json"), "{not-json\n");
+		withRunStorage(testStorage(), () => patchRunStatus(malformed.runId, { branchIds: ["main"], chartId: "demo", state: "complete" }));
 		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
 		const sent: Array<{ customType: string; details: { requestId: string } }> = [];
 		const pi = {
@@ -420,18 +451,18 @@ describe("hyperchart extension", () => {
 
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.customType).toBe("hyperchart-terminal");
-		expect(hasTerminalNotificationReceipt(owned, "pi", "session-a")).toBe(true);
-		expect(hasTerminalNotificationReceipt(foreignSession, "pi", "session-a")).toBe(false);
-		expect(hasTerminalNotificationReceipt(foreignWorkDir, "pi", "session-a")).toBe(false);
+		expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(owned.runId, "pi", "session-a"))).toBe(true);
+		expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(foreignSession.runId, "pi", "session-a"))).toBe(false);
+		expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(foreignWorkDir.runId, "pi", "session-a"))).toBe(false);
 	});
 
 	it("confirms only after Pi accepts the message and retries a pre-delivery failure", async () => {
 		const chartPath = writeChart("terminal-send-order");
-		const runDir = createRun("terminal-send-order", projectDir, chartPath, "session-a");
-		persistTerminalNotificationRequest(runDir, {
-			runId: "terminal-send-order", branchId: "main", runDir, chartId: "demo", outcome: "complete", prompt: "done", artifacts: [],
-		});
-		patchRunStatus(runDir, { runId: "terminal-send-order", branchIds: ["main"], chartId: "demo", state: "complete" });
+		const { runId, runDir } = createRun("terminal-send-order", projectDir, chartPath, "session-a");
+		withRunStorage(testStorage(), () => persistTerminalNotificationRequest(runId, {
+			runId: "terminal-send-order", branchId: "main", chartId: "demo", outcome: "complete", prompt: "done", artifacts: [],
+		}));
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: ["main"], chartId: "demo", state: "complete" }));
 		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
 		let attempts = 0;
 		const pi = {
@@ -441,7 +472,7 @@ describe("hyperchart extension", () => {
 			},
 			sendMessage: () => {
 				attempts++;
-				expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(false);
+				expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(runId, "pi", "session-a"))).toBe(false);
 				if (attempts === 1) throw new Error("send failed");
 			},
 			events: { on: () => {}, emit: () => {} },
@@ -452,25 +483,25 @@ describe("hyperchart extension", () => {
 
 		await sessionStart?.({ reason: "startup" }, context);
 		expect(attempts).toBe(1);
-		expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(false);
+		expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(runId, "pi", "session-a"))).toBe(false);
 		await sessionStart?.({ reason: "resume" }, context);
 		expect(attempts).toBe(2);
-		expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(true);
+		expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(runId, "pi", "session-a"))).toBe(true);
 	});
 
 	it("does not resend a terminal request already persisted in the Pi session", async () => {
 		const chartPath = writeChart("terminal-persisted");
-		const runDir = createRun("persisted-terminal", projectDir, chartPath, "session-a");
-		const request = persistTerminalNotificationRequest(runDir, {
+		const { runId, runDir } = createRun("persisted-terminal", projectDir, chartPath, "session-a");
+		const request = withRunStorage(testStorage(), () => persistTerminalNotificationRequest(runId, {
 			runId: "persisted-terminal",
-			branchId: "main",			runDir,
+			branchId: "main",
 			chartId: "demo",
 			outcome: "failed",
 			prompt: "failed terminal",
 			artifacts: [],
 			error: "boom",
-		});
-		patchRunStatus(runDir, { runId: "persisted-terminal", branchIds: ["main"], chartId: "demo", state: "failed", error: "boom" });
+		}));
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: ["main"], chartId: "demo", state: "failed", error: "boom" }));
 		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
 		let sends = 0;
 		const pi = {
@@ -497,24 +528,24 @@ describe("hyperchart extension", () => {
 		await sessionStart?.({ reason: "resume" }, context);
 
 		expect(sends).toBe(0);
-		expect(hasTerminalNotificationReceipt(runDir, "pi", "session-a")).toBe(true);
+		expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(runId, "pi", "session-a"))).toBe(true);
 	});
 
 	it("delivers an identical post-rewind notification because it has a new request identity", async () => {
 		const chartPath = writeChart("terminal-rewind-generation");
-		const runDir = createRun("terminal-rewind-generation", projectDir, chartPath, "session-a");
+		const { runId, runDir } = createRun("terminal-rewind-generation", projectDir, chartPath, "session-a");
 		const payload = {
 			runId: "terminal-rewind-generation",
-			branchId: "main",			runDir,
+			branchId: "main",
 			chartId: "demo",
 			outcome: "complete" as const,
 			prompt: "identical terminal",
 			artifacts: [],
 		};
-		const oldRequest = persistTerminalNotificationRequest(runDir, payload);
-		removeTerminalNotificationOutbox(runDir);
-		const newRequest = persistTerminalNotificationRequest(runDir, payload);
-		patchRunStatus(runDir, { runId: payload.runId, branchIds: ["main"], chartId: "demo", state: "complete" });
+		const oldRequest = withRunStorage(testStorage(), () => persistTerminalNotificationRequest(runId, payload));
+		withRunStorage(testStorage(), () => removeTerminalNotificationOutbox(runId));
+		const newRequest = withRunStorage(testStorage(), () => persistTerminalNotificationRequest(runId, payload));
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: ["main"], chartId: "demo", state: "complete" }));
 		expect(newRequest.requestId).not.toBe(oldRequest.requestId);
 		let sessionStart: ((event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) | undefined;
 		const sent: Array<{ details: { requestId: string } }> = [];
@@ -610,22 +641,23 @@ describe("hyperchart extension", () => {
 		expect(charts.map((chart) => chart.name)).toEqual(["bundled"]);
 	});
 
-	it("accepts runId aliases and rejects conflicting run coordinates", async () => {
+	it("accepts runId and rejects legacy runDir coordinates", async () => {
 		const runId = "coordinate-alias";
-		const runDir = createRun(runId, projectDir, writeChart("coordinate-alias"));
+		const { runDir } = createRun(runId, projectDir, writeChart("coordinate-alias"));
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 			{ type: "session_ref", index: 1, file: "missing.jsonl", parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]);
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
-		const listed = await tool.execute("branches-alias", { action: "branches", runId }, new AbortController().signal, () => undefined, ctx);
-		expect(listed.details).toMatchObject({ runDir, branches: [expect.objectContaining({ branchId: "main" })], totalCount: 1 });
-		const viewed = await tool.execute("view-alias", { action: "view", runId, branchId: "main", open: false }, new AbortController().signal, () => undefined, ctx);
+		const listed = await tool.execute("branches-id", { action: "branches", runId }, new AbortController().signal, () => undefined, ctx);
+		expect(listed.details).not.toHaveProperty("runDir");
+		expect(listed.details).toMatchObject({ runId, branches: [expect.objectContaining({ branchId: "main" })], totalCount: 1 });
+		const viewed = await tool.execute("view-id", { action: "view", runId, branchId: "main", open: false }, new AbortController().signal, () => undefined, ctx);
 		expect(viewed.details).toMatchObject({ url: expect.stringMatching(/^http:\/\//) });
-		const forked = await tool.execute("fork-alias", { action: "fork", runId, branchId: "experiment", fromSeqId: 2 }, new AbortController().signal, () => undefined, ctx);
+		const forked = await tool.execute("fork-id", { action: "fork", runId, branchId: "experiment", fromSeqId: 2 }, new AbortController().signal, () => undefined, ctx);
 		expect(forked.details).toMatchObject({ branchId: "experiment", headSeqId: 2, selectedBranchChanged: false, started: false });
-		const rewound = await tool.execute("rewind-alias", { action: "rewind", runId, branchId: "main", seqId: 2, mode: "after" }, new AbortController().signal, () => undefined, ctx);
+		const rewound = await tool.execute("rewind-id", { action: "rewind", runId, branchId: "main", seqId: 2, mode: "after" }, new AbortController().signal, () => undefined, ctx);
 		expect(rewound.details).toMatchObject({ branchId: "main", headSeqId: 2 });
 		await expect(tool.execute(
 			"coordinate-conflict",
@@ -633,19 +665,19 @@ describe("hyperchart extension", () => {
 			new AbortController().signal,
 			() => undefined,
 			ctx,
-		)).rejects.toThrow(/conflicting runDir and runId/);
+		)).rejects.toThrow(/runDir is not supported; pass runId/);
 		await expect(tool.execute(
 			"respond-run-dir",
 			{ action: "respond", runDir, runId, branchId: "main", seqId: 1, event: "APPROVED" },
 			new AbortController().signal,
 			() => undefined,
 			ctx,
-		)).rejects.toThrow(/respond accepts the exact runId only/);
+		)).rejects.toThrow(/runDir is not supported; pass runId/);
 	});
 
 	it("returns cursor-paged branch tool results capped at 100", async () => {
 		const runId = "paged-branches";
-		const runDir = createRun(runId, projectDir, writeChart("paged-branches"));
+		const { runDir } = createRun(runId, projectDir, writeChart("paged-branches"));
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
@@ -669,22 +701,21 @@ describe("hyperchart extension", () => {
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
 		const signal = new AbortController().signal;
-		await expect(tool.execute("missing-run", { action: "run" }, signal, () => undefined, ctx)).rejects.toThrow(/action=run requires chartPath.*runDir\/runId/);
-		await expect(tool.execute("missing-inspect-run", { action: "run_inspect" }, signal, () => undefined, ctx)).rejects.toThrow(/action=run_inspect requires runDir or runId/);
-		await expect(tool.execute("missing-branches-run", { action: "branches" }, signal, () => undefined, ctx)).rejects.toThrow(/action=branches requires runDir or runId/);
-		await expect(tool.execute("missing-view-target", { action: "view" }, signal, () => undefined, ctx)).rejects.toThrow(/action=view requires exactly one of chartPath or runDir\/runId/);
+		await expect(tool.execute("missing-run", { action: "run" }, signal, () => undefined, ctx)).rejects.toThrow(/action=run requires chartPath.*runId/);
+		await expect(tool.execute("missing-inspect-run", { action: "run_inspect" }, signal, () => undefined, ctx)).rejects.toThrow(/action=run_inspect requires runId/);
+		await expect(tool.execute("missing-branches-run", { action: "branches" }, signal, () => undefined, ctx)).rejects.toThrow(/action=branches requires runId/);
+		await expect(tool.execute("missing-view-target", { action: "view" }, signal, () => undefined, ctx)).rejects.toThrow(/action=view requires exactly one of chartPath or runId/);
 	});
 
 	it("stops one run through the consolidated tool", async () => {
 		const chartPath = writeChart("stoppable");
-		const runDir = createRun("stoppable-run", projectDir, chartPath);
-		patchRunStatus(runDir, {
-			runId: "stoppable-run",
+		const { runId, runDir } = createRun("stoppable-run", projectDir, chartPath);
+		withRunStorage(testStorage(), () => patchRunStatus(runId, {
 		branchIds: ["main"],			chartId: "demo",
 			state: "running",
 			pid: 999_999_999,
 			heartbeatAt: Date.now(),
-		});
+		}));
 		const result = await registeredTool("hyperchart").execute(
 			"tool-call",
 			{ action: "stop", runId: "stoppable-run" },
@@ -693,7 +724,7 @@ describe("hyperchart extension", () => {
 			commandContext(projectDir).ctx,
 		);
 
-		expect(readRunStatus(runDir)).toMatchObject({ state: "stopped", exitCode: 0 });
+		expect(withRunStorage(testStorage(), () => readRunStatus(runId))).toMatchObject({ state: "stopped", exitCode: 0 });
 		expect((result as { content: Array<{ text: string }> }).content[0]?.text).toContain("stoppable-run (marked stopped)");
 	});
 
@@ -743,11 +774,11 @@ describe("hyperchart extension", () => {
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
 		register(pi);
-		const { url } = await openRunInspector({
+		const { url } = await withRunStorage(testStorage(), () => openRunInspector({
 			runId: "lifecycle-run",
 			branchId: "main",			loadRun: async () => ({ runId: "lifecycle-run" }) as never,
 			openBrowser: () => undefined,
-		});
+		}));
 		expect((await fetch(url)).status).toBe(200);
 
 		await sessionShutdown?.();
@@ -757,7 +788,7 @@ describe("hyperchart extension", () => {
 
 	it("queues steering for a live agent session", async () => {
 		const runId = "steerable-run";
-		const runDir = createRun(runId, projectDir, writeChart("steerable"));
+		const { runDir } = createRun(runId, projectDir, writeChart("steerable"));
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		const actionKey = actionUidKey(actionUid);
 		updateSessionProgress(join(runDir, "sessions"), actionUid, {
@@ -779,14 +810,15 @@ describe("hyperchart extension", () => {
 		expect(notifications).toContainEqual({ message: "Steering queued for @worker on branch main", type: "info" });
 	});
 
-	it("offers documented top-level commands and run ids with an empty prefix", () => {
+	it("offers documented top-level commands and run ids with an empty prefix", async () => {
 		const runId = "demo-run";
 		const chartPath = writeChart("demo");
-		const runDir = createRun(runId, projectDir, chartPath);
-		writeFileSync(join(runDir, "runner.config.json"), JSON.stringify({ runId, runDir, chartPath, chartId: "demo", workDir: projectDir, branchId: "main" }));
+		const { runDir } = createRun(runId, projectDir, chartPath);
+		writeFileSync(join(runDir, "runner.config.json"), JSON.stringify({ runId, storage: testStorage(), chartPath, chartId: "demo", workDir: projectDir, branchId: "main" }));
 
-		const values = registeredCommand()
-			.getArgumentCompletions("")
+		const command = registeredCommand();
+		await command.handler("list", commandContext(projectDir).ctx);
+		const values = command.getArgumentCompletions("")
 			?.map((item) => item.value);
 
 		expect(values).toContain("view");
@@ -856,41 +888,41 @@ describe("hyperchart extension", () => {
 
 	it("keeps view as the shortcut for opening the latest run", async () => {
 		const runId = "current-run";
-		const runDir = createRun(runId, projectDir, writeChart("current"));
+		const { runDir } = createRun(runId, projectDir, writeChart("current"));
 		const { ctx, notifications } = commandContext(projectDir);
 
 		await registeredCommand().handler("view", ctx);
 
-		expect(notifications).toContainEqual({ message: `Run ${runId}: ${runDir}`, type: "info" });
+		expect(notifications).toContainEqual({ message: `Run ${runId}: ${runId}`, type: "info" });
 	});
 
 	it("opens the browser inspector with overview data and on-demand transcripts", async () => {
 		const runId = "tool-view-run";
-		const runDir = createRun(runId, projectDir, writeChart("tool-view"));
+		const { runDir } = createRun(runId, projectDir, writeChart("tool-view"));
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]);
 		const transcriptFile = join(runDir, "sessions", "tool-view.jsonl");
-		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", type: "message", message: { role: "assistant", content: "inspector transcript" } })}\n`);
+		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", timestamp: new Date(3).toISOString(), type: "message", message: { role: "assistant", content: "inspector transcript" } })}\n`);
 		updateSessionProgress(join(runDir, "sessions"), actionUid, {
 			actionName: "worker",
 			status: "running",
 			sessionId: "session-id",
 			sessionFile: transcriptFile,
-		}, "demo:work:agent:1:2");
+		}, "demo:work:agent:1:3");
 		updateSessionProgress(join(runDir, "sessions"), actionUid, {
 			actionName: "worker",
 			status: "running",
 			sessionId: "experiment-session",
-		}, "demo:work:agent:1:2", "experiment");
+		}, "demo:work:agent:1:3", "experiment");
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
 		const result = await tool.execute(
 			"tool-call",
-			{ action: "view", branchId: "main", runDir: runId, open: false },
+			{ action: "view", branchId: "main", runId, open: false },
 			new AbortController().signal,
 			() => undefined,
 			ctx,
@@ -909,18 +941,18 @@ describe("hyperchart extension", () => {
 		const runResponse = await fetch(new URL(`/api/runs/${token}`, inspectorUrl));
 		expect(runResponse.status).toBe(200);
 		const runPayload = (await runResponse.json()) as {
-			run: { runId: string; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
+			run: { runId: string; historySnapshot: { branchId: string; headSeqId: number | null }; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
 		};
 		expect(runPayload).toMatchObject({ run: { runId } });
 		expect(runPayload.run.states.find((state) => state.id === "work")?.session?.messages).toBeUndefined();
 		const sessionResponse = await fetch(new URL(`/api/runs/${token}/history`, inspectorUrl), {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ operation: "readVisitSession", input: { branchId: "main", invokeSeqId: 2 } }),
+			body: JSON.stringify({ operation: "readVisitSession", input: { snapshot: runPayload.run.historySnapshot, invokeSeqId: 3 } }),
 		});
 		expect(sessionResponse.status).toBe(200);
 		const sessionPayload = await sessionResponse.json() as { result: { messages?: unknown[] } };
-		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript" }]);
+		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript", timestamp: 3 }]);
 
 		const steerResponse = await fetch(new URL(`/api/runs/${token}/steer`, inspectorUrl), {
 			method: "POST",
@@ -938,26 +970,26 @@ describe("hyperchart extension", () => {
 	});
 
 	it("rejects a foreign-workdir run through the view agent action", async () => {
-		const runDir = createRun("foreign-tool-view", otherProjectDir, writeChart("foreign-tool-view"));
+		const { runId, runDir } = createRun("foreign-tool-view", otherProjectDir, writeChart("foreign-tool-view"));
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
 		await expect(
 			tool.execute(
 				"tool-call",
-				{ action: "view", branchId: "main", runDir, open: false },
+				{ action: "view", runId, branchId: "main", open: false },
 				new AbortController().signal,
 				() => undefined,
 				ctx,
 			),
-		).rejects.toThrow("belongs to another working directory or is missing metadata");
+		).rejects.toThrow("belongs to another working directory");
 	});
 
 	it("inspects the requested durable branch and rejects ambiguous omission", async () => {
 		const runId = "branch-aware-inspect";
-		const runDir = createRun(runId, projectDir, writeChart("branch-aware-inspect"));
+		const { runDir } = createRun(runId, projectDir, writeChart("branch-aware-inspect"));
 		writeTwoBranchV2Log(runDir);
-		patchRunStatus(runDir, { runId, branchIds: [], chartId: "demo", state: "stopped" });
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { branchIds: [], chartId: "demo", state: "stopped" }));
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
 
@@ -983,16 +1015,16 @@ describe("hyperchart extension", () => {
 
 	it("returns a runtime-enriched inspector model for concrete run dirs", async () => {
 		const runId = "runtime-inspect-run";
-		const runDir = createRun(runId, projectDir, writeChart("runtime-inspect"));
+		const { runDir } = createRun(runId, projectDir, writeChart("runtime-inspect"));
 		const uid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
 			{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 			{ type: "failure_intent", origin: "work", error: { code: 2, stderr: "nope" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3 },
 		]);
-		patchRunStatus(runDir, { runId, chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] });
+		withRunStorage(testStorage(), () => patchRunStatus(runId, { chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] }));
 		const transcriptFile = join(runDir, "sessions", "runtime-inspect.jsonl");
-		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", type: "message", message: { role: "assistant", content: "verbose Pi transcript" } })}\n`);
+		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", timestamp: new Date(3).toISOString(), type: "message", message: { role: "assistant", content: "verbose Pi transcript" } })}\n`);
 		updateSessionProgress(join(runDir, "sessions"), uid, {
 			actionName: "worker",
 			status: "failed",
@@ -1000,14 +1032,14 @@ describe("hyperchart extension", () => {
 			lastActivityAt: 4,
 			sessionId: "session-id",
 			sessionFile: transcriptFile,
-		}, "demo:work:agent:1:2");
+		}, "demo:work:agent:1:3");
 		const tool = registeredTool("hyperchart");
 		const { ctx } = commandContext(projectDir);
 
-		const result = await tool.execute("tool-call", { action: "run_inspect", branchId: "main", runDir: runId }, new AbortController().signal, () => undefined, ctx);
+		const result = await tool.execute("tool-call", { action: "run_inspect", branchId: "main", runId }, new AbortController().signal, () => undefined, ctx);
 		const inferred = await tool.execute("tool-call-inferred", { action: "run_inspect", runId }, new AbortController().signal, () => undefined, ctx);
 		expect(inferred.details).toMatchObject({ branchId: "main" });
-		await expect(tool.execute("tool-call-full", { action: "run_inspect", branchId: "main", runDir: runId, verbose: true }, new AbortController().signal, () => undefined, ctx)).rejects.toThrow(/hyperchart view/);
+		await expect(tool.execute("tool-call-full", { action: "run_inspect", branchId: "main", runId, verbose: true }, new AbortController().signal, () => undefined, ctx)).rejects.toThrow(/hyperchart view/);
 		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; stateDigests: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }> };
 
 		expect(JSON.stringify(details)).not.toContain("verbose Pi transcript");
@@ -1026,12 +1058,12 @@ describe("hyperchart extension", () => {
 		const importedFlag = join(tempDir, "imported.txt");
 		const maliciousChart = writeChart("malicious", importedFlag);
 		const pathRunDir = join(tempDir, "crafted-run");
-		await saveRunMeta(pathRunDir, {
+		await withRunStorage({ kind: "jsonl", rootDir: tempDir, layout: "run-id" }, () => saveRunMeta("crafted-run", {
 			chartPath: maliciousChart,
 			workDir: projectDir,
 			chartId: "malicious",
 			createdAt: new Date().toISOString(),
-		});
+		}));
 		createRun("foreign-run", otherProjectDir, maliciousChart);
 		const command = registeredCommand();
 		const { ctx } = commandContext(projectDir);
@@ -1060,7 +1092,7 @@ describe("hyperchart extension", () => {
 
 	it("rewinds an incompatible modified-chart run to the compatible prefix", async () => {
 		const chartPath = writeIncompatibleReplayChart();
-		const runDir = createRun("rewind-compatible", projectDir, chartPath);
+		const { runId, runDir } = createRun("rewind-compatible", projectDir, chartPath);
 		mkdirSync(runDir, { recursive: true });
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
@@ -1089,7 +1121,7 @@ describe("hyperchart extension", () => {
 
 		const result = await tool.execute(
 			"tool-call",
-			{ action: "rewind", branchId: "main", runDir, to: "compatible" },
+			{ action: "rewind", runId, branchId: "main", to: "compatible" },
 			new AbortController().signal,
 			() => undefined,
 			ctx,
@@ -1113,7 +1145,7 @@ describe("hyperchart extension", () => {
 	}
 };\n`,
 		);
-		const runDir = createRun("rewind-visits", projectDir, chartPath);
+		const { runId, runDir } = createRun("rewind-visits", projectDir, chartPath);
 		mkdirSync(runDir, { recursive: true });
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		const definition = { kind: "agent", uid: actionUid, name: "worker" };
@@ -1150,7 +1182,7 @@ describe("hyperchart extension", () => {
 			sessionsDir,
 			actionUid,
 			{ actionName: "worker", status: "completed", sessionFile: sharedSessionFile },
-			"demo:work:agent:1:2",
+			"demo:work:agent:1:3",
 			"main",
 		);
 		updateSessionProgress(
@@ -1165,7 +1197,7 @@ describe("hyperchart extension", () => {
 		const { ctx } = commandContext(projectDir);
 		const result = await tool.execute(
 			"tool-call",
-			{ action: "rewind", branchId: "main", runDir, seqId: 4, mode: "before" },
+			{ action: "rewind", runId, branchId: "main", seqId: 4, mode: "before" },
 			new AbortController().signal,
 			() => undefined,
 			ctx,
@@ -1302,8 +1334,8 @@ function commandContext(cwd: string): { ctx: ExtensionCommandContext; notificati
 	};
 }
 
-function createRun(runId: string, workDir: string, chartPath: string, originSessionId?: string): string {
-	const runDir = join(agentDir, "hypercharts", "runs", runId);
+function createRun(runId: string, workDir: string, chartPath: string, originSessionId?: string): { runId: string; runDir: string } {
+	const runDir = resolveRunPaths(runId, testStorage()).runDir;
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	void new JsonlLogStore(join(runDir, "log.jsonl")).writeRunMeta({
 		chartPath,
@@ -1312,7 +1344,7 @@ function createRun(runId: string, workDir: string, chartPath: string, originSess
 		createdAt: new Date().toISOString(),
 		...(originSessionId === undefined ? {} : { originSessionId }),
 	});
-	return runDir;
+	return { runId, runDir };
 }
 
 function writeIncompatibleReplayChart(): string {

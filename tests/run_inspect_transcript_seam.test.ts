@@ -1,3 +1,5 @@
+import { basename as fixtureRunId, dirname as fixtureRoot } from "node:path";
+import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,7 +9,7 @@ import { branchSessionSegment } from "../packages/hyperchart/src/runtime/generic
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
-import { hyperchartRunFromRunDir } from "../packages/hyperchart/src/inspect/run_inspect.js";
+import { hyperchartRunFromRunId } from "../packages/hyperchart/src/inspect/run_inspect.js";
 import {
 	limitTranscriptMessages,
 	readNeutralSessionTranscript,
@@ -48,7 +50,7 @@ describe("run inspection transcript seam", () => {
 		}, "seam:done:agent:1:7", "main");
 		const readTranscript = vi.fn(async () => [{ id: "m1", role: "assistant" as const, text: "injected" }]);
 
-		const compact = await hyperchartRunFromRunDir(runDir);
+		const compact = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir)));
 		const compactState = compact.states.find((candidate) => candidate.id === "done");
 		expect(compactState?.session).toMatchObject({ actionKey: "seam:done:agent", status: "running" });
 		expect(compactState?.session?.messages).toBeUndefined();
@@ -57,7 +59,7 @@ describe("run inspection transcript seam", () => {
 		expect(compact.historySnapshot).toEqual({ branchId: "main", headSeqId: null });
 		expect(readTranscript).not.toHaveBeenCalled();
 
-		const full = await hyperchartRunFromRunDir(runDir, { readTranscript, includeTranscripts: true });
+		const full = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), { readTranscript, includeTranscripts: true }));
 		const fullState = full.states.find((candidate) => candidate.id === "done");
 		expect(fullState?.session?.messages).toEqual([{ id: "m1", role: "assistant", text: "injected" }]);
 		expect(readTranscript).toHaveBeenCalled();
@@ -83,10 +85,10 @@ describe("run inspection transcript seam", () => {
 			{ id: "pg", role: "assistant" as const, text: "from postgres" },
 		]);
 
-		const run = await hyperchartRunFromRunDir(runDir, {
+		const run = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), {
 			includeTranscripts: true,
 			readTranscript,
-		});
+		}));
 		expect(run.states.find((state) => state.id === "done")?.session?.messages).toEqual([
 			{ id: "pg", role: "assistant", text: "from postgres" },
 		]);
@@ -152,7 +154,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		const runDir = join(root, "run");
 		const sessionsDir = join(runDir, "sessions");
 		mkdirSync(sessionsDir, { recursive: true });
-		await saveRunMeta(runDir, { chartPath, workDir: root, chartId: "visits", createdAt: new Date().toISOString() });
+		await withRunStorage(fixtureStorage(runDir), () => saveRunMeta(fixtureRunId(runDir), { chartPath, workDir: root, chartId: "visits", createdAt: new Date().toISOString() }));
 		const actionUid = { chart: "visits", state: "work", action: "agent" };
 		const definition = { kind: "agent", uid: actionUid, name: "worker", task: "work" };
 		const records = [
@@ -183,7 +185,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 			lastActivityAt: Number.MAX_SAFE_INTEGER,
 		}, "visits:work:agent:3:6");
 
-		const run = await hyperchartRunFromRunDir(runDir, {
+		const run = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), {
 			includeTranscripts: true,
 			readTranscript: async () => [
 				{ id: "first", role: "assistant", text: "first visit", timestamp: 2500 },
@@ -191,7 +193,7 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 				{ id: "resumed", role: "assistant", text: "resumed visit", timestamp: 4500 },
 				{ id: "third", role: "assistant", text: "third visit", timestamp: 6500 },
 			],
-		});
+		}));
 		const state = run.states.find((state) => state.id === "work");
 		const visits = state?.visitHistory;
 		expect(visits?.[0]?.session?.messages).toEqual([
@@ -224,13 +226,13 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 		);
 		const runDir = join(root, "run");
 		mkdirSync(join(runDir, "sessions"), { recursive: true });
-		await saveRunMeta(runDir, { chartPath, workDir: root, chartId: "configured", createdAt: new Date().toISOString() });
+		await withRunStorage(fixtureStorage(runDir), () => saveRunMeta(fixtureRunId(runDir), { chartPath, workDir: root, chartId: "configured", createdAt: new Date().toISOString() }));
 		writeFileSync(
 			join(runDir, "runner.config.json"),
 			JSON.stringify({
 				runId: "configured-run",
 				branchId: "main",
-				runDir,
+				storage: fixtureStorage(runDir),
 				chartPath,
 				chartId: "configured",
 				workDir: root,
@@ -249,7 +251,7 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 			tools: ["read", "browser", "finish"],
 		}, "configured:work:agent:1:2");
 
-		const run = await hyperchartRunFromRunDir(runDir, {
+		const run = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), {
 			agentDefaults: () => ({
 				role: "worker",
 				model: "anthropic/fallback",
@@ -258,7 +260,7 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 				tools: ["bash"],
 				resolvedTools: ["stale-tool", "finish"],
 			}),
-		});
+		}));
 		const state = run.states.find((candidate) => candidate.id === "work");
 
 		expect(state).toMatchObject({
@@ -277,7 +279,7 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 		});
 
 		writeFileSync(join(runDir, "runner.config.json"), "{ invalid json");
-		const invalidSnapshot = await hyperchartRunFromRunDir(runDir, {
+		const invalidSnapshot = await withRunStorage(fixtureStorage(runDir), () => hyperchartRunFromRunId(fixtureRunId(runDir), {
 			agentDefaults: () => ({
 				role: "worker",
 				model: "anthropic/fallback",
@@ -286,7 +288,7 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 				tools: ["bash"],
 				resolvedTools: ["mutable-tool", "finish"],
 			}),
-		});
+		}));
 		const invalidState = invalidSnapshot.states.find((candidate) => candidate.id === "work");
 		expect(invalidState).toMatchObject({
 			role: "worker",
@@ -320,3 +322,8 @@ export default chart({ kind: "chart", id: "configured", initial: "work", states:
 		expect(resolveContainedSessionFile(sessionsDir, escapeLink)).toBeUndefined();
 	});
 });
+
+/** Explicit storage configuration for this suite's generated literal-layout fixtures. */
+function fixtureStorage(runDirectory: string): RunStorage {
+ return {kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id"};
+}

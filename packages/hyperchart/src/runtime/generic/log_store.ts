@@ -136,6 +136,8 @@ export class HistoryCursorError extends Error {
 }
 
 export type RunMeta = {
+	/** Stored for hashed JSONL enumeration; literal-layout storage keys remain authoritative. */
+	runId?: string;
 	chartPath: string;
 	exportName?: string;
 	workDir: string;

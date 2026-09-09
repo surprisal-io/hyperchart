@@ -17,5 +17,7 @@ describe("React stylesheet", () => {
 		expect(css).toContain('html[data-hyperchart-inspector-open]');
 		expect(css).toContain(':not(:has([data-testid="hyperchart-inspector-dialog"]))');
 		expect(css).toContain("animation-play-state: paused !important");
+		expect(css).toContain("[data-hyperchart-execution] .react-flow__node");
+		expect(css).toContain("visibility: visible !important");
 	});
 });

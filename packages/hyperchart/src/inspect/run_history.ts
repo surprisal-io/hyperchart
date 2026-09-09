@@ -1,3 +1,4 @@
+import { resolveRunPaths, withRunStorage } from "../runtime/generic/run_paths.js";
 import { actionUidKey } from "../core/action_uid.js";
 import { basename, resolve } from "node:path";
 import type {
@@ -28,16 +29,14 @@ import { actorGenerationHistoryItemToHost, actorMessageHistoryItemsToHost, actor
 import { runtimeVisitHistoriesForInspector } from "../host/adapters.js";
 
 export async function createRunInspectorDataSource(
-	runDir: string,
+	runId: string,
 	options: {
-		runId?: string;
 		ast?: ChartAst;
 		readTranscript?: SessionTranscriptReader;
 	} = {},
 ): Promise<HyperchartInspectorDataSource> {
-	const absoluteRunDir = resolve(runDir);
-	const runId = options.runId ?? basename(absoluteRunDir);
-	const meta = await loadRunMeta(absoluteRunDir, { runId });
+	const { runDir: absoluteRunDir, storage } = resolveRunPaths(runId);
+	const meta = await loadRunMeta(runId);
 	const parsed =
 		options.ast === undefined
 			? parseChartModuleSync(
@@ -52,14 +51,14 @@ export async function createRunInspectorDataSource(
 	const assertRun = (candidate: string) => {
 		if (candidate !== runId) throw new Error(`Inspector data source is bound to run '${runId}'`);
 	};
-	const withStore = async <T>(operation: (store: Awaited<ReturnType<typeof openRunLogStore>>) => Promise<T>): Promise<T> => {
-		const store = await openRunLogStore(absoluteRunDir, {
+	const withStore = async <T>(operation: (store: Awaited<ReturnType<typeof openRunLogStore>>) => Promise<T>): Promise<T> => withRunStorage(storage, async () => {
+		const store = await openRunLogStore(runId, {
 			access: "read",
-			runId,
+			storage,
 		});
 		try { return await operation(store); }
 		finally { await store.close(); }
-	};
+	});
 	return {
 		listBranches: async ({ runId: candidate, cursor }) => {
 			assertRun(candidate);

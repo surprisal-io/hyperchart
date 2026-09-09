@@ -6,6 +6,8 @@ import { importedModuleSpecifier } from "./imported_module.js";
 export type GuardContext = Readonly<{
 	chartDir: string;
 	workDir: string;
+	/** Runtime-supplied original action identity, stable across validation rounds. */
+	invocation?: Readonly<{ branchId: string; actionUid: ActionUID; invocationId: string }>;
 }>;
 
 /** Runtime-rendered script options. Raw dynamic guard options are never silently discarded. */
@@ -31,7 +33,7 @@ export async function runGuard(
 		if (typeof fn !== "function") {
 			throw new Error(`Guard export '${guard.export}' is not a function in ${guard.module}`);
 		}
-		// Existing one-argument guards remain compatible; context is only chartDir/workDir.
+		// Context carries workspace paths and optional runtime-supplied invocation provenance.
 		return normalizeGuardOutcome(await fn(event, ctx));
 	}
 
@@ -40,7 +42,7 @@ export async function runGuard(
 		throw new Error("Script guard env/artifacts/reply require a rendered guard invocation from ChartRuntime; call runGuard with RenderedGuardInvocation options.");
 	}
 	const runner = invocation?.scripts ?? new ScriptRunner({ workDir: ctx.workDir });
-	return runner.runGuard(guard, event, invocation?.env, invocation?.artifacts, invocation?.reply, invocation?.actionUid);
+	return runner.runGuard(guard, event, invocation?.env, invocation?.artifacts, invocation?.reply, invocation?.actionUid, ctx.invocation);
 }
 
 function normalizeGuardOutcome(value: unknown): GuardOutcome {
