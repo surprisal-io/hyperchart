@@ -3,7 +3,7 @@ import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runt
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
 import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/core/types.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
@@ -109,6 +109,49 @@ async function fixture(
 }
 
 describe("live branch sealing and move", () => {
+	it("wakes ordinary admission after a rejected commit with no journal mutation, never reserving across the move fence", async () => {
+		const f = await fixture(["main"]);
+		const target = (await branchView(f.runDir, "main")).branch.headSeqId!;
+		const before = storageEntries(f.runDir);
+		const committing = deferred();
+		const release = deferred();
+		const store = (f.controller as unknown as { rootStore: JsonlLogStore }).rootStore;
+		const failure = new Error("commit rejected after drain");
+		vi.spyOn(store, "moveBranch").mockImplementationOnce(async () => {
+			committing.resolve();
+			await release.promise;
+			throw failure;
+		});
+		const readiness: boolean[] = [];
+		const unsubscribe = f.controller.onBranchChange(() => readiness.push(f.controller.canStartBranch("main")));
+		try {
+			const moving = f.controller.moveBranch("main", target);
+			void moving.catch(() => {});
+			await committing.promise;
+			expect(f.controller.liveBranchIds).toEqual([]);
+			expect(f.controller.canStartBranch("main")).toBe(false);
+			await expect(f.controller.startBranch("main")).rejects.toBeInstanceOf(BranchSealedError);
+			expect(f.controller.liveBranchIds).toEqual([]);
+			expect(f.executors.get("main")).toHaveLength(1);
+			expect(readiness).toEqual([false]);
+			release.resolve();
+			await expect(moving).rejects.toBe(failure);
+			expect(readiness).toEqual([false, true]);
+			expect(storageEntries(f.runDir)).toEqual(before);
+			const resumed = f.controller.startBranch("main");
+			await waitFor(() => f.executors.get("main")?.[1]?.emit !== undefined);
+			expect(f.controller.canStartBranch("main")).toBe(false);
+			await f.controller.stopAndDrain("main");
+			await expect(resumed).resolves.toMatchObject({ outcome: "drained" });
+		} finally {
+			release.resolve();
+			unsubscribe();
+			await f.controller.stop();
+			await f.completion;
+		}
+	});
+
+
 	it("fails closed before the move commit point and releases temporary seals", async () => {
 		const f = await fixture(["main"]);
 		const beforeEntries = storageEntries(f.runDir);
@@ -132,13 +175,20 @@ describe("live branch sealing and move", () => {
 		const before = await branchView(f.runDir, "main");
 		const drainedHeadSeqId = before.branch.headSeqId!;
 
+		const changes = vi.fn();
+		const unsubscribe = f.controller.onBranchChange(changes);
 		const draining = f.controller.stopAndDrain("main");
 		await first.disposalStarted.promise;
+		expect(f.controller.canStartBranch("main")).toBe(false);
+		expect(await f.controller.activeBranchIds()).toEqual(["main"]);
 		await expect(f.controller.forkBranch({
 			branchId: "blocked-during-drain", sourceBranchId: "main", fromSeqId: drainedHeadSeqId,
 		})).rejects.toBeInstanceOf(BranchSealedError);
 		releaseDispose.resolve();
 		await expect(draining).resolves.toEqual({ branchId: "main", outcome: "drained" });
+		expect(changes).toHaveBeenCalledTimes(1);
+		expect(f.controller.canStartBranch("main")).toBe(true);
+		unsubscribe();
 		await expect(f.controller.forkBranch({
 			branchId: "blocked-after-drain", sourceBranchId: "main", fromSeqId: drainedHeadSeqId,
 		})).rejects.toBeInstanceOf(BranchSealedError);

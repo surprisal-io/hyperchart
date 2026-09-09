@@ -104,10 +104,9 @@ describe("runId storage identity", () => {
 		symlinkSync(f.root, join(f.storage.rootDir, "escape"));
 		expect(() => resolveRunPaths("escape", f.storage)).toThrow("escapes");
 	});
-	it("uses semantic ID through live control, owning hook, fork, rewind and ownership", async () => {
+	it("uses semantic ID through live control, drain/readmission, fork, rewind and ownership", async () => {
 		const f = fixture();
 		let starts = 0;
-		let moves = 0;
 		await withRunStorage(f.storage, async () => {
 			await seed(f);
 			const controller = await createHyperchartRunnerController(
@@ -132,10 +131,7 @@ describe("runId storage identity", () => {
 					},
 				}),
 			);
-			controller.setBranchMoveHandler(async (move) => {
-				moves++;
-				return move();
-			});
+
 			const hold = controller.acquireHold();
 			const running = controller.start();
 			try {
@@ -154,7 +150,8 @@ describe("runId storage identity", () => {
 					targetHeadSeqId: response.record.seqId,
 				});
 				expect(move.moveSeqId).toBeGreaterThan(response.record.seqId);
-				expect(moves).toBe(1);
+				expect(controller.liveBranchIds).not.toContain("main");
+				expect(controller.canStartBranch("main")).toBe(true);
 				const restart = controller.startBranch("main");
 				await vi.waitFor(() => expect(starts).toBe(2));
 				expect(readRunStatus(f.runId)?.runId).toBe(f.runId);

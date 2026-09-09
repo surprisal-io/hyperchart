@@ -132,19 +132,21 @@ export class BranchDrainError extends Error {
 
 /** An admission fence retained by this attempt cannot be retried as a fresh reservation. */
 export class BranchAdmissionError extends Error {
-	constructor(readonly branchId: BranchId) {
-		super(`Hyperchart branch '${branchId}' was already admitted to this runner attempt`);
+	constructor(readonly branchId: BranchId, options?: ErrorOptions) {
+		super(`Hyperchart branch '${branchId}' was already admitted to this runner attempt`, options);
 		this.name = "BranchAdmissionError";
 	}
 }
 
 export interface HyperchartRunnerController {
-	/** Install one owning scheduler around every direct or transported move. */
-	setBranchMoveHandler(handler: RunnerBranchMoveHandler): void;
+	/** Observe reservation settlement and admission readiness, including changes without journal writes. */
+	onBranchChange(listener: () => void): () => void;
+	/** Whether a fresh reservation can be made now. Failed cleanup throws with its original cause. */
+	canStartBranch(branchId: BranchId): boolean;
 	/** Every durable branch currently known to this controller. */
 	durableBranchIds(): Promise<readonly BranchId[]>;
 	readonly liveBranchIds: readonly BranchId[];
-	/** Live branches currently executing/setup, excluding drains and journal-native open user gates. */
+	/** Live branches occupying execution capacity, including setup/drain but excluding journal-native open user gates. */
 	activeBranchIds(): Promise<readonly BranchId[]>;
 	/** Launch the reserved initial branches and resolve at aggregate termination. */
 	start(): Promise<void>;
@@ -169,8 +171,6 @@ export interface HyperchartRunnerController {
 	/** Seal one live branch and drain all already admitted work. A successful drain remains eligible for replay-gated readmission. */
 	stopAndDrain(branchId: BranchId): Promise<RunnerBranchOutcome>;
 }
-
-export type RunnerBranchMoveHandler = (move: () => Promise<RunnerMoveBranchCommit>) => Promise<RunnerMoveBranchCommit>;
 
 type RunnerPhase = "accepting" | "closing" | "closed";
 type Deferred<T> = { promise: Promise<T>; resolve(value: T): void };
@@ -247,10 +247,10 @@ export function readRunnerConfig(path: string): HyperchartRunnerConfig {
 }
 
 class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
-	private branchMoveHandler: RunnerBranchMoveHandler | undefined;
+	private readonly branchListeners = new Set<() => void>();
 	private phase: RunnerPhase = "accepting";
 	private readonly live = new Map<BranchId, BranchEntry>();
-	private readonly admitted = new Set<BranchId>();
+	private readonly admitted = new Map<BranchId, BranchAdmissionError | undefined>();
 	private readonly knownDurableBranches: Set<BranchId>;
 	private readonly sealedBranches = new Set<BranchId>();
 	private readonly movingBranches = new Set<BranchId>();
@@ -300,16 +300,28 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		process.on("SIGINT", this.onSigint);
 	}
 
-	setBranchMoveHandler(handler: RunnerBranchMoveHandler): void {
-		if (this.branchMoveHandler !== undefined) throw new Error("A branch move owner is already installed");
-		this.branchMoveHandler = handler;
+	onBranchChange(listener: () => void): () => void {
+		this.branchListeners.add(listener);
+		return () => { this.branchListeners.delete(listener); };
+	}
+
+	private notifyBranchChange(): void {
+		for (const listener of this.branchListeners) listener();
+	}
+
+	canStartBranch(branchId: BranchId): boolean {
+		const failure = this.admitted.get(branchId);
+		if (failure !== undefined) throw failure;
+		return this.phase === "accepting" && this.knownDurableBranches.has(branchId)
+			&& !this.admitted.has(branchId) && !this.movingBranches.has(branchId)
+			&& (!this.sealedBranches.has(branchId) || this.readmissionRequired.has(branchId));
 	}
 
 	async durableBranchIds(): Promise<readonly BranchId[]> { return [...this.knownDurableBranches]; }
 	get liveBranchIds(): readonly BranchId[] { return [...this.live.keys()]; }
 	async activeBranchIds(): Promise<readonly BranchId[]> {
 		const active = await Promise.all([...this.live.entries()].map(async ([branchId, entry]) => {
-			if (entry.draining) return undefined;
+			if (entry.draining) return branchId;
 			const semantic = entry.semantic ?? await BranchExecution.restore({ ast: this.ast, branchId, store: entry.store, saveCheckpoint: "never" });
 			return semantic.openUserInteractions().length === 0 ? branchId : undefined;
 		}));
@@ -454,10 +466,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		if (targetHeadSeqId !== null && (!Number.isSafeInteger(targetHeadSeqId) || targetHeadSeqId <= 0)) {
 			return Promise.reject(new Error("targetHeadSeqId must be null or a positive safe integer"));
 		}
-		const result = this.moveChain.then(() => {
-			const move = () => this.performBranchMove(branchId, targetHeadSeqId);
-			return this.branchMoveHandler === undefined ? move() : this.branchMoveHandler(move);
-		});
+		const result = this.moveChain.then(() => this.performBranchMove(branchId, targetHeadSeqId));
 		this.moveChain = result.then(() => undefined, () => undefined);
 		return result;
 	}
@@ -513,7 +522,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		this.assertAccepting("start a branch");
 		if (!this.started) throw new Error("Hyperchart runner must be started before starting a dynamic branch; call controller.start() first");
 		assertRunnerBranchId(branchId);
-		if (this.admitted.has(branchId)) throw new BranchAdmissionError(branchId);
+		if (this.admitted.has(branchId)) throw this.admitted.get(branchId) ?? new BranchAdmissionError(branchId);
 		if (!this.knownDurableBranches.has(branchId)) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 		const readmission = this.readmissionRequired.has(branchId);
 		if (this.movingBranches.has(branchId) || this.sealedBranches.has(branchId) && !readmission) {
@@ -584,7 +593,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			draining: false,
 			operations: new Set(),
 		};
-		this.admitted.add(branchId);
+		this.admitted.set(branchId, undefined);
 		this.live.set(branchId, entry);
 		return entry;
 	}
@@ -669,6 +678,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 						if (!preexistingSeals.has(affectedBranchId)) this.sealedBranches.delete(affectedBranchId);
 					}
 				});
+				this.notifyBranchChange();
 			}
 		}
 	}
@@ -913,9 +923,12 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			if (outcome.outcome === "drained") {
 				this.admitted.delete(entry.branchId);
 				this.readmissionRequired.add(entry.branchId);
+			} else {
+				this.admitted.set(entry.branchId, new BranchAdmissionError(entry.branchId, { cause: outcome.cause }));
 			}
 			entry.outcome.resolve(outcome);
 			this.live.delete(entry.branchId);
+			this.notifyBranchChange();
 			this.publishLiveStatus();
 			this.finishIfDrained();
 		}
@@ -969,6 +982,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		this.outcomes.push(settledOutcome);
 		entry.outcome.resolve(settledOutcome);
 		this.live.delete(entry.branchId);
+		this.notifyBranchChange();
 		if (this.live.size > 0 || this.holdCount > 0) {
 			this.publishLiveStatus();
 			return;

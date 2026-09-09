@@ -42,7 +42,6 @@ export type {
 	ExecutorContext,
 	HyperchartRunnerConfig,
 	HyperchartRunnerController,
-	RunnerBranchMoveHandler,
 	RunnerBranchOutcome,
 	RunnerCommitUserInteractionOptions,
 	RunnerForkAndCommitUserInteractionOptions,
