@@ -91,7 +91,7 @@ Multiple gates from parallel/map branches and separate owned runs are serialized
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
 4. Resume with `hyperchart_run` and `runId`. Create a different run with `chartPath` and no `runId`.
 5. If a `failure_intent` was durably recorded, plain resume replays back into global failure quiescence or the failed outcome. Recover with `hyperchart_rewind`: stop the run, rewind to before the failure intent (`state` or `seqId`), then resume. Rewind appends a move of the explicit branch head; all records and downstream files remain.
-6. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
+6. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk. Removed-guard warnings alone need no override when recorded positive validation proves acceptance. Pending/rejected claims and legacy completions without validation provenance cannot be accepted by an override; restore the original guard, rewind before the invocation, or restart. Never add provenance to old logs manually.
 
 ## Safety rules
 

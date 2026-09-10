@@ -78,6 +78,7 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runId: stri
 			{
 				type: "state_action",
 				kind: "invoke",
+				validation: null,
 			sessionId: "session-id",
 				actionUid: uid,
 				definition: { kind: "agent", uid, name: "old-worker" },

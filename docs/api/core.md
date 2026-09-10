@@ -554,7 +554,7 @@ Every record carries:
 | `args` | Run arguments. |
 | `session_ref` | Persisted host session reference. |
 | `spawned` | Pinned map keys and items. |
-| `state_action/invoke` | Invocation plus action-definition provenance and optional resolved state input. |
+| `state_action/invoke` | Invocation, action definition, validation policy (guard or explicit `null`), and optional resolved state input. |
 | `state_action/complete` | Claimed completion event and optional resolved state input. |
 | `state_action/validated` | Guard, event, accepted/rejected verdict, and optional resolved state input. |
 | `state_action/timer_fired` | Deadline won the race. |
@@ -568,7 +568,7 @@ Every record carries:
 | `actor_scope` | Closing or quiescent stop. |
 | `failure_intent` | Reserved global failure became durable. |
 
-`StateActionInvokeLog` is exported separately because replay and integrations commonly need its `definition` provenance. Resolved `input` copies are plain finite acyclic JSON, informational only, and excluded from replay identity; records written before the field existed remain compatible.
+`StateActionInvokeLog` is exported separately because replay and integrations commonly need its `definition` provenance. New records also carry `validation: GuardRefAst | null`; the optional type permits reading legacy records, not treating absence as unguarded. A guarded or unknown completion requires a matching recorded positive verdict before publishing its result/pins when the current guard is absent. Resolved `input` copies are plain finite acyclic JSON, informational only, and excluded from replay identity; records written before the field existed remain compatible.
 
 Transitions are not records. Projection recomputes routing from the current chart. Transition inputs can bind `event()` selectors or ordinary refs such as `result()`; refs resolve from the selected ancestry when the edge fires and fail closed if unavailable.
 
@@ -594,7 +594,8 @@ type ReplayExplanation = {
 ```
 
 - `broken` means projection cannot structurally apply a record. Do not continue past it.
-- `stale` means logged action or guard provenance differs from the current chart.
+- `stale` means logged action or guard provenance differs from the current chart. `reason: "guard_removed"` is the supported informational exception: recorded verdicts retain their meaning and this warning alone does not require a resume override. Other reasons retain the existing warning gate.
+- An unresolved guarded/unknown legacy completion is inspectable but cannot resume without its validator. A warning override cannot manufacture acceptance. See [Recovery and safety](../safety.md#a-validator-was-removed).
 - `skipped` means a record applied as an inactive-state no-op. It can be a legitimate race loser or evidence that a chart edit changed traversal.
 - `prefixEnd` is an array index boundary, not a durable seqId.
 
@@ -622,7 +623,10 @@ type ReplayStaleRecord = {
   seqId: number;
   record: DurableLogRecord;
   state: StatePath;
-  reason: "action_definition_changed" | "guard_changed";
+  reason: "action_definition_changed" | "guard_changed" | "guard_removed"
+    | "actor_definition_changed" | "actor_placement_changed"
+    | "actor_message_source_changed" | "actor_reply_contract_changed"
+    | "user_interaction_contract_changed";
   message: string;
   invokeSeqId?: number;
 };

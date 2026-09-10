@@ -53,6 +53,10 @@ The host runtime overlay distinguishes map actions held behind a `concurrency` g
 
 Run inspectors load a projection-backed overview first, then request snapshot-pinned state/map/actor/record chunks through `HyperchartInspectorDataSource`. The dialog keeps a bounded, chronological **Action visit history** beside the graph: repeated invocations remain separate and are ordered by durable sequence, while pending, waiting, skipped, and unvisited states stay in a distinct state-context disclosure. Record pages request batched semantic action-visit enrichment, avoiding one full-prefix scan per visible state; inherited invocations retain their origin branch for transcript lookup. Live overview updates keep open history and Execution viewport stable; **Refresh history** adopts latest received snapshot. Older/newer controls make partial windows explicit, and selecting a row opens that exact invocation when its state is represented in the current graph. Runtime lists use `@tanstack/react-virtual`, retain at most 1,000 rows, and load transcripts only when a visit is opened. Actor messages remain grouped by durable enqueue transaction.
 
+Removing a validator replays recorded verdicts with a warning; missing positive validation never becomes an accepted result. Unknown legacy invoke policies block ambiguous completions. See [Recovery and safety](../../docs/safety.md#a-validator-was-removed).
+
+If an edited chart cannot replay historical facts, the inspector labels its graph **Current definition only** and keeps durable history/transcripts readable without relaxing execution replay. See [incompatible historical run inspection](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md#inspecting-an-incompatible-historical-run) for diagnostics and record-only limitations.
+
 The core package has no Pi dependency. React integrations use the optional peer dependencies declared by the package.
 
 ## Documentation

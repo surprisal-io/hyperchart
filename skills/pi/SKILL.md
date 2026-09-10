@@ -201,7 +201,7 @@ Read [Recovery and safety](../../docs/safety.md), then:
 2. Check process status, pending invocations, validation attempts, replay findings, sessions, and artifacts.
 3. Reconcile any external file, API, or remote side effect that may have succeeded before a crash.
 4. Resume with `hyperchart({ action: "run", runId, branchId })`. The branch may be omitted only when the run has exactly one durable head. Create a different run with `chartPath`; it defaults to fresh branch `main`.
-5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk.
+5. Do not set `ignoreReplayWarnings` unless the incompatibility has been explained and the user explicitly accepts the risk. Removed-guard warnings alone need no override when recorded positive validation proves acceptance. Pending/rejected claims and legacy completions without validation provenance cannot be accepted by an override; restore the original guard, rewind before the invocation, or restart. Never add provenance to old logs manually.
 
 ## Rewind and branch navigation
 

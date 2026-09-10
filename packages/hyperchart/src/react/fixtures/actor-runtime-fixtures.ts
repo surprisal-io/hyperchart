@@ -1,3 +1,4 @@
+import { capturedStorySchedule } from "./capture-story-schedule.js";
 import { z } from "zod";
 import {
 	agent,
@@ -163,7 +164,7 @@ const actorStoryTimestamp = 1_700_000_000_000;
  * Durable facts leave the first batch item inside the actor action and the remaining items in FIFO order.
  * This intentionally exercises the runtime adapter rather than hand-authoring React models.
  */
-export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
+function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 	const declaration = ast.actors["@editor"];
 	const queue = ast.states.queue;
 	const queueReview = ast.states["queue-review"];
@@ -295,6 +296,9 @@ export function actorInspectorRecords(ast: ChartAst): DurableLogRecord[] {
 	];
 }
 
+const actorInspectorCaptured = capturedStorySchedule(actorInspectorAst, actorInspectorSchedule(actorInspectorAst));
+export function actorInspectorRecords(_ast: ChartAst): DurableLogRecord[] { return [...actorInspectorCaptured]; }
+
 export const actorInspectorInspectResult = actorInspectorScenario.inspect;
 
 export const actorStaticAdapterRun = actorInspectorScenario.staticRun({
@@ -361,7 +365,7 @@ export const mailboxReentryChart = chart({
 const mailboxReentryScenario = storyScenario(mailboxReentryChart, "storybook:actor-mailbox-reentry-ui");
 export const mailboxReentryAst = mailboxReentryScenario.ast;
 
-export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
+function mailboxReentrySchedule(ast: ChartAst): DurableLogRecord[] {
 	const declaration = ast.actors["phase.@worker"];
 	const dispatch = ast.states["phase.dispatch"];
 	const hold = ast.states["phase.hold"];
@@ -422,6 +426,9 @@ export function mailboxReentryRecords(ast: ChartAst): DurableLogRecord[] {
 		{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker~2", messageId: second[0]!.messageId, receiveState: "phase.@worker~2.idle", ...stamp(19) },
 	];
 }
+
+const mailboxReentryCaptured = capturedStorySchedule(mailboxReentryAst, mailboxReentrySchedule(mailboxReentryAst));
+export function mailboxReentryRecords(_ast: ChartAst): DurableLogRecord[] { return [...mailboxReentryCaptured]; }
 
 export const mailboxReentryRun = mailboxReentryScenario.runtimeRun(mailboxReentryRecords(mailboxReentryAst), {
 	runId: "actor:mailbox-reentry",

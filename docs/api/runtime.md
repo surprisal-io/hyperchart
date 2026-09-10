@@ -80,7 +80,7 @@ interface Runtime {
 }
 ```
 
-The internal execution layer owns machine semantics, projection restoration, replay diagnostics, retention, and checkpoint cadence. A runtime only interprets effects, returns machine events, and performs durable I/O. Runtime and storage never receive `BranchProjection` or interpret a checkpoint blob.
+The internal execution layer owns machine semantics, projection restoration, replay diagnostics, retention, and checkpoint cadence. Projector contract version 5 carries the invoke's recorded validation policy: a guard, explicit unguarded `null`, or unknown legacy omission. Removed-guard histories accept only matching recorded positive verdicts. Warning-only completed histories resume without a generic override; unresolved historical validation is blocked before executor construction/workspace materialization, even with an override. See [Recovery and safety](../safety.md#a-validator-was-removed). A runtime only interprets effects, returns machine events, and performs durable I/O. Runtime and storage never receive `BranchProjection` or interpret a checkpoint blob.
 
 `runEffects()` must arrange for every non-terminal effect except best-effort `cancel` to eventually produce the corresponding machine event. Effects are consumed in the supplied list order. Each `durable_records` effect is one indivisible storage commit: append every record in that effect together or append none, and never split it into multiple commits. Durable records must be committed before emitting `durable_records_added`; when one machine output contains multiple `durable_records` effects, each effect remains a separate atomic unit and both commits and acknowledgements preserve their supplied order.
 

@@ -85,7 +85,15 @@ Do not perform network, filesystem, LLM, or long-running work in the participant
 | skipped | a record cannot participate in the current traversal | inspect ordering and chart changes |
 | broken | the record cannot be interpreted safely | do not override; repair or restart |
 
-The runner blocks stale and skipped replay by default. Broken replay is not an override case.
+The runner blocks stale and skipped replay by default, except the informational `guard_removed` diagnostic described below. Broken replay is not an override case.
+
+### A validator was removed
+
+Replay preserves the invocation's recorded validation policy. A recorded rejection stays rejected; only a matching `validated` fact with `outcome: true` accepts that completion, publishes its result/artifact pins, and follows the current transitions. The removed validator is never rerun. Completed histories with only `guard_removed` warnings may resume without `ignoreReplayWarnings`; other action/guard changes and skipped records retain their normal gates.
+
+New invoke facts record `validation: <guard>` or explicit `validation: null` (unguarded). Omission means **unknown legacy policy**, not unguarded. Under a current unguarded state, an ambiguous legacy completion remains provisional until a recorded verdict establishes acceptance. This deliberately also blocks genuinely unguarded old completions whose logs lack proof of their policy. Do not edit the log to add `null`.
+
+A pending/rejected historical invocation whose validator is gone cannot resume by accepting the claim or rerunning obsolete validation. The runner blocks it before building an executor or materializing the workspace, even with a warning override. Restore the original validator, rewind before the invocation, or restart. The inspector keeps the provisional history visible, with a warning and no accepted result or pins.
 
 `--ignore-replay-warnings` and `ignoreReplayWarnings: true` are explicit assertions that you have reviewed the mismatch. They do not repair the log and do not make external effects safe to repeat.
 

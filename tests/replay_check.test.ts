@@ -77,13 +77,14 @@ function args(seqId = 1): DurableLogRecord {
 	return { type: "args", args: {}, parentId: null, seqId, branchId: "main", timestamp: seqId };
 }
 
-function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst = definitionForUid(uid)): DurableLogRecord {
+function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst = definitionForUid(uid), validation: GuardRefAst | null = null): DurableLogRecord {
 	return {
 		type: "state_action",
 		kind: "invoke",
 			sessionId: "session-id",
 		actionUid: uid,
 		definition: actionDefinition,
+		validation,
 		...meta(seqId),
 	};
 }
@@ -402,7 +403,7 @@ describe("explainReplay", () => {
 		expect(explanation.broken?.error).toContain("payload.value");
 	});
 
-	it("treats removed validators under old validated records as broken", () => {
+	it("replays removed validators from recorded positive legacy verdicts", () => {
 		const old = ast(
 			chart({
 				kind: "chart",
@@ -426,12 +427,14 @@ describe("explainReplay", () => {
 			}),
 		);
 		const work = actionUid(old, "work");
-		const log = [args(), invoke(work, 2), complete(work, "DONE", 3), validated(work, "DONE", 4)];
+		const legacyInvoke = invoke(work, 2);
+		if (legacyInvoke.type === "state_action" && legacyInvoke.kind === "invoke") delete legacyInvoke.validation;
+		const log = [args(), legacyInvoke, complete(work, "DONE", 3), validated(work, "DONE", 4)];
 
 		const explanation = explainReplay(current, log);
 
-		expect(explanation.broken).toMatchObject({ seqId: 4, state: "work", invokeSeqId: 2 });
-		expect(explanation.broken?.error).toContain("No pending validation");
+		expect(explanation.broken).toBeUndefined();
+		expect(explanation.stale).toContainEqual(expect.objectContaining({ reason: "guard_removed" }));
 	});
 
 	it("allows old completions to become pending when a validator is added", () => {
@@ -591,12 +594,12 @@ describe("explainReplay", () => {
 			}),
 		);
 		const work = actionUid(old, "work");
-		const log = [args(), invoke(work, 2, definition(old, "work")), complete(work, "DONE", 3), validated(work, "DONE", 4, oldGuard)];
+		const log = [args(), invoke(work, 2, definition(old, "work"), oldGuard), complete(work, "DONE", 3), validated(work, "DONE", 4, oldGuard)];
 
 		const explanation = explainReplay(current, log);
 
 		expect(explanation.broken).toBeUndefined();
-		expect(explanation.stale).toMatchObject([{ seqId: 4, state: "work", reason: "guard_changed", invokeSeqId: 2 }]);
+		expect(explanation.stale).toMatchObject([{ seqId: 2, reason: "guard_changed" }, { seqId: 4, state: "work", reason: "guard_changed", invokeSeqId: 2 }]);
 	});
 
 	it("replays spawned maps from old facts", () => {
@@ -644,7 +647,7 @@ describe("explainReplay", () => {
 		const uid = actionUid(current, "work");
 		const oldJournal = [
 			args(),
-			invoke(uid, 2, definition(current, "work")),
+			invoke(uid, 2, definition(current, "work"), tsImport("./checks.js", "ok")),
 			complete(uid, "DONE", 3),
 			validated(uid, "DONE", 4),
 		];

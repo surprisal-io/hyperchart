@@ -1,3 +1,4 @@
+import { capturedStorySchedule } from "./capture-story-schedule.js";
 import { agent, chart, final, script, user } from "../../core/dsl.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import type { ChartCst } from "../../core/types.js";
@@ -107,29 +108,29 @@ const commonRecords: DurableLogRecord[] = [
 ];
 
 /** Durable facts for an active run currently executing visual-review. */
-export const runningRunRecords: DurableLogRecord[] = [
+const runningRunSchedule: DurableLogRecord[] = [
 	...commonRecords,
 	actionRecord("visual-review", "invoke", 8),
 ];
 
 /** Durable prefix paused at an explicit user-input boundary. */
-export const blockedRunRecords: DurableLogRecord[] = [
-	...runningRunRecords,
+const blockedRunSchedule: DurableLogRecord[] = [
+	...runningRunSchedule,
 	actionRecord("visual-review", "complete", 9, "DONE"),
 	actionRecord("approval", "invoke", 10),
 ];
 
 /** Complete production-shaped execution through the authored final state. */
-export const completedRunRecords: DurableLogRecord[] = [
-	...blockedRunRecords,
+const completedRunSchedule: DurableLogRecord[] = [
+	...blockedRunSchedule,
 	actionRecord("approval", "complete", 11, "APPROVED"),
 	actionRecord("render-report", "invoke", 12),
 	actionRecord("render-report", "complete", 13, "DONE"),
 ];
 
 /** The same active history followed by production-shaped fail-fast intent. */
-export const failedRunRecords: DurableLogRecord[] = [
-	...runningRunRecords,
+const failedRunSchedule: DurableLogRecord[] = [
+	...runningRunSchedule,
 	{
 		type: "failure_intent",
 		origin: "visual-review",
@@ -139,6 +140,11 @@ export const failedRunRecords: DurableLogRecord[] = [
 		branchId: "main", timestamp: timestamp(9),
 	},
 ];
+
+export const runningRunRecords = capturedStorySchedule(inspectorDialogAst, runningRunSchedule);
+export const blockedRunRecords = capturedStorySchedule(inspectorDialogAst, blockedRunSchedule);
+export const completedRunRecords = capturedStorySchedule(inspectorDialogAst, completedRunSchedule);
+export const failedRunRecords = capturedStorySchedule(inspectorDialogAst, failedRunSchedule);
 
 export const inspectRun = inspectorDialogScenario.staticRun({
 	runId: "inspect:deck-director",

@@ -106,7 +106,7 @@ The distinction matters for artifact lookup, state selection, rewind, and replay
 
 ## Invocations and provenance
 
-Every `state_action / invoke` record stores an `actionUid`, the normalized action definition, and—when declared—a JSON snapshot of the visit's resolved input. Replay compares the definition with the current chart and treats the input snapshot as informational only. The same snapshot is copied to `complete` and `validated` phase facts so journal consumers do not need to navigate ancestry to recover state identity carried through transition refs.
+Every new `state_action / invoke` record stores an `actionUid`, the normalized action definition, `validation` (the guard or explicit `null`), and—when declared—a JSON snapshot of the visit's resolved input. Replay compares the definition with the current chart and treats the input snapshot as informational only. The same snapshot is copied to `complete` and `validated` phase facts so journal consumers do not need to navigate ancestry to recover state identity carried through transition refs.
 
 The definition includes the action kind and settings needed to establish meaning: agent name and invocation overrides, script command/args/environment templates, schemas, reads, and artifact declarations.
 
@@ -125,7 +125,11 @@ A validation verdict is durable. Replay reads the stored verdict; it does not ru
 
 Transition ref bindings resolve while projecting the accepted completion (or positive verdict), after its result has entered the replay-derived result map and before the target state enters. They use the same resolver as prompt/effect refs. Missing results or selectors throw at that boundary, preventing a partial target input or invoke.
 
-Because validator identity is stored, changing the validator can make replay stale or broken. This is intentional: the same accepted fact must not acquire a new meaning silently.
+Removing a validator is a supported warning-level replay change, not permission to accept old claims. `guard_removed` warnings are informational: matching recorded positive verdicts accept; recorded rejections keep the same invocation/retry cycle and do not publish results or pins. New invocations use the current chart's explicit unguarded policy. A different current guard remains a blocking stale diagnostic by default.
+
+An invoke without `validation` has unknown legacy policy. With no current guard, its completion stays provisional until a verdict is recorded; even genuinely unguarded legacy completions are blocked when their policy cannot be proved. Unresolved historical guarded/unknown invocations cannot resume under the unguarded chart, including with `ignoreReplayWarnings`. No historical AST is fabricated and no later/sibling snapshot is consulted. See [the recovery procedure](safety.md#a-validator-was-removed).
+
+Projection checkpoint contract version 5 retains per-invocation validation policy across bounded replay batches and invalidates prior projector caches. Histories with compatibility diagnostics, including informational removed-guard warnings, remain non-checkpointable so a cache cannot hide warnings.
 
 ## Artifact pins
 

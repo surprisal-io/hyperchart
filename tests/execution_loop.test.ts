@@ -24,6 +24,7 @@ import type {
 	DurableRecordDraft,
 	Effect,
 	GuardOutcome,
+	GuardRefAst,
 	MachineEvent,
 	StateActionAst,
 	StateCst,
@@ -323,9 +324,11 @@ function mapAst(concurrency?: number): ChartAst {
 
 const PLAN_OUTPUT = { chapters: { intro: { title: "Intro" }, body: { title: "Body" } } };
 
+const validationPolicies = new Map<string, GuardRefAst | null>();
 function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 	const state = ast.states[stateId];
 	if (state?.kind !== "state") throw new Error(`state ${stateId} should be actionable`);
+	validationPolicies.set(`${state.action.uid.chart}:${stateId}`, state.validate ?? null);
 	return state.action.uid;
 }
 
@@ -338,7 +341,7 @@ function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecor
 }
 
 function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: definitionForUid(uid), ...meta(seqId) };
+	return { type: "state_action", kind: "invoke", validation: validationPolicies.get(`${uid.chart}:${uid.state.replace(/#[^.]+/g, "")}`) ?? null, sessionId: "session-id", actionUid: uid, definition: definitionForUid(uid), ...meta(seqId) };
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
@@ -399,7 +402,7 @@ describe("execution loop", () => {
 		const ast = linearAst();
 		const runtime = new MockRuntime({
 			ast,
-			logs: [complete(actionUid(ast), "DONE")],
+			logs: [invoke(actionUid(ast), 1), complete(actionUid(ast), "DONE", 2)],
 			events: failOnPullEvents(),
 		});
 

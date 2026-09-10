@@ -1,3 +1,4 @@
+import { capturedStorySchedule } from "../packages/hyperchart/src/react/fixtures/capture-story-schedule.js";
 import { resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -133,6 +134,12 @@ function deckLog(ast: ChartAst, variant: "single" | "many" = "single"): DurableL
 	return records;
 }
 
+const capturedDeckAst = normalizeDeckDirector();
+const capturedDeckLogs = {
+	single: capturedStorySchedule(capturedDeckAst, deckLog(capturedDeckAst, "single")),
+	many: capturedStorySchedule(capturedDeckAst, deckLog(capturedDeckAst, "many")),
+};
+
 function transcript(name: string, task: string, summary: string, toolPath: string) {
 	const sessionId = `00000000-0000-4000-8000-${Buffer.from(name).toString("hex").slice(0, 12).padEnd(12, "0")}`;
 	const times = [0, 1, 2, 3, 4, 5].map((offset) => new Date(STORY_NOW - 120_000 + offset * 10_000).toISOString());
@@ -264,7 +271,7 @@ function writeRun(storage: RunStorage, ast: ChartAst, variant: "running" | "many
 					: "deck-director-20260712-093000";
 	const runDir = resolveRunPaths(runId, storage).runDir;
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
-	const records = deckLog(ast, variant === "many-running" ? "many" : "single");
+	const records = capturedDeckLogs[variant === "many-running" ? "many" : "single"];
 	writeJsonl(join(runDir, "log.jsonl"), [
 		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, metadata: { name: "main" }, committedAt: RUNTIME_NOW - 721_000 },
 		...records,

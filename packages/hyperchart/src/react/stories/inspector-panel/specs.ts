@@ -1,3 +1,5 @@
+import { capturedStorySchedule } from "../../fixtures/capture-story-schedule.js";
+import { normalizeChartConfig } from "../../../core/normalize.js";
 import { z } from "zod";
 import {
 	agent,
@@ -1159,4 +1161,11 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	},
 ];
 
-export const inspectorPanelSpecs: InspectorPanelSpec[] = inspectorPanelSpecInputs;
+export const inspectorPanelSpecs: InspectorPanelSpec[] = inspectorPanelSpecInputs.map((spec) => {
+	if (spec.runtime.mode === "static") return spec;
+	const normalized = normalizeChartConfig(spec.chart);
+	if (!normalized.ok) return spec;
+	const schedule = spec.runtime.records?.(normalized.ast) ?? storyLog(spec.runtime.run?.args).records;
+	const captured = capturedStorySchedule(normalized.ast, schedule);
+	return { ...spec, runtime: { ...spec.runtime, records: () => captured } };
+});

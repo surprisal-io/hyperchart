@@ -255,3 +255,22 @@ Do not publish from a workspace whose package manifests or lockfile still refer 
 - [ ] package versions and core dependency are exact and matching.
 - [ ] annotated tag `v<version>` exists on the release commit in the configured release remote.
 - [ ] user docs, package READMEs, skill references, examples, and visuals reflect the release.
+
+## Offline Inspector fixture capture
+
+Migrated dialog, actor, State Details board, TUI, and replay-warning fixtures import synchronous captured JSON; browser builds do not execute their capture loops and retain the existing target. Regenerate with:
+
+```bash
+node scripts/record-story-fixtures.mjs --write
+```
+
+The generator temporarily transforms only the named fixture declarations in memory to execute their external-response schedules through the production execution loop. It seeds clock/UUID sources **before** execution in its isolated process, then persists emitted records directly. It never patches completed records or semantic UI models. The JSON includes capture context; `explainReplay()` validates each original-definition history. Running the command twice must produce byte-identical output. Missing registry keys fail explicitly.
+
+Schedules are simulation inputs and snapshot selectors, not durable logs. A selector inside an atomic durable append rounds up to the entire committed batch; capture stops before acknowledgement or later effects, never between an actor reply, its settlement, and its call resolution. The pool out-of-order scenario releases worker 0 before acknowledging worker 1's second reply, because real FIFO admission immediately assigns the next message to the newly idle worker. The former hand-authored schedule incorrectly deferred that admission. Coverage still includes out-of-order replies, persistent worker reuse, and ordered batch results.
+
+Replay-model verification additionally includes:
+
+```bash
+node tla/trace/record-removed-validator.mjs
+tla/trace/validate.sh removed-validator-chart.ts removed-validator-run.jsonl removed RemovedValidator
+```

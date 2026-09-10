@@ -159,11 +159,11 @@ export default chart({ kind: "chart", id: "visits", initial: "work", states: {
 		const definition = { kind: "agent", uid: actionUid, name: "worker", task: "work" };
 		const records = [
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1000 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 2, seqId: 3, branchId: "main", timestamp: 2000 },
+			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition, parentId: 2, seqId: 3, branchId: "main", timestamp: 2000 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3000 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 4, seqId: 5, branchId: "main", timestamp: 4000 },
+			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition, parentId: 4, seqId: 5, branchId: "main", timestamp: 4000 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 5, seqId: 6, branchId: "main", timestamp: 5000 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition, parentId: 6, seqId: 7, branchId: "main", timestamp: 6000 },
+			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition, parentId: 6, seqId: 7, branchId: "main", timestamp: 6000 },
 		];
 		writeFileSync(join(runDir, "log.jsonl"), [
 			{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 900 },

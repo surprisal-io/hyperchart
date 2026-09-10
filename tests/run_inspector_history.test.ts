@@ -70,7 +70,7 @@ describe("run inspector stateless history source", () => {
 		await store.initializeRootBranch();
 		const appended = await store.appendDrafts([
 			{ type: "args", args: { topic: "cursor chunks" } },
-			{ type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "visit-session", input: { topic: "recorded provenance" }, definition: action.action },
+			{ type: "state_action", kind: "invoke", validation: null, actionUid: action.action.uid, sessionId: "visit-session", input: { topic: "recorded provenance" }, definition: action.action },
 		]);
 		const invokeSeqId = appended.find((record) => record.type === "state_action" && record.kind === "invoke")?.seqId;
 		if (invokeSeqId === undefined) throw new Error("visit invoke missing");
@@ -120,7 +120,7 @@ describe("run inspector stateless history source", () => {
 		const parsed = parseChartModuleSync(chartPath); if (!parsed.ok) throw new Error("timeout fixture invalid");
 		const action = parsed.ast.states.work; if (action?.kind !== "state") throw new Error("timeout action missing");
 		const store = new JsonlLogStore(join(runDir, "log.jsonl")); await store.writeRunMeta({ runId, chartPath, workDir: root, chartId: "timeout", createdAt: new Date(0).toISOString() }); await store.initializeRootBranch();
-		await store.appendDrafts([{ type: "args", args: {} }, { type: "state_action", kind: "invoke", actionUid: action.action.uid, sessionId: "session", definition: action.action }, { type: "state_action", kind: "timer_fired", actionUid: action.action.uid }]);
+		await store.appendDrafts([{ type: "args", args: {} }, { type: "state_action", kind: "invoke", validation: null, actionUid: action.action.uid, sessionId: "session", definition: action.action }, { type: "state_action", kind: "timer_fired", actionUid: action.action.uid }]);
 		const source = await withRunStorage(storage, () => createRunInspectorDataSource(runId)); const snapshot = await store.captureSnapshot("main");
 		const visits = await source.readStateVisits({ runId: "timeout-run", snapshot, stateId: "work" });
 		expect(visits.items[0]).toMatchObject({ status: "cancelled", endedReason: "timed_out" });
@@ -128,7 +128,7 @@ describe("run inspector stateless history source", () => {
 
 	it("does not hide a failed completion after validation attempts", () => {
 		const actionUid = { chart: "validated", state: "work", action: "agent" };
-		const invoke = { type: "state_action", kind: "invoke", actionUid, sessionId: "session", definition: { kind: "agent", uid: actionUid, name: "worker" }, seqId: 1, parentId: null, branchId: "main", timestamp: 1 } as const;
+		const invoke = { type: "state_action", kind: "invoke", validation: null, actionUid, sessionId: "session", definition: { kind: "agent", uid: actionUid, name: "worker" }, seqId: 1, parentId: null, branchId: "main", timestamp: 1 } as const;
 		const validated = { type: "state_action", kind: "validated", actionUid, event: { type: "DONE" }, guard: { kind: "tsImport", module: "./check.js", export: "ok" }, outcome: { ok: false, reason: "retry" }, seqId: 2, parentId: 1, branchId: "main", timestamp: 2 } as const;
 		const complete = { type: "state_action", kind: "complete", actionUid, event: { type: "FAILED", error: "retry failed" }, seqId: 3, parentId: 2, branchId: "main", timestamp: 3 } as const;
 		const visit = stateVisitHistoryItemToHost({ kind: "state-visit", state: "work", seqId: 1, visit: 1, invoke, records: [invoke, validated, complete] });
@@ -188,7 +188,7 @@ describe("run inspector stateless history source", () => {
 		const ancestry: DurableLogRecord[] = [{ type: "args", args: {}, seqId: 1, parentId: null, branchId: "main", timestamp: 1 }];
 		for (let visit = 1; visit <= 1_001; visit++) {
 			const invokeSeqId = ancestry.length + 1;
-			ancestry.push({ type: "state_action", kind: "invoke", actionUid: state.action.uid, sessionId: `session-${visit}`, definition: state.action, seqId: invokeSeqId, parentId: invokeSeqId - 1, branchId: "main", timestamp: invokeSeqId });
+			ancestry.push({ type: "state_action", kind: "invoke", validation: null, actionUid: state.action.uid, sessionId: `session-${visit}`, definition: state.action, seqId: invokeSeqId, parentId: invokeSeqId - 1, branchId: "main", timestamp: invokeSeqId });
 			const completeSeqId = ancestry.length + 1;
 			ancestry.push({ type: "state_action", kind: "complete", actionUid: state.action.uid, event: { type: "LOOP" }, seqId: completeSeqId, parentId: completeSeqId - 1, branchId: "main", timestamp: completeSeqId });
 		}
@@ -212,12 +212,12 @@ describe("run inspector stateless history source", () => {
 		await store.initializeRootBranch();
 		const mainRecords = await store.appendDrafts([
 			{ type: "args", args: {} },
-			{ type: "state_action", kind: "invoke", actionUid: state.action.uid, sessionId: "ancestor-session", definition: state.action },
+			{ type: "state_action", kind: "invoke", validation: null, actionUid: state.action.uid, sessionId: "ancestor-session", definition: state.action },
 			{ type: "state_action", kind: "complete", actionUid: state.action.uid, event: { type: "LOOP" } },
 		]);
 		await store.createBranch("fork", mainRecords.at(-1)!.seqId);
 		const forkStore = new JsonlLogStore(join(runDir, "log.jsonl"), "fork");
-		const forkRecords = await forkStore.appendDrafts([{ type: "state_action", kind: "invoke", actionUid: state.action.uid, sessionId: "fork-session", definition: state.action }]);
+		const forkRecords = await forkStore.appendDrafts([{ type: "state_action", kind: "invoke", validation: null, actionUid: state.action.uid, sessionId: "fork-session", definition: state.action }]);
 		writeFileSync(join(runDir, "sessions", "progress.json"), JSON.stringify({
 			version: 1,
 			updatedAt: 5,

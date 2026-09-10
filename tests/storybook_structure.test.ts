@@ -58,14 +58,15 @@ function storyFiles(directory: string): string[] {
 }
 
 describe("Storybook information architecture", () => {
-	it("captures resolved-input present cases through the execution loop and labels legacy logs", () => {
+	it("captures resolved-input cases through the execution loop, including absent input", () => {
 		const source = readFileSync(join(storyDirectory, "ResolvedInputRecords.stories.tsx"), "utf8");
 		expect(source).toContain("await loop(runtime");
 		expect(source).toContain("scenario.runtimeRun(runtime.records");
 		expect(source).toContain("executed capture · user_interaction/opened · input recorded");
 		expect(source).toContain("executed capture · state_action/invoke · result-ref input recorded");
-		expect(source).toContain("legacy compatibility fixture · user_interaction/opened · input absent");
-		expect(source).toContain("Hand-authored pre-input durable shape");
+		expect(source).toContain("executed no-input fixture · user_interaction/opened · input absent");
+		expect(source).toContain("Captured through the execution loop with no declared state input");
+		expect(source).toContain("plainStateRecords");
 		expect(source).not.toContain("const recordedPrefix");
 	});
 

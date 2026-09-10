@@ -1,3 +1,4 @@
+import { capturedStorySchedule } from "./capture-story-schedule.js";
 import { z } from "zod";
 import { agent, actor, actorPool, arg, call, callBatch, chart, failed, final, item, map, message, protocol, receive, reply, self, send, sendBatch } from "../../core/dsl.js";
 import type { DurableLogRecord, ActorMessageEnvelope } from "../../core/durable_events.js";
@@ -61,6 +62,7 @@ function enqueue(ast: ChartAst, sourcePath: string, occurrence: string, event: s
 	};
 }
 function buildRun(name: string, ast: ChartAst, inspect: typeof actorInspectorInspectResult, records: DurableLogRecord[], status: "running" | "failed" = "running", replayWarnings?: string[]): HyperchartRunInfo {
+	records = capturedStorySchedule(ast, records);
 	const replay = explainReplay(ast, records);
 	if (replay.broken !== undefined || replay.prefixEnd !== records.length || replay.stale.length > 0 || replay.skipped.length > 0) throw new Error(`invalid actor story ${name}: ${JSON.stringify(replay)}`);
 	return hyperchartRunFromRuntime(inspect, ast, records, {
@@ -106,7 +108,7 @@ const pendingCallRecords: DurableLogRecord[] = [
 	...callBaseRecords,
 	enqueue(callAst, "apply", "@editor", "APPLY", [callMessage], 3),
 ];
-export const actorPendingCallRun = callScenario.runtimeRun(pendingCallRecords, { runId: "actor:pending-call", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
+export const actorPendingCallRun = callScenario.runtimeRun(capturedStorySchedule(callScenario.ast, pendingCallRecords), { runId: "actor:pending-call", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
 
 const applyReply = messageContract(callAst, "@editor", "APPLY").reply;
 if (applyReply.kind !== "named") throw new Error("expected named APPLY reply");
@@ -118,14 +120,15 @@ if (editorSettle?.kind !== "reply" || editorSettle.event === undefined || editor
 const appliedSchema = applyReply.schemas[editorSettle.event];
 if (appliedSchema === undefined) throw new Error(`missing ${editorSettle.event} schema`);
 const editorApplyUid = { ...editorApply.action.uid, state: "@editor.apply" };
-export const actorNamedReplyRecords: DurableLogRecord[] = [
+const actorNamedReplySchedule: DurableLogRecord[] = [
 	...pendingCallRecords,
 	{ type: "actor_message", kind: "accepted", occurrence: "@editor", messageId: callMessage.messageId, receiveState: "@editor.idle", ...stamp(4) },
 	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: editorApplyUid, definition: editorApply.action, ...stamp(5) },
 	{ type: "state_action", kind: "complete", actionUid: editorApplyUid, event: { type: "DONE" }, ...stamp(6) },
 	{ type: "actor_message", kind: "replied", occurrence: "@editor", messageId: callMessage.messageId, message: editorSettle.message, replyEvent: editorSettle.event, output: editorSettle.output, schema: appliedSchema, ...stamp(7) },
 ];
-export const actorNamedReplyRun = callScenario.runtimeRun(actorNamedReplyRecords, { runId: "actor:named-reply", status: { state: "running", updatedAt: now + 7_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 7_000 });
+export const actorNamedReplyRecords = capturedStorySchedule(callScenario.ast, actorNamedReplySchedule);
+export const actorNamedReplyRun = callScenario.runtimeRun(capturedStorySchedule(callScenario.ast, actorNamedReplySchedule), { runId: "actor:named-reply", status: { state: "running", updatedAt: now + 7_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 7_000 });
 
 // Structured drain is intentionally SEND-only and nested. The root graph only
 // shows the owning compound; opening it reveals the waiting final, whose blocker
@@ -178,7 +181,7 @@ const drainingRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker", messageId: drainMessages[0]!.messageId, receiveState: "phase.@worker.idle", ...stamp(4) },
 	{ type: "actor_scope", kind: "closing", occurrence: "phase.@worker", ...stamp(5) },
 ];
-export const actorDrainingRun = drainScenario.runtimeRun(drainingRecords, {
+export const actorDrainingRun = drainScenario.runtimeRun(capturedStorySchedule(drainScenario.ast, drainingRecords), {
 	runId: "actor:draining",
 	status: { state: "running", updatedAt: now + 5_000 },
 	cwd: "/workspace",
@@ -191,7 +194,7 @@ const failureRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "accepted", occurrence: "@editor", messageId: callMessage.messageId, receiveState: "@editor.idle", ...stamp(4) },
 	{ type: "failure_intent", origin: "@editor.apply", error: "Reply failed exact protocol validation", ...stamp(5) },
 ];
-export const actorFailureRun = callScenario.runtimeRun(failureRecords, { runId: "actor:failure", status: { state: "failed", updatedAt: now + 5_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 5_000 });
+export const actorFailureRun = callScenario.runtimeRun(capturedStorySchedule(callScenario.ast, failureRecords), { runId: "actor:failure", status: { state: "failed", updatedAt: now + 5_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 5_000 });
 
 const ChangedEditor = actor({
 	input: z.object({ file: z.string(), revision: z.number().optional() }).strict(),
@@ -247,7 +250,7 @@ const auditRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "settled", occurrence: "@auditor", messageId: auditMessage.messageId, ...stamp(6) },
 	{ type: "actor_scope", kind: "closing", occurrence: "@auditor", ...stamp(7) }, { type: "actor_scope", kind: "stopped", occurrence: "@auditor", ...stamp(8) },
 ];
-export const actorSendVoidRun = auditScenario.runtimeRun(auditRecords, { runId: "actor:send-void", status: { state: "complete", updatedAt: now + 8_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 8_000 });
+export const actorSendVoidRun = auditScenario.runtimeRun(capturedStorySchedule(auditScenario.ast, auditRecords), { runId: "actor:send-void", status: { state: "complete", updatedAt: now + 8_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 8_000 });
 
 const ReentryProtocol = protocol({ RECORD: message({ input: z.object({ path: z.string() }).strict() }) });
 const ReentryActor = actor({
@@ -311,7 +314,7 @@ const reentryRecords: DurableLogRecord[] = [
 	{ type: "actor_scope", kind: "stopped", occurrence: "phase.@auditor~3", ...stamp(25) },
 	{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: reentryAction.action.uid, definition: reentryAction.action, ...stamp(26) },
 ];
-export const actorReentryRun = reentryScenario.runtimeRun(reentryRecords, { runId: "actor:reentry", status: { state: "running", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000 });
+export const actorReentryRun = reentryScenario.runtimeRun(capturedStorySchedule(reentryScenario.ast, reentryRecords), { runId: "actor:reentry", status: { state: "running", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000 });
 
 const mapEditor = Editor({ file: item("file") });
 const mapScenario = storyScenario(chart({ kind: "chart", id: "actor-map-story", args: { projects: {} }, initial: "projects", states: { projects: map({ over: arg("projects"), actors: { editor: mapEditor }, initial: "apply", onDone: "done", states: { apply: call({ to: mapEditor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "finished", REJECTED: "finished" } }), finished: final() } }), done: final() } }));
@@ -328,8 +331,8 @@ const mapRecords: DurableLogRecord[] = [
 	enqueue(mapAst, "projects#b.apply", "projects#b.@editor", "APPLY", [mapCallB], 6, "projects.apply"),
 	{ type: "actor_message", kind: "accepted", occurrence: "projects#b.@editor", messageId: mapCallB.messageId, receiveState: "projects#b.@editor.idle", ...stamp(7) },
 ];
-export const actorMapPartialRun = mapScenario.runtimeRun(mapRecords.slice(0, 3), { runId: "actor:map-partial", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
-export const actorMapLocalRun = mapScenario.runtimeRun(mapRecords, { runId: "actor:map-local", status: { state: "running", updatedAt: now + 4_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 4_000 });
+export const actorMapPartialRun = mapScenario.runtimeRun(capturedStorySchedule(mapScenario.ast, mapRecords.slice(0, 3)), { runId: "actor:map-partial", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
+export const actorMapLocalRun = mapScenario.runtimeRun(capturedStorySchedule(mapScenario.ast, mapRecords), { runId: "actor:map-local", status: { state: "running", updatedAt: now + 4_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 4_000 });
 
 const PoolWorkProtocol = protocol({
 	WORK: message({ input: z.object({ id: z.number(), label: z.string() }).strict(), reply: z.object({ id: z.number(), receipt: z.string() }).strict() }),
@@ -405,7 +408,7 @@ const poolEnqueuedRecords: DurableLogRecord[] = [
 	...poolBaseRecords,
 	enqueue(actorPoolAst, "batch", "@workers", "WORK", poolMessages, 3),
 ];
-export const actorPoolBusyRecords: DurableLogRecord[] = [
+const actorPoolBusySchedule: DurableLogRecord[] = [
 	...poolEnqueuedRecords,
 	poolAccepted(0, 0, 4),
 	poolAccepted(1, 1, 5),
@@ -414,20 +417,22 @@ export const actorPoolBusyRecords: DurableLogRecord[] = [
 	poolCompleted(1, 1, 8),
 ];
 const poolPartialRecords: DurableLogRecord[] = [
-	...actorPoolBusyRecords,
+	...actorPoolBusySchedule,
 	poolReplied(1, 1, 9),
 	poolSettled(1, 1, 10),
 ];
-export const actorPoolCompleteRecords: DurableLogRecord[] = [
+const actorPoolCompleteSchedule: DurableLogRecord[] = [
 	...poolPartialRecords,
 	poolAccepted(2, 1, 11),
 	poolInvoked(1, 12),
 	poolCompleted(1, 2, 13),
-	poolReplied(2, 1, 14),
-	poolSettled(2, 1, 15),
-	poolCompleted(0, 0, 16),
-	poolReplied(0, 0, 17),
-	poolSettled(0, 0, 18),
+	// Release worker 0 before acknowledging worker 1's second reply. The real
+	// scheduler immediately admits the FIFO head when a worker becomes idle.
+	poolCompleted(0, 0, 14),
+	poolReplied(0, 0, 15),
+	poolSettled(0, 0, 16),
+	poolReplied(2, 1, 17),
+	poolSettled(2, 1, 18),
 	poolAccepted(3, 0, 19),
 	poolInvoked(0, 20),
 	poolCompleted(0, 3, 21),
@@ -445,10 +450,12 @@ const poolSessionProgress = {
 		"actor-pool-story:@workers.$worker-1.work:work:2:12": { actionUid: poolWorkerUid(1), visit: 2, status: "completed", startedAt: now + 12_000, completedAt: now + 13_000, model: "storybook/pool-worker", turnCount: 1, lastMessage: "Reused worker for gamma." },
 	},
 };
-export const actorPoolIdleRun = poolScenario.runtimeRun(poolBaseRecords, { runId: "actor:pool-idle", status: { state: "running", updatedAt: now + 2_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 2_000 });
-export const actorPoolBusyRun = poolScenario.runtimeRun(actorPoolBusyRecords, { runId: "actor:pool-busy", status: { state: "running", updatedAt: now + 8_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 8_000, sessionProgress: poolSessionProgress });
-export const actorPoolPartialBatchRun = poolScenario.runtimeRun(poolPartialRecords, { runId: "actor:pool-partial", status: { state: "running", updatedAt: now + 10_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 10_000, sessionProgress: poolSessionProgress });
-export const actorPoolOutOfOrderRun = poolScenario.runtimeRun(actorPoolCompleteRecords, { runId: "actor:pool-complete", status: { state: "complete", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000, sessionProgress: poolSessionProgress });
+export const actorPoolBusyRecords = capturedStorySchedule(poolScenario.ast, actorPoolBusySchedule);
+export const actorPoolCompleteRecords = capturedStorySchedule(poolScenario.ast, actorPoolCompleteSchedule);
+export const actorPoolIdleRun = poolScenario.runtimeRun(capturedStorySchedule(poolScenario.ast, poolBaseRecords), { runId: "actor:pool-idle", status: { state: "running", updatedAt: now + 2_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 2_000 });
+export const actorPoolBusyRun = poolScenario.runtimeRun(capturedStorySchedule(poolScenario.ast, actorPoolBusySchedule), { runId: "actor:pool-busy", status: { state: "running", updatedAt: now + 8_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 8_000, sessionProgress: poolSessionProgress });
+export const actorPoolPartialBatchRun = poolScenario.runtimeRun(capturedStorySchedule(poolScenario.ast, poolPartialRecords), { runId: "actor:pool-partial", status: { state: "running", updatedAt: now + 10_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 10_000, sessionProgress: poolSessionProgress });
+export const actorPoolOutOfOrderRun = poolScenario.runtimeRun(capturedStorySchedule(poolScenario.ast, actorPoolCompleteSchedule), { runId: "actor:pool-complete", status: { state: "complete", updatedAt: now + 26_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 26_000, sessionProgress: poolSessionProgress });
 
 const crowdedPool = PoolTemplate({ lane: "crowded" });
 export const actorPoolCrowdedChart = chart({
@@ -501,7 +508,7 @@ const crowdedReplied = (messageIndex: number, workerIndex: number, seqId: number
 const crowdedSettled = (messageIndex: number, workerIndex: number, seqId: number): DurableLogRecord => ({
 	type: "actor_message", kind: "settled", occurrence: "@workers", messageId: crowdedMessages[messageIndex]!.messageId, workerIndex, ...stamp(seqId),
 });
-export const actorPoolCrowdedRecords: DurableLogRecord[] = [
+const actorPoolCrowdedSchedule: DurableLogRecord[] = [
 	{ type: "args", args: {}, ...stamp(1) },
 	created(crowdedAst, "@workers", "@workers", 2),
 	enqueue(crowdedAst, "batch", "@workers", "WORK", crowdedMessages, 3),
@@ -530,7 +537,8 @@ export const actorPoolCrowdedRecords: DurableLogRecord[] = [
 	crowdedInvoked(0, 26),
 	crowdedInvoked(1, 27),
 ];
-export const actorPoolCrowdedRun = crowdedScenario.runtimeRun(actorPoolCrowdedRecords, {
+export const actorPoolCrowdedRecords = capturedStorySchedule(crowdedScenario.ast, actorPoolCrowdedSchedule);
+export const actorPoolCrowdedRun = crowdedScenario.runtimeRun(capturedStorySchedule(crowdedScenario.ast, actorPoolCrowdedSchedule), {
 	runId: "actor:pool-crowded",
 	status: { state: "running", updatedAt: now + 27_000 },
 	cwd: "/workspace",
@@ -566,7 +574,7 @@ const poolDrainRecords: DurableLogRecord[] = [
 	{ type: "actor_message", kind: "accepted", occurrence: "phase.@workers", messageId: poolDrainMessages[1]!.messageId, receiveState: "phase.@workers.$worker-1.idle", workerIndex: 1, ...stamp(5) },
 	{ type: "actor_scope", kind: "closing", occurrence: "phase.@workers", ...stamp(6) },
 ];
-export const actorPoolDrainingRun = poolDrainScenario.runtimeRun(poolDrainRecords, { runId: "actor:pool-draining", status: { state: "running", updatedAt: now + 6_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 6_000 });
+export const actorPoolDrainingRun = poolDrainScenario.runtimeRun(capturedStorySchedule(poolDrainScenario.ast, poolDrainRecords), { runId: "actor:pool-draining", status: { state: "running", updatedAt: now + 6_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 6_000 });
 
 const MapPoolTemplate = actorPool({ concurrency: 2, worker: PoolWorker });
 const mapPool = MapPoolTemplate({ lane: item("lane") });
@@ -615,7 +623,7 @@ const mapPoolRecords: DurableLogRecord[] = [
 	{ type: "spawned", path: "projects", instances: { a: mapPoolInput }, ...stamp(16) },
 	created(mapPoolAst, "projects.@workers", "projects#a.@workers~2", 17, "projects#a", mapPoolInput, 2),
 ];
-export const actorPoolMapReentryRun = mapPoolScenario.runtimeRun(mapPoolRecords, { runId: "actor:pool-map-reentry", status: { state: "running", updatedAt: now + 17_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 17_000 });
+export const actorPoolMapReentryRun = mapPoolScenario.runtimeRun(capturedStorySchedule(mapPoolScenario.ast, mapPoolRecords), { runId: "actor:pool-map-reentry", status: { state: "running", updatedAt: now + 17_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 17_000 });
 
 export const allActorPoolRuns = [
 	actorPoolIdleRun,
@@ -663,7 +671,7 @@ const overflowRecords: DurableLogRecord[] = [
 	created(overflowAst, "@overflow", "@overflow", 2),
 	enqueue(overflowAst, "queue", "@overflow", "PROCESS_WITH_A_LONG_PROTOCOL_EVENT_NAME", overflowMessages, 3),
 ];
-export const actorOverflowRun = overflowScenario.runtimeRun(overflowRecords, { runId: "actor:overflow", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
+export const actorOverflowRun = overflowScenario.runtimeRun(capturedStorySchedule(overflowScenario.ast, overflowRecords), { runId: "actor:overflow", status: { state: "running", updatedAt: now + 3_000 }, cwd: "/workspace", createdAt: now, updatedAt: now + 3_000 });
 
 // Dialog navigation is intentionally visual-state driven. Semantic fixtures above
 // remain available to focused tests and card stories without duplicating full dialogs.

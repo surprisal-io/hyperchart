@@ -1,21 +1,12 @@
+import { scenario, records, secondRecords } from "../fixtures/runtime-section-fixture.js";
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
-import { agent, chart, final } from "../../core/dsl.js";
 import type { HyperchartRuntimeSessionProgressFile } from "../../host/adapters.js";
 import { RuntimeSection } from "../components/inspector/details/RuntimeSection.js";
 import type { HyperchartRunInfo, HyperchartStateInfo } from "../types.js";
-import { actionAt, storyArgs, storyComplete, storyInvoke, storyScenario } from "../fixtures/story-scenario.js";
+import { actionAt } from "../fixtures/story-scenario.js";
 
-const scenario = storyScenario(chart({
-	kind: "chart", id: "runtime-section-story", initial: "research",
-	states: {
-		research: { kind: "state", action: agent("report-engine-research-scout", { task: "Research the regional escalation risk.", model: "openai-codex/gpt-5.6-luna", thinking: "xhigh", tools: ["read", "web_search"] }), transitions: { REENTER: "research", DONE: "second" } },
-		second: { kind: "state", action: agent("report-engine-research-scout", { task: "Research current military posture." }), transitions: { DONE: "done" } },
-		done: final(),
-	},
-}));
-const records = [storyArgs({}, 1, 1_700_000_000_000), storyInvoke(scenario.ast, "research", 2, 1_700_000_010_000), storyComplete(scenario.ast, "research", "REENTER", 3, 1_700_000_020_000), storyInvoke(scenario.ast, "research", 4, 1_700_000_030_000)];
 const researchAction = actionAt(scenario.ast, "research");
 if (researchAction.kind !== "agent" || researchAction.model === undefined || researchAction.thinking === undefined) throw new Error("expected concrete research agent metadata");
 const researchUid = researchAction.uid;
@@ -36,7 +27,6 @@ const state = requiredState(run, "research");
 const runWithoutSession = scenario.runtimeRun(records, { runId: "runtime-section:no-session", status: { state: "running", updatedAt: 1_700_000_040_000 }, cwd: "/workspace", createdAt: 1_700_000_000_000, updatedAt: 1_700_000_040_000 });
 const stateWithoutSession = requiredState(runWithoutSession, "research");
 
-const secondRecords = [...records, storyComplete(scenario.ast, "research", "DONE", 5, 1_700_000_050_000), storyInvoke(scenario.ast, "second", 6, 1_700_000_060_000)];
 const secondUid = actionAt(scenario.ast, "second").uid;
 const secondProgress: HyperchartRuntimeSessionProgressFile = { updatedAt: 1_700_000_070_000, sessions: { second: { actionUid: secondUid, visit: 1, actionKey: `${secondUid.chart}:${secondUid.state}:${secondUid.action}`, status: "running", startedAt: 1_700_000_060_000, messages: [{ id: "u2", role: "user", text: "Research current military posture." }] } } };
 const secondRun = scenario.runtimeRun(secondRecords, { runId: "runtime-section:second", status: { state: "running", updatedAt: 1_700_000_070_000 }, sessionProgress: secondProgress, cwd: "/workspace" });

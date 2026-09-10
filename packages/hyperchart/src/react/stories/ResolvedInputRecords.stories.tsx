@@ -1,3 +1,4 @@
+import { plainScenario, plainPrefix, plainStateRecords } from "../fixtures/no-input-records-fixture.js";
 import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
@@ -11,18 +12,13 @@ import { loop } from "../../execution/execution_loop.js";
 import type { Runtime } from "../../runtime/runtime.js";
 import { RuntimeSection } from "../components/inspector/details/RuntimeSection.js";
 import type { HyperchartRunInfo, HyperchartStateInfo } from "../types.js";
-import { actionAt, storyScenario, type StoryScenario } from "../fixtures/story-scenario.js";
+import { storyScenario, type StoryScenario } from "../fixtures/story-scenario.js";
 
 const Decision = z.object({ hypothesisId: z.string() });
 const Candidate = z.object({ decision: Decision });
 const ResolvedInput = z.object({ hypothesisId: z.string() });
 const now = Date.UTC(2026, 7, 31, 19, 0, 0);
-const stamp = (seqId: number) => ({
-	seqId,
-	parentId: seqId === 1 ? null : seqId - 1,
-	branchId: "main",
-	timestamp: now + seqId * 1_000,
-});
+
 
 const recordedScenario = storyScenario(chart({
 	kind: "chart",
@@ -167,41 +163,12 @@ function executedRuns(): Promise<ExecutedRuns> {
 	return executedRunsPromise;
 }
 
-const plainScenario = storyScenario(chart({
-	kind: "chart",
-	id: "records-without-input",
-	initial: "approval",
-	states: {
-		approval: {
-			kind: "state",
-			action: user({ prompt: "Continue?", options: ["CONTINUE"] }),
-			transitions: { CONTINUE: "work" },
-		},
-		work: {
-			kind: "state",
-			action: agent("worker", { task: "Continue without state input." }),
-			transitions: { DONE: "done" },
-		},
-		done: final(),
-	},
-}));
-const approval = actionAt(plainScenario.ast, "approval");
-const work = actionAt(plainScenario.ast, "work");
-const plainPrefix: DurableLogRecord[] = [
-	{ type: "args", args: {}, ...stamp(1) },
-	{ type: "state_action", kind: "invoke", sessionId: "approval-session", actionUid: approval.uid, definition: approval, ...stamp(2) },
-	{ type: "user_interaction", kind: "opened", actionUid: approval.uid, phaseSeqId: 2, prompt: "Continue?", options: ["CONTINUE"], events: ["CONTINUE"], ...stamp(3) },
-];
 const plainUserRun = plainScenario.runtimeRun(plainPrefix, {
 	runId: "resolved-input:opened-absent",
 	status: { state: "blocked", updatedAt: now + 3_000 },
 	cwd: "/workspace",
 });
-const plainStateRun = plainScenario.runtimeRun([
-	...plainPrefix,
-	{ type: "user_interaction", kind: "resolved", gateSeqId: 3, actionUid: approval.uid, event: { type: "CONTINUE" }, ...stamp(4) },
-	{ type: "state_action", kind: "invoke", sessionId: "work-session", actionUid: work.uid, definition: work, ...stamp(5) },
-], {
+const plainStateRun = plainScenario.runtimeRun(plainStateRecords, {
 	runId: "resolved-input:state-action-absent",
 	status: { state: "running", updatedAt: now + 5_000 },
 	cwd: "/workspace",
@@ -220,16 +187,16 @@ type InputPanel = Readonly<{
 	state: string;
 }>;
 
-const legacyPanels: readonly InputPanel[] = [
+const noInputPanels: readonly InputPanel[] = [
 	{
-		label: "legacy compatibility fixture · user_interaction/opened · input absent",
-		description: "Hand-authored pre-input durable shape, replay-checked through the production adapter to demonstrate old-log presentation.",
+		label: "executed no-input fixture · user_interaction/opened · input absent",
+		description: "Captured through the execution loop with no declared state input, then replay-checked through the production adapter.",
 		run: plainUserRun,
 		state: "approval",
 	},
 	{
-		label: "legacy compatibility fixture · state_action/invoke · input absent",
-		description: "Hand-authored pre-input durable shape, replay-checked through the production adapter to retain the prior compact detail view.",
+		label: "executed no-input fixture · state_action/invoke · input absent",
+		description: "Captured through the execution loop with no declared state input; the production adapter retains the compact detail view.",
 		run: plainStateRun,
 		state: "work",
 	},
@@ -257,14 +224,14 @@ function RecordInputBoard() {
 				state: "execute",
 			},
 		] satisfies readonly InputPanel[]),
-		...legacyPanels,
+		...noInputPanels,
 	];
 	return (
 		<main className="min-h-screen bg-[var(--bg-primary)] p-6 text-[var(--text-primary)]">
 			<div className="mx-auto max-w-6xl">
 				<h1 className="text-lg font-semibold">Durable resolved input records</h1>
 				<p className="mt-1 text-xs text-[var(--text-tertiary)]">
-					Executed production-loop captures for input-present records, contrasted with explicitly labeled legacy compatibility fixtures.
+					Executed production-loop captures for input-present records, contrasted with offline captures with no declared state input.
 				</p>
 				{captured === undefined ? <p className="mt-4 text-xs text-[var(--text-tertiary)]">Capturing executed durable records…</p> : null}
 				<div className="mt-5 grid items-start gap-4 lg:grid-cols-2">
@@ -292,7 +259,7 @@ const meta = {
 		controls: { disable: true },
 		docs: {
 			description: {
-				component: "Execution-loop-captured user-interaction and state-action inputs rendered as structured JSON, with explicitly labeled legacy absent-field fixtures.",
+				component: "Execution-loop-captured user-interaction and state-action inputs rendered as structured JSON, with offline no-input captures.",
 			},
 		},
 	},
