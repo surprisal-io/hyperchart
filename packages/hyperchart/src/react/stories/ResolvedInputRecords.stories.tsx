@@ -19,68 +19,71 @@ const Candidate = z.object({ decision: Decision });
 const _ResolvedInput = z.object({ hypothesisId: z.string() });
 const now = Date.UTC(2026, 7, 31, 19, 0, 0);
 
-
-const recordedScenario = storyScenario(chart({
-	kind: "chart",
-	id: "resolved-input-records",
-	initial: "produce",
-	states: {
-		produce: {
-			kind: "state",
-			action: agent("candidate-producer", { reply: Candidate }),
-			transitions: {
-				GENERATED: {
-					target: "review",
-					input: { hypothesisId: result("produce", "decision.hypothesisId") },
+const recordedScenario = storyScenario(
+	chart({
+		kind: "chart",
+		id: "resolved-input-records",
+		initial: "produce",
+		states: {
+			produce: {
+				kind: "state",
+				action: agent("candidate-producer", { reply: Candidate }),
+				transitions: {
+					GENERATED: {
+						target: "review",
+						input: { hypothesisId: result("produce", "decision.hypothesisId") },
+					},
 				},
 			},
-		},
-		review: {
-			kind: "state",
-			input: { hypothesisId: z.string() },
-			action: user({
-				prompt: t`Review ${input("hypothesisId")}`,
-				options: ["SELECTED"],
-			}),
-			transitions: {
-				SELECTED: {
-					target: "execute",
-					input: { hypothesisId: result("produce", "decision.hypothesisId") },
+			review: {
+				kind: "state",
+				input: { hypothesisId: z.string() },
+				action: user({
+					prompt: t`Review ${input("hypothesisId")}`,
+					options: ["SELECTED"],
+				}),
+				transitions: {
+					SELECTED: {
+						target: "execute",
+						input: { hypothesisId: result("produce", "decision.hypothesisId") },
+					},
 				},
 			},
+			execute: {
+				kind: "state",
+				input: { hypothesisId: z.string() },
+				action: agent("experimenter", { task: t`Execute ${input("hypothesisId")}` }),
+				transitions: { DONE: "done" },
+			},
+			done: final(),
 		},
-		execute: {
-			kind: "state",
-			input: { hypothesisId: z.string() },
-			action: agent("experimenter", { task: t`Execute ${input("hypothesisId")}` }),
-			transitions: { DONE: "done" },
-		},
-		done: final(),
-	},
-}));
+	}),
+);
 
 const hypothesisId = "hypothesis:42";
-const stateActionScenario = storyScenario(chart({
-	kind: "chart",
-	id: "resolved-state-action-input",
-	initial: "produce",
-	states: {
-		produce: {
-			kind: "state",
-			action: agent("candidate-producer", { reply: Candidate }),
-			transitions: {
-				GENERATED: { target: "execute", input: { hypothesisId: result("produce", "decision.hypothesisId") } },
+const stateActionScenario = storyScenario(
+	chart({
+		kind: "chart",
+		id: "resolved-state-action-input",
+		initial: "produce",
+		states: {
+			produce: {
+				kind: "state",
+				action: agent("candidate-producer", { reply: Candidate }),
+				transitions: {
+					GENERATED: { target: "execute", input: { hypothesisId: result("produce", "decision.hypothesisId") } },
+				},
 			},
+			execute: {
+				kind: "state",
+				input: { hypothesisId: z.string() },
+				action: agent("experimenter", { task: t`Execute ${input("hypothesisId")}` }),
+				transitions: { DONE: "done" },
+			},
+			done: final(),
 		},
-		execute: {
-			kind: "state",
-			input: { hypothesisId: z.string() },
-			action: agent("experimenter", { task: t`Execute ${input("hypothesisId")}` }),
-			transitions: { DONE: "done" },
-		},
-		done: final(),
-	},
-}));
+	}),
+);
 
 class CaptureFinished extends Error {}
 
@@ -92,32 +95,46 @@ class ResolvedInputCaptureRuntime implements Runtime {
 	private readonly waiters: Array<() => void> = [];
 	private seqId = 0;
 
-	constructor(readonly ast: ChartAst, private readonly stopAt: (record: DurableLogRecord) => boolean) {
+	constructor(
+		readonly ast: ChartAst,
+		private readonly stopAt: (record: DurableLogRecord) => boolean,
+	) {
 		this.projection = createBranchProjection(ast);
 	}
-	async loadAst() { return this.ast; }
-	async loadProjection() { return this.projection; }
+	async loadAst() {
+		return this.ast;
+	}
+	async loadProjection() {
+		return this.projection;
+	}
 	async runEffects(effects: Effect[]) {
 		for (const effect of effects) {
 			if (effect.kind === "durable_records") {
-				const records = effect.records.map((draft): DurableLogRecord => ({
-					...draft,
-					seqId: ++this.seqId,
-					parentId: this.seqId === 1 ? null : this.seqId - 1,
-					branchId: "main",
-					timestamp: now + this.seqId * 1_000,
-				}) as DurableLogRecord);
+				const records = effect.records.map(
+					(draft): DurableLogRecord =>
+						({
+							...draft,
+							seqId: ++this.seqId,
+							parentId: this.seqId === 1 ? null : this.seqId - 1,
+							branchId: "main",
+							timestamp: now + this.seqId * 1_000,
+						}) as DurableLogRecord,
+				);
 				this.records.push(...records);
 				if (effect.id === "args") projectBranch(this.projection, this.ast, records);
 				if (records.some(this.stopAt)) throw new CaptureFinished();
 				this.push({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
-				this.push({ kind: "agent", effectId: effect.id,
+				this.push({
+					kind: "agent",
+					effectId: effect.id,
 					outcome: {
 						kind: "completed",
-						event: effect.actionUid.state === "produce"
-					? { type: "GENERATED", output: { decision: { hypothesisId } } }
-					: { type: "DONE" } },
+						event:
+							effect.actionUid.state === "produce"
+								? { type: "GENERATED", output: { decision: { hypothesisId } } }
+								: { type: "DONE" },
+					},
 				});
 			} else if (effect.kind !== "cancel") {
 				throw new Error(`Unexpected resolved-input story effect ${effect.kind}`);
@@ -131,7 +148,10 @@ class ResolvedInputCaptureRuntime implements Runtime {
 			if (event !== undefined) yield event;
 		}
 	}
-	private push(event: MachineEvent) { this.queued.push(event); this.waiters.shift()?.(); }
+	private push(event: MachineEvent) {
+		this.queued.push(event);
+		this.waiters.shift()?.();
+	}
 }
 
 async function captureExecutedRun(
@@ -153,11 +173,11 @@ type ExecutedRuns = Readonly<{ gate: HyperchartRunInfo; stateAction: HyperchartR
 let executedRunsPromise: Promise<ExecutedRuns> | undefined;
 function executedRuns(): Promise<ExecutedRuns> {
 	executedRunsPromise ??= Promise.all([
-		captureExecutedRun(
-			recordedScenario,
-			(record) => record.type === "user_interaction" && record.kind === "opened",
-			{ runId: "resolved-input:opened", status: { state: "blocked", updatedAt: now + 5_000 }, cwd: "/workspace" },
-		),
+		captureExecutedRun(recordedScenario, (record) => record.type === "user_interaction" && record.kind === "opened", {
+			runId: "resolved-input:opened",
+			status: { state: "blocked", updatedAt: now + 5_000 },
+			cwd: "/workspace",
+		}),
 		captureExecutedRun(
 			stateActionScenario,
 			(record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "execute",
@@ -194,13 +214,15 @@ type InputPanel = Readonly<{
 const noInputPanels: readonly InputPanel[] = [
 	{
 		label: "executed no-input fixture · user_interaction/opened · input absent",
-		description: "Captured through the execution loop with no declared state input, then replay-checked through the production adapter.",
+		description:
+			"Captured through the execution loop with no declared state input, then replay-checked through the production adapter.",
 		run: plainUserRun,
 		state: "approval",
 	},
 	{
 		label: "executed no-input fixture · state_action/invoke · input absent",
-		description: "Captured through the execution loop with no declared state input; the production adapter retains the compact detail view.",
+		description:
+			"Captured through the execution loop with no declared state input; the production adapter retains the compact detail view.",
 		run: plainStateRun,
 		state: "work",
 	},
@@ -210,25 +232,32 @@ function RecordInputBoard() {
 	const [captured, setCaptured] = useState<ExecutedRuns>();
 	useEffect(() => {
 		let current = true;
-		void executedRuns().then((runs) => { if (current) setCaptured(runs); });
-		return () => { current = false; };
+		void executedRuns().then((runs) => {
+			if (current) setCaptured(runs);
+		});
+		return () => {
+			current = false;
+		};
 	}, []);
 	const panels: readonly InputPanel[] = [
-		...(captured === undefined ? [] : ([
-			{
-				label: "executed capture · user_interaction/opened · input recorded",
-				description: "The production execution loop emitted an opened gate carrying the fully resolved hypothesis input.",
-				run: captured.gate,
-				state: "review",
-			},
-			{
-				label: "executed capture · state_action/invoke · result-ref input recorded",
-				description:
+		...(captured === undefined
+			? []
+			: ([
+					{
+						label: "executed capture · user_interaction/opened · input recorded",
+						description:
+							"The production execution loop emitted an opened gate carrying the fully resolved hypothesis input.",
+						run: captured.gate,
+						state: "review",
+					},
+					{
+						label: "executed capture · state_action/invoke · result-ref input recorded",
+						description:
 							'The production execution loop resolved result("produce", "decision.hypothesisId") before invoking the target action.',
 						run: captured.stateAction,
-				state: "execute",
-			},
-		] satisfies readonly InputPanel[])),
+						state: "execute",
+					},
+				] satisfies readonly InputPanel[])),
 		...noInputPanels,
 	];
 	return (
@@ -236,7 +265,8 @@ function RecordInputBoard() {
 			<div className="mx-auto max-w-6xl">
 				<h1 className="text-lg font-semibold">Durable resolved input records</h1>
 				<p className="mt-1 text-xs text-[var(--text-tertiary)]">
-					Executed production-loop captures for input-present records, contrasted with offline captures with no declared state input.
+					Executed production-loop captures for input-present records, contrasted with offline captures with no declared
+					state input.
 				</p>
 				{captured === undefined ? (
 					<p className="mt-4 text-xs text-[var(--text-tertiary)]">Capturing executed durable records…</p>
@@ -245,7 +275,10 @@ function RecordInputBoard() {
 					{panels.map((panel) => {
 						const state = stateFrom(panel.run, panel.state);
 						return (
-							<section key={panel.label} className="rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4">
+							<section
+								key={panel.label}
+								className="rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-4"
+							>
 								<h2 className="font-mono text-xs font-semibold text-[var(--hc-blue-text)]">{panel.label}</h2>
 								<p className="mb-3 mt-1 text-[11px] text-[var(--text-tertiary)]">{panel.description}</p>
 								<RuntimeSection state={state} allStates={panel.run.states} />
@@ -266,7 +299,8 @@ const meta = {
 		controls: { disable: true },
 		docs: {
 			description: {
-				component: "Execution-loop-captured user-interaction and state-action inputs rendered as structured JSON, with offline no-input captures.",
+				component:
+					"Execution-loop-captured user-interaction and state-action inputs rendered as structured JSON, with offline no-input captures.",
 			},
 		},
 	},

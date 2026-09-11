@@ -6,12 +6,20 @@ import { z } from "../packages/hyperchart/src/index.js";
 import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import type { AgentActionAst, ChartEvent, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
-import { createAgentDefaultsResolver, loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
+import {
+	createAgentDefaultsResolver,
+	loadAgentDefinition,
+	resolvePiSubagentDefinitionDirs,
+} from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
-import { buildNudgePrompt,
+import {
+	buildNudgePrompt,
 	buildRecoveryPrompt,
-	buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
-import { actionSessionDir, branchSessionSegment,
+	buildTaskPrompt,
+} from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
+import {
+	actionSessionDir,
+	branchSessionSegment,
 	evaluateAgentTurn,
 } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
 import {
@@ -81,13 +89,24 @@ describe("PiAgentExecutor live delivery", () => {
 	it("delivers steering only to the exact durable invocation", async () => {
 		const dir = await makeTempDir();
 		const target = effect({ id: "chart:work:worker:2:2" });
-		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir: join(dir, "sessions"), branchId: "main", modelRuntime: {} as never });
+		const executor = new PiAgentExecutor({
+			workDir: dir,
+			agentDir: dir,
+			definitionDirs: [dir],
+			sessionsDir: join(dir, "sessions"),
+			branchId: "main",
+			modelRuntime: {} as never,
+		});
 		const steered: string[] = [];
 		const internal = executor as unknown as {
 			live: Map<string, { session: { steer(message: string): Promise<void> }; effect: AgentEffect }>;
 		};
 		internal.live.set(actionUidKey(target.actionUid), {
-			session: { steer: async (message) => { steered.push(message); } },
+			session: {
+				steer: async (message) => {
+					steered.push(message);
+				},
+			},
 			effect: target,
 		});
 
@@ -115,19 +134,35 @@ describe("PiAgentExecutor provider durability", () => {
 		const internal = executor as unknown as {
 			generations: { next(key: string): number };
 			sessionHandles: WeakMap<object, { drain(): Promise<void> }>;
-			promptAndAccept(key: string, generation: number, emit: (event: ChartEvent) => void, live: object, prompt: string): Promise<void>;
+			promptAndAccept(
+				key: string,
+				generation: number,
+				emit: (event: ChartEvent) => void,
+				live: object,
+				prompt: string,
+			): Promise<void>;
 		};
 		const generation = internal.generations.next(key);
 		internal.sessionHandles.set(session, {
-			drain: async () => { throw new Error("postgres unavailable"); },
+			drain: async () => {
+				throw new Error("postgres unavailable");
+			},
 		});
 
-		await expect(internal.promptAndAccept(key, generation, emit, {
-			session,
-			effect: invocation,
-			sink: { captured: { type: "DONE" } },
-			generation,
-		}, "work")).rejects.toThrow("postgres unavailable");
+		await expect(
+			internal.promptAndAccept(
+				key,
+				generation,
+				emit,
+				{
+					session,
+					effect: invocation,
+					sink: { captured: { type: "DONE" } },
+					generation,
+				},
+				"work",
+			),
+		).rejects.toThrow("postgres unavailable");
 		expect(emit).not.toHaveBeenCalled();
 	});
 });
@@ -149,16 +184,24 @@ describe("PiAgentExecutor cancellation", () => {
 			modelRuntime: {} as never,
 		});
 		let releaseConstruction!: () => void;
-		const constructionGate = new Promise<void>((resolve) => { releaseConstruction = resolve; });
+		const constructionGate = new Promise<void>((resolve) => {
+			releaseConstruction = resolve;
+		});
 		let constructionStarted = false;
 		let aborts = 0;
 		let disposals = 0;
 		let prompts = 0;
 		const lateSession = {
 			extensionRunner: { emit: async () => undefined },
-			abort: async () => { aborts++; },
-			dispose: () => { disposals++; },
-			prompt: async () => { prompts++; },
+			abort: async () => {
+				aborts++;
+			},
+			dispose: () => {
+				disposals++;
+			},
+			prompt: async () => {
+				prompts++;
+			},
 		};
 		const internal = executor as unknown as {
 			createSession: (...args: unknown[]) => Promise<unknown>;
@@ -178,7 +221,9 @@ describe("PiAgentExecutor cancellation", () => {
 		const disposal = executor.dispose();
 		expect(executor.dispose()).toBe(disposal);
 		let settled = false;
-		void disposal.then(() => { settled = true; });
+		void disposal.then(() => {
+			settled = true;
+		});
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(settled).toBe(false);
 
@@ -198,21 +243,43 @@ describe("PiAgentExecutor cancellation", () => {
 	it("shares repeated cancellation and resolves only after asynchronous abort", async () => {
 		const dir = await makeTempDir();
 		let finishAbort!: () => void;
-		const abort = new Promise<void>((resolve) => { finishAbort = resolve; });
+		const abort = new Promise<void>((resolve) => {
+			finishAbort = resolve;
+		});
 		let disposed = false;
 		const target = effect();
 		const sessionsDir = join(dir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
-		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir, branchId: "main", modelRuntime: {} as never });
+		const executor = new PiAgentExecutor({
+			workDir: dir,
+			agentDir: dir,
+			definitionDirs: [dir],
+			sessionsDir,
+			branchId: "main",
+			modelRuntime: {} as never,
+		});
 		const internal = executor as unknown as {
 			generations: { next(key: string): number };
-			live: Map<string, { session: { extensionRunner: { emit(): Promise<void> }; abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number;
-				}>;
+			live: Map<
+				string,
+				{
+					session: { extensionRunner: { emit(): Promise<void> }; abort(): Promise<void>; dispose(): void };
+					effect: AgentEffect;
+					sink: CompletionSink;
+					generation: number;
+				}
+			>;
 		};
 		const key = actionUidKey(target.actionUid);
 		const generation = internal.generations.next(key);
 		internal.live.set(key, {
-			session: { extensionRunner: { emit: async () => undefined }, abort: () => abort, dispose: () => { disposed = true; } },
+			session: {
+				extensionRunner: { emit: async () => undefined },
+				abort: () => abort,
+				dispose: () => {
+					disposed = true;
+				},
+			},
 			effect: target,
 			sink: { captured: undefined },
 			generation,
@@ -221,7 +288,9 @@ describe("PiAgentExecutor cancellation", () => {
 		const first = executor.cancel(target.actionUid);
 		expect(executor.cancel(target.actionUid)).toBe(first);
 		let quiesced = false;
-		void first.then(() => { quiesced = true; });
+		void first.then(() => {
+			quiesced = true;
+		});
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(quiesced).toBe(false);
 		finishAbort();
@@ -396,13 +465,7 @@ describe("finish tool", () => {
 		expect(failed.isError).toBe(true);
 		expect(sink.captured).toBeUndefined();
 
-		await tool.execute(
-			"call",
-			{ event: "DONE", output: { value: 1 } },
-			undefined,
-			undefined,
-			{} as never,
-		);
+		await tool.execute("call", { event: "DONE", output: { value: 1 } }, undefined, undefined, {} as never);
 		const second = (await tool.execute(
 			"call",
 			{ event: "DONE", output: { value: 2 } },
@@ -469,7 +532,9 @@ describe("pi executor helpers", () => {
 		expect(buildSessionPlan(definition, effect(), options).modelRef).toBe("anthropic/claude-opus");
 		expect(buildSessionPlan(definition, effect({}, { model: "openai/gpt" }), options).modelRef).toBe("openai/gpt");
 		// An unconfigured role falls through to the definition model.
-		expect(buildSessionPlan(definition, effect(), { modelRoles: { other: "x/y" } }).modelRef).toBe("anthropic/fallback");
+		expect(buildSessionPlan(definition, effect(), { modelRoles: { other: "x/y" } }).modelRef).toBe(
+			"anthropic/fallback",
+		);
 	});
 
 	it("fails loudly when a declared role or toolset is unconfigured and has no fallback", () => {
@@ -498,20 +563,44 @@ describe("pi executor helpers", () => {
 		await writeFile(join(definitions, "worker.md"), "---\ndescription: worker\n---\nworker\n", "utf8");
 		const sessionsDir = join(dir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
-		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [definitions], sessionsDir, branchId: "main", modelRuntime: {} as never });
+		const executor = new PiAgentExecutor({
+			workDir: dir,
+			agentDir: dir,
+			definitionDirs: [definitions],
+			sessionsDir,
+			branchId: "main",
+			modelRuntime: {} as never,
+		});
 		const internal = executor as unknown as { run: Function; generations: { next(key: string): number } };
 		const generation = internal.generations.next(actionUidKey(effect().actionUid));
-		await expect(internal.run(effect({ reads: [{ path: "https://example.com/data.json" }] }), () => undefined, runOptions, generation)).rejects.toThrow("not a local artifact");
-		expect(() => validateDeclaredReadPaths([{ path: "https://example.com/data.json" }])).toThrow("not a local artifact");
+		await expect(
+			internal.run(
+				effect({ reads: [{ path: "https://example.com/data.json" }] }),
+				() => undefined,
+				runOptions,
+				generation,
+			),
+		).rejects.toThrow("not a local artifact");
+		expect(() => validateDeclaredReadPaths([{ path: "https://example.com/data.json" }])).toThrow(
+			"not a local artifact",
+		);
 	});
 
 	it("does not recover stale id-free finish calls for a newer rejected phase", async () => {
 		const messages = [
 			{ role: "user", content: "old phase" },
-			{ role: "assistant", content: [{ type: "toolCall", name: "finish", id: "old-id-free", arguments: { event: "DONE", output: { value: 1 } } }] },
+			{
+				role: "assistant",
+				content: [
+					{ type: "toolCall", name: "finish", id: "old-id-free", arguments: { event: "DONE", output: { value: 1 } } },
+				],
+			},
 			{ role: "toolResult", toolName: "finish", toolCallId: "old-id-free", isError: false },
 		];
-		expect(await findCapturedFinish(messages, effect({ id: "chart:work:worker:1:3" }))).toEqual({ type: "DONE", output: { value: 1 } });
+		expect(await findCapturedFinish(messages, effect({ id: "chart:work:worker:1:3" }))).toEqual({
+			type: "DONE",
+			output: { value: 1 },
+		});
 		expect(shouldRecoverRestoredFinish({})).toBe(true);
 		expect(shouldRecoverRestoredFinish({ resumePrompt: "fix the rejection" })).toBe(false);
 	});
@@ -526,7 +615,8 @@ describe("pi executor helpers", () => {
 	});
 
 	it("pins the exact declared artifact path in validation recovery prompts", () => {
-		const invocation = effect({ artifacts: [{ name: "research", path: "artifacts/research/deep/take/research-3.json" }],
+		const invocation = effect({
+			artifacts: [{ name: "research", path: "artifacts/research/deep/take/research-3.json" }],
 			recovery: {
 				mode: "nudge",
 				scope: "validation",
@@ -561,9 +651,7 @@ describe("pi executor helpers", () => {
 
 	it("extracts only the latest assistant turn's provider error", () => {
 		expect(
-			lastAssistantError([
-				{ role: "assistant", stopReason: "error", errorMessage: "402: Insufficient Balance" },
-			]),
+			lastAssistantError([{ role: "assistant", stopReason: "error", errorMessage: "402: Insufficient Balance" }]),
 		).toBe("402: Insufficient Balance");
 		expect(
 			lastAssistantError([

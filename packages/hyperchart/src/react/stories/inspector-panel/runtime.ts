@@ -61,7 +61,12 @@ function runFromInspectorPanelSpec(
 		});
 	}
 	const replay = explainReplay(ast, generated.records);
-	if (replay.broken !== undefined || replay.prefixEnd !== generated.records.length || replay.stale.length > 0 || replay.skipped.length > 0) {
+	if (
+		replay.broken !== undefined ||
+		replay.prefixEnd !== generated.records.length ||
+		replay.stale.length > 0 ||
+		replay.skipped.length > 0
+	) {
 		throw new Error(`invalid inspector-panel story log for ${key}: ${JSON.stringify(replay)}`);
 	}
 	return hyperchartRunFromRuntime(inspectChartAst(ast, { chartPath: `storybook:${ast.id}` }), ast, generated.records, {
@@ -104,10 +109,15 @@ function formatJson(value: unknown): string {
 	return JSON.stringify(value, null, 2);
 }
 
-export function inspectorPanelScenario(spec: InspectorPanelSpec): { run: HyperchartRunInfo; selectedStateId: string | null } | undefined {
+export function inspectorPanelScenario(
+	spec: InspectorPanelSpec,
+): { run: HyperchartRunInfo; selectedStateId: string | null } | undefined {
 	const validation = validateChartForStory(spec.chart);
 	if (!validation.ok) return undefined;
-	const key = spec.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+	const key = spec.title
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/(^-|-$)/g, "");
 	return { run: runFromInspectorPanelSpec(spec, validation.ast, key), selectedStateId: spec.runtime.selectedStateId };
 }
 
@@ -125,11 +135,14 @@ export function inspectorPanelTileProps(spec: InspectorPanelSpec): InspectorPane
 	const state = runtime.selectedStateId
 		? run.states.find((candidate) => candidate.id === runtime.selectedStateId)
 		: undefined;
-	const definitionStateId = state?.actorInternal !== undefined
-		? `${state.actorInternal.declarationPath}.${state.actorInternal.localState}`
-		: state?.actorDeclaration !== undefined
-			? state.actorDeclaration.declarationPath
-			: runtime.selectedStateId === null ? null : templatePath(runtime.selectedStateId);
+	const definitionStateId =
+		state?.actorInternal !== undefined
+			? `${state.actorInternal.declarationPath}.${state.actorInternal.localState}`
+			: state?.actorDeclaration !== undefined
+				? state.actorDeclaration.declarationPath
+				: runtime.selectedStateId === null
+					? null
+					: templatePath(runtime.selectedStateId);
 	const definitionSource = state?.definitionSource ?? coreHyperchartSource(ast, definitionStateId);
 	return {
 		variant: "panel",

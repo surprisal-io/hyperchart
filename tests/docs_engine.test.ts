@@ -47,7 +47,10 @@ describe("docs-engine batched semantic gate", () => {
 		writeFileSync(unitsFile, JSON.stringify({ items: units }));
 		const files = Object.keys(units).map((id, index) => {
 			const path = join(artifacts, "findings", `${id}.json`);
-			writeFileSync(path, JSON.stringify({ unitId: id, findings: Array.from({ length: index }, (_, i) => finding(`${id}-${i}`)) }));
+			writeFileSync(
+				path,
+				JSON.stringify({ unitId: id, findings: Array.from({ length: index }, (_, i) => finding(`${id}-${i}`)) }),
+			);
 			return path;
 		});
 
@@ -62,14 +65,12 @@ describe("docs-engine batched semantic gate", () => {
 		expect(event.type).toBe("GATE_BATCHES_READY");
 		expect(Object.keys(event.output.batches)).toEqual(["batch-1", "batch-2", "batch-3"]);
 		expect(event.output.findingCount).toBe(6);
-		expect(Object.values(event.output.batches).flatMap((batch: any) => batch.findings).map((entry: any) => entry.id).sort()).toEqual([
-			"b:0",
-			"c:0",
-			"c:1",
-			"d:0",
-			"d:1",
-			"d:2",
-		]);
+		expect(
+			Object.values(event.output.batches)
+				.flatMap((batch: any) => batch.findings)
+				.map((entry: any) => entry.id)
+				.sort(),
+		).toEqual(["b:0", "c:0", "c:1", "d:0", "d:1", "d:2"]);
 	});
 
 	it("accepts only compact, complete pass/drop/rework decisions", () => {
@@ -106,7 +107,13 @@ describe("docs-engine batched semantic gate", () => {
 
 		writeFileSync(
 			verdictFile,
-			JSON.stringify({ batchId: "batch-1", decisions: [{ id: "a:0", result: "pass" }, { id: "c:0", result: "rework" }] }),
+			JSON.stringify({
+				batchId: "batch-1",
+				decisions: [
+					{ id: "a:0", result: "pass" },
+					{ id: "c:0", result: "rework" },
+				],
+			}),
 		);
 		const invalid = runDocsScript("guard-gate-batch.mjs", root, {
 			BATCH_JSON: JSON.stringify(batch),
@@ -149,7 +156,10 @@ describe("docs-engine batched semantic gate", () => {
 			verdictFile,
 			JSON.stringify({
 				batchId: "batch-1",
-				decisions: [{ id: "a:0", result: "pass" }, { id: "a:1", result: "drop" }],
+				decisions: [
+					{ id: "a:0", result: "pass" },
+					{ id: "a:1", result: "drop" },
+				],
 			}),
 		);
 
@@ -174,7 +184,13 @@ describe("docs-engine batched semantic gate", () => {
 
 		writeFileSync(
 			verdictFile,
-			JSON.stringify({ batchId: "batch-1", decisions: [{ id: "a:0", result: "rework", comment: "Use the exact symbol." }, { id: "a:1", result: "drop" }] }),
+			JSON.stringify({
+				batchId: "batch-1",
+				decisions: [
+					{ id: "a:0", result: "rework", comment: "Use the exact symbol." },
+					{ id: "a:1", result: "drop" },
+				],
+			}),
 		);
 		const rework = runDocsScript("route-gate-batches.mjs", root, {
 			UNITS_FILE: unitsFile,

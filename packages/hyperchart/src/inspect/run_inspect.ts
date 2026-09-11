@@ -5,11 +5,7 @@ import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { actionUidKey } from "../core/action_uid.js";
 import { templatePath } from "../core/paths.js";
-import {
-	inspectChartAst,
-	parseChartModuleSync,
-	type HyperchartInspectAgentDefaults,
-} from "../core/inspect.js";
+import { inspectChartAst, parseChartModuleSync, type HyperchartInspectAgentDefaults } from "../core/inspect.js";
 import type { ActionUID, ChartAst } from "../core/types.js";
 import type { BranchProjection } from "../core/projection.js";
 import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
@@ -34,7 +30,13 @@ export async function readBranchExecutionOverview(
 	store: import("../runtime/generic/log_store.js").RunLogStore,
 	snapshot?: HistorySnapshot,
 ): Promise<BranchExecutionOverview> {
-	const semantic = await BranchExecution.restore({ ast, branchId, store, saveCheckpoint: "never", ...(snapshot === undefined ? {} : { snapshot }) });
+	const semantic = await BranchExecution.restore({
+		ast,
+		branchId,
+		store,
+		saveCheckpoint: "never",
+		...(snapshot === undefined ? {} : { snapshot }),
+	});
 	return semantic.inspectionOverview();
 }
 
@@ -53,26 +55,25 @@ export type HyperchartRunFromRunIdBaseOptions = {
 	now?: number;
 };
 
-export type HyperchartRunFromRunIdOptions = HyperchartRunFromRunIdBaseOptions & (
-	| {
-			/** Compact inspection without transcript message payloads. */
-			includeTranscripts?: false;
-	  }
-	| {
-			/** Full inspection requires an explicit host-owned transcript reader. */
-			includeTranscripts: true;
-			readTranscript: SessionTranscriptReader;
-	  }
-);
+export type HyperchartRunFromRunIdOptions = HyperchartRunFromRunIdBaseOptions &
+	(
+		| {
+				/** Compact inspection without transcript message payloads. */
+				includeTranscripts?: false;
+		  }
+		| {
+				/** Full inspection requires an explicit host-owned transcript reader. */
+				includeTranscripts: true;
+				readTranscript: SessionTranscriptReader;
+		  }
+	);
 
 export async function hyperchartRunFromRunId(
 	runId: string,
 	options: HyperchartRunFromRunIdOptions = {},
 ): Promise<HyperchartRunInfo> {
 	const absoluteRunDir = resolveRunPaths(runId).runDir;
-	const meta =
-		options.meta ??
-		(await loadRunMeta(runId));
+	const meta = options.meta ?? (await loadRunMeta(runId));
 	const ast = options.ast ?? parsedRunAst(meta);
 	const agentDefaults = runAgentDefaults(absoluteRunDir, options.agentDefaults);
 	const inspect = inspectChartAst(ast, {
@@ -98,9 +99,9 @@ export async function hyperchartRunFromRunId(
 	try {
 		let syntheticEmptyBranch = false;
 		try {
-			snapshot = options.snapshot ?? await store.captureSnapshot(branchId);
+			snapshot = options.snapshot ?? (await store.captureSnapshot(branchId));
 		} catch (error) {
-			if (await store.countRecords() !== 0) throw error;
+			if ((await store.countRecords()) !== 0) throw error;
 			snapshot = { branchId, headSeqId: null };
 			syntheticEmptyBranch = true;
 		}
@@ -117,7 +118,9 @@ export async function hyperchartRunFromRunId(
 			if (broken === undefined || broken.error !== error.message) throw error;
 		}
 		const [recordChunk, branchChunk] = await Promise.all([
-			syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
+			syntheticEmptyBranch
+				? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] })
+				: store.readRecords({ snapshot }),
 			store.listBranches(),
 		]);
 		records = [...recordChunk.items].reverse();
@@ -131,57 +134,81 @@ export async function hyperchartRunFromRunId(
 	const branchSessionProgress = {
 		...rawSessionProgress,
 		sessions: Object.fromEntries(
-			Object.entries(rawSessionProgress.sessions).filter(([, session]) => options.snapshot === undefined && session.branchId === branchId),
+			Object.entries(rawSessionProgress.sessions).filter(
+				([, session]) => options.snapshot === undefined && session.branchId === branchId,
+			),
 		),
 	};
 	const runtimeRecords = records;
-	const overviewSessionProgress = projection !== undefined && options.includeTranscripts !== true
-		? currentSessionProgress(branchSessionProgress, projection)
-		: branchSessionProgress;
+	const overviewSessionProgress =
+		projection !== undefined && options.includeTranscripts !== true
+			? currentSessionProgress(branchSessionProgress, projection)
+			: branchSessionProgress;
 	const pending = new Set(projection?.pendingActions.map((action) => action.invokeSeqId));
-	const historicalTranscriptRecords = options.snapshot === undefined ? runtimeRecords
-		: runtimeRecords.filter((record) => !pending.has(record.seqId));
+	const historicalTranscriptRecords =
+		options.snapshot === undefined ? runtimeRecords : runtimeRecords.filter((record) => !pending.has(record.seqId));
 	const snapshotTime = options.snapshot === undefined ? undefined : records.at(-1)?.timestamp;
-	const sessionProgress = broken === undefined && options.includeTranscripts === true
-		? await sessionProgressWithVisitTranscripts(
-				historicalTranscriptRecords,
-				branchSessionProgress,
-				options.snapshot === undefined ? options.readTranscript : async (binding) => {
-					const messages = await options.readTranscript(binding);
-					return messages?.filter((message) => snapshotTime !== undefined && message.timestamp !== undefined && message.timestamp <= snapshotTime);
-				},
-			)
-		: overviewSessionProgress;
+	const sessionProgress =
+		broken === undefined && options.includeTranscripts === true
+			? await sessionProgressWithVisitTranscripts(
+					historicalTranscriptRecords,
+					branchSessionProgress,
+					options.snapshot === undefined
+						? options.readTranscript
+						: async (binding) => {
+								const messages = await options.readTranscript(binding);
+								return messages?.filter(
+									(message) =>
+										snapshotTime !== undefined && message.timestamp !== undefined && message.timestamp <= snapshotTime,
+								);
+							},
+				)
+			: overviewSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
-	const run = broken === undefined ? hyperchartRunFromRuntime(inspect, ast, runtimeRecords, {
-		runId,
-		status: { ...status, replayWarnings: [...(status?.replayWarnings ?? []), ...replayWarnings] },
-		sessionProgress,
-		cwd: meta.workDir,
-		branchWorkspace: join(absoluteRunDir, "workspaces", branchId),
-		...(Number.isNaN(createdAt) ? {} : { createdAt }),
-		...(options.now === undefined ? {} : { now: options.now }),
-		...(projection === undefined ? {} : { projection }),
-	}) : hyperchartRunFromReplayIncompatibility(inspect, broken, {
-		runId, cwd: meta.workDir,
-		...(Number.isNaN(createdAt) ? {} : { createdAt }),
-		...(records.at(-1) === undefined ? {} : { updatedAt: records.at(-1)!.timestamp }),
-	});
-	const selected = projection !== undefined && options.includeTranscripts !== true ? overviewOnly(run, projection) : run;
+	const run =
+		broken === undefined
+			? hyperchartRunFromRuntime(inspect, ast, runtimeRecords, {
+					runId,
+					status: { ...status, replayWarnings: [...(status?.replayWarnings ?? []), ...replayWarnings] },
+					sessionProgress,
+					cwd: meta.workDir,
+					branchWorkspace: join(absoluteRunDir, "workspaces", branchId),
+					...(Number.isNaN(createdAt) ? {} : { createdAt }),
+					...(options.now === undefined ? {} : { now: options.now }),
+					...(projection === undefined ? {} : { projection }),
+				})
+			: hyperchartRunFromReplayIncompatibility(inspect, broken, {
+					runId,
+					cwd: meta.workDir,
+					...(Number.isNaN(createdAt) ? {} : { createdAt }),
+					...(records.at(-1) === undefined ? {} : { updatedAt: records.at(-1)!.timestamp }),
+				});
+	const selected =
+		projection !== undefined && options.includeTranscripts !== true ? overviewOnly(run, projection) : run;
 	return {
 		...selected,
 		...(snapshot === undefined ? {} : { historySnapshot: snapshot }),
 		branchId,
 		...(status === undefined ? {} : { runnerBranchIds: status.branchIds }),
-		...(initialBranches === undefined ? {} : { branchCount: initialBranches.totalCount, ...(initialBranches.next === undefined ? {} : { branchListNext: initialBranches.next }) }),
-		...(branches === undefined ? {} : {
-			branches: branches.map((branch) => ({
-				branchId: branch.branchId,
-				headSeqId: options.snapshot !== undefined && branch.branchId === branchId ? options.snapshot.headSeqId : branch.headSeqId,
-				...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }),
-				...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }),
-			})),
-		}),
+		...(initialBranches === undefined
+			? {}
+			: {
+					branchCount: initialBranches.totalCount,
+					...(initialBranches.next === undefined ? {} : { branchListNext: initialBranches.next }),
+				}),
+		...(branches === undefined
+			? {}
+			: {
+					branches: branches.map((branch) => ({
+						branchId: branch.branchId,
+						headSeqId:
+							options.snapshot !== undefined && branch.branchId === branchId
+								? options.snapshot.headSeqId
+								: branch.headSeqId,
+						...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }),
+						...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }),
+					})),
+				}),
 	};
 }
 
@@ -198,7 +225,9 @@ export async function hyperchartRunOverviewFromRunId(
 	try {
 		const initialBranches = await store.listBranches();
 		return { run, branchCount: initialBranches.totalCount, initialBranches, snapshot: run.historySnapshot };
-	} finally { await store.close(); }
+	} finally {
+		await store.close();
+	}
 }
 
 function currentSessionProgress(
@@ -208,15 +237,23 @@ function currentSessionProgress(
 	const pendingInvokes = new Set(projection.pendingActions.map((pending) => pending.invokeSeqId));
 	const retainedSessionIds = new Set(Object.values(projection.sessions));
 	const latestByAction = new Map<string, number>();
-	const summaryKey = (session: (typeof progress.sessions)[string]) => `${templatePath(session.actionUid.state)}:${session.actionUid.action}`;
-	for (const session of Object.values(progress.sessions)) latestByAction.set(summaryKey(session), Math.max(latestByAction.get(summaryKey(session)) ?? 0, session.invokeSeqId));
+	const summaryKey = (session: (typeof progress.sessions)[string]) =>
+		`${templatePath(session.actionUid.state)}:${session.actionUid.action}`;
+	for (const session of Object.values(progress.sessions))
+		latestByAction.set(
+			summaryKey(session),
+			Math.max(latestByAction.get(summaryKey(session)) ?? 0, session.invokeSeqId),
+		);
 	return {
 		...progress,
-		sessions: Object.fromEntries(Object.entries(progress.sessions).filter(([, session]) =>
-			pendingInvokes.has(session.invokeSeqId)
-			|| session.sessionId !== undefined && retainedSessionIds.has(session.sessionId)
-			|| latestByAction.get(summaryKey(session)) === session.invokeSeqId,
-		)),
+		sessions: Object.fromEntries(
+			Object.entries(progress.sessions).filter(
+				([, session]) =>
+					pendingInvokes.has(session.invokeSeqId) ||
+					(session.sessionId !== undefined && retainedSessionIds.has(session.sessionId)) ||
+					latestByAction.get(summaryKey(session)) === session.invokeSeqId,
+			),
+		),
 	};
 }
 
@@ -230,24 +267,47 @@ export function overviewOnly(run: HyperchartRunInfo, projection: BranchProjectio
 		const session = state.session === undefined ? undefined : withoutMessages(state.session);
 		const hasMapRuntime = state.type === "map" && projection.spawns[state.id] !== undefined;
 		const actorMessageCount = state.actorOccurrence?.mailbox.totalCount ?? state.actorMessageHistory?.length ?? 0;
-		const actorOccurrence = state.actorOccurrence === undefined ? undefined : actorOccurrenceOverview(state.actorOccurrence);
-		const actorInternal = state.actorInternal === undefined ? undefined : (() => {
-			const generations = state.actorInternal.generations?.slice(-1).map((generation) => {
-				const { visitHistory: _visits, actorMessageHistory: _messages, actorMessages: _sent, ...current } = generation;
-				return current;
-			});
-			const { generations: _old, ...current } = state.actorInternal;
-			return { ...current, ...(generations === undefined ? {} : { generations }) };
-		})();
-		const actorMessageLink = state.actorMessageLink === undefined ? undefined : (() => {
-			const { messages: _messages, ...current } = state.actorMessageLink;
-			return current;
-		})();
-		const mapConfig = state.mapConfig === undefined ? undefined : (() => {
-			const { visitHistory: _visits, ...current } = state.mapConfig;
-			return current;
-		})();
-		const { visitHistory: _visits, actorMessageHistory: _actorMessages, mapConfig: _map, actorOccurrence: _actor, actorInternal: _internal, actorMessageLink: _link, ...base } = state;
+		const actorOccurrence =
+			state.actorOccurrence === undefined ? undefined : actorOccurrenceOverview(state.actorOccurrence);
+		const actorInternal =
+			state.actorInternal === undefined
+				? undefined
+				: (() => {
+						const generations = state.actorInternal.generations?.slice(-1).map((generation) => {
+							const {
+								visitHistory: _visits,
+								actorMessageHistory: _messages,
+								actorMessages: _sent,
+								...current
+							} = generation;
+							return current;
+						});
+						const { generations: _old, ...current } = state.actorInternal;
+						return { ...current, ...(generations === undefined ? {} : { generations }) };
+					})();
+		const actorMessageLink =
+			state.actorMessageLink === undefined
+				? undefined
+				: (() => {
+						const { messages: _messages, ...current } = state.actorMessageLink;
+						return current;
+					})();
+		const mapConfig =
+			state.mapConfig === undefined
+				? undefined
+				: (() => {
+						const { visitHistory: _visits, ...current } = state.mapConfig;
+						return current;
+					})();
+		const {
+			visitHistory: _visits,
+			actorMessageHistory: _actorMessages,
+			mapConfig: _map,
+			actorOccurrence: _actor,
+			actorInternal: _internal,
+			actorMessageLink: _link,
+			...base
+		} = state;
 		return {
 			...base,
 			...(mapConfig === undefined ? {} : { mapConfig }),
@@ -258,7 +318,17 @@ export function overviewOnly(run: HyperchartRunInfo, projection: BranchProjectio
 			runtimeSummary: {
 				status: state.status,
 				visitCount,
-				...(latestVisit === undefined ? {} : { latestVisit: { visit: latestVisit.visit, invokeSeqId: latestVisit.invokeSeqId, startedAt: latestVisit.startedAt, ...(latestVisit.endedAt === undefined ? {} : { endedAt: latestVisit.endedAt }), status: latestVisit.status } }),
+				...(latestVisit === undefined
+					? {}
+					: {
+							latestVisit: {
+								visit: latestVisit.visit,
+								invokeSeqId: latestVisit.invokeSeqId,
+								startedAt: latestVisit.startedAt,
+								...(latestVisit.endedAt === undefined ? {} : { endedAt: latestVisit.endedAt }),
+								status: latestVisit.status,
+							},
+						}),
 				...(session === undefined ? {} : { activeSession: session }),
 				...(state.usage === undefined ? {} : { usage: state.usage }),
 				issueCount: state.issues?.length ?? 0,
@@ -274,10 +344,19 @@ export function overviewOnly(run: HyperchartRunInfo, projection: BranchProjectio
 
 function actorOccurrenceOverview(actor: NonNullable<HyperchartRunInfo["actorOccurrences"]>[number]) {
 	const { generationHistory: _generations, messageHistory: _messages, batchCalls: _batchCalls, ...current } = actor;
-	const mailbox = { totalCount: actor.mailbox.totalCount, ...(actor.mailbox.head === undefined ? {} : { head: actor.mailbox.head }) };
+	const mailbox = {
+		totalCount: actor.mailbox.totalCount,
+		...(actor.mailbox.head === undefined ? {} : { head: actor.mailbox.head }),
+	};
 	const mailboxInstances = current.mailboxInstances.slice(-1).map((instance) => {
 		const { messageHistory: _history, mailbox: instanceMailbox, ...summary } = instance;
-		return { ...summary, mailbox: { totalCount: instanceMailbox.totalCount, ...(instanceMailbox.head === undefined ? {} : { head: instanceMailbox.head }) } };
+		return {
+			...summary,
+			mailbox: {
+				totalCount: instanceMailbox.totalCount,
+				...(instanceMailbox.head === undefined ? {} : { head: instanceMailbox.head }),
+			},
+		};
 	});
 	const workers = current.workers?.map((worker) => {
 		const { messageHistory: _workerMessages, visitHistory: _workerVisits, session, ...summary } = worker;
@@ -299,17 +378,20 @@ async function sessionProgressWithVisitTranscripts(
 	const invocations = agentInvocationsByAction(records);
 	const resolvedSessions = await Promise.all(
 		Object.entries(progress.sessions).map(async ([key, session]) => {
-			const invocation = invocations.get(session.actionKey)?.find(
-				(candidate) => candidate.invokeSeqId === session.invokeSeqId,
-			);
+			const invocation = invocations
+				.get(session.actionKey)
+				?.find((candidate) => candidate.invokeSeqId === session.invokeSeqId);
 			const sessionId = session.sessionId ?? invocation?.sessionId;
 			const messages = sessionId === undefined ? undefined : await readTranscript({ sessionId });
 			const visit = session.visit ?? invocations.get(session.actionKey)?.at(-1)?.visit;
-			return [key, {
-				...session,
-				...(visit === undefined ? {} : { visit }),
-				...(messages === undefined ? {} : { messages }),
-			}] as const;
+			return [
+				key,
+				{
+					...session,
+					...(visit === undefined ? {} : { visit }),
+					...(messages === undefined ? {} : { messages }),
+				},
+			] as const;
 		}),
 	);
 	const sessions = Object.fromEntries(resolvedSessions);
@@ -349,7 +431,8 @@ async function sessionProgressWithVisitTranscripts(
 					candidate.actionKey === invocation.actionKey &&
 					candidate.visit === invocation.visit &&
 					candidate.messages === undefined
-				) delete sessions[key];
+				)
+					delete sessions[key];
 			}
 			knownVisits.add(`${invocation.actionKey}:${invocation.visit}`);
 		}

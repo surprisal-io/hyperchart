@@ -40,9 +40,10 @@ export function useActionVisitHistory(run: HyperchartRunInfo, dataSource?: Hyper
 			const graphStateId = graphStateIdForRuntimePath(run.states, row.statePath);
 			if (graphStateId === undefined) return row;
 			const state = run.states.find((candidate) => candidate.id === graphStateId);
-			const actorVisit = row.visit === undefined && state !== undefined
-				? actorMessageVisitForState(state, row.invokeSeqId, row.originBranchId)
-				: undefined;
+			const actorVisit =
+				row.visit === undefined && state !== undefined
+					? actorMessageVisitForState(state, row.invokeSeqId, row.originBranchId)
+					: undefined;
 			if (actorVisit === undefined) return { ...row, graphStateId };
 			const { error: _error, ...index } = row;
 			return { ...index, graphStateId, visit: actorVisit };

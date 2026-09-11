@@ -34,7 +34,10 @@ export function compileProjectionRetention(ast: ChartAst): ProjectionRetentionPl
 			readers.add(readerPath);
 			resultReaders.set(resultState, readers);
 			for (const mapPath of mapScopes) {
-				if ((resultState === mapPath || resultState.startsWith(`${mapPath}.`)) && !(readerPath === mapPath || readerPath.startsWith(`${mapPath}.`))) {
+				if (
+					(resultState === mapPath || resultState.startsWith(`${mapPath}.`)) &&
+					!(readerPath === mapPath || readerPath.startsWith(`${mapPath}.`))
+				) {
 					externallyReadMapScopes.add(mapPath);
 				}
 			}
@@ -67,7 +70,8 @@ export function compileProjectionRetention(ast: ChartAst): ProjectionRetentionPl
 			reenterableStates.add(childPath(readerPath, node.initial));
 			reenterableStates.add(siblingPath(readerPath, node.onDone));
 		}
-		if ((node.kind === "state" && node.action.kind === "agent" && node.action.reentry !== undefined) ||
+		if (
+			(node.kind === "state" && node.action.kind === "agent" && node.action.reentry !== undefined) ||
 			(node.kind === "map" && node.onReenter !== undefined)
 		) {
 			reenterableStates.add(readerPath);
@@ -110,7 +114,8 @@ export function compactProjection(
 	for (const endpoint of [...Object.values(projection.actors), ...Object.values(projection.actorPools)]) {
 		for (const messageId of endpoint.mailbox) retainedMessageIds.add(messageId);
 		if ("workers" in endpoint) {
-			for (const worker of endpoint.workers) if (worker.currentMessageId !== undefined) retainedMessageIds.add(worker.currentMessageId);
+			for (const worker of endpoint.workers)
+				if (worker.currentMessageId !== undefined) retainedMessageIds.add(worker.currentMessageId);
 		} else if (endpoint.currentMessageId !== undefined) retainedMessageIds.add(endpoint.currentMessageId);
 	}
 	for (const call of Object.values(projection.pendingActorCalls)) {
@@ -137,8 +142,11 @@ function isResumableAction(ast: ChartAst, path: StatePath, node: unknown): node 
 
 function isActionLike(value: unknown): value is ActionStateAst {
 	return (
-		typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "state" &&
-		typeof (value as { action?: unknown }).action === "object" && (value as { action?: unknown }).action !== null
+		typeof value === "object" &&
+		value !== null &&
+		(value as { kind?: unknown }).kind === "state" &&
+		typeof (value as { action?: unknown }).action === "object" &&
+		(value as { action?: unknown }).action !== null
 	);
 }
 

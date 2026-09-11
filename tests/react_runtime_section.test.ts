@@ -33,11 +33,13 @@ describe("Runtime inspector section", () => {
 	it("renders pinned deliverables with path, hash, and size", () => {
 		const state: HyperchartStateInfo = {
 			...runtimeState,
-			artifacts: [{
-				name: "report",
-				path: "artifacts/report.md",
-				schema: { schema: { type: "object", properties: { title: { type: "string" } } } },
-			}],
+			artifacts: [
+				{
+					name: "report",
+					path: "artifacts/report.md",
+					schema: { schema: { type: "object", properties: { title: { type: "string" } } } },
+				},
+			],
 		};
 		const markup = renderToStaticMarkup(
 			createElement(VisitHistory, {
@@ -51,7 +53,13 @@ describe("Runtime inspector section", () => {
 						endedAt: 2000,
 						status: "done",
 						completedEvent: "DONE",
-						artifactPins: [{ path: "artifacts/report.md", hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", size: 18324 }],
+						artifactPins: [
+							{
+								path: "artifacts/report.md",
+								hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+								size: 18324,
+							},
+						],
 						invocation: { kind: "agent", task: "Write the report" },
 					},
 				],
@@ -65,34 +73,42 @@ describe("Runtime inspector section", () => {
 	});
 
 	it("renders recorded resolved input as structured JSON and omits the block when absent", () => {
-		const withInput = renderToStaticMarkup(createElement(VisitHistory, {
-			state: runtimeState,
-			allStates: [runtimeState],
-			visits: [{
-				visit: 1,
-				invokeSeqId: 2,
-				startedAt: 1000,
-				status: "running",
-				inputs: { hypothesisId: "hypothesis:42", source: { kind: "result-ref" } },
-				invocation: { kind: "agent", task: "Run experiment" },
-			}],
-		}));
+		const withInput = renderToStaticMarkup(
+			createElement(VisitHistory, {
+				state: runtimeState,
+				allStates: [runtimeState],
+				visits: [
+					{
+						visit: 1,
+						invokeSeqId: 2,
+						startedAt: 1000,
+						status: "running",
+						inputs: { hypothesisId: "hypothesis:42", source: { kind: "result-ref" } },
+						invocation: { kind: "agent", task: "Run experiment" },
+					},
+				],
+			}),
+		);
 		expect(withInput).toContain("resolved inputs");
 		expect(withInput).toContain("hypothesisId");
 		expect(withInput).toContain("hypothesis:42");
 		expect(withInput).toContain("result-ref");
 
-		const withoutInput = renderToStaticMarkup(createElement(VisitHistory, {
-			state: runtimeState,
-			allStates: [runtimeState],
-			visits: [{
-				visit: 1,
-				invokeSeqId: 2,
-				startedAt: 1000,
-				status: "running",
-				invocation: { kind: "agent", task: "Run experiment" },
-			}],
-		}));
+		const withoutInput = renderToStaticMarkup(
+			createElement(VisitHistory, {
+				state: runtimeState,
+				allStates: [runtimeState],
+				visits: [
+					{
+						visit: 1,
+						invokeSeqId: 2,
+						startedAt: 1000,
+						status: "running",
+						invocation: { kind: "agent", task: "Run experiment" },
+					},
+				],
+			}),
+		);
 		expect(withoutInput).not.toContain("resolved inputs");
 	});
 
@@ -132,9 +148,7 @@ describe("Runtime inspector section", () => {
 		expect(runtimeMarkup).toContain("3 turns");
 		expect(runtimeMarkup).toContain("5 tools");
 
-		const agentMarkup = renderToStaticMarkup(
-			createElement(AgentInfoCard, { state, allStates: [state] }),
-		);
+		const agentMarkup = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
 		expect(agentMarkup).toContain("@worker");
 		expect(agentMarkup).not.toContain("View session");
 	});
@@ -146,15 +160,17 @@ describe("Runtime inspector section", () => {
 			type: "script",
 			status: "done",
 			session,
-			visitHistory: [{
-				visit: 1,
-				invokeSeqId: 2,
-				startedAt: 1000,
-				endedAt: 1100,
-				status: "done",
-				invocation: { kind: "script", command: "true", args: [] },
-				session,
-			}],
+			visitHistory: [
+				{
+					visit: 1,
+					invokeSeqId: 2,
+					startedAt: 1000,
+					endedAt: 1100,
+					status: "done",
+					invocation: { kind: "script", command: "true", args: [] },
+					session,
+				},
+			],
 		};
 
 		const markup = renderToStaticMarkup(createElement(RuntimeSection, { state }));
@@ -240,10 +256,7 @@ describe("Runtime inspector section", () => {
 			agent: "writer",
 		};
 
-		expect(agentStatesForSelection(map, [map, firstWriter, reviewer, secondWriter])).toEqual([
-			firstWriter,
-			reviewer,
-		]);
+		expect(agentStatesForSelection(map, [map, firstWriter, reviewer, secondWriter])).toEqual([firstWriter, reviewer]);
 	});
 
 	it("renders fitting map values without a full-content control", () => {

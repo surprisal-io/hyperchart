@@ -54,11 +54,24 @@ export function mergeHistoryWindow<T>(
 	});
 	let segments: Segment<T>[];
 	if (direction === "initial") {
-		segments = unique.length === 0 ? [] : [{ items: unique, ...(chunk.older === undefined ? {} : { older: chunk.older }), ...(chunk.newer === undefined ? {} : { newer: chunk.newer }) }];
+		segments =
+			unique.length === 0
+				? []
+				: [
+						{
+							items: unique,
+							...(chunk.older === undefined ? {} : { older: chunk.older }),
+							...(chunk.newer === undefined ? {} : { newer: chunk.newer }),
+						},
+					];
 	} else if (unique.length === 0) {
 		segments = [...current.segments];
 	} else {
-		const segment = { items: unique, ...(chunk.older === undefined ? {} : { older: chunk.older }), ...(chunk.newer === undefined ? {} : { newer: chunk.newer }) };
+		const segment = {
+			items: unique,
+			...(chunk.older === undefined ? {} : { older: chunk.older }),
+			...(chunk.newer === undefined ? {} : { newer: chunk.newer }),
+		};
 		segments = direction === "older" ? [...current.segments, segment] : [segment, ...current.segments];
 	}
 

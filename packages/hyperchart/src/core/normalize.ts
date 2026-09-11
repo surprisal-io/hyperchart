@@ -116,18 +116,16 @@ function toChartAst(
 	const states: Record<StatePath, StateAst> = {};
 	const actors: Record<StatePath, ActorEndpointDeclarationAst> = {};
 	const actorTargets = new Map<object, StatePath>();
-	const rawActors: Array<{ declaration: Record<string, unknown>; name: string; path: StatePath; owner?: StatePath; pointer: string;
+	const rawActors: Array<{
+		declaration: Record<string, unknown>;
+		name: string;
+		path: StatePath;
+		owner?: StatePath;
+		pointer: string;
 	}> = [];
 	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
 	for (const placement of rawActors) {
-		const declaration = toActorDeclarationAst(
-			placement,
-			chartId,
-			actorTargets,
-			diagnostics,
-			source,
-			schemaRegistry,
-		);
+		const declaration = toActorDeclarationAst(placement, chartId, actorTargets, diagnostics, source, schemaRegistry);
 		if (declaration !== undefined) actors[placement.path] = declaration;
 	}
 	for (const [stateId, stateInput] of Object.entries(input.states)) {
@@ -191,22 +189,40 @@ function toChartArguments(
 	for (const [name, raw] of Object.entries(input)) {
 		const pointer = `/args/${escapePointer(name)}`;
 		if (name.length === 0) {
-			diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument names must be non-empty.", pointer, source));
+			diagnostics.push(
+				diagnostic("INVALID_CHART_ARGUMENT", "Chart argument names must be non-empty.", pointer, source),
+			);
 			continue;
 		}
 		if (!isRecord(raw)) {
-			diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' metadata must be an object.`, pointer, source));
+			diagnostics.push(
+				diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' metadata must be an object.`, pointer, source),
+			);
 			continue;
 		}
 		for (const field of Object.keys(raw)) {
 			if (field !== "description" && field !== "default") {
-				diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' has unknown metadata field '${field}'.`, `${pointer}/${escapePointer(field)}`, source));
+				diagnostics.push(
+					diagnostic(
+						"INVALID_CHART_ARGUMENT",
+						`Chart argument '${name}' has unknown metadata field '${field}'.`,
+						`${pointer}/${escapePointer(field)}`,
+						source,
+					),
+				);
 			}
 		}
 		let description: string | undefined;
 		if (raw.description !== undefined) {
 			if (typeof raw.description !== "string") {
-				diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", `Chart argument '${name}' description must be a string.`, `${pointer}/description`, source));
+				diagnostics.push(
+					diagnostic(
+						"INVALID_CHART_ARGUMENT",
+						`Chart argument '${name}' description must be a string.`,
+						`${pointer}/description`,
+						source,
+					),
+				);
 			} else {
 				description = raw.description;
 			}
@@ -232,15 +248,31 @@ function toJsonValue(
 	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
 	if (typeof value === "number") {
 		if (Number.isFinite(value)) return value;
-		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must contain only finite JSON numbers.", pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_CHART_ARGUMENT",
+				"Chart argument defaults must contain only finite JSON numbers.",
+				pointer,
+				source,
+			),
+		);
 		return undefined;
 	}
 	if (typeof value !== "object") {
-		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must be JSON-serializable data.", pointer, source));
+		diagnostics.push(
+			diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must be JSON-serializable data.", pointer, source),
+		);
 		return undefined;
 	}
 	if (ancestors.has(value)) {
-		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must not contain circular references.", pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_CHART_ARGUMENT",
+				"Chart argument defaults must not contain circular references.",
+				pointer,
+				source,
+			),
+		);
 		return undefined;
 	}
 	ancestors.add(value);
@@ -255,7 +287,14 @@ function toJsonValue(
 	}
 	const prototype = Object.getPrototypeOf(value);
 	if (prototype !== Object.prototype && prototype !== null) {
-		diagnostics.push(diagnostic("INVALID_CHART_ARGUMENT", "Chart argument defaults must contain only plain JSON objects.", pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_CHART_ARGUMENT",
+				"Chart argument defaults must contain only plain JSON objects.",
+				pointer,
+				source,
+			),
+		);
 		ancestors.delete(value);
 		return undefined;
 	}
@@ -288,30 +327,66 @@ function collectActorPlacements(
 	legalOwner = true,
 ): void {
 	if (ownerInput.actors !== undefined && !legalOwner) {
-		diagnostics.push(diagnostic("INVALID_ACTOR_OWNER", "actors may be placed only on chart, compound, parallel, or map owners.", `${pointer}/actors`, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_ACTOR_OWNER",
+				"actors may be placed only on chart, compound, parallel, or map owners.",
+				`${pointer}/actors`,
+				source,
+			),
+		);
 	}
 	if (ownerInput.actors !== undefined && legalOwner) {
 		if (!isRecord(ownerInput.actors)) {
-			diagnostics.push(diagnostic("INVALID_ACTORS", "actors must be an object of static actor declarations.", `${pointer}/actors`, source));
+			diagnostics.push(
+				diagnostic(
+					"INVALID_ACTORS",
+					"actors must be an object of static actor declarations.",
+					`${pointer}/actors`,
+					source,
+				),
+			);
 		} else {
 			for (const [name, raw] of Object.entries(ownerInput.actors)) {
 				const actorPointer = `${pointer}/actors/${escapePointer(name)}`;
 				if (!STATE_ID_PATTERN.test(name)) {
-					diagnostics.push(diagnostic("INVALID_ACTOR_NAME", `Actor name '${name}' must match [A-Za-z0-9_-]+.`, actorPointer, source));
+					diagnostics.push(
+						diagnostic("INVALID_ACTOR_NAME", `Actor name '${name}' must match [A-Za-z0-9_-]+.`, actorPointer, source),
+					);
 					continue;
 				}
 				if (!isRecord(raw) || (raw.kind !== "actorDeclaration" && raw.kind !== "actorPoolDeclaration")) {
-					diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", `actors.${name} must be the result of invoking actor() or actorPool().`, actorPointer, source));
+					diagnostics.push(
+						diagnostic(
+							"INVALID_ACTOR_DECLARATION",
+							`actors.${name} must be the result of invoking actor() or actorPool().`,
+							actorPointer,
+							source,
+						),
+					);
 					continue;
 				}
 				const path = ownerPath === undefined ? `@${name}` : `${ownerPath}.@${name}`;
 				const previous = targets.get(raw);
 				if (previous !== undefined) {
-					diagnostics.push(diagnostic("DUPLICATE_ACTOR_PLACEMENT", `The same actor declaration is placed at both '${previous}' and '${path}'. Invoke the template again for a second actor.`, actorPointer, source));
+					diagnostics.push(
+						diagnostic(
+							"DUPLICATE_ACTOR_PLACEMENT",
+							`The same actor declaration is placed at both '${previous}' and '${path}'. Invoke the template again for a second actor.`,
+							actorPointer,
+							source,
+						),
+					);
 					continue;
 				}
 				targets.set(raw, path);
-				placements.push({ declaration: raw, name, path, ...(ownerPath === undefined ? {} : { owner: ownerPath }), pointer: actorPointer });
+				placements.push({
+					declaration: raw,
+					name,
+					path,
+					...(ownerPath === undefined ? {} : { owner: ownerPath }),
+					pointer: actorPointer,
+				});
 			}
 		}
 	}
@@ -320,7 +395,16 @@ function collectActorPlacements(
 		if (!isRecord(child)) continue;
 		const childPath = ownerPath === undefined ? childName : `${ownerPath}.${childName}`;
 		const childIsOwner = child.kind === "compound" || child.kind === "parallel" || child.kind === "map";
-		collectActorPlacements(child, childPath, `${pointer}/states/${escapePointer(childName)}`, targets, placements, diagnostics, source, childIsOwner);
+		collectActorPlacements(
+			child,
+			childPath,
+			`${pointer}/states/${escapePointer(childName)}`,
+			targets,
+			placements,
+			diagnostics,
+			source,
+			childIsOwner,
+		);
 	}
 }
 
@@ -334,33 +418,76 @@ function toActorDeclarationAst(
 ): ActorEndpointDeclarationAst | undefined {
 	const authoredDefinition = placement.declaration.definition;
 	const isPool = placement.declaration.kind === "actorPoolDeclaration";
-	if (!isRecord(authoredDefinition) || (isPool ? authoredDefinition.kind !== "actorPoolTemplate" : authoredDefinition.kind !== "actorTemplate")) {
-		diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", `Actor declaration has no ${isPool ? "actorPool()" : "actor()"} template definition.`, placement.pointer, source));
+	if (
+		!isRecord(authoredDefinition) ||
+		(isPool ? authoredDefinition.kind !== "actorPoolTemplate" : authoredDefinition.kind !== "actorTemplate")
+	) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_ACTOR_DECLARATION",
+				`Actor declaration has no ${isPool ? "actorPool()" : "actor()"} template definition.`,
+				placement.pointer,
+				source,
+			),
+		);
 		return undefined;
 	}
 	let concurrency: number | undefined;
 	if (isPool) {
-		if (typeof authoredDefinition.concurrency !== "number" || !Number.isSafeInteger(authoredDefinition.concurrency) || authoredDefinition.concurrency < 1) {
-			diagnostics.push(diagnostic("INVALID_ACTOR_POOL_CONCURRENCY", "actorPool() concurrency must be a positive safe integer.", `${placement.pointer}/concurrency`, source));
+		if (
+			typeof authoredDefinition.concurrency !== "number" ||
+			!Number.isSafeInteger(authoredDefinition.concurrency) ||
+			authoredDefinition.concurrency < 1
+		) {
+			diagnostics.push(
+				diagnostic(
+					"INVALID_ACTOR_POOL_CONCURRENCY",
+					"actorPool() concurrency must be a positive safe integer.",
+					`${placement.pointer}/concurrency`,
+					source,
+				),
+			);
 		} else {
 			concurrency = authoredDefinition.concurrency;
 		}
 	}
 	const definition = isPool && isRecord(authoredDefinition.worker) ? authoredDefinition.worker : authoredDefinition;
 	if (!isRecord(definition) || definition.kind !== "actorTemplate") {
-		diagnostics.push(diagnostic("INVALID_ACTOR_DECLARATION", "actorPool() worker must be an actor() template.", `${placement.pointer}/worker`, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_ACTOR_DECLARATION",
+				"actorPool() worker must be an actor() template.",
+				`${placement.pointer}/worker`,
+				source,
+			),
+		);
 		return undefined;
 	}
 	const input = toSchemaAst(definition.input, `${placement.pointer}/input`, diagnostics, source, schemaRegistry);
 	const inputValue = toValueAst(placement.declaration.input, `${placement.pointer}/placement`, diagnostics, source);
-	const protocol = toProtocolAst(definition.protocol, `${placement.pointer}/protocol`, diagnostics, source, schemaRegistry);
+	const protocol = toProtocolAst(
+		definition.protocol,
+		`${placement.pointer}/protocol`,
+		diagnostics,
+		source,
+		schemaRegistry,
+	);
 	if (!isRecord(definition.states)) {
-		diagnostics.push(diagnostic("INVALID_ACTOR_STATES", "actor.states must be an object.", `${placement.pointer}/states`, source));
+		diagnostics.push(
+			diagnostic("INVALID_ACTOR_STATES", "actor.states must be an object.", `${placement.pointer}/states`, source),
+		);
 		return undefined;
 	}
 	const initial = typeof definition.initial === "string" ? definition.initial : "";
 	if (initial.length === 0 || !(initial in definition.states)) {
-		diagnostics.push(diagnostic("UNKNOWN_INITIAL_STATE", `Actor '${placement.path}' must name an existing initial state.`, `${placement.pointer}/initial`, source));
+		diagnostics.push(
+			diagnostic(
+				"UNKNOWN_INITIAL_STATE",
+				`Actor '${placement.path}' must name an existing initial state.`,
+				`${placement.pointer}/initial`,
+				source,
+			),
+		);
 	}
 	const states: Record<StatePath, ActorWorkflowStateAst> = {};
 	for (const [id, raw] of Object.entries(definition.states)) {
@@ -372,13 +499,22 @@ function toActorDeclarationAst(
 		const parent = isPool ? `${placement.path}.$worker` : placement.path;
 		if (raw.kind === "receive") {
 			if (!isRecord(raw.on) || Object.keys(raw.on).length === 0) {
-				diagnostics.push(diagnostic("INVALID_RECEIVE", "receive() requires a non-empty on map.", `${pointer}/on`, source));
+				diagnostics.push(
+					diagnostic("INVALID_RECEIVE", "receive() requires a non-empty on map.", `${pointer}/on`, source),
+				);
 				continue;
 			}
 			const on: Record<string, string> = {};
 			for (const [event, target] of Object.entries(raw.on)) {
 				if (typeof target !== "string" || target.length === 0) {
-					diagnostics.push(diagnostic("INVALID_RECEIVE", `receive.${event} must target an actor state.`, `${pointer}/on/${escapePointer(event)}`, source));
+					diagnostics.push(
+						diagnostic(
+							"INVALID_RECEIVE",
+							`receive.${event} must target an actor state.`,
+							`${pointer}/on/${escapePointer(event)}`,
+							source,
+						),
+					);
 					continue;
 				}
 				on[event] = target;
@@ -389,35 +525,89 @@ function toActorDeclarationAst(
 		if (raw.kind === "send" || raw.kind === "sendBatch" || raw.kind === "call" || raw.kind === "callBatch") {
 			const authoredSelf = isRecord(raw.to) && raw.to.kind === "actorSelf";
 			if (authoredSelf && (raw.kind === "call" || raw.kind === "callBatch")) {
-				diagnostics.push(diagnostic("SELF_CALL_FORBIDDEN", `${raw.kind}() cannot target self(); recursive actor calls are not supported.`, `${pointer}/to`, source));
+				diagnostics.push(
+					diagnostic(
+						"SELF_CALL_FORBIDDEN",
+						`${raw.kind}() cannot target self(); recursive actor calls are not supported.`,
+						`${pointer}/to`,
+						source,
+					),
+				);
 			}
-			const targetActor = authoredSelf && (raw.kind === "send" || raw.kind === "sendBatch")
-				? placement.path
-				: isRecord(raw.to) ? actorTargets.get(raw.to) : undefined;
-			if (targetActor === undefined && !authoredSelf) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${raw.kind} in actor '${placement.path}' must target a placed static declaration.`, `${pointer}/to`, source));
+			const targetActor =
+				authoredSelf && (raw.kind === "send" || raw.kind === "sendBatch")
+					? placement.path
+					: isRecord(raw.to)
+						? actorTargets.get(raw.to)
+						: undefined;
+			if (targetActor === undefined && !authoredSelf)
+				diagnostics.push(
+					diagnostic(
+						"INVALID_ACTOR_TARGET",
+						`${raw.kind} in actor '${placement.path}' must target a placed static declaration.`,
+						`${pointer}/to`,
+						source,
+					),
+				);
 			const event = typeof raw.event === "string" ? raw.event : "";
 			if (raw.kind === "send" || raw.kind === "sendBatch") {
 				const batch = raw.kind === "sendBatch";
 				const field = batch ? "inputs" : "input";
-				if (!Object.hasOwn(raw, field)) diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${raw.kind}() requires ${field}.`, pointer, source));
-				if (batch && Array.isArray(raw.inputs) && raw.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
+				if (!Object.hasOwn(raw, field))
+					diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${raw.kind}() requires ${field}.`, pointer, source));
+				if (batch && Array.isArray(raw.inputs) && raw.inputs.length === 0)
+					diagnostics.push(
+						diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
+					);
 				const value = toValueAst(raw[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
 				states[id] = batch
-					? { kind: "sendBatch", id, parent, to: targetActor ?? "", ...(authoredSelf ? { self: true } : {}), event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, inputs: value }
-					: { kind: "send", id, parent, to: targetActor ?? "", ...(authoredSelf ? { self: true } : {}), event, target: typeof raw.target === "string" ? raw.target : "", transitions: {}, input: value };
+					? {
+							kind: "sendBatch",
+							id,
+							parent,
+							to: targetActor ?? "",
+							...(authoredSelf ? { self: true } : {}),
+							event,
+							target: typeof raw.target === "string" ? raw.target : "",
+							transitions: {},
+							inputs: value,
+						}
+					: {
+							kind: "send",
+							id,
+							parent,
+							to: targetActor ?? "",
+							...(authoredSelf ? { self: true } : {}),
+							event,
+							target: typeof raw.target === "string" ? raw.target : "",
+							transitions: {},
+							input: value,
+						};
 				continue;
 			}
 			if (raw.kind === "callBatch") {
-				if (Array.isArray(raw.inputs) && raw.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
+				if (Array.isArray(raw.inputs) && raw.inputs.length === 0)
+					diagnostics.push(
+						diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
+					);
 				states[id] = {
-					kind: "callBatch", id, parent, to: targetActor ?? "", event,
+					kind: "callBatch",
+					id,
+					parent,
+					to: targetActor ?? "",
+					event,
 					inputs: toValueAst(raw.inputs, `${pointer}/inputs`, diagnostics, source) ?? [],
-					target: typeof raw.target === "string" ? raw.target : "", transitions: {},
+					target: typeof raw.target === "string" ? raw.target : "",
+					transitions: {},
 				};
 				continue;
 			}
 			states[id] = {
-				kind: "call", id, parent, to: targetActor ?? "", event,
+				kind: "call",
+				id,
+				parent,
+				to: targetActor ?? "",
+				event,
 				input: toValueAst(raw.input, `${pointer}/input`, diagnostics, source) ?? null,
 				...(typeof raw.target === "string" ? { target: raw.target } : {}),
 				transitions: toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {},
@@ -426,19 +616,39 @@ function toActorDeclarationAst(
 		}
 		if (raw.kind === "reply") {
 			states[id] = {
-				kind: "reply", id, parent,
+				kind: "reply",
+				id,
+				parent,
 				target: typeof raw.target === "string" ? raw.target : "",
 				message: "",
 				...(typeof raw.event === "string" ? { event: raw.event } : {}),
-				...(Object.hasOwn(raw, "output") ? { output: toValueAst(raw.output, `${pointer}/output`, diagnostics, source) ?? null } : {}),
+				...(Object.hasOwn(raw, "output")
+					? { output: toValueAst(raw.output, `${pointer}/output`, diagnostics, source) ?? null }
+					: {}),
 			};
 			continue;
 		}
 		if ("action" in raw) {
-			const action = toStateActionAst(raw.action, chartId, `${isPool ? `${placement.path}.$worker` : placement.path}.${id}`, `${pointer}/action`, diagnostics, source, schemaRegistry);
+			const action = toStateActionAst(
+				raw.action,
+				chartId,
+				`${isPool ? `${placement.path}.$worker` : placement.path}.${id}`,
+				`${pointer}/action`,
+				diagnostics,
+				source,
+				schemaRegistry,
+			);
 			if (action === undefined) continue;
 			const transitions = toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
-			if ("FAILED" in transitions) diagnostics.push(diagnostic("RESERVED_FAILED_TRANSITION", "FAILED is globally fail-fast and cannot be routed inside an actor.", `${pointer}/transitions/FAILED`, source));
+			if ("FAILED" in transitions)
+				diagnostics.push(
+					diagnostic(
+						"RESERVED_FAILED_TRANSITION",
+						"FAILED is globally fail-fast and cannot be routed inside an actor.",
+						`${pointer}/transitions/FAILED`,
+						source,
+					),
+				);
 			const stateInput = toInputDeclarations(raw.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
 			for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
@@ -453,21 +663,42 @@ function toActorDeclarationAst(
 					);
 			}
 			states[id] = {
-				kind: "state", id, parent, action,
+				kind: "state",
+				id,
+				parent,
+				action,
 				transitions,
 				...(stateInput === undefined ? {} : { input: stateInput }),
 				...(after === undefined ? {} : { after }),
 			};
 			continue;
 		}
-		diagnostics.push(diagnostic("INVALID_ACTOR_STATE", "Actor states must use receive(), send(), call(), reply(), or an action state.", pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_ACTOR_STATE",
+				"Actor states must use receive(), send(), call(), reply(), or an action state.",
+				pointer,
+				source,
+			),
+		);
 	}
 	const initialNode = states[initial];
 	if (initialNode !== undefined && initialNode.kind !== "receive") {
-		diagnostics.push(diagnostic("ACTOR_INITIAL_NOT_RECEIVE", `Actor '${placement.path}' must enter through an explicit receive() state.`, `${placement.pointer}/initial`, source));
+		diagnostics.push(
+			diagnostic(
+				"ACTOR_INITIAL_NOT_RECEIVE",
+				`Actor '${placement.path}' must enter through an explicit receive() state.`,
+				`${placement.pointer}/initial`,
+				source,
+			),
+		);
 	}
-	const resolved = protocol === undefined ? states : inferAndValidateActorReplies(placement, states, protocol, actorTargets, diagnostics, source);
-	if (input !== undefined && protocol !== undefined) validateActorIsolation(placement, resolved, initial, input, protocol, diagnostics, source);
+	const resolved =
+		protocol === undefined
+			? states
+			: inferAndValidateActorReplies(placement, states, protocol, actorTargets, diagnostics, source);
+	if (input !== undefined && protocol !== undefined)
+		validateActorIsolation(placement, resolved, initial, input, protocol, diagnostics, source);
 	if (input === undefined || inputValue === undefined || protocol === undefined) return undefined;
 	if (isPool) {
 		if (concurrency === undefined) return undefined;
@@ -512,25 +743,51 @@ function toProtocolAst(
 	for (const [event, raw] of Object.entries(input)) {
 		const path = `${pointer}/${escapePointer(event)}`;
 		if (!STATE_ID_PATTERN.test(event) || event === "FAILED" || !isRecord(raw)) {
-			diagnostics.push(diagnostic("INVALID_PROTOCOL_MESSAGE", `Protocol message '${event}' is invalid or reserved.`, path, source));
+			diagnostics.push(
+				diagnostic("INVALID_PROTOCOL_MESSAGE", `Protocol message '${event}' is invalid or reserved.`, path, source),
+			);
 			continue;
 		}
 		const messageInput = toSchemaAst(raw.input, `${path}/input`, diagnostics, source, schemaRegistry);
 		const hasReply = Object.hasOwn(raw, "reply");
 		const hasReplies = Object.hasOwn(raw, "replies");
-		if (hasReply && hasReplies) diagnostics.push(diagnostic("INVALID_REPLY_CONTRACT", "message() cannot declare both reply and replies.", path, source));
+		if (hasReply && hasReplies)
+			diagnostics.push(
+				diagnostic("INVALID_REPLY_CONTRACT", "message() cannot declare both reply and replies.", path, source),
+			);
 		let reply: ProtocolMessageAst["reply"] = { kind: "void" };
 		if (hasReply) {
 			const schema = toSchemaAst(raw.reply, `${path}/reply`, diagnostics, source, schemaRegistry);
 			if (schema !== undefined) reply = { kind: "single", schema };
 		} else if (hasReplies) {
 			if (!isRecord(raw.replies) || Object.keys(raw.replies).length === 0) {
-				diagnostics.push(diagnostic("INVALID_REPLY_CONTRACT", "Named replies must be a non-empty schema map.", `${path}/replies`, source));
+				diagnostics.push(
+					diagnostic(
+						"INVALID_REPLY_CONTRACT",
+						"Named replies must be a non-empty schema map.",
+						`${path}/replies`,
+						source,
+					),
+				);
 			} else {
 				const schemas: Record<string, SchemaAst> = {};
 				for (const [name, schemaInput] of Object.entries(raw.replies)) {
-					if (!STATE_ID_PATTERN.test(name) || name === "FAILED") diagnostics.push(diagnostic("INVALID_REPLY_EVENT", `Reply event '${name}' is invalid or reserved.`, `${path}/replies/${escapePointer(name)}`, source));
-					const schema = toSchemaAst(schemaInput, `${path}/replies/${escapePointer(name)}`, diagnostics, source, schemaRegistry);
+					if (!STATE_ID_PATTERN.test(name) || name === "FAILED")
+						diagnostics.push(
+							diagnostic(
+								"INVALID_REPLY_EVENT",
+								`Reply event '${name}' is invalid or reserved.`,
+								`${path}/replies/${escapePointer(name)}`,
+								source,
+							),
+						);
+					const schema = toSchemaAst(
+						schemaInput,
+						`${path}/replies/${escapePointer(name)}`,
+						diagnostics,
+						source,
+						schemaRegistry,
+					);
 					if (schema !== undefined) schemas[name] = schema;
 				}
 				reply = { kind: "named", schemas };
@@ -542,9 +799,16 @@ function toProtocolAst(
 }
 
 function actorWorkflowSuccessors(node: ActorWorkflowStateAst): StateId[] {
-	if (node.kind === "state") return [...Object.values(node.transitions).map((transition) => transition.target), ...(node.after === undefined ? [] : [node.after.target])];
+	if (node.kind === "state")
+		return [
+			...Object.values(node.transitions).map((transition) => transition.target),
+			...(node.after === undefined ? [] : [node.after.target]),
+		];
 	if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "callBatch") return [node.target];
-	if (node.kind === "call") return node.target === undefined ? Object.values(node.transitions).map((transition) => transition.target) : [node.target];
+	if (node.kind === "call")
+		return node.target === undefined
+			? Object.values(node.transitions).map((transition) => transition.target)
+			: [node.target];
 	return [];
 }
 
@@ -567,8 +831,24 @@ function inferAndValidateActorReplies(
 	for (const [id, node] of Object.entries(states)) {
 		if (node.kind !== "receive") continue;
 		for (const [message, target] of Object.entries(node.on)) {
-			if (!(message in protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `receive() in '${placement.path}.${id}' names unknown message '${message}'.`, `${placement.pointer}/states/${escapePointer(id)}/on/${escapePointer(message)}`, source));
-			if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `receive.${message} targets unknown actor state '${target}'.`, `${placement.pointer}/states/${escapePointer(id)}/on/${escapePointer(message)}`, source));
+			if (!(message in protocol))
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_PROTOCOL_MESSAGE",
+						`receive() in '${placement.path}.${id}' names unknown message '${message}'.`,
+						`${placement.pointer}/states/${escapePointer(id)}/on/${escapePointer(message)}`,
+						source,
+					),
+				);
+			if (!(target in states))
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_TRANSITION_TARGET",
+						`receive.${message} targets unknown actor state '${target}'.`,
+						`${placement.pointer}/states/${escapePointer(id)}/on/${escapePointer(message)}`,
+						source,
+					),
+				);
 			addContext(target, message);
 		}
 	}
@@ -584,20 +864,72 @@ function inferAndValidateActorReplies(
 	const result = { ...states };
 	for (const [id, node] of Object.entries(states)) {
 		const pointer = `${placement.pointer}/states/${escapePointer(id)}`;
-		for (const target of actorWorkflowSuccessors(node)) if (!(target in states)) diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `Actor state '${id}' targets unknown state '${target}'.`, pointer, source));
-		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
+		for (const target of actorWorkflowSuccessors(node))
+			if (!(target in states))
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_TRANSITION_TARGET",
+						`Actor state '${id}' targets unknown state '${target}'.`,
+						pointer,
+						source,
+					),
+				);
+		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch")
+			validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
 		if (node.kind !== "reply") continue;
 		const messages = [...(contexts.get(id) ?? [])];
 		if (messages.length !== 1) {
-			diagnostics.push(diagnostic(messages.length === 0 ? "UNREACHABLE_REPLY" : "AMBIGUOUS_REPLY_PATH", `reply() state '${placement.path}.${id}' must be reachable from exactly one protocol message; got ${messages.join(", ") || "none"}.`, pointer, source));
+			diagnostics.push(
+				diagnostic(
+					messages.length === 0 ? "UNREACHABLE_REPLY" : "AMBIGUOUS_REPLY_PATH",
+					`reply() state '${placement.path}.${id}' must be reachable from exactly one protocol message; got ${messages.join(", ") || "none"}.`,
+					pointer,
+					source,
+				),
+			);
 			continue;
 		}
 		const message = messages[0] ?? "";
 		const contract = protocol[message]?.reply;
-		if (contract?.kind === "void" && (node.event !== undefined || node.output !== undefined)) diagnostics.push(diagnostic("INVALID_VOID_REPLY", `Void message '${message}' reply() cannot have event or output.`, pointer, source));
-		if (contract?.kind === "single" && (node.event !== undefined || node.output === undefined)) diagnostics.push(diagnostic("INVALID_SINGLE_REPLY", `Single-reply message '${message}' requires output and no event.`, pointer, source));
-		if (contract?.kind === "named" && (node.event === undefined || !(node.event in contract.schemas) || node.output === undefined)) diagnostics.push(diagnostic("INVALID_NAMED_REPLY", `Named-reply message '${message}' requires a declared event and output.`, pointer, source));
-		if (states[node.target]?.kind !== "receive") diagnostics.push(diagnostic("REPLY_TARGET_NOT_RECEIVE", `reply() target '${node.target}' must be an explicit receive() state.`, `${pointer}/target`, source));
+		if (contract?.kind === "void" && (node.event !== undefined || node.output !== undefined))
+			diagnostics.push(
+				diagnostic(
+					"INVALID_VOID_REPLY",
+					`Void message '${message}' reply() cannot have event or output.`,
+					pointer,
+					source,
+				),
+			);
+		if (contract?.kind === "single" && (node.event !== undefined || node.output === undefined))
+			diagnostics.push(
+				diagnostic(
+					"INVALID_SINGLE_REPLY",
+					`Single-reply message '${message}' requires output and no event.`,
+					pointer,
+					source,
+				),
+			);
+		if (
+			contract?.kind === "named" &&
+			(node.event === undefined || !(node.event in contract.schemas) || node.output === undefined)
+		)
+			diagnostics.push(
+				diagnostic(
+					"INVALID_NAMED_REPLY",
+					`Named-reply message '${message}' requires a declared event and output.`,
+					pointer,
+					source,
+				),
+			);
+		if (states[node.target]?.kind !== "receive")
+			diagnostics.push(
+				diagnostic(
+					"REPLY_TARGET_NOT_RECEIVE",
+					`reply() target '${node.target}' must be an explicit receive() state.`,
+					`${pointer}/target`,
+					source,
+				),
+			);
 		result[id] = { ...node, message };
 	}
 	for (const [receiveId, receive] of Object.entries(states)) {
@@ -610,7 +942,8 @@ function inferAndValidateActorReplies(
 				if (visiting.has(stateId)) return false;
 				const state = states[stateId];
 				if (state === undefined || state.kind === "receive") return false;
-				if (state.kind === "reply") return contexts.get(stateId)?.size === 1 && contexts.get(stateId)?.has(message) === true;
+				if (state.kind === "reply")
+					return contexts.get(stateId)?.size === 1 && contexts.get(stateId)?.has(message) === true;
 				const next = actorWorkflowSuccessors(state);
 				if (next.length === 0) return false;
 				visiting.add(stateId);
@@ -619,14 +952,29 @@ function inferAndValidateActorReplies(
 				if (ok) verified.add(stateId);
 				return ok;
 			};
-			if (!walk(target)) diagnostics.push(diagnostic("MISSING_REPLY", `Every '${message}' workflow from receive '${receiveId}' must terminate in exactly one reply() before returning to receive.`, `${placement.pointer}/states/${escapePointer(receiveId)}/on/${escapePointer(message)}`, source));
+			if (!walk(target))
+				diagnostics.push(
+					diagnostic(
+						"MISSING_REPLY",
+						`Every '${message}' workflow from receive '${receiveId}' must terminate in exactly one reply() before returning to receive.`,
+						`${placement.pointer}/states/${escapePointer(receiveId)}/on/${escapePointer(message)}`,
+						source,
+					),
+				);
 		}
 	}
 	return result;
 }
 
 function valueRefs(value: ValueAst | undefined): InputRef[] {
-	if (value === undefined || value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return [];
+	if (
+		value === undefined ||
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "number" ||
+		typeof value === "boolean"
+	)
+		return [];
 	if (Array.isArray(value)) return value.flatMap(valueRefs);
 	if (isInputRef(value)) return [value];
 	return Object.values(value).flatMap(valueRefs);
@@ -664,47 +1012,128 @@ function validateActorIsolation(
 		if (node.kind === "state") {
 			for (const template of actionTemplates(node.action)) refs.push(...template.refs.map((ref) => ({ ref, pointer })));
 			for (const read of artifactReads(node.action, pointer)) {
-				if (states[read.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor artifact read '${read.state}' must name an actor-local action state.`, read.pointer, source));
+				if (states[read.state]?.kind !== "state")
+					diagnostics.push(
+						diagnostic(
+							"ACTOR_ISOLATION_VIOLATION",
+							`Actor artifact read '${read.state}' must name an actor-local action state.`,
+							read.pointer,
+							source,
+						),
+					);
 			}
 		}
 		if ("transitions" in node) {
 			for (const [eventType, transition] of Object.entries(node.transitions)) {
 				for (const [name, binding] of Object.entries(transition.input ?? {})) {
-					if (binding.kind !== "event") refs.push({ ref: binding, pointer: `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`, allowSelfResult: true });
+					if (binding.kind !== "event")
+						refs.push({
+							ref: binding,
+							pointer: `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`,
+							allowSelfResult: true,
+						});
 				}
 			}
 		}
 		if (node.kind === "send") refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
-		if (node.kind === "sendBatch" || node.kind === "callBatch") refs.push(...valueRefs(node.inputs).map((ref) => ({ ref, pointer })));
+		if (node.kind === "sendBatch" || node.kind === "callBatch")
+			refs.push(...valueRefs(node.inputs).map((ref) => ({ ref, pointer })));
 		if (node.kind === "call") refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
 		if (node.kind === "reply") refs.push(...valueRefs(node.output).map((ref) => ({ ref, pointer })));
 		for (const use of refs) {
 			const { ref } = use;
 			if (ref.kind === "actorInput") {
-				if (!schemaHasPath(actorInputSchema, ref.path)) diagnostics.push(diagnostic("INVALID_ACTOR_INPUT_REF", `actorInput selector '${ref.path}' does not exist.`, use.pointer, source));
+				if (!schemaHasPath(actorInputSchema, ref.path))
+					diagnostics.push(
+						diagnostic(
+							"INVALID_ACTOR_INPUT_REF",
+							`actorInput selector '${ref.path}' does not exist.`,
+							use.pointer,
+							source,
+						),
+					);
 				continue;
 			}
 			if (ref.kind === "messageInput") {
 				const message = protocol[ref.message];
-				if (message === undefined || !schemaHasPath(message.input, ref.path)) diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", `messageInput('${ref.message}', '${ref.path ?? ""}') does not match the actor protocol.`, use.pointer, source));
+				if (message === undefined || !schemaHasPath(message.input, ref.path))
+					diagnostics.push(
+						diagnostic(
+							"INVALID_MESSAGE_INPUT_REF",
+							`messageInput('${ref.message}', '${ref.path ?? ""}') does not match the actor protocol.`,
+							use.pointer,
+							source,
+						),
+					);
 				continue;
 			}
 			if (ref.kind === "result") {
 				const producer = states[ref.state];
-				if (producer?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor result('${ref.state}') must name an actor-local action state.`, use.pointer, source));
-				else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path)) diagnostics.push(diagnostic("UNKNOWN_INPUT_RESULT", `Actor result selector '${ref.path}' does not exist on '${ref.state}'.`, use.pointer, source));
-				else if (use.allowSelfResult === true && ref.state !== stateId && dominators.get(stateId)?.has(ref.state) !== true) {
-					diagnostics.push(diagnostic("NON_DOMINATED_REF", `Transition input in actor state '${stateId}' reads '${ref.state}', but '${ref.state}' does not dominate '${stateId}'.`, use.pointer, source));
+				if (producer?.kind !== "state")
+					diagnostics.push(
+						diagnostic(
+							"ACTOR_ISOLATION_VIOLATION",
+							`Actor result('${ref.state}') must name an actor-local action state.`,
+							use.pointer,
+							source,
+						),
+					);
+				else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path))
+					diagnostics.push(
+						diagnostic(
+							"UNKNOWN_INPUT_RESULT",
+							`Actor result selector '${ref.path}' does not exist on '${ref.state}'.`,
+							use.pointer,
+							source,
+						),
+					);
+				else if (
+					use.allowSelfResult === true &&
+					ref.state !== stateId &&
+					dominators.get(stateId)?.has(ref.state) !== true
+				) {
+					diagnostics.push(
+						diagnostic(
+							"NON_DOMINATED_REF",
+							`Transition input in actor state '${stateId}' reads '${ref.state}', but '${ref.state}' does not dominate '${stateId}'.`,
+							use.pointer,
+							source,
+						),
+					);
 				}
 				continue;
 			}
 			if (ref.kind === "input") {
 				const schema = node.kind === "state" ? node.input?.[ref.name] : undefined;
-				if (schema === undefined || !schemaHasPath(schema, ref.path)) diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor input('${ref.name}') must name an input of the current actor-local action state.`, use.pointer, source));
+				if (schema === undefined || !schemaHasPath(schema, ref.path))
+					diagnostics.push(
+						diagnostic(
+							"ACTOR_ISOLATION_VIOLATION",
+							`Actor input('${ref.name}') must name an input of the current actor-local action state.`,
+							use.pointer,
+							source,
+						),
+					);
 				continue;
 			}
-			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `Actor visit('${ref.state}') must name an actor-local state.`, use.pointer, source));
-			else if (ref.kind !== "visit") diagnostics.push(diagnostic("ACTOR_ISOLATION_VIOLATION", `${ref.kind}() cannot cross an actor boundary; capture it in the actor placement input.`, use.pointer, source));
+			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state")
+				diagnostics.push(
+					diagnostic(
+						"ACTOR_ISOLATION_VIOLATION",
+						`Actor visit('${ref.state}') must name an actor-local state.`,
+						use.pointer,
+						source,
+					),
+				);
+			else if (ref.kind !== "visit")
+				diagnostics.push(
+					diagnostic(
+						"ACTOR_ISOLATION_VIOLATION",
+						`${ref.kind}() cannot cross an actor boundary; capture it in the actor placement input.`,
+						use.pointer,
+						source,
+					),
+				);
 		}
 	}
 }
@@ -730,7 +1159,8 @@ function actorWorkflowDominators(
 	const predecessors = new Map<StatePath, Set<StatePath>>();
 	for (const state of reachable) predecessors.set(state, new Set());
 	for (const state of reachable) {
-		for (const target of actorWorkflowControlSuccessors(states[state]!)) if (reachable.has(target)) predecessors.get(target)!.add(state);
+		for (const target of actorWorkflowControlSuccessors(states[state]!))
+			if (reachable.has(target)) predecessors.get(target)!.add(state);
 	}
 	const dominators = new Map<StatePath, Set<StatePath>>();
 	for (const state of reachable) dominators.set(state, state === initial ? new Set([state]) : new Set(reachable));
@@ -740,9 +1170,15 @@ function actorWorkflowDominators(
 		for (const state of reachable) {
 			if (state === initial) continue;
 			const incoming = [...predecessors.get(state)!];
-			const common = incoming.length === 0
-				? new Set<StatePath>()
-				: incoming.slice(1).reduce((result, predecessor) => new Set([...result].filter((item) => dominators.get(predecessor)!.has(item))), new Set(dominators.get(incoming[0]!)!));
+			const common =
+				incoming.length === 0
+					? new Set<StatePath>()
+					: incoming
+							.slice(1)
+							.reduce(
+								(result, predecessor) => new Set([...result].filter((item) => dominators.get(predecessor)!.has(item))),
+								new Set(dominators.get(incoming[0]!)!),
+							);
 			common.add(state);
 			if (!sameSet(dominators.get(state)!, common)) {
 				dominators.set(state, common);
@@ -764,15 +1200,31 @@ function validateMessagingNode(
 ): void {
 	if (node.to.length === 0) return;
 	const targetOwner = node.to.includes(".@") ? node.to.slice(0, node.to.lastIndexOf(".@")) : undefined;
-	if (targetOwner !== undefined && placement.owner !== targetOwner && !(placement.owner?.startsWith(`${targetOwner}.`) ?? false)) {
-		diagnostics.push(diagnostic("ACTOR_SCOPE_VIOLATION", `Actor '${placement.path}' cannot address declaration '${node.to}' outside its lexical scope.`, `${pointer}/to`, source));
+	if (
+		targetOwner !== undefined &&
+		placement.owner !== targetOwner &&
+		!(placement.owner?.startsWith(`${targetOwner}.`) ?? false)
+	) {
+		diagnostics.push(
+			diagnostic(
+				"ACTOR_SCOPE_VIOLATION",
+				`Actor '${placement.path}' cannot address declaration '${node.to}' outside its lexical scope.`,
+				`${pointer}/to`,
+				source,
+			),
+		);
 	}
 }
 
 function actorDefinitionAst(declaration: ActorEndpointDeclarationAst): ActorDefinitionAst {
 	return declaration.kind === "actorPool"
 		? declaration.worker
-		: { input: declaration.input, protocol: declaration.protocol, initial: declaration.initial, states: declaration.states };
+		: {
+				input: declaration.input,
+				protocol: declaration.protocol,
+				initial: declaration.initial,
+				states: declaration.states,
+			};
 }
 
 function validateActorTargets(
@@ -782,23 +1234,61 @@ function validateActorTargets(
 	source: ChartSource,
 ): void {
 	for (const [path, node] of Object.entries(states)) {
-		if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch") continue;
+		if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch")
+			continue;
 		const actor = actors[node.to];
 		if (actor === undefined) continue;
-		if (!(node.event in actor.protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `${node.kind} in '${path}' names unknown message '${node.event}'.`, `${statePointer(path)}/event`, source));
+		if (!(node.event in actor.protocol))
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_PROTOCOL_MESSAGE",
+					`${node.kind} in '${path}' names unknown message '${node.event}'.`,
+					`${statePointer(path)}/event`,
+					source,
+				),
+			);
 		const owner = actor.owner;
-		if (owner !== undefined && path !== owner && !path.startsWith(`${owner}.`)) diagnostics.push(diagnostic("ACTOR_SCOPE_VIOLATION", `State '${path}' cannot address actor '${actor.path}' outside its lexical scope.`, `${statePointer(path)}/to`, source));
+		if (owner !== undefined && path !== owner && !path.startsWith(`${owner}.`))
+			diagnostics.push(
+				diagnostic(
+					"ACTOR_SCOPE_VIOLATION",
+					`State '${path}' cannot address actor '${actor.path}' outside its lexical scope.`,
+					`${statePointer(path)}/to`,
+					source,
+				),
+			);
 		validateCallRouting(node, actor.protocol[node.event], `${statePointer(path)}`, diagnostics, source);
 	}
 	for (const declaration of Object.values(actors)) {
 		for (const [stateId, node] of Object.entries(actorDefinitionAst(declaration).states)) {
-			if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch") continue;
+			if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch")
+				continue;
 			const target = actors[node.to];
 			const pointer = `/actors/${escapePointer(declaration.name)}/states/${escapePointer(stateId)}`;
 			if (target === undefined) continue;
-			if (!(node.event in target.protocol)) diagnostics.push(diagnostic("UNKNOWN_PROTOCOL_MESSAGE", `${node.kind} in actor '${declaration.path}.${stateId}' names unknown message '${node.event}'.`, `${pointer}/event`, source));
+			if (!(node.event in target.protocol))
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_PROTOCOL_MESSAGE",
+						`${node.kind} in actor '${declaration.path}.${stateId}' names unknown message '${node.event}'.`,
+						`${pointer}/event`,
+						source,
+					),
+				);
 			const targetOwner = target.owner;
-			if (targetOwner !== undefined && declaration.owner !== targetOwner && !(declaration.owner?.startsWith(`${targetOwner}.`) ?? false)) diagnostics.push(diagnostic("ACTOR_SCOPE_VIOLATION", `Actor '${declaration.path}' cannot address actor '${target.path}' outside its lexical scope.`, `${pointer}/to`, source));
+			if (
+				targetOwner !== undefined &&
+				declaration.owner !== targetOwner &&
+				!(declaration.owner?.startsWith(`${targetOwner}.`) ?? false)
+			)
+				diagnostics.push(
+					diagnostic(
+						"ACTOR_SCOPE_VIOLATION",
+						`Actor '${declaration.path}' cannot address actor '${target.path}' outside its lexical scope.`,
+						`${pointer}/to`,
+						source,
+					),
+				);
 			validateCallRouting(node, target.protocol[node.event], pointer, diagnostics, source);
 		}
 	}
@@ -813,16 +1303,40 @@ function validateCallRouting(
 ): void {
 	if (message === undefined || (node.kind !== "call" && node.kind !== "callBatch")) return;
 	if (node.kind === "callBatch") {
-		if (message.reply.kind !== "single") diagnostics.push(diagnostic("INVALID_CALL_BATCH_REPLY", "callBatch() requires a protocol message with exactly one reply schema.", pointer, source));
-		if (node.target.length === 0) diagnostics.push(diagnostic("INVALID_CALL_TARGET", "callBatch() requires a target.", pointer, source));
+		if (message.reply.kind !== "single")
+			diagnostics.push(
+				diagnostic(
+					"INVALID_CALL_BATCH_REPLY",
+					"callBatch() requires a protocol message with exactly one reply schema.",
+					pointer,
+					source,
+				),
+			);
+		if (node.target.length === 0)
+			diagnostics.push(diagnostic("INVALID_CALL_TARGET", "callBatch() requires a target.", pointer, source));
 		return;
 	}
 	if (message.reply.kind === "named") {
 		const expected = Object.keys(message.reply.schemas).sort();
 		const actual = Object.keys(node.transitions).sort();
-		if (JSON.stringify(expected) !== JSON.stringify(actual) || node.target !== undefined) diagnostics.push(diagnostic("INVALID_CALL_TRANSITIONS", `call() named reply transitions must be exactly: ${expected.join(", ")}.`, pointer, source));
+		if (JSON.stringify(expected) !== JSON.stringify(actual) || node.target !== undefined)
+			diagnostics.push(
+				diagnostic(
+					"INVALID_CALL_TRANSITIONS",
+					`call() named reply transitions must be exactly: ${expected.join(", ")}.`,
+					pointer,
+					source,
+				),
+			);
 	} else if (node.target === undefined || Object.keys(node.transitions).length > 0) {
-		diagnostics.push(diagnostic("INVALID_CALL_TARGET", "Void/single reply call() requires target and no named transitions.", pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_CALL_TARGET",
+				"Void/single reply call() requires target and no named transitions.",
+				pointer,
+				source,
+			),
+		);
 	}
 }
 
@@ -834,7 +1348,11 @@ function validateActorUsage(
 ): void {
 	const targeted = new Set<string>();
 	const collect = (node: StateAst | ActorWorkflowStateAst) => {
-		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && !("self" in node && node.self === true)) targeted.add(node.to);
+		if (
+			(node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") &&
+			!("self" in node && node.self === true)
+		)
+			targeted.add(node.to);
 	};
 	for (const node of Object.values(states)) collect(node);
 	for (const actor of Object.values(actors)) {
@@ -842,15 +1360,18 @@ function validateActorUsage(
 	}
 	for (const [path, actor] of Object.entries(actors)) {
 		if (targeted.has(path)) continue;
-		const pointer = actor.owner === undefined
-			? `/actors/${escapePointer(actor.name)}`
-			: `${statePointer(actor.owner)}/actors/${escapePointer(actor.name)}`;
-		diagnostics.push(diagnostic(
-			"UNUSED_ACTOR",
-			`Actor '${path}' is never targeted by send(), sendBatch(), call(), or callBatch().`,
-			pointer,
-			source,
-		));
+		const pointer =
+			actor.owner === undefined
+				? `/actors/${escapePointer(actor.name)}`
+				: `${statePointer(actor.owner)}/actors/${escapePointer(actor.name)}`;
+		diagnostics.push(
+			diagnostic(
+				"UNUSED_ACTOR",
+				`Actor '${path}' is never targeted by send(), sendBatch(), call(), or callBatch().`,
+				pointer,
+				source,
+			),
+		);
 	}
 }
 
@@ -861,7 +1382,14 @@ function validateActorCallCycles(
 ): void {
 	const graph = new Map<string, Set<string>>();
 	for (const [path, actor] of Object.entries(actors)) {
-		graph.set(path, new Set(Object.values(actorDefinitionAst(actor).states).flatMap((state) => state.kind === "call" || state.kind === "callBatch" ? [state.to] : [])));
+		graph.set(
+			path,
+			new Set(
+				Object.values(actorDefinitionAst(actor).states).flatMap((state) =>
+					state.kind === "call" || state.kind === "callBatch" ? [state.to] : [],
+				),
+			),
+		);
 	}
 	const settled = new Set<string>();
 	const visiting = new Set<string>();
@@ -869,7 +1397,14 @@ function validateActorCallCycles(
 		if (settled.has(path)) return;
 		if (visiting.has(path)) {
 			const cycle = [...trail.slice(trail.indexOf(path)), path];
-			diagnostics.push(diagnostic("ACTOR_CALL_CYCLE", `Static actor call cycle is forbidden: ${cycle.join(" -> ")}.`, `/actors`, source));
+			diagnostics.push(
+				diagnostic(
+					"ACTOR_CALL_CYCLE",
+					`Static actor call cycle is forbidden: ${cycle.join(" -> ")}.`,
+					`/actors`,
+					source,
+				),
+			);
 			return;
 		}
 		visiting.add(path);
@@ -894,11 +1429,20 @@ function toValueAst(
 		return undefined;
 	}
 	if (typeof input !== "object") {
-		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values must be JSON data with InputRef leaves.", pointer, source));
+		diagnostics.push(
+			diagnostic("INVALID_ACTOR_VALUE", "Actor values must be JSON data with InputRef leaves.", pointer, source),
+		);
 		return undefined;
 	}
 	if (isRecord(input) && (input.kind === "actorDeclaration" || input.kind === "actorPoolDeclaration")) {
-		diagnostics.push(diagnostic("ACTOR_DECLARATION_IN_DATA", "Static actor declarations cannot be embedded in runtime data.", pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"ACTOR_DECLARATION_IN_DATA",
+				"Static actor declarations cannot be embedded in runtime data.",
+				pointer,
+				source,
+			),
+		);
 		return undefined;
 	}
 	if (isInputRef(input)) return toInputRef(input, pointer, diagnostics, source);
@@ -908,17 +1452,25 @@ function toValueAst(
 	}
 	ancestors.add(input);
 	if (Array.isArray(input)) {
-		const values = input.map((value, index) => toValueAst(value, `${pointer}/${index}`, diagnostics, source, ancestors) ?? null);
+		const values = input.map(
+			(value, index) => toValueAst(value, `${pointer}/${index}`, diagnostics, source, ancestors) ?? null,
+		);
 		ancestors.delete(input);
 		return values;
 	}
-	if (!isRecord(input) || (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)) {
-		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values must contain only plain objects.", pointer, source));
+	if (
+		!isRecord(input) ||
+		(Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null)
+	) {
+		diagnostics.push(
+			diagnostic("INVALID_ACTOR_VALUE", "Actor values must contain only plain objects.", pointer, source),
+		);
 		ancestors.delete(input);
 		return undefined;
 	}
 	const value: Record<string, ValueAst> = {};
-	for (const [name, child] of Object.entries(input)) value[name] = toValueAst(child, `${pointer}/${escapePointer(name)}`, diagnostics, source, ancestors) ?? null;
+	for (const [name, child] of Object.entries(input))
+		value[name] = toValueAst(child, `${pointer}/${escapePointer(name)}`, diagnostics, source, ancestors) ?? null;
 	ancestors.delete(input);
 	return value;
 }
@@ -970,7 +1522,14 @@ function collectState(
 		}
 		const outcome = input.outcome === "failed" ? "failed" : "complete";
 		if (input.outcome !== undefined && input.outcome !== "complete" && input.outcome !== "failed") {
-			diagnostics.push(diagnostic("INVALID_FINAL_OUTCOME", "Final outcome must be 'complete' or 'failed'.", `${pointer}/outcome`, source));
+			diagnostics.push(
+				diagnostic(
+					"INVALID_FINAL_OUTCOME",
+					"Final outcome must be 'complete' or 'failed'.",
+					`${pointer}/outcome`,
+					source,
+				),
+			);
 		}
 		const notify = toTerminalNotification(input.notify, `${pointer}/notify`, diagnostics, source);
 		states[path] = deepFreeze({
@@ -1178,43 +1737,131 @@ function collectState(
 		}
 		const authoredSelf = isRecord(input.to) && input.to.kind === "actorSelf";
 		const targetActor = authoredSelf ? undefined : isRecord(input.to) ? actorTargets.get(input.to) : undefined;
-		if (authoredSelf) diagnostics.push(diagnostic("SELF_OUTSIDE_ACTOR", "self() may only target send() or sendBatch() inside actor().", `${pointer}/to`, source));
-		else if (targetActor === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_TARGET", `${input.kind} in state '${path}' must target a placed static actor declaration.`, `${pointer}/to`, source));
+		if (authoredSelf)
+			diagnostics.push(
+				diagnostic(
+					"SELF_OUTSIDE_ACTOR",
+					"self() may only target send() or sendBatch() inside actor().",
+					`${pointer}/to`,
+					source,
+				),
+			);
+		else if (targetActor === undefined)
+			diagnostics.push(
+				diagnostic(
+					"INVALID_ACTOR_TARGET",
+					`${input.kind} in state '${path}' must target a placed static actor declaration.`,
+					`${pointer}/to`,
+					source,
+				),
+			);
 		const eventType = typeof input.event === "string" && input.event.length > 0 ? input.event : undefined;
-		if (eventType === undefined) diagnostics.push(diagnostic("INVALID_ACTOR_EVENT", `${input.kind}.event must be a non-empty protocol message name.`, `${pointer}/event`, source));
+		if (eventType === undefined)
+			diagnostics.push(
+				diagnostic(
+					"INVALID_ACTOR_EVENT",
+					`${input.kind}.event must be a non-empty protocol message name.`,
+					`${pointer}/event`,
+					source,
+				),
+			);
 		if (input.kind === "send" || input.kind === "sendBatch") {
 			const batch = input.kind === "sendBatch";
 			const field = batch ? "inputs" : "input";
-			if (!Object.hasOwn(input, field)) diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${input.kind}() requires ${field}.`, pointer, source));
-			if (batch && Array.isArray(input.inputs) && input.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
+			if (!Object.hasOwn(input, field))
+				diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${input.kind}() requires ${field}.`, pointer, source));
+			if (batch && Array.isArray(input.inputs) && input.inputs.length === 0)
+				diagnostics.push(
+					diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
+				);
 			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
-			if (target.length === 0) diagnostics.push(diagnostic("INVALID_TRANSITION_TARGET", `${input.kind} target must be a non-empty state id.`, `${pointer}/target`, source));
+			if (target.length === 0)
+				diagnostics.push(
+					diagnostic(
+						"INVALID_TRANSITION_TARGET",
+						`${input.kind} target must be a non-empty state id.`,
+						`${pointer}/target`,
+						source,
+					),
+				);
 			const value = toValueAst(input[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
-			states[path] = deepFreeze(batch
-				? ({ kind: "sendBatch", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, inputs: value } satisfies SendBatchStateAst)
-					: ({ kind: "send", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, input: value } satisfies SendStateAst),
+			states[path] = deepFreeze(
+				batch
+					? ({
+							kind: "sendBatch",
+							id: localId,
+							...parent,
+							to: targetActor ?? "",
+							event: eventType ?? "",
+							target,
+							transitions: {},
+							inputs: value,
+						} satisfies SendBatchStateAst)
+					: ({
+							kind: "send",
+							id: localId,
+							...parent,
+							to: targetActor ?? "",
+							event: eventType ?? "",
+							target,
+							transitions: {},
+							input: value,
+						} satisfies SendStateAst),
 			);
 			return;
 		}
 		if (input.kind === "callBatch") {
-			if (Array.isArray(input.inputs) && input.inputs.length === 0) diagnostics.push(diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source));
+			if (Array.isArray(input.inputs) && input.inputs.length === 0)
+				diagnostics.push(
+					diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
+				);
 			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
-			if (target.length === 0) diagnostics.push(diagnostic("INVALID_CALL_TARGET", "callBatch() target must be a non-empty state id.", `${pointer}/target`, source));
+			if (target.length === 0)
+				diagnostics.push(
+					diagnostic(
+						"INVALID_CALL_TARGET",
+						"callBatch() target must be a non-empty state id.",
+						`${pointer}/target`,
+						source,
+					),
+				);
 			states[path] = deepFreeze({
-				kind: "callBatch", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "",
-				inputs: toValueAst(input.inputs, `${pointer}/inputs`, diagnostics, source) ?? [], target, transitions: {},
+				kind: "callBatch",
+				id: localId,
+				...parent,
+				to: targetActor ?? "",
+				event: eventType ?? "",
+				inputs: toValueAst(input.inputs, `${pointer}/inputs`, diagnostics, source) ?? [],
+				target,
+				transitions: {},
 			} satisfies CallBatchStateAst);
 			return;
 		}
 		const value = toValueAst(input.input, `${pointer}/input`, diagnostics, source);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
 		const target = typeof input.target === "string" && input.target.length > 0 ? input.target : undefined;
-		states[path] = deepFreeze({ kind: "call", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", input: value ?? null, ...(target === undefined ? {} : { target }), transitions } satisfies CallStateAst);
+		states[path] = deepFreeze({
+			kind: "call",
+			id: localId,
+			...parent,
+			to: targetActor ?? "",
+			event: eventType ?? "",
+			input: value ?? null,
+			...(target === undefined ? {} : { target }),
+			transitions,
+		} satisfies CallStateAst);
 		return;
 	}
 
 	if (input.kind === "receive" || input.kind === "reply") {
-		diagnostics.push(diagnostic("ACTOR_STATE_OUTSIDE_ACTOR", `${String(input.kind)}() may only appear inside actor().`, pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"ACTOR_STATE_OUTSIDE_ACTOR",
+				`${String(input.kind)}() may only appear inside actor().`,
+				pointer,
+				source,
+			),
+		);
 		return;
 	}
 
@@ -1237,10 +1884,13 @@ function collectState(
 		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
 		for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
 			if (input[legacy] !== undefined) {
-				diagnostics.push(diagnostic(
+				diagnostics.push(
+					diagnostic(
 						"LEGACY_AGENT_POLICY",
 						`${legacy} moved from the action state into agent() options.`,
-						`${pointer}/${legacy}`, source),
+						`${pointer}/${legacy}`,
+						source,
+					),
 				);
 			}
 		}
@@ -1249,7 +1899,7 @@ function collectState(
 		if (validation?.guard.kind === "script") {
 			const actionArtifacts = action.kind === "agent" ? (action.artifacts ?? {}) : {};
 			for (const name of Object.keys(validation.guard.artifacts ?? {})) {
-				if (Object.prototype.hasOwnProperty.call(actionArtifacts, name)) {
+				if (Object.hasOwn(actionArtifacts, name)) {
 					diagnostics.push(
 						diagnostic(
 							"DUPLICATE_GUARD_ARTIFACT",
@@ -1303,19 +1953,47 @@ function validateTerminalArtifactRef(
 	source: ChartSource,
 ): void {
 	if (read.kind === "joinArtifactOf" && !insideMap(states, read.state)) {
-		diagnostics.push(diagnostic("INVALID_MAP_REF", `joinArtifactOf in terminal '${terminalPath}' references '${read.state}', which is not inside a map.`, pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_MAP_REF",
+				`joinArtifactOf in terminal '${terminalPath}' references '${read.state}', which is not inside a map.`,
+				pointer,
+				source,
+			),
+		);
 	}
 	const producer = states[read.state];
 	const artifacts = producer?.kind === "state" ? declaredArtifactsForState(producer) : undefined;
 	if (artifacts === undefined || Object.keys(artifacts).length === 0) {
-		diagnostics.push(diagnostic("UNKNOWN_FILE_SOURCE", `artifactOf in terminal '${terminalPath}' references '${read.state}', which declares no artifacts.`, pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"UNKNOWN_FILE_SOURCE",
+				`artifactOf in terminal '${terminalPath}' references '${read.state}', which declares no artifacts.`,
+				pointer,
+				source,
+			),
+		);
 		return;
 	}
-	if (read.artifact !== undefined && !Object.prototype.hasOwnProperty.call(artifacts, read.artifact)) {
-		diagnostics.push(diagnostic("UNKNOWN_ARTIFACT", `artifactOf in terminal '${terminalPath}': '${read.state}' declares no artifact '${read.artifact}'.`, pointer, source));
+	if (read.artifact !== undefined && !Object.hasOwn(artifacts, read.artifact)) {
+		diagnostics.push(
+			diagnostic(
+				"UNKNOWN_ARTIFACT",
+				`artifactOf in terminal '${terminalPath}': '${read.state}' declares no artifact '${read.artifact}'.`,
+				pointer,
+				source,
+			),
+		);
 	}
 	if (read.artifact === undefined && Object.keys(artifacts).length > 1) {
-		diagnostics.push(diagnostic("AMBIGUOUS_ARTIFACT", `artifactOf in terminal '${terminalPath}': '${read.state}' declares several artifacts — name one.`, pointer, source));
+		diagnostics.push(
+			diagnostic(
+				"AMBIGUOUS_ARTIFACT",
+				`artifactOf in terminal '${terminalPath}': '${read.state}' declares several artifacts — name one.`,
+				pointer,
+				source,
+			),
+		);
 	}
 }
 
@@ -1334,7 +2012,14 @@ function validateTargets(
 			if (notify !== undefined) {
 				const scope = notify.scope ?? path;
 				if (!(scope in states)) {
-					diagnostics.push(diagnostic("UNKNOWN_NOTIFICATION_SCOPE", `Terminal notification in '${path}' has unknown scope '${scope}'.`, `${pointer}/notify/scope`, source));
+					diagnostics.push(
+						diagnostic(
+							"UNKNOWN_NOTIFICATION_SCOPE",
+							`Terminal notification in '${path}' has unknown scope '${scope}'.`,
+							`${pointer}/notify/scope`,
+							source,
+						),
+					);
 				} else if (notify.prompt !== undefined) {
 					validateTemplateRefs(states, scope, notify.prompt, `${pointer}/notify/prompt`, diagnostics, source);
 				}
@@ -1345,14 +2030,32 @@ function validateTargets(
 			continue;
 		}
 		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
-		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && node.target !== undefined && !(sibling(node.target) in states)) {
-			diagnostics.push(diagnostic("UNKNOWN_TRANSITION_TARGET", `${node.kind} in state '${path}' targets unknown state '${node.target}'.`, `${pointer}/target`, source));
+		if (
+			(node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") &&
+			node.target !== undefined &&
+			!(sibling(node.target) in states)
+		) {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_TRANSITION_TARGET",
+					`${node.kind} in state '${path}' targets unknown state '${node.target}'.`,
+					`${pointer}/target`,
+					source,
+				),
+			);
 		}
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			const target = transition.target;
 			for (const [name, binding] of Object.entries(transition.input ?? {})) {
 				if (binding.kind !== "event") {
-					validateInputRefs(states, path, [binding], `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`, diagnostics, source);
+					validateInputRefs(
+						states,
+						path,
+						[binding],
+						`${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`,
+						diagnostics,
+						source,
+					);
 				}
 			}
 			if (!(sibling(target) in states)) {
@@ -1392,7 +2095,9 @@ function validateTargets(
 				const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 				const actionArtifactRefs = [
 					...(node.action.kind === "agent" ? (node.action.reads ?? []) : []),
-					...(node.action.kind === "script" || node.action.kind === "tsImport" ? Object.values(node.action.env ?? {}) : []),
+					...(node.action.kind === "script" || node.action.kind === "tsImport"
+						? Object.values(node.action.env ?? {})
+						: []),
 				];
 				const guardArtifactRefs = guard?.kind === "script" ? Object.values(guard.env ?? {}) : [];
 				const artifactRefs = [...actionArtifactRefs, ...guardArtifactRefs].filter(
@@ -1412,11 +2117,12 @@ function validateTargets(
 					}
 					const producer = states[read.state];
 					const selfGuardRef = guard?.kind === "script" && read.kind === "artifactOf" && read.state === path;
-					const artifacts = producer?.kind === "state"
-						? selfGuardRef && producer.action.kind !== "user"
-							? producer.action.artifacts
-							: declaredArtifactsForState(producer)
-						: undefined;
+					const artifacts =
+						producer?.kind === "state"
+							? selfGuardRef && producer.action.kind !== "user"
+								? producer.action.artifacts
+								: declaredArtifactsForState(producer)
+							: undefined;
 					if (artifacts === undefined || Object.keys(artifacts).length === 0) {
 						diagnostics.push(
 							diagnostic(
@@ -1428,7 +2134,7 @@ function validateTargets(
 						);
 						continue;
 					}
-					if (read.artifact !== undefined && !Object.prototype.hasOwnProperty.call(artifacts, read.artifact)) {
+					if (read.artifact !== undefined && !Object.hasOwn(artifacts, read.artifact)) {
 						diagnostics.push(
 							diagnostic(
 								"UNKNOWN_ARTIFACT",
@@ -1457,15 +2163,29 @@ function validateTargets(
 			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 			if (guard?.kind === "script") {
 				for (const value of Object.values(guard.env ?? {})) {
-					if (typeof value !== "string" && value.kind === "template") validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
+					if (typeof value !== "string" && value.kind === "template")
+						validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
 				}
 				for (const declared of Object.values(guard.artifacts ?? {})) {
-					validateTemplateRefs(states, path, declared.path, `${pointer}/action/validation/guard/artifacts`, diagnostics, source);
+					validateTemplateRefs(
+						states,
+						path,
+						declared.path,
+						`${pointer}/action/validation/guard/artifacts`,
+						diagnostics,
+						source,
+					);
 				}
 			}
 			if (node.action.kind === "agent" && typeof node.action.reentry === "object") {
-				validateTemplateRefs(states, path, node.action.reentry.resume,
-					`${pointer}/action/reentry/resume`, diagnostics, source);
+				validateTemplateRefs(
+					states,
+					path,
+					node.action.reentry.resume,
+					`${pointer}/action/reentry/resume`,
+					diagnostics,
+					source,
+				);
 			}
 			continue;
 		}
@@ -1600,18 +2320,44 @@ function validateActorPlacementRefs(
 			const pointer = `/actors/${escapePointer(actor.name)}/placement`;
 			if (ref.kind === "arg") continue;
 			if (ref.kind === "result") {
-				if (consumer === undefined || states[ref.state]?.kind !== "state" || !dominatesForDataRef(states, dominators, ref.state, consumer)) {
-					diagnostics.push(diagnostic("INVALID_ACTOR_PLACEMENT_REF", `Actor '${actor.path}' placement result('${ref.state}') must be available before its owner activates.`, pointer, source));
+				if (
+					consumer === undefined ||
+					states[ref.state]?.kind !== "state" ||
+					!dominatesForDataRef(states, dominators, ref.state, consumer)
+				) {
+					diagnostics.push(
+						diagnostic(
+							"INVALID_ACTOR_PLACEMENT_REF",
+							`Actor '${actor.path}' placement result('${ref.state}') must be available before its owner activates.`,
+							pointer,
+							source,
+						),
+					);
 				}
 				continue;
 			}
 			if (ref.kind === "key" || ref.kind === "item") {
 				let scope = consumer;
 				while (scope !== undefined && states[scope]?.kind !== "map") scope = parentStatePath(scope);
-				if (scope === undefined || (ref.map !== undefined && ref.map !== scope)) diagnostics.push(diagnostic("INVALID_ACTOR_PLACEMENT_REF", `Actor '${actor.path}' placement ${ref.kind}() must refer to its enclosing map owner.`, pointer, source));
+				if (scope === undefined || (ref.map !== undefined && ref.map !== scope))
+					diagnostics.push(
+						diagnostic(
+							"INVALID_ACTOR_PLACEMENT_REF",
+							`Actor '${actor.path}' placement ${ref.kind}() must refer to its enclosing map owner.`,
+							pointer,
+							source,
+						),
+					);
 				continue;
 			}
-			diagnostics.push(diagnostic("INVALID_ACTOR_PLACEMENT_REF", `${ref.kind}() is unavailable while actor '${actor.path}' placement input is created.`, pointer, source));
+			diagnostics.push(
+				diagnostic(
+					"INVALID_ACTOR_PLACEMENT_REF",
+					`${ref.kind}() is unavailable while actor '${actor.path}' placement input is created.`,
+					pointer,
+					source,
+				),
+			);
 		}
 	}
 }
@@ -1657,7 +2403,10 @@ function validateInputs(
 				...(transition.input === undefined ? {} : { bindings: transition.input }),
 			});
 		}
-		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && node.target !== undefined) {
+		if (
+			(node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") &&
+			node.target !== undefined
+		) {
 			const target = sibling(node.target);
 			if (target in states) edges.push({ target, pointer: `${pointer}/target` });
 		}
@@ -1774,7 +2523,13 @@ function validateDominatedRefs(
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			for (const [name, binding] of Object.entries(transition.input ?? {})) {
 				if (binding.kind === "result") {
-					check(binding.state, path, `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`, "result()", true);
+					check(
+						binding.state,
+						path,
+						`${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`,
+						"result()",
+						true,
+					);
 				}
 			}
 		}
@@ -1794,14 +2549,22 @@ function validateDominatedRefs(
 			if (guard?.kind === "script") {
 				for (const [name, value] of Object.entries(guard.env ?? {})) {
 					if (typeof value !== "string" && (value.kind === "artifactOf" || value.kind === "joinArtifactOf")) {
-						reads.push({ state: value.state, pointer: `${pointer}/action/validation/guard/env/${escapePointer(name)}`, allowSelf: value.kind === "artifactOf" && value.state === path });
+						reads.push({
+							state: value.state,
+							pointer: `${pointer}/action/validation/guard/env/${escapePointer(name)}`,
+							allowSelf: value.kind === "artifactOf" && value.state === path,
+						});
 					}
 					if (typeof value !== "string" && value.kind === "template") {
-						for (const ref of value.refs) if (ref.kind === "result") check(ref.state, path, `${pointer}/action/validation/guard/env/${escapePointer(name)}`, "result()");
+						for (const ref of value.refs)
+							if (ref.kind === "result")
+								check(ref.state, path, `${pointer}/action/validation/guard/env/${escapePointer(name)}`, "result()");
 					}
 				}
 				for (const [name, declared] of Object.entries(guard.artifacts ?? {})) {
-					for (const ref of declared.path.refs) if (ref.kind === "result") check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
+					for (const ref of declared.path.refs)
+						if (ref.kind === "result")
+							check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
 				}
 			}
 			for (const read of reads) {
@@ -1820,16 +2583,21 @@ function validateDominatedRefs(
 	}
 }
 
-function artifactReads(action: StateActionAst, basePointer: string): Array<{ state: StatePath; pointer: string; allowSelf?: boolean }> {
+function artifactReads(
+	action: StateActionAst,
+	basePointer: string,
+): Array<{ state: StatePath; pointer: string; allowSelf?: boolean }> {
 	const reads: Array<{ state: StatePath; pointer: string; allowSelf?: boolean }> = [];
 	if (action.kind === "agent") {
 		for (const [index, read] of (action.reads ?? []).entries()) {
-			if (read.kind === "artifactOf" || read.kind === "joinArtifactOf") reads.push({ state: read.state, pointer: `${basePointer}/action/reads/${index}` });
+			if (read.kind === "artifactOf" || read.kind === "joinArtifactOf")
+				reads.push({ state: read.state, pointer: `${basePointer}/action/reads/${index}` });
 		}
 	}
 	if (action.kind === "script" || action.kind === "tsImport") {
 		for (const [name, value] of Object.entries(action.env ?? {})) {
-			if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") reads.push({ state: value.state, pointer: `${basePointer}/action/env/${escapePointer(name)}` });
+			if (value.kind === "artifactOf" || value.kind === "joinArtifactOf")
+				reads.push({ state: value.state, pointer: `${basePointer}/action/env/${escapePointer(name)}` });
 		}
 	}
 	return reads;
@@ -1852,7 +2620,10 @@ function buildDominanceGraph(
 				addEdge(path, siblingTarget(node, transition.target));
 			}
 		}
-		if ((node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") && node.target !== undefined) {
+		if (
+			(node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") &&
+			node.target !== undefined
+		) {
 			addEdge(path, siblingTarget(node, node.target));
 		}
 		if (node.kind === "state" && node.after !== undefined) {
@@ -1935,7 +2706,8 @@ function dominatesForDataRef(
 ): boolean {
 	if (strictlyDominates(dominators, producer, consumer)) return true;
 	return (
-		parallelJoinDominates(states, dominators, producer, consumer) || mapJoinDominates(states, dominators, producer, consumer)
+		parallelJoinDominates(states, dominators, producer, consumer) ||
+		mapJoinDominates(states, dominators, producer, consumer)
 	);
 }
 
@@ -2061,7 +2833,14 @@ function validateInputRefs(
 ): void {
 	for (const ref of refs) {
 		if (ref.kind === "actorInput" || ref.kind === "messageInput") {
-			diagnostics.push(diagnostic("ACTOR_LOCAL_REF_OUTSIDE_ACTOR", `${ref.kind}() may only be used inside an actor workflow.`, pointer, source));
+			diagnostics.push(
+				diagnostic(
+					"ACTOR_LOCAL_REF_OUTSIDE_ACTOR",
+					`${ref.kind}() may only be used inside an actor workflow.`,
+					pointer,
+					source,
+				),
+			);
 		}
 		if (
 			(ref.kind === "key" || ref.kind === "item") &&
@@ -2190,18 +2969,33 @@ function toTerminalNotification(
 	let artifacts: (ArtifactOfAst | JoinArtifactOfAst)[] | undefined;
 	if (input.artifacts !== undefined) {
 		if (!Array.isArray(input.artifacts)) {
-			diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify.artifacts must be an array of artifactOf()/joinArtifactOf() references.", `${path}/artifacts`, source));
+			diagnostics.push(
+				diagnostic(
+					"INVALID_TERMINAL_NOTIFICATION",
+					"notify.artifacts must be an array of artifactOf()/joinArtifactOf() references.",
+					`${path}/artifacts`,
+					source,
+				),
+			);
 		} else {
 			artifacts = [];
 			for (const [index, item] of input.artifacts.entries()) {
 				const pointer = `${path}/artifacts/${index}`;
-				const ref = isRecord(item) && item.kind === "artifactOf"
-					? toArtifactOf(item, pointer, diagnostics, source)
-					: isRecord(item) && item.kind === "joinArtifactOf"
-						? toJoinArtifactOf(item, pointer, diagnostics, source)
-						: undefined;
+				const ref =
+					isRecord(item) && item.kind === "artifactOf"
+						? toArtifactOf(item, pointer, diagnostics, source)
+						: isRecord(item) && item.kind === "joinArtifactOf"
+							? toJoinArtifactOf(item, pointer, diagnostics, source)
+							: undefined;
 				if (ref === undefined && !(isRecord(item) && (item.kind === "artifactOf" || item.kind === "joinArtifactOf"))) {
-					diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify artifacts must use artifactOf() or joinArtifactOf().", pointer, source));
+					diagnostics.push(
+						diagnostic(
+							"INVALID_TERMINAL_NOTIFICATION",
+							"notify artifacts must use artifactOf() or joinArtifactOf().",
+							pointer,
+							source,
+						),
+					);
 				}
 				if (ref !== undefined) artifacts.push(ref);
 			}
@@ -2209,7 +3003,14 @@ function toTerminalNotification(
 	}
 	const scope = typeof input.scope === "string" && input.scope.length > 0 ? input.scope : undefined;
 	if (input.scope !== undefined && scope === undefined) {
-		diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify.scope must be a non-empty state path.", `${path}/scope`, source));
+		diagnostics.push(
+			diagnostic(
+				"INVALID_TERMINAL_NOTIFICATION",
+				"notify.scope must be a non-empty state path.",
+				`${path}/scope`,
+				source,
+			),
+		);
 	}
 	return {
 		...(prompt === undefined ? {} : { prompt }),
@@ -2496,21 +3297,32 @@ function toInputRef(
 	}
 	if (input.kind === "actorInput") {
 		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
-			diagnostics.push(diagnostic("INVALID_ACTOR_INPUT_REF", "actorInput path must be a non-empty selector.", path, source));
+			diagnostics.push(
+				diagnostic("INVALID_ACTOR_INPUT_REF", "actorInput path must be a non-empty selector.", path, source),
+			);
 			return undefined;
 		}
 		return { kind: "actorInput", ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
 	}
 	if (input.kind === "messageInput") {
 		if (typeof input.message !== "string" || input.message.length === 0) {
-			diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", "messageInput message must be non-empty.", path, source));
+			diagnostics.push(
+				diagnostic("INVALID_MESSAGE_INPUT_REF", "messageInput message must be non-empty.", path, source),
+			);
 			return undefined;
 		}
 		if (input.path !== undefined && (typeof input.path !== "string" || input.path.length === 0)) {
-			diagnostics.push(diagnostic("INVALID_MESSAGE_INPUT_REF", "messageInput path must be a non-empty selector.", path, source));
+			diagnostics.push(
+				diagnostic("INVALID_MESSAGE_INPUT_REF", "messageInput path must be a non-empty selector.", path, source),
+			);
 			return undefined;
 		}
-		return { kind: "messageInput", message: input.message, ...(input.path === undefined ? {} : { path: input.path }), ...jsonMark };
+		return {
+			kind: "messageInput",
+			message: input.message,
+			...(input.path === undefined ? {} : { path: input.path }),
+			...jsonMark,
+		};
 	}
 	if (input.kind === "key" || input.kind === "item") {
 		if (input.map !== undefined && (typeof input.map !== "string" || input.map.length === 0)) {
@@ -2810,12 +3622,22 @@ function toStateActionAst(
 		case "tsImport": {
 			if (typeof input.module !== "string" || input.module.length === 0) {
 				diagnostics.push(
-					diagnostic("INVALID_TS_IMPORT", "Imported action module must be a non-empty string.", `${path}/module`, source),
+					diagnostic(
+						"INVALID_TS_IMPORT",
+						"Imported action module must be a non-empty string.",
+						`${path}/module`,
+						source,
+					),
 				);
 			}
 			if (typeof input.export !== "string" || input.export.length === 0) {
 				diagnostics.push(
-					diagnostic("INVALID_TS_IMPORT", "Imported action export must be a non-empty string.", `${path}/export`, source),
+					diagnostic(
+						"INVALID_TS_IMPORT",
+						"Imported action export must be a non-empty string.",
+						`${path}/export`,
+						source,
+					),
 				);
 			}
 			const options = toScriptOptions(input, path, diagnostics, source, schemaRegistry, "INVALID_TS_IMPORT");
@@ -2874,7 +3696,12 @@ function toStateActionAst(
 		}
 		default:
 			diagnostics.push(
-				diagnostic("INVALID_ACTION_KIND", "Action kind must be 'agent', 'user', 'script' or 'tsImport'.", `${path}/kind`, source),
+				diagnostic(
+					"INVALID_ACTION_KIND",
+					"Action kind must be 'agent', 'user', 'script' or 'tsImport'.",
+					`${path}/kind`,
+					source,
+				),
 			);
 			return undefined;
 	}
@@ -2979,7 +3806,14 @@ function toTransitionMap(
 	for (const [eventType, raw] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(eventType)}`;
 		if (eventType === "FAILED") {
-			diagnostics.push(diagnostic("RESERVED_FAILED_TRANSITION", "FAILED is globally fail-fast and cannot be routed in authored charts.", pointer, source));
+			diagnostics.push(
+				diagnostic(
+					"RESERVED_FAILED_TRANSITION",
+					"FAILED is globally fail-fast and cannot be routed in authored charts.",
+					pointer,
+					source,
+				),
+			);
 			continue;
 		}
 		if (typeof raw === "string") {
@@ -3040,7 +3874,9 @@ function toTransitionInputs(
 	for (const [name, raw] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
 		if (!isRecord(raw)) {
-			diagnostics.push(diagnostic("INVALID_BINDING", "Transition input values must be event() bindings or refs.", pointer, source));
+			diagnostics.push(
+				diagnostic("INVALID_BINDING", "Transition input values must be event() bindings or refs.", pointer, source),
+			);
 			continue;
 		}
 		if (raw.kind === "event") {
@@ -3052,7 +3888,9 @@ function toTransitionInputs(
 			continue;
 		}
 		if (!isInputRef(raw)) {
-			diagnostics.push(diagnostic("INVALID_BINDING", "Transition input values must be event() bindings or refs.", pointer, source));
+			diagnostics.push(
+				diagnostic("INVALID_BINDING", "Transition input values must be event() bindings or refs.", pointer, source),
+			);
 			continue;
 		}
 		const ref = toInputRef(raw, pointer, diagnostics, source);

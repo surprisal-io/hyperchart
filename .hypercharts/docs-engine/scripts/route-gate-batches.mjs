@@ -5,7 +5,8 @@ import { emit, readJson, rejectAll } from "./doc-checks.mjs";
 function parsePathArray(name) {
 	try {
 		const value = JSON.parse(process.env[name] ?? "[]");
-		if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) throw new Error("not an array of paths");
+		if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+			throw new Error("not an array of paths");
 		return value;
 	} catch (error) {
 		rejectAll([`${name} must be a JSON array of paths: ${error.message}`]);
@@ -45,9 +46,7 @@ for (const unitId of batches.unitIds ?? []) {
 		continue;
 	}
 
-	const accepted = unitRefs
-		.filter((ref) => decisionById.get(ref.id)?.result === "pass")
-		.map((ref) => ref.finding);
+	const accepted = unitRefs.filter((ref) => decisionById.get(ref.id)?.result === "pass").map((ref) => ref.finding);
 	const findingsPath = `artifacts/docs-engine/approved-findings/${unitId}.json`;
 	mkdirSync(dirname(findingsPath), { recursive: true });
 	writeFileSync(findingsPath, `${JSON.stringify({ unitId, findings: accepted }, null, 2)}\n`);

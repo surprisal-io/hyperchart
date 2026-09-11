@@ -8,13 +8,23 @@ import {
 	reconcileGraphElements,
 } from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
 import { edgeMotionPoints } from "../packages/hyperchart/src/react/components/inspector/graph/edgeRouting.js";
-import { scopeStackForState, visibleStateIdsForScope } from "../packages/hyperchart/src/react/components/inspector/helpers/scope.js";
-import { actorMapLocalRun, actorMapPartialRun, actorNamedReplyRun, actorPendingCallRun, actorSendVoidRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
+import {
+	scopeStackForState,
+	visibleStateIdsForScope,
+} from "../packages/hyperchart/src/react/components/inspector/helpers/scope.js";
+import {
+	actorMapLocalRun,
+	actorMapPartialRun,
+	actorNamedReplyRun,
+	actorPendingCallRun,
+	actorSendVoidRun,
+} from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 
 function run(status: "pending" | "running" | "done", target = "done"): HyperchartRunInfo {
 	return {
 		runId: "layout-run",
-		branchId: "main",		chartName: "layout",
+		branchId: "main",
+		chartName: "layout",
 		status: status === "done" ? "completed" : "running",
 		cwd: "/workspace",
 		createdAt: 1,
@@ -113,23 +123,25 @@ describe("explicit actor graph contract", () => {
 		const sendState = actorSendVoidRun.states.find((state) => state.id === "record");
 		expect(sendState?.transitions).toEqual([expect.objectContaining({ event: "ENQUEUED", target: "done" })]);
 		const sendGraph = buildGraph(actorSendVoidRun, new Set(actorSendVoidRun.states.map((state) => state.id)));
-		expect(sendGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "record", target: "done", label: "ENQUEUED" }),
-		]));
+		expect(sendGraph.edges).toEqual(
+			expect.arrayContaining([expect.objectContaining({ source: "record", target: "done", label: "ENQUEUED" })]),
+		);
 
 		const messageIds = new Set(actorNamedReplyRun.states.map((state) => state.id));
 		const messageGraph = buildGraph(actorNamedReplyRun, messageIds);
-		expect(messageGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "apply", target: "@editor", label: "call · APPLY" }),
-		]));
+		expect(messageGraph.edges).toEqual(
+			expect.arrayContaining([expect.objectContaining({ source: "apply", target: "@editor", label: "call · APPLY" })]),
+		);
 
 		// The reply transaction already resolved this call. Do not draw a phantom wait edge.
 		expect(messageGraph.edges.some((edge) => edge.source === "@editor" && edge.target === "apply")).toBe(false);
 		const pendingGraph = buildGraph(actorPendingCallRun, new Set(actorPendingCallRun.states.map((state) => state.id)));
-		expect(pendingGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "apply", target: "@editor", label: "call · APPLY" }),
-			expect.objectContaining({ source: "@editor", target: "apply" }),
-		]));
+		expect(pendingGraph.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: "apply", target: "@editor", label: "call · APPLY" }),
+				expect.objectContaining({ source: "@editor", target: "apply" }),
+			]),
+		);
 
 		const ids = new Set(actorMapLocalRun.states.map((state) => state.id));
 		expect(ids.size).toBe(actorMapLocalRun.states.length);
@@ -141,11 +153,9 @@ describe("explicit actor graph contract", () => {
 		expect([...ownerScope].some((id) => id.includes("::actor"))).toBe(false);
 		expect(scopeStackForState(actorMapLocalRun.states, "projects#a.@editor")).toEqual(["projects", "projects#a"]);
 		const actorScope = visibleStateIdsForScope(actorMapLocalRun.states, { scopeId: "projects#a.@editor" });
-		expect([...actorScope]).toEqual(expect.arrayContaining([
-			"projects#a.@editor.idle",
-			"projects#a.@editor.apply",
-			"projects#a.@editor.settle",
-		]));
+		expect([...actorScope]).toEqual(
+			expect.arrayContaining(["projects#a.@editor.idle", "projects#a.@editor.apply", "projects#a.@editor.settle"]),
+		);
 	});
 
 	it("keeps inactive map placements as definition-only actors while materialized placements use runtime", () => {
@@ -158,20 +168,22 @@ describe("explicit actor graph contract", () => {
 			type: "actor-declaration",
 			actorDeclaration: expect.objectContaining({ declarationPath: "projects.@editor" }),
 		});
-		expect(actorMapPartialRun.states.find((state) => state.id === "projects#b.@editor")?.actorOccurrence).toBeUndefined();
-		expect([...visibleStateIdsForScope(actorMapPartialRun.states, { scopeId: "projects#b.@editor" })]).toEqual(expect.arrayContaining([
-			"projects#b.@editor.idle",
-			"projects#b.@editor.apply",
-			"projects#b.@editor.settle",
-		]));
+		expect(
+			actorMapPartialRun.states.find((state) => state.id === "projects#b.@editor")?.actorOccurrence,
+		).toBeUndefined();
+		expect([...visibleStateIdsForScope(actorMapPartialRun.states, { scopeId: "projects#b.@editor" })]).toEqual(
+			expect.arrayContaining(["projects#b.@editor.idle", "projects#b.@editor.apply", "projects#b.@editor.settle"]),
+		);
 	});
 
 	it("renders fire-and-forget send without a fabricated waiting reply edge", () => {
 		const ids = new Set(actorSendVoidRun.states.map((state) => state.id));
 		const graph = buildGraph(actorSendVoidRun, ids);
-		expect(graph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "record", target: "@auditor", label: "send · RECORD" }),
-		]));
+		expect(graph.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: "record", target: "@auditor", label: "send · RECORD" }),
+			]),
+		);
 		expect(graph.edges.some((edge) => edge.id.includes(":reply:"))).toBe(false);
 	});
 });

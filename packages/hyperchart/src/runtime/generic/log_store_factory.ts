@@ -19,15 +19,28 @@ export async function openRunLogStore(runId: string, options: OpenRunLogStoreOpt
 	const { runDir, storage } = resolveRunPaths(runId, options.storage);
 	const branchId = options.branchId ?? DEFAULT_BRANCH_ID;
 	switch (storage.kind) {
-		case "jsonl": return new JsonlLogStore(`${runDir}/log.jsonl`, branchId);
-		case "postgres": return PostgresLogStore.open({ dsn: storage.dsn, runId, branchId, onWarn: options.onWarn ?? (() => {}), access: options.access ?? "read" });
+		case "jsonl":
+			return new JsonlLogStore(`${runDir}/log.jsonl`, branchId);
+		case "postgres":
+			return PostgresLogStore.open({
+				dsn: storage.dsn,
+				runId,
+				branchId,
+				onWarn: options.onWarn ?? (() => {}),
+				access: options.access ?? "read",
+			});
 	}
 }
 
 export function parseRunLogStorage(value: unknown): RunLogStorage | undefined {
 	if (typeof value !== "object" || value === null) return undefined;
 	const candidate = value as Partial<RunLogStorage>;
-	if (typeof candidate.rootDir !== "string" || candidate.rootDir.length === 0 || (candidate.layout !== "run-id" && candidate.layout !== "sha256")) return undefined;
+	if (
+		typeof candidate.rootDir !== "string" ||
+		candidate.rootDir.length === 0 ||
+		(candidate.layout !== "run-id" && candidate.layout !== "sha256")
+	)
+		return undefined;
 	if (candidate.kind === "jsonl") return { kind: "jsonl", rootDir: candidate.rootDir, layout: candidate.layout };
 	if (candidate.kind === "postgres" && typeof candidate.dsn === "string" && candidate.dsn.length > 0)
 		return { kind: "postgres", dsn: candidate.dsn, rootDir: candidate.rootDir, layout: candidate.layout };

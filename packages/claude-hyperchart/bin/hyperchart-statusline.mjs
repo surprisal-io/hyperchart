@@ -26,7 +26,7 @@ const RESET = "\x1b[0m";
 
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 const runsRoot = process.env.HYPERCHART_RUNS_ROOT ?? join(configDir, "hypercharts", "runs");
-const storage = {kind: "jsonl", rootDir: runsRoot, layout: "run-id"};
+const storage = { kind: "jsonl", rootDir: runsRoot, layout: "run-id" };
 
 function readJson(path) {
 	try {
@@ -65,7 +65,12 @@ function liveLabel(runDir, status) {
 }
 
 function terminalLabel(status) {
-	const mark = status.state === "complete" ? `${GREEN}✓${RESET}` : status.state === "failed" ? `${RED}✗${RESET}` : `${DIM}■${RESET}`;
+	const mark =
+		status.state === "complete"
+			? `${GREEN}✓${RESET}`
+			: status.state === "failed"
+				? `${RED}✗${RESET}`
+				: `${DIM}■${RESET}`;
 	return `${mark} ${status.chartId}: ${status.state}`;
 }
 

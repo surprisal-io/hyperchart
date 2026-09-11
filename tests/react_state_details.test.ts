@@ -24,9 +24,11 @@ describe("StateDetails", () => {
 	});
 
 	it("distinguishes the owning repository from the selected branch action workspace", () => {
-		const markup = renderToStaticMarkup(createElement(RunOverview, {
-			run: { ...runningRun, cwd: "/project/repo", branchWorkspace: "/runs/example/workspaces/main" },
-		}));
+		const markup = renderToStaticMarkup(
+			createElement(RunOverview, {
+				run: { ...runningRun, cwd: "/project/repo", branchWorkspace: "/runs/example/workspaces/main" },
+			}),
+		);
 		expect(markup).toContain("project / repository");
 		expect(markup).toContain("/project/repo");
 		expect(markup).toContain("branch workspace (action cwd)");
@@ -39,7 +41,13 @@ describe("StateDetails", () => {
 			id: "prepare",
 			type: "script",
 			status: "done",
-			artifacts: [{ name: "context", path: "artifacts/context.json", schema: { schema: { type: "object", properties: { title: { type: "string" } } } } }],
+			artifacts: [
+				{
+					name: "context",
+					path: "artifacts/context.json",
+					schema: { schema: { type: "object", properties: { title: { type: "string" } } } },
+				},
+			],
 		};
 		const reader: HyperchartStateInfo = {
 			id: "write",
@@ -47,16 +55,25 @@ describe("StateDetails", () => {
 			status: "running",
 			agent: "writer",
 			reads: ['artifactOf("prepare", { artifact: "context" })'],
-			readArtifacts: [{ name: "context", sourceState: "prepare", path: "artifacts/context.json", schema: { schema: { type: "object", properties: { title: { type: "string" } } } } }],
+			readArtifacts: [
+				{
+					name: "context",
+					sourceState: "prepare",
+					path: "artifacts/context.json",
+					schema: { schema: { type: "object", properties: { title: { type: "string" } } } },
+				},
+			],
 			refs: { artifact: ['artifactOf("prepare", { artifact: "context" })'] },
 		};
-		const markup = renderToStaticMarkup(createElement(StateDetails, {
-			state: reader,
-			allStates: [producer, reader],
-			highlightedArtifact: { stateId: "prepare", name: "context" },
-			revealedArtifactStateIds: ["prepare"],
-			onHighlightArtifact: () => undefined,
-		}));
+		const markup = renderToStaticMarkup(
+			createElement(StateDetails, {
+				state: reader,
+				allStates: [producer, reader],
+				highlightedArtifact: { stateId: "prepare", name: "context" },
+				revealedArtifactStateIds: ["prepare"],
+				onHighlightArtifact: () => undefined,
+			}),
+		);
 		expect(markup).toContain("prepare → context");
 		expect(markup).toContain('id="artifact-contract-prepare-context"');
 		expect(markup).toContain("Contracts in scope");
@@ -64,7 +81,13 @@ describe("StateDetails", () => {
 	});
 
 	it("does not fade or expand a prompt that fits", () => {
-		const state: HyperchartStateInfo = { id: "write", type: "agent", status: "running", agent: "writer", taskPrompt: "Short prompt." };
+		const state: HyperchartStateInfo = {
+			id: "write",
+			type: "agent",
+			status: "running",
+			agent: "writer",
+			taskPrompt: "Short prompt.",
+		};
 		const markup = renderToStaticMarkup(createElement(StateDetails, { state, allStates: [state] }));
 		expect(markup).toContain("Short prompt.");
 		expect(markup).not.toContain("after:bg-gradient-to-t");
@@ -121,16 +144,25 @@ describe("StateDetails", () => {
 				notify: {
 					prompt: 'Report completed: {result("prepare", "summary")}',
 					scope: "prepare",
-					artifacts: [{ name: "report", sourceState: "prepare", path: "artifacts/final-report.json", schema: { schema: { type: "object" } } }],
+					artifacts: [
+						{
+							name: "report",
+							sourceState: "prepare",
+							path: "artifacts/final-report.json",
+							schema: { schema: { type: "object" } },
+						},
+					],
 				},
 			},
 		};
-		const markup = renderToStaticMarkup(createElement(StateDetails, {
-			state: terminal,
-			allStates: [producer, terminal],
-			onHighlightReply: () => undefined,
-			onHighlightArtifact: () => undefined,
-		}));
+		const markup = renderToStaticMarkup(
+			createElement(StateDetails, {
+				state: terminal,
+				allStates: [producer, terminal],
+				onHighlightReply: () => undefined,
+				onHighlightArtifact: () => undefined,
+			}),
+		);
 		expect(markup).toContain("Final outcome");
 		expect(markup).toContain("complete");
 		expect(markup).toContain("notification prompt");
@@ -140,23 +172,33 @@ describe("StateDetails", () => {
 	});
 
 	it("renders script template refs with the shared interpolation renderer", () => {
-		const run = storyScenario(chart({
-			kind: "chart", id: "script-result-link", initial: "prepare-data",
-			states: {
-				"prepare-data": { kind: "state", action: agent("producer", { reply: z.object({ title: z.string() }) }), transitions: { DONE: "render" } },
-				render: { kind: "state", action: script("node", []), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		})).staticRun();
+		const run = storyScenario(
+			chart({
+				kind: "chart",
+				id: "script-result-link",
+				initial: "prepare-data",
+				states: {
+					"prepare-data": {
+						kind: "state",
+						action: agent("producer", { reply: z.object({ title: z.string() }) }),
+						transitions: { DONE: "render" },
+					},
+					render: { kind: "state", action: script("node", []), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		).staticRun();
 		const scriptState = run.states.find((state) => state.id === "render")!;
 		const onHighlightReply = vi.fn();
-		render(createElement(TemplateTextBlock, {
-			text: '{json(result("prepare-data"))}',
-			state: scriptState,
-			allStates: run.states,
-			compact: true,
-			onHighlightReply,
-		}));
+		render(
+			createElement(TemplateTextBlock, {
+				text: '{json(result("prepare-data"))}',
+				state: scriptState,
+				allStates: run.states,
+				compact: true,
+				onHighlightReply,
+			}),
+		);
 		const link = screen.getByRole("button", { name: '${json(result("prepare-data"))}' });
 		fireEvent.click(link);
 		expect(onHighlightReply).toHaveBeenCalledExactlyOnceWith("prepare-data", "");
@@ -168,11 +210,13 @@ describe("StateDetails", () => {
 			type: "agent",
 			status: "done",
 			completedEvent: "REVIEW_REQUIRED",
-			transitions: [{
-				event: "REVIEW_REQUIRED",
-				target: "review-follow-up",
-				input: { draft: "event:draft", score: "event:score" },
-			}],
+			transitions: [
+				{
+					event: "REVIEW_REQUIRED",
+					target: "review-follow-up",
+					input: { draft: "event:draft", score: "event:score" },
+				},
+			],
 		};
 		const target: HyperchartStateInfo = {
 			id: "review-follow-up",

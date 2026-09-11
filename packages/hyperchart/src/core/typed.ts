@@ -1,5 +1,12 @@
 import type { z } from "zod";
-import type { ArtifactOfCst, ChartArgumentCst, ChartCst, EventBindingCst, JoinArtifactOfCst, InputRef } from "./types.js";
+import type {
+	ArtifactOfCst,
+	ChartArgumentCst,
+	ChartCst,
+	EventBindingCst,
+	JoinArtifactOfCst,
+	InputRef,
+} from "./types.js";
 
 // Dot-paths a result() selector may take into a value of type T. Free-form objects
 // (Record<string, unknown>) admit any tail; arrays and primitives end the path.
@@ -68,7 +75,9 @@ export type FilesOf<C> = C extends { states: infer S }
 	? Simplify2<
 			UnionToIntersection<
 				FlattenStates<S> extends infer E
-					? E extends [infer P extends string, { action: { artifacts: infer A; validation?: { guard: { kind: "script"; artifacts?: infer G } } } },
+					? E extends [
+							infer P extends string,
+							{ action: { artifacts: infer A; validation?: { guard: { kind: "script"; artifacts?: infer G } } } },
 						]
 						? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<A, G>> }
 						: E extends [infer P extends string, { action: { artifacts: infer A } }]
@@ -141,16 +150,16 @@ type VerifyArguments<C, Args> = C extends { args: infer Actual }
 		? Exclude<keyof Actual, keyof Args> extends never
 			? unknown
 			: { "chart argument metadata names an unknown Args key": { chartDeclares: Actual; registryDeclares: Args } }
-		: { "chart argument metadata is out of sync with the Args registry": { chartDeclares: Actual; registryDeclares: Args;
+		: {
+				"chart argument metadata is out of sync with the Args registry": {
+					chartDeclares: Actual;
+					registryDeclares: Args;
 				};
 			}
 	: unknown;
 
-type VerifyDecl<C, Args, Results, Files, Maps, Inputs> = VerifyArguments<C, Args> & Mutual<
-	Results,
-	ResultsOf<C>,
-	"results registry is out of sync with the chart"
-> &
+type VerifyDecl<C, Args, Results, Files, Maps, Inputs> = VerifyArguments<C, Args> &
+	Mutual<Results, ResultsOf<C>, "results registry is out of sync with the chart"> &
 	Mutual<Files, FilesOf<C>, "files registry is out of sync with the chart"> &
 	Mutual<Maps, MapsOf<C>, "maps registry is out of sync with the chart"> &
 	Mutual<Inputs, InputsOf<C>, "inputs registry is out of sync with the chart">;

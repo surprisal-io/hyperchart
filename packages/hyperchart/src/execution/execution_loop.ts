@@ -8,7 +8,11 @@ export interface ExecutionSession {
 }
 
 // Runs a chart: execution owns the restored projection; runtime only performs effects and I/O.
-export async function start(runtime: Runtime, execution: ExecutionSession, args?: Readonly<Record<string, unknown>>): Promise<MachineState> {
+export async function start(
+	runtime: Runtime,
+	execution: ExecutionSession,
+	args?: Readonly<Record<string, unknown>>,
+): Promise<MachineState> {
 	if (execution.isFresh() && args !== undefined) {
 		await runtime.runEffects([{ kind: "durable_records", id: "args", records: [{ type: "args", args }] }]);
 	}

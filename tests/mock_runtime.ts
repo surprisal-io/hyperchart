@@ -1,6 +1,13 @@
 import type { Runtime } from "../packages/hyperchart/src/runtime/runtime.js";
 import { toAsyncIterable } from "../packages/hyperchart/src/index.js";
-import { createBranchProjection, projectBranch, type ChartAst, type DurableLogRecord, type Effect, type MachineEvent } from "../packages/hyperchart/src/index.js";
+import {
+	createBranchProjection,
+	projectBranch,
+	type ChartAst,
+	type DurableLogRecord,
+	type Effect,
+	type MachineEvent,
+} from "../packages/hyperchart/src/index.js";
 
 type MaybeAsyncIterable<T> = Iterable<T> | AsyncIterable<T>;
 
@@ -36,7 +43,13 @@ export class MockRuntime implements Runtime {
 				let seqId = this.logs.at(-1)?.seqId ?? 0;
 				let parentId = seqId === 0 ? null : seqId;
 				for (const draft of effect.records) {
-					const record = { ...draft, seqId: ++seqId, parentId, branchId: this.branchId, timestamp: Date.now() } as DurableLogRecord;
+					const record = {
+						...draft,
+						seqId: ++seqId,
+						parentId,
+						branchId: this.branchId,
+						timestamp: Date.now(),
+					} as DurableLogRecord;
 					this.logs.push(record);
 					parentId = record.seqId;
 				}

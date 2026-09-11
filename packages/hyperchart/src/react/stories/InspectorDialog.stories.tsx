@@ -37,7 +37,12 @@ export const Running: Story = {
 	},
 	render: (args) => <InteractiveInspector {...args} />,
 	parameters: {
-		docs: { description: { story: "Live runtime inspector with controlled selection between durable runs and explicit repository versus branch-workspace metadata." } },
+		docs: {
+			description: {
+				story:
+					"Live runtime inspector with controlled selection between durable runs and explicit repository versus branch-workspace metadata.",
+			},
+		},
 	},
 	play: async ({ canvasElement, args }) => {
 		const canvas = within(canvasElement.ownerDocument.body);
@@ -58,7 +63,9 @@ export const StaticInspect: Story = {
 		selectedRunId: inspectRun.runId,
 	},
 	parameters: {
-		docs: { description: { story: "Read-only inspection with explicit return from state details to the chart overview." } },
+		docs: {
+			description: { story: "Read-only inspection with explicit return from state details to the chart overview." },
+		},
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement.ownerDocument.body);
@@ -90,6 +97,11 @@ export const ActionVisitReentry: Story = {
 		selectedRunId: actorReentryRun.runId,
 	},
 	parameters: {
-		docs: { description: { story: "Three separate visits to the same action, projected from an execution-loop capture. Completed visits remain distinct from the current invocation." } },
+		docs: {
+			description: {
+				story:
+					"Three separate visits to the same action, projected from an execution-loop capture. Completed visits remain distinct from the current invocation.",
+			},
+		},
 	},
 };

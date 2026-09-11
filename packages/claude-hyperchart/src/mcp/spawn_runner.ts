@@ -5,12 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { recoverStaleRunTerminalNotification } from "@surprisal/hyperchart/runtime";
 import type { HyperchartRunnerConfig } from "@surprisal/hyperchart/runner";
-import {
-	isRunLive,
-	isTerminalRunState,
-	readRunStatus,
-	type HyperchartRunStatus,
-} from "@surprisal/hyperchart/sessions";
+import { isRunLive, isTerminalRunState, readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
 
 function runnerEntry(): string {
 	const moduleDir = dirname(fileURLToPath(import.meta.url));

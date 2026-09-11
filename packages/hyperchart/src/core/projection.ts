@@ -1,9 +1,19 @@
 import assert from "./assert.js";
-import type { ActionStateAst, ActionUID,
-	ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent,
-	InputRef, SchemaAst,
+import type {
+	ActionStateAst,
+	ActionUID,
+	ActorEndpointDeclarationAst,
+	ActorDeclarationAst,
+	ActorPoolDeclarationAst,
+	ChartAst,
+	ChartEvent,
+	InputRef,
+	SchemaAst,
 	StateActionAst,
-	StateAst, StatePath, TransitionAst } from "./types.js";
+	StateAst,
+	StatePath,
+	TransitionAst,
+} from "./types.js";
 import type {
 	ActorMessageEnvelope,
 	AgentRecoveryScope,
@@ -12,7 +22,15 @@ import type {
 	StateActionRetryLog,
 	UserInteractionOpenedLog,
 } from "./durable_events.js";
-import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
+import {
+	actorContextForState,
+	actorDefinitionForEndpoint,
+	actorGenerationPath,
+	actorLogicalOccurrencePath,
+	actorOccurrencePath,
+	actorPoolWorkerOccurrencePath,
+	actorStatePath,
+} from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
 	childPath,
@@ -48,11 +66,11 @@ const EMPTY_RECOVERY_COUNTERS: RecoveryCounters = {
 };
 
 type PendingActionBase = {
-			actionUid: ActionUID;
-			visitId: number;
-			seqId: number;
-			invokeSeqId: number;
-			sessionId: string;
+	actionUid: ActionUID;
+	visitId: number;
+	seqId: number;
+	invokeSeqId: number;
+	sessionId: string;
 	/** Resolved action definition pinned by the original invoke fact. */
 	definition: StateActionAst;
 	/** Original invoke timestamp — the anchor for the state's after deadline. */
@@ -130,21 +148,21 @@ export type ProjectedActorEndpointOccurrence = ProjectedActorOccurrence | Projec
 
 export type PendingActorCall =
 	| {
-		kind: "singleton";
-		callId: string;
-		callerState: StatePath;
-		occurrence: StatePath;
-		messageId: string;
-		status: "enqueued" | "accepted" | "partial";
-	}
+			kind: "singleton";
+			callId: string;
+			callerState: StatePath;
+			occurrence: StatePath;
+			messageId: string;
+			status: "enqueued" | "accepted" | "partial";
+	  }
 	| {
-		kind: "batch";
-		callId: string;
-		callerState: StatePath;
-		occurrence: StatePath;
-		messageIds: readonly string[];
-		status: "enqueued" | "accepted" | "partial";
-	};
+			kind: "batch";
+			callId: string;
+			callerState: StatePath;
+			occurrence: StatePath;
+			messageIds: readonly string[];
+			status: "enqueued" | "accepted" | "partial";
+	  };
 
 export type OpenProjectedUserInteraction = {
 	opened: UserInteractionOpenedLog;
@@ -291,9 +309,24 @@ export function projectBranch(
 				if (firstMessage === undefined) throw new Error("Actor enqueue record must contain at least one message");
 				const callId = firstMessage.callId;
 				if (callId !== undefined) {
-					projection.pendingActorCalls[callId] = record.source.kind === "callBatch"
-						? { kind: "batch", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageIds: record.messages.map((message) => message.messageId), status: "enqueued" }
-						: { kind: "singleton", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageId: firstMessage.messageId, status: "enqueued" };
+					projection.pendingActorCalls[callId] =
+						record.source.kind === "callBatch"
+							? {
+									kind: "batch",
+									callId,
+									callerState: record.source.producerState,
+									occurrence: record.occurrence,
+									messageIds: record.messages.map((message) => message.messageId),
+									status: "enqueued",
+								}
+							: {
+									kind: "singleton",
+									callId,
+									callerState: record.source.producerState,
+									occurrence: record.occurrence,
+									messageId: firstMessage.messageId,
+									status: "enqueued",
+								};
 				}
 				const producer = firstMessage.producerState;
 				if (producer !== undefined) {
@@ -354,7 +387,14 @@ export function projectBranch(
 				delete projection.pendingActorCalls[record.callId];
 				delete projection.liveActorMessages[record.messageId];
 				if (Object.hasOwn(record, "output")) projection.results[record.callerState] = record.output;
-				advanceActorProducerAfterReply(projection, ast, record.callerState, record.replyEvent, record.output, abandoned);
+				advanceActorProducerAfterReply(
+					projection,
+					ast,
+					record.callerState,
+					record.replyEvent,
+					record.output,
+					abandoned,
+				);
 				break;
 			}
 			case "actor_batch_call_resolved": {
@@ -370,15 +410,20 @@ export function projectBranch(
 				if (record.kind === "closing") {
 					if (actor.definition.kind === "actorPool") {
 						const pool = actor as ProjectedActorPoolOccurrence;
-						pool.status = pool.mailbox.length === 0 && pool.workers.every((worker) => worker.currentMessageId === undefined) ? "closing" : "draining";
+						pool.status =
+							pool.mailbox.length === 0 && pool.workers.every((worker) => worker.currentMessageId === undefined)
+								? "closing"
+								: "draining";
 						for (const worker of pool.workers) worker.status = "draining";
 					} else {
 						const ordinary = actor as ProjectedActorOccurrence;
-						ordinary.status = ordinary.currentMessageId === undefined && ordinary.mailbox.length === 0 ? "closing" : "draining";
+						ordinary.status =
+							ordinary.currentMessageId === undefined && ordinary.mailbox.length === 0 ? "closing" : "draining";
 					}
 				} else {
 					actor.status = "stopped";
-					if (actor.definition.kind === "actorPool") for (const worker of (actor as ProjectedActorPoolOccurrence).workers) worker.status = "stopped";
+					if (actor.definition.kind === "actorPool")
+						for (const worker of (actor as ProjectedActorPoolOccurrence).workers) worker.status = "stopped";
 					completeParallels(projection, ast);
 				}
 				break;
@@ -419,8 +464,8 @@ export function projectBranch(
 			}
 			case "user_interaction": {
 				if (record.kind === "opened") {
-					const pending = projection.pendingActions.find((entry) =>
-						sameActionUid(entry.actionUid, record.actionUid) && entry.phase === "running",
+					const pending = projection.pendingActions.find(
+						(entry) => sameActionUid(entry.actionUid, record.actionUid) && entry.phase === "running",
 					);
 					if (pending === undefined || pending.seqId !== record.phaseSeqId) {
 						throw new Error(`No matching pending user phase for opened gate in state ${record.actionUid.state}`);
@@ -429,18 +474,25 @@ export function projectBranch(
 					if (node?.kind !== "state" || node.action.kind !== "user") {
 						throw new Error(`Opened user interaction for non-user state ${record.actionUid.state}`);
 					}
-					if (pending.gateSeqId !== undefined) throw new Error(`User phase in state ${record.actionUid.state} already has an opened gate`);
+					if (pending.gateSeqId !== undefined)
+						throw new Error(`User phase in state ${record.actionUid.state} already has an opened gate`);
 					pending.gateSeqId = record.seqId;
 					projection.openUserInteractions[record.seqId] = { opened: record, status: "open" };
 					break;
 				}
 				const gate = projection.openUserInteractions[record.gateSeqId];
-				const pending = projection.pendingActions.find((entry) =>
-					sameActionUid(entry.actionUid, record.actionUid) &&
+				const pending = projection.pendingActions.find(
+					(entry) =>
+						sameActionUid(entry.actionUid, record.actionUid) &&
 						entry.phase === "running" &&
-					entry.gateSeqId === record.gateSeqId,
+						entry.gateSeqId === record.gateSeqId,
 				);
-				if (gate === undefined || gate.status !== "open" || pending === undefined || !sameActionUid(gate.opened.actionUid, record.actionUid)) {
+				if (
+					gate === undefined ||
+					gate.status !== "open" ||
+					pending === undefined ||
+					!sameActionUid(gate.opened.actionUid, record.actionUid)
+				) {
 					throw new Error(`No open user interaction ${record.gateSeqId} for state ${record.actionUid.state}`);
 				}
 				const node = actionStateAt(ast, record.actionUid.state);
@@ -458,11 +510,14 @@ export function projectBranch(
 				switch (record.kind) {
 					case "invoke":
 						if (!isRecord(record.definition)) {
-							throw new Error(`Invoke record for state ${record.actionUid.state} is missing action definition provenance`);
+							throw new Error(
+								`Invoke record for state ${record.actionUid.state} is missing action definition provenance`,
+							);
 						}
 						if (isActionActive(projection, ast, record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "invoke");
-							if (projection.pendingActions.some((pending) => sameActionUid(pending.actionUid, record.actionUid))) throw new Error(`Invocation before pending action settled in ${record.actionUid.state}`);
+							if (projection.pendingActions.some((pending) => sameActionUid(pending.actionUid, record.actionUid)))
+								throw new Error(`Invocation before pending action settled in ${record.actionUid.state}`);
 							const key = actionUidKey(record.actionUid);
 							const visitId = (projection.stateVisits[key] ?? 0) + 1;
 							projection.stateVisits[key] = visitId;
@@ -482,7 +537,16 @@ export function projectBranch(
 						}
 						break;
 					case "complete":
-						applyActionCompletion(projection, ast, record.actionUid, record.event, record.seqId, abandoned, skipped, record);
+						applyActionCompletion(
+							projection,
+							ast,
+							record.actionUid,
+							record.event,
+							record.seqId,
+							abandoned,
+							skipped,
+							record,
+						);
 						break;
 					case "retry":
 						applyActionRetry(projection, record);
@@ -506,13 +570,20 @@ export function projectBranch(
 						if (!validating) {
 							throw new Error(`No pending validation for action in state ${record.actionUid.state}`);
 						}
-						if (record.outcome === true && validating.completionArtifacts !== undefined && validating.completionArtifacts.branchId !== record.branchId)
-							throw new Error(`Cannot accept provisional artifacts from branch '${validating.completionArtifacts.branchId}' on '${record.branchId}'; a branch-local completion is required`);
+						if (
+							record.outcome === true &&
+							validating.completionArtifacts !== undefined &&
+							validating.completionArtifacts.branchId !== record.branchId
+						)
+							throw new Error(
+								`Cannot accept provisional artifacts from branch '${validating.completionArtifacts.branchId}' on '${record.branchId}'; a branch-local completion is required`,
+							);
 						if (!sameRecordedValue(record.event, validating.event)) {
 							throw new Error(`Validation event does not match pending completion in state ${record.actionUid.state}`);
 						}
 						if (record.outcome === true) {
-							if (validating.completionArtifacts !== undefined) Object.assign(projection.artifactPins, validating.completionArtifacts.pins);
+							if (validating.completionArtifacts !== undefined)
+								Object.assign(projection.artifactPins, validating.completionArtifacts.pins);
 							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
@@ -544,11 +615,17 @@ export function projectedActorEndpoint(
 }
 
 /** Canonical live message lookup. Endpoint queues/workers and pending calls retain IDs only. */
-export function projectedActorMessage(projection: BranchProjection, messageId: string | undefined): ProjectedActorMessage | undefined {
+export function projectedActorMessage(
+	projection: BranchProjection,
+	messageId: string | undefined,
+): ProjectedActorMessage | undefined {
 	return messageId === undefined ? undefined : projection.liveActorMessages[messageId];
 }
 
-export function projectedActorMailbox(projection: BranchProjection, endpoint: ProjectedActorEndpointOccurrence): ProjectedActorMessage[] {
+export function projectedActorMailbox(
+	projection: BranchProjection,
+	endpoint: ProjectedActorEndpointOccurrence,
+): ProjectedActorMessage[] {
 	return endpoint.mailbox.map((messageId) => {
 		const message = projection.liveActorMessages[messageId];
 		assert(message !== undefined, `Actor ${endpoint.occurrence} mailbox references missing live message ${messageId}`);
@@ -564,7 +641,10 @@ export function projectedActorCurrentMessage(
 	const messageId = worker?.currentMessageId ?? (endpoint as ProjectedActorOccurrence).currentMessageId;
 	if (messageId === undefined) return undefined;
 	const message = projection.liveActorMessages[messageId];
-	assert(message !== undefined, `Actor ${worker?.occurrence ?? endpoint.occurrence} references missing current message ${messageId}`);
+	assert(
+		message !== undefined,
+		`Actor ${worker?.occurrence ?? endpoint.occurrence} references missing current message ${messageId}`,
+	);
 	return message;
 }
 
@@ -597,27 +677,41 @@ function actorExecutionForContext(projection: BranchProjection, context: ReturnT
 	assert(context !== undefined);
 	const endpoint = projectedActorEndpoint(projection, context.endpointOccurrence);
 	assert(endpoint !== undefined, `Actor endpoint ${context.endpointOccurrence} is not projected`);
-	const worker = context.workerIndex === undefined
-		? undefined
-		: endpoint.definition.kind === "actorPool" ? (endpoint as ProjectedActorPoolOccurrence).workers[context.workerIndex] : undefined;
+	const worker =
+		context.workerIndex === undefined
+			? undefined
+			: endpoint.definition.kind === "actorPool"
+				? (endpoint as ProjectedActorPoolOccurrence).workers[context.workerIndex]
+				: undefined;
 	return { endpoint, worker };
 }
 
-function executionCurrentState(endpoint: ProjectedActorEndpointOccurrence, worker?: ProjectedActorPoolWorker): StatePath {
+function executionCurrentState(
+	endpoint: ProjectedActorEndpointOccurrence,
+	worker?: ProjectedActorPoolWorker,
+): StatePath {
 	return worker?.currentState ?? (endpoint as ProjectedActorOccurrence).currentState;
 }
 
-function setExecutionCurrentState(endpoint: ProjectedActorEndpointOccurrence, target: StatePath, worker?: ProjectedActorPoolWorker): void {
+function setExecutionCurrentState(
+	endpoint: ProjectedActorEndpointOccurrence,
+	target: StatePath,
+	worker?: ProjectedActorPoolWorker,
+): void {
 	if (worker !== undefined) worker.currentState = target;
 	else (endpoint as ProjectedActorOccurrence).currentState = target;
 }
 
 function refreshPoolStatus(pool: ProjectedActorPoolOccurrence): void {
 	if (pool.status === "closing" || pool.status === "draining") {
-		pool.status = pool.mailbox.length === 0 && pool.workers.every((worker) => worker.currentMessageId === undefined) ? "closing" : "draining";
+		pool.status =
+			pool.mailbox.length === 0 && pool.workers.every((worker) => worker.currentMessageId === undefined)
+				? "closing"
+				: "draining";
 		return;
 	}
-	pool.status = pool.workers.some((worker) => worker.currentMessageId !== undefined) || pool.mailbox.length > 0 ? "busy" : "idle";
+	pool.status =
+		pool.workers.some((worker) => worker.currentMessageId !== undefined) || pool.mailbox.length > 0 ? "busy" : "idle";
 }
 
 function refreshPendingBatchStatus(projection: BranchProjection, callId: string): void {
@@ -634,7 +728,12 @@ function refreshPendingBatchStatus(projection: BranchProjection, callId: string)
 	});
 	const accepted = messages.filter((message) => message.status !== "queued").length;
 	const settled = messages.filter((message) => message.status === "settled").length;
-	pending.status = settled > 0 || (accepted > 0 && accepted < messages.length) ? "partial" : accepted === messages.length ? "accepted" : "enqueued";
+	pending.status =
+		settled > 0 || (accepted > 0 && accepted < messages.length)
+			? "partial"
+			: accepted === messages.length
+				? "accepted"
+				: "enqueued";
 }
 
 function applyActionRetry(projection: BranchProjection, record: StateActionRetryLog): void {
@@ -717,10 +816,7 @@ function validateRetryAttempt(
 	}
 }
 
-function recoveryCountersAfter(
-	previous: RecoveryCounters,
-	record: StateActionRetryLog,
-): RecoveryCounters {
+function recoveryCountersAfter(previous: RecoveryCounters, record: StateActionRetryLog): RecoveryCounters {
 	return {
 		general: recoveryCountersForScope("general", previous.general, record),
 		validation: recoveryCountersForScope("validation", previous.validation, record),
@@ -754,8 +850,10 @@ function applyActionCompletion(
 		return;
 	}
 	assertActiveActionUid(ast, actionUid.state, actionUid, "complete");
-	const completionArtifacts = record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined
-		? { branchId: record.branchId, pins: record.artifacts } : undefined;
+	const completionArtifacts =
+		record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined
+			? { branchId: record.branchId, pins: record.artifacts }
+			: undefined;
 	const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
 	if (previous === undefined) throw new Error(`No pending invocation for completion in ${actionUid.state}`);
 	if (previous.phase === "validating") throw new Error(`Completion before validation verdict in ${actionUid.state}`);
@@ -841,11 +939,18 @@ function applyTransition(
 	const actorContext = actorContextForState(ast, fromLeaf);
 	if (actorContext !== undefined) {
 		const { endpoint, worker } = actorExecutionForContext(projection, actorContext);
-		assert(executionCurrentState(endpoint, worker) === actorContext.localState, `Actor state ${fromLeaf} is not active`);
+		assert(
+			executionCurrentState(endpoint, worker) === actorContext.localState,
+			`Actor state ${fromLeaf} is not active`,
+		);
 		assert(actorContext.node.kind === "state", `Actor state ${fromLeaf} cannot emit action event ${eventType}`);
 		const transition = actorContext.node.transitions[eventType];
 		assert(transition !== undefined, `No actor transition for event type ${eventType} in state ${fromLeaf}`);
-		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, { transition, event, scope: fromLeaf });
+		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, {
+			transition,
+			event,
+			scope: fromLeaf,
+		});
 		setExecutionCurrentState(endpoint, transition.target, worker);
 		return;
 	}
@@ -866,14 +971,7 @@ function advanceActorProducerAfterEnqueue(
 ): void {
 	const node = actorProducerNode(ast, statePath);
 	if (node.kind === "call" || node.kind === "callBatch") return;
-	applyActorProducerTransition(
-		projection,
-		ast,
-		statePath,
-		{ target: node.target },
-		{ type: "ACTOR_REPLY" },
-		abandoned,
-	);
+	applyActorProducerTransition(projection, ast, statePath, { target: node.target }, { type: "ACTOR_REPLY" }, abandoned);
 }
 
 function advanceActorProducerAfterReply(
@@ -885,12 +983,16 @@ function advanceActorProducerAfterReply(
 	abandoned: PendingAction[],
 ): void {
 	const node = actorProducerNode(ast, statePath);
-	assert(node.kind === "call" || node.kind === "callBatch", `Fire-and-forget send state ${statePath} cannot await a reply`);
-	const transition = node.target !== undefined
-		? { target: node.target }
-		: replyEvent === undefined
-			? undefined
-			: node.transitions[replyEvent];
+	assert(
+		node.kind === "call" || node.kind === "callBatch",
+		`Fire-and-forget send state ${statePath} cannot await a reply`,
+	);
+	const transition =
+		node.target !== undefined
+			? { target: node.target }
+			: replyEvent === undefined
+				? undefined
+				: node.transitions[replyEvent];
 	assert(transition !== undefined, `Actor call ${statePath} has no route for reply '${replyEvent ?? "missing"}'`);
 	applyActorProducerTransition(
 		projection,
@@ -905,7 +1007,10 @@ function advanceActorProducerAfterReply(
 function actorProducerNode(ast: ChartAst, statePath: StatePath) {
 	const actorContext = actorContextForState(ast, statePath);
 	const node = actorContext?.node ?? nodeAt(ast, statePath);
-	assert(node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch", `Actor message fact has invalid producer state ${statePath}`);
+	assert(
+		node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch",
+		`Actor message fact has invalid producer state ${statePath}`,
+	);
 	return node;
 }
 
@@ -920,8 +1025,15 @@ function applyActorProducerTransition(
 	const actorContext = actorContextForState(ast, statePath);
 	if (actorContext !== undefined) {
 		const { endpoint, worker } = actorExecutionForContext(projection, actorContext);
-		assert(executionCurrentState(endpoint, worker) === actorContext.localState, `Actor producer state ${statePath} is not active`);
-		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, { transition, event, scope: statePath });
+		assert(
+			executionCurrentState(endpoint, worker) === actorContext.localState,
+			`Actor producer state ${statePath} is not active`,
+		);
+		applyActorInputForEntry(projection, ast, endpoint, transition.target, worker, {
+			transition,
+			event,
+			scope: statePath,
+		});
 		setExecutionCurrentState(endpoint, transition.target, worker);
 		return;
 	}
@@ -1060,9 +1172,12 @@ function completeParallels(projection: BranchProjection, ast: ChartAst): void {
 	for (;;) {
 		const parallel = findCompletedParallel(projection, ast);
 		const compound = findCompletedCompound(projection, ast);
-		const done = parallel === undefined
-			? compound
-			: compound === undefined || parallel.path.length >= compound.path.length ? parallel : compound;
+		const done =
+			parallel === undefined
+				? compound
+				: compound === undefined || parallel.path.length >= compound.path.length
+					? parallel
+					: compound;
 		if (done === undefined) return;
 		projection.activeLeaves = [
 			...projection.activeLeaves.filter((leaf) => !underScope(leaf, done.path)),
@@ -1100,7 +1215,9 @@ function findCompletedParallel(
 	candidates.sort((a, b) => b.path.length - a.path.length);
 	return candidates.find(({ path }) => {
 		const leaves = projection.activeLeaves.filter((leaf) => underScope(leaf, path));
-		const actors = projectedActorEndpoints(projection).filter((actor) => actor.owner !== undefined && underScope(actor.owner, path));
+		const actors = projectedActorEndpoints(projection).filter(
+			(actor) => actor.owner !== undefined && underScope(actor.owner, path),
+		);
 		const mapOwnedDeclarations = Object.values(ast.actors).filter((actor) => actor.owner === templatePath(path));
 		const expectedActors = mapOwnedDeclarations.length * Object.keys(projection.spawns[path] ?? {}).length;
 		return (
@@ -1150,11 +1267,26 @@ function assertActorCreated(
 	ast: ChartAst,
 	record: ActorCreatedRecord,
 ): { liveDefinition: ActorEndpointDeclarationAst; logicalOccurrence: StatePath } {
-	assert.equal(projectedActorEndpoint(projection, record.occurrence), undefined, `Actor occurrence ${record.occurrence} was created twice`);
+	assert.equal(
+		projectedActorEndpoint(projection, record.occurrence),
+		undefined,
+		`Actor occurrence ${record.occurrence} was created twice`,
+	);
 	const liveDefinition = liveActorDeclaration(ast, record.declaration, record.occurrence);
-	assert.equal(record.definition.kind, liveDefinition.kind, `Actor creation ${record.occurrence} endpoint kind changed`);
-	assert.equal(record.definition.path, record.declaration, `Actor creation ${record.occurrence} has mismatched definition provenance`);
-	assert(Number.isInteger(record.generation) && record.generation >= 1, `Actor occurrence ${record.occurrence} has invalid generation`);
+	assert.equal(
+		record.definition.kind,
+		liveDefinition.kind,
+		`Actor creation ${record.occurrence} endpoint kind changed`,
+	);
+	assert.equal(
+		record.definition.path,
+		record.declaration,
+		`Actor creation ${record.occurrence} has mismatched definition provenance`,
+	);
+	assert(
+		Number.isInteger(record.generation) && record.generation >= 1,
+		`Actor occurrence ${record.occurrence} has invalid generation`,
+	);
 	const declaredOwner: StatePath | undefined = record.definition.owner;
 	assert(
 		(declaredOwner === undefined) === (record.owner === undefined) &&
@@ -1210,7 +1342,11 @@ function assertActorMessagesEnqueued(
 ): ProjectedActorEndpointOccurrence {
 	const actor = projectedActorEndpoint(projection, record.occurrence);
 	assert(actor !== undefined, `Message enqueue targets unknown actor ${record.occurrence}`);
-	assert.equal(record.generation, actor.generation, `Message enqueue targets the wrong generation of ${actor.logicalOccurrence}`);
+	assert.equal(
+		record.generation,
+		actor.generation,
+		`Message enqueue targets the wrong generation of ${actor.logicalOccurrence}`,
+	);
 	const first = record.messages[0];
 	assert(first !== undefined, "Actor enqueue transaction must contain at least one message");
 	assert(
@@ -1219,19 +1355,42 @@ function assertActorMessagesEnqueued(
 	);
 	assert(
 		record.source.producerState === first.producerState &&
-			record.messages.every((message) => message.producerState === record.source.producerState && message.event === record.source.event),
+			record.messages.every(
+				(message) => message.producerState === record.source.producerState && message.event === record.source.event,
+			),
 		"Message enqueue has inconsistent producer provenance",
 	);
-	const selfSource = (record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch") && record.source.definition.self === true;
+	const selfSource =
+		(record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch") &&
+		record.source.definition.self === true;
 	if (selfSource) {
 		const producerContext = actorContextForState(ast, record.source.producerState);
-		assert(producerContext !== undefined, `Self-send producer ${record.source.producerState} is not an actor workflow state`);
+		assert(
+			producerContext !== undefined,
+			`Self-send producer ${record.source.producerState} is not an actor workflow state`,
+		);
 		const producerExecution = actorExecutionForContext(projection, producerContext);
-		const producerCurrent = projectedActorMessage(projection, producerExecution.worker?.currentMessageId ?? (producerExecution.endpoint as ProjectedActorOccurrence).currentMessageId);
+		const producerCurrent = projectedActorMessage(
+			projection,
+			producerExecution.worker?.currentMessageId ??
+				(producerExecution.endpoint as ProjectedActorOccurrence).currentMessageId,
+		);
 		assert(producerCurrent !== undefined, `Self-send producer ${record.source.producerState} has no current message`);
-		assert.equal(executionCurrentState(producerExecution.endpoint, producerExecution.worker), producerContext.localState, `Self-send producer ${record.source.producerState} is not current`);
-		assert.equal(record.source.targetDeclaration, producerContext.declaration.path, `Self-send producer ${record.source.producerState} changed declaration`);
-		assert.equal(record.occurrence, producerContext.endpointOccurrence, `Self-send producer ${record.source.producerState} escaped its actor occurrence`);
+		assert.equal(
+			executionCurrentState(producerExecution.endpoint, producerExecution.worker),
+			producerContext.localState,
+			`Self-send producer ${record.source.producerState} is not current`,
+		);
+		assert.equal(
+			record.source.targetDeclaration,
+			producerContext.declaration.path,
+			`Self-send producer ${record.source.producerState} changed declaration`,
+		);
+		assert.equal(
+			record.occurrence,
+			producerContext.endpointOccurrence,
+			`Self-send producer ${record.source.producerState} escaped its actor occurrence`,
+		);
 	}
 	assert(
 		actor.status !== "stopped" && actor.status !== "cancelled" && actor.status !== "failed",
@@ -1239,16 +1398,23 @@ function assertActorMessagesEnqueued(
 	);
 	if (actor.status === "closing" || actor.status === "draining") {
 		const producerContext = actorContextForState(ast, record.source.producerState);
-		const producerExecution = producerContext === undefined ? undefined : actorExecutionForContext(projection, producerContext);
-		const producerMessage = projectedActorMessage(projection, producerExecution?.worker?.currentMessageId ?? (producerExecution?.endpoint as ProjectedActorOccurrence | undefined)?.currentMessageId);
+		const producerExecution =
+			producerContext === undefined ? undefined : actorExecutionForContext(projection, producerContext);
+		const producerMessage = projectedActorMessage(
+			projection,
+			producerExecution?.worker?.currentMessageId ??
+				(producerExecution?.endpoint as ProjectedActorOccurrence | undefined)?.currentMessageId,
+		);
 		assert(producerMessage !== undefined, `External message enqueue targets closing actor ${record.occurrence}`);
 	}
 	const expectedProducerVisit = (projection.actorProducerVisits[record.source.producerState] ?? 0) + 1;
 	assert(
-		record.messages.every((message, index) =>
-			message.producerVisit === expectedProducerVisit &&
-			message.batchIndex === index &&
-			message.messageId === `${record.source.producerState}:message:${expectedProducerVisit}:${index}`),
+		record.messages.every(
+			(message, index) =>
+				message.producerVisit === expectedProducerVisit &&
+				message.batchIndex === index &&
+				message.messageId === `${record.source.producerState}:message:${expectedProducerVisit}:${index}`,
+		),
 		`Actor enqueue identity must use producer ${record.source.producerState} visit ${expectedProducerVisit} with canonical batch indexes`,
 	);
 	const singleton = record.source.kind === "send" || record.source.kind === "call";
@@ -1256,10 +1422,14 @@ function assertActorMessagesEnqueued(
 	const expectsCall = record.source.kind === "call" || record.source.kind === "callBatch";
 	const callId = first.callId;
 	const expectedCallId = `${record.source.producerState}:call:${expectedProducerVisit}`;
-	assert(expectsCall
-		? callId === expectedCallId && record.messages.every((message) => message.callId === expectedCallId)
-		: record.messages.every((message) => message.callId === undefined), `Actor ${record.source.kind} call correlation is inconsistent`);
-	if (callId !== undefined) assert(projection.pendingActorCalls[callId] === undefined, `Duplicate actor call id ${callId}`);
+	assert(
+		expectsCall
+			? callId === expectedCallId && record.messages.every((message) => message.callId === expectedCallId)
+			: record.messages.every((message) => message.callId === undefined),
+		`Actor ${record.source.kind} call correlation is inconsistent`,
+	);
+	if (callId !== undefined)
+		assert(projection.pendingActorCalls[callId] === undefined, `Duplicate actor call id ${callId}`);
 	const ids = new Set(Object.keys(projection.liveActorMessages));
 	for (const envelope of record.messages) {
 		assert(!ids.has(envelope.messageId), `Duplicate actor message id ${envelope.messageId}`);
@@ -1268,32 +1438,47 @@ function assertActorMessagesEnqueued(
 	return actor;
 }
 
-function assertActorMessageAccepted(
-	projection: BranchProjection,
-	ast: ChartAst,
-	record: ActorMessageAcceptedRecord,
-) {
+function assertActorMessageAccepted(projection: BranchProjection, ast: ChartAst, record: ActorMessageAcceptedRecord) {
 	const endpoint = projectedActorEndpoint(projection, record.occurrence);
 	assert(endpoint !== undefined, `Actor message fact targets unknown actor ${record.occurrence}`);
 	const headId = endpoint.mailbox[0];
 	const head = projectedActorMessage(projection, headId);
-	assert(head !== undefined && head.messageId === record.messageId, `Actor ${record.occurrence} may accept only its FIFO head`);
+	assert(
+		head !== undefined && head.messageId === record.messageId,
+		`Actor ${record.occurrence} may accept only its FIFO head`,
+	);
 	const definition = actorDefinitionForEndpoint(liveActorDeclaration(ast, endpoint.declaration, endpoint.occurrence));
 	if (endpoint.definition.kind === "actorPool") {
-		assert(record.workerIndex !== undefined && Number.isInteger(record.workerIndex), `Pool ${record.occurrence} accepted without workerIndex`);
+		assert(
+			record.workerIndex !== undefined && Number.isInteger(record.workerIndex),
+			`Pool ${record.occurrence} accepted without workerIndex`,
+		);
 		const pool = endpoint as ProjectedActorPoolOccurrence;
 		const worker = pool.workers[record.workerIndex];
 		assert(worker !== undefined, `Pool ${record.occurrence} workerIndex ${record.workerIndex} is out of range`);
 		assert.equal(worker.currentMessageId, undefined, `Pool worker ${worker.occurrence} already owns a current message`);
 		const eligible = pool.workers.filter((candidate) => {
-			if (candidate.currentMessageId !== undefined || candidate.status === "stopped" || candidate.status === "failed" || candidate.status === "cancelled") return false;
+			if (
+				candidate.currentMessageId !== undefined ||
+				candidate.status === "stopped" ||
+				candidate.status === "failed" ||
+				candidate.status === "cancelled"
+			)
+				return false;
 			const receive = definition.states[candidate.currentState];
 			return receive?.kind === "receive" && receive.on[head.event] !== undefined;
 		});
-		assert(eligible.some((candidate) => candidate.index === worker.index), `Pool ${record.occurrence} selected worker ${worker.index} that is not idle and receive-compatible`);
+		assert(
+			eligible.some((candidate) => candidate.index === worker.index),
+			`Pool ${record.occurrence} selected worker ${worker.index} that is not idle and receive-compatible`,
+		);
 		const receive = definition.states[worker.currentState];
 		assert(receive?.kind === "receive", `Pool worker ${worker.occurrence} accepted outside receive()`);
-		assert.equal(record.receiveState, actorStatePath(worker.occurrence, worker.currentState), `Pool worker ${worker.occurrence} accepted from the wrong receive visit`);
+		assert.equal(
+			record.receiveState,
+			actorStatePath(worker.occurrence, worker.currentState),
+			`Pool worker ${worker.occurrence} accepted from the wrong receive visit`,
+		);
 		const target = receive.on[head.event];
 		assert(target !== undefined, `FIFO head '${head.event}' is unsupported by receive '${worker.currentState}'`);
 		return { endpoint, worker, head, target };
@@ -1303,44 +1488,85 @@ function assertActorMessageAccepted(
 	assert.equal(actor.currentMessageId, undefined, `Actor ${record.occurrence} already owns a current message`);
 	const receive = definition.states[actor.currentState];
 	assert(receive?.kind === "receive", `Actor ${record.occurrence} accepted a message outside receive()`);
-	assert.equal(record.receiveState, actorStatePath(record.occurrence, actor.currentState), `Actor ${record.occurrence} accepted from the wrong receive visit`);
+	assert.equal(
+		record.receiveState,
+		actorStatePath(record.occurrence, actor.currentState),
+		`Actor ${record.occurrence} accepted from the wrong receive visit`,
+	);
 	const target = receive.on[head.event];
 	assert(target !== undefined, `FIFO head '${head.event}' is unsupported by receive '${actor.currentState}'`);
 	return { endpoint, worker: undefined, head, target };
 }
 
-function assertActorMessageReplied(
-	projection: BranchProjection,
-	ast: ChartAst,
-	record: ActorMessageRepliedRecord,
-) {
+function assertActorMessageReplied(projection: BranchProjection, ast: ChartAst, record: ActorMessageRepliedRecord) {
 	const endpoint = projectedActorEndpoint(projection, record.occurrence);
 	assert(endpoint !== undefined, `Actor message fact targets unknown actor ${record.occurrence}`);
-	const worker = record.workerIndex === undefined ? undefined : endpoint.definition.kind === "actorPool" ? (endpoint as ProjectedActorPoolOccurrence).workers[record.workerIndex] : undefined;
-	assert.equal(endpoint.definition.kind === "actorPool", record.workerIndex !== undefined, `Actor reply worker identity does not match endpoint kind`);
-	const current = projectedActorMessage(projection, worker?.currentMessageId ?? (endpoint as ProjectedActorOccurrence).currentMessageId);
-	assert(current !== undefined && current.messageId === record.messageId, `Actor ${record.occurrence} replied to a message it does not own`);
-	assert.equal(current.workerIndex, record.workerIndex, `Actor ${record.occurrence} reply worker does not match durable assignment`);
+	const worker =
+		record.workerIndex === undefined
+			? undefined
+			: endpoint.definition.kind === "actorPool"
+				? (endpoint as ProjectedActorPoolOccurrence).workers[record.workerIndex]
+				: undefined;
+	assert.equal(
+		endpoint.definition.kind === "actorPool",
+		record.workerIndex !== undefined,
+		`Actor reply worker identity does not match endpoint kind`,
+	);
+	const current = projectedActorMessage(
+		projection,
+		worker?.currentMessageId ?? (endpoint as ProjectedActorOccurrence).currentMessageId,
+	);
+	assert(
+		current !== undefined && current.messageId === record.messageId,
+		`Actor ${record.occurrence} replied to a message it does not own`,
+	);
+	assert.equal(
+		current.workerIndex,
+		record.workerIndex,
+		`Actor ${record.occurrence} reply worker does not match durable assignment`,
+	);
 	const currentState = worker?.currentState ?? (endpoint as ProjectedActorOccurrence).currentState;
-	const reply = actorDefinitionForEndpoint(liveActorDeclaration(ast, endpoint.declaration, endpoint.occurrence)).states[currentState];
-	assert(reply?.kind === "reply" && reply.message === current.event && record.message === current.event, `Actor ${record.occurrence} reply does not match its inferred current message`);
+	const reply = actorDefinitionForEndpoint(liveActorDeclaration(ast, endpoint.declaration, endpoint.occurrence)).states[
+		currentState
+	];
+	assert(
+		reply?.kind === "reply" && reply.message === current.event && record.message === current.event,
+		`Actor ${record.occurrence} reply does not match its inferred current message`,
+	);
 	return { endpoint, worker, current };
 }
 
-function assertActorMessageSettled(
-	projection: BranchProjection,
-	ast: ChartAst,
-	record: ActorMessageSettledRecord,
-) {
+function assertActorMessageSettled(projection: BranchProjection, ast: ChartAst, record: ActorMessageSettledRecord) {
 	const endpoint = projectedActorEndpoint(projection, record.occurrence);
 	assert(endpoint !== undefined, `Actor message fact targets unknown actor ${record.occurrence}`);
-	const worker = record.workerIndex === undefined ? undefined : endpoint.definition.kind === "actorPool" ? (endpoint as ProjectedActorPoolOccurrence).workers[record.workerIndex] : undefined;
-	assert.equal(endpoint.definition.kind === "actorPool", record.workerIndex !== undefined, `Actor settlement worker identity does not match endpoint kind`);
-	const current = projectedActorMessage(projection, worker?.currentMessageId ?? (endpoint as ProjectedActorOccurrence).currentMessageId);
-	assert(current !== undefined && current.messageId === record.messageId && current.status === "replied", `Actor ${record.occurrence} settled before a validated reply`);
-	assert.equal(current.workerIndex, record.workerIndex, `Actor ${record.occurrence} settlement worker does not match durable assignment`);
+	const worker =
+		record.workerIndex === undefined
+			? undefined
+			: endpoint.definition.kind === "actorPool"
+				? (endpoint as ProjectedActorPoolOccurrence).workers[record.workerIndex]
+				: undefined;
+	assert.equal(
+		endpoint.definition.kind === "actorPool",
+		record.workerIndex !== undefined,
+		`Actor settlement worker identity does not match endpoint kind`,
+	);
+	const current = projectedActorMessage(
+		projection,
+		worker?.currentMessageId ?? (endpoint as ProjectedActorOccurrence).currentMessageId,
+	);
+	assert(
+		current !== undefined && current.messageId === record.messageId && current.status === "replied",
+		`Actor ${record.occurrence} settled before a validated reply`,
+	);
+	assert.equal(
+		current.workerIndex,
+		record.workerIndex,
+		`Actor ${record.occurrence} settlement worker does not match durable assignment`,
+	);
 	const currentState = worker?.currentState ?? (endpoint as ProjectedActorOccurrence).currentState;
-	const reply = actorDefinitionForEndpoint(liveActorDeclaration(ast, endpoint.declaration, endpoint.occurrence)).states[currentState];
+	const reply = actorDefinitionForEndpoint(liveActorDeclaration(ast, endpoint.declaration, endpoint.occurrence)).states[
+		currentState
+	];
 	assert(reply?.kind === "reply", `Actor ${record.occurrence} settled outside reply()`);
 	return { endpoint, worker, current, reply };
 }
@@ -1364,19 +1590,36 @@ function assertActorCallResolved(projection: BranchProjection, record: ActorCall
 		`Actor call result ${record.callId} output presence does not match the correlated reply`,
 	);
 	if (resolvedHasOutput) {
-		assert.deepStrictEqual(message.replyOutput, record.output, `Actor call result ${record.callId} output does not match the correlated reply`);
+		assert.deepStrictEqual(
+			message.replyOutput,
+			record.output,
+			`Actor call result ${record.callId} output does not match the correlated reply`,
+		);
 	}
 }
 
 function assertActorBatchCallResolved(projection: BranchProjection, record: ActorBatchCallResolvedRecord): unknown[] {
 	const call = projection.pendingActorCalls[record.callId];
-	assert(call?.kind === "batch" && call.callerState === record.callerState, `Actor batch call result ${record.callId} has no matching pending caller`);
-	assert.deepStrictEqual(record.messageIds, call.messageIds, `Actor batch call ${record.callId} resolution order or membership changed`);
-	assert(projectedActorEndpoint(projection, call.occurrence) !== undefined, `Actor batch call ${record.callId} targets a missing endpoint`);
+	assert(
+		call?.kind === "batch" && call.callerState === record.callerState,
+		`Actor batch call result ${record.callId} has no matching pending caller`,
+	);
+	assert.deepStrictEqual(
+		record.messageIds,
+		call.messageIds,
+		`Actor batch call ${record.callId} resolution order or membership changed`,
+	);
+	assert(
+		projectedActorEndpoint(projection, call.occurrence) !== undefined,
+		`Actor batch call ${record.callId} targets a missing endpoint`,
+	);
 	return call.messageIds.map((messageId) => {
 		const message = projection.liveActorMessages[messageId];
 		assert(message?.status === "settled", `Actor batch call ${record.callId} resolved before all items settled`);
-		assert(Object.hasOwn(message, "replyOutput"), `Actor batch call ${record.callId} item ${messageId} has no single reply output`);
+		assert(
+			Object.hasOwn(message, "replyOutput"),
+			`Actor batch call ${record.callId} item ${messageId} has no single reply output`,
+		);
 		return message.replyOutput;
 	});
 }
@@ -1387,15 +1630,20 @@ function assertActorScope(projection: BranchProjection, record: ActorScopeRecord
 	if (record.kind === "closing") {
 		assert.notEqual(actor.status, "stopped", `Stopped actor ${record.occurrence} cannot close again`);
 	} else {
-		const busy = actor.definition.kind === "actorPool"
-			? (actor as ProjectedActorPoolOccurrence).workers.some((worker) => worker.currentMessageId !== undefined)
-			: (actor as ProjectedActorOccurrence).currentMessageId !== undefined;
+		const busy =
+			actor.definition.kind === "actorPool"
+				? (actor as ProjectedActorPoolOccurrence).workers.some((worker) => worker.currentMessageId !== undefined)
+				: (actor as ProjectedActorOccurrence).currentMessageId !== undefined;
 		assert(!busy && actor.mailbox.length === 0, `Actor ${record.occurrence} stopped before drain`);
 	}
 	return actor;
 }
 
-function liveActorDeclaration(ast: ChartAst, declaration: StatePath, occurrence: StatePath): ActorEndpointDeclarationAst {
+function liveActorDeclaration(
+	ast: ChartAst,
+	declaration: StatePath,
+	occurrence: StatePath,
+): ActorEndpointDeclarationAst {
 	const live = ast.actors[declaration];
 	assert(live !== undefined, `Actor ${occurrence} declaration ${declaration} is missing from the live chart`);
 	return live;
@@ -1412,33 +1660,41 @@ export function resolveRef(
 	context = "Template",
 ): unknown {
 	const actorContext = actorContextForState(state.ast, stateId);
-	const actor = actorContext === undefined ? undefined : projectedActorEndpoint(state.projection, actorContext.endpointOccurrence);
-	const worker = actorContext?.workerIndex === undefined || actor?.definition.kind !== "actorPool"
-		? undefined
-		: (actor as ProjectedActorPoolOccurrence).workers[actorContext.workerIndex];
+	const actor =
+		actorContext === undefined ? undefined : projectedActorEndpoint(state.projection, actorContext.endpointOccurrence);
+	const worker =
+		actorContext?.workerIndex === undefined || actor?.definition.kind !== "actorPool"
+			? undefined
+			: (actor as ProjectedActorPoolOccurrence).workers[actorContext.workerIndex];
 	if (ref.kind === "actorInput") {
 		assert(actor !== undefined, `${context} in state ${stateId}: actorInput() used outside an actor`);
 		return selectRefPath(actor.input, ref.path, ref, stateId, context);
 	}
 	if (ref.kind === "messageInput") {
 		const message = actor === undefined ? undefined : projectedActorCurrentMessage(state.projection, actor, worker);
-		assert(message !== undefined && message.event === ref.message, `${context} in state ${stateId}: messageInput('${ref.message}') does not match the current message`);
+		assert(
+			message !== undefined && message.event === ref.message,
+			`${context} in state ${stateId}: messageInput('${ref.message}') does not match the current message`,
+		);
 		return selectRefPath(message.input, ref.path, ref, stateId, context);
 	}
 	if (ref.kind === "arg") {
 		const args = state.projection.args;
-		if (args === undefined || !(ref.name in args)) throw new Error(`${context} in state ${stateId}: no argument '${ref.name}'`);
+		if (args === undefined || !(ref.name in args))
+			throw new Error(`${context} in state ${stateId}: no argument '${ref.name}'`);
 		return args[ref.name];
 	}
 	if (ref.kind === "visit") return resolveVisitRef(state, ref, stateId, context);
 	if (ref.kind === "input") {
 		const slot = inputSlotFor(state, ref.name, stateId);
-		if (slot === undefined || !(ref.name in slot.values)) throw new Error(`${context} in state ${stateId}: no input '${ref.name}'`);
+		if (slot === undefined || !(ref.name in slot.values))
+			throw new Error(`${context} in state ${stateId}: no input '${ref.name}'`);
 		return selectRefPath(slot.values[ref.name], ref.path, ref, stateId, context);
 	}
 	if (ref.kind === "key" || ref.kind === "item") {
 		const instance = nearestInstance(stateId, ref.map);
-		if (instance === undefined) throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} used outside any map instance`);
+		if (instance === undefined)
+			throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} used outside any map instance`);
 		const occurrenceInput = state.projection.inputs[`${instance.container}#${instance.key}`];
 		const instances = state.projection.spawns[instance.container];
 		if (instances === undefined || !(instance.key in instances)) {
@@ -1447,9 +1703,10 @@ export function resolveRef(
 		if (ref.kind === "key") return occurrenceInput?.key ?? instance.key;
 		return selectRefPath(occurrenceInput?.item ?? instances[instance.key], ref.path, ref, stateId, context);
 	}
-	const resultKey = actorContext === undefined
-		? instancePathFor(ref.state, stateId)
-		: actorStatePath(actorContext.occurrence, ref.state);
+	const resultKey =
+		actorContext === undefined
+			? instancePathFor(ref.state, stateId)
+			: actorStatePath(actorContext.occurrence, ref.state);
 	if (!(resultKey in state.projection.results)) {
 		throw new Error(`${context} in state ${stateId}: no result for state ${resultKey}`);
 	}
@@ -1463,13 +1720,15 @@ function resolveVisitRef(
 	context: string,
 ): number {
 	const actor = actorContextForState(state.ast, stateId);
-	const target = ref.state === undefined
-		? stateId
-		: actor === undefined
-			? instancePathFor(ref.state, stateId)
-			: actorStatePath(actor.occurrence, ref.state);
+	const target =
+		ref.state === undefined
+			? stateId
+			: actor === undefined
+				? instancePathFor(ref.state, stateId)
+				: actorStatePath(actor.occurrence, ref.state);
 	const node = actionStateAt(state.ast, target);
-	if (node === undefined) throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} does not reference an action state`);
+	if (node === undefined)
+		throw new Error(`${context} in state ${stateId}: ${refLabel(ref)} does not reference an action state`);
 	const key = actionUidKey({ ...node.action.uid, state: target });
 	const visit = state.projection.stateVisits[key];
 	if (visit === undefined) throw new Error(`${context} in state ${stateId}: no visit for state ${target}`);
@@ -1517,14 +1776,22 @@ function selectRefPath(
 
 function refLabel(ref: InputRef): string {
 	switch (ref.kind) {
-		case "arg": return `arg '${ref.name}'`;
-		case "result": return `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "key": return `map key${ref.map === undefined ? "" : ` of '${ref.map}'`}`;
-		case "item": return `map item${ref.map === undefined ? "" : ` of '${ref.map}'`}${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "input": return `input '${ref.name}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "visit": return `visit${ref.state === undefined ? "" : ` of '${ref.state}'`}`;
-		case "actorInput": return `actor input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "messageInput": return `message '${ref.message}' input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "arg":
+			return `arg '${ref.name}'`;
+		case "result":
+			return `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "key":
+			return `map key${ref.map === undefined ? "" : ` of '${ref.map}'`}`;
+		case "item":
+			return `map item${ref.map === undefined ? "" : ` of '${ref.map}'`}${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "input":
+			return `input '${ref.name}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "visit":
+			return `visit${ref.state === undefined ? "" : ` of '${ref.state}'`}`;
+		case "actorInput":
+			return `actor input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
+		case "messageInput":
+			return `message '${ref.message}' input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
 	}
 }
 
@@ -1536,10 +1803,18 @@ function applyActorInputForEntry(
 	worker?: ProjectedActorPoolWorker,
 	entry?: EntryEvent,
 ): void {
-	const node = actorDefinitionForEndpoint(liveActorDeclaration(ast, actor.declaration, actor.occurrence)).states[target];
+	const node = actorDefinitionForEndpoint(liveActorDeclaration(ast, actor.declaration, actor.occurrence)).states[
+		target
+	];
 	if (node?.kind !== "state" || node.input === undefined) return;
 	const occurrence = worker?.occurrence ?? actor.occurrence;
-	projection.inputs[actorStatePath(occurrence, target)] = resolveInputValues(projection, ast, node.input, entry, `${occurrence}.${target}`);
+	projection.inputs[actorStatePath(occurrence, target)] = resolveInputValues(
+		projection,
+		ast,
+		node.input,
+		entry,
+		`${occurrence}.${target}`,
+	);
 }
 
 function applyInputsForEntry(
@@ -1564,9 +1839,10 @@ function resolveInputValues(
 	for (const [name, schema] of Object.entries(input)) {
 		const binding = entry?.transition.input?.[name];
 		if (entry !== undefined && binding !== undefined) {
-			values[name] = binding.kind === "event"
-				? selectEventValue(entry.event, binding.path, name, statePath)
-				: resolveRef({ ast, projection }, binding, entry.scope, "Transition input");
+			values[name] =
+				binding.kind === "event"
+					? selectEventValue(entry.event, binding.path, name, statePath)
+					: resolveRef({ ast, projection }, binding, entry.scope, "Transition input");
 			continue;
 		}
 		if (schemaHasDefault(schema)) {
@@ -1661,15 +1937,19 @@ function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: Action
 function sameRecordedValue(left: unknown, right: unknown): boolean {
 	if (left === right) return true;
 	if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
-	if (Array.isArray(left) || Array.isArray(right)) return (
-			Array.isArray(left) && Array.isArray(right)
-		&& left.length === right.length && left.every((value, index) => sameRecordedValue(value, right[index]))
+	if (Array.isArray(left) || Array.isArray(right))
+		return (
+			Array.isArray(left) &&
+			Array.isArray(right) &&
+			left.length === right.length &&
+			left.every((value, index) => sameRecordedValue(value, right[index]))
 		);
 	const a = left as Record<string, unknown>;
 	const b = right as Record<string, unknown>;
 	const keys = Object.keys(a);
 	return (
-		keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameRecordedValue(a[key], b[key]))
+		keys.length === Object.keys(b).length &&
+		keys.every((key) => Object.hasOwn(b, key) && sameRecordedValue(a[key], b[key]))
 	);
 }
 

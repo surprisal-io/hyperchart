@@ -24,7 +24,11 @@ export function loadAgentDefinition(name: string, dirs: string[]): AgentDefiniti
 	return loadAgentDefinitionGeneric(name, dirs, parsePiFrontmatter);
 }
 
-export function resolvePiSubagentDefinitionDirs(cwd: string, agentDir: string = getAgentDir(), chartPath?: string): string[] {
+export function resolvePiSubagentDefinitionDirs(
+	cwd: string,
+	agentDir: string = getAgentDir(),
+	chartPath?: string,
+): string[] {
 	return uniqueExistingDirs([
 		...(chartPath === undefined ? [] : [join(dirname(resolve(chartPath)), "agents")]),
 		...projectAgentDirs(cwd),
@@ -49,15 +53,11 @@ export function createAgentDefaultsResolver(
 		],
 		"pi",
 	);
-	return createDefaultsResolverForDirs(
-		resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath),
-		parsePiFrontmatter,
-		{
-			...(resolution.defaultModel === undefined ? {} : { defaultModel: resolution.defaultModel }),
-			modelRoles: resolution.modelRoles ?? settings.modelRoles,
-			toolsets: resolution.toolsets ?? settings.toolsets,
-		},
-	);
+	return createDefaultsResolverForDirs(resolvePiSubagentDefinitionDirs(cwd, agentDir, chartPath), parsePiFrontmatter, {
+		...(resolution.defaultModel === undefined ? {} : { defaultModel: resolution.defaultModel }),
+		modelRoles: resolution.modelRoles ?? settings.modelRoles,
+		toolsets: resolution.toolsets ?? settings.toolsets,
+	});
 }
 
 function projectAgentDirs(cwd: string): string[] {

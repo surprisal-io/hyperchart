@@ -3,7 +3,10 @@ import type { ChartAst, ChartEvent } from "../../packages/hyperchart/src/core/ty
 import type { SchemaRegistryLike } from "../../packages/hyperchart/src/core/schema_registry.js";
 import type { DurableRecordDraft } from "../../packages/hyperchart/src/core/durable_events.js";
 import type { MemoryLogStore } from "../../packages/hyperchart/src/runtime/generic/memory_log_store.js";
-import type { RunLogStore, UserInteractionResponseCommit } from "../../packages/hyperchart/src/runtime/generic/log_store.js";
+import type {
+	RunLogStore,
+	UserInteractionResponseCommit,
+} from "../../packages/hyperchart/src/runtime/generic/log_store.js";
 import { BranchExecution } from "../../packages/hyperchart/src/execution/branch_execution.js";
 
 type PreparedCommitStore = RunLogStore | MemoryLogStore;
@@ -22,18 +25,33 @@ export async function prepareUserInteractionCommit(
 	ast: ChartAst,
 	gateSeqId: number,
 	event: ChartEvent,
-	options: { branchId?: string; snapshot?: Readonly<{ branchId: string; headSeqId: number | null }>; schemaRegistry?: SchemaRegistryLike } = {},
+	options: {
+		branchId?: string;
+		snapshot?: Readonly<{ branchId: string; headSeqId: number | null }>;
+		schemaRegistry?: SchemaRegistryLike;
+	} = {},
 ): Promise<PreparedTestUserInteraction> {
 	const branchId = options.branchId ?? store.branchId;
-	const snapshot = options.snapshot ?? await store.captureSnapshot(branchId);
+	const snapshot = options.snapshot ?? (await store.captureSnapshot(branchId));
 	const semantic = await BranchExecution.restore({ ast, branchId, store, snapshot, saveCheckpoint: "never" });
 	const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId });
 	if (existing !== undefined) {
-		if (!isDeepStrictEqual(existing.event, event)) throw new Error(`Conflicting response for user interaction ${gateSeqId}`);
-		return { expectedHeadSeqId: snapshot.headSeqId, gateSeqId, draft: { type: "user_interaction", kind: "resolved", gateSeqId, actionUid: existing.actionUid, event }, semantic, existing };
+		if (!isDeepStrictEqual(existing.event, event))
+			throw new Error(`Conflicting response for user interaction ${gateSeqId}`);
+		return {
+			expectedHeadSeqId: snapshot.headSeqId,
+			gateSeqId,
+			draft: { type: "user_interaction", kind: "resolved", gateSeqId, actionUid: existing.actionUid, event },
+			semantic,
+			existing,
+		};
 	}
 	const gate = await store.getRecord(gateSeqId);
-	if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: gateSeqId })) {
+	if (
+		gate?.type !== "user_interaction" ||
+		gate.kind !== "opened" ||
+		!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: gateSeqId }))
+	) {
 		throw new Error(`User interaction ${gateSeqId} is stale or missing from branch '${branchId}'`);
 	}
 	const draft = await semantic.prepareUserInteraction(gate, event, options.schemaRegistry);
@@ -45,10 +63,17 @@ export async function commitUserInteractionResponse(
 	ast: ChartAst,
 	gateSeqId: number,
 	event: ChartEvent,
-	options: { branchId?: string; snapshot?: Readonly<{ branchId: string; headSeqId: number | null }>; schemaRegistry?: SchemaRegistryLike } = {},
+	options: {
+		branchId?: string;
+		snapshot?: Readonly<{ branchId: string; headSeqId: number | null }>;
+		schemaRegistry?: SchemaRegistryLike;
+	} = {},
 ): Promise<UserInteractionResponseCommit> {
 	const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, event, options);
 	if (prepared.existing !== undefined) return { record: prepared.existing, idempotent: true };
-	const records = await store.appendDraftsAtHead({ expectedHeadSeqId: prepared.expectedHeadSeqId, drafts: [prepared.draft] }, prepared.semantic.prepareStampedCommit);
+	const records = await store.appendDraftsAtHead(
+		{ expectedHeadSeqId: prepared.expectedHeadSeqId, drafts: [prepared.draft] },
+		prepared.semantic.prepareStampedCommit,
+	);
 	return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
 }

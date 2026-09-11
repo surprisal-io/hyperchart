@@ -1,9 +1,18 @@
-import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import {
+	withRunStorage,
+	resolveRunPaths,
+	type RunStorage,
+} from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isRunLive, markRunHeartbeat, patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
+import {
+	isRunLive,
+	markRunHeartbeat,
+	patchRunStatus,
+	readRunStatus,
+} from "../packages/hyperchart/src/runtime/generic/run_status.js";
 
 const tempDirs: string[] = [];
 
@@ -24,16 +33,20 @@ describe("run status", () => {
 		const runId = "run";
 		const dir = resolveRunPaths(runId, storage).runDir;
 		await mkdir(dir);
-		withRunStorage(storage, () => patchRunStatus(runId, {
-			branchIds: ["main", "experiment"],
-			chartId: "chart",
-			state: "failed",
-			attemptId: "attempt-a",
-			error: "boom",
-			exitCode: 1,
-			heartbeatAt: 100,
-		}));
-		withRunStorage(storage, () => patchRunStatus(runId, { state: "running", error: undefined, exitCode: undefined, heartbeatAt: Date.now() }));
+		withRunStorage(storage, () =>
+			patchRunStatus(runId, {
+				branchIds: ["main", "experiment"],
+				chartId: "chart",
+				state: "failed",
+				attemptId: "attempt-a",
+				error: "boom",
+				exitCode: 1,
+				heartbeatAt: 100,
+			}),
+		);
+		withRunStorage(storage, () =>
+			patchRunStatus(runId, { state: "running", error: undefined, exitCode: undefined, heartbeatAt: Date.now() }),
+		);
 
 		const status = withRunStorage(storage, () => readRunStatus(runId));
 		expect(status).toMatchObject({
@@ -78,16 +91,23 @@ describe("run status", () => {
 		const runId = "run";
 		const dir = resolveRunPaths(runId, storage).runDir;
 		await mkdir(dir);
-		await writeFile(join(dir, "status.json"), JSON.stringify({
-			version: 1,
-			runId,
-			runDir: dir,
-			chartId: "chart",
+		await writeFile(
+			join(dir, "status.json"),
+			JSON.stringify({
+				version: 1,
+				runId,
+				runDir: dir,
+				chartId: "chart",
+				state: "complete",
+				branchId: "main",
+				startedAt: 1,
+				updatedAt: 2,
+			}),
+		);
+		expect(withRunStorage(storage, () => readRunStatus(runId))).toMatchObject({
+			version: 2,
+			branchIds: ["main"],
 			state: "complete",
-			branchId: "main",
-			startedAt: 1,
-			updatedAt: 2,
-		}));
-		expect(withRunStorage(storage, () => readRunStatus(runId))).toMatchObject({ version: 2, branchIds: ["main"], state: "complete" });
+		});
 	});
 });

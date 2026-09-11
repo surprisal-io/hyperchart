@@ -5,7 +5,10 @@ import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_e
 import type { ActionUID, ChartAst, StateActionAst } from "../packages/hyperchart/src/core/types.js";
 import { createMachine, type MachineState } from "../packages/hyperchart/src/core/machine.js";
 import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
-import { finalMachineFailureMessage, terminalStateForFinalMachine } from "../packages/hyperchart/src/execution/run_outcome.js";
+import {
+	finalMachineFailureMessage,
+	terminalStateForFinalMachine,
+} from "../packages/hyperchart/src/execution/run_outcome.js";
 
 function ast(config: Parameters<typeof normalizeChartConfig>[0]): ChartAst {
 	const result = normalizeChartConfig(config);
@@ -37,7 +40,17 @@ describe("run outcome", () => {
 		);
 		const uid = { chart: "failure-route", state: "work", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: uid, definition: definitionForUid(uid), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: uid,
+				definition: definitionForUid(uid),
+				parentId: 0,
+				seqId: 1,
+				branchId: "main",
+				timestamp: 1,
+			},
 			{ type: "failure_intent", origin: "work", error: "boom", parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
 		];
 
@@ -50,17 +63,22 @@ describe("run outcome", () => {
 		const completeAst = ast(chart({ kind: "chart", id: "complete", initial: "done", states: { done: final() } }));
 		const failedAst = ast(chart({ kind: "chart", id: "failed", initial: "failed", states: { failed: failed() } }));
 		const uid = { chart: "failed", state: "work", action: "agent" };
-		const log: DurableLogRecord[] = [{
-			type: "state_action",
-			kind: "complete",
-			actionUid: uid,
-			event: { type: "FAILED", error: { message: "boom", code: 7 } },
-			parentId: 0,
-			seqId: 1,
-			branchId: "main", timestamp: 1,
-		}];
+		const log: DurableLogRecord[] = [
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: uid,
+				event: { type: "FAILED", error: { message: "boom", code: 7 } },
+				parentId: 0,
+				seqId: 1,
+				branchId: "main",
+				timestamp: 1,
+			},
+		];
 
-		expect(finalMachineFailureMessage(stateFromLog(failedAst, []), log)).toBe("chart reached failed terminal state 'failed'");
+		expect(finalMachineFailureMessage(stateFromLog(failedAst, []), log)).toBe(
+			"chart reached failed terminal state 'failed'",
+		);
 		expect(finalMachineFailureMessage(stateFromLog(completeAst, []), log)).toBeUndefined();
 	});
 
@@ -80,13 +98,53 @@ describe("run outcome", () => {
 		const work = { chart: "stale-error-route", state: "work", action: "agent" };
 		const recover = { chart: "stale-error-route", state: "recover", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "complete", actionUid: work, event: { type: "NEEDS_RECOVERY" }, parentId: 1, seqId: 2, branchId: "main", timestamp: 2 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
-			{ type: "state_action", kind: "complete", actionUid: recover, event: { type: "DONE" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 4 },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: work,
+				definition: definitionForUid(work),
+				parentId: 0,
+				seqId: 1,
+				branchId: "main",
+				timestamp: 1,
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: work,
+				event: { type: "NEEDS_RECOVERY" },
+				parentId: 1,
+				seqId: 2,
+				branchId: "main",
+				timestamp: 2,
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: recover,
+				definition: definitionForUid(recover),
+				parentId: 2,
+				seqId: 3,
+				branchId: "main",
+				timestamp: 3,
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: recover,
+				event: { type: "DONE" },
+				parentId: 3,
+				seqId: 4,
+				branchId: "main",
+				timestamp: 4,
+			},
 		];
 
-		expect(finalMachineFailureMessage(stateFromLog(machineAst, log), log)).toBe("chart reached failed terminal state 'failed'");
+		expect(finalMachineFailureMessage(stateFromLog(machineAst, log), log)).toBe(
+			"chart reached failed terminal state 'failed'",
+		);
 	});
 
 	it("keeps recovered workflows complete when a later success reaches done", () => {
@@ -106,7 +164,17 @@ describe("run outcome", () => {
 		const work = { chart: "recovered-route", state: "work", action: "agent" };
 		const recover = { chart: "recovered-route", state: "recover", action: "agent" };
 		const log: DurableLogRecord[] = [
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: work, definition: definitionForUid(work), parentId: 0, seqId: 1, branchId: "main", timestamp: 1 },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: work,
+				definition: definitionForUid(work),
+				parentId: 0,
+				seqId: 1,
+				branchId: "main",
+				timestamp: 1,
+			},
 			{
 				type: "state_action",
 				kind: "complete",
@@ -114,9 +182,20 @@ describe("run outcome", () => {
 				event: { type: "NEEDS_RECOVERY" },
 				parentId: 1,
 				seqId: 2,
-				branchId: "main", timestamp: 2,
+				branchId: "main",
+				timestamp: 2,
 			},
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: recover, definition: definitionForUid(recover), parentId: 2, seqId: 3, branchId: "main", timestamp: 3 },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: recover,
+				definition: definitionForUid(recover),
+				parentId: 2,
+				seqId: 3,
+				branchId: "main",
+				timestamp: 3,
+			},
 			{
 				type: "state_action",
 				kind: "complete",
@@ -124,7 +203,8 @@ describe("run outcome", () => {
 				event: { type: "DONE" },
 				parentId: 3,
 				seqId: 4,
-				branchId: "main", timestamp: 4,
+				branchId: "main",
+				timestamp: 4,
 			},
 		];
 

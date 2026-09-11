@@ -15,7 +15,10 @@ import {
 } from "../packages/hyperchart/src/index.js";
 import type { ChartAst, ChartCst } from "../packages/hyperchart/src/index.js";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
-import { compactProjection, compileProjectionRetention } from "../packages/hyperchart/src/execution/projection_retention.js";
+import {
+	compactProjection,
+	compileProjectionRetention,
+} from "../packages/hyperchart/src/execution/projection_retention.js";
 
 function parsed(config: ChartCst): ChartAst {
 	const normalized = normalizeChartConfig(config);
@@ -25,24 +28,26 @@ function parsed(config: ChartCst): ChartAst {
 
 describe("projection retention", () => {
 	it("discovers result readers and resumable actions from the normalized AST", () => {
-		const ast = parsed(chart({
-			kind: "chart",
-			id: "retention",
-			initial: "writer",
-			states: {
-				writer: {
-					kind: "state",
-					action: agent("writer", { reentry: { resume: "Continue the prior writer session." } }),
-					transitions: { DONE: "reader" },
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "retention",
+				initial: "writer",
+				states: {
+					writer: {
+						kind: "state",
+						action: agent("writer", { reentry: { resume: "Continue the prior writer session." } }),
+						transitions: { DONE: "reader" },
+					},
+					reader: {
+						kind: "state",
+						action: agent("reader", { task: t`Read ${result("writer")}` }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
 				},
-				reader: {
-					kind: "state",
-					action: agent("reader", { task: t`Read ${result("writer")}` }),
-					transitions: { DONE: "done" },
-				},
-				done: final(),
-			},
-		}));
+			}),
+		);
 		const plan = compileProjectionRetention(ast);
 		const writer = ast.states.writer;
 		if (writer?.kind !== "state") throw new Error("missing writer");
@@ -53,83 +58,98 @@ describe("projection retention", () => {
 	});
 
 	it("resolves nested compound, map, and parallel entry and exit paths", () => {
-		const region = (name: string) => compound({
-			initial: "work",
-			states: {
-				work: { kind: "state", action: agent(name), transitions: { DONE: "finished" } },
-				finished: final(),
-			},
-		});
-		const ast = parsed(chart({
-			kind: "chart",
-			id: "nested-retention",
-			args: { items: {} },
-			initial: "outer",
-			states: {
-				outer: compound({
-					initial: "fan",
-					onDone: "done",
-					states: {
-						fan: parallel({
-							onDone: "merged",
-							states: {
-								left: compound({
-									initial: "fanout",
-									states: {
-										fanout: map({
-											over: arg("items"),
-											onReenter: resume("Resume mapped work."),
-											initial: "work",
-											onDone: "leftDone",
-											states: {
-												work: { kind: "state", action: agent("mapped", { reentry: { resume: "Resume item." } }), transitions: { DONE: "itemDone" } },
-												itemDone: final(),
-											},
-										}),
-										leftDone: final(),
-									},
-								}),
-								right: region("right"),
-							},
-						}),
-						merged: final(),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const region = (name: string) =>
+			compound({
+				initial: "work",
+				states: {
+					work: { kind: "state", action: agent(name), transitions: { DONE: "finished" } },
+					finished: final(),
+				},
+			});
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "nested-retention",
+				args: { items: {} },
+				initial: "outer",
+				states: {
+					outer: compound({
+						initial: "fan",
+						onDone: "done",
+						states: {
+							fan: parallel({
+								onDone: "merged",
+								states: {
+									left: compound({
+										initial: "fanout",
+										states: {
+											fanout: map({
+												over: arg("items"),
+												onReenter: resume("Resume mapped work."),
+												initial: "work",
+												onDone: "leftDone",
+												states: {
+													work: {
+														kind: "state",
+														action: agent("mapped", { reentry: { resume: "Resume item." } }),
+														transitions: { DONE: "itemDone" },
+													},
+													itemDone: final(),
+												},
+											}),
+											leftDone: final(),
+										},
+									}),
+									right: region("right"),
+								},
+							}),
+							merged: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 
 		const reenterable = [...compileProjectionRetention(ast).reenterableStates];
-		expect(reenterable).toEqual(expect.arrayContaining([
-			"outer",
-			"outer.fan",
-			"outer.fan.left",
-			"outer.fan.left.fanout",
-			"outer.fan.left.fanout.work",
-			"outer.fan.left.fanout.itemDone",
-			"outer.fan.left.leftDone",
-			"outer.fan.right",
-			"outer.fan.right.work",
-			"outer.fan.right.finished",
-			"outer.merged",
-			"done",
-		]));
+		expect(reenterable).toEqual(
+			expect.arrayContaining([
+				"outer",
+				"outer.fan",
+				"outer.fan.left",
+				"outer.fan.left.fanout",
+				"outer.fan.left.fanout.work",
+				"outer.fan.left.fanout.itemDone",
+				"outer.fan.left.leftDone",
+				"outer.fan.right",
+				"outer.fan.right.work",
+				"outer.fan.right.finished",
+				"outer.merged",
+				"done",
+			]),
+		);
 		for (const localId of ["fan", "left", "work", "finished"]) {
 			expect(reenterable).not.toContain(localId);
 		}
 	});
 
 	it("prunes only proven non-resumable sessions and conservatively retains semantic values", () => {
-		const ast = parsed(chart({
-			kind: "chart",
-			id: "compact",
-			initial: "resumable",
-			states: {
-				resumable: { kind: "state", action: agent("worker", { reentry: { resume: "Resume." } }), transitions: { DONE: "restart" } },
-				restart: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "compact",
+				initial: "resumable",
+				states: {
+					resumable: {
+						kind: "state",
+						action: agent("worker", { reentry: { resume: "Resume." } }),
+						transitions: { DONE: "restart" },
+					},
+					restart: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const resumable = ast.states.resumable;
 		const restart = ast.states.restart;
 		if (resumable?.kind !== "state" || restart?.kind !== "state") throw new Error("missing actions");
@@ -142,7 +162,15 @@ describe("projection retention", () => {
 		projection.spawns.items = { one: 1 };
 		projection.stateVisits["compact:restart:agent"] = 4;
 		projection.actorProducerVisits.sender = 3;
-		projection.liveActorMessages.orphan = { messageId: "orphan", event: "TEST", input: {}, producerState: "sender", producerVisit: 3, batchIndex: 0, status: "settled" };
+		projection.liveActorMessages.orphan = {
+			messageId: "orphan",
+			event: "TEST",
+			input: {},
+			producerState: "sender",
+			producerVisit: 3,
+			batchIndex: 0,
+			status: "settled",
+		};
 		const retainedActors = projection.actors;
 		const retainedPools = projection.actorPools;
 

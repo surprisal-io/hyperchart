@@ -10,8 +10,8 @@ import {
 	type HyperchartSummaryInfo,
 } from "../packages/hyperchart/src/host/index.js";
 
-type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends
-	(<Value>() => Value extends Right ? 1 : 2) ? true : false;
+type Equal<Left, Right> =
+	(<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2 ? true : false;
 
 const summaryKeysAreLightweight: Equal<
 	keyof HyperchartSummaryInfo,
@@ -70,7 +70,9 @@ describe("host public surface", () => {
 
 	it("defines a harness-neutral snapshot adapter contract", async () => {
 		const snapshot: HyperchartSessionSnapshot = { hypercharts: [], runs: [] };
-		const unavailable = async (): Promise<never> => { throw new Error("not configured"); };
+		const unavailable = async (): Promise<never> => {
+			throw new Error("not configured");
+		};
 		const adapter: HyperchartHostAdapter = {
 			readSessionSnapshot: async () => snapshot,
 			readChartSnapshot: async () => undefined,

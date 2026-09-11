@@ -23,7 +23,10 @@ export async function validateActionCompletion(
 	opts: CompletionValidationOptions,
 ): Promise<ChartEvent> {
 	if (!contract.events.includes(event.type)) {
-		return { type: "FAILED", error: `${opts.label} emitted unsupported event '${event.type}'; allowed: ${contract.events.join(", ")}` };
+		return {
+			type: "FAILED",
+			error: `${opts.label} emitted unsupported event '${event.type}'; allowed: ${contract.events.join(", ")}`,
+		};
 	}
 	if (event.type === "FAILED") {
 		if (!("error" in event)) return { type: "FAILED", error: `${opts.label} emitted FAILED without an error` };

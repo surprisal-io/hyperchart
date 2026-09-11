@@ -1,4 +1,8 @@
-import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import {
+	withRunStorage,
+	resolveRunPaths,
+	type RunStorage,
+} from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,28 +65,48 @@ function createRequest(
 		createdAt: new Date().toISOString(),
 		originSessionId: sessionId,
 	});
-	withRunStorage(storage, () => patchRunStatus(runId, {branchIds: ["main"], chartId: "chart", state: "running", heartbeatAt: Date.now() }));
-	withRunStorage(storage, () => persistTerminalNotificationRequest(runId, {
-		runId,
-		branchId: "main",
-		chartId: "chart",
-		outcome: "complete",
-		prompt,
-		artifacts: [],
-	}));
-	if (status !== "running") withRunStorage(storage, () => patchRunStatus(runId, { state: status, heartbeatAt: undefined }));
+	withRunStorage(storage, () =>
+		patchRunStatus(runId, { branchIds: ["main"], chartId: "chart", state: "running", heartbeatAt: Date.now() }),
+	);
+	withRunStorage(storage, () =>
+		persistTerminalNotificationRequest(runId, {
+			runId,
+			branchId: "main",
+			chartId: "chart",
+			outcome: "complete",
+			prompt,
+			artifacts: [],
+		}),
+	);
+	if (status !== "running")
+		withRunStorage(storage, () => patchRunStatus(runId, { state: status, heartbeatAt: undefined }));
 	return runId;
 }
 
 describe("Claude terminal monitor", () => {
 	it("routes by exact session and workDir, writes one physical line, and receipts once", async () => {
 		const { storage, runsRoot, cwd, root } = world();
-			const owned = createRequest(storage, cwd, "owned", "session-a", "complete", `dangerous terminal payload ${"x".repeat(100_000)}`);
+		const owned = createRequest(
+			storage,
+			cwd,
+			"owned",
+			"session-a",
+			"complete",
+			`dangerous terminal payload ${"x".repeat(100_000)}`,
+		);
 		createRequest(storage, cwd, "foreign-session", "session-b");
 		createRequest(storage, join(root, "other"), "foreign-workdir", "session-a");
 		const lines: string[] = [];
 
-		expect(await emitPendingClaudeTerminalNotifications({ storage, runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(
+			await emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: (line) => lines.push(line),
+			}),
+		).toBe(1);
 		expect(lines).toHaveLength(1);
 		expect(lines[0]).not.toContain("\n");
 		const emitted = JSON.parse(lines[0]!);
@@ -95,27 +119,58 @@ describe("Claude terminal monitor", () => {
 		expect(JSON.stringify(emitted)).not.toContain("dangerous terminal payload");
 		expect(Buffer.byteLength(lines[0]!)).toBeLessThanOrEqual(64 * 1024);
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(owned, "claude", "session-a"))).toBe(true);
-		expect(await emitPendingClaudeTerminalNotifications({ storage, runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(0);
+		expect(
+			await emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: (line) => lines.push(line),
+			}),
+		).toBe(0);
 	});
 
 	it("bounds overflow through the actual Claude monitor serializer", async () => {
 		const { storage, runsRoot, cwd } = world("sha256");
 		createRequest(storage, cwd, "x".repeat(100_000), "session-a", "complete", "prompt");
 		const lines: string[] = [];
-		expect(await emitPendingClaudeTerminalNotifications({ storage, runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(
+			await emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: (line) => lines.push(line),
+			}),
+		).toBe(1);
 		expect(Buffer.byteLength(lines[0]!)).toBeLessThanOrEqual(64 * 1024);
-		expect(JSON.parse(lines[0]!)).toMatchObject({ customType: "hyperchart-boundary-error", details: { error: "model-envelope-too-large" } });
+		expect(JSON.parse(lines[0]!)).toMatchObject({
+			customType: "hyperchart-boundary-error",
+			details: { error: "model-envelope-too-large" },
+		});
 	});
 
 	it("recovers a pre-delivery crash after the claim lease expires", async () => {
 		const { storage, runsRoot, cwd } = world();
 		const runId = createRequest(storage, cwd, "crashed-before-write", "session-a");
 		const request = withRunStorage(storage, () => readTerminalNotificationRequest(runId))!;
-		expect(withRunStorage(storage, () => claimTerminalNotificationReceipt(runId, request.requestId, "claude", "session-a", { now: 1, leaseMs: 1 }))).toBe(true);
+		expect(
+			withRunStorage(storage, () =>
+				claimTerminalNotificationReceipt(runId, request.requestId, "claude", "session-a", { now: 1, leaseMs: 1 }),
+			),
+		).toBe(true);
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(false);
 		const lines: string[] = [];
 
-		expect(await emitPendingClaudeTerminalNotifications({ storage, runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(
+			await emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: (line) => lines.push(line),
+			}),
+		).toBe(1);
 		expect(lines).toHaveLength(1);
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(true);
 	});
@@ -123,23 +178,41 @@ describe("Claude terminal monitor", () => {
 	it("does not confirm a replacement generation when delivery races with resume", async () => {
 		const { storage, runsRoot, cwd } = world();
 		const runId = createRequest(storage, cwd, "delivery-race", "session-a");
-		await expect(emitPendingClaudeTerminalNotifications({
-			storage, runsRoot,
-			cwd,
-			sessionId: "session-a",
-			writeLine: () => {
-				withRunStorage(storage, () => patchRunStatus(runId, { state: "starting" }));
-				withRunStorage(storage, () => archiveTerminalNotificationGeneration(runId));
-				withRunStorage(storage, () => persistTerminalNotificationRequest(runId, {
-					runId: "delivery-race", branchId: "main", chartId: "chart", outcome: "complete", prompt: "replacement", artifacts: [],
-				}));
-				withRunStorage(storage, () => patchRunStatus(runId, { state: "complete" }));
-			},
-		})).rejects.toThrow(/no longer active/);
+		await expect(
+			emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: () => {
+					withRunStorage(storage, () => patchRunStatus(runId, { state: "starting" }));
+					withRunStorage(storage, () => archiveTerminalNotificationGeneration(runId));
+					withRunStorage(storage, () =>
+						persistTerminalNotificationRequest(runId, {
+							runId: "delivery-race",
+							branchId: "main",
+							chartId: "chart",
+							outcome: "complete",
+							prompt: "replacement",
+							artifacts: [],
+						}),
+					);
+					withRunStorage(storage, () => patchRunStatus(runId, { state: "complete" }));
+				},
+			}),
+		).rejects.toThrow(/no longer active/);
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(false);
 
 		const lines: string[] = [];
-		expect(await emitPendingClaudeTerminalNotifications({ storage, runsRoot, cwd, sessionId: "session-a", writeLine: (line) => lines.push(line) })).toBe(1);
+		expect(
+			await emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: (line) => lines.push(line),
+			}),
+		).toBe(1);
 		expect(lines).toHaveLength(1);
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(true);
 	});
@@ -147,12 +220,17 @@ describe("Claude terminal monitor", () => {
 	it("leaves a failed stdout write recoverable instead of confirming it", async () => {
 		const { storage, runsRoot, cwd } = world();
 		const runId = createRequest(storage, cwd, "write-failed", "session-a");
-		await expect(emitPendingClaudeTerminalNotifications({
-			storage, runsRoot,
-			cwd,
-			sessionId: "session-a",
-			writeLine: () => { throw new Error("stdout closed"); },
-		})).rejects.toThrow("stdout closed");
+		await expect(
+			emitPendingClaudeTerminalNotifications({
+				storage,
+				runsRoot,
+				cwd,
+				sessionId: "session-a",
+				writeLine: () => {
+					throw new Error("stdout closed");
+				},
+			}),
+		).rejects.toThrow("stdout closed");
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(false);
 	});
 
@@ -163,7 +241,9 @@ describe("Claude terminal monitor", () => {
 		withRunStorage(storage, () => patchRunStatus(runId, { state: "failed" }));
 		expect(await pendingOwnedClaudeTerminalRequests({ storage, runsRoot, cwd, sessionId: "session-a" })).toEqual([]);
 		withRunStorage(storage, () => patchRunStatus(runId, { state: "complete" }));
-		expect(await pendingOwnedClaudeTerminalRequests({ storage, runsRoot, cwd, sessionId: "session-a" })).toHaveLength(1);
+		expect(await pendingOwnedClaudeTerminalRequests({ storage, runsRoot, cwd, sessionId: "session-a" })).toHaveLength(
+			1,
+		);
 	});
 
 	it("the dead-run watcher preserves a request written before the status crash", async () => {
@@ -212,7 +292,9 @@ describe("Claude terminal monitor", () => {
 				});
 			});
 			expect(JSON.parse(line)).toMatchObject({ details: { runId: "late", outcome: "complete" } });
-			await vi.waitFor(() => expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(true));
+			await vi.waitFor(() =>
+				expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(true),
+			);
 		} finally {
 			child.kill("SIGTERM");
 		}

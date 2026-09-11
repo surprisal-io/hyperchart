@@ -73,9 +73,7 @@ function parseToolsets(value: unknown, path: string): Record<string, string[]> {
 	if (!isRecord(value)) throw new Error(`Invalid hypercharts settings at ${path}: 'toolsets' must be an object`);
 	for (const [name, tools] of Object.entries(value)) {
 		if (!Array.isArray(tools) || tools.some((tool) => typeof tool !== "string" || tool.trim() === "")) {
-			throw new Error(
-				`Invalid hypercharts settings at ${path}: toolset '${name}' must map to an array of tool names`,
-			);
+			throw new Error(`Invalid hypercharts settings at ${path}: toolset '${name}' must map to an array of tool names`);
 		}
 	}
 	return value as Record<string, string[]>;

@@ -140,12 +140,19 @@ export class FunctionRunner {
 	private async resolveParams(
 		env: Readonly<Record<string, string | RenderedArtifact>> | undefined,
 	): Promise<Readonly<Record<string, unknown>>> {
-		return Object.fromEntries(await Promise.all(Object.entries(env ?? {}).map(async ([name, value]) => [
-			name,
-			typeof value === "string"
-				? value
-				: await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry),
-		] as const)));
+		return Object.fromEntries(
+			await Promise.all(
+				Object.entries(env ?? {}).map(
+					async ([name, value]) =>
+						[
+							name,
+							typeof value === "string"
+								? value
+								: await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry),
+						] as const,
+				),
+			),
+		);
 	}
 
 	private begin(key: string): LiveFunction {
@@ -155,9 +162,13 @@ export class FunctionRunner {
 		const live: LiveFunction = {
 			controller: new AbortController(),
 			cancelled: false,
-			aborted: new Promise<typeof ABORTED>((resolve) => { abortWait = () => resolve(ABORTED); }),
+			aborted: new Promise<typeof ABORTED>((resolve) => {
+				abortWait = () => resolve(ABORTED);
+			}),
 			abortWait: () => abortWait(),
-			settled: new Promise<void>((resolve) => { settle = resolve; }),
+			settled: new Promise<void>((resolve) => {
+				settle = resolve;
+			}),
 			settle: () => settle(),
 		};
 		this.live.set(key, live);

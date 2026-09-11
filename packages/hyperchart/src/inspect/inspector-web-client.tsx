@@ -27,7 +27,7 @@ function InspectorApp() {
 	const [selectedBranchId, setSelectedBranchId] = useState<string>();
 	const [theme, setTheme] = useState<ThemeName>(initialTheme);
 	const token = runToken();
-	const historyDataSource = useMemo(() => token === undefined ? undefined : browserHistoryDataSource(token), [token]);
+	const historyDataSource = useMemo(() => (token === undefined ? undefined : browserHistoryDataSource(token)), [token]);
 	const linkedSeqId = Number(new URLSearchParams(window.location.search).get("seqId"));
 	const historyTargetSeqId = Number.isSafeInteger(linkedSeqId) && linkedSeqId > 0 ? linkedSeqId : undefined;
 
@@ -45,13 +45,15 @@ function InspectorApp() {
 				const branchQuery = selectedBranchId === undefined ? "" : `?branchId=${encodeURIComponent(selectedBranchId)}`;
 				const response = await fetch(`/api/runs/${token}${branchQuery}`, { cache: "no-store" });
 				const payload = (await response.json()) as RunResponse;
-				if (!response.ok || payload.run === undefined) throw new Error(payload.error ?? `Inspector request failed (${response.status})`);
+				if (!response.ok || payload.run === undefined)
+					throw new Error(payload.error ?? `Inspector request failed (${response.status})`);
 				if (!disposed) {
 					setLatestHistorySnapshot(payload.run.historySnapshot);
 					setRun((current) => {
-						const preserve = current?.runId === payload.run!.runId && current.branchId === payload.run!.branchId
-							? current.historySnapshot
-							: undefined;
+						const preserve =
+							current?.runId === payload.run!.runId && current.branchId === payload.run!.branchId
+								? current.historySnapshot
+								: undefined;
 						return { ...payload.run!, ...(preserve === undefined ? {} : { historySnapshot: preserve }) };
 					});
 					setError(undefined);
@@ -89,7 +91,11 @@ function InspectorApp() {
 	};
 
 	return (
-		<div data-hyperchart-root data-theme={theme} className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
+		<div
+			data-hyperchart-root
+			data-theme={theme}
+			className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]"
+		>
 			<button
 				type="button"
 				onClick={toggleTheme}
@@ -104,7 +110,13 @@ function InspectorApp() {
 					onClose={() => window.close()}
 					onSelectBranch={(_runId, branchId) => setSelectedBranchId(branchId)}
 					onSteerSession={steerSession}
-					onRefreshHistory={() => setRun((current) => current === undefined || latestHistorySnapshot === undefined ? current : { ...current, historySnapshot: latestHistorySnapshot })}
+					onRefreshHistory={() =>
+						setRun((current) =>
+							current === undefined || latestHistorySnapshot === undefined
+								? current
+								: { ...current, historySnapshot: latestHistorySnapshot },
+						)
+					}
 					{...(historyDataSource === undefined ? {} : { historyDataSource })}
 					{...(historyTargetSeqId === undefined ? {} : { historyTargetSeqId })}
 					theme={{ resolved: theme, themeName: theme }}
@@ -113,7 +125,9 @@ function InspectorApp() {
 				<div className="flex min-h-screen items-center justify-center p-8">
 					<div className="max-w-xl rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-6 shadow-xl">
 						<div className="text-sm font-semibold">Hyperchart inspector</div>
-						<div className={`mt-2 text-sm ${error === undefined ? "text-[var(--text-muted)]" : "text-[var(--danger)]"}`}>
+						<div
+							className={`mt-2 text-sm ${error === undefined ? "text-[var(--text-muted)]" : "text-[var(--danger)]"}`}
+						>
 							{error ?? "Loading run…"}
 						</div>
 					</div>

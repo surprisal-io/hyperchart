@@ -1,13 +1,5 @@
 import { execFileSync } from "node:child_process";
-import {
-	existsSync,
-	mkdtempSync,
-	readFileSync,
-	readdirSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -73,11 +65,11 @@ try {
 
 	const tarballs = [];
 	for (const item of packageSpecs) {
-		const output = execFileSync(
-			"npm",
-			["pack", "--json", "--pack-destination", temp, `./${item.dir}`],
-			{ cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
-		);
+		const output = execFileSync("npm", ["pack", "--json", "--pack-destination", temp, `./${item.dir}`], {
+			cwd: root,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "inherit"],
+		});
 		const report = JSON.parse(output)[0];
 		const names = new Set(report.files.map((file) => file.path));
 		for (const expected of item.expected) {
@@ -116,7 +108,8 @@ function validateManifests() {
 	const plugin = JSON.parse(
 		readFileSync(resolve(root, "packages/claude-hyperchart/.claude-plugin/plugin.json"), "utf8"),
 	);
-	if (plugin.version !== claude.version) throw new Error("Claude plugin manifest version must match the package version");
+	if (plugin.version !== claude.version)
+		throw new Error("Claude plugin manifest version must match the package version");
 	if (!pi.keywords?.includes("pi-package")) throw new Error("Pi package must include the pi-package keyword");
 	if (!Array.isArray(pi.pi?.extensions) || !Array.isArray(pi.pi?.skills)) {
 		throw new Error("Pi package must declare pi.extensions and pi.skills");

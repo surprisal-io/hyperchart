@@ -49,133 +49,199 @@ export function VisitHistory({
 		}
 		setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: true } }));
 		const reader = onReadSession;
-		void reader(visit.invokeSeqId, visit.originBranchId).then((session) => {
-			if (readerRef.current !== reader) return;
-			if (session === undefined) {
-				setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: "Transcript is unavailable." } }));
-				return;
-			}
-			setLoadedSessions((current) => ({ ...current, [visit.invokeSeqId]: session }));
-			setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false } }));
-			setOpenSessionIdentity(identity);
-		}, (error: unknown) => {
-			if (readerRef.current !== reader) return;
-			setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false, error: error instanceof Error ? error.message : String(error) } }));
-		});
+		void reader(visit.invokeSeqId, visit.originBranchId).then(
+			(session) => {
+				if (readerRef.current !== reader) return;
+				if (session === undefined) {
+					setSessionReads((current) => ({
+						...current,
+						[visit.invokeSeqId]: { loading: false, error: "Transcript is unavailable." },
+					}));
+					return;
+				}
+				setLoadedSessions((current) => ({ ...current, [visit.invokeSeqId]: session }));
+				setSessionReads((current) => ({ ...current, [visit.invokeSeqId]: { loading: false } }));
+				setOpenSessionIdentity(identity);
+			},
+			(error: unknown) => {
+				if (readerRef.current !== reader) return;
+				setSessionReads((current) => ({
+					...current,
+					[visit.invokeSeqId]: { loading: false, error: error instanceof Error ? error.message : String(error) },
+				}));
+			},
+		);
 	};
 	if (visits.length === 0) return null;
 	const openVisit = visits.find((visit) => visitSessionIdentity(visit) === openSessionIdentity);
-	const openSession = openVisit === undefined ? undefined : loadedSessions[openVisit.invokeSeqId] ?? openVisit.session;
+	const openSession =
+		openVisit === undefined ? undefined : (loadedSessions[openVisit.invokeSeqId] ?? openVisit.session);
 	return (
 		<>
 			<div className="space-y-2">
 				<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Visit history</div>
 				{visits.map((visit, index) => {
 					const sessionRead = sessionReads[visit.invokeSeqId];
-					const canReadSession = visit.invocation.kind === "agent" && (visit.session !== undefined || onReadSession !== undefined);
+					const canReadSession =
+						visit.invocation.kind === "agent" && (visit.session !== undefined || onReadSession !== undefined);
 					const selected = visit.invokeSeqId === selectedInvokeSeqId;
-					const expanded = selected || (expandedVisits[visit.invokeSeqId] ?? (!lazyDetails && index === visits.length - 1 && visit.status === "running"));
-					return <details
-						key={visit.invokeSeqId}
-						open={expanded}
-						aria-current={selected ? "true" : undefined}
-						onToggle={(event) => {
-							const open = event.currentTarget.open;
-							setExpandedVisits((current) => current[visit.invokeSeqId] === open ? current : { ...current, [visit.invokeSeqId]: open });
-						}}
-						className={`group rounded-lg border bg-[var(--bg-secondary)] ${selected ? "border-blue-500/60 ring-1 ring-blue-500/25" : "border-[var(--border-secondary)]"}`}
-					>
-						<summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] marker:hidden">
-							<span className="font-semibold text-[var(--text-primary)]">Visit {visit.visit}</span>
-							<StatusPill status={visit.status} />
-							<span className="text-[var(--text-muted)]">{formatHyperchartDateTime(visit.startedAt)}</span>
-							{canReadSession && (
-								<button
-									type="button"
-									aria-label={`View session for visit ${visit.visit}`}
-									disabled={sessionRead?.loading === true || sessionRead?.error !== undefined}
-									onClick={(event) => {
-										event.preventDefault();
-										event.stopPropagation();
-										openVisitSession(visit);
-									}}
-									className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-cyan-text)] hover:bg-cyan-500/15"
-								>
-									<span className={`h-1.5 w-1.5 rounded-full ${visit.session !== undefined && isLiveSession(visit.session.status) ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
-									<CommandLineIcon className="h-3 w-3" aria-hidden="true" /> View session
-								</button>
-							)}
-							{sessionRead?.loading === true && <span role="status" className="text-[10px] text-[var(--text-muted)]">Loading transcript…</span>}
-							{sessionRead?.error !== undefined && (
-								<span className="inline-flex items-center gap-1 text-[10px] text-[var(--danger)]">
-									Transcript load failed: {sessionRead.error}
-									<button type="button" className="text-[var(--hc-cyan-text)]" onClick={(event) => { event.preventDefault(); event.stopPropagation(); openVisitSession(visit); }}>Retry</button>
+					const expanded =
+						selected ||
+						(expandedVisits[visit.invokeSeqId] ??
+							(!lazyDetails && index === visits.length - 1 && visit.status === "running"));
+					return (
+						<details
+							key={visit.invokeSeqId}
+							open={expanded}
+							aria-current={selected ? "true" : undefined}
+							onToggle={(event) => {
+								const open = event.currentTarget.open;
+								setExpandedVisits((current) =>
+									current[visit.invokeSeqId] === open ? current : { ...current, [visit.invokeSeqId]: open },
+								);
+							}}
+							className={`group rounded-lg border bg-[var(--bg-secondary)] ${selected ? "border-blue-500/60 ring-1 ring-blue-500/25" : "border-[var(--border-secondary)]"}`}
+						>
+							<summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 px-2.5 py-2 text-[11px] marker:hidden">
+								<span className="font-semibold text-[var(--text-primary)]">Visit {visit.visit}</span>
+								<StatusPill status={visit.status} />
+								<span className="text-[var(--text-muted)]">{formatHyperchartDateTime(visit.startedAt)}</span>
+								{canReadSession && (
+									<button
+										type="button"
+										aria-label={`View session for visit ${visit.visit}`}
+										disabled={sessionRead?.loading === true || sessionRead?.error !== undefined}
+										onClick={(event) => {
+											event.preventDefault();
+											event.stopPropagation();
+											openVisitSession(visit);
+										}}
+										className="ml-auto inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-cyan-500/35 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-cyan-text)] hover:bg-cyan-500/15"
+									>
+										<span
+											className={`h-1.5 w-1.5 rounded-full ${visit.session !== undefined && isLiveSession(visit.session.status) ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`}
+										/>
+										<CommandLineIcon className="h-3 w-3" aria-hidden="true" /> View session
+									</button>
+								)}
+								{sessionRead?.loading === true && (
+									<span role="status" className="text-[10px] text-[var(--text-muted)]">
+										Loading transcript…
+									</span>
+								)}
+								{sessionRead?.error !== undefined && (
+									<span className="inline-flex items-center gap-1 text-[10px] text-[var(--danger)]">
+										Transcript load failed: {sessionRead.error}
+										<button
+											type="button"
+											className="text-[var(--hc-cyan-text)]"
+											onClick={(event) => {
+												event.preventDefault();
+												event.stopPropagation();
+												openVisitSession(visit);
+											}}
+										>
+											Retry
+										</button>
+									</span>
+								)}
+								<span className="basis-full text-right text-[10px] text-[var(--text-muted)] group-open:hidden">
+									show
 								</span>
-							)}
-							<span className="basis-full text-right text-[10px] text-[var(--text-muted)] group-open:hidden">show</span>
-							<span className="hidden basis-full text-right text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
-						</summary>
-						{(!lazyDetails || expanded) && <div className="space-y-3 border-t border-[var(--border-primary)] px-2.5 py-2.5">
-							{visit.replayWarning !== undefined && <div role="note" className="text-[11px] text-[var(--hc-amber-text)]">{visit.replayWarning}</div>}
-							{visit.completedEvent !== undefined && (
-								<div className="text-[10px] text-[var(--text-muted)]">
-									completed event <code className="ml-1 rounded bg-[var(--bg-code)] px-1 py-0.5 font-mono text-[var(--text-secondary)]">{visit.completedEvent}</code>
+								<span className="hidden basis-full text-right text-[10px] text-[var(--text-muted)] group-open:inline">
+									hide
+								</span>
+							</summary>
+							{(!lazyDetails || expanded) && (
+								<div className="space-y-3 border-t border-[var(--border-primary)] px-2.5 py-2.5">
+									{visit.replayWarning !== undefined && (
+										<div role="note" className="text-[11px] text-[var(--hc-amber-text)]">
+											{visit.replayWarning}
+										</div>
+									)}
+									{visit.completedEvent !== undefined && (
+										<div className="text-[10px] text-[var(--text-muted)]">
+											completed event{" "}
+											<code className="ml-1 rounded bg-[var(--bg-code)] px-1 py-0.5 font-mono text-[var(--text-secondary)]">
+												{visit.completedEvent}
+											</code>
+										</div>
+									)}
+									{visit.endedAt !== undefined && (
+										<div className="text-[10px] text-[var(--text-muted)]">
+											ended {formatHyperchartDateTime(visit.endedAt)}
+										</div>
+									)}
+									{visit.endedReason !== undefined && (
+										<div className="text-[10px] text-[var(--text-muted)]">
+											ended because{" "}
+											{visit.endedReason === "timed_out" ? "the deadline fired" : "another transition exited the scope"}
+										</div>
+									)}
+									{visit.validationAttempts !== undefined && (
+										<div className="text-[10px] text-[var(--text-muted)]">
+											validation attempts: {visit.validationAttempts}
+										</div>
+									)}
+									{visit.artifactPins !== undefined && visit.artifactPins.length > 0 && (
+										<div>
+											<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+												pinned deliverables
+											</div>
+											<div className="grid gap-1.5">
+												{visit.artifactPins.map((pin) => {
+													const artifact = state.artifacts?.find((candidate) => candidate.path === pin.path);
+													const typeName =
+														(artifact?.name ?? "artifact")
+															.split(/[^A-Za-z0-9_$]+/)
+															.filter(Boolean)
+															.map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+															.join("") || "Artifact";
+													return (
+														<ArtifactRow
+															key={pin.path}
+															kind="pin"
+															label={pin.path}
+															detail={`sha256:${pin.hash.slice(0, 12)} · ${formatPinSize(pin.size)}`}
+															{...(artifact?.schema === undefined
+																? {}
+																: { typeText: `type ${typeName} = ${schemaTypeText(artifact.schema)};` })}
+															{...(artifact !== undefined && onHighlightArtifact !== undefined
+																? { onClick: () => onHighlightArtifact(state.id, artifact.name) }
+																: {})}
+														/>
+													);
+												})}
+											</div>
+										</div>
+									)}
+									{visit.inputs !== undefined && (
+										<div>
+											<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+												resolved inputs
+											</div>
+											<JsonBlock value={visit.inputs} previewLines={9} />
+										</div>
+									)}
+									{visit.mapItem !== undefined && (
+										<div>
+											<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+												map item · {visit.mapItem.key}
+											</div>
+											<JsonBlock value={visit.mapItem.value} previewLines={9} />
+										</div>
+									)}
+									<VisitInvocationDetails
+										recordOnly={visit.replayWarning !== undefined}
+										invocation={visit.invocation}
+										state={state}
+										allStates={allStates}
+										{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+									/>
 								</div>
 							)}
-							{visit.endedAt !== undefined && (
-								<div className="text-[10px] text-[var(--text-muted)]">
-									ended {formatHyperchartDateTime(visit.endedAt)}
-								</div>
-							)}
-							{visit.endedReason !== undefined && (
-								<div className="text-[10px] text-[var(--text-muted)]">
-									ended because{" "}
-									{visit.endedReason === "timed_out" ? "the deadline fired" : "another transition exited the scope"}
-								</div>
-							)}
-							{visit.validationAttempts !== undefined && (
-								<div className="text-[10px] text-[var(--text-muted)]">
-									validation attempts: {visit.validationAttempts}
-								</div>
-							)}
-							{visit.artifactPins !== undefined && visit.artifactPins.length > 0 && (
-								<div>
-									<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">pinned deliverables</div>
-									<div className="grid gap-1.5">
-										{visit.artifactPins.map((pin) => {
-											const artifact = state.artifacts?.find((candidate) => candidate.path === pin.path);
-											const typeName = (artifact?.name ?? "artifact").split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Artifact";
-											return (
-												<ArtifactRow
-													key={pin.path}
-													kind="pin"
-													label={pin.path}
-													detail={`sha256:${pin.hash.slice(0, 12)} · ${formatPinSize(pin.size)}`}
-													{...(artifact?.schema === undefined ? {} : { typeText: `type ${typeName} = ${schemaTypeText(artifact.schema)};` })}
-													{...(artifact !== undefined && onHighlightArtifact !== undefined ? { onClick: () => onHighlightArtifact(state.id, artifact.name) } : {})}
-												/>
-											);
-										})}
-									</div>
-								</div>
-							)}
-							{visit.inputs !== undefined && (
-								<div>
-									<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved inputs</div>
-									<JsonBlock value={visit.inputs} previewLines={9} />
-								</div>
-							)}
-							{visit.mapItem !== undefined && (
-								<div>
-									<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-										map item · {visit.mapItem.key}
-									</div>
-									<JsonBlock value={visit.mapItem.value} previewLines={9} />
-								</div>
-							)}
-							<VisitInvocationDetails recordOnly={visit.replayWarning !== undefined} invocation={visit.invocation} state={state} allStates={allStates} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
-						</div>}
-					</details>;
+						</details>
+					);
 				})}
 			</div>
 			{openVisit !== undefined && openSession !== undefined && (

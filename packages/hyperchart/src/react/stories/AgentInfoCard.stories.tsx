@@ -12,9 +12,18 @@ const meta = {
 	title: "Hyperchart/Inspector/State Details/Agent Info",
 	id: "hyperchart-components-agent-info-card",
 	component: AgentInfoCard,
-	parameters: { layout: "centered", docs: { description: { component: "Agent metadata projected from a normalized chart and durable session facts." } } },
+	parameters: {
+		layout: "centered",
+		docs: { description: { component: "Agent metadata projected from a normalized chart and durable session facts." } },
+	},
 	args: { state, allStates: scenario.run.states },
-	decorators: [(Story) => <div className="w-[390px] max-w-[calc(100vw-2rem)]"><Story /></div>],
+	decorators: [
+		(Story) => (
+			<div className="w-[390px] max-w-[calc(100vw-2rem)]">
+				<Story />
+			</div>
+		),
+	],
 } satisfies Meta<typeof AgentInfoCard>;
 
 export default meta;

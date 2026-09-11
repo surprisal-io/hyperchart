@@ -46,9 +46,30 @@ export function lintChartModuleSource(chartPath: string): ChartSourceLintDiagnos
 	const diagnostics: ChartSourceLintDiagnostic[] = [];
 	const lines = source.split(/\r?\n/);
 	for (const [index, line] of lines.entries()) {
-		addMatches(diagnostics, line, index + 1, /\.passthrough\s*\(/g, "DEPRECATED_ZOD_PASSTHROUGH", "Zod .passthrough() is deprecated; use z.looseObject(...) or .loose() instead.");
-		addMatches(diagnostics, line, index + 1, /\b(?:as\s+any|:\s*any\b|<any>|Record\s*<[^\n>]*,\s*any\b|Array\s*<\s*any\s*>)/g, "EXPLICIT_ANY", "Explicit any in chart modules hides schema/registry drift; use exported CST types, unknown, or a concrete z.infer type.");
-		addMatches(diagnostics, line, index + 1, /@ts-(?:ignore|expect-error|nocheck)/g, "TS_SUPPRESSION", "TypeScript suppression comments are not allowed in hyperchart modules.");
+		addMatches(
+			diagnostics,
+			line,
+			index + 1,
+			/\.passthrough\s*\(/g,
+			"DEPRECATED_ZOD_PASSTHROUGH",
+			"Zod .passthrough() is deprecated; use z.looseObject(...) or .loose() instead.",
+		);
+		addMatches(
+			diagnostics,
+			line,
+			index + 1,
+			/\b(?:as\s+any|:\s*any\b|<any>|Record\s*<[^\n>]*,\s*any\b|Array\s*<\s*any\s*>)/g,
+			"EXPLICIT_ANY",
+			"Explicit any in chart modules hides schema/registry drift; use exported CST types, unknown, or a concrete z.infer type.",
+		);
+		addMatches(
+			diagnostics,
+			line,
+			index + 1,
+			/@ts-(?:ignore|expect-error|nocheck)/g,
+			"TS_SUPPRESSION",
+			"TypeScript suppression comments are not allowed in hyperchart modules.",
+		);
 	}
 	return diagnostics;
 }
@@ -60,24 +81,31 @@ export async function typecheckChartModule(chartPath: string): Promise<ChartType
 	const tempDir = mkdtempSync(join(tmpdir(), "hyperchart-typecheck-"));
 	const configPath = join(tempDir, "tsconfig.json");
 	const hyperchartEntry = resolveHyperchartTypeEntry();
-	writeFileSync(configPath, JSON.stringify({
-		compilerOptions: {
-			noEmit: true,
-			pretty: false,
-			skipLibCheck: true,
-			strict: true,
-			noUncheckedIndexedAccess: true,
-			exactOptionalPropertyTypes: true,
-			target: "ES2022",
-			module: "NodeNext",
-			moduleResolution: "NodeNext",
-			baseUrl: dirname(chartPath),
-			paths: { "@surprisal/hyperchart": [hyperchartEntry] },
-			typeRoots: [nodeTypeRoot],
-			types: ["node"],
-		},
-		files: [resolve(chartPath)],
-	}, null, 2));
+	writeFileSync(
+		configPath,
+		JSON.stringify(
+			{
+				compilerOptions: {
+					noEmit: true,
+					pretty: false,
+					skipLibCheck: true,
+					strict: true,
+					noUncheckedIndexedAccess: true,
+					exactOptionalPropertyTypes: true,
+					target: "ES2022",
+					module: "NodeNext",
+					moduleResolution: "NodeNext",
+					baseUrl: dirname(chartPath),
+					paths: { "@surprisal/hyperchart": [hyperchartEntry] },
+					typeRoots: [nodeTypeRoot],
+					types: ["node"],
+				},
+				files: [resolve(chartPath)],
+			},
+			null,
+			2,
+		),
+	);
 	const args = ["--project", configPath];
 	const command = `${process.execPath} ${tscPath} ${args.map(shellQuote).join(" ")}`;
 	try {
@@ -98,7 +126,9 @@ export async function typecheckChartModule(chartPath: string): Promise<ChartType
 export async function assertChartTypechecks(chartPath: string): Promise<void> {
 	const result = await typecheckChartModule(chartPath);
 	if (!result.ok) {
-		throw new Error(`Hyperchart TypeScript typecheck failed for ${chartPath}\n\n${result.diagnostics}\n\nCommand:\n${result.command}`);
+		throw new Error(
+			`Hyperchart TypeScript typecheck failed for ${chartPath}\n\n${result.diagnostics}\n\nCommand:\n${result.command}`,
+		);
 	}
 }
 
@@ -128,20 +158,25 @@ function formatPreflightDiagnostics(
 ): string {
 	const sections: string[] = [];
 	if (lint.length > 0) {
-		sections.push([
-			"Chart source lint failed:",
-			...lint.map((diagnostic) =>
-				`${chartPath}:${diagnostic.line}:${diagnostic.column} ${diagnostic.code}: ${diagnostic.message}\n  ${diagnostic.text}`,
-			),
-		].join("\n"));
+		sections.push(
+			[
+				"Chart source lint failed:",
+				...lint.map(
+					(diagnostic) =>
+						`${chartPath}:${diagnostic.line}:${diagnostic.column} ${diagnostic.code}: ${diagnostic.message}\n  ${diagnostic.text}`,
+				),
+			].join("\n"),
+		);
 	}
 	if (!typecheck.ok) {
 		const registryHints = registryMismatchHints(typecheck.diagnostics);
-		sections.push([
-			...(registryHints.length === 0 ? [] : [`Hyperchart registry guidance:\n${registryHints.join("\n")}`]),
-			`TypeScript typecheck failed:\n${typecheck.diagnostics}`,
-			`Command:\n${typecheck.command}`,
-		].join("\n\n"));
+		sections.push(
+			[
+				...(registryHints.length === 0 ? [] : [`Hyperchart registry guidance:\n${registryHints.join("\n")}`]),
+				`TypeScript typecheck failed:\n${typecheck.diagnostics}`,
+				`Command:\n${typecheck.command}`,
+			].join("\n\n"),
+		);
 	}
 	return sections.join("\n\n");
 }
@@ -149,13 +184,19 @@ function formatPreflightDiagnostics(
 function registryMismatchHints(diagnostics: string): string[] {
 	const hints: string[] = [];
 	if (diagnostics.includes("files registry is out of sync with the chart")) {
-		hints.push("- Artifact output types come from the schema declared on the chart action or validator. An omitted schema is inferred as unknown, so a concrete files-registry type (for example string) is incompatible. Declare the artifact schema on the chart action, or make the registry entry unknown if the output is intentionally untyped.");
+		hints.push(
+			"- Artifact output types come from the schema declared on the chart action or validator. An omitted schema is inferred as unknown, so a concrete files-registry type (for example string) is incompatible. Declare the artifact schema on the chart action, or make the registry entry unknown if the output is intentionally untyped.",
+		);
 	}
 	if (diagnostics.includes("results registry is out of sync with the chart")) {
-		hints.push("- Results-registry entries come only from actions that declare a reply schema. Declare the action reply schema with the intended output type, or remove the state from the results registry if it produces no structured result.");
+		hints.push(
+			"- Results-registry entries come only from actions that declare a reply schema. Declare the action reply schema with the intended output type, or remove the state from the results registry if it produces no structured result.",
+		);
 	}
 	if (diagnostics.includes("maps registry is out of sync with the chart")) {
-		hints.push("- Map item types come from the mapped source schema. An untyped source is inferred as unknown; declare its schema or use unknown in the maps registry.");
+		hints.push(
+			"- Map item types come from the mapped source schema. An untyped source is inferred as unknown; declare its schema or use unknown in the maps registry.",
+		);
 	}
 	return hints;
 }

@@ -13,7 +13,10 @@ export type SnapshotTestRuntime = Runtime & {
 	loadProjection(): Promise<BranchProjection>;
 };
 
-export async function start(runtime: SnapshotTestRuntime | ChartRuntime, args?: Readonly<Record<string, unknown>>): Promise<MachineState> {
+export async function start(
+	runtime: SnapshotTestRuntime | ChartRuntime,
+	args?: Readonly<Record<string, unknown>>,
+): Promise<MachineState> {
 	if ("executionInputs" in runtime) {
 		const { ast, store } = runtime.executionInputs();
 		return startChartRuntime(runtime, ast, store, args);
@@ -27,11 +30,18 @@ export async function start(runtime: SnapshotTestRuntime | ChartRuntime, args?: 
 	return executionLoop(runtime, BranchExecution.fromProjection(ast, runtime.branchId, projection));
 }
 
-export async function startChartRuntime(runtime: ChartRuntime, ast: ChartAst, store: CheckpointRepository, args?: Readonly<Record<string, unknown>>): Promise<MachineState> {
+export async function startChartRuntime(
+	runtime: ChartRuntime,
+	ast: ChartAst,
+	store: CheckpointRepository,
+	args?: Readonly<Record<string, unknown>>,
+): Promise<MachineState> {
 	const execution = await BranchExecution.restore({ ast, branchId: runtime.branchId, store });
 	runtime.bindStampedCommit(execution.prepareStampedCommit);
 	runtime.bindArtifactValidator(artifactSnapshotValidator(runtime.executionInputs().schemaRegistry));
-	return import("../../packages/hyperchart/src/execution/execution_loop.js").then(({ start }) => start(runtime, execution, args));
+	return import("../../packages/hyperchart/src/execution/execution_loop.js").then(({ start }) =>
+		start(runtime, execution, args),
+	);
 }
 
 export async function loop(runtime: SnapshotTestRuntime): Promise<MachineState> {

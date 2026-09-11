@@ -1,11 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-	HYPERCHARTS_DIR_NAME,
-	RUNS_DIR_NAME,
-	createHostPaths,
-	type HostPaths,
-} from "@surprisal/hyperchart/runtime";
+import { HYPERCHARTS_DIR_NAME, RUNS_DIR_NAME, createHostPaths, type HostPaths } from "@surprisal/hyperchart/runtime";
 
 export const CLAUDE_CONFIG_DIR_NAME = ".claude";
 

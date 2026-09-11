@@ -68,7 +68,8 @@ function scriptChart(action: ReturnType<typeof script>): ChartAst {
 
 async function runScriptChart(ast: ChartAst, workDir: string, projectDir?: string) {
 	const runtime = new ChartRuntime({
-		ast, branchId: "main",
+		ast,
+		branchId: "main",
 		logStore: new MemoryLogStore(),
 		agentExecutor: new FakeAgentExecutor(),
 		...(projectDir === undefined ? {} : { projectDir }),
@@ -174,7 +175,13 @@ describe("guards", () => {
 
 	it("fails clearly when raw dynamic script options lack a rendered invocation", async () => {
 		const dir = await makeTempDir();
-		await expect(runGuard(script(node, ["-e", "process.exit(0)"], { env: { VALUE: "raw" }, reply: z.object({ ok: z.boolean() }) }), { type: "DONE" }, { chartDir: dir, workDir: dir })).rejects.toThrow("rendered guard invocation");
+		await expect(
+			runGuard(
+				script(node, ["-e", "process.exit(0)"], { env: { VALUE: "raw" }, reply: z.object({ ok: z.boolean() }) }),
+				{ type: "DONE" },
+				{ chartDir: dir, workDir: dir },
+			),
+		).rejects.toThrow("rendered guard invocation");
 	});
 
 	it("escalates cancellation to SIGKILL when a guard ignores SIGTERM", async () => {
@@ -183,7 +190,21 @@ describe("guards", () => {
 		const actionUid = { chart: "cancel-test", state: "work", action: "script" } as const;
 		// The guard confirms its SIGTERM trap is installed before the test cancels; a fixed sleep
 		// races Node startup and would let SIGTERM kill the process directly.
-		const pending = runner.runGuard({ kind: "script", command: node, args: ["-e", "process.on('SIGTERM',()=>{}); require('node:fs').writeFileSync('ready',''); setInterval(()=>{},1000)"] }, { type: "DONE" }, undefined, undefined, undefined, actionUid);
+		const pending = runner.runGuard(
+			{
+				kind: "script",
+				command: node,
+				args: [
+					"-e",
+					"process.on('SIGTERM',()=>{}); require('node:fs').writeFileSync('ready',''); setInterval(()=>{},1000)",
+				],
+			},
+			{ type: "DONE" },
+			undefined,
+			undefined,
+			undefined,
+			actionUid,
+		);
 		const ready = join(dir, "ready");
 		for (let attempt = 0; attempt < 300 && !existsSync(ready); attempt++) {
 			await new Promise((resolve) => setTimeout(resolve, 10));
@@ -192,7 +213,9 @@ describe("guards", () => {
 		const cancelling = runner.cancel(actionUid);
 		expect(runner.cancel(actionUid)).toBe(cancelling);
 		let quiesced = false;
-		void cancelling.then(() => { quiesced = true; });
+		void cancelling.then(() => {
+			quiesced = true;
+		});
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(quiesced).toBe(false);
 		await expect(withTimeout(cancelling)).resolves.toBeUndefined();

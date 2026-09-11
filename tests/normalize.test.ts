@@ -22,7 +22,18 @@ import {
 	user,
 	z,
 } from "../packages/hyperchart/src/index.js";
-import { arg, artifactOf, chart, event, input, item, key, result, resume, visit } from "../packages/hyperchart/src/core/dsl.js";
+import {
+	arg,
+	artifactOf,
+	chart,
+	event,
+	input,
+	item,
+	key,
+	result,
+	resume,
+	visit,
+} from "../packages/hyperchart/src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
 	it("normalizes serializable chart argument metadata into the frozen AST", () => {
@@ -109,12 +120,14 @@ describe("normalizeChartConfig", () => {
 	});
 
 	it("normalizes explicit terminal outcomes and defaults raw finals to complete", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "terminal-outcomes",
-			initial: "done",
-			states: { done: final(), failed: failed(), raw: { kind: "final" } },
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "terminal-outcomes",
+				initial: "done",
+				states: { done: final(), failed: failed(), raw: { kind: "final" } },
+			}),
+		);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) throw new Error("expected valid chart");
 		expect(parsed.ast.states.done).toMatchObject({ kind: "final", outcome: "complete" });
@@ -131,16 +144,22 @@ describe("normalizeChartConfig", () => {
 	});
 
 	it("normalizes terminal notifications with an explicit render scope", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "terminal-notify-scope",
-			initial: "prepare",
-			states: {
-				prepare: { kind: "state", action: agent("prepare"), transitions: { READY: { target: "work", input: { topic: event("topic") } } } },
-				work: { kind: "state", input: { topic: z.string() }, action: agent("work"), transitions: { DONE: "done" } },
-				done: final({ notify: { scope: "work", prompt: t`Publish ${input("topic")}` } }),
-			},
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "terminal-notify-scope",
+				initial: "prepare",
+				states: {
+					prepare: {
+						kind: "state",
+						action: agent("prepare"),
+						transitions: { READY: { target: "work", input: { topic: event("topic") } } },
+					},
+					work: { kind: "state", input: { topic: z.string() }, action: agent("work"), transitions: { DONE: "done" } },
+					done: final({ notify: { scope: "work", prompt: t`Publish ${input("topic")}` } }),
+				},
+			}),
+		);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) throw new Error("expected valid chart");
 		expect(parsed.ast.states.done).toMatchObject({
@@ -157,39 +176,51 @@ describe("normalizeChartConfig", () => {
 		});
 		expect(malformed.diagnostics.map((diagnostic) => diagnostic.code)).toContain("INVALID_TERMINAL_NOTIFICATION");
 
-		const invalid = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "invalid-notify",
-			initial: "work",
-			states: {
-				work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
-				done: final({ notify: {
-					scope: "missing",
-					prompt: {} as never,
-					artifacts: [artifactOf("work"), { kind: "not-an-artifact" } as never],
-				} }),
-			},
-		}));
+		const invalid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "invalid-notify",
+				initial: "work",
+				states: {
+					work: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
+					done: final({
+						notify: {
+							scope: "missing",
+							prompt: {} as never,
+							artifacts: [artifactOf("work"), { kind: "not-an-artifact" } as never],
+						},
+					}),
+				},
+			}),
+		);
 		const codes = invalid.diagnostics.map((diagnostic) => diagnostic.code);
-		expect(codes).toEqual(expect.arrayContaining([
-			"INVALID_TEMPLATE",
-			"UNKNOWN_NOTIFICATION_SCOPE",
-			"UNKNOWN_FILE_SOURCE",
-			"INVALID_TERMINAL_NOTIFICATION",
-		]));
+		expect(codes).toEqual(
+			expect.arrayContaining([
+				"INVALID_TEMPLATE",
+				"UNKNOWN_NOTIFICATION_SCOPE",
+				"UNKNOWN_FILE_SOURCE",
+				"INVALID_TERMINAL_NOTIFICATION",
+			]),
+		);
 	});
 
 	it("applies dominance checks to terminal prompt and artifact reads", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "terminal-dominance",
-			initial: "start",
-			states: {
-				start: { kind: "state", action: agent("start"), transitions: { SKIP: "done", PRODUCE: "produce" } },
-				produce: { kind: "state", action: agent("produce", { artifacts: { report: artifact("report.txt") } }), transitions: { DONE: "done" } },
-				done: final({ notify: { prompt: t`Result ${result("produce")}`, artifacts: [artifactOf("produce")] } }),
-			},
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "terminal-dominance",
+				initial: "start",
+				states: {
+					start: { kind: "state", action: agent("start"), transitions: { SKIP: "done", PRODUCE: "produce" } },
+					produce: {
+						kind: "state",
+						action: agent("produce", { artifacts: { report: artifact("report.txt") } }),
+						transitions: { DONE: "done" },
+					},
+					done: final({ notify: { prompt: t`Result ${result("produce")}`, artifacts: [artifactOf("produce")] } }),
+				},
+			}),
+		);
 		expect(parsed.ok).toBe(false);
 		expect(parsed.diagnostics.filter((diagnostic) => diagnostic.code === "NON_DOMINATED_REF")).toHaveLength(2);
 	});
@@ -572,26 +603,43 @@ describe("normalizeChartConfig", () => {
 	});
 
 	it("infers an actor reply reachable only through after", () => {
-		const TimedProtocol = protocol({ RUN: message({ input: z.object({}).strict(), reply: z.object({ timedOut: z.boolean() }).strict() }) });
+		const TimedProtocol = protocol({
+			RUN: message({ input: z.object({}).strict(), reply: z.object({ timedOut: z.boolean() }).strict() }),
+		});
 		const Timed = actor({
-			input: z.object({}).strict(), protocol: TimedProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: TimedProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { RUN: "work" } }),
-				work: { kind: "state", action: agent("slow-worker"), transitions: {}, after: { delayMs: 10, target: "settle" } },
+				work: {
+					kind: "state",
+					action: agent("slow-worker"),
+					transitions: {},
+					after: { delayMs: 10, target: "settle" },
+				},
 				settle: reply({ target: "idle", output: { timedOut: true } }),
 			},
 		});
 		const timed = Timed({});
-		const result = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-after-reply", actors: { timed }, initial: "dispatch",
-			states: { dispatch: send({ to: timed, event: "RUN", input: {}, target: "done" }), done: final() },
-		}));
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-after-reply",
+				actors: { timed },
+				initial: "dispatch",
+				states: { dispatch: send({ to: timed, event: "RUN", input: {}, target: "done" }), done: final() },
+			}),
+		);
 
 		expect(result.ok).toBe(true);
 		assert(result.ok, JSON.stringify(result.diagnostics));
 		expect(result.diagnostics).toEqual([]);
 		const timedActor = result.ast.actors["@timed"];
-		expect(timedActor?.kind === "actor" ? timedActor.states.settle : undefined).toMatchObject({ kind: "reply", message: "RUN" });
+		expect(timedActor?.kind === "actor" ? timedActor.states.settle : undefined).toMatchObject({
+			kind: "reply",
+			message: "RUN",
+		});
 	});
 
 	it("rejects invalid after shapes and unknown after targets", () => {

@@ -73,29 +73,29 @@ const SyncReply = z.object({ unitCount: z.number() });
 
 type Args = { mode: string };
 type Results = {
-	"inventory": z.infer<typeof InventoryReply>;
+	inventory: z.infer<typeof InventoryReply>;
 	"prepare-gate": z.infer<typeof PrepareGateReply>;
 	"gate-route": z.infer<typeof GateRouteReply>;
-	"route": z.infer<typeof RouteReply>;
-	"propagate": z.infer<typeof SyncReply>;
+	route: z.infer<typeof RouteReply>;
+	propagate: z.infer<typeof SyncReply>;
 };
 type Files = {
-	"inventory": { units: z.infer<typeof Units>; registry: z.infer<typeof Registry> };
+	inventory: { units: z.infer<typeof Units>; registry: z.infer<typeof Registry> };
 	"audit.review": { findings: z.infer<typeof Findings> };
 	"prepare-gate": { batches: z.infer<typeof GateBatches> };
 	"gate.review": { verdict: z.infer<typeof BatchVerdict> };
 	"gate-route": { ledger: z.infer<typeof GateLedger>; rework: z.infer<typeof ReworkManifest> };
-	"route": { report: unknown };
+	route: { report: unknown };
 	"rewrite.patch": { unit: unknown };
 };
 type Maps = {
-	"audit": z.infer<typeof Unit>;
-	"gate": z.infer<typeof GateBatch>;
-	"rewrite": z.infer<typeof RewriteUnit>;
+	audit: z.infer<typeof Unit>;
+	gate: z.infer<typeof GateBatch>;
+	rewrite: z.infer<typeof RewriteUnit>;
 };
 type Inputs = {
-	"audit": { auditItems: Record<string, z.infer<typeof Unit>> };
-	"rewrite": { patchItems: Record<string, z.infer<typeof RewriteUnit>> };
+	audit: { auditItems: Record<string, z.infer<typeof Unit>> };
+	rewrite: { patchItems: Record<string, z.infer<typeof RewriteUnit>> };
 };
 
 const { chart, arg, artifactOf, joinArtifactOf, event, input, item, key, result, visit } = refs<
@@ -142,14 +142,14 @@ export default chart({
 						artifacts: {
 							findings: artifact(t`artifacts/docs-engine/findings/${key("audit")}.json`, Findings),
 						},
-		}),
+					}),
 					validate: script("node", [file("scripts/guard-findings.mjs")], {
 						env: {
 							FINDINGS_FILE: artifactOf("audit.review"),
 							UNIT_JSON: t`${json(item("audit"))}`,
 						},
 						reply: GuardReply,
-		}),
+					}),
 					onReject: "resume",
 					retries: 2,
 					transitions: { AUDITED: "done" },
@@ -169,10 +169,7 @@ export default chart({
 					GATE_ROUND: t`${visit("prepare-gate")}`,
 				},
 				artifacts: {
-					batches: artifact(
-						t`artifacts/docs-engine/gate-batches-round-${visit("prepare-gate")}.json`,
-						GateBatches,
-					),
+					batches: artifact(t`artifacts/docs-engine/gate-batches-round-${visit("prepare-gate")}.json`, GateBatches),
 				},
 				reply: PrepareGateReply,
 			}),
@@ -194,14 +191,14 @@ export default chart({
 								BatchVerdict,
 							),
 						},
-		}),
+					}),
 					validate: script("node", [file("scripts/guard-gate-batch.mjs")], {
 						env: {
 							BATCH_JSON: t`${json(item("gate"))}`,
 							VERDICT_FILE: artifactOf("gate.review", { artifact: "verdict" }),
 						},
 						reply: GuardReply,
-		}),
+					}),
 					onReject: "resume",
 					retries: 2,
 					transitions: { CLASSIFIED: "done" },
@@ -266,14 +263,14 @@ export default chart({
 						task: t`Apply the audit findings to one canonical documentation unit.\n\nUnit: ${json(item("rewrite"))}\n\nRead the unit file and the findings artifact at findingsPath, apply each correction surgically, and keep the unit's structure and frontmatter intact. Edit only the canonical unit file. Finish with PATCHED.`,
 						reads: [t`${item("rewrite", "path")}`, t`${item("rewrite", "findingsPath")}`],
 						artifacts: { unit: artifact(t`${item("rewrite", "path")}`) },
-		}),
+					}),
 					validate: script("node", [file("scripts/guard-unit.mjs")], {
 						env: {
 							UNIT_JSON: t`${json(item("rewrite"))}`,
 							REGISTRY_FILE: artifactOf("inventory", { artifact: "registry" }),
 						},
 						reply: GuardReply,
-		}),
+					}),
 					onReject: "resume",
 					retries: 2,
 					transitions: { PATCHED: "done" },

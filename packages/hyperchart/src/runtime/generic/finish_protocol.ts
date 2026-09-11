@@ -32,7 +32,10 @@ export async function validateFinishParams(
 	}
 	return errors.length > 0
 		? { ok: false, errors }
-		: { ok: true, event: { type: params.event as string, ...(params.output === undefined ? {} : { output: params.output }) } };
+		: {
+				ok: true,
+				event: { type: params.event as string, ...(params.output === undefined ? {} : { output: params.output }) },
+			};
 }
 
 function validateFinishBasics(effect: AgentEffect, params: FinishParams): string[] {
@@ -44,7 +47,8 @@ function validateFinishBasics(effect: AgentEffect, params: FinishParams): string
 		return errors;
 	}
 	const allowedEvents = finishableEvents(effect);
-	if (params.event === "FAILED") errors.push("FAILED is reserved for runtime failures and cannot be returned by an agent");
+	if (params.event === "FAILED")
+		errors.push("FAILED is reserved for runtime failures and cannot be returned by an agent");
 	else if (!allowedEvents.includes(params.event)) {
 		errors.push(`event '${params.event}' is not allowed; expected one of ${allowedEvents.join(", ")}`);
 	}

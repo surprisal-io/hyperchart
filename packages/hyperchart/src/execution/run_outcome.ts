@@ -11,7 +11,9 @@ export function terminalStateForFinalMachine(state: MachineState): RunTerminalSt
 	return state.projection.activeLeaves.some((leaf) => {
 		const node = nodeAt(state.ast, leaf);
 		return node?.kind === "final" && node.outcome === "failed";
-	}) ? "failed" : "complete";
+	})
+		? "failed"
+		: "complete";
 }
 
 export function createFailureProvenanceTracker(state: MachineState): {
@@ -33,7 +35,8 @@ export function createFailureProvenanceTracker(state: MachineState): {
 					if (before.has(leaf)) continue;
 					const node = nodeAt(state.ast, leaf);
 					if (node?.kind !== "final" || node.outcome !== "failed") continue;
-					if (record.type === "state_action" && record.kind === "complete" && record.event.type === "FAILED") enteredBy.set(leaf, record);
+					if (record.type === "state_action" && record.kind === "complete" && record.event.type === "FAILED")
+						enteredBy.set(leaf, record);
 					else enteredBy.delete(leaf);
 				}
 			}
@@ -46,7 +49,8 @@ export function createFailureProvenanceTracker(state: MachineState): {
 				const candidate = enteredBy.get(leaf);
 				if (candidate !== undefined && (latest === undefined || candidate.seqId > latest.seqId)) latest = candidate;
 			}
-			if (latest !== undefined && "error" in latest.event && latest.event.error !== undefined) return describeEventError(latest.event.error);
+			if (latest !== undefined && "error" in latest.event && latest.event.error !== undefined)
+				return describeEventError(latest.event.error);
 			return `chart reached failed terminal state '${failedLeaves[0]}'`;
 		},
 	};

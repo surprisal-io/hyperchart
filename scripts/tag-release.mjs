@@ -9,7 +9,11 @@ if (!version) {
 	console.error("Usage: node scripts/tag-release.mjs [--check] <version>");
 	process.exit(2);
 }
-if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(version)) {
+if (
+	!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(
+		version,
+	)
+) {
 	throw new Error(`Invalid release version: ${version}`);
 }
 
@@ -39,7 +43,9 @@ console.log(`Created annotated release tag ${tag} and pushed it to ${remote}.`);
 
 function assertCompatible(location, tagName, actual, expected) {
 	if (actual !== undefined && actual.commit !== expected) {
-		throw new Error(`Release tag ${tagName} on ${location} points to ${actual.commit}, expected current HEAD ${expected}`);
+		throw new Error(
+			`Release tag ${tagName} on ${location} points to ${actual.commit}, expected current HEAD ${expected}`,
+		);
 	}
 	if (actual !== undefined && !actual.annotated) {
 		throw new Error(`Release tag ${tagName} on ${location} exists but is not annotated`);
@@ -58,13 +64,7 @@ function readLocalTag(tagName) {
 }
 
 function readRemoteTag(remoteName, tagName) {
-	const output = git([
-		"ls-remote",
-		"--tags",
-		remoteName,
-		`refs/tags/${tagName}`,
-		`refs/tags/${tagName}^{}`,
-	]);
+	const output = git(["ls-remote", "--tags", remoteName, `refs/tags/${tagName}`, `refs/tags/${tagName}^{}`]);
 	if (output === "") return undefined;
 	const refs = new Map(
 		output.split("\n").map((line) => {

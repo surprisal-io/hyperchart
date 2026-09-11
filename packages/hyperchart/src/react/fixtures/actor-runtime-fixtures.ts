@@ -31,37 +31,58 @@ export const EditorProtocol = protocol({
 		},
 	}),
 	REVIEW: message({
-		input: z.object({
-			revision: z.object({
-				commit: z.string(),
-				files: z.array(z.object({
-					path: z.string(),
-					changes: z.object({ additions: z.number().int(), deletions: z.number().int() }).strict(),
-				}).strict()),
-			}).strict(),
-			policy: z.object({ requiredChecks: z.array(z.string()), minimumCoverage: z.number() }).strict(),
-			reviewers: z.array(z.object({ name: z.string(), role: z.enum(["owner", "security", "quality"]) }).strict()),
-		}).strict(),
+		input: z
+			.object({
+				revision: z
+					.object({
+						commit: z.string(),
+						files: z.array(
+							z
+								.object({
+									path: z.string(),
+									changes: z.object({ additions: z.number().int(), deletions: z.number().int() }).strict(),
+								})
+								.strict(),
+						),
+					})
+					.strict(),
+				policy: z.object({ requiredChecks: z.array(z.string()), minimumCoverage: z.number() }).strict(),
+				reviewers: z.array(z.object({ name: z.string(), role: z.enum(["owner", "security", "quality"]) }).strict()),
+			})
+			.strict(),
 		replies: {
-			APPROVED: z.object({
-				approval: z.object({ reviewer: z.string(), timestamp: z.string() }).strict(),
-				checks: z.record(z.string(), z.enum(["passed", "waived"])),
-			}).strict(),
-			CHANGES_REQUESTED: z.object({
-				summary: z.string(),
-				comments: z.array(z.object({
-					path: z.string(), line: z.number().int(), severity: z.enum(["warning", "blocking"]), message: z.string(),
-				}).strict()),
-			}).strict(),
+			APPROVED: z
+				.object({
+					approval: z.object({ reviewer: z.string(), timestamp: z.string() }).strict(),
+					checks: z.record(z.string(), z.enum(["passed", "waived"])),
+				})
+				.strict(),
+			CHANGES_REQUESTED: z
+				.object({
+					summary: z.string(),
+					comments: z.array(
+						z
+							.object({
+								path: z.string(),
+								line: z.number().int(),
+								severity: z.enum(["warning", "blocking"]),
+								message: z.string(),
+							})
+							.strict(),
+					),
+				})
+				.strict(),
 		},
 	}),
 	ARCHIVE: message({
-		input: z.object({
-			destination: z.enum(["local", "remote"]),
-			commits: z.array(z.string()),
-			manifest: z.record(z.string(), z.object({ checksum: z.string(), bytes: z.number().int() }).strict()),
-			retention: z.object({ days: z.number().int(), legalHold: z.boolean() }).strict(),
-		}).strict(),
+		input: z
+			.object({
+				destination: z.enum(["local", "remote"]),
+				commits: z.array(z.string()),
+				manifest: z.record(z.string(), z.object({ checksum: z.string(), bytes: z.number().int() }).strict()),
+				retention: z.object({ days: z.number().int(), legalHold: z.boolean() }).strict(),
+			})
+			.strict(),
 	}),
 });
 
@@ -174,7 +195,20 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 	const applyInputSchema = declaration?.protocol.APPLY?.input;
 	const reviewInputSchema = declaration?.protocol.REVIEW?.input;
 	const archiveInputSchema = declaration?.protocol.ARCHIVE?.input;
-	if (declaration?.kind !== "actor" || queue?.kind !== "sendBatch" || !Array.isArray(queue.inputs) || queueReview?.kind !== "send" || queueReview.input === undefined || queueArchive?.kind !== "send" || queueArchive.input === undefined || applyCall?.kind !== "call" || action?.kind !== "state" || applyInputSchema === undefined || reviewInputSchema === undefined || archiveInputSchema === undefined) {
+	if (
+		declaration?.kind !== "actor" ||
+		queue?.kind !== "sendBatch" ||
+		!Array.isArray(queue.inputs) ||
+		queueReview?.kind !== "send" ||
+		queueReview.input === undefined ||
+		queueArchive?.kind !== "send" ||
+		queueArchive.input === undefined ||
+		applyCall?.kind !== "call" ||
+		action?.kind !== "state" ||
+		applyInputSchema === undefined ||
+		reviewInputSchema === undefined ||
+		archiveInputSchema === undefined
+	) {
 		throw new Error("actor inspector fixture did not normalize to the expected actor graph");
 	}
 	return [
@@ -188,7 +222,8 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 			definition: declaration,
 			parentId: 1,
 			seqId: 2,
-			branchId: "main", timestamp: actorStoryTimestamp + 2,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 2,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -212,7 +247,8 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 			})),
 			parentId: 2,
 			seqId: 3,
-			branchId: "main", timestamp: actorStoryTimestamp + 3,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 3,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -226,10 +262,20 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 				event: queueReview.event,
 				inputSchema: reviewInputSchema,
 			},
-			messages: [{ messageId: "queue-review:message:1:0", event: queueReview.event, input: queueReview.input, producerState: "queue-review", producerVisit: 1, batchIndex: 0 }],
+			messages: [
+				{
+					messageId: "queue-review:message:1:0",
+					event: queueReview.event,
+					input: queueReview.input,
+					producerState: "queue-review",
+					producerVisit: 1,
+					batchIndex: 0,
+				},
+			],
 			parentId: 3,
 			seqId: 4,
-			branchId: "main", timestamp: actorStoryTimestamp + 4,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 4,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -243,10 +289,20 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 				event: queueArchive.event,
 				inputSchema: archiveInputSchema,
 			},
-			messages: [{ messageId: "queue-archive:message:1:0", event: queueArchive.event, input: queueArchive.input, producerState: "queue-archive", producerVisit: 1, batchIndex: 0 }],
+			messages: [
+				{
+					messageId: "queue-archive:message:1:0",
+					event: queueArchive.event,
+					input: queueArchive.input,
+					producerState: "queue-archive",
+					producerVisit: 1,
+					batchIndex: 0,
+				},
+			],
 			parentId: 4,
 			seqId: 5,
-			branchId: "main", timestamp: actorStoryTimestamp + 5,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 5,
 		},
 		{
 			type: "actor_messages_enqueued",
@@ -260,18 +316,21 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 				event: applyCall.event,
 				inputSchema: applyInputSchema,
 			},
-			messages: [{
-				messageId: "apply-call:message:1:0",
-				event: applyCall.event,
-				input: applyCall.input,
-				producerState: "apply-call",
-				producerVisit: 1,
-				batchIndex: 0,
-				callId: "apply-call:call:1",
-			}],
+			messages: [
+				{
+					messageId: "apply-call:message:1:0",
+					event: applyCall.event,
+					input: applyCall.input,
+					producerState: "apply-call",
+					producerVisit: 1,
+					batchIndex: 0,
+					callId: "apply-call:call:1",
+				},
+			],
 			parentId: 5,
 			seqId: 6,
-			branchId: "main", timestamp: actorStoryTimestamp + 6,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 6,
 		},
 		{
 			type: "actor_message",
@@ -281,7 +340,8 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 			receiveState: "@editor.idle",
 			parentId: 6,
 			seqId: 7,
-			branchId: "main", timestamp: actorStoryTimestamp + 7,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 7,
 		},
 		{
 			type: "state_action",
@@ -291,13 +351,16 @@ function actorInspectorSchedule(ast: ChartAst): DurableLogRecord[] {
 			definition: action.action,
 			parentId: 7,
 			seqId: 8,
-			branchId: "main", timestamp: actorStoryTimestamp + 8,
+			branchId: "main",
+			timestamp: actorStoryTimestamp + 8,
 		},
 	];
 }
 
 const actorInspectorCaptured = capturedStorySchedule(actorInspectorAst, actorInspectorSchedule(actorInspectorAst));
-export function actorInspectorRecords(_ast: ChartAst): DurableLogRecord[] { return [...actorInspectorCaptured]; }
+export function actorInspectorRecords(_ast: ChartAst): DurableLogRecord[] {
+	return [...actorInspectorCaptured];
+}
 
 export const actorInspectorInspectResult = actorInspectorScenario.inspect;
 
@@ -308,22 +371,19 @@ export const actorStaticAdapterRun = actorInspectorScenario.staticRun({
 	updatedAt: 1_700_000_000_000,
 });
 
-export const actorRuntimeAdapterRun = actorInspectorScenario.runtimeRun(
-	actorInspectorRecords(actorInspectorAst),
-	{
+export const actorRuntimeAdapterRun = actorInspectorScenario.runtimeRun(actorInspectorRecords(actorInspectorAst), {
+	runId: "run:actor-inspector-ui",
+	status: {
 		runId: "run:actor-inspector-ui",
-		status: {
-			runId: "run:actor-inspector-ui",
-			chartId: "actor-inspector-ui",
-			state: "running",
-			startedAt: 1_700_000_000_000,
-			updatedAt: 1_700_000_005_000,
-		},
-		cwd: "/workspace",
-		createdAt: 1_700_000_000_000,
+		chartId: "actor-inspector-ui",
+		state: "running",
+		startedAt: 1_700_000_000_000,
 		updatedAt: 1_700_000_005_000,
 	},
-);
+	cwd: "/workspace",
+	createdAt: 1_700_000_000_000,
+	updatedAt: 1_700_000_005_000,
+});
 
 const MailboxProtocol = protocol({ PING: message({ input: z.object({ value: z.string() }).strict() }) });
 const MailboxWorker = actor({
@@ -371,24 +431,44 @@ function mailboxReentrySchedule(ast: ChartAst): DurableLogRecord[] {
 	const hold = ast.states["phase.hold"];
 	const between = ast.states.between;
 	const contract = declaration?.protocol.PING;
-	if (declaration?.kind !== "actor" || dispatch?.kind !== "sendBatch" || !Array.isArray(dispatch.inputs) || hold?.kind !== "state" || between?.kind !== "state" || contract === undefined) {
+	if (
+		declaration?.kind !== "actor" ||
+		dispatch?.kind !== "sendBatch" ||
+		!Array.isArray(dispatch.inputs) ||
+		hold?.kind !== "state" ||
+		between?.kind !== "state" ||
+		contract === undefined
+	) {
 		throw new Error("mailbox reentry fixture did not normalize to the expected graph");
 	}
 	const dispatchInputs = dispatch.inputs;
-	const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: actorStoryTimestamp + 100 + seqId });
-	const messages = (visit: number) => dispatchInputs.map((input, batchIndex) => ({
-		messageId: `phase.dispatch:message:${visit}:${batchIndex}`,
-		event: dispatch.event,
-		input,
-		producerState: "phase.dispatch",
-		producerVisit: visit,
-		batchIndex,
-	}));
+	const stamp = (seqId: number) => ({
+		parentId: seqId === 1 ? null : seqId - 1,
+		seqId,
+		branchId: "main",
+		timestamp: actorStoryTimestamp + 100 + seqId,
+	});
+	const messages = (visit: number) =>
+		dispatchInputs.map((input, batchIndex) => ({
+			messageId: `phase.dispatch:message:${visit}:${batchIndex}`,
+			event: dispatch.event,
+			input,
+			producerState: "phase.dispatch",
+			producerVisit: visit,
+			batchIndex,
+		}));
 	const enqueue = (occurrence: string, generation: number, visit: number, seqId: number): DurableLogRecord => ({
 		type: "actor_messages_enqueued",
 		occurrence,
 		generation,
-		source: { producerState: "phase.dispatch", kind: "sendBatch", definition: dispatch, targetDeclaration: "phase.@worker", event: dispatch.event, inputSchema: contract.input },
+		source: {
+			producerState: "phase.dispatch",
+			kind: "sendBatch",
+			definition: dispatch,
+			targetDeclaration: "phase.@worker",
+			event: dispatch.event,
+			inputSchema: contract.input,
+		},
 		messages: messages(visit),
 		...stamp(seqId),
 	});
@@ -408,27 +488,97 @@ function mailboxReentrySchedule(ast: ChartAst): DurableLogRecord[] {
 		{ type: "args", args: {}, ...stamp(1) },
 		actorCreated("phase.@worker", 1, 2),
 		enqueue("phase.@worker", 1, 1, 3),
-		{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: hold.action.uid, definition: hold.action, ...stamp(4) },
-		{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker", messageId: first[0]!.messageId, receiveState: "phase.@worker.idle", ...stamp(5) },
-		{ type: "actor_message", kind: "replied", occurrence: "phase.@worker", messageId: first[0]!.messageId, message: "PING", ...stamp(6) },
-		{ type: "actor_message", kind: "settled", occurrence: "phase.@worker", messageId: first[0]!.messageId, ...stamp(7) },
-		{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker", messageId: first[1]!.messageId, receiveState: "phase.@worker.idle", ...stamp(8) },
-		{ type: "actor_message", kind: "replied", occurrence: "phase.@worker", messageId: first[1]!.messageId, message: "PING", ...stamp(9) },
-		{ type: "actor_message", kind: "settled", occurrence: "phase.@worker", messageId: first[1]!.messageId, ...stamp(10) },
+		{
+			type: "state_action",
+			kind: "invoke",
+			sessionId: "session-id",
+			actionUid: hold.action.uid,
+			definition: hold.action,
+			...stamp(4),
+		},
+		{
+			type: "actor_message",
+			kind: "accepted",
+			occurrence: "phase.@worker",
+			messageId: first[0]!.messageId,
+			receiveState: "phase.@worker.idle",
+			...stamp(5),
+		},
+		{
+			type: "actor_message",
+			kind: "replied",
+			occurrence: "phase.@worker",
+			messageId: first[0]!.messageId,
+			message: "PING",
+			...stamp(6),
+		},
+		{
+			type: "actor_message",
+			kind: "settled",
+			occurrence: "phase.@worker",
+			messageId: first[0]!.messageId,
+			...stamp(7),
+		},
+		{
+			type: "actor_message",
+			kind: "accepted",
+			occurrence: "phase.@worker",
+			messageId: first[1]!.messageId,
+			receiveState: "phase.@worker.idle",
+			...stamp(8),
+		},
+		{
+			type: "actor_message",
+			kind: "replied",
+			occurrence: "phase.@worker",
+			messageId: first[1]!.messageId,
+			message: "PING",
+			...stamp(9),
+		},
+		{
+			type: "actor_message",
+			kind: "settled",
+			occurrence: "phase.@worker",
+			messageId: first[1]!.messageId,
+			...stamp(10),
+		},
 		{ type: "state_action", kind: "complete", actionUid: hold.action.uid, event: { type: "EXIT" }, ...stamp(11) },
 		{ type: "actor_scope", kind: "closing", occurrence: "phase.@worker", ...stamp(12) },
 		{ type: "actor_scope", kind: "stopped", occurrence: "phase.@worker", ...stamp(13) },
-		{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: between.action.uid, definition: between.action, ...stamp(14) },
+		{
+			type: "state_action",
+			kind: "invoke",
+			sessionId: "session-id",
+			actionUid: between.action.uid,
+			definition: between.action,
+			...stamp(14),
+		},
 		{ type: "state_action", kind: "complete", actionUid: between.action.uid, event: { type: "AGAIN" }, ...stamp(15) },
 		actorCreated("phase.@worker~2", 2, 16),
 		enqueue("phase.@worker~2", 2, 2, 17),
-		{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: hold.action.uid, definition: hold.action, ...stamp(18) },
-		{ type: "actor_message", kind: "accepted", occurrence: "phase.@worker~2", messageId: second[0]!.messageId, receiveState: "phase.@worker~2.idle", ...stamp(19) },
+		{
+			type: "state_action",
+			kind: "invoke",
+			sessionId: "session-id",
+			actionUid: hold.action.uid,
+			definition: hold.action,
+			...stamp(18),
+		},
+		{
+			type: "actor_message",
+			kind: "accepted",
+			occurrence: "phase.@worker~2",
+			messageId: second[0]!.messageId,
+			receiveState: "phase.@worker~2.idle",
+			...stamp(19),
+		},
 	];
 }
 
 const mailboxReentryCaptured = capturedStorySchedule(mailboxReentryAst, mailboxReentrySchedule(mailboxReentryAst));
-export function mailboxReentryRecords(_ast: ChartAst): DurableLogRecord[] { return [...mailboxReentryCaptured]; }
+export function mailboxReentryRecords(_ast: ChartAst): DurableLogRecord[] {
+	return [...mailboxReentryCaptured];
+}
 
 export const mailboxReentryRun = mailboxReentryScenario.runtimeRun(mailboxReentryRecords(mailboxReentryAst), {
 	runId: "actor:mailbox-reentry",

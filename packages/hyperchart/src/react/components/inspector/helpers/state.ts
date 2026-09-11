@@ -261,7 +261,8 @@ export function agentStatesForSelection(
 	return allStates.filter((candidate) => {
 		if (
 			!candidate.agent ||
-			(!candidate.id.startsWith(childPrefix) && !(state.type === "map" && candidate.id.startsWith(mapInstancePrefix))) ||
+			(!candidate.id.startsWith(childPrefix) &&
+				!(state.type === "map" && candidate.id.startsWith(mapInstancePrefix))) ||
 			seenAgents.has(candidate.agent)
 		) {
 			return false;

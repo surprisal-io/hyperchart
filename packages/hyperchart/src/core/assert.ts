@@ -15,8 +15,11 @@ function deepEqual(actual: unknown, expected: unknown): boolean {
 	if (Array.isArray(actual) !== Array.isArray(expected)) return false;
 	const actualKeys = Object.keys(actual);
 	const expectedKeys = Object.keys(expected);
-	if (actualKeys.length !== expectedKeys.length || actualKeys.some((key) => !Object.hasOwn(expected, key))) return false;
-	return actualKeys.every((key) => deepEqual((actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key]));
+	if (actualKeys.length !== expectedKeys.length || actualKeys.some((key) => !Object.hasOwn(expected, key)))
+		return false;
+	return actualKeys.every((key) =>
+		deepEqual((actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key]),
+	);
 }
 
 const assert: Assertion = (condition: unknown, message?: string): asserts condition => {

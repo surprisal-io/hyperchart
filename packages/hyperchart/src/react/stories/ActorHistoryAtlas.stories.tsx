@@ -10,11 +10,18 @@ const receiveState = actorReentryRun.states.find((state) => state.id === "phase.
 const replyState = actorReentryRun.states.find((state) => state.id === "phase.@auditor.settle");
 const occurrence = actorReentryRun.actorOccurrences?.[0];
 const poolOccurrence = actorPoolOutOfOrderRun.actorOccurrences?.[0];
-if (receiveState === undefined || replyState === undefined || occurrence === undefined || poolOccurrence === undefined) {
+if (
+	receiveState === undefined ||
+	replyState === undefined ||
+	occurrence === undefined ||
+	poolOccurrence === undefined
+) {
 	throw new Error("actor history atlas requires replay-valid actor and pool projections");
 }
-const receiveMessages = receiveState.actorInternal?.generations?.flatMap((generation) => generation.actorMessageHistory ?? []) ?? [];
-const replyMessages = replyState.actorInternal?.generations?.flatMap((generation) => generation.actorMessageHistory ?? []) ?? [];
+const receiveMessages =
+	receiveState.actorInternal?.generations?.flatMap((generation) => generation.actorMessageHistory ?? []) ?? [];
+const replyMessages =
+	replyState.actorInternal?.generations?.flatMap((generation) => generation.actorMessageHistory ?? []) ?? [];
 
 const meta = {
 	title: "Hyperchart/Inspector/State Details/Actor History Atlas",
@@ -26,7 +33,10 @@ type Story = StoryObj;
 
 function AtlasCard({ title, testId, children }: { title: string; testId: string; children: React.ReactNode }) {
 	return (
-		<article data-testid={testId} className="min-w-0 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-3">
+		<article
+			data-testid={testId}
+			className="min-w-0 rounded-xl border border-[var(--border-primary)] bg-[var(--bg-secondary)] p-3"
+		>
 			<h2 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{title}</h2>
 			{children}
 		</article>

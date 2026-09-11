@@ -50,7 +50,11 @@ export function AgentSessionDialog({
 
 	return (
 		<DialogPortal>
-			<div data-hyperchart-root data-theme={resolved} className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-6">
+			<div
+				data-hyperchart-root
+				data-theme={resolved}
+				className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-6"
+			>
 				<button
 					type="button"
 					tabIndex={-1}
@@ -76,7 +80,9 @@ export function AgentSessionDialog({
 							</div>
 							<div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
 								<span className="inline-flex items-center gap-1">
-									<span className={`h-1.5 w-1.5 rounded-full ${session.status === "running" || session.status === "starting" ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`} />
+									<span
+										className={`h-1.5 w-1.5 rounded-full ${session.status === "running" || session.status === "starting" ? "animate-pulse bg-emerald-400" : "bg-[var(--text-muted)]"}`}
+									/>
 									{session.status}
 								</span>
 								{session.role !== undefined && <span>role {session.role}</span>}
@@ -112,43 +118,72 @@ export function AgentSessionDialog({
 					>
 						{session.messages?.length ? (
 							session.messages
-								.filter((entry) => !(entry.role === "tool" && entry.toolStatus === "running" && entry.toolName === session.currentTool))
+								.filter(
+									(entry) =>
+										!(
+											entry.role === "tool" &&
+											entry.toolStatus === "running" &&
+											entry.toolName === session.currentTool
+										),
+								)
 								.map((entry) => (
-								<div key={entry.id} className={`flex ${entry.role === "user" ? "justify-end" : "justify-start"}`}>
-									<div className={`max-w-[88%] rounded-xl border px-3 py-2 ${messageClasses(entry.role, entry.isError === true)}`}>
-										<div className="mb-1 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-wide opacity-70">
-											<span>{entry.role === "tool" ? entry.toolName ?? "tool" : entry.role}</span>
-											{entry.role === "tool" && entry.toolStatus && (
-												<span className={entry.toolStatus === "error" ? "text-[var(--hc-red-text)]" : entry.toolStatus === "completed" ? "text-[var(--hc-green-text)]" : "text-[var(--hc-cyan-text)]"}>
-													{entry.toolStatus === "running" ? "loading" : entry.toolStatus === "completed" ? "complete" : "error"}
-												</span>
-											)}
-											{entry.timestamp !== undefined && <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>}
+									<div key={entry.id} className={`flex ${entry.role === "user" ? "justify-end" : "justify-start"}`}>
+										<div
+											className={`max-w-[88%] rounded-xl border px-3 py-2 ${messageClasses(entry.role, entry.isError === true)}`}
+										>
+											<div className="mb-1 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-wide opacity-70">
+												<span>{entry.role === "tool" ? (entry.toolName ?? "tool") : entry.role}</span>
+												{entry.role === "tool" && entry.toolStatus && (
+													<span
+														className={
+															entry.toolStatus === "error"
+																? "text-[var(--hc-red-text)]"
+																: entry.toolStatus === "completed"
+																	? "text-[var(--hc-green-text)]"
+																	: "text-[var(--hc-cyan-text)]"
+														}
+													>
+														{entry.toolStatus === "running"
+															? "loading"
+															: entry.toolStatus === "completed"
+																? "complete"
+																: "error"}
+													</span>
+												)}
+												{entry.timestamp !== undefined && <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>}
+											</div>
+											{entry.role === "tool" ? (
+												<CollapsibleTranscriptText text={toolLifecycleText(entry)} />
+											) : entry.text && entry.role === "reasoning" ? (
+												<CollapsibleTranscriptText text={entry.text} />
+											) : entry.text ? (
+												<pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+													{entry.text}
+												</pre>
+											) : null}
 										</div>
-										{entry.role === "tool" ? (
-											<CollapsibleTranscriptText text={toolLifecycleText(entry)} />
-										) : entry.text && entry.role === "reasoning" ? (
-											<CollapsibleTranscriptText text={entry.text} />
-										) : entry.text ? (
-											<pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{entry.text}</pre>
-										) : null}
 									</div>
-								</div>
-							))
+								))
 						) : (
-							<div className="flex h-full min-h-48 items-center justify-center text-xs text-[var(--text-muted)]">Waiting for session output…</div>
+							<div className="flex h-full min-h-48 items-center justify-center text-xs text-[var(--text-muted)]">
+								Waiting for session output…
+							</div>
 						)}
 						{session.currentReasoning && (
 							<div className="rounded-xl border border-violet-500/25 bg-violet-500/10 px-3 py-2 text-[var(--text-secondary)]">
 								<div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--hc-purple-text)]">
 									{session.currentText === undefined && session.currentTool === undefined ? (
-										<><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" /> reasoning live</>
+										<>
+											<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" /> reasoning live
+										</>
 									) : (
 										<span>reasoning</span>
 									)}
 								</div>
 								{session.currentText === undefined && session.currentTool === undefined ? (
-									<pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{session.currentReasoning}</pre>
+									<pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+										{session.currentReasoning}
+									</pre>
 								) : (
 									<CollapsibleTranscriptText text={session.currentReasoning} />
 								)}
@@ -159,27 +194,45 @@ export function AgentSessionDialog({
 								<div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
 									<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> assistant live
 								</div>
-								<pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{session.currentText}</pre>
+								<pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">
+									{session.currentText}
+								</pre>
 							</div>
 						)}
 						{session.currentTool && (
 							<div className="rounded-xl border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-[var(--hc-cyan-text)]">
 								<div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide">
-									<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" /> {session.currentTool} · loading
+									<span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" /> {session.currentTool} ·
+									loading
 								</div>
-								{session.currentToolArgs && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--text-secondary)]">{session.currentToolArgs}</pre>}
+								{session.currentToolArgs && (
+									<pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-[var(--text-secondary)]">
+										{session.currentToolArgs}
+									</pre>
+								)}
 							</div>
 						)}
-						{session.error && <div role="alert" className="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-[var(--hc-red-text)]">{session.error}</div>}
+						{session.error && (
+							<div
+								role="alert"
+								className="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2 text-xs text-[var(--hc-red-text)]"
+							>
+								{session.error}
+							</div>
+						)}
 					</div>
 
-					<form onSubmit={(event) => void submit(event)} className="border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-3">
+					<form
+						onSubmit={(event) => void submit(event)}
+						className="border-t border-[var(--border-primary)] bg-[var(--bg-secondary)] p-3"
+					>
 						<div className="flex items-end gap-2">
 							<textarea
 								value={message}
 								onChange={(event) => setMessage(event.target.value)}
 								onKeyDown={(event) => {
-									if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) event.currentTarget.form?.requestSubmit();
+									if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
+										event.currentTarget.form?.requestSubmit();
 								}}
 								disabled={!steeringEnabled || sending}
 								rows={2}
@@ -195,8 +248,14 @@ export function AgentSessionDialog({
 								<PaperAirplaneIcon className="h-4 w-4" aria-hidden="true" /> {sending ? "Sending…" : "Steer"}
 							</button>
 						</div>
-						<div className="mt-1.5 text-[10px] text-[var(--text-muted)]">Ctrl/⌘ + Enter to send after the current tool call.</div>
-						{sendError && <div role="alert" className="mt-2 text-[11px] text-[var(--hc-red-text)]">{sendError}</div>}
+						<div className="mt-1.5 text-[10px] text-[var(--text-muted)]">
+							Ctrl/⌘ + Enter to send after the current tool call.
+						</div>
+						{sendError && (
+							<div role="alert" className="mt-2 text-[11px] text-[var(--hc-red-text)]">
+								{sendError}
+							</div>
+						)}
 					</form>
 				</div>
 			</div>
@@ -253,7 +312,12 @@ function CollapsibleTranscriptText({ text }: { text: string }) {
 							<div className="max-h-[2.9em] overflow-hidden whitespace-pre-wrap break-words pr-5 font-mono text-[11px] leading-relaxed">
 								{text}
 							</div>
-							<span className="absolute bottom-0 right-0 px-1 font-mono text-[11px] text-[var(--text-muted)]" aria-hidden="true">…</span>
+							<span
+								className="absolute bottom-0 right-0 px-1 font-mono text-[11px] text-[var(--text-muted)]"
+								aria-hidden="true"
+							>
+								…
+							</span>
 						</div>
 					)}
 					<button
@@ -262,7 +326,10 @@ function CollapsibleTranscriptText({ text }: { text: string }) {
 						aria-expanded={expanded}
 						className="mt-1 inline-flex items-center gap-1 text-[9px] font-medium uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
 					>
-						<ChevronDownIcon className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`} aria-hidden="true" />
+						<ChevronDownIcon
+							className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`}
+							aria-hidden="true"
+						/>
 						{expanded ? "Collapse" : "Expand"}
 					</button>
 				</div>

@@ -21,8 +21,7 @@ for (const [index, decision] of decisions.entries()) {
 	if (!expectedIds.has(decision.id)) violations.push(`${at}.id '${decision.id}' is not in this batch`);
 	if (seen.has(decision.id)) violations.push(`${at}.id '${decision.id}' is duplicated`);
 	seen.add(decision.id);
-	if (!["pass", "drop", "rework"].includes(decision.result))
-		violations.push(`${at}.result must be pass|drop|rework`);
+	if (!["pass", "drop", "rework"].includes(decision.result)) violations.push(`${at}.result must be pass|drop|rework`);
 	if (decision.result === "rework" && (typeof decision.comment !== "string" || decision.comment.trim() === ""))
 		violations.push(`${at}.comment is required for rework`);
 }

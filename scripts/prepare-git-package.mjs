@@ -17,12 +17,10 @@ try {
 } catch {}
 
 run("npm", ["install", "--include=dev", "--ignore-scripts"], root);
-if (packageName === "@surprisal/pi-hyperchart")
-	run("npm", ["run", "build", "-w", "@surprisal/hyperchart"], root);
+if (packageName === "@surprisal/pi-hyperchart") run("npm", ["run", "build", "-w", "@surprisal/hyperchart"], root);
 run("npm", ["run", "build", "-w", packageName], root);
 
 function run(command, args, cwd) {
 	const result = spawnSync(command, args, { cwd, stdio: "inherit" });
-	if (result.status !== 0)
-		throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
+	if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed with ${result.status}`);
 }

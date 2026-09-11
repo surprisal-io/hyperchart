@@ -5,7 +5,11 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { BranchId, DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import { terminalStateForFinalMachine } from "../packages/hyperchart/src/execution/run_outcome.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
-import type { PostgresLogStore, PostgresRunTransaction, SqlTransactionalRunLogStore } from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
+import type {
+	PostgresLogStore,
+	PostgresRunTransaction,
+	SqlTransactionalRunLogStore,
+} from "../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
 import {
 	HISTORY_READ_ITEMS,
 	type HistoryChunk,
@@ -33,7 +37,9 @@ function sourceFilesUnder(path: string): string[] {
 }
 
 function sourcesUnder(path: string): string {
-	return sourceFilesUnder(path).map((file) => readFileSync(file, "utf8")).join("\n");
+	return sourceFilesUnder(path)
+		.map((file) => readFileSync(file, "utf8"))
+		.join("\n");
 }
 
 describe("bounded run-history API boundary", () => {
@@ -53,11 +59,17 @@ describe("bounded run-history API boundary", () => {
 		expectTypeOf<RunLogStore>().not.toHaveProperty("moveBranchWithCheckpoint");
 		expectTypeOf<ConstructorParameters<typeof MemoryLogStore>>().toEqualTypeOf<[branchId?: BranchId]>();
 		expectTypeOf<HistoryChunk<DurableLogRecord>["items"]>().toEqualTypeOf<readonly DurableLogRecord[]>();
-		expectTypeOf<Parameters<typeof terminalStateForFinalMachine>>().toEqualTypeOf<[state: Parameters<typeof terminalStateForFinalMachine>[0]]>();
+		expectTypeOf<Parameters<typeof terminalStateForFinalMachine>>().toEqualTypeOf<
+			[state: Parameters<typeof terminalStateForFinalMachine>[0]]
+		>();
 
 		const entrypoint = readFileSync(runtimeIndex, "utf8");
-		expect(entrypoint).not.toMatch(/openExecutionReplay|EXECUTION_REPLAY_BATCH_RECORDS|NormalizedRunLog|RunLogReader|collectBranches|RespondToUserInteractionInput/);
-		expect(entrypoint).not.toMatch(/\b(?:latestPinsByPath|materializeWorkspace|finalMachineFailureMessage|listHyperchartBranches|loadBranchProjection|projectBranch|ProjectionContract|PROJECTOR_VERSION|listHyperchartBranchPage)\b/);
+		expect(entrypoint).not.toMatch(
+			/openExecutionReplay|EXECUTION_REPLAY_BATCH_RECORDS|NormalizedRunLog|RunLogReader|collectBranches|RespondToUserInteractionInput/,
+		);
+		expect(entrypoint).not.toMatch(
+			/\b(?:latestPinsByPath|materializeWorkspace|finalMachineFailureMessage|listHyperchartBranches|loadBranchProjection|projectBranch|ProjectionContract|PROJECTOR_VERSION|listHyperchartBranchPage)\b/,
+		);
 		expect(entrypoint).toMatch(/materializeWorkspaceFromPins|OpaqueCheckpointEnvelope|PrepareStampedCommit/);
 		expect(readFileSync(runnerIndex, "utf8")).toMatch(/listHyperchartBranchPage|createHyperchartRunnerController/);
 	});
@@ -93,7 +105,9 @@ describe("bounded run-history API boundary", () => {
 	it("keeps runtime and storage independent from projection and execution internals", () => {
 		const runtime = sourcesUnder(runtimeSources);
 		expect(runtime).not.toMatch(/from ["'][^"']*(?:core\/projection|projection_retention|execution\/)/);
-		expect(runtime).not.toMatch(/\b(?:BranchProjection|projectBranch|loadBranchProjection|projectorVersion|astDigest|ProjectionContract)\b/);
+		expect(runtime).not.toMatch(
+			/\b(?:BranchProjection|projectBranch|loadBranchProjection|projectorVersion|astDigest|ProjectionContract)\b/,
+		);
 		const postgres = readFileSync(join(packageRoot, "hyperchart/src/runtime/generic/postgres_log_store.ts"), "utf8");
 		expect(postgres).toContain("selector_key");
 		expect(postgres).toContain("blob jsonb");
@@ -101,11 +115,9 @@ describe("bounded run-history API boundary", () => {
 	});
 
 	it("keeps storage independent from AST, projection, and host layers", () => {
-		const storage = [
-			"log_store.ts",
-			"memory_log_store.ts",
-			"postgres_log_store.ts",
-		].map((name) => readFileSync(join(packageRoot, "hyperchart/src/runtime/generic", name), "utf8")).join("\n");
+		const storage = ["log_store.ts", "memory_log_store.ts", "postgres_log_store.ts"]
+			.map((name) => readFileSync(join(packageRoot, "hyperchart/src/runtime/generic", name), "utf8"))
+			.join("\n");
 		expect(storage).not.toMatch(/core\/(?:projection|normalize|inspect)|\/host\/|user_interaction_admission/);
 	});
 });

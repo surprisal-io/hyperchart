@@ -34,11 +34,7 @@ import {
 	stringifyToolArgs,
 	validateDeclaredReadPaths,
 } from "@surprisal/hyperchart/runtime";
-import {
-	loadAgentDefinition,
-	resolvePiSubagentDefinitionDirs,
-	type AgentDefinition,
-} from "./agent_definitions.js";
+import { loadAgentDefinition, resolvePiSubagentDefinitionDirs, type AgentDefinition } from "./agent_definitions.js";
 import { createFinishTool, type CompletionSink, validateFinishParams } from "./finish_tool.js";
 import { createThrottledProgressWriter, updateSessionProgress } from "@surprisal/hyperchart/sessions";
 
@@ -120,11 +116,12 @@ export function sessionIdForAttempt(sessionId: string, attempt: number): string 
 }
 
 function workspaceContextNote(projectDir: string, branchWorkspace: string): string {
-	if (projectDir === branchWorkspace) return [
-		`Project/repository directory: ${projectDir}`,
-		`Branch workspace (current working directory): ${branchWorkspace}`,
-		`Working directory: ${branchWorkspace}`,
-	].join("\n");
+	if (projectDir === branchWorkspace)
+		return [
+			`Project/repository directory: ${projectDir}`,
+			`Branch workspace (current working directory): ${branchWorkspace}`,
+			`Working directory: ${branchWorkspace}`,
+		].join("\n");
 	return [
 		`Project/repository directory: ${projectDir}`,
 		`Branch workspace (current working directory): ${branchWorkspace}`,
@@ -180,23 +177,28 @@ export class PiAgentExecutor implements AgentExecutor {
 		const key = actionUidKey(effect.actionUid);
 		const previous = this.cancelAction(effect.actionUid, true);
 		const generation = this.generations.next(key);
-		this.launch(key, generation, this.run(
-			effect,
-			emit,
-			{
-				forceNewSession: effect.recovery?.mode === "restart",
+		this.launch(
+			key,
+			generation,
+			this.run(
+				effect,
+				emit,
+				{
+					forceNewSession: effect.recovery?.mode === "restart",
 					sessionAttempt: effect.recovery?.restartAttempt ?? 0,
-				...(effect.recovery !== undefined
-					? { resumePrompt: buildRecoveryPrompt(effect) }
+					...(effect.recovery !== undefined
+						? { resumePrompt: buildRecoveryPrompt(effect) }
 						: effect.resume === undefined
 							? {}
 							: {
 									resumePrompt: effect.resume.message,
 									...(effect.resume.session === undefined ? {} : { resumeSessionFile: effect.resume.session }),
-					}) },
+								}),
+				},
 				generation,
-				previous)
-			.catch((error: unknown) => this.handleRunFailure(key, generation, effect, emit, error)));
+				previous,
+			).catch((error: unknown) => this.handleRunFailure(key, generation, effect, emit, error)),
+		);
 	}
 
 	async steer(actionKey: string, invokeSeqId: number, message: string): Promise<boolean> {
@@ -285,7 +287,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		];
 		const results = await Promise.allSettled(pending);
 		const failures = [
-			...results.filter((result): result is PromiseRejectedResult => result.status === "rejected").map((result) => result.reason),
+			...results
+				.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+				.map((result) => result.reason),
 			...this.cleanupFailures,
 		];
 		try {
@@ -325,8 +329,14 @@ export class PiAgentExecutor implements AgentExecutor {
 	): Promise<void> {
 		await previous;
 		let outcome: AgentOutcome | undefined;
-		await this.runSession(effect, (value) => {
-				outcome = value; }, runOptions, generation);
+		await this.runSession(
+			effect,
+			(value) => {
+				outcome = value;
+			},
+			runOptions,
+			generation,
+		);
 		// Deliver only after the physical session and recorder have fully closed.
 		if (outcome !== undefined) this.safeEmit(actionUidKey(effect.actionUid), generation, emit, outcome);
 	}
@@ -365,14 +375,8 @@ export class PiAgentExecutor implements AgentExecutor {
 				? latestSessionForRunOptions(this.options.sessionsDir, this.options.branchId, dir, effect, runOptions)
 				: undefined;
 		const sink: CompletionSink = { captured: undefined };
-		const session = await this.createSession(
-			effect,
-			definition,
-			dir,
-			latest,
-			runOptions,
-			sink,
-			() => this.isStopped(key, generation),
+		const session = await this.createSession(effect, definition, dir, latest, runOptions, sink, () =>
+			this.isStopped(key, generation),
 		);
 		if (session === undefined) return;
 		if (this.isStopped(key, generation)) {
@@ -400,9 +404,7 @@ export class PiAgentExecutor implements AgentExecutor {
 				return;
 			}
 
-			const taskPrompt = [
-				runOptions.resumePrompt, buildTaskPrompt(effect, reads),
-			]
+			const taskPrompt = [runOptions.resumePrompt, buildTaskPrompt(effect, reads)]
 				.filter((part): part is string => part !== undefined)
 				.join("\n\n");
 			await this.promptAndAccept(key, generation, emit, live, taskPrompt);
@@ -489,12 +491,7 @@ export class PiAgentExecutor implements AgentExecutor {
 				...(model === undefined ? {} : { model }),
 				...(plan.thinkingLevel === undefined ? {} : { thinkingLevel: plan.thinkingLevel }),
 				...(tools === undefined ? {} : { tools }),
-				customTools: createInvocationCustomTools(
-					effect,
-					sink,
-					this.options.schemaRegistry,
-					overrides?.customTools,
-				),
+				customTools: createInvocationCustomTools(effect, sink, this.options.schemaRegistry, overrides?.customTools),
 				resourceLoader,
 				sessionManager,
 			}));
@@ -553,8 +550,12 @@ export class PiAgentExecutor implements AgentExecutor {
 		}
 	}
 
-	private async acceptanceLoop(key: string, generation: number, emit: EmitAgentOutcome,
-		live: LiveAgent): Promise<void> {
+	private async acceptanceLoop(
+		key: string,
+		generation: number,
+		emit: EmitAgentOutcome,
+		live: LiveAgent,
+	): Promise<void> {
 		const outcome = await evaluateAgentTurn({
 			effect: live.effect,
 			sink: live.sink,
@@ -564,13 +565,19 @@ export class PiAgentExecutor implements AgentExecutor {
 			checkArtifacts: () => checkEffectArtifacts(live.effect, this.options.workDir, this.options.schemaRegistry),
 		});
 		if (outcome !== undefined) this.safeEmit(key, generation, emit, outcome);
-			}
+	}
 
 	private attachProgress(session: AgentSession, effect: AgentEffect, definition: AgentDefinition): () => void {
 		let turnCount = 0;
 		let toolCount = 0;
 		let tokenCount = 0;
-		const stream = createThrottledProgressWriter(this.options.sessionsDir, effect.actionUid, definition.name, effect.id, this.options.branchId);
+		const stream = createThrottledProgressWriter(
+			this.options.sessionsDir,
+			effect.actionUid,
+			definition.name,
+			effect.id,
+			this.options.branchId,
+		);
 		const clearStreamFields = { currentText: undefined, currentReasoning: undefined };
 		const unsubscribe = session.subscribe((event) => {
 			if (event.type === "turn_start") {
@@ -808,7 +815,11 @@ function latestJsonl(dir: string): string | undefined {
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
 }
 
-function latestJsonlForPreviousActionSession(sessionsDir: string, branchId: string, effect: AgentEffect): string | undefined {
+function latestJsonlForPreviousActionSession(
+	sessionsDir: string,
+	branchId: string,
+	effect: AgentEffect,
+): string | undefined {
 	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid));
 	if (!existsSync(root)) return undefined;
 	const currentKey = sanitizeSegment(sessionKey(effect.id));

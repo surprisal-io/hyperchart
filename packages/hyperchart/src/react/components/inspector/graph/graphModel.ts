@@ -172,7 +172,8 @@ export function buildGraph(
 				style: {
 					stroke: running ? EDGE_RUNNING_COLOR : EDGE_NEUTRAL_COLOR,
 					strokeWidth: running ? 1.6 : 1.15,
-					strokeDasharray: edge.kind === "send" || edge.kind === "sendBatch" || edge.kind === "reply" ? "5 4" : undefined,
+					strokeDasharray:
+						edge.kind === "send" || edge.kind === "sendBatch" || edge.kind === "reply" ? "5 4" : undefined,
 					opacity: edge.kind === "send" || edge.kind === "sendBatch" ? 0.58 : 0.72,
 				},
 				data: routedPoints === undefined && !running ? undefined : { points: routedPoints, running },

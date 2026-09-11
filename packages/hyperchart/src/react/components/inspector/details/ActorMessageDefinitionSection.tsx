@@ -23,16 +23,18 @@ export function ActorMessageDefinitionSection({
 }) {
 	const definition = state.actorMessageDefinition;
 	if (definition === undefined) return null;
-	const title = definition.kind === "receive"
-		? "Accepted message contracts"
-		: definition.kind === "reply"
-			? "Reply definition"
-			: "Outgoing message definition";
+	const title =
+		definition.kind === "receive"
+			? "Accepted message contracts"
+			: definition.kind === "reply"
+				? "Reply definition"
+				: "Outgoing message definition";
 	const targetPath = state.actorMessageLink?.to ?? definition.resolvedTo ?? definition.to;
-	const targetState = targetPath === undefined
-		? undefined
-		: allStates.find((candidate) => candidate.id === targetPath)
-			?? allStates.find((candidate) => candidate.actorDeclaration?.declarationPath === targetPath);
+	const targetState =
+		targetPath === undefined
+			? undefined
+			: (allStates.find((candidate) => candidate.id === targetPath) ??
+				allStates.find((candidate) => candidate.actorDeclaration?.declarationPath === targetPath));
 	const targetStateId = targetState?.id ?? targetPath;
 	return (
 		<Section title={title} icon={ArrowsRightLeftIcon} defaultOpen>
@@ -101,7 +103,9 @@ export function ActorMessageDefinitionSection({
 							{definition.contracts.length === 1 ? "message contract" : "message contracts"}
 						</div>
 						<div className="grid gap-2">
-							{definition.contracts.map((contract) => <ActorProtocolCard key={contract.event} contract={contract} />)}
+							{definition.contracts.map((contract) => (
+								<ActorProtocolCard key={contract.event} contract={contract} />
+							))}
 						</div>
 					</div>
 				) : null}

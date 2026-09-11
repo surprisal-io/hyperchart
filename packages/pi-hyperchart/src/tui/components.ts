@@ -4,7 +4,14 @@ import { readRunStatus } from "@surprisal/hyperchart/sessions";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { getSelectListTheme, type Theme } from "@earendil-works/pi-coding-agent";
-import { SelectList, truncateToWidth, visibleWidth, type Component, type SelectItem, type TUI } from "@earendil-works/pi-tui";
+import {
+	SelectList,
+	truncateToWidth,
+	visibleWidth,
+	type Component,
+	type SelectItem,
+	type TUI,
+} from "@earendil-works/pi-tui";
 import type { ChartAst } from "@surprisal/hyperchart/internal/core/types";
 import { JsonlLogStore, type RunHistoryStore } from "@surprisal/hyperchart/runtime";
 import { readBranchExecutionOverview } from "@surprisal/hyperchart/inspect";
@@ -173,7 +180,8 @@ export class RunWidget implements Component {
 			accent(this.theme, `branch:${view.branchId}`),
 			view.branchCount > 1 ? dim(this.theme, `${view.branchCount} heads`) : undefined,
 			dim(this.theme, `tree:${view.recordCount}`),
-			view.runnerBranchIds !== undefined && (view.runnerBranchIds.length !== 1 || view.runnerBranchIds[0] !== view.branchId)
+			view.runnerBranchIds !== undefined &&
+			(view.runnerBranchIds.length !== 1 || view.runnerBranchIds[0] !== view.branchId)
 				? dim(this.theme, `runners:${view.runnerBranchIds.join(",")}`)
 				: undefined,
 			accent(this.theme, `${this.progressPercent}%`),
@@ -187,7 +195,13 @@ export class RunWidget implements Component {
 			activeLines.push(...sessions.slice(0, 3).map((session) => compactSessionLine(session, this.theme, live)));
 		}
 		const hidden = Math.max(active.length, sessions.length) - activeLines.length;
-		const heads = view.branches.length === 0 ? undefined : dim(this.theme, `  heads ${view.branches.map((branch) => `${branch.branchId}@${branch.headSeqId ?? "empty"}`).join(" · ")}${view.branchCount > view.branches.length ? ` · +${view.branchCount - view.branches.length} more` : ""}`);
+		const heads =
+			view.branches.length === 0
+				? undefined
+				: dim(
+						this.theme,
+						`  heads ${view.branches.map((branch) => `${branch.branchId}@${branch.headSeqId ?? "empty"}`).join(" · ")}${view.branchCount > view.branches.length ? ` · +${view.branchCount - view.branches.length} more` : ""}`,
+					);
 		return [
 			header,
 			heads,
@@ -213,28 +227,30 @@ export class RunWidget implements Component {
 		const branchId = this.opts.branchId ?? "main";
 		const store = await openRunLogStore(this.opts.runId, { branchId });
 		try {
-		const snapshot = await store.captureSnapshot(branchId);
-		const [execution, recordChunk, branches, recordCount] = await Promise.all([
-			readBranchExecutionOverview(this.opts.ast, branchId, store, snapshot),
-			store.readRecords({ snapshot }),
-			readRunWidgetBranchOverview(store),
-			store.countRecords(),
-		]);
-		const records = [...recordChunk.items].reverse();
-		const run = await hyperchartRunFromRunId(this.opts.runId, { ast: this.opts.ast, branchId });
-		this.view = buildRunView(this.opts.ast, records, Date.now(), {
-			branchId,
-			...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
-			branches: branches.items.map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
-			branchCount: branches.totalCount,
-			recordCount,
-			execution,
-		});
-		this.progress = readSessionProgress(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions")).sessions;
-		this.progressPercent = summarizeHyperchartProgress(run).pct;
-		this.refreshError = undefined;
-		this.tui.requestRender();
-		} finally { await store.close(); }
+			const snapshot = await store.captureSnapshot(branchId);
+			const [execution, recordChunk, branches, recordCount] = await Promise.all([
+				readBranchExecutionOverview(this.opts.ast, branchId, store, snapshot),
+				store.readRecords({ snapshot }),
+				readRunWidgetBranchOverview(store),
+				store.countRecords(),
+			]);
+			const records = [...recordChunk.items].reverse();
+			const run = await hyperchartRunFromRunId(this.opts.runId, { ast: this.opts.ast, branchId });
+			this.view = buildRunView(this.opts.ast, records, Date.now(), {
+				branchId,
+				...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
+				branches: branches.items.map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId })),
+				branchCount: branches.totalCount,
+				recordCount,
+				execution,
+			});
+			this.progress = readSessionProgress(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions")).sessions;
+			this.progressPercent = summarizeHyperchartProgress(run).pct;
+			this.refreshError = undefined;
+			this.tui.requestRender();
+		} finally {
+			await store.close();
+		}
 	});
 
 	private handleRefreshError(cause: unknown): void {

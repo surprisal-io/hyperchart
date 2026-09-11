@@ -41,7 +41,10 @@ function parseScalar(value: string): unknown {
 }
 
 function unquote(value: string): string {
-	if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+	if (
+		value.length >= 2 &&
+		((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+	) {
 		return value.slice(1, -1);
 	}
 	return value;

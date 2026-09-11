@@ -16,7 +16,12 @@ import { nodeMiniMapColor, useGraphLayout } from "./graph/graphModel.js";
 import { HyperchartStateGraphNode } from "./graph/HyperchartStateGraphNode.js";
 import { HyperchartTransitionEdge } from "./graph/HyperchartTransitionEdge.js";
 import { hyperchartRunTitle, stateDisplayName } from "./helpers/state.js";
-import { immediateMapScopeId, scopeStackForState, stateScopeParentId, visibleStateIdsForScope } from "./helpers/scope.js";
+import {
+	immediateMapScopeId,
+	scopeStackForState,
+	stateScopeParentId,
+	visibleStateIdsForScope,
+} from "./helpers/scope.js";
 import { StatusPill } from "../ui/StatusPill.js";
 import { useModalDialog } from "../../support/useModalDialog.js";
 import { HyperchartInspectorSidePanel } from "./HyperchartInspectorSidePanel.js";
@@ -132,13 +137,13 @@ export function HyperchartInspectorDialogInner({
 	const [branchCursor, setBranchCursor] = useState(run?.branchListNext);
 	const [branchLoadError, setBranchLoadError] = useState<string>();
 	const [historySnapshot, setHistorySnapshot] = useState(run?.historySnapshot);
-	const pinnedHistorySnapshot = historySnapshot?.branchId === (run?.branchId ?? "main")
-		? historySnapshot
-		: run?.historySnapshot;
+	const pinnedHistorySnapshot =
+		historySnapshot?.branchId === (run?.branchId ?? "main") ? historySnapshot : run?.historySnapshot;
 	const historyRun = useMemo(
-		() => run === undefined || pinnedHistorySnapshot === undefined
-			? run
-			: { ...run, historySnapshot: pinnedHistorySnapshot },
+		() =>
+			run === undefined || pinnedHistorySnapshot === undefined
+				? run
+				: { ...run, historySnapshot: pinnedHistorySnapshot },
 		[pinnedHistorySnapshot, run],
 	);
 
@@ -156,15 +161,18 @@ export function HyperchartInspectorDialogInner({
 
 	const currentScopeId = scopeStack.at(-1) ?? null;
 	const visibleIds = useMemo(
-		() => run ? visibleStateIdsForScope(run.states, { scopeId: currentScopeId }) : new Set<string>(),
+		() => (run ? visibleStateIdsForScope(run.states, { scopeId: currentScopeId }) : new Set<string>()),
 		[currentScopeId, run],
 	);
 
 	const graph = useGraphLayout(run, visibleIds);
-	const focusedGraph = useMemo(() => ({
-		...graph,
-		nodes: graph.nodes.map((node) => ({ ...node, selected: node.id === selectedStateId })),
-	}), [graph, selectedStateId]);
+	const focusedGraph = useMemo(
+		() => ({
+			...graph,
+			nodes: graph.nodes.map((node) => ({ ...node, selected: node.id === selectedStateId })),
+		}),
+		[graph, selectedStateId],
+	);
 	const selectedState =
 		selectedStateId && visibleIds.has(selectedStateId)
 			? (run?.states.find((state) => state.id === selectedStateId) ?? null)
@@ -205,12 +213,16 @@ export function HyperchartInspectorDialogInner({
 		if (latestRun?.states.some((state) => state.id === stateId) !== true) return;
 		setScopeStack(scopeStackForState(latestRun.states, stateId));
 		setSelectedStateId(stateId);
-		setSelectedVisit(targetSeqId === undefined ? null : {
-			invokeSeqId: targetSeqId,
-			statePath: stateId,
-			graphStateId: stateId,
-			originBranchId: latestRun.branchId ?? "main",
-		});
+		setSelectedVisit(
+			targetSeqId === undefined
+				? null
+				: {
+						invokeSeqId: targetSeqId,
+						statePath: stateId,
+						graphStateId: stateId,
+						originBranchId: latestRun.branchId ?? "main",
+					},
+		);
 		setSelectedExecutionNodeId(nodeId);
 	}, []);
 	const clearStateSelection = useCallback(() => {
@@ -223,10 +235,22 @@ export function HyperchartInspectorDialogInner({
 		if (latestRun === undefined || historyDataSource === undefined || branchCursor === undefined) return;
 		try {
 			const chunk = await historyDataSource.listBranches({ runId: latestRun.runId, cursor: branchCursor });
-			setVisibleBranches((current) => [...current, ...chunk.items.filter((branch) => !current.some((candidate) => candidate.branchId === branch.branchId)).map((branch) => ({ branchId: branch.branchId, headSeqId: branch.headSeqId, ...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }), ...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }) }))]);
+			setVisibleBranches((current) => [
+				...current,
+				...chunk.items
+					.filter((branch) => !current.some((candidate) => candidate.branchId === branch.branchId))
+					.map((branch) => ({
+						branchId: branch.branchId,
+						headSeqId: branch.headSeqId,
+						...(branch.metadata?.name === undefined ? {} : { name: branch.metadata.name }),
+						...(branch.metadata?.reason === undefined ? {} : { reason: branch.metadata.reason }),
+					})),
+			]);
 			setBranchCursor(chunk.next);
 			setBranchLoadError(undefined);
-		} catch (error) { setBranchLoadError(error instanceof Error ? error.message : String(error)); }
+		} catch (error) {
+			setBranchLoadError(error instanceof Error ? error.message : String(error));
+		}
 	}, [branchCursor, historyDataSource]);
 	const handleNodeClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => {
 		setSelectedStateId(node.id);
@@ -242,16 +266,22 @@ export function HyperchartInspectorDialogInner({
 			<div
 				data-hyperchart-root
 				data-theme={resolved}
-				className={embedded ? "absolute inset-0 flex" : `fixed inset-0 z-[70] flex ${isMobile ? "items-stretch justify-stretch p-0" : "items-center justify-center p-5"}`}
+				className={
+					embedded
+						? "absolute inset-0 flex"
+						: `fixed inset-0 z-[70] flex ${isMobile ? "items-stretch justify-stretch p-0" : "items-center justify-center p-5"}`
+				}
 				data-testid="hyperchart-inspector-dialog"
 			>
-				{!embedded && <button
-					type="button"
-					tabIndex={-1}
-					className="absolute inset-0 cursor-default bg-[var(--bg-overlay)]"
-					onClick={onClose}
-					aria-label="Close hyperchart inspector"
-				/>}
+				{!embedded && (
+					<button
+						type="button"
+						tabIndex={-1}
+						className="absolute inset-0 cursor-default bg-[var(--bg-overlay)]"
+						onClick={onClose}
+						aria-label="Close hyperchart inspector"
+					/>
+				)}
 				<div
 					ref={dialogRef}
 					tabIndex={-1}
@@ -271,16 +301,20 @@ export function HyperchartInspectorDialogInner({
 								</span>
 								<StatusPill status={run.status} />
 							</div>
-							{run.replayIncompatibility === undefined && <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
-								<div
-									className="h-full rounded-full bg-[var(--accent-blue)] transition-all"
-									style={{ width: `${progress.pct}%` }}
-								/>
-							</div>}
+							{run.replayIncompatibility === undefined && (
+								<div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
+									<div
+										className="h-full rounded-full bg-[var(--accent-blue)] transition-all"
+										style={{ width: `${progress.pct}%` }}
+									/>
+								</div>
+							)}
 						</div>
 						{visibleBranches.length > 0 && (
 							<div className="flex items-center gap-1.5" data-testid="hyperchart-branch-navigation">
-								<label className="sr-only" htmlFor={`${titleId}-branch`}>Branch</label>
+								<label className="sr-only" htmlFor={`${titleId}-branch`}>
+									Branch
+								</label>
 								<select
 									id={`${titleId}-branch`}
 									value={run.branchId ?? "main"}
@@ -290,34 +324,76 @@ export function HyperchartInspectorDialogInner({
 								>
 									{visibleBranches.map((branch) => (
 										<option key={branch.branchId} value={branch.branchId}>
-											{branch.branchId}{run.runnerBranchIds?.includes(branch.branchId) === true ? " · live" : ""}
+											{branch.branchId}
+											{run.runnerBranchIds?.includes(branch.branchId) === true ? " · live" : ""}
 										</option>
 									))}
 								</select>
 								{onForkBranch && run.branchId && (
-									<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => {
-										const head = visibleBranches.find((branch) => branch.branchId === run.branchId)?.headSeqId;
-										if (head === null || head === undefined) return;
-										const branchId = window.prompt("New branch name");
-										if (branchId && window.confirm(`Create branch ${branchId} at seqId ${head}? This will not select or start it.`)) void onForkBranch(run.runId, head, branchId);
-									}}>Fork…</button>
+									<button
+										type="button"
+										className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs"
+										onClick={() => {
+											const head = visibleBranches.find((branch) => branch.branchId === run.branchId)?.headSeqId;
+											if (head === null || head === undefined) return;
+											const branchId = window.prompt("New branch name");
+											if (
+												branchId &&
+												window.confirm(`Create branch ${branchId} at seqId ${head}? This will not select or start it.`)
+											)
+												void onForkBranch(run.runId, head, branchId);
+										}}
+									>
+										Fork…
+									</button>
 								)}
-								{branchCursor !== undefined && historyDataSource !== undefined && <button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs" onClick={() => void loadMoreBranches()}>More heads…</button>}
-								{branchLoadError !== undefined && <span className="text-xs text-[var(--danger)]" title={branchLoadError}>heads failed</span>}
+								{branchCursor !== undefined && historyDataSource !== undefined && (
+									<button
+										type="button"
+										className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs"
+										onClick={() => void loadMoreBranches()}
+									>
+										More heads…
+									</button>
+								)}
+								{branchLoadError !== undefined && (
+									<span className="text-xs text-[var(--danger)]" title={branchLoadError}>
+										heads failed
+									</span>
+								)}
 								{onRewindBranch && run.branchId && (
-									<button type="button" className="rounded border border-amber-500/35 px-2 py-1 text-xs" onClick={() => {
-										const value = window.prompt(`Move ${run.branchId} head to seqId`);
-										const seqId = Number(value);
-										if (Number.isSafeInteger(seqId) && seqId > 0 && window.confirm(`Move only branch ${run.branchId} to seqId ${seqId}? All records stay preserved.`)) void onRewindBranch(run.runId, run.branchId!, seqId);
-									}}>Rewind…</button>
+									<button
+										type="button"
+										className="rounded border border-amber-500/35 px-2 py-1 text-xs"
+										onClick={() => {
+											const value = window.prompt(`Move ${run.branchId} head to seqId`);
+											const seqId = Number(value);
+											if (
+												Number.isSafeInteger(seqId) &&
+												seqId > 0 &&
+												window.confirm(
+													`Move only branch ${run.branchId} to seqId ${seqId}? All records stay preserved.`,
+												)
+											)
+												void onRewindBranch(run.runId, run.branchId!, seqId);
+										}}
+									>
+										Rewind…
+									</button>
 								)}
 							</div>
 						)}
 						{historyDataSource !== undefined && run.historySnapshot !== undefined && onRefreshHistory !== undefined && (
-							<button type="button" className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)]" onClick={() => {
-								setHistorySnapshot(run.historySnapshot);
-								void onRefreshHistory(run.runId);
-							}}>Refresh history</button>
+							<button
+								type="button"
+								className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs text-[var(--text-secondary)]"
+								onClick={() => {
+									setHistorySnapshot(run.historySnapshot);
+									void onRefreshHistory(run.runId);
+								}}
+							>
+								Refresh history
+							</button>
 						)}
 						{run.status === "running" && onAbort && (
 							<button
@@ -328,26 +404,34 @@ export function HyperchartInspectorDialogInner({
 								Abort
 							</button>
 						)}
-						{run.replayIncompatibility === undefined && (run.status === "failed" || run.status === "paused" || run.status === "blocked") && onResume && (
+						{run.replayIncompatibility === undefined &&
+							(run.status === "failed" || run.status === "paused" || run.status === "blocked") &&
+							onResume && (
+								<button
+									type="button"
+									onClick={() => onResume(run.runId)}
+									className="rounded border border-green-500/35 bg-green-500/10 px-2 py-1 text-xs text-[var(--hc-green-text)] hover:bg-green-500/15"
+								>
+									Resume
+								</button>
+							)}
+						{!embedded && (
 							<button
+								ref={closeButtonRef}
 								type="button"
-								onClick={() => onResume(run.runId)}
-								className="rounded border border-green-500/35 bg-green-500/10 px-2 py-1 text-xs text-[var(--hc-green-text)] hover:bg-green-500/15"
+								onClick={onClose}
+								className={`rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${isMobile ? "p-2" : "p-1"}`}
+								aria-label="Close hyperchart inspector"
 							>
-								Resume
+								<XMarkIcon className="h-5 w-5" aria-hidden="true" />
 							</button>
 						)}
-						{!embedded && <button
-							ref={closeButtonRef}
-							type="button"
-							onClick={onClose}
-							className={`rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${isMobile ? "p-2" : "p-1"}`}
-							aria-label="Close hyperchart inspector"
-						>
-							<XMarkIcon className="h-5 w-5" aria-hidden="true" />
-						</button>}
 					</header>
-					{run.replayIncompatibility !== undefined && <div role="alert" className="px-4 py-2"><IssuesSection issues={run.issues} title="Current definition only · Runtime derivation unavailable" /></div>}
+					{run.replayIncompatibility !== undefined && (
+						<div role="alert" className="px-4 py-2">
+							<IssuesSection issues={run.issues} title="Current definition only · Runtime derivation unavailable" />
+						</div>
+					)}
 
 					{runs.length > 1 && (
 						<div className="flex gap-1 overflow-x-auto border-b border-[var(--border-primary)] px-3 py-2">
@@ -373,40 +457,54 @@ export function HyperchartInspectorDialogInner({
 						>
 							<div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--border-primary)] px-3 py-2 text-xs">
 								<div className="inline-flex shrink-0 rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-0.5">
-									<button type="button" onClick={() => setCanvasMode("execution")} className={`rounded-md px-2.5 py-1 font-medium ${canvasMode === "execution" ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-muted)]"}`}>Execution</button>
-									<button type="button" onClick={() => setCanvasMode("structure")} className={`rounded-md px-2.5 py-1 font-medium ${canvasMode === "structure" ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-muted)]"}`}>Structure</button>
-								</div>
-								{canvasMode === "structure" && <div className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-1.5 py-1 text-[11px]">
 									<button
 										type="button"
-										onClick={() => {
-											setScopeStack([]);
-											setSelectedStateId(null);
-										}}
-										className={`rounded px-1.5 py-0.5 ${currentScopeId ? "text-[var(--hc-blue-text)] hover:bg-blue-500/10" : "text-[var(--text-primary)]"}`}
+										onClick={() => setCanvasMode("execution")}
+										className={`rounded-md px-2.5 py-1 font-medium ${canvasMode === "execution" ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-muted)]"}`}
 									>
-										root
+										Execution
 									</button>
-									{scopeStack.map((scopeId, index) => {
-										const scopeState = run.states.find((state) => state.id === scopeId);
-										return (
-											<React.Fragment key={scopeId}>
-												<span className="text-[var(--text-muted)]">/</span>
-												<button
-													type="button"
-													onClick={() => {
-														setScopeStack(scopeStack.slice(0, index + 1));
-														setSelectedStateId(null);
-													}}
-													className={`max-w-[180px] truncate rounded px-1.5 py-0.5 ${index === scopeStack.length - 1 ? "text-[var(--text-primary)]" : "text-[var(--hc-blue-text)] hover:bg-blue-500/10"}`}
-													title={scopeId}
-												>
-													{scopeState ? stateDisplayName(scopeState) : scopeId}
-												</button>
-											</React.Fragment>
-										);
-									})}
-								</div>}
+									<button
+										type="button"
+										onClick={() => setCanvasMode("structure")}
+										className={`rounded-md px-2.5 py-1 font-medium ${canvasMode === "structure" ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-muted)]"}`}
+									>
+										Structure
+									</button>
+								</div>
+								{canvasMode === "structure" && (
+									<div className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] px-1.5 py-1 text-[11px]">
+										<button
+											type="button"
+											onClick={() => {
+												setScopeStack([]);
+												setSelectedStateId(null);
+											}}
+											className={`rounded px-1.5 py-0.5 ${currentScopeId ? "text-[var(--hc-blue-text)] hover:bg-blue-500/10" : "text-[var(--text-primary)]"}`}
+										>
+											root
+										</button>
+										{scopeStack.map((scopeId, index) => {
+											const scopeState = run.states.find((state) => state.id === scopeId);
+											return (
+												<React.Fragment key={scopeId}>
+													<span className="text-[var(--text-muted)]">/</span>
+													<button
+														type="button"
+														onClick={() => {
+															setScopeStack(scopeStack.slice(0, index + 1));
+															setSelectedStateId(null);
+														}}
+														className={`max-w-[180px] truncate rounded px-1.5 py-0.5 ${index === scopeStack.length - 1 ? "text-[var(--text-primary)]" : "text-[var(--hc-blue-text)] hover:bg-blue-500/10"}`}
+														title={scopeId}
+													>
+														{scopeState ? stateDisplayName(scopeState) : scopeId}
+													</button>
+												</React.Fragment>
+											);
+										})}
+									</div>
+								)}
 								<span className="ml-auto shrink-0 text-[11px] text-[var(--text-tertiary)]">
 									updated {formatHyperchartTime(run.updatedAt)}
 								</span>
@@ -447,7 +545,10 @@ export function HyperchartInspectorDialogInner({
 								{...(historyTargetSeqId === undefined ? {} : { historyTargetSeqId })}
 								{...(onSteerSession === undefined
 									? {}
-									: { onSteerSession: (actionKey: string, message: string) => onSteerSession(run.runId, actionKey, message) })}
+									: {
+											onSteerSession: (actionKey: string, message: string) =>
+												onSteerSession(run.runId, actionKey, message),
+										})}
 							/>
 						</div>
 					</div>

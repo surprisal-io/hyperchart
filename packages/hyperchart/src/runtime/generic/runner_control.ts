@@ -1,6 +1,15 @@
 import { resolveRunPaths, currentRunStorage, withRunStorage } from "./run_paths.js";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	renameSync,
+	rmSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ChartEvent } from "../../core/types.js";
 import type { BranchId, UserInteractionResolvedLog } from "../../core/durable_events.js";
@@ -19,16 +28,18 @@ type RunnerControlBase = Readonly<{
 	createdAt: number;
 }>;
 
-export type RunnerUserResponseRequest = RunnerControlBase & Readonly<{
-	kind: "respond_user_interaction";
-	gateSeqId: number;
-	event: ChartEvent;
-}>;
+export type RunnerUserResponseRequest = RunnerControlBase &
+	Readonly<{
+		kind: "respond_user_interaction";
+		gateSeqId: number;
+		event: ChartEvent;
+	}>;
 
-export type RunnerMoveBranchRequest = RunnerControlBase & Readonly<{
-	kind: "move_branch";
-	targetHeadSeqId: number | null;
-}>;
+export type RunnerMoveBranchRequest = RunnerControlBase &
+	Readonly<{
+		kind: "move_branch";
+		targetHeadSeqId: number | null;
+	}>;
 
 export type RunnerControlRequest = RunnerUserResponseRequest | RunnerMoveBranchRequest;
 
@@ -42,16 +53,18 @@ type RunnerControlFailure = Readonly<{
 	completedAt: number;
 }>;
 
-export type RunnerUserResponseResult = Readonly<{
-	version: 1;
-	kind: "respond_user_interaction";
-	requestId: string;
-	attemptId: string;
-	ok: true;
-	idempotent: boolean;
-	record: UserInteractionResolvedLog;
-	completedAt: number;
-}> | RunnerControlFailure;
+export type RunnerUserResponseResult =
+	| Readonly<{
+			version: 1;
+			kind: "respond_user_interaction";
+			requestId: string;
+			attemptId: string;
+			ok: true;
+			idempotent: boolean;
+			record: UserInteractionResolvedLog;
+			completedAt: number;
+	  }>
+	| RunnerControlFailure;
 
 export type RunnerMoveBranchCommit = Readonly<{
 	moveSeqId: number;
@@ -59,23 +72,28 @@ export type RunnerMoveBranchCommit = Readonly<{
 	preservedRecords: number;
 }>;
 
-export type RunnerMoveBranchResult = Readonly<{
-	version: 1;
-	kind: "move_branch";
-	requestId: string;
-	attemptId: string;
-	ok: true;
-	moveSeqId: number;
-	previousHeadSeqId: number | null;
-	preservedRecords: number;
-	completedAt: number;
-}> | RunnerControlFailure;
+export type RunnerMoveBranchResult =
+	| Readonly<{
+			version: 1;
+			kind: "move_branch";
+			requestId: string;
+			attemptId: string;
+			ok: true;
+			moveSeqId: number;
+			previousHeadSeqId: number | null;
+			preservedRecords: number;
+			completedAt: number;
+	  }>
+	| RunnerControlFailure;
 
 export type RunnerControlResult = RunnerUserResponseResult | RunnerMoveBranchResult;
 export type RunnerControlCommit = UserInteractionResponseCommit | RunnerMoveBranchCommit;
 
 export class RunnerControlUnavailableError extends Error {
-	constructor(message: string) { super(message); this.name = "RunnerControlUnavailableError"; }
+	constructor(message: string) {
+		super(message);
+		this.name = "RunnerControlUnavailableError";
+	}
 }
 
 /** Submit a gate response through the owning live runtime and wait for its durable acknowledgement. */
@@ -95,7 +113,8 @@ export async function requestLiveRunnerUserResponse(
 		createdAt: Date.now(),
 	};
 	const result = await publishAndWait(runId, request, options);
-	if (result.kind !== "respond_user_interaction") throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
+	if (result.kind !== "respond_user_interaction")
+		throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
 	return { record: result.record, idempotent: result.idempotent };
 }
 
@@ -115,8 +134,13 @@ export async function requestLiveRunnerBranchMove(
 		createdAt: Date.now(),
 	};
 	const result = await publishAndWait(runId, request, options);
-	if (result.kind !== "move_branch") throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
-	return { moveSeqId: result.moveSeqId, previousHeadSeqId: result.previousHeadSeqId, preservedRecords: result.preservedRecords };
+	if (result.kind !== "move_branch")
+		throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
+	return {
+		moveSeqId: result.moveSeqId,
+		previousHeadSeqId: result.previousHeadSeqId,
+		preservedRecords: result.preservedRecords,
+	};
 }
 
 /** Runner-owned control drain. Commands are transport only; the journal remains semantic truth. */
@@ -135,32 +159,72 @@ export function watchRunnerControl(
 				if (disposed) break;
 				const path = join(requestsDir(runId), file);
 				const request = readRequest(path);
-				if (request === undefined) { safeUnlink(path); continue; }
-				if (request.attemptId !== attemptId) { safeUnlink(path); continue; }
+				if (request === undefined) {
+					safeUnlink(path);
+					continue;
+				}
+				if (request.attemptId !== attemptId) {
+					safeUnlink(path);
+					continue;
+				}
 				let result: RunnerControlResult;
 				try {
 					const committed = await deliver(request);
 					if (request.kind === "move_branch") {
 						if (!isMoveCommit(committed)) throw new Error("Runner move control returned invalid commit metadata");
-						result = { version: CONTROL_VERSION, kind: request.kind, requestId: request.id, attemptId, ok: true, ...committed, completedAt: Date.now() };
+						result = {
+							version: CONTROL_VERSION,
+							kind: request.kind,
+							requestId: request.id,
+							attemptId,
+							ok: true,
+							...committed,
+							completedAt: Date.now(),
+						};
 					} else {
-						if (typeof committed !== "object" || committed === null || !("record" in committed)) throw new Error("Runner response control returned an invalid commit");
-						result = { version: CONTROL_VERSION, kind: request.kind, requestId: request.id, attemptId, ok: true, idempotent: committed.idempotent, record: committed.record, completedAt: Date.now() };
+						if (typeof committed !== "object" || committed === null || !("record" in committed))
+							throw new Error("Runner response control returned an invalid commit");
+						result = {
+							version: CONTROL_VERSION,
+							kind: request.kind,
+							requestId: request.id,
+							attemptId,
+							ok: true,
+							idempotent: committed.idempotent,
+							record: committed.record,
+							completedAt: Date.now(),
+						};
 					}
 				} catch (error) {
-					result = { version: CONTROL_VERSION, kind: request.kind, requestId: request.id, attemptId, ok: false, error: error instanceof Error ? error.message : String(error), completedAt: Date.now() };
+					result = {
+						version: CONTROL_VERSION,
+						kind: request.kind,
+						requestId: request.id,
+						attemptId,
+						ok: false,
+						error: error instanceof Error ? error.message : String(error),
+						completedAt: Date.now(),
+					};
 				}
-				try { publishJsonExclusive(resultPath(runId, request.id), result); }
-				catch (error) { if (!isNodeError(error) || error.code !== "EEXIST") continue; }
+				try {
+					publishJsonExclusive(resultPath(runId, request.id), result);
+				} catch (error) {
+					if (!isNodeError(error) || error.code !== "EEXIST") continue;
+				}
 				safeUnlink(path);
 			}
-		} finally { draining = false; }
+		} finally {
+			draining = false;
+		}
 	};
 	void drain();
 	// This referenced control loop keeps a detached runtime alive while every branch is
 	// durably waiting at a user gate. Controller shutdown clears it.
 	const timer = setInterval(() => void drain(), CONTROL_POLL_MS);
-	return () => { disposed = true; clearInterval(timer); };
+	return () => {
+		disposed = true;
+		clearInterval(timer);
+	};
 }
 
 /** Backward-compatible response-only watcher used by focused admission tests. */
@@ -170,7 +234,8 @@ export function watchRunnerUserResponses(
 	deliver: (request: RunnerUserResponseRequest) => Promise<UserInteractionResponseCommit>,
 ): () => void {
 	return watchRunnerControl(runId, attemptId, (request) => {
-		if (request.kind !== "respond_user_interaction") return Promise.reject(new Error("This runner control watcher does not accept branch moves"));
+		if (request.kind !== "respond_user_interaction")
+			return Promise.reject(new Error("This runner control watcher does not accept branch moves"));
 		return deliver(request);
 	});
 }
@@ -193,24 +258,43 @@ function waitForResult(
 	const pollMs = options.pollMs ?? CONTROL_POLL_MS;
 	const started = Date.now();
 	return new Promise((resolveResult, rejectResult) => {
-		const finish = (callback: () => void) => { clearInterval(timer); callback(); };
+		const finish = (callback: () => void) => {
+			clearInterval(timer);
+			callback();
+		};
 		const check = () => {
 			const result = readResult(resultPath(runId, request.id));
 			if (result !== undefined) {
 				return finish(() => {
 					rmSync(resultPath(runId, request.id), { force: true });
-					if (result.attemptId !== request.attemptId) return rejectResult(new RunnerControlUnavailableError("Runner attempt changed before control acknowledgement"));
-					if (result.kind !== request.kind) return rejectResult(new RunnerControlUnavailableError("Runner returned the wrong control result kind"));
+					if (result.attemptId !== request.attemptId)
+						return rejectResult(
+							new RunnerControlUnavailableError("Runner attempt changed before control acknowledgement"),
+						);
+					if (result.kind !== request.kind)
+						return rejectResult(new RunnerControlUnavailableError("Runner returned the wrong control result kind"));
 					if (!result.ok) return rejectResult(new Error(result.error));
 					resolveResult(result);
 				});
 			}
 			const status = readRunStatus(runId);
 			if (!isRunLive(status) || status?.attemptId !== request.attemptId) {
-				return finish(() => { rmSync(requestPath(runId, request.id), { force: true }); rejectResult(new RunnerControlUnavailableError("Owning Hyperchart runtime stopped before control acknowledgement")); });
+				return finish(() => {
+					rmSync(requestPath(runId, request.id), { force: true });
+					rejectResult(
+						new RunnerControlUnavailableError("Owning Hyperchart runtime stopped before control acknowledgement"),
+					);
+				});
 			}
 			if (Date.now() - started >= timeoutMs) {
-				return finish(() => { rmSync(requestPath(runId, request.id), { force: true }); rejectResult(new RunnerControlUnavailableError("Timed out waiting for owning Hyperchart runtime control acknowledgement")); });
+				return finish(() => {
+					rmSync(requestPath(runId, request.id), { force: true });
+					rejectResult(
+						new RunnerControlUnavailableError(
+							"Timed out waiting for owning Hyperchart runtime control acknowledgement",
+						),
+					);
+				});
 			}
 		};
 		const timer = setInterval(check, pollMs);
@@ -219,55 +303,129 @@ function waitForResult(
 	});
 }
 
-function controlDir(runId: string): string { return resolve(resolveRunPaths(runId).runDir, "runner-control", "user-responses"); }
-function requestsDir(runId: string): string { return join(controlDir(runId), "requests"); }
-function resultsDir(runId: string): string { return join(controlDir(runId), "results"); }
-function requestPath(runId: string, id: string): string { return join(requestsDir(runId), `${id}.json`); }
-function resultPath(runId: string, id: string): string { return join(resultsDir(runId), `${id}.json`); }
+function controlDir(runId: string): string {
+	return resolve(resolveRunPaths(runId).runDir, "runner-control", "user-responses");
+}
+function requestsDir(runId: string): string {
+	return join(controlDir(runId), "requests");
+}
+function resultsDir(runId: string): string {
+	return join(controlDir(runId), "results");
+}
+function requestPath(runId: string, id: string): string {
+	return join(requestsDir(runId), `${id}.json`);
+}
+function resultPath(runId: string, id: string): string {
+	return join(resultsDir(runId), `${id}.json`);
+}
 function requestFiles(runId: string): string[] {
-	try { return readdirSync(requestsDir(runId)).filter((file) => file.endsWith(".json")).sort(); }
-	catch { return []; }
+	try {
+		return readdirSync(requestsDir(runId))
+			.filter((file) => file.endsWith(".json"))
+			.sort();
+	} catch {
+		return [];
+	}
 }
 function publishJsonExclusive(path: string, value: unknown): void {
 	mkdirSync(dirname(path), { recursive: true });
 	const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
 	writeFileSync(temporary, `${JSON.stringify(value)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-	try { renameSync(temporary, path); } catch (error) { rmSync(temporary, { force: true }); throw error; }
+	try {
+		renameSync(temporary, path);
+	} catch (error) {
+		rmSync(temporary, { force: true });
+		throw error;
+	}
 }
 function readRequest(path: string): RunnerControlRequest | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Partial<RunnerControlRequest>;
-		if (value.version !== CONTROL_VERSION || typeof value.id !== "string" || typeof value.attemptId !== "string" || typeof value.branchId !== "string" || typeof value.createdAt !== "number") return undefined;
+		if (
+			value.version !== CONTROL_VERSION ||
+			typeof value.id !== "string" ||
+			typeof value.attemptId !== "string" ||
+			typeof value.branchId !== "string" ||
+			typeof value.createdAt !== "number"
+		)
+			return undefined;
 		if (value.kind === "move_branch") {
 			if (value.targetHeadSeqId !== null && !isPositiveInteger(value.targetHeadSeqId)) return undefined;
 			return value as RunnerMoveBranchRequest;
 		}
-		if (value.kind !== "respond_user_interaction" || !isPositiveInteger(value.gateSeqId) || !isChartEvent(value.event)) return undefined;
+		if (value.kind !== "respond_user_interaction" || !isPositiveInteger(value.gateSeqId) || !isChartEvent(value.event))
+			return undefined;
 		return value as RunnerUserResponseRequest;
-	} catch { return undefined; }
+	} catch {
+		return undefined;
+	}
 }
 function readResult(path: string): RunnerControlResult | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
-		const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & { record?: Partial<UserInteractionResolvedLog> };
-		if (value.version !== CONTROL_VERSION || (value.kind !== "respond_user_interaction" && value.kind !== "move_branch") || typeof value.requestId !== "string" || typeof value.attemptId !== "string" || typeof value.ok !== "boolean" || typeof value.completedAt !== "number") return undefined;
-		if (!value.ok) return typeof value.error === "string" ? value as unknown as RunnerControlFailure : undefined;
+		const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & {
+			record?: Partial<UserInteractionResolvedLog>;
+		};
+		if (
+			value.version !== CONTROL_VERSION ||
+			(value.kind !== "respond_user_interaction" && value.kind !== "move_branch") ||
+			typeof value.requestId !== "string" ||
+			typeof value.attemptId !== "string" ||
+			typeof value.ok !== "boolean" ||
+			typeof value.completedAt !== "number"
+		)
+			return undefined;
+		if (!value.ok) return typeof value.error === "string" ? (value as unknown as RunnerControlFailure) : undefined;
 		if (value.kind === "move_branch") {
-			return isPositiveInteger(value.moveSeqId) && (value.previousHeadSeqId === null || isPositiveInteger(value.previousHeadSeqId)) && isNonNegativeInteger(value.preservedRecords)
-				? value as unknown as RunnerMoveBranchResult
+			return isPositiveInteger(value.moveSeqId) &&
+				(value.previousHeadSeqId === null || isPositiveInteger(value.previousHeadSeqId)) &&
+				isNonNegativeInteger(value.preservedRecords)
+				? (value as unknown as RunnerMoveBranchResult)
 				: undefined;
 		}
-		if (typeof value.idempotent !== "boolean" || value.record?.type !== "user_interaction" || value.record.kind !== "resolved" || !isPositiveInteger(value.record.seqId) || !isPositiveInteger(value.record.gateSeqId)) return undefined;
+		if (
+			typeof value.idempotent !== "boolean" ||
+			value.record?.type !== "user_interaction" ||
+			value.record.kind !== "resolved" ||
+			!isPositiveInteger(value.record.seqId) ||
+			!isPositiveInteger(value.record.gateSeqId)
+		)
+			return undefined;
 		return value as unknown as RunnerUserResponseResult;
-	} catch { return undefined; }
+	} catch {
+		return undefined;
+	}
 }
-function isChartEvent(value: unknown): value is ChartEvent { return typeof value === "object" && value !== null && !Array.isArray(value) && typeof (value as { type?: unknown }).type === "string"; }
+function isChartEvent(value: unknown): value is ChartEvent {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		typeof (value as { type?: unknown }).type === "string"
+	);
+}
 function isMoveCommit(value: RunnerControlCommit): value is RunnerMoveBranchCommit {
-	return typeof value === "object" && value !== null && "moveSeqId" in value && isPositiveInteger(value.moveSeqId)
-		&& (value.previousHeadSeqId === null || isPositiveInteger(value.previousHeadSeqId)) && isNonNegativeInteger(value.preservedRecords);
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"moveSeqId" in value &&
+		isPositiveInteger(value.moveSeqId) &&
+		(value.previousHeadSeqId === null || isPositiveInteger(value.previousHeadSeqId)) &&
+		isNonNegativeInteger(value.preservedRecords)
+	);
 }
-function isPositiveInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value > 0; }
-function isNonNegativeInteger(value: unknown): value is number { return typeof value === "number" && Number.isSafeInteger(value) && value >= 0; }
-function safeUnlink(path: string): void { try { unlinkSync(path); } catch {} }
-function isNodeError(error: unknown): error is NodeJS.ErrnoException { return error instanceof Error && "code" in error; }
+function isPositiveInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function isNonNegativeInteger(value: unknown): value is number {
+	return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+function safeUnlink(path: string): void {
+	try {
+		unlinkSync(path);
+	} catch {}
+}
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
+}

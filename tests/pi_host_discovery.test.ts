@@ -12,10 +12,9 @@ import { updateSessionProgress } from "../packages/hyperchart/src/runtime/generi
 const tempDirs: string[] = [];
 
 function v2Jsonl(records: readonly Record<string, unknown>[]): string {
-	return `${[
-		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
-		...records,
-	].map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+	return `${[{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 }, ...records]
+		.map((entry) => JSON.stringify(entry))
+		.join("\n")}\n`;
 }
 
 async function tempDir(prefix: string): Promise<string> {
@@ -141,29 +140,35 @@ describe("Pi Hyperchart host adapter", () => {
 		);
 		const runDir = join(agentDir, "hypercharts", "runs", "side-effect-run");
 		await mkdir(runDir, { recursive: true });
-		await writeFile(join(runDir, "meta.json"), JSON.stringify({
-			chartPath,
-			workDir: projectDir,
-			chartId: "side-effect",
-			createdAt: "2026-07-10T00:00:00.000Z",
-		}), "utf8");
-		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 2,
-			runId: "side-effect-run",
-			branchIds: ["main"],
-			runDir,
-			chartId: "side-effect",
-			state: "complete",
-			startedAt: 1,
-			updatedAt: 2,
-		}), "utf8");
+		await writeFile(
+			join(runDir, "meta.json"),
+			JSON.stringify({
+				chartPath,
+				workDir: projectDir,
+				chartId: "side-effect",
+				createdAt: "2026-07-10T00:00:00.000Z",
+			}),
+			"utf8",
+		);
+		await writeFile(
+			join(runDir, "status.json"),
+			JSON.stringify({
+				version: 2,
+				runId: "side-effect-run",
+				branchIds: ["main"],
+				runDir,
+				chartId: "side-effect",
+				state: "complete",
+				startedAt: 1,
+				updatedAt: 2,
+			}),
+			"utf8",
+		);
 		await writeFile(join(runDir, "log.jsonl"), "", "utf8");
 
 		const snapshot = await createPiHyperchartHost({ agentDir }).readSessionSnapshot(projectDir);
 
-		expect(snapshot.hypercharts).toEqual([
-			expect.objectContaining({ name: "side-effect", stateCount: 1 }),
-		]);
+		expect(snapshot.hypercharts).toEqual([expect.objectContaining({ name: "side-effect", stateCount: 1 })]);
 		expect(snapshot.runs).toEqual([
 			expect.objectContaining({ runId: "side-effect-run", chartName: "side-effect", status: "completed" }),
 		]);
@@ -209,7 +214,9 @@ describe("Pi Hyperchart host adapter", () => {
 		const summary = await host.readSessionSnapshot(projectDir);
 		const definition = await host.readChartSnapshot(projectDir, "clash");
 
-		expect(summary.hypercharts.find((chart) => chart.name === "clash")?.source).toBe(join(projectChartsDir, "selected.chart.ts"));
+		expect(summary.hypercharts.find((chart) => chart.name === "clash")?.source).toBe(
+			join(projectChartsDir, "selected.chart.ts"),
+		);
 		expect(definition?.source).toBe(join(projectChartsDir, "selected.chart.ts"));
 		expect(definition?.states?.map((state) => state.id)).toEqual(["project"]);
 		expect(existsSync(unrelatedMarker)).toBe(false);
@@ -222,7 +229,11 @@ describe("Pi Hyperchart host adapter", () => {
 		const chartsDir = join(projectDir, ".pi", "hypercharts");
 		await mkdir(chartsDir, { recursive: true });
 		await writeFile(join(chartsDir, "modular.chart.ts"), 'export { default } from "./definition.mjs";\n', "utf8");
-		await writeFile(join(chartsDir, "definition.mjs"), 'export default { kind: "chart", id: "modular", initial: "only", states: { only: { kind: "final" } } };\n', "utf8");
+		await writeFile(
+			join(chartsDir, "definition.mjs"),
+			'export default { kind: "chart", id: "modular", initial: "only", states: { only: { kind: "final" } } };\n',
+			"utf8",
+		);
 
 		const summary = await createPiHyperchartHost({ agentDir }).readSessionSnapshot(projectDir);
 
@@ -237,7 +248,11 @@ describe("Pi Hyperchart host adapter", () => {
 		const agentDir = await tempDir("hyperchart-agent-");
 		const userChartsDir = join(agentDir, "hypercharts");
 		await mkdir(userChartsDir, { recursive: true });
-		await writeFile(join(userChartsDir, "user.chart.ts"), 'export default { kind: "chart", id: "user-chart", initial: "done", states: { done: { kind: "final" } } };\n', "utf8");
+		await writeFile(
+			join(userChartsDir, "user.chart.ts"),
+			'export default { kind: "chart", id: "user-chart", initial: "done", states: { done: { kind: "final" } } };\n',
+			"utf8",
+		);
 		const previous = process.env.PI_CODING_AGENT_DIR;
 		process.env.PI_CODING_AGENT_DIR = agentDir;
 		try {
@@ -260,26 +275,36 @@ describe("Pi Hyperchart host adapter", () => {
 		);
 		const runDir = join(agentDir, "hypercharts", "runs", "generated-run");
 		await mkdir(runDir, { recursive: true });
-		await writeFile(join(runDir, "meta.json"), JSON.stringify({
-			chartPath,
-			workDir: projectDir,
-			chartId: "generated",
-			createdAt: "2026-07-10T00:00:00.000Z",
-		}), "utf8");
-		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 2,
-			runId: "generated-run",
-			branchIds: ["main"],
-			runDir,
-			chartId: "generated",
-			state: "complete",
-			startedAt: 1,
-			updatedAt: 2,
-		}), "utf8");
+		await writeFile(
+			join(runDir, "meta.json"),
+			JSON.stringify({
+				chartPath,
+				workDir: projectDir,
+				chartId: "generated",
+				createdAt: "2026-07-10T00:00:00.000Z",
+			}),
+			"utf8",
+		);
+		await writeFile(
+			join(runDir, "status.json"),
+			JSON.stringify({
+				version: 2,
+				runId: "generated-run",
+				branchIds: ["main"],
+				runDir,
+				chartId: "generated",
+				state: "complete",
+				startedAt: 1,
+				updatedAt: 2,
+			}),
+			"utf8",
+		);
 		await writeFile(join(runDir, "log.jsonl"), "", "utf8");
 
 		const require = createRequire(import.meta.url);
-		const registerUrl = pathToFileURL(join(dirname(require.resolve("jiti/package.json")), "lib", "jiti-register.mjs")).href;
+		const registerUrl = pathToFileURL(
+			join(dirname(require.resolve("jiti/package.json")), "lib", "jiti-register.mjs"),
+		).href;
 		const hostUrl = new URL("../packages/pi-hyperchart/dist/runtime/pi/host_adapter.js", import.meta.url).href;
 		const script = `
 let hostModule = await import(${JSON.stringify(hostUrl)});
@@ -311,24 +336,36 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const malformedDir = join(runsRoot, "malformed-run");
 		await mkdir(join(runDir, "sessions"), { recursive: true });
 		await mkdir(malformedDir, { recursive: true });
-		await writeFile(join(runDir, "meta.json"), JSON.stringify({
-			chartPath,
-			workDir: projectDir,
-			chartId: "sample",
-			createdAt: "2026-07-10T00:00:00.000Z",
-			originSessionId: "session-a",
-		}), "utf8");
-		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 2,
-			runId: "sample-run",
-			branchIds: ["main"],
-			runDir,
-			chartId: "sample",
-			state: "running",
-			startedAt: 1,
-			updatedAt: 2,
-		}), "utf8");
-		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([{ type: "args", args: { topic: "native" }, seqId: 2, parentId: null, branchId: "main", timestamp: 1 }]), "utf8");
+		await writeFile(
+			join(runDir, "meta.json"),
+			JSON.stringify({
+				chartPath,
+				workDir: projectDir,
+				chartId: "sample",
+				createdAt: "2026-07-10T00:00:00.000Z",
+				originSessionId: "session-a",
+			}),
+			"utf8",
+		);
+		await writeFile(
+			join(runDir, "status.json"),
+			JSON.stringify({
+				version: 2,
+				runId: "sample-run",
+				branchIds: ["main"],
+				runDir,
+				chartId: "sample",
+				state: "running",
+				startedAt: 1,
+				updatedAt: 2,
+			}),
+			"utf8",
+		);
+		await writeFile(
+			join(runDir, "log.jsonl"),
+			v2Jsonl([{ type: "args", args: { topic: "native" }, seqId: 2, parentId: null, branchId: "main", timestamp: 1 }]),
+			"utf8",
+		);
 		await writeFile(join(malformedDir, "meta.json"), "not json", "utf8");
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
@@ -341,7 +378,8 @@ console.log(JSON.stringify(snapshot.runs));`;
 		expect(snapshot.runs).toHaveLength(1);
 		expect(snapshot.runs[0]).toMatchObject({
 			runId: "sample-run",
-			branchId: "main",			chartName: "sample",
+			branchId: "main",
+			chartName: "sample",
 			status: "running",
 			cwd: projectDir,
 			originSessionId: "session-a",
@@ -359,31 +397,55 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const chartPath = await writeWaitingMapChart(projectDir);
 		const runDir = join(agentDir, "hypercharts", "runs", "waiting-map-run");
 		await mkdir(runDir, { recursive: true });
-		await writeFile(join(runDir, "meta.json"), JSON.stringify({
-			chartPath,
-			workDir: projectDir,
-			chartId: "waiting-map",
-			createdAt: "2026-07-10T00:00:00.000Z",
-		}), "utf8");
+		await writeFile(
+			join(runDir, "meta.json"),
+			JSON.stringify({
+				chartPath,
+				workDir: projectDir,
+				chartId: "waiting-map",
+				createdAt: "2026-07-10T00:00:00.000Z",
+			}),
+			"utf8",
+		);
 		const actionUid = { chart: "waiting-map", state: "items#a.work", action: "agent" };
-		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
-			{ type: "args", args: { items: { a: "Alpha", b: "Beta", c: "Gamma" } }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{ type: "spawned", path: "items", instances: { a: "Alpha", b: "Beta", c: "Gamma" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
-			{
-				type: "state_action",
-				kind: "invoke",
-			sessionId: "session-id",
-				actionUid,
-				definition: {
-					kind: "agent",
-					uid: { chart: "waiting-map", state: "items.work", action: "agent" },
-					name: "worker",
+		await writeFile(
+			join(runDir, "log.jsonl"),
+			v2Jsonl([
+				{
+					type: "args",
+					args: { items: { a: "Alpha", b: "Beta", c: "Gamma" } },
+					parentId: null,
+					seqId: 2,
+					branchId: "main",
+					timestamp: 1,
 				},
-				parentId: 3,
-				seqId: 4,
-				branchId: "main", timestamp: 3,
-			},
-		]), "utf8");
+				{
+					type: "spawned",
+					path: "items",
+					instances: { a: "Alpha", b: "Beta", c: "Gamma" },
+					parentId: 2,
+					seqId: 3,
+					branchId: "main",
+					timestamp: 2,
+				},
+				{
+					type: "state_action",
+					kind: "invoke",
+					sessionId: "session-id",
+					actionUid,
+					definition: {
+						kind: "agent",
+						uid: { chart: "waiting-map", state: "items.work", action: "agent" },
+						name: "worker",
+					},
+					parentId: 3,
+					seqId: 4,
+					branchId: "main",
+					timestamp: 3,
+				},
+			]),
+			"utf8",
+		);
 
 		const host = createPiHyperchartHost({ agentDir });
 		const snapshot = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
@@ -404,31 +466,62 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const runDir = join(agentDir, "hypercharts", "runs", "transcript-run");
 		const sessionsDir = join(runDir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
-		await writeFile(join(runDir, "meta.json"), JSON.stringify({
-			chartPath,
-			workDir: projectDir,
-			chartId: "sample",
-			createdAt: "2026-07-10T00:00:00.000Z",
-		}), "utf8");
+		await writeFile(
+			join(runDir, "meta.json"),
+			JSON.stringify({
+				chartPath,
+				workDir: projectDir,
+				chartId: "sample",
+				createdAt: "2026-07-10T00:00:00.000Z",
+			}),
+			"utf8",
+		);
 		const actionUid = { chart: "sample", state: "work", action: "agent" };
-		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
-			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
-		]), "utf8");
+		await writeFile(
+			join(runDir, "log.jsonl"),
+			v2Jsonl([
+				{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+				{
+					type: "state_action",
+					kind: "invoke",
+					sessionId: "session-id",
+					actionUid,
+					definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } },
+					parentId: 2,
+					seqId: 3,
+					branchId: "main",
+					timestamp: 2,
+				},
+			]),
+			"utf8",
+		);
 		const transcriptFile = join(sessionsDir, "transcript.jsonl");
-		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload", timestamp: 3 } })}\n`, "utf8");
-		updateSessionProgress(sessionsDir, actionUid, {
-			actionName: "worker",
-			status: "running",
-			sessionId: "session-id",
-			sessionFile: transcriptFile,
-		}, "sample:work:agent:1:3");
+		await writeFile(
+			transcriptFile,
+			`${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload", timestamp: 3 } })}\n`,
+			"utf8",
+		);
+		updateSessionProgress(
+			sessionsDir,
+			actionUid,
+			{
+				actionName: "worker",
+				status: "running",
+				sessionId: "session-id",
+				sessionFile: transcriptFile,
+			},
+			"sample:work:agent:1:3",
+		);
 
 		const host = createPiHyperchartHost({ agentDir });
 		const summary = await host.readSessionSnapshot(projectDir, { runLimit: 1 });
 		const overview = await host.readRunOverview(projectDir, "transcript-run");
 		const fullSession = overview?.run.states.find((state) => state.id === "work")?.session;
-		const loadedSession = await host.readVisitSession({ runId: "transcript-run", snapshot: overview!.snapshot, invokeSeqId: 3 });
+		const loadedSession = await host.readVisitSession({
+			runId: "transcript-run",
+			snapshot: overview!.snapshot,
+			invokeSeqId: 3,
+		});
 
 		expect(summary.runs[0]).toMatchObject({ runId: "transcript-run" });
 		expect(summary.runs[0]).not.toHaveProperty("states");
@@ -445,23 +538,31 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const agentDir = await tempDir("hyperchart-agent-");
 		const runDir = join(agentDir, "hypercharts", "runs", "missing-chart-run");
 		await mkdir(runDir, { recursive: true });
-		await writeFile(join(runDir, "meta.json"), JSON.stringify({
-			chartPath: join(projectDir, "deleted.chart.ts"),
-			workDir: projectDir,
-			chartId: "deleted-chart",
-			createdAt: "2026-07-10T00:00:00.000Z",
-		}), "utf8");
-		await writeFile(join(runDir, "status.json"), JSON.stringify({
-			version: 2,
-			runId: "missing-chart-run",
-			branchIds: [],
-			runDir,
-			chartId: "deleted-chart",
-			state: "complete",
-			startedAt: 10,
-			updatedAt: 20,
-			exitCode: 0,
-		}), "utf8");
+		await writeFile(
+			join(runDir, "meta.json"),
+			JSON.stringify({
+				chartPath: join(projectDir, "deleted.chart.ts"),
+				workDir: projectDir,
+				chartId: "deleted-chart",
+				createdAt: "2026-07-10T00:00:00.000Z",
+			}),
+			"utf8",
+		);
+		await writeFile(
+			join(runDir, "status.json"),
+			JSON.stringify({
+				version: 2,
+				runId: "missing-chart-run",
+				branchIds: [],
+				runDir,
+				chartId: "deleted-chart",
+				state: "complete",
+				startedAt: 10,
+				updatedAt: 20,
+				exitCode: 0,
+			}),
+			"utf8",
+		);
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
 		const host = createPiHyperchartHost({ agentDir });
@@ -471,7 +572,8 @@ console.log(JSON.stringify(snapshot.runs));`;
 		expect(snapshot.runs).toEqual([
 			expect.objectContaining({
 				runId: "missing-chart-run",
-				branchId: "main",				chartName: "deleted-chart",
+				branchId: "main",
+				chartName: "deleted-chart",
 				status: "completed",
 				cwd: projectDir,
 			}),

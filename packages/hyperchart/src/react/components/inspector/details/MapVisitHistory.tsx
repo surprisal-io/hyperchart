@@ -39,7 +39,9 @@ export function MapVisitHistory({
 						open={expanded}
 						onToggle={(event) => {
 							const open = event.currentTarget.open;
-							setExpandedVisits((current) => current[visit.spawnSeqId] === open ? current : { ...current, [visit.spawnSeqId]: open });
+							setExpandedVisits((current) =>
+								current[visit.spawnSeqId] === open ? current : { ...current, [visit.spawnSeqId]: open },
+							);
 						}}
 						className="group rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)]"
 					>
@@ -57,10 +59,12 @@ export function MapVisitHistory({
 							<span className="ml-auto text-[10px] text-[var(--text-muted)] group-open:hidden">show</span>
 							<span className="ml-auto hidden text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
 						</summary>
-						{expanded && <div className="space-y-2 border-t border-[var(--border-primary)] px-2.5 py-2.5">
-							<div className="text-[10px] text-[var(--text-muted)]">spawn seq {visit.spawnSeqId}</div>
-							<JsonBlock value={visit.instances} previewLines={8} />
-						</div>}
+						{expanded && (
+							<div className="space-y-2 border-t border-[var(--border-primary)] px-2.5 py-2.5">
+								<div className="text-[10px] text-[var(--text-muted)]">spawn seq {visit.spawnSeqId}</div>
+								<JsonBlock value={visit.instances} previewLines={8} />
+							</div>
+						)}
 					</details>
 				);
 			})}

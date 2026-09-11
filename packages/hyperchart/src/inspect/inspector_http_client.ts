@@ -2,14 +2,15 @@ import type { HyperchartInspectorDataSource } from "../host/adapter.js";
 
 /** Browser-safe stateless transport for the inspector history contract. */
 export function browserHistoryDataSource(token: string): HyperchartInspectorDataSource {
-	const call = async <T,>(operation: string, input: unknown): Promise<T> => {
+	const call = async <T>(operation: string, input: unknown): Promise<T> => {
 		const response = await fetch(`/api/runs/${token}/history`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ operation, input }),
 		});
-		const payload = await response.json() as { found?: boolean; result?: T; error?: string };
-		if (!response.ok || typeof payload.found !== "boolean") throw new Error(payload.error ?? `History request failed (${response.status})`);
+		const payload = (await response.json()) as { found?: boolean; result?: T; error?: string };
+		if (!response.ok || typeof payload.found !== "boolean")
+			throw new Error(payload.error ?? `History request failed (${response.status})`);
 		return (payload.found ? payload.result : undefined) as T;
 	};
 	return {

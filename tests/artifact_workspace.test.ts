@@ -20,8 +20,15 @@ async function root(): Promise<string> {
 
 function completion(seqId: number, branchId: string, artifacts: Record<string, ArtifactPin>): DurableLogRecord {
 	return {
-		type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" }, artifacts,
-		seqId, parentId: seqId === 1 ? null : seqId - 1, branchId, timestamp: seqId,
+		type: "state_action",
+		kind: "complete",
+		actionUid: uid,
+		event: { type: "DONE" },
+		artifacts,
+		seqId,
+		parentId: seqId === 1 ? null : seqId - 1,
+		branchId,
+		timestamp: seqId,
 	};
 }
 
@@ -38,11 +45,20 @@ describe("materializeWorkspace", () => {
 		const pin = await store.put(source);
 		const logStore = new JsonlLogStore(join(dir, "run", "log.jsonl"));
 		await logStore.initializeRootBranch();
-		const [accepted] = await logStore.appendDrafts([{
-			type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" },
-			artifacts: { "nested/report.md": pin },
-		}]);
-		await logStore.createBranch("fork", accepted!.seqId, { name: "fork", sourceBranchId: "main", sourceSeqId: accepted!.seqId });
+		const [accepted] = await logStore.appendDrafts([
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: uid,
+				event: { type: "DONE" },
+				artifacts: { "nested/report.md": pin },
+			},
+		]);
+		await logStore.createBranch("fork", accepted!.seqId, {
+			name: "fork",
+			sourceBranchId: "main",
+			sourceSeqId: accepted!.seqId,
+		});
 		const forkAncestry = await collectHistoryRecords(logStore, "fork");
 		const workspace = join(dir, "run", "workspaces", "fork");
 
@@ -89,10 +105,12 @@ describe("materializeWorkspace", () => {
 		const store = new ArtifactStore(join(dir, "run"));
 		const hash = "a".repeat(64);
 
-		await expect(materializeWorkspaceFromPins(
-			latestArtifactPins([completion(1, "main", { "missing/report.md": { hash, size: 12 } })]),
-			store,
-			join(dir, "workspace"),
-		)).rejects.toThrow(new RegExp(`missing/report\\.md.*${hash}|${hash}.*missing/report\\.md`));
+		await expect(
+			materializeWorkspaceFromPins(
+				latestArtifactPins([completion(1, "main", { "missing/report.md": { hash, size: 12 } })]),
+				store,
+				join(dir, "workspace"),
+			),
+		).rejects.toThrow(new RegExp(`missing/report\\.md.*${hash}|${hash}.*missing/report\\.md`));
 	});
 });

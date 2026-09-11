@@ -13,11 +13,7 @@ import {
 export { finishableEvents, validateFinishParams };
 export type { CompletionSink };
 
-export function createFinishTool(
-	effect: AgentEffect,
-	sink: CompletionSink,
-	registry?: SchemaRegistry,
-): ToolDefinition {
+export function createFinishTool(effect: AgentEffect, sink: CompletionSink, registry?: SchemaRegistry): ToolDefinition {
 	return defineTool({
 		name: "finish",
 		label: "Finish",

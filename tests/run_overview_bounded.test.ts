@@ -8,7 +8,11 @@ import {
 	mailboxReentryRecords,
 	mailboxReentryRun,
 } from "../packages/hyperchart/src/react/fixtures/actor-runtime-fixtures.js";
-import { actorPoolAst, actorPoolBusyRecords, actorPoolBusyRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
+import {
+	actorPoolAst,
+	actorPoolBusyRecords,
+	actorPoolBusyRun,
+} from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 import { ActorMailboxCard } from "../packages/hyperchart/src/react/components/inspector/details/ActorMailboxCard.js";
 
 describe("bounded run overview", () => {
@@ -22,7 +26,10 @@ describe("bounded run overview", () => {
 		const latestInstance = actor.mailboxInstances.at(-1);
 		if (latestInstance === undefined) throw new Error("mailbox instance fixture is incomplete");
 		latestInstance.mailbox = { totalCount: 20_000, head: seed, entries: actor.mailbox.entries };
-		actor.mailboxInstances[0]!.messageHistory = Array.from({ length: 20_000 }, (_, index) => ({ ...seed, messageId: `settled-${index}` }));
+		actor.mailboxInstances[0]!.messageHistory = Array.from({ length: 20_000 }, (_, index) => ({
+			...seed,
+			messageId: `settled-${index}`,
+		}));
 		const records = mailboxReentryRecords(mailboxReentryAst);
 		const projection = projectBranch(createBranchProjection(mailboxReentryAst), mailboxReentryAst, records);
 
@@ -36,7 +43,9 @@ describe("bounded run overview", () => {
 		expect(JSON.stringify(overview)).not.toContain("queued-19999");
 		expect(JSON.stringify(overview)).not.toContain("settled-19999");
 
-		const markup = renderToStaticMarkup(createElement(ActorMailboxCard, { instances: bounded?.mailboxInstances ?? [] }));
+		const markup = renderToStaticMarkup(
+			createElement(ActorMailboxCard, { instances: bounded?.mailboxInstances ?? [] }),
+		);
 		expect(markup).toContain(`>${seed.event}<`);
 		expect(markup).toContain("Showing the retained mailbox head.");
 		expect(markup).toContain("20,000 queued in the pinned overview");
@@ -51,19 +60,27 @@ describe("bounded run overview", () => {
 		const seed = worker.currentMessage ?? pool.mailbox.head;
 		if (seed === undefined) throw new Error("pool message fixture is incomplete");
 		worker.messageHistory = Array.from({ length: 10_000 }, (_, index) => ({ ...seed, messageId: `worker-${index}` }));
-		worker.visitHistory = Array.from({ length: 10_000 }, (_, index) => ({ visit: index + 1, invokeSeqId: index + 1, startedAt: index, status: "done" as const, invocation: { kind: "actor" as const } }));
+		worker.visitHistory = Array.from({ length: 10_000 }, (_, index) => ({
+			visit: index + 1,
+			invokeSeqId: index + 1,
+			startedAt: index,
+			status: "done" as const,
+			invocation: { kind: "actor" as const },
+		}));
 		const records = actorPoolBusyRecords;
 		const projection = projectBranch(createBranchProjection(actorPoolAst), actorPoolAst, records);
 
 		const overview = overviewOnly(source, projection);
-		for (const occurrence of overview.actorOccurrences ?? []) for (const summary of occurrence.workers ?? []) {
-			expect(summary).not.toHaveProperty("messageHistory");
-			expect(summary).not.toHaveProperty("visitHistory");
-			expect(summary.session).not.toHaveProperty("messages");
-		}
-		for (const state of overview.states) for (const summary of state.actorOccurrence?.workers ?? []) {
-			expect(summary).not.toHaveProperty("messageHistory");
-			expect(summary).not.toHaveProperty("visitHistory");
-		}
+		for (const occurrence of overview.actorOccurrences ?? [])
+			for (const summary of occurrence.workers ?? []) {
+				expect(summary).not.toHaveProperty("messageHistory");
+				expect(summary).not.toHaveProperty("visitHistory");
+				expect(summary.session).not.toHaveProperty("messages");
+			}
+		for (const state of overview.states)
+			for (const summary of state.actorOccurrence?.workers ?? []) {
+				expect(summary).not.toHaveProperty("messageHistory");
+				expect(summary).not.toHaveProperty("visitHistory");
+			}
 	});
 });

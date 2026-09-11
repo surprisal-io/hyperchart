@@ -8,16 +8,19 @@ export function answerFromReplySummary(summary: ReplySchemaSummary): unknown {
 	if ((summary.alternatives?.length ?? 0) > 0) {
 		if (summary.alternativeMode === "allOf") {
 			const parts = summary.alternatives!.map(answerFromReplySummary);
-			if (parts.every((part) => typeof part === "object" && part !== null && !Array.isArray(part))) return Object.assign({}, ...parts);
+			if (parts.every((part) => typeof part === "object" && part !== null && !Array.isArray(part)))
+				return Object.assign({}, ...parts);
 			return parts[0];
 		}
 		return answerFromReplySummary(summary.alternatives![0]!);
 	}
 	const type = summary.types.find((candidate) => candidate !== "null") ?? summary.types[0];
 	if (type === "object") {
-		return Object.fromEntries((summary.fields ?? [])
-			.filter((field) => field.required)
-			.map((field) => [field.name, answerFromReplySummary(field.value)]));
+		return Object.fromEntries(
+			(summary.fields ?? [])
+				.filter((field) => field.required)
+				.map((field) => [field.name, answerFromReplySummary(field.value)]),
+		);
 	}
 	if (type === "array") {
 		if (summary.tupleItems !== undefined) return summary.tupleItems.map(answerFromReplySummary);
@@ -31,7 +34,7 @@ export function answerFromReplySummary(summary: ReplySchemaSummary): unknown {
 		return "x".repeat(minimum);
 	}
 	if (type === "integer" || type === "number") {
-		let value = summary.constraints?.minimum ?? ((summary.constraints?.exclusiveMinimum ?? -1) + 1);
+		let value = summary.constraints?.minimum ?? (summary.constraints?.exclusiveMinimum ?? -1) + 1;
 		const multiple = summary.constraints?.multipleOf;
 		if (multiple !== undefined) value = Math.ceil(value / multiple) * multiple;
 		return type === "integer" ? Math.ceil(value) : value;

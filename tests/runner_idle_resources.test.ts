@@ -14,32 +14,49 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
 	const runDir = resolveRunPaths("idle-resources", storage).runDir;
 	mkdirSync(runDir);
 	const chartPath = join(root, "chart.mjs");
-	writeFileSync(chartPath, `export default { kind: "chart", id: "idle-resources", initial: "ask", states: {
+	writeFileSync(
+		chartPath,
+		`export default { kind: "chart", id: "idle-resources", initial: "ask", states: {
   ask: { kind: "state", action: { kind: "user", prompt: "Select", options: ["SELECTED"] }, transitions: { SELECTED: "work" } },
   work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "ask" } }
-} };`);
+} };`,
+	);
 	const log = join(runDir, "log.jsonl");
-	writeFileSync(log,
+	writeFileSync(
+		log,
 		`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
 	);
 	const emissions = new Map<string, (outcome: AgentOutcome) => void>();
 	let resident = 0;
 	let built = 0;
-	const controller = await createHyperchartRunnerController({ runId: "idle-resources", storage, chartPath, chartId: "idle-resources", workDir: root, branchId: "main" }, ({ config }) => {
-		resident++; built++;
-		return {
-			start(_effect, emit) { emissions.set(config.branchId, emit); },
+	const controller = await createHyperchartRunnerController(
+		{ runId: "idle-resources", storage, chartPath, chartId: "idle-resources", workDir: root, branchId: "main" },
+		({ config }) => {
+			resident++;
+			built++;
+			return {
+				start(_effect, emit) {
+					emissions.set(config.branchId, emit);
+				},
 				async cancel() {},
-			async dispose() { resident--; emissions.delete(config.branchId); },
-			async steer() { return false; },
-		};
-	});
+				async dispose() {
+					resident--;
+					emissions.delete(config.branchId);
+				},
+				async steer() {
+					return false;
+				},
+			};
+		},
+	);
 	const hold = controller.acquireHold();
 	const aggregate = controller.start();
 	const gate = async (branchId: string) => {
 		const store = new JsonlLogStore(log, branchId);
 		const records = await collectHistoryRecords(store, branchId);
-		const opened = [...records].reverse().find((record) => record.type === "user_interaction" && record.kind === "opened");
+		const opened = [...records]
+			.reverse()
+			.find((record) => record.type === "user_interaction" && record.kind === "opened");
 		if (opened === undefined) throw new Error("gate missing");
 		return opened.seqId;
 	};
@@ -76,7 +93,9 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
 		expect(await controller.durableBranchIds()).toEqual(["main", "fork"]);
 		expect(resident).toBe(0);
 		expect(built).toBe(12);
-		console.log("runner resource regression: 10 unload/readmission cycles; final resident executors=0; gate unload journal bytes unchanged");
+		console.log(
+			"runner resource regression: 10 unload/readmission cycles; final resident executors=0; gate unload journal bytes unchanged",
+		);
 	} finally {
 		await controller.stop();
 		hold.release();

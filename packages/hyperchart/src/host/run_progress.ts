@@ -45,8 +45,15 @@ function completedVisitCount(states: HyperchartStateInfo[]): number {
 		if (state.visitHistory !== undefined) {
 			return count + state.visitHistory.filter((visit) => visit.status === "done" || visit.status === "failed").length;
 		}
-		const actionState = state.type === undefined || state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport";
-		return count + (state.final !== true && actionState && (state.status === "done" || state.status === "failed") ? 1 : 0);
+		const actionState =
+			state.type === undefined ||
+			state.type === "agent" ||
+			state.type === "user" ||
+			state.type === "script" ||
+			state.type === "tsImport";
+		return (
+			count + (state.final !== true && actionState && (state.status === "done" || state.status === "failed") ? 1 : 0)
+		);
 	}, 0);
 }
 
@@ -82,7 +89,8 @@ function enqueueTransitionTarget(
 	byId: Map<string, HyperchartStateInfo>,
 ): void {
 	const targetState = byId.get(target);
-	const entersNestedScope = targetState?.type === "compound" || targetState?.type === "parallel" || targetState?.type === "region";
+	const entersNestedScope =
+		targetState?.type === "compound" || targetState?.type === "parallel" || targetState?.type === "region";
 	if (entersNestedScope) {
 		const initialChildren = [...byId.values()].filter(
 			(state) => state.initial === true && enclosingContainer(state.id, byId)?.id === target,
@@ -110,10 +118,7 @@ function enclosingCompletionTarget(
 	return undefined;
 }
 
-function enclosingContainer(
-	stateId: string,
-	byId: Map<string, HyperchartStateInfo>,
-): HyperchartStateInfo | undefined {
+function enclosingContainer(stateId: string, byId: Map<string, HyperchartStateInfo>): HyperchartStateInfo | undefined {
 	let parent = parentPath(stateId);
 	while (parent !== undefined) {
 		const direct = byId.get(parent);

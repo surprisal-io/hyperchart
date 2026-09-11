@@ -5,7 +5,11 @@ import { AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-c
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import type { ChartEvent } from "../packages/hyperchart/src/core/types.js";
-import { PiAgentExecutor, type PiExtensionPolicy, type PiSessionService } from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
+import {
+	PiAgentExecutor,
+	type PiExtensionPolicy,
+	type PiSessionService,
+} from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -15,11 +19,20 @@ afterEach(async () => {
 
 function effect(visit = 1): AgentEffect {
 	const actionUid = { chart: "resources", state: "work", action: "worker" };
-	return { kind: "agent", id: `resources:work:worker:${visit}:${visit}`, actionUid,
-		action: { kind: "agent", uid: actionUid, name: "worker",
+	return {
+		kind: "agent",
+		id: `resources:work:worker:${visit}:${visit}`,
+		actionUid,
+		action: {
+			kind: "agent",
+			uid: actionUid,
+			name: "worker",
 			onFail: { nudge: 2, restart: 1 },
-			tools: ["read", "grep", "finish"] },
-		events: ["DONE", "FAILED"], sessionId: `resource-session-${visit}` };
+			tools: ["read", "grep", "finish"],
+		},
+		events: ["DONE", "FAILED"],
+		sessionId: `resource-session-${visit}`,
+	};
 }
 
 async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
@@ -28,11 +41,18 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 	await mkdir(join(root, "extensions"));
 	await mkdir(join(root, "sessions"));
 	await writeFile(join(root, "worker.md"), "---\ndescription: resource worker\n---\nChart worker instructions\n");
-	const modelRuntime = await ModelRuntime.create({ authPath: join(root, "auth.json"), modelsPath: join(root, "models.json"), modelsStorePath: join(root, "models-store.json") });
+	const modelRuntime = await ModelRuntime.create({
+		authPath: join(root, "auth.json"),
+		modelsPath: join(root, "models.json"),
+		modelsStorePath: join(root, "models-store.json"),
+	});
 	const counts = { handles: 0, subscriptions: 0, shutdown: 0, disposed: 0, created: 0 };
 	const order: string[] = [];
 	const opened: string[] = [];
-	const stored = new Map<string, { header: NonNullable<ReturnType<SessionManager["getHeader"]>>; entries: ReturnType<SessionManager["getEntries"]> }>();
+	const stored = new Map<
+		string,
+		{ header: NonNullable<ReturnType<SessionManager["getHeader"]>>; entries: ReturnType<SessionManager["getEntries"]> }
+	>();
 	const service: PiSessionService = {
 		async openOrCreate(id) {
 			opened.push(id);
@@ -40,10 +60,16 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 			// The workspace SDK predates arbitrary external IDs; the service still
 			// receives/asserts the exact durable ID, while its test manager uses a legal local ID.
 			const manager = SessionManager.inMemory(root, { id: id.replaceAll(":", "-") });
-			for (const entry of saved?.entries ?? []) if (entry.type === "message" && entry.message.role === "user") manager.appendMessage(entry.message);
+			for (const entry of saved?.entries ?? [])
+				if (entry.type === "message" && entry.message.role === "user") manager.appendMessage(entry.message);
 			counts.handles++;
-			return { manager, sessionId: id, restored: saved !== undefined,
-				async drain() { order.push("drain"); },
+			return {
+				manager,
+				sessionId: id,
+				restored: saved !== undefined,
+				async drain() {
+					order.push("drain");
+				},
 				async close() {
 					counts.handles--;
 					stored.set(id, { header: manager.getHeader()!, entries: manager.getEntries() });
@@ -51,16 +77,34 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 				},
 			};
 		},
-		async readTranscript() { return undefined; },
-		async close() { expect(counts.handles).toBe(0); },
+		async readTranscript() {
+			return undefined;
+		},
+		async close() {
+			expect(counts.handles).toBe(0);
+		},
 	};
 	const overrides = vi.fn(async () => undefined);
-	const executor = new PiAgentExecutor({ resolveSessionOverrides: overrides, workDir: root, projectDir: root, agentDir: root, definitionDirs: [root], sessionsDir: join(root, "sessions"), branchId: "main", modelRuntime, ...(extensionPolicy === "ambient" ? {} : { extensionPolicy }), sessionService: service });
+	const executor = new PiAgentExecutor({
+		resolveSessionOverrides: overrides,
+		workDir: root,
+		projectDir: root,
+		agentDir: root,
+		definitionDirs: [root],
+		sessionsDir: join(root, "sessions"),
+		branchId: "main",
+		modelRuntime,
+		...(extensionPolicy === "ambient" ? {} : { extensionPolicy }),
+		sessionService: service,
+	});
 	const subscribe = AgentSession.prototype.subscribe;
 	vi.spyOn(AgentSession.prototype, "subscribe").mockImplementation(function (this: AgentSession, listener) {
 		counts.subscriptions++;
 		const unsubscribe = subscribe.call(this, listener);
-		return () => { counts.subscriptions--; unsubscribe(); };
+		return () => {
+			counts.subscriptions--;
+			unsubscribe();
+		};
 	});
 	const dispose = AgentSession.prototype.dispose;
 	vi.spyOn(AgentSession.prototype, "dispose").mockImplementation(function (this: AgentSession) {
@@ -70,7 +114,10 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 	});
 	const seenSessions = new WeakSet<AgentSession>();
 	const prompts: Array<{ id: string; text: string; entries: number }> = [];
-	const prompt = vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (this: AgentSession, text) {
+	const prompt = vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (
+		this: AgentSession,
+		text,
+	) {
 		prompts.push({ id: this.sessionId, text, entries: this.sessionManager.getEntries().length });
 		// Exercise real SDK extension contexts without invoking a provider. The
 		// fixture starts a resource as a normal host would, then executor owns teardown.
@@ -95,15 +142,19 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 }
 
 function complete(executor: PiAgentExecutor, invocation: AgentEffect): Promise<ChartEvent> {
-	return new Promise((resolve) => executor.start(invocation, (outcome: AgentOutcome) =>
-			resolve(outcome.kind === "completed" ? outcome.event : { type: "FAILED", error: outcome.failure.message })),
+	return new Promise((resolve) =>
+		executor.start(invocation, (outcome: AgentOutcome) =>
+			resolve(outcome.kind === "completed" ? outcome.event : { type: "FAILED", error: outcome.failure.message }),
+		),
 	);
 }
 
-const internal = (executor: PiAgentExecutor) => executor as unknown as {
-	live: Map<string, unknown>; runs: Map<string, unknown>;
-	cleanupSession(session: AgentSession): Promise<void>;
-};
+const internal = (executor: PiAgentExecutor) =>
+	executor as unknown as {
+		live: Map<string, unknown>;
+		runs: Map<string, unknown>;
+		cleanupSession(session: AgentSession): Promise<void>;
+	};
 
 describe("PiAgentExecutor session resources", () => {
 	it("closes completed sessions, progress and recorders before delivery over 100 isolated cycles", async () => {
@@ -119,8 +170,12 @@ describe("PiAgentExecutor session resources", () => {
 			await new Promise((resolve) => setImmediate(resolve));
 			expect(internal(f.executor).runs.size).toBe(0);
 			expect(f.counts).toEqual({ created: 100, disposed: 100, shutdown: 100, handles: 0, subscriptions: 0 });
-			console.log("resource regression: 100 cycles; completed live sessions=0, progress subscriptions=0, recorder handles=0; shutdown=dispose=100");
-		} finally { await f.executor.dispose(); }
+			console.log(
+				"resource regression: 100 cycles; completed live sessions=0, progress subscriptions=0, recorder handles=0; shutdown=dispose=100",
+			);
+		} finally {
+			await f.executor.dispose();
+		}
 	}, 30_000);
 
 	it("reports artifact failure after cleanup and accepts a durable nudge on the same session", async () => {
@@ -150,7 +205,9 @@ describe("PiAgentExecutor session resources", () => {
 			expect(turns).toBe(2);
 			expect(f.opened).toEqual(["resource-session-1", "resource-session-1"]);
 			expect(f.counts).toEqual({ created: 2, disposed: 2, shutdown: 2, handles: 0, subscriptions: 0 });
-		} finally { await f.executor.dispose(); }
+		} finally {
+			await f.executor.dispose();
+		}
 	});
 
 	it.each(["nudge", "restart"] as const)("reopens the correct transcript for durable recovery (%s)", async (mode) => {
@@ -177,27 +234,38 @@ describe("PiAgentExecutor session resources", () => {
 				const firstEntries = f.prompts[0]?.entries;
 				const secondEntries = f.prompts[1]?.entries;
 				if (firstEntries === undefined || secondEntries === undefined) throw new Error("missing prompt entries");
-			expect(secondEntries).toBeGreaterThan(firstEntries);
+				expect(secondEntries).toBeGreaterThan(firstEntries);
 			}
 			expect(f.counts.handles).toBe(0);
 			expect(f.counts.disposed).toBe(2);
-		} finally { await f.executor.dispose(); }
+		} finally {
+			await f.executor.dispose();
+		}
 	});
 
 	it("runs shutdown exactly once before invalidation even when cancellation and disposal race", async () => {
 		const f = await fixture();
 		let entered!: () => void;
-		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
 		let release!: () => void;
 		f.prompt.mockImplementationOnce(async function (this: AgentSession) {
 			const emit = this.extensionRunner.emit.bind(this.extensionRunner);
 			vi.spyOn(this.extensionRunner, "emit").mockImplementation(async (event) => {
-				if (event.type === "session_shutdown") { f.counts.shutdown++; f.order.push("shutdown"); }
+				if (event.type === "session_shutdown") {
+					f.counts.shutdown++;
+					f.order.push("shutdown");
+				}
 				return emit(event);
 			});
-			vi.spyOn(this, "abort").mockImplementation(async () => { release(); });
+			vi.spyOn(this, "abort").mockImplementation(async () => {
+				release();
+			});
 			entered();
-			await new Promise<void>((resolve) => { release = resolve; });
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
 		});
 		const emitted = vi.fn();
 		f.executor.start(effect(), emitted);
@@ -211,14 +279,23 @@ describe("PiAgentExecutor session resources", () => {
 	it("serializes superseding starts and suppresses stale completions without overlapping recorders", async () => {
 		const f = await fixture();
 		const open = f.service.openOrCreate.bind(f.service);
-		f.service.openOrCreate = async (id) => { expect(f.counts.handles).toBe(0); return open(id); };
+		f.service.openOrCreate = async (id) => {
+			expect(f.counts.handles).toBe(0);
+			return open(id);
+		};
 		let entered!: () => void;
-		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
 		let release!: () => void;
 		f.prompt.mockImplementationOnce(async function (this: AgentSession) {
-			vi.spyOn(this, "abort").mockImplementation(async () => { release(); });
+			vi.spyOn(this, "abort").mockImplementation(async () => {
+				release();
+			});
 			entered();
-			await new Promise<void>((resolve) => { release = resolve; });
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
 		});
 		const first = vi.fn();
 		const second = vi.fn();
@@ -236,14 +313,23 @@ describe("PiAgentExecutor session resources", () => {
 	it("cancels the current replacement while the previous generation is still shutting down", async () => {
 		const f = await fixture();
 		let entered!: () => void;
-		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
 		let releaseAbort!: () => void;
-		const abortGate = new Promise<void>((resolve) => { releaseAbort = resolve; });
+		const abortGate = new Promise<void>((resolve) => {
+			releaseAbort = resolve;
+		});
 		let releasePrompt!: () => void;
 		f.prompt.mockImplementationOnce(async function (this: AgentSession) {
-			vi.spyOn(this, "abort").mockImplementation(async () => { await abortGate; releasePrompt(); });
+			vi.spyOn(this, "abort").mockImplementation(async () => {
+				await abortGate;
+				releasePrompt();
+			});
 			entered();
-			await new Promise<void>((resolve) => { releasePrompt = resolve; });
+			await new Promise<void>((resolve) => {
+				releasePrompt = resolve;
+			});
 		});
 		const emitted = vi.fn();
 		f.executor.start(effect(1), emitted);
@@ -262,10 +348,18 @@ describe("PiAgentExecutor session resources", () => {
 		const f = await fixture();
 		const open = f.service.openOrCreate.bind(f.service);
 		let entered!: () => void;
-		const started = new Promise<void>((resolve) => { entered = resolve; });
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
 		let release!: () => void;
-		const gate = new Promise<void>((resolve) => { release = resolve; });
-		f.service.openOrCreate = async (id) => { entered(); await gate; return open(id); };
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		f.service.openOrCreate = async (id) => {
+			entered();
+			await gate;
+			return open(id);
+		};
 		const emitted = vi.fn();
 		f.executor.start(effect(), emitted);
 		await started;
@@ -281,12 +375,25 @@ describe("PiAgentExecutor session resources", () => {
 		const f = await fixture();
 		const order: string[] = [];
 		const session = {
-			async abort() { order.push("abort"); },
-			extensionRunner: { async emit() { order.push("shutdown"); throw new Error("shutdown failed"); } },
-			dispose() { order.push("dispose"); },
+			async abort() {
+				order.push("abort");
+			},
+			extensionRunner: {
+				async emit() {
+					order.push("shutdown");
+					throw new Error("shutdown failed");
+				},
+			},
+			dispose() {
+				order.push("dispose");
+			},
 		} as unknown as AgentSession;
 		const handles = (f.executor as unknown as { sessionHandles: WeakMap<AgentSession, object> }).sessionHandles;
-		handles.set(session, { async close() { order.push("close"); } });
+		handles.set(session, {
+			async close() {
+				order.push("close");
+			},
+		});
 		const first = internal(f.executor).cleanupSession(session);
 		expect(internal(f.executor).cleanupSession(session)).toBe(first);
 		await expect(first).resolves.toBeUndefined();
@@ -300,7 +407,9 @@ describe("PiAgentExecutor session resources", () => {
 		const open = f.service.openOrCreate.bind(f.service);
 		f.service.openOrCreate = async (id) => {
 			const handle = await open(id);
-			vi.spyOn(handle.manager, "getSessionId").mockImplementation(() => { throw new Error("fixture SDK construction failure"); });
+			vi.spyOn(handle.manager, "getSessionId").mockImplementation(() => {
+				throw new Error("fixture SDK construction failure");
+			});
 			return handle;
 		};
 		expect(await complete(f.executor, effect())).toEqual({ type: "FAILED", error: "fixture SDK construction failure" });
@@ -314,9 +423,18 @@ describe("PiAgentExecutor session resources", () => {
 		const open = f.service.openOrCreate.bind(f.service);
 		f.service.openOrCreate = async (id) => {
 			const handle = await open(id);
-			return { ...handle, async close() { await handle.close(); throw new Error("fixture recorder failure"); } };
+			return {
+				...handle,
+				async close() {
+					await handle.close();
+					throw new Error("fixture recorder failure");
+				},
+			};
 		};
-		expect(await complete(f.executor, effect())).toMatchObject({ type: "FAILED", error: "Failed to clean up Pi agent session" });
+		expect(await complete(f.executor, effect())).toMatchObject({
+			type: "FAILED",
+			error: "Failed to clean up Pi agent session",
+		});
 		expect(f.counts).toMatchObject({ disposed: 1, shutdown: 1, handles: 0, subscriptions: 0 });
 		await f.executor.dispose();
 	});
@@ -330,10 +448,15 @@ describe("PiAgentExecutor session resources", () => {
 		await f.executor.dispose();
 	});
 
-	it.each(["ambient", "isolated"] as const)("enforces %s extension discovery without removing instructions or built-in/finish tools", async (policy) => {
+	it.each([
+		"ambient",
+		"isolated",
+	] as const)("enforces %s extension discovery without removing instructions or built-in/finish tools", async (policy) => {
 		const f = await fixture(policy);
 		const marker = join(f.root, "extension-events.txt");
-		await writeFile(join(f.root, "extensions", "monitor.ts"), `import { appendFileSync } from "node:fs";
+		await writeFile(
+			join(f.root, "extensions", "monitor.ts"),
+			`import { appendFileSync } from "node:fs";
 export default function(pi) {
   appendFileSync(${JSON.stringify(marker)}, "factory\\n");
   let timer;
@@ -342,7 +465,8 @@ export default function(pi) {
     clearInterval(timer);
     appendFileSync(${JSON.stringify(marker)}, "shutdown:" + ctx.sessionManager.getSessionId() + "\\n");
   });
-}`);
+}`,
+		);
 		const original = f.prompt.getMockImplementation()!;
 		f.prompt.mockImplementationOnce(async function (this: AgentSession, text, options) {
 			expect(this.agent.state.systemPrompt).toContain("Chart worker instructions");
@@ -354,7 +478,9 @@ export default function(pi) {
 			const { readFile } = await import("node:fs/promises");
 			if (policy === "ambient") expect(await readFile(marker, "utf8")).toBe("factory\nshutdown:resource-session-1\n");
 			else await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
-		} finally { await f.executor.dispose(); }
+		} finally {
+			await f.executor.dispose();
+		}
 	});
 });
 
@@ -362,7 +488,10 @@ it("supplies the durable invocation ID to session overrides rather than an SDK s
 	const { executor, overrides } = await fixture();
 	await complete(executor, effect(1));
 	await complete(executor, effect(2));
-	expect(overrides).toHaveBeenNthCalledWith(1, expect.objectContaining({ invocationId: effect(1).sessionId, branchId: "main", actionUid: effect(1).actionUid }));
+	expect(overrides).toHaveBeenNthCalledWith(
+		1,
+		expect.objectContaining({ invocationId: effect(1).sessionId, branchId: "main", actionUid: effect(1).actionUid }),
+	);
 	expect(overrides).toHaveBeenNthCalledWith(2, expect.objectContaining({ invocationId: effect(2).sessionId }));
 	await executor.dispose();
 });

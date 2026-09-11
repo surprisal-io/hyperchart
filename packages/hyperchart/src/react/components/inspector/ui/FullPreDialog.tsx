@@ -62,8 +62,12 @@ export function FullPreDialog({
 					<div className="min-h-0 overflow-auto p-4">
 						<div className="min-w-0 max-w-full rounded-lg border border-[var(--border-primary)] bg-[var(--bg-code)]">
 							{renderContent === undefined ? (
-								<HighlightedBlock language={language} full wrapLongLines={wrapLongLines}>{children}</HighlightedBlock>
-							) : renderContent(children)}
+								<HighlightedBlock language={language} full wrapLongLines={wrapLongLines}>
+									{children}
+								</HighlightedBlock>
+							) : (
+								renderContent(children)
+							)}
 						</div>
 					</div>
 				</div>

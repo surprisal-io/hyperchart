@@ -53,7 +53,13 @@ export function HyperchartInspectorSidePanel({
 		setRevealedArtifactStateIds([]);
 	}, [run.runId, selectedStateId]);
 	useEffect(() => {
-		if (highlightedReply === null && highlightedArtifact === null && highlightedInputName === null && highlightedRefValue === null) return;
+		if (
+			highlightedReply === null &&
+			highlightedArtifact === null &&
+			highlightedInputName === null &&
+			highlightedRefValue === null
+		)
+			return;
 		const timeout = window.setTimeout(() => {
 			setHighlightedReply(null);
 			setHighlightedArtifact(null);
@@ -73,7 +79,8 @@ export function HyperchartInspectorSidePanel({
 		}
 		return ids;
 	}, [run]);
-	const effectiveDefinitionSource = definitionSource ?? (selectedState === null ? run.definitionSource : selectedState.definitionSource);
+	const effectiveDefinitionSource =
+		definitionSource ?? (selectedState === null ? run.definitionSource : selectedState.definitionSource);
 	const scopeProps = onOpenScope
 		? { onOpenScope, canOpenScope: selectedState ? scopeChildIds.has(selectedState.id) : false }
 		: {};
@@ -109,16 +116,16 @@ export function HyperchartInspectorSidePanel({
 						revealedArtifactStateIds={revealedArtifactStateIds}
 						onHighlightReply={(stateId, path) => {
 							setHighlightedReply({ stateId, path });
-							setRevealedReplyStateIds((stateIds) =>
-								stateIds.includes(stateId) ? stateIds : [...stateIds, stateId],
-							);
+							setRevealedReplyStateIds((stateIds) => (stateIds.includes(stateId) ? stateIds : [...stateIds, stateId]));
 							setHighlightedArtifact(null);
 							setHighlightedInputName(null);
 							setHighlightedRefValue(null);
 						}}
 						onHighlightArtifact={(stateId, name) => {
 							setHighlightedArtifact({ stateId, name });
-							setRevealedArtifactStateIds((stateIds) => stateIds.includes(stateId) ? stateIds : [...stateIds, stateId]);
+							setRevealedArtifactStateIds((stateIds) =>
+								stateIds.includes(stateId) ? stateIds : [...stateIds, stateId],
+							);
 							setHighlightedReply(null);
 							setHighlightedInputName(null);
 							setHighlightedRefValue(null);
@@ -139,7 +146,18 @@ export function HyperchartInspectorSidePanel({
 						}}
 						{...scopeProps}
 						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
-						{...(historyDataSource === undefined || run.historySnapshot === undefined ? {} : { history: { runId: run.runId, snapshot: run.historySnapshot, dataSource: historyDataSource, ...((selectedInvokeSeqId ?? historyTargetSeqId) === undefined ? {} : { targetSeqId: selectedInvokeSeqId ?? historyTargetSeqId }) } })}
+						{...(historyDataSource === undefined || run.historySnapshot === undefined
+							? {}
+							: {
+									history: {
+										runId: run.runId,
+										snapshot: run.historySnapshot,
+										dataSource: historyDataSource,
+										...((selectedInvokeSeqId ?? historyTargetSeqId) === undefined
+											? {}
+											: { targetSeqId: selectedInvokeSeqId ?? historyTargetSeqId }),
+									},
+								})}
 						{...(onSteerSession === undefined || run.replayIncompatibility !== undefined ? {} : { onSteerSession })}
 					/>
 				</>

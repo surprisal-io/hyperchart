@@ -91,7 +91,9 @@ export function renderedArtifactPath(artifact: RenderedArtifact, workDir: string
 
 function artifactPath(artifact: RenderedArtifact, workDir: string): string {
 	if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path)) {
-		throw new Error(`Artifact ${artifact.path}: web URLs are not local artifacts; use a browser/search tool or acquire a local asset first`);
+		throw new Error(
+			`Artifact ${artifact.path}: web URLs are not local artifacts; use a browser/search tool or acquire a local asset first`,
+		);
 	}
 	const root = resolve(workDir);
 	const filePath = resolve(root, artifact.path);

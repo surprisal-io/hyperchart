@@ -36,9 +36,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -57,9 +55,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -76,9 +72,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -92,9 +86,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -136,25 +128,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -170,10 +153,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -186,26 +166,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -228,10 +197,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -241,17 +207,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -279,29 +239,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -317,10 +266,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -345,10 +291,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -364,19 +307,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -411,11 +346,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -438,9 +369,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -480,12 +409,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -518,10 +442,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -603,9 +524,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -658,11 +577,7 @@
 					"name": "actor-editor",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Apply ",
-							" to ",
-							" inside the actor occurrence."
-						],
+						"strings": ["Apply ", " to ", " inside the actor occurrence."],
 						"refs": [
 							{
 								"kind": "messageInput",
@@ -685,9 +600,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"commit"
-							],
+							"required": ["commit"],
 							"additionalProperties": false
 						}
 					},
@@ -737,9 +650,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"commit"
-						],
+						"required": ["commit"],
 						"additionalProperties": false
 					}
 				},
@@ -804,9 +715,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -825,9 +734,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -844,9 +751,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -860,9 +765,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -904,25 +807,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -938,10 +832,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -954,26 +845,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -996,10 +876,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -1009,17 +886,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -1047,29 +918,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -1085,10 +945,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -1113,10 +970,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -1132,19 +986,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -1179,11 +1025,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -1206,9 +1048,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -1248,12 +1088,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -1286,10 +1121,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -1371,9 +1203,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -1426,11 +1256,7 @@
 					"name": "actor-editor",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Apply ",
-							" to ",
-							" inside the actor occurrence."
-						],
+						"strings": ["Apply ", " to ", " inside the actor occurrence."],
 						"refs": [
 							{
 								"kind": "messageInput",
@@ -1453,9 +1279,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"commit"
-							],
+							"required": ["commit"],
 							"additionalProperties": false
 						}
 					},
@@ -1510,9 +1334,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -1531,9 +1353,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -1550,9 +1370,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -1566,9 +1384,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -1610,25 +1426,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -1644,10 +1451,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -1660,26 +1464,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -1702,10 +1495,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -1715,17 +1505,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -1753,29 +1537,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -1791,10 +1564,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -1819,10 +1589,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -1838,19 +1605,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -1885,11 +1644,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -1912,9 +1667,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -1954,12 +1707,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -1992,10 +1740,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -2077,9 +1822,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -2134,9 +1877,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -2155,9 +1896,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -2174,9 +1913,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -2190,9 +1927,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -2234,25 +1969,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -2268,10 +1994,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -2284,26 +2007,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -2326,10 +2038,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -2339,17 +2048,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -2377,29 +2080,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -2415,10 +2107,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -2443,10 +2132,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -2462,19 +2148,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -2509,11 +2187,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -2536,9 +2210,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -2578,12 +2250,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -2616,10 +2283,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -2709,9 +2373,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -2730,9 +2392,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -2749,9 +2409,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -2765,9 +2423,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -2809,25 +2465,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -2843,10 +2490,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -2859,26 +2503,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -2901,10 +2534,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -2914,17 +2544,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -2952,29 +2576,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -2990,10 +2603,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -3018,10 +2628,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -3037,19 +2644,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -3084,11 +2683,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -3111,9 +2706,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -3153,12 +2746,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -3191,10 +2779,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -3272,9 +2857,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -3326,11 +2909,7 @@
 					"name": "actor-editor",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Apply ",
-							" to ",
-							" inside the actor occurrence."
-						],
+						"strings": ["Apply ", " to ", " inside the actor occurrence."],
 						"refs": [
 							{
 								"kind": "messageInput",
@@ -3353,9 +2932,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"commit"
-							],
+							"required": ["commit"],
 							"additionalProperties": false
 						}
 					},
@@ -3404,11 +2981,7 @@
 								]
 							},
 							"policy": {
-								"requiredChecks": [
-									"typecheck",
-									"unit",
-									"replay"
-								],
+								"requiredChecks": ["typecheck", "unit", "replay"],
 								"minimumCoverage": 0.9
 							},
 							"reviewers": [
@@ -3459,25 +3032,16 @@
 																"maximum": 9007199254740991
 															}
 														},
-														"required": [
-															"additions",
-															"deletions"
-														],
+														"required": ["additions", "deletions"],
 														"additionalProperties": false
 													}
 												},
-												"required": [
-													"path",
-													"changes"
-												],
+												"required": ["path", "changes"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"commit",
-										"files"
-									],
+									"required": ["commit", "files"],
 									"additionalProperties": false
 								},
 								"policy": {
@@ -3493,10 +3057,7 @@
 											"type": "number"
 										}
 									},
-									"required": [
-										"requiredChecks",
-										"minimumCoverage"
-									],
+									"required": ["requiredChecks", "minimumCoverage"],
 									"additionalProperties": false
 								},
 								"reviewers": {
@@ -3509,26 +3070,15 @@
 											},
 											"role": {
 												"type": "string",
-												"enum": [
-													"owner",
-													"security",
-													"quality"
-												]
+												"enum": ["owner", "security", "quality"]
 											}
 										},
-										"required": [
-											"name",
-											"role"
-										],
+										"required": ["name", "role"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"revision",
-								"policy",
-								"reviewers"
-							],
+							"required": ["revision", "policy", "reviewers"],
 							"additionalProperties": false
 						}
 					}
@@ -3558,11 +3108,7 @@
 								]
 							},
 							"policy": {
-								"requiredChecks": [
-									"typecheck",
-									"unit",
-									"replay"
-								],
+								"requiredChecks": ["typecheck", "unit", "replay"],
 								"minimumCoverage": 0.9
 							},
 							"reviewers": [
@@ -3602,10 +3148,7 @@
 						"transitions": {},
 						"input": {
 							"destination": "remote",
-							"commits": [
-								"abc1234",
-								"def5678"
-							],
+							"commits": ["abc1234", "def5678"],
 							"manifest": {
 								"dist/editor.js": {
 									"checksum": "sha256:81f5",
@@ -3632,10 +3175,7 @@
 							"properties": {
 								"destination": {
 									"type": "string",
-									"enum": [
-										"local",
-										"remote"
-									]
+									"enum": ["local", "remote"]
 								},
 								"commits": {
 									"type": "array",
@@ -3660,10 +3200,7 @@
 												"maximum": 9007199254740991
 											}
 										},
-										"required": [
-											"checksum",
-											"bytes"
-										],
+										"required": ["checksum", "bytes"],
 										"additionalProperties": false
 									}
 								},
@@ -3679,19 +3216,11 @@
 											"type": "boolean"
 										}
 									},
-									"required": [
-										"days",
-										"legalHold"
-									],
+									"required": ["days", "legalHold"],
 									"additionalProperties": false
 								}
 							},
-							"required": [
-								"destination",
-								"commits",
-								"manifest",
-								"retention"
-							],
+							"required": ["destination", "commits", "manifest", "retention"],
 							"additionalProperties": false
 						}
 					}
@@ -3702,10 +3231,7 @@
 						"event": "ARCHIVE",
 						"input": {
 							"destination": "remote",
-							"commits": [
-								"abc1234",
-								"def5678"
-							],
+							"commits": ["abc1234", "def5678"],
 							"manifest": {
 								"dist/editor.js": {
 									"checksum": "sha256:81f5",
@@ -3767,9 +3293,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -3824,9 +3348,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -3845,9 +3367,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -3864,9 +3384,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -3880,9 +3398,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -3924,25 +3440,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -3958,10 +3465,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -3974,26 +3478,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -4016,10 +3509,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -4029,17 +3519,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -4067,29 +3551,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -4105,10 +3578,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -4133,10 +3603,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -4152,19 +3619,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -4199,11 +3658,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -4226,9 +3681,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -4268,12 +3721,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -4306,10 +3754,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -4387,9 +3832,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -4441,11 +3884,7 @@
 					"name": "actor-editor",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Apply ",
-							" to ",
-							" inside the actor occurrence."
-						],
+						"strings": ["Apply ", " to ", " inside the actor occurrence."],
 						"refs": [
 							{
 								"kind": "messageInput",
@@ -4468,9 +3907,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"commit"
-							],
+							"required": ["commit"],
 							"additionalProperties": false
 						}
 					},
@@ -4519,11 +3956,7 @@
 								]
 							},
 							"policy": {
-								"requiredChecks": [
-									"typecheck",
-									"unit",
-									"replay"
-								],
+								"requiredChecks": ["typecheck", "unit", "replay"],
 								"minimumCoverage": 0.9
 							},
 							"reviewers": [
@@ -4574,25 +4007,16 @@
 																"maximum": 9007199254740991
 															}
 														},
-														"required": [
-															"additions",
-															"deletions"
-														],
+														"required": ["additions", "deletions"],
 														"additionalProperties": false
 													}
 												},
-												"required": [
-													"path",
-													"changes"
-												],
+												"required": ["path", "changes"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"commit",
-										"files"
-									],
+									"required": ["commit", "files"],
 									"additionalProperties": false
 								},
 								"policy": {
@@ -4608,10 +4032,7 @@
 											"type": "number"
 										}
 									},
-									"required": [
-										"requiredChecks",
-										"minimumCoverage"
-									],
+									"required": ["requiredChecks", "minimumCoverage"],
 									"additionalProperties": false
 								},
 								"reviewers": {
@@ -4624,26 +4045,15 @@
 											},
 											"role": {
 												"type": "string",
-												"enum": [
-													"owner",
-													"security",
-													"quality"
-												]
+												"enum": ["owner", "security", "quality"]
 											}
 										},
-										"required": [
-											"name",
-											"role"
-										],
+										"required": ["name", "role"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"revision",
-								"policy",
-								"reviewers"
-							],
+							"required": ["revision", "policy", "reviewers"],
 							"additionalProperties": false
 						}
 					}
@@ -4673,11 +4083,7 @@
 								]
 							},
 							"policy": {
-								"requiredChecks": [
-									"typecheck",
-									"unit",
-									"replay"
-								],
+								"requiredChecks": ["typecheck", "unit", "replay"],
 								"minimumCoverage": 0.9
 							},
 							"reviewers": [
@@ -4717,10 +4123,7 @@
 						"transitions": {},
 						"input": {
 							"destination": "remote",
-							"commits": [
-								"abc1234",
-								"def5678"
-							],
+							"commits": ["abc1234", "def5678"],
 							"manifest": {
 								"dist/editor.js": {
 									"checksum": "sha256:81f5",
@@ -4747,10 +4150,7 @@
 							"properties": {
 								"destination": {
 									"type": "string",
-									"enum": [
-										"local",
-										"remote"
-									]
+									"enum": ["local", "remote"]
 								},
 								"commits": {
 									"type": "array",
@@ -4775,10 +4175,7 @@
 												"maximum": 9007199254740991
 											}
 										},
-										"required": [
-											"checksum",
-											"bytes"
-										],
+										"required": ["checksum", "bytes"],
 										"additionalProperties": false
 									}
 								},
@@ -4794,19 +4191,11 @@
 											"type": "boolean"
 										}
 									},
-									"required": [
-										"days",
-										"legalHold"
-									],
+									"required": ["days", "legalHold"],
 									"additionalProperties": false
 								}
 							},
-							"required": [
-								"destination",
-								"commits",
-								"manifest",
-								"retention"
-							],
+							"required": ["destination", "commits", "manifest", "retention"],
 							"additionalProperties": false
 						}
 					}
@@ -4817,10 +4206,7 @@
 						"event": "ARCHIVE",
 						"input": {
 							"destination": "remote",
-							"commits": [
-								"abc1234",
-								"def5678"
-							],
+							"commits": ["abc1234", "def5678"],
 							"manifest": {
 								"dist/editor.js": {
 									"checksum": "sha256:81f5",
@@ -4882,9 +4268,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -4941,9 +4325,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"channel"
-							],
+							"required": ["channel"],
 							"additionalProperties": false
 						}
 					},
@@ -4962,9 +4344,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"value"
-									],
+									"required": ["value"],
 									"additionalProperties": false
 								}
 							},
@@ -5033,9 +4413,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"value"
-							],
+							"required": ["value"],
 							"additionalProperties": false
 						}
 					}
@@ -5259,9 +4637,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"channel"
-							],
+							"required": ["channel"],
 							"additionalProperties": false
 						}
 					},
@@ -5280,9 +4656,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"value"
-									],
+									"required": ["value"],
 									"additionalProperties": false
 								}
 							},
@@ -5351,9 +4725,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"value"
-							],
+							"required": ["value"],
 							"additionalProperties": false
 						}
 					}
@@ -5457,9 +4829,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"channel"
-							],
+							"required": ["channel"],
 							"additionalProperties": false
 						}
 					},
@@ -5478,9 +4848,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"value"
-									],
+									"required": ["value"],
 									"additionalProperties": false
 								}
 							},
@@ -5549,9 +4917,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"value"
-							],
+							"required": ["value"],
 							"additionalProperties": false
 						}
 					}
@@ -5775,9 +5141,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"channel"
-							],
+							"required": ["channel"],
 							"additionalProperties": false
 						}
 					},
@@ -5796,9 +5160,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"value"
-									],
+									"required": ["value"],
 									"additionalProperties": false
 								}
 							},
@@ -5867,9 +5229,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"value"
-							],
+							"required": ["value"],
 							"additionalProperties": false
 						}
 					}
@@ -5998,9 +5358,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -6022,9 +5380,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -6041,9 +5397,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -6057,9 +5411,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -6101,25 +5453,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -6135,10 +5478,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -6151,26 +5491,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -6193,10 +5522,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -6206,17 +5532,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -6244,29 +5564,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -6282,10 +5591,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -6310,10 +5616,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -6329,19 +5632,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -6376,11 +5671,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -6403,9 +5694,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -6445,12 +5734,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -6483,10 +5767,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -6591,9 +5872,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -6615,9 +5894,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -6634,9 +5911,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -6650,9 +5925,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -6694,25 +5967,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -6728,10 +5992,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -6744,26 +6005,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -6786,10 +6036,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -6799,17 +6046,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -6837,29 +6078,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -6875,10 +6105,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -6903,10 +6130,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -6922,19 +6146,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -6969,11 +6185,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -6996,9 +6208,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -7038,12 +6248,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -7076,10 +6281,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -7149,9 +6351,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -7173,9 +6373,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"patch"
-									],
+									"required": ["patch"],
 									"additionalProperties": false
 								}
 							},
@@ -7192,9 +6390,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"commit"
-											],
+											"required": ["commit"],
 											"additionalProperties": false
 										}
 									},
@@ -7208,9 +6404,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"reason"
-											],
+											"required": ["reason"],
 											"additionalProperties": false
 										}
 									}
@@ -7252,25 +6446,16 @@
 																		"maximum": 9007199254740991
 																	}
 																},
-																"required": [
-																	"additions",
-																	"deletions"
-																],
+																"required": ["additions", "deletions"],
 																"additionalProperties": false
 															}
 														},
-														"required": [
-															"path",
-															"changes"
-														],
+														"required": ["path", "changes"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"commit",
-												"files"
-											],
+											"required": ["commit", "files"],
 											"additionalProperties": false
 										},
 										"policy": {
@@ -7286,10 +6471,7 @@
 													"type": "number"
 												}
 											},
-											"required": [
-												"requiredChecks",
-												"minimumCoverage"
-											],
+											"required": ["requiredChecks", "minimumCoverage"],
 											"additionalProperties": false
 										},
 										"reviewers": {
@@ -7302,26 +6484,15 @@
 													},
 													"role": {
 														"type": "string",
-														"enum": [
-															"owner",
-															"security",
-															"quality"
-														]
+														"enum": ["owner", "security", "quality"]
 													}
 												},
-												"required": [
-													"name",
-													"role"
-												],
+												"required": ["name", "role"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"revision",
-										"policy",
-										"reviewers"
-									],
+									"required": ["revision", "policy", "reviewers"],
 									"additionalProperties": false
 								}
 							},
@@ -7344,10 +6515,7 @@
 															"type": "string"
 														}
 													},
-													"required": [
-														"reviewer",
-														"timestamp"
-													],
+													"required": ["reviewer", "timestamp"],
 													"additionalProperties": false
 												},
 												"checks": {
@@ -7357,17 +6525,11 @@
 													},
 													"additionalProperties": {
 														"type": "string",
-														"enum": [
-															"passed",
-															"waived"
-														]
+														"enum": ["passed", "waived"]
 													}
 												}
 											},
-											"required": [
-												"approval",
-												"checks"
-											],
+											"required": ["approval", "checks"],
 											"additionalProperties": false
 										}
 									},
@@ -7395,29 +6557,18 @@
 															},
 															"severity": {
 																"type": "string",
-																"enum": [
-																	"warning",
-																	"blocking"
-																]
+																"enum": ["warning", "blocking"]
 															},
 															"message": {
 																"type": "string"
 															}
 														},
-														"required": [
-															"path",
-															"line",
-															"severity",
-															"message"
-														],
+														"required": ["path", "line", "severity", "message"],
 														"additionalProperties": false
 													}
 												}
 											},
-											"required": [
-												"summary",
-												"comments"
-											],
+											"required": ["summary", "comments"],
 											"additionalProperties": false
 										}
 									}
@@ -7433,10 +6584,7 @@
 									"properties": {
 										"destination": {
 											"type": "string",
-											"enum": [
-												"local",
-												"remote"
-											]
+											"enum": ["local", "remote"]
 										},
 										"commits": {
 											"type": "array",
@@ -7461,10 +6609,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"checksum",
-													"bytes"
-												],
+												"required": ["checksum", "bytes"],
 												"additionalProperties": false
 											}
 										},
@@ -7480,19 +6625,11 @@
 													"type": "boolean"
 												}
 											},
-											"required": [
-												"days",
-												"legalHold"
-											],
+											"required": ["days", "legalHold"],
 											"additionalProperties": false
 										}
 									},
-									"required": [
-										"destination",
-										"commits",
-										"manifest",
-										"retention"
-									],
+									"required": ["destination", "commits", "manifest", "retention"],
 									"additionalProperties": false
 								}
 							},
@@ -7527,11 +6664,7 @@
 								"name": "actor-editor",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Apply ",
-										" to ",
-										" inside the actor occurrence."
-									],
+									"strings": ["Apply ", " to ", " inside the actor occurrence."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -7554,9 +6687,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"commit"
-										],
+										"required": ["commit"],
 										"additionalProperties": false
 									}
 								},
@@ -7596,12 +6727,7 @@
 								"name": "actor-reviewer",
 								"task": {
 									"kind": "template",
-									"strings": [
-										"Review revision ",
-										" under policy ",
-										" for ",
-										"."
-									],
+									"strings": ["Review revision ", " under policy ", " for ", "."],
 									"refs": [
 										{
 											"kind": "messageInput",
@@ -7634,10 +6760,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"reviewer",
-											"timestamp"
-										],
+										"required": ["reviewer", "timestamp"],
 										"additionalProperties": false
 									}
 								},
@@ -7720,9 +6843,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -7775,11 +6896,7 @@
 					"name": "actor-editor",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Apply ",
-							" to ",
-							" inside the actor occurrence."
-						],
+						"strings": ["Apply ", " to ", " inside the actor occurrence."],
 						"refs": [
 							{
 								"kind": "messageInput",
@@ -7802,9 +6919,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"commit"
-							],
+							"required": ["commit"],
 							"additionalProperties": false
 						}
 					},
@@ -7855,9 +6970,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"patch"
-							],
+							"required": ["patch"],
 							"additionalProperties": false
 						}
 					}
@@ -7923,9 +7036,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"file"
-							],
+							"required": ["file"],
 							"additionalProperties": false
 						}
 					},
@@ -7965,16 +7076,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"field1",
-										"field2",
-										"field3",
-										"field4",
-										"field5",
-										"field6",
-										"field7",
-										"field8"
-									],
+									"required": ["field1", "field2", "field3", "field4", "field5", "field6", "field7", "field8"],
 									"additionalProperties": false
 								}
 							},
@@ -7991,9 +7093,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"result"
-											],
+											"required": ["result"],
 											"additionalProperties": false
 										}
 									},
@@ -8007,9 +7107,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"result"
-											],
+											"required": ["result"],
 											"additionalProperties": false
 										}
 									},
@@ -8023,9 +7121,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"result"
-											],
+											"required": ["result"],
 											"additionalProperties": false
 										}
 									},
@@ -8039,9 +7135,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"result"
-											],
+											"required": ["result"],
 											"additionalProperties": false
 										}
 									},
@@ -8055,9 +7149,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"result"
-											],
+											"required": ["result"],
 											"additionalProperties": false
 										}
 									},
@@ -8071,9 +7163,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"result"
-											],
+											"required": ["result"],
 											"additionalProperties": false
 										}
 									}
@@ -8659,16 +7749,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"field1",
-								"field2",
-								"field3",
-								"field4",
-								"field5",
-								"field6",
-								"field7",
-								"field8"
-							],
+							"required": ["field1", "field2", "field3", "field4", "field5", "field6", "field7", "field8"],
 							"additionalProperties": false
 						}
 					}
@@ -9562,9 +8643,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -9586,10 +8665,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -9608,10 +8684,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -9630,9 +8703,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -9651,10 +8722,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -9673,10 +8741,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -9707,9 +8772,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -9725,10 +8788,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -9834,10 +8894,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -10012,9 +9069,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -10030,10 +9085,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -10066,9 +9118,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -10084,10 +9134,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -10145,10 +9192,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -10199,9 +9243,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -10217,10 +9259,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -10278,10 +9317,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -10332,9 +9368,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -10350,10 +9384,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -10411,10 +9442,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -10465,9 +9493,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -10483,10 +9509,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -10544,10 +9567,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -10598,9 +9618,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -10616,10 +9634,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -10665,9 +9680,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -10689,10 +9702,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -10711,10 +9721,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -10733,9 +9740,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -10754,10 +9759,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -10776,10 +9778,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -10810,9 +9809,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -10828,10 +9825,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -10937,10 +9931,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -11115,9 +10106,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -11133,10 +10122,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -11169,9 +10155,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -11187,10 +10171,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -11248,10 +10229,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -11302,9 +10280,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -11320,10 +10296,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -11381,10 +10354,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -11435,9 +10405,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -11453,10 +10421,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -11514,10 +10479,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -11568,9 +10530,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -11586,10 +10546,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -11647,10 +10604,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -11701,9 +10655,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -11719,10 +10671,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -11770,9 +10719,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -11794,10 +10741,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -11816,10 +10760,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -11838,9 +10779,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -11859,10 +10798,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -11881,10 +10817,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -11915,9 +10848,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -11933,10 +10864,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -12019,10 +10947,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -12164,9 +11089,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -12191,10 +11114,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -12213,10 +11133,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -12235,9 +11152,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -12256,10 +11171,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -12278,10 +11190,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -12312,9 +11221,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -12330,10 +11237,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -12402,10 +11306,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -12486,9 +11387,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -12504,10 +11403,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -12565,10 +11461,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -12702,9 +11595,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -12729,10 +11620,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -12751,10 +11639,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -12773,9 +11658,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -12794,10 +11677,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -12816,10 +11696,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -12850,9 +11727,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -12868,10 +11743,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -12937,9 +11809,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -12961,10 +11831,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -12983,10 +11850,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -13005,9 +11869,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -13026,10 +11888,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -13048,10 +11907,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -13082,9 +11938,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -13100,10 +11954,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -13185,10 +12036,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -13291,9 +12139,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -13309,10 +12155,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -13345,9 +12188,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -13363,10 +12204,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -13424,10 +12262,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -13478,9 +12313,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -13496,10 +12329,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -13577,10 +12407,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -13631,9 +12458,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -13649,10 +12474,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -13690,10 +12512,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -13757,10 +12576,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -13784,12 +12600,7 @@
 				"type": "actor_batch_call_resolved",
 				"callId": "batch:call:1",
 				"callerState": "batch",
-				"messageIds": [
-					"batch:message:1:0",
-					"batch:message:1:1",
-					"batch:message:1:2",
-					"batch:message:1:3"
-				],
+				"messageIds": ["batch:message:1:0", "batch:message:1:1", "batch:message:1:2", "batch:message:1:3"],
 				"parentId": 23,
 				"seqId": 24,
 				"branchId": "main",
@@ -13845,9 +12656,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -13869,10 +12678,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -13891,10 +12697,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -13913,9 +12716,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -13934,10 +12735,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -13956,10 +12754,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -13990,9 +12785,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -14008,10 +12801,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -14093,10 +12883,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -14199,9 +12986,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -14217,10 +13002,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -14253,9 +13035,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -14271,10 +13051,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -14340,9 +13117,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -14364,10 +13139,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -14386,10 +13158,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -14408,9 +13177,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -14429,10 +13196,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -14451,10 +13215,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -14485,9 +13246,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -14503,10 +13262,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -14588,10 +13344,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"label"
-							],
+							"required": ["id", "label"],
 							"additionalProperties": false
 						}
 					}
@@ -14694,9 +13447,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -14712,10 +13463,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -14748,9 +13496,7 @@
 					"name": "pool-worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Process the assigned pool item."
-						],
+						"strings": ["Process the assigned pool item."],
 						"refs": []
 					},
 					"reply": {
@@ -14766,10 +13512,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"id",
-								"receipt"
-							],
+							"required": ["id", "receipt"],
 							"additionalProperties": false
 						}
 					},
@@ -14827,10 +13570,7 @@
 								"type": "string"
 							}
 						},
-						"required": [
-							"id",
-							"receipt"
-						],
+						"required": ["id", "receipt"],
 						"additionalProperties": false
 					}
 				},
@@ -14894,9 +13634,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"lane"
-							],
+							"required": ["lane"],
 							"additionalProperties": false
 						}
 					},
@@ -14918,10 +13656,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"id",
-										"label"
-									],
+									"required": ["id", "label"],
 									"additionalProperties": false
 								}
 							},
@@ -14940,10 +13675,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"receipt"
-										],
+										"required": ["id", "receipt"],
 										"additionalProperties": false
 									}
 								}
@@ -14962,9 +13694,7 @@
 										"type": "string"
 									}
 								},
-								"required": [
-									"lane"
-								],
+								"required": ["lane"],
 								"additionalProperties": false
 							}
 						},
@@ -14983,10 +13713,7 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"id",
-											"label"
-										],
+										"required": ["id", "label"],
 										"additionalProperties": false
 									}
 								},
@@ -15005,10 +13732,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									}
@@ -15039,9 +13763,7 @@
 									"name": "pool-worker",
 									"task": {
 										"kind": "template",
-										"strings": [
-											"Process the assigned pool item."
-										],
+										"strings": ["Process the assigned pool item."],
 										"refs": []
 									},
 									"reply": {
@@ -15057,10 +13779,7 @@
 													"type": "string"
 												}
 											},
-											"required": [
-												"id",
-												"receipt"
-											],
+											"required": ["id", "receipt"],
 											"additionalProperties": false
 										}
 									},
@@ -15134,10 +13853,7 @@
 									"maximum": 9007199254740991
 								}
 							},
-							"required": [
-								"journal",
-								"retentionDays"
-							],
+							"required": ["journal", "retentionDays"],
 							"additionalProperties": false
 						}
 					},
@@ -15157,9 +13873,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"path"
-									],
+									"required": ["path"],
 									"additionalProperties": false
 								}
 							},
@@ -15223,9 +13937,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"path"
-							],
+							"required": ["path"],
 							"additionalProperties": false
 						}
 					}
@@ -15370,10 +14082,7 @@
 									"maximum": 9007199254740991
 								}
 							},
-							"required": [
-								"journal",
-								"retentionDays"
-							],
+							"required": ["journal", "retentionDays"],
 							"additionalProperties": false
 						}
 					},
@@ -15393,9 +14102,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"path"
-									],
+									"required": ["path"],
 									"additionalProperties": false
 								}
 							},
@@ -15459,9 +14166,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"path"
-							],
+							"required": ["path"],
 							"additionalProperties": false
 						}
 					}
@@ -15606,10 +14311,7 @@
 									"maximum": 9007199254740991
 								}
 							},
-							"required": [
-								"journal",
-								"retentionDays"
-							],
+							"required": ["journal", "retentionDays"],
 							"additionalProperties": false
 						}
 					},
@@ -15629,9 +14331,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"path"
-									],
+									"required": ["path"],
 									"additionalProperties": false
 								}
 							},
@@ -15695,9 +14395,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"path"
-							],
+							"required": ["path"],
 							"additionalProperties": false
 						}
 					}
@@ -15850,9 +14548,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"path"
-									],
+									"required": ["path"],
 									"additionalProperties": false
 								}
 							},
@@ -15915,9 +14611,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"path"
-							],
+							"required": ["path"],
 							"additionalProperties": false
 						}
 					}
@@ -16033,9 +14727,7 @@
 											"type": "string"
 										}
 									},
-									"required": [
-										"path"
-									],
+									"required": ["path"],
 									"additionalProperties": false
 								}
 							},
@@ -16110,9 +14802,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"path"
-							],
+							"required": ["path"],
 							"additionalProperties": false
 						}
 					}
@@ -16216,9 +14906,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Create a report plan and source buckets."
-						],
+						"strings": ["Create a report plan and source buckets."],
 						"refs": []
 					},
 					"onFail": {
@@ -16266,9 +14954,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Collect official, market, and developer evidence."
-						],
+						"strings": ["Collect official, market, and developer evidence."],
 						"refs": []
 					},
 					"onFail": {
@@ -16316,9 +15002,7 @@
 					"name": "deck-narrative-synthesizer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Synthesize verified research into narrative beats."
-						],
+						"strings": ["Synthesize verified research into narrative beats."],
 						"refs": []
 					},
 					"onFail": {
@@ -16366,9 +15050,7 @@
 					"name": "deck-vision-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Check visual consistency, unsupported numbers, and data references."
-						],
+						"strings": ["Check visual consistency, unsupported numbers, and data references."],
 						"refs": []
 					},
 					"onFail": {
@@ -16415,9 +15097,7 @@
 					},
 					"prompt": {
 						"kind": "template",
-						"strings": [
-							"Approve the verified report for rendering."
-						],
+						"strings": ["Approve the verified report for rendering."],
 						"refs": []
 					},
 					"options": []
@@ -16459,9 +15139,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Create a report plan and source buckets."
-						],
+						"strings": ["Create a report plan and source buckets."],
 						"refs": []
 					},
 					"onFail": {
@@ -16509,9 +15187,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Collect official, market, and developer evidence."
-						],
+						"strings": ["Collect official, market, and developer evidence."],
 						"refs": []
 					},
 					"onFail": {
@@ -16559,9 +15235,7 @@
 					"name": "deck-narrative-synthesizer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Synthesize verified research into narrative beats."
-						],
+						"strings": ["Synthesize verified research into narrative beats."],
 						"refs": []
 					},
 					"onFail": {
@@ -16609,9 +15283,7 @@
 					"name": "deck-vision-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Check visual consistency, unsupported numbers, and data references."
-						],
+						"strings": ["Check visual consistency, unsupported numbers, and data references."],
 						"refs": []
 					},
 					"onFail": {
@@ -16658,9 +15330,7 @@
 					},
 					"prompt": {
 						"kind": "template",
-						"strings": [
-							"Approve the verified report for rendering."
-						],
+						"strings": ["Approve the verified report for rendering."],
 						"refs": []
 					},
 					"options": []
@@ -16681,9 +15351,7 @@
 				"phaseSeqId": 10,
 				"prompt": "Approve the verified report for rendering.",
 				"options": [],
-				"events": [
-					"APPROVED"
-				],
+				"events": ["APPROVED"],
 				"parentId": 10,
 				"seqId": 11,
 				"branchId": "main",
@@ -16723,11 +15391,7 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs",
-						"--format",
-						"html"
-					]
+					"args": ["scripts/render-report.mjs", "--format", "html"]
 				},
 				"parentId": 12,
 				"seqId": 13,
@@ -16782,9 +15446,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Create a report plan and source buckets."
-						],
+						"strings": ["Create a report plan and source buckets."],
 						"refs": []
 					},
 					"onFail": {
@@ -16832,9 +15494,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Collect official, market, and developer evidence."
-						],
+						"strings": ["Collect official, market, and developer evidence."],
 						"refs": []
 					},
 					"onFail": {
@@ -16882,9 +15542,7 @@
 					"name": "deck-narrative-synthesizer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Synthesize verified research into narrative beats."
-						],
+						"strings": ["Synthesize verified research into narrative beats."],
 						"refs": []
 					},
 					"onFail": {
@@ -16932,9 +15590,7 @@
 					"name": "deck-vision-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Check visual consistency, unsupported numbers, and data references."
-						],
+						"strings": ["Check visual consistency, unsupported numbers, and data references."],
 						"refs": []
 					},
 					"onFail": {
@@ -17052,11 +15708,7 @@
 												"type": "number"
 											}
 										},
-										"required": [
-											"queries",
-											"purpose",
-											"required_sources"
-										],
+										"required": ["queries", "purpose", "required_sources"],
 										"additionalProperties": false
 									}
 								},
@@ -17070,11 +15722,7 @@
 									}
 								}
 							},
-							"required": [
-								"artifacts_dir",
-								"buckets",
-								"coverage_thresholds"
-							],
+							"required": ["artifacts_dir", "buckets", "coverage_thresholds"],
 							"additionalProperties": false
 						}
 					},
@@ -17102,58 +15750,42 @@
 						"artifacts_dir": "artifacts/agentic-tooling-2026",
 						"buckets": {
 							"official": {
-								"queries": [
-									"official agent tooling evidence"
-								],
+								"queries": ["official agent tooling evidence"],
 								"purpose": "official evidence",
 								"required_sources": 3
 							},
 							"developer": {
-								"queries": [
-									"developer agent tooling evidence"
-								],
+								"queries": ["developer agent tooling evidence"],
 								"purpose": "developer evidence",
 								"required_sources": 3
 							},
 							"market": {
-								"queries": [
-									"market agent tooling evidence"
-								],
+								"queries": ["market agent tooling evidence"],
 								"purpose": "market evidence",
 								"required_sources": 3
 							},
 							"community": {
-								"queries": [
-									"community agent tooling evidence"
-								],
+								"queries": ["community agent tooling evidence"],
 								"purpose": "community evidence",
 								"required_sources": 3
 							},
 							"security": {
-								"queries": [
-									"security agent tooling evidence"
-								],
+								"queries": ["security agent tooling evidence"],
 								"purpose": "security evidence",
 								"required_sources": 3
 							},
 							"standards": {
-								"queries": [
-									"standards agent tooling evidence"
-								],
+								"queries": ["standards agent tooling evidence"],
 								"purpose": "standards evidence",
 								"required_sources": 3
 							},
 							"funding": {
-								"queries": [
-									"funding agent tooling evidence"
-								],
+								"queries": ["funding agent tooling evidence"],
 								"purpose": "funding evidence",
 								"required_sources": 3
 							},
 							"benchmarks": {
-								"queries": [
-									"benchmarks agent tooling evidence"
-								],
+								"queries": ["benchmarks agent tooling evidence"],
 								"purpose": "benchmarks evidence",
 								"required_sources": 3
 							}
@@ -17180,58 +15812,42 @@
 				"path": "research",
 				"instances": {
 					"official": {
-						"queries": [
-							"official agent tooling evidence"
-						],
+						"queries": ["official agent tooling evidence"],
 						"purpose": "official evidence",
 						"required_sources": 3
 					},
 					"developer": {
-						"queries": [
-							"developer agent tooling evidence"
-						],
+						"queries": ["developer agent tooling evidence"],
 						"purpose": "developer evidence",
 						"required_sources": 3
 					},
 					"market": {
-						"queries": [
-							"market agent tooling evidence"
-						],
+						"queries": ["market agent tooling evidence"],
 						"purpose": "market evidence",
 						"required_sources": 3
 					},
 					"community": {
-						"queries": [
-							"community agent tooling evidence"
-						],
+						"queries": ["community agent tooling evidence"],
 						"purpose": "community evidence",
 						"required_sources": 3
 					},
 					"security": {
-						"queries": [
-							"security agent tooling evidence"
-						],
+						"queries": ["security agent tooling evidence"],
 						"purpose": "security evidence",
 						"required_sources": 3
 					},
 					"standards": {
-						"queries": [
-							"standards agent tooling evidence"
-						],
+						"queries": ["standards agent tooling evidence"],
 						"purpose": "standards evidence",
 						"required_sources": 3
 					},
 					"funding": {
-						"queries": [
-							"funding agent tooling evidence"
-						],
+						"queries": ["funding agent tooling evidence"],
 						"purpose": "funding evidence",
 						"required_sources": 3
 					},
 					"benchmarks": {
-						"queries": [
-							"benchmarks agent tooling evidence"
-						],
+						"queries": ["benchmarks agent tooling evidence"],
 						"purpose": "benchmarks evidence",
 						"required_sources": 3
 					}
@@ -17260,12 +15876,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17286,11 +15897,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -17330,19 +15937,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -17377,12 +15977,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17403,11 +15998,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -17447,19 +16038,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -17494,12 +16078,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17520,11 +16099,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -17564,19 +16139,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -17611,12 +16179,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17637,11 +16200,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -17681,19 +16240,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -17728,12 +16280,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17754,11 +16301,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -17798,19 +16341,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -17845,12 +16381,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17871,11 +16402,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -17915,19 +16442,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -17962,12 +16482,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -17988,11 +16503,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -18032,19 +16543,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -18079,12 +16583,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -18105,11 +16604,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -18149,19 +16644,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -18273,11 +16761,7 @@
 												"type": "number"
 											}
 										},
-										"required": [
-											"queries",
-											"purpose",
-											"required_sources"
-										],
+										"required": ["queries", "purpose", "required_sources"],
 										"additionalProperties": false
 									}
 								},
@@ -18291,11 +16775,7 @@
 									}
 								}
 							},
-							"required": [
-								"artifacts_dir",
-								"buckets",
-								"coverage_thresholds"
-							],
+							"required": ["artifacts_dir", "buckets", "coverage_thresholds"],
 							"additionalProperties": false
 						}
 					},
@@ -18323,23 +16803,17 @@
 						"artifacts_dir": "artifacts/agentic-tooling-2026",
 						"buckets": {
 							"official": {
-								"queries": [
-									"official agent tooling evidence"
-								],
+								"queries": ["official agent tooling evidence"],
 								"purpose": "official evidence",
 								"required_sources": 3
 							},
 							"developer": {
-								"queries": [
-									"developer agent tooling evidence"
-								],
+								"queries": ["developer agent tooling evidence"],
 								"purpose": "developer evidence",
 								"required_sources": 3
 							},
 							"market": {
-								"queries": [
-									"market agent tooling evidence"
-								],
+								"queries": ["market agent tooling evidence"],
 								"purpose": "market evidence",
 								"required_sources": 3
 							}
@@ -18361,23 +16835,17 @@
 				"path": "research",
 				"instances": {
 					"official": {
-						"queries": [
-							"official agent tooling evidence"
-						],
+						"queries": ["official agent tooling evidence"],
 						"purpose": "official evidence",
 						"required_sources": 3
 					},
 					"developer": {
-						"queries": [
-							"developer agent tooling evidence"
-						],
+						"queries": ["developer agent tooling evidence"],
 						"purpose": "developer evidence",
 						"required_sources": 3
 					},
 					"market": {
-						"queries": [
-							"market agent tooling evidence"
-						],
+						"queries": ["market agent tooling evidence"],
 						"purpose": "market evidence",
 						"required_sources": 3
 					}
@@ -18406,12 +16874,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -18432,11 +16895,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -18476,19 +16935,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -18523,12 +16975,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -18549,11 +16996,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -18593,19 +17036,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -18640,12 +17076,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Bucketed research pass for the report on ",
-							".\nYour bucket (",
-							"): ",
-							""
-						],
+						"strings": ["Bucketed research pass for the report on ", ".\nYour bucket (", "): ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -18666,11 +17097,7 @@
 						"research": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"",
-									"/research-",
-									".json"
-								],
+								"strings": ["", "/research-", ".json"],
 								"refs": [
 									{
 										"kind": "result",
@@ -18710,19 +17137,12 @@
 														}
 													}
 												},
-												"required": [
-													"url",
-													"title",
-													"summary",
-													"facts"
-												],
+												"required": ["url", "title", "summary", "facts"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"records"
-									],
+									"required": ["records"],
 									"additionalProperties": false
 								}
 							}
@@ -18810,9 +17230,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Create a report plan and source buckets."
-						],
+						"strings": ["Create a report plan and source buckets."],
 						"refs": []
 					},
 					"onFail": {
@@ -18860,9 +17278,7 @@
 					"name": "deck-source-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Collect official, market, and developer evidence."
-						],
+						"strings": ["Collect official, market, and developer evidence."],
 						"refs": []
 					},
 					"onFail": {
@@ -18910,9 +17326,7 @@
 					"name": "deck-narrative-synthesizer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Synthesize verified research into narrative beats."
-						],
+						"strings": ["Synthesize verified research into narrative beats."],
 						"refs": []
 					},
 					"onFail": {
@@ -18960,9 +17374,7 @@
 					"name": "deck-vision-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Check visual consistency, unsupported numbers, and data references."
-						],
+						"strings": ["Check visual consistency, unsupported numbers, and data references."],
 						"refs": []
 					},
 					"onFail": {
@@ -19097,18 +17509,14 @@
 					"name": "reporter",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Prepare the final report and summary."
-						],
+						"strings": ["Prepare the final report and summary."],
 						"refs": []
 					},
 					"artifacts": {
 						"report": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/final-report.json"
-								],
+								"strings": ["artifacts/final-report.json"],
 								"refs": []
 							},
 							"shape": {
@@ -19127,10 +17535,7 @@
 											}
 										}
 									},
-									"required": [
-										"title",
-										"sections"
-									],
+									"required": ["title", "sections"],
 									"additionalProperties": false
 								}
 							}
@@ -19146,9 +17551,7 @@
 									"type": "string"
 								}
 							},
-							"required": [
-								"summary"
-							],
+							"required": ["summary"],
 							"additionalProperties": false
 						}
 					},
@@ -19212,9 +17615,7 @@
 					"name": "coverage-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review source coverage before rendering."
-						],
+						"strings": ["Review source coverage before rendering."],
 						"refs": []
 					},
 					"onFail": {
@@ -19355,9 +17756,7 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs"
-					],
+					"args": ["scripts/render-report.mjs"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -19379,16 +17778,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"sections"
-							],
+							"required": ["sections"],
 							"additionalProperties": false
 						}
 					}
@@ -19474,11 +17869,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -19494,9 +17885,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -19533,11 +17922,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -19553,9 +17938,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -19592,11 +17975,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -19612,9 +17991,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -19696,9 +18073,7 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs"
-					],
+					"args": ["scripts/render-report.mjs"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -19720,16 +18095,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"sections"
-							],
+							"required": ["sections"],
 							"additionalProperties": false
 						}
 					}
@@ -19799,11 +18170,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -19819,9 +18186,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -19884,9 +18249,7 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs"
-					],
+					"args": ["scripts/render-report.mjs"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -19908,16 +18271,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"sections"
-							],
+							"required": ["sections"],
 							"additionalProperties": false
 						}
 					}
@@ -20091,11 +18450,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -20111,9 +18466,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -20157,9 +18510,7 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs"
-					],
+					"args": ["scripts/render-report.mjs"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -20181,16 +18532,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"sections"
-							],
+							"required": ["sections"],
 							"additionalProperties": false
 						}
 					}
@@ -20276,11 +18623,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -20296,9 +18639,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -20335,11 +18676,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -20355,9 +18692,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -20394,11 +18729,7 @@
 					"name": "chapter-author",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Rewrite the section for ",
-							" after ",
-							" visits."
-						],
+						"strings": ["Rewrite the section for ", " after ", " visits."],
 						"refs": [
 							{
 								"kind": "input",
@@ -20414,9 +18745,7 @@
 						"draft": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/risk.md"
-								],
+								"strings": ["artifacts/risk.md"],
 								"refs": []
 							}
 						}
@@ -20519,9 +18848,7 @@
 					"name": "planner",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Plan report sections."
-						],
+						"strings": ["Plan report sections."],
 						"refs": []
 					},
 					"reply": {
@@ -20545,16 +18872,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"sections"
-							],
+							"required": ["sections"],
 							"additionalProperties": false
 						}
 					},
@@ -20619,9 +18942,7 @@
 					"name": "writer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Write the first report draft."
-						],
+						"strings": ["Write the first report draft."],
 						"refs": []
 					},
 					"onFail": {
@@ -20691,9 +19012,7 @@
 					"name": "reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review one planned section."
-						],
+						"strings": ["Review one planned section."],
 						"refs": []
 					},
 					"onFail": {
@@ -20725,9 +19044,7 @@
 					"name": "reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review one planned section."
-						],
+						"strings": ["Review one planned section."],
 						"refs": []
 					},
 					"onFail": {
@@ -20759,9 +19076,7 @@
 					"name": "reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review one planned section."
-						],
+						"strings": ["Review one planned section."],
 						"refs": []
 					},
 					"onFail": {
@@ -20793,9 +19108,7 @@
 					"name": "reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review one planned section."
-						],
+						"strings": ["Review one planned section."],
 						"refs": []
 					},
 					"onFail": {
@@ -20871,9 +19184,7 @@
 					"name": "copy-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review copy"
-						],
+						"strings": ["Review copy"],
 						"refs": []
 					},
 					"onFail": {
@@ -20905,9 +19216,7 @@
 					"name": "visual-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review visuals"
-						],
+						"strings": ["Review visuals"],
 						"refs": []
 					},
 					"onFail": {
@@ -20939,9 +19248,7 @@
 					"name": "data-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review data"
-						],
+						"strings": ["Review data"],
 						"refs": []
 					},
 					"onFail": {
@@ -21017,9 +19324,7 @@
 					"name": "copy-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review copy"
-						],
+						"strings": ["Review copy"],
 						"refs": []
 					},
 					"onFail": {
@@ -21051,9 +19356,7 @@
 					"name": "visual-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review visuals"
-						],
+						"strings": ["Review visuals"],
 						"refs": []
 					},
 					"onFail": {
@@ -21085,9 +19388,7 @@
 					"name": "data-reviewer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Review data"
-						],
+						"strings": ["Review data"],
 						"refs": []
 					},
 					"onFail": {
@@ -21179,27 +19480,21 @@
 					"name": "writer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Write the findings report and its machine-readable summary."
-						],
+						"strings": ["Write the findings report and its machine-readable summary."],
 						"refs": []
 					},
 					"artifacts": {
 						"report": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/findings-report.md"
-								],
+								"strings": ["artifacts/findings-report.md"],
 								"refs": []
 							}
 						},
 						"summary": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/findings-summary.json"
-								],
+								"strings": ["artifacts/findings-summary.json"],
 								"refs": []
 							},
 							"shape": {
@@ -21212,9 +19507,7 @@
 											"type": "number"
 										}
 									},
-									"required": [
-										"findings"
-									],
+									"required": ["findings"],
 									"additionalProperties": false
 								}
 							}
@@ -21285,16 +19578,12 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/prepare-context.mjs"
-					],
+					"args": ["scripts/prepare-context.mjs"],
 					"artifacts": {
 						"context": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/implementation-context.json"
-								],
+								"strings": ["artifacts/implementation-context.json"],
 								"refs": []
 							},
 							"shape": {
@@ -21322,11 +19611,7 @@
 											"description": "Commands that verify the change."
 										}
 									},
-									"required": [
-										"title",
-										"risks",
-										"testCommands"
-									],
+									"required": ["title", "risks", "testCommands"],
 									"additionalProperties": false,
 									"description": "Implementation context the writer must read before starting."
 								}
@@ -21335,9 +19620,7 @@
 						"conventions": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/writing-conventions.json"
-								],
+								"strings": ["artifacts/writing-conventions.json"],
 								"refs": []
 							},
 							"shape": {
@@ -21348,10 +19631,7 @@
 									"properties": {
 										"style": {
 											"type": "string",
-											"enum": [
-												"concise",
-												"detailed"
-											]
+											"enum": ["concise", "detailed"]
 										},
 										"requiredSections": {
 											"type": "array",
@@ -21360,10 +19640,7 @@
 											}
 										}
 									},
-									"required": [
-										"style",
-										"requiredSections"
-									],
+									"required": ["style", "requiredSections"],
 									"additionalProperties": false,
 									"description": "Writing conventions for the implementation note."
 								}
@@ -21388,16 +19665,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"sources"
-							],
+							"required": ["sources"],
 							"additionalProperties": false
 						}
 					}
@@ -21468,19 +19741,14 @@
 					"name": "source-reader",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Summarize the assigned implementation source."
-						],
+						"strings": ["Summarize the assigned implementation source."],
 						"refs": []
 					},
 					"artifacts": {
 						"brief": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/source-",
-									".json"
-								],
+								"strings": ["artifacts/source-", ".json"],
 								"refs": [
 									{
 										"kind": "key"
@@ -21503,10 +19771,7 @@
 											}
 										}
 									},
-									"required": [
-										"source",
-										"findings"
-									],
+									"required": ["source", "findings"],
 									"additionalProperties": false,
 									"description": "One source brief produced by a map instance."
 								}
@@ -21542,19 +19807,14 @@
 					"name": "source-reader",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Summarize the assigned implementation source."
-						],
+						"strings": ["Summarize the assigned implementation source."],
 						"refs": []
 					},
 					"artifacts": {
 						"brief": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/source-",
-									".json"
-								],
+								"strings": ["artifacts/source-", ".json"],
 								"refs": [
 									{
 										"kind": "key"
@@ -21577,10 +19837,7 @@
 											}
 										}
 									},
-									"required": [
-										"source",
-										"findings"
-									],
+									"required": ["source", "findings"],
 									"additionalProperties": false,
 									"description": "One source brief produced by a map instance."
 								}
@@ -21648,19 +19905,14 @@
 					"name": "writer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Write a compact implementation note.\n\nInclude risks, test commands, and exact file paths."
-						],
+						"strings": ["Write a compact implementation note.\n\nInclude risks, test commands, and exact file paths."],
 						"refs": []
 					},
 					"artifacts": {
 						"note": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/implementation-note-",
-									".json"
-								],
+								"strings": ["artifacts/implementation-note-", ".json"],
 								"refs": [
 									{
 										"kind": "visit",
@@ -21695,19 +19947,12 @@
 														"type": "string"
 													}
 												},
-												"required": [
-													"command",
-													"expected"
-												],
+												"required": ["command", "expected"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"summary",
-										"risks",
-										"verification"
-									],
+									"required": ["summary", "risks", "verification"],
 									"additionalProperties": false,
 									"description": "Structured implementation note produced by the writer."
 								}
@@ -21716,10 +19961,7 @@
 						"appendix": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/implementation-note-",
-									".md"
-								],
+								"strings": ["artifacts/implementation-note-", ".md"],
 								"refs": [
 									{
 										"kind": "visit",
@@ -21747,10 +19989,7 @@
 						},
 						{
 							"kind": "template",
-							"strings": [
-								"notes/rich-agent-visit-",
-								".md"
-							],
+							"strings": ["notes/rich-agent-visit-", ".md"],
 							"refs": [
 								{
 									"kind": "visit",
@@ -21761,11 +20000,7 @@
 					],
 					"model": "claude-sonnet",
 					"thinking": "medium",
-					"tools": [
-						"read",
-						"edit",
-						"bash"
-					],
+					"tools": ["read", "edit", "bash"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -21798,10 +20033,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"file",
-													"line"
-												],
+												"required": ["file", "line"],
 												"additionalProperties": false
 											}
 										},
@@ -21809,18 +20041,11 @@
 											"type": "number"
 										}
 									},
-									"required": [
-										"risks",
-										"evidence",
-										"score"
-									],
+									"required": ["risks", "evidence", "score"],
 									"additionalProperties": false
 								}
 							},
-							"required": [
-								"draft",
-								"review"
-							],
+							"required": ["draft", "review"],
 							"additionalProperties": false
 						}
 					},
@@ -21847,9 +20072,7 @@
 					"output": {
 						"draft": "First implementation note draft.",
 						"review": {
-							"risks": [
-								"The replay contract may drift."
-							],
+							"risks": ["The replay contract may drift."],
 							"evidence": [
 								{
 									"file": "packages/hyperchart/src/core/replay_check.ts",
@@ -21884,19 +20107,14 @@
 					"name": "writer",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Write a compact implementation note.\n\nInclude risks, test commands, and exact file paths."
-						],
+						"strings": ["Write a compact implementation note.\n\nInclude risks, test commands, and exact file paths."],
 						"refs": []
 					},
 					"artifacts": {
 						"note": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/implementation-note-",
-									".json"
-								],
+								"strings": ["artifacts/implementation-note-", ".json"],
 								"refs": [
 									{
 										"kind": "visit",
@@ -21931,19 +20149,12 @@
 														"type": "string"
 													}
 												},
-												"required": [
-													"command",
-													"expected"
-												],
+												"required": ["command", "expected"],
 												"additionalProperties": false
 											}
 										}
 									},
-									"required": [
-										"summary",
-										"risks",
-										"verification"
-									],
+									"required": ["summary", "risks", "verification"],
 									"additionalProperties": false,
 									"description": "Structured implementation note produced by the writer."
 								}
@@ -21952,10 +20163,7 @@
 						"appendix": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"artifacts/implementation-note-",
-									".md"
-								],
+								"strings": ["artifacts/implementation-note-", ".md"],
 								"refs": [
 									{
 										"kind": "visit",
@@ -21983,10 +20191,7 @@
 						},
 						{
 							"kind": "template",
-							"strings": [
-								"notes/rich-agent-visit-",
-								".md"
-							],
+							"strings": ["notes/rich-agent-visit-", ".md"],
 							"refs": [
 								{
 									"kind": "visit",
@@ -21997,11 +20202,7 @@
 					],
 					"model": "claude-sonnet",
 					"thinking": "medium",
-					"tools": [
-						"read",
-						"edit",
-						"bash"
-					],
+					"tools": ["read", "edit", "bash"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -22034,10 +20235,7 @@
 														"maximum": 9007199254740991
 													}
 												},
-												"required": [
-													"file",
-													"line"
-												],
+												"required": ["file", "line"],
 												"additionalProperties": false
 											}
 										},
@@ -22045,18 +20243,11 @@
 											"type": "number"
 										}
 									},
-									"required": [
-										"risks",
-										"evidence",
-										"score"
-									],
+									"required": ["risks", "evidence", "score"],
 									"additionalProperties": false
 								}
 							},
-							"required": [
-								"draft",
-								"review"
-							],
+							"required": ["draft", "review"],
 							"additionalProperties": false
 						}
 					},
@@ -22113,9 +20304,7 @@
 					"name": "planner",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Prepare structured report data for renderer."
-						],
+						"strings": ["Prepare structured report data for renderer."],
 						"refs": []
 					},
 					"reply": {
@@ -22134,10 +20323,7 @@
 									}
 								}
 							},
-							"required": [
-								"title",
-								"sections"
-							],
+							"required": ["title", "sections"],
 							"additionalProperties": false
 						}
 					},
@@ -22163,10 +20349,7 @@
 					"type": "DONE",
 					"output": {
 						"title": "Report",
-						"sections": [
-							"intro",
-							"risk"
-						]
+						"sections": ["intro", "risk"]
 					}
 				},
 				"parentId": 2,
@@ -22191,27 +20374,16 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs",
-						"--format",
-						"html",
-						"--out",
-						"dist/report.html"
-					],
+					"args": ["scripts/render-report.mjs", "--format", "html", "--out", "dist/report.html"],
 					"env": {
 						"RUN_DIR": {
 							"kind": "template",
-							"strings": [
-								"runs/current"
-							],
+							"strings": ["runs/current"],
 							"refs": []
 						},
 						"REPORT_DATA": {
 							"kind": "template",
-							"strings": [
-								"",
-								""
-							],
+							"strings": ["", ""],
 							"refs": [
 								{
 									"kind": "result",
@@ -22225,18 +20397,14 @@
 						"html": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"dist/report.html"
-								],
+								"strings": ["dist/report.html"],
 								"refs": []
 							}
 						},
 						"data": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"dist/report.json"
-								],
+								"strings": ["dist/report.json"],
 								"refs": []
 							},
 							"shape": {
@@ -22255,10 +20423,7 @@
 											}
 										}
 									},
-									"required": [
-										"title",
-										"sections"
-									],
+									"required": ["title", "sections"],
 									"additionalProperties": false
 								}
 							}
@@ -22291,16 +20456,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"ok"
-							],
+							"required": ["ok"],
 							"additionalProperties": false
 						}
 					}
@@ -22371,9 +20532,7 @@
 						"action": "script"
 					},
 					"command": "node",
-					"args": [
-						"scripts/render-report.mjs"
-					],
+					"args": ["scripts/render-report.mjs"],
 					"reply": {
 						"kind": "jsonSchema",
 						"schema": {
@@ -22401,16 +20560,12 @@
 												"type": "string"
 											}
 										},
-										"required": [
-											"title"
-										],
+										"required": ["title"],
 										"additionalProperties": false
 									}
 								}
 							},
-							"required": [
-								"ok"
-							],
+							"required": ["ok"],
 							"additionalProperties": false
 						}
 					}
@@ -22459,9 +20614,7 @@
 					},
 					"prompt": {
 						"kind": "template",
-						"strings": [
-							"Approve the report for publication or return it for revision."
-						],
+						"strings": ["Approve the report for publication or return it for revision."],
 						"refs": []
 					},
 					"options": []
@@ -22482,10 +20635,7 @@
 				"phaseSeqId": 2,
 				"prompt": "Approve the report for publication or return it for revision.",
 				"options": [],
-				"events": [
-					"APPROVED",
-					"REVISE"
-				],
+				"events": ["APPROVED", "REVISE"],
 				"parentId": 2,
 				"seqId": 3,
 				"branchId": "main",
@@ -22527,9 +20677,7 @@
 					"name": "publisher",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Publish the approved report."
-						],
+						"strings": ["Publish the approved report."],
 						"refs": []
 					},
 					"onFail": {
@@ -22592,9 +20740,7 @@
 						"guard": {
 							"kind": "script",
 							"command": "node",
-							"args": [
-								"scripts/validate-review.mjs"
-							]
+							"args": ["scripts/validate-review.mjs"]
 						},
 						"onFail": {
 							"nudge": 2,
@@ -22637,9 +20783,7 @@
 				"guard": {
 					"kind": "script",
 					"command": "node",
-					"args": [
-						"scripts/validate-review.mjs"
-					]
+					"args": ["scripts/validate-review.mjs"]
 				},
 				"outcome": {
 					"ok": false,
@@ -22701,14 +20845,10 @@
 					},
 					"prompt": {
 						"kind": "template",
-						"strings": [
-							"Continue?"
-						],
+						"strings": ["Continue?"],
 						"refs": []
 					},
-					"options": [
-						"CONTINUE"
-					]
+					"options": ["CONTINUE"]
 				},
 				"parentId": 1,
 				"seqId": 2,
@@ -22725,12 +20865,8 @@
 				},
 				"phaseSeqId": 2,
 				"prompt": "Continue?",
-				"options": [
-					"CONTINUE"
-				],
-				"events": [
-					"CONTINUE"
-				],
+				"options": ["CONTINUE"],
+				"events": ["CONTINUE"],
 				"parentId": 2,
 				"seqId": 3,
 				"branchId": "main",
@@ -22772,9 +20908,7 @@
 					"name": "worker",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Continue without state input."
-						],
+						"strings": ["Continue without state input."],
 						"refs": []
 					},
 					"onFail": {
@@ -22815,14 +20949,10 @@
 					},
 					"prompt": {
 						"kind": "template",
-						"strings": [
-							"Continue?"
-						],
+						"strings": ["Continue?"],
 						"refs": []
 					},
-					"options": [
-						"CONTINUE"
-					]
+					"options": ["CONTINUE"]
 				},
 				"parentId": 1,
 				"seqId": 2,
@@ -22839,12 +20969,8 @@
 				},
 				"phaseSeqId": 2,
 				"prompt": "Continue?",
-				"options": [
-					"CONTINUE"
-				],
-				"events": [
-					"CONTINUE"
-				],
+				"options": ["CONTINUE"],
+				"events": ["CONTINUE"],
 				"parentId": 2,
 				"seqId": 3,
 				"branchId": "main",
@@ -22881,9 +21007,7 @@
 						"result": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"result.txt"
-								],
+								"strings": ["result.txt"],
 								"refs": []
 							}
 						}
@@ -23044,9 +21168,7 @@
 						"result": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"result.txt"
-								],
+								"strings": ["result.txt"],
 								"refs": []
 							}
 						}
@@ -23147,10 +21269,7 @@
 					"name": "experimenter",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Investigate ",
-							""
-						],
+						"strings": ["Investigate ", ""],
 						"refs": [
 							{
 								"kind": "arg",
@@ -23303,10 +21422,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23365,10 +21481,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23427,10 +21540,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23489,10 +21599,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23551,10 +21658,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23613,10 +21717,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23675,10 +21776,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23737,10 +21835,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23799,10 +21894,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23861,10 +21953,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23923,10 +22012,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -23985,10 +22071,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24047,10 +22130,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24109,10 +22189,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24171,10 +22248,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24233,10 +22307,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24295,10 +22366,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24357,10 +22425,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24419,10 +22484,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24481,10 +22543,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24543,10 +22602,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24605,10 +22661,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24667,10 +22720,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24729,10 +22779,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24791,10 +22838,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24853,10 +22897,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24915,10 +22956,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -24977,10 +23015,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25039,10 +23074,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25101,10 +23133,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25163,10 +23192,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25225,10 +23251,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25287,10 +23310,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25349,10 +23369,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25411,10 +23428,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25473,10 +23487,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25535,10 +23546,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25597,10 +23605,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25659,10 +23664,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25721,10 +23723,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25783,10 +23782,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25845,10 +23841,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25907,10 +23900,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -25969,10 +23959,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26031,10 +24018,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26093,10 +24077,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26155,10 +24136,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26217,10 +24195,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26279,10 +24254,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26341,10 +24313,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26403,10 +24372,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26465,10 +24431,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26527,10 +24490,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26589,10 +24549,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26651,10 +24608,7 @@
 					"name": "recorder",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Record ",
-							""
-						],
+						"strings": ["Record ", ""],
 						"refs": [
 							{
 								"kind": "input",
@@ -26792,9 +24746,7 @@
 						"candidate": {
 							"path": {
 								"kind": "template",
-								"strings": [
-									"candidate.txt"
-								],
+								"strings": ["candidate.txt"],
 								"refs": []
 							}
 						}
@@ -26930,17 +24882,12 @@
 					"name": "report-engine-research-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Research the regional escalation risk."
-						],
+						"strings": ["Research the regional escalation risk."],
 						"refs": []
 					},
 					"model": "openai-codex/gpt-5.6-luna",
 					"thinking": "xhigh",
-					"tools": [
-						"read",
-						"web_search"
-					],
+					"tools": ["read", "web_search"],
 					"onFail": {
 						"nudge": 2,
 						"restart": 1
@@ -26986,17 +24933,12 @@
 					"name": "report-engine-research-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Research the regional escalation risk."
-						],
+						"strings": ["Research the regional escalation risk."],
 						"refs": []
 					},
 					"model": "openai-codex/gpt-5.6-luna",
 					"thinking": "xhigh",
-					"tools": [
-						"read",
-						"web_search"
-					],
+					"tools": ["read", "web_search"],
 					"onFail": {
 						"nudge": 2,
 						"restart": 1
@@ -27042,9 +24984,7 @@
 					"name": "report-engine-research-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Research current military posture."
-						],
+						"strings": ["Research current military posture."],
 						"refs": []
 					},
 					"onFail": {
@@ -27086,17 +25026,12 @@
 					"name": "report-engine-research-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Research the regional escalation risk."
-						],
+						"strings": ["Research the regional escalation risk."],
 						"refs": []
 					},
 					"model": "openai-codex/gpt-5.6-luna",
 					"thinking": "xhigh",
-					"tools": [
-						"read",
-						"web_search"
-					],
+					"tools": ["read", "web_search"],
 					"onFail": {
 						"nudge": 2,
 						"restart": 1
@@ -27142,17 +25077,12 @@
 					"name": "report-engine-research-scout",
 					"task": {
 						"kind": "template",
-						"strings": [
-							"Research the regional escalation risk."
-						],
+						"strings": ["Research the regional escalation risk."],
 						"refs": []
 					},
 					"model": "openai-codex/gpt-5.6-luna",
 					"thinking": "xhigh",
-					"tools": [
-						"read",
-						"web_search"
-					],
+					"tools": ["read", "web_search"],
 					"onFail": {
 						"nudge": 2,
 						"restart": 1

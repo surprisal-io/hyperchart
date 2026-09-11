@@ -1,13 +1,6 @@
-import {
-	CodeBracketSquareIcon,
-	CommandLineIcon,
-	InformationCircleIcon,
-} from "@heroicons/react/24/outline";
+import { CodeBracketSquareIcon, CommandLineIcon, InformationCircleIcon } from "@heroicons/react/24/outline";
 import type { HyperchartRunInfo } from "../../../types.js";
-import {
-	formatHyperchartDateTime,
-	formatHyperchartUsage,
-} from "../../../hyperchart-display.js";
+import { formatHyperchartDateTime, formatHyperchartUsage } from "../../../hyperchart-display.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
 import { Section } from "../ui/Section.js";
@@ -18,9 +11,13 @@ export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo;
 	return (
 		<div className="space-y-3">
 			{run.mode === "static" ? (
-				<Section title={run.replayIncompatibility === undefined ? "Static graph" : "Current definition only"} icon={InformationCircleIcon}>
+				<Section
+					title={run.replayIncompatibility === undefined ? "Static graph" : "Current definition only"}
+					icon={InformationCircleIcon}
+				>
 					<div className="text-[var(--text-muted)]">
-						{run.replayIncompatibility?.message ?? "This is a static chart inspect. Runtime arguments, process metadata, timings, and resolved fan-out data are available only for run inspect."}
+						{run.replayIncompatibility?.message ??
+							"This is a static chart inspect. Runtime arguments, process metadata, timings, and resolved fan-out data are available only for run inspect."}
 					</div>
 				</Section>
 			) : (
@@ -61,7 +58,8 @@ export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo;
 						</dl>
 						{run.branchWorkspace !== undefined && run.cwd !== "" && run.branchWorkspace !== run.cwd && (
 							<div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-[var(--hc-amber-text)]">
-								Actions run in the isolated branch workspace, not in the project repository. Project files are not copied there unless they were materialized as Hyperchart artifacts.
+								Actions run in the isolated branch workspace, not in the project repository. Project files are not
+								copied there unless they were materialized as Hyperchart artifacts.
 							</div>
 						)}
 						{run.totalUsage && (

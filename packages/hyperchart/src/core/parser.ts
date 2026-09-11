@@ -52,8 +52,13 @@ export function selectChartModuleExport(module: Record<string, unknown>, exportN
 }
 
 function isDefaultOnlyModule(value: unknown): value is { default: unknown } {
-	return typeof value === "object" && value !== null && !Array.isArray(value) &&
-		Object.keys(value).length === 1 && Object.hasOwn(value, "default");
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.keys(value).length === 1 &&
+		Object.hasOwn(value, "default")
+	);
 }
 
 export function parseChartExport(value: unknown, source: ChartSource = {}): ParsedChart {

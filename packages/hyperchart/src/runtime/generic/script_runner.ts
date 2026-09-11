@@ -28,7 +28,14 @@ type LiveScript = {
 export class ScriptRunner {
 	private readonly live = new Map<string, LiveScript>();
 
-	constructor(private readonly opts: { workDir: string; projectDir?: string; schemaRegistry?: SchemaRegistryLike; killGraceMs?: number }) {}
+	constructor(
+		private readonly opts: {
+			workDir: string;
+			projectDir?: string;
+			schemaRegistry?: SchemaRegistryLike;
+			killGraceMs?: number;
+		},
+	) {}
 
 	async run(effect: ScriptEffect, validationAttempt?: { n: number; reason?: string }): Promise<ChartEvent> {
 		const key = actionUidKey(effect.actionUid);
@@ -38,7 +45,10 @@ export class ScriptRunner {
 			if (live.cancelled) return { type: "FAILED", error: "script cancelled before process start" };
 			const result = await this.runProcess(effect.command, effect.args, env, undefined, live);
 			if (result.code !== 0) {
-				return { type: "FAILED", error: { code: result.code, signal: result.signal, stderr: tail(result.stderr, 2000) } };
+				return {
+					type: "FAILED",
+					error: { code: result.code, signal: result.signal, stderr: tail(result.stderr, 2000) },
+				};
 			}
 			return validateActionCompletion(effect, eventFromStdout(result.stdout, effect.events), {
 				workDir: this.opts.workDir,
@@ -59,7 +69,10 @@ export class ScriptRunner {
 		actionUid?: ActionUID,
 		invocation?: GuardContext["invocation"],
 	): Promise<GuardOutcome> {
-		const hasRawOptions = guard.env !== undefined || ("artifacts" in guard && guard.artifacts !== undefined) || ("reply" in guard && guard.reply !== undefined);
+		const hasRawOptions =
+			guard.env !== undefined ||
+			("artifacts" in guard && guard.artifacts !== undefined) ||
+			("reply" in guard && guard.reply !== undefined);
 		if (hasRawOptions && renderedEnv === undefined && artifacts === undefined && reply === undefined) {
 			throw new Error("Script guard env/artifacts/reply require rendered guard invocation options.");
 		}
@@ -77,13 +90,7 @@ export class ScriptRunner {
 				env.HYPERCHART_ACTION_UID = JSON.stringify(invocation.actionUid);
 			}
 			if (live.cancelled) return { ok: false, reason: "script guard cancelled before process start" };
-			const result = await this.runProcess(
-				guard.command,
-				guard.args ?? [],
-				env,
-				JSON.stringify(event),
-				live,
-			);
+			const result = await this.runProcess(guard.command, guard.args ?? [], env, JSON.stringify(event), live);
 			if (result.code !== 0) {
 				return { ok: false, reason: result.stderr.trim() || `exit ${result.code ?? result.signal ?? "unknown"}` };
 			}
@@ -124,7 +131,9 @@ export class ScriptRunner {
 		let settle!: () => void;
 		const live: LiveScript = {
 			cancelled: false,
-			settled: new Promise<void>((resolve) => { settle = resolve; }),
+			settled: new Promise<void>((resolve) => {
+				settle = resolve;
+			}),
 			settle: () => settle(),
 		};
 		if (key !== undefined) {
@@ -208,10 +217,16 @@ export class ScriptRunner {
 		}
 	}
 
-	private async resolveEnv(renderedEnv: RenderedScriptEnv | undefined, validationAttempt: { n: number; reason?: string } | undefined) {
+	private async resolveEnv(
+		renderedEnv: RenderedScriptEnv | undefined,
+		validationAttempt: { n: number; reason?: string } | undefined,
+	) {
 		const env: Record<string, string> = { ...process.env } as Record<string, string>;
 		for (const [name, value] of Object.entries(renderedEnv ?? {})) {
-			env[name] = typeof value === "string" ? value : serializeEnvValue(await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry));
+			env[name] =
+				typeof value === "string"
+					? value
+					: serializeEnvValue(await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry));
 		}
 		env.HYPERCHART_PROJECT_DIR = this.opts.projectDir ?? this.opts.workDir;
 		env.HYPERCHART_BRANCH_WORKSPACE = this.opts.workDir;
@@ -221,11 +236,14 @@ export class ScriptRunner {
 		}
 		return env;
 	}
-
 }
 
 function eventFromStdout(stdout: string, events: readonly string[]): ChartEvent {
-	const lastLine = stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0).at(-1);
+	const lastLine = stdout
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+		.at(-1);
 	if (lastLine !== undefined) {
 		try {
 			const parsed = JSON.parse(lastLine) as unknown;
@@ -241,10 +259,15 @@ function eventFromStdout(stdout: string, events: readonly string[]): ChartEvent 
 	}
 	const nonFailedEvents = events.filter((event) => event !== "FAILED");
 	if (nonFailedEvents.length === 1) return { type: nonFailedEvents[0] as string };
-	return { type: "FAILED", error: `ambiguous completion: print JSON {"type": ...} as the last stdout line; allowed: ${events.join(", ")}` };
+	return {
+		type: "FAILED",
+		error: `ambiguous completion: print JSON {"type": ...} as the last stdout line; allowed: ${events.join(", ")}`,
+	};
 }
 
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+function waitForExit(
+	child: ChildProcessWithoutNullStreams,
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
 	return new Promise((resolve, reject) => {
 		child.once("error", reject);
 		child.once("close", (code, signal) => resolve({ code, signal }));

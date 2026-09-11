@@ -48,9 +48,7 @@ export function createHostPaths(config: HostPathsConfig): HostPaths {
 			const candidates = chartPathCandidates(
 				spec,
 				cwd,
-				[getProjectHyperchartsDir(cwd), getSharedHyperchartsDir(cwd)].filter(
-					(dir): dir is string => dir !== undefined,
-				),
+				[getProjectHyperchartsDir(cwd), getSharedHyperchartsDir(cwd)].filter((dir): dir is string => dir !== undefined),
 				config.userChartsDir,
 			);
 			const found = candidates.find((candidate) => isFile(candidate));
@@ -71,12 +69,15 @@ export function listHyperchartFiles(root: string): string[] {
 	if (!isDirectory(root)) return [];
 	const files: string[] = [];
 	walk(root, files, root, new Set());
-	return files
-		.filter((file) => file.endsWith(".chart.ts") || file.endsWith(".ts"))
-		.sort();
+	return files.filter((file) => file.endsWith(".chart.ts") || file.endsWith(".ts")).sort();
 }
 
-function chartPathCandidates(spec: string, cwd: string, projectChartsDirs: readonly string[], userChartsDir?: string): string[] {
+function chartPathCandidates(
+	spec: string,
+	cwd: string,
+	projectChartsDirs: readonly string[],
+	userChartsDir?: string,
+): string[] {
 	const variants = chartNameVariants(spec);
 	const candidates: string[] = [];
 	if (!isAbsolute(spec) && !spec.startsWith(".")) {
@@ -100,7 +101,6 @@ function chartNameVariants(spec: string): string[] {
 function hasKnownModuleExtension(spec: string): boolean {
 	return [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"].some((extension) => spec.endsWith(extension));
 }
-
 
 function findNearestProjectRoot(cwd: string, markers: readonly string[]): string | undefined {
 	let current = resolve(cwd);

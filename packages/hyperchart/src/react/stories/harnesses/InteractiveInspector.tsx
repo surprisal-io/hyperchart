@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-	HyperchartInspectorDialog,
-	type HyperchartInspectorDialogProps,
-} from "../../HyperchartInspectorDialog.js";
+import { HyperchartInspectorDialog, type HyperchartInspectorDialogProps } from "../../HyperchartInspectorDialog.js";
 
 /** Keeps Storybook's inspector example interactive while forwarding actions to the Actions panel. */
 export function InteractiveInspector(props: HyperchartInspectorDialogProps) {

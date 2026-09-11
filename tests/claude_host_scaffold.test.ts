@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseSimpleFrontmatter } from "../packages/hyperchart/src/runtime/generic/frontmatter.js";
 import { loadAgentDefinition } from "../packages/hyperchart/src/runtime/generic/agent_definitions.js";
 import { loadAgentDefinition as loadPiAgentDefinition } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
+import { claudeHostPaths, claudeRunsRoot } from "../packages/claude-hyperchart/src/claude/paths.js";
 import {
-	claudeHostPaths,
-	claudeRunsRoot,
-} from "../packages/claude-hyperchart/src/claude/paths.js";
-import { createClaudeAgentDefaultsResolver, resolveClaudeSubagentDefinitionDirs } from "../packages/claude-hyperchart/src/claude/agent_definitions.js";
+	createClaudeAgentDefaultsResolver,
+	resolveClaudeSubagentDefinitionDirs,
+} from "../packages/claude-hyperchart/src/claude/agent_definitions.js";
 import { createNeutralTranscriptWriter } from "../packages/claude-hyperchart/src/claude/transcript_writer.js";
 import { readNeutralSessionTranscript } from "../packages/hyperchart/src/inspect/session_transcript.js";
 
@@ -88,10 +88,7 @@ describe("claude host scaffold", () => {
 		const project = join(root, "project");
 		const chartDir = join(project, ".hypercharts", "review");
 		mkdirSync(join(chartDir, "agents"), { recursive: true });
-		writeFileSync(
-			join(chartDir, "agents", "critic.md"),
-			"---\nrole: reviewer\ntoolset: reading\n---\nReview prompt\n",
-		);
+		writeFileSync(join(chartDir, "agents", "critic.md"), "---\nrole: reviewer\ntoolset: reading\n---\nReview prompt\n");
 		writeFileSync(
 			join(project, ".hypercharts", "settings.json"),
 			JSON.stringify({
@@ -133,7 +130,9 @@ describe("claude host scaffold", () => {
 	});
 
 	it("parses frontmatter scalars, arrays, and quoted strings", () => {
-		const parsed = parseSimpleFrontmatter('---\nname: "worker"\ntools: [read, "write"]\ncount: 3\nflag: true\n---\nBody text\n');
+		const parsed = parseSimpleFrontmatter(
+			'---\nname: "worker"\ntools: [read, "write"]\ncount: 3\nflag: true\n---\nBody text\n',
+		);
 		expect(parsed.frontmatter).toEqual({ name: "worker", tools: ["read", "write"], count: 3, flag: true });
 		expect(parsed.body.trim()).toBe("Body text");
 	});
@@ -144,12 +143,34 @@ describe("claude host scaffold", () => {
 		const file = join(sessionsDir, "abc", "session.jsonl");
 		const writer = createNeutralTranscriptWriter(file, "sdk-session-1");
 		writer.append({ id: "u1", role: "user", text: "start" });
-		writer.append({ id: "t1", role: "tool", toolName: "bash", toolCallId: "c1", toolInput: "ls", toolStatus: "running" });
-		writer.append({ id: "t2", role: "tool", toolName: "bash", toolCallId: "c1", toolOutput: "ok", toolStatus: "completed" });
+		writer.append({
+			id: "t1",
+			role: "tool",
+			toolName: "bash",
+			toolCallId: "c1",
+			toolInput: "ls",
+			toolStatus: "running",
+		});
+		writer.append({
+			id: "t2",
+			role: "tool",
+			toolName: "bash",
+			toolCallId: "c1",
+			toolOutput: "ok",
+			toolStatus: "completed",
+		});
 
 		expect(readNeutralSessionTranscript(sessionsDir, file)).toEqual([
 			{ id: "u1", role: "user", text: "start" },
-			{ id: "t1", role: "tool", toolName: "bash", toolCallId: "c1", toolInput: "ls", toolStatus: "completed", toolOutput: "ok" },
+			{
+				id: "t1",
+				role: "tool",
+				toolName: "bash",
+				toolCallId: "c1",
+				toolInput: "ls",
+				toolStatus: "completed",
+				toolOutput: "ok",
+			},
 		]);
 	});
 });

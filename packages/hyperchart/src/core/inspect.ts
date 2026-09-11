@@ -41,7 +41,10 @@ function selfEntryPath(): string {
 	return fileURLToPath(new URL("../index.ts", import.meta.url));
 }
 
-export function inspectChartModuleSync(filePath: string, options: InspectChartModuleOptions = {}): HyperchartInspectResult {
+export function inspectChartModuleSync(
+	filePath: string,
+	options: InspectChartModuleOptions = {},
+): HyperchartInspectResult {
 	const absolutePath = resolve(filePath);
 	const parsed = parseChartModuleSync(absolutePath, options);
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));

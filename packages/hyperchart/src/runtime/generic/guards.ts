@@ -37,12 +37,25 @@ export async function runGuard(
 		return normalizeGuardOutcome(await fn(event, ctx));
 	}
 
-	const hasRawOptions = guard.env !== undefined || ("artifacts" in guard && guard.artifacts !== undefined) || ("reply" in guard && guard.reply !== undefined);
+	const hasRawOptions =
+		guard.env !== undefined ||
+		("artifacts" in guard && guard.artifacts !== undefined) ||
+		("reply" in guard && guard.reply !== undefined);
 	if (invocation === undefined && hasRawOptions) {
-		throw new Error("Script guard env/artifacts/reply require a rendered guard invocation from ChartRuntime; call runGuard with RenderedGuardInvocation options.");
+		throw new Error(
+			"Script guard env/artifacts/reply require a rendered guard invocation from ChartRuntime; call runGuard with RenderedGuardInvocation options.",
+		);
 	}
 	const runner = invocation?.scripts ?? new ScriptRunner({ workDir: ctx.workDir });
-	return runner.runGuard(guard, event, invocation?.env, invocation?.artifacts, invocation?.reply, invocation?.actionUid, ctx.invocation);
+	return runner.runGuard(
+		guard,
+		event,
+		invocation?.env,
+		invocation?.artifacts,
+		invocation?.reply,
+		invocation?.actionUid,
+		ctx.invocation,
+	);
 }
 
 function normalizeGuardOutcome(value: unknown): GuardOutcome {

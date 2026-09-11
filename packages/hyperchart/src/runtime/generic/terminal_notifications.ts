@@ -74,13 +74,14 @@ export function readDeliverableTerminalNotificationRequest(runId: string): Termi
 	if (status.attemptId !== undefined && request.attemptId !== undefined) {
 		return status.attemptId === request.attemptId ? request : undefined;
 	}
-	return status.branchIds.includes(request.payload.branchId) || (
-		status.branchIds.length === 0 &&
-		status.attemptId === undefined &&
-		request.attemptId === undefined &&
-		status.runId === request.payload.runId &&
-		status.chartId === request.payload.chartId
-	) ? request : undefined;
+	return status.branchIds.includes(request.payload.branchId) ||
+		(status.branchIds.length === 0 &&
+			status.attemptId === undefined &&
+			request.attemptId === undefined &&
+			status.runId === request.payload.runId &&
+			status.chartId === request.payload.chartId)
+		? request
+		: undefined;
 }
 
 /**
@@ -96,9 +97,10 @@ export function recoverStaleRunTerminalNotification(
 		return undefined;
 	}
 	let request = readTerminalNotificationRequest(runId);
-	const belongsToCurrentAttempt = status.attemptId === undefined
-		? request !== undefined // Legacy status/outbox pairs retain their original request-wins behavior.
-		: request?.attemptId === status.attemptId;
+	const belongsToCurrentAttempt =
+		status.attemptId === undefined
+			? request !== undefined // Legacy status/outbox pairs retain their original request-wins behavior.
+			: request?.attemptId === status.attemptId;
 	if (!belongsToCurrentAttempt) {
 		// The host may have durably opened this attempt before the runner got far
 		// enough to archive the previous outbox. Never let that older outcome win.
@@ -121,9 +123,10 @@ export function recoverStaleRunTerminalNotification(
 		pid: undefined,
 		heartbeatAt: undefined,
 		exitCode: request.payload.outcome === "complete" ? 0 : 1,
-		error: request.payload.outcome === "failed"
-			? request.payload.error ?? status.error ?? "runner exited before recording a terminal status"
-			: undefined,
+		error:
+			request.payload.outcome === "failed"
+				? (request.payload.error ?? status.error ?? "runner exited before recording a terminal status")
+				: undefined,
 	});
 	return request;
 }
@@ -146,7 +149,10 @@ export function archiveTerminalNotificationGeneration(runId: string): string | u
 }
 
 /** Persist-once outbox write. Existing identical payloads are reused; divergent terminal replay fails loud. */
-export function persistTerminalNotificationRequest(runId: string, payload: TerminalNotificationPayload): TerminalNotificationRequest {
+export function persistTerminalNotificationRequest(
+	runId: string,
+	payload: TerminalNotificationPayload,
+): TerminalNotificationRequest {
 	const path = terminalNotificationRequestPath(runId);
 	const existing = readTerminalNotificationRequest(runId);
 	if (existing !== undefined) {
@@ -175,13 +181,23 @@ export function readTerminalNotificationRequest(runId: string): TerminalNotifica
 	const path = terminalNotificationRequestPath(runId);
 	if (!existsSync(path)) return undefined;
 	const value = JSON.parse(readFileSync(path, "utf8")) as TerminalNotificationRequest;
-	if (value.version !== 2 || typeof value.requestId !== "string" || typeof value.payload?.prompt !== "string" || typeof value.payload?.branchId !== "string") {
+	if (
+		value.version !== 2 ||
+		typeof value.requestId !== "string" ||
+		typeof value.payload?.prompt !== "string" ||
+		typeof value.payload?.branchId !== "string"
+	) {
 		throw new Error(`Invalid terminal notification request: ${path}`);
 	}
 	return value;
 }
 
-export function terminalNotificationReceiptPath(runId: string, requestId: string, host: string, sessionId: string): string {
+export function terminalNotificationReceiptPath(
+	runId: string,
+	requestId: string,
+	host: string,
+	sessionId: string,
+): string {
 	const generationKey = createHash("sha256").update(requestId).digest("hex");
 	const ownerKey = createHash("sha256").update(`${host}\0${sessionId}`).digest("hex");
 	return join(resolveRunPaths(runId).runDir, TERMINAL_NOTIFICATION_DIR, "receipts", generationKey, `${ownerKey}.json`);
@@ -195,15 +211,18 @@ function legacyTerminalNotificationReceiptPath(runId: string, host: string, sess
 export function hasTerminalNotificationReceipt(runId: string, host: string, sessionId: string): boolean {
 	const request = readTerminalNotificationRequest(runId);
 	if (request === undefined) return false;
-	const receipt = readReceipt(terminalNotificationReceiptPath(runId, request.requestId, host, sessionId))
-		?? readReceipt(legacyTerminalNotificationReceiptPath(runId, host, sessionId));
-	return receipt !== undefined &&
+	const receipt =
+		readReceipt(terminalNotificationReceiptPath(runId, request.requestId, host, sessionId)) ??
+		readReceipt(legacyTerminalNotificationReceiptPath(runId, host, sessionId));
+	return (
+		receipt !== undefined &&
 		receipt.requestId === request.requestId &&
 		receipt.host === host &&
 		receipt.sessionId === sessionId &&
 		// Receipts written by the original implementation had no state. Treat them as
 		// confirmed so upgrading does not duplicate notifications already delivered.
-		(receipt.state === "confirmed" || (receipt.state === undefined && typeof receipt.deliveredAt === "string"));
+		(receipt.state === "confirmed" || (receipt.state === undefined && typeof receipt.deliveredAt === "string"))
+	);
 }
 
 /**
@@ -221,8 +240,13 @@ export function claimTerminalNotificationReceipt(
 	const request = readTerminalNotificationRequest(runId);
 	if (request === undefined || request.requestId !== requestId) return false;
 	const legacy = readReceipt(legacyTerminalNotificationReceiptPath(runId, host, sessionId));
-	if (legacy?.requestId === requestId && legacy.host === host && legacy.sessionId === sessionId &&
-		(legacy.state === "confirmed" || (legacy.state === undefined && typeof legacy.deliveredAt === "string"))) return false;
+	if (
+		legacy?.requestId === requestId &&
+		legacy.host === host &&
+		legacy.sessionId === sessionId &&
+		(legacy.state === "confirmed" || (legacy.state === undefined && typeof legacy.deliveredAt === "string"))
+	)
+		return false;
 	const path = terminalNotificationReceiptPath(runId, requestId, host, sessionId);
 	const now = options.now ?? Date.now();
 	const leaseMs = options.leaseMs ?? TERMINAL_NOTIFICATION_CLAIM_LEASE_MS;
@@ -243,8 +267,14 @@ export function claimTerminalNotificationReceipt(
 			if (!isNodeError(error) || error.code !== "EEXIST") throw error;
 		}
 		const existing = readReceipt(path);
-		if (existing !== undefined && existing.requestId === request.requestId && existing.host === host && existing.sessionId === sessionId) {
-			if (existing.state === "confirmed" || (existing.state === undefined && typeof existing.deliveredAt === "string")) return false;
+		if (
+			existing !== undefined &&
+			existing.requestId === request.requestId &&
+			existing.host === host &&
+			existing.sessionId === sessionId
+		) {
+			if (existing.state === "confirmed" || (existing.state === undefined && typeof existing.deliveredAt === "string"))
+				return false;
 			const claimedAt = existing.claimedAt === undefined ? Number.NaN : Date.parse(existing.claimedAt);
 			if (Number.isFinite(claimedAt) && now - claimedAt < leaseMs) return false;
 		}
@@ -282,14 +312,25 @@ export function claimTerminalNotificationReceipt(
 }
 
 /** Confirm only after the host-facing delivery operation succeeds. */
-export function markTerminalNotificationReceipt(runId: string, requestId: string, host: string, sessionId: string): TerminalNotificationReceipt {
+export function markTerminalNotificationReceipt(
+	runId: string,
+	requestId: string,
+	host: string,
+	sessionId: string,
+): TerminalNotificationReceipt {
 	const request = readTerminalNotificationRequest(runId);
 	if (request === undefined || request.requestId !== requestId) {
 		throw new Error(`Terminal notification generation '${requestId}' is no longer active for ${runId}`);
 	}
 	const path = terminalNotificationReceiptPath(runId, requestId, host, sessionId);
 	const existing = readReceipt(path) ?? readReceipt(legacyTerminalNotificationReceiptPath(runId, host, sessionId));
-	if (existing !== undefined && existing.requestId === request.requestId && existing.host === host && existing.sessionId === sessionId && existing.state === "confirmed") {
+	if (
+		existing !== undefined &&
+		existing.requestId === request.requestId &&
+		existing.host === host &&
+		existing.sessionId === sessionId &&
+		existing.state === "confirmed"
+	) {
 		return existing as TerminalNotificationReceipt;
 	}
 	const receipt: TerminalNotificationReceipt = {
@@ -305,7 +346,12 @@ export function markTerminalNotificationReceipt(runId: string, requestId: string
 	return receipt;
 }
 
-export function removeTerminalNotificationReceipt(runId: string, requestId: string, host: string, sessionId: string): void {
+export function removeTerminalNotificationReceipt(
+	runId: string,
+	requestId: string,
+	host: string,
+	sessionId: string,
+): void {
 	rmSync(terminalNotificationReceiptPath(runId, requestId, host, sessionId), { force: true });
 	rmSync(legacyTerminalNotificationReceiptPath(runId, host, sessionId), { force: true });
 }
@@ -329,12 +375,18 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error;
 }
 
-function readReceipt(path: string): (Partial<TerminalNotificationReceipt> & Pick<TerminalNotificationReceipt, "requestId" | "host" | "sessionId">) | undefined {
+function readReceipt(
+	path: string,
+):
+	| (Partial<TerminalNotificationReceipt> & Pick<TerminalNotificationReceipt, "requestId" | "host" | "sessionId">)
+	| undefined {
 	if (!existsSync(path)) return undefined;
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-		if (typeof value.requestId !== "string" || typeof value.host !== "string" || typeof value.sessionId !== "string") return undefined;
-		return value as Partial<TerminalNotificationReceipt> & Pick<TerminalNotificationReceipt, "requestId" | "host" | "sessionId">;
+		if (typeof value.requestId !== "string" || typeof value.host !== "string" || typeof value.sessionId !== "string")
+			return undefined;
+		return value as Partial<TerminalNotificationReceipt> &
+			Pick<TerminalNotificationReceipt, "requestId" | "host" | "sessionId">;
 	} catch {
 		return undefined;
 	}
@@ -343,7 +395,10 @@ function readReceipt(path: string): (Partial<TerminalNotificationReceipt> & Pick
 function stableJson(value: unknown): string {
 	if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
 	if (value !== null && typeof value === "object") {
-		return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`).join(",")}}`;
+		return `{${Object.entries(value as Record<string, unknown>)
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+			.join(",")}}`;
 	}
 	return JSON.stringify(value);
 }

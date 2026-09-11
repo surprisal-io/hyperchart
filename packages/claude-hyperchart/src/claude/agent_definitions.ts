@@ -48,13 +48,9 @@ export function createClaudeAgentDefaultsResolver(
 		],
 		"claude",
 	);
-	return createAgentDefaultsResolver(
-		resolveClaudeSubagentDefinitionDirs(cwd, chartPath),
-		undefined,
-		{
-			...(resolution.defaultModel === undefined ? {} : { defaultModel: resolution.defaultModel }),
-			modelRoles: resolution.modelRoles ?? settings.modelRoles,
-			toolsets: resolution.toolsets ?? settings.toolsets,
-		},
-	);
+	return createAgentDefaultsResolver(resolveClaudeSubagentDefinitionDirs(cwd, chartPath), undefined, {
+		...(resolution.defaultModel === undefined ? {} : { defaultModel: resolution.defaultModel }),
+		modelRoles: resolution.modelRoles ?? settings.modelRoles,
+		toolsets: resolution.toolsets ?? settings.toolsets,
+	});
 }

@@ -1,4 +1,8 @@
-import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import {
+	withRunStorage,
+	resolveRunPaths,
+	type RunStorage,
+} from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { createHash } from "node:crypto";
 import { isAbsolute, join } from "node:path";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -117,51 +121,57 @@ export async function consume(params, ctx) {
 }
 `,
 		);
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "function-vertical",
-			initial: "produce",
-			states: {
-				produce: {
-					kind: "state",
-					action: tsAction("./actions.mjs", "produce", {
-						env: { TOPIC: t`${arg("topic")}` },
-						artifacts: { report: artifact("report.json", z.object({ ok: z.boolean(), topic: z.string() })) },
-						reply: z.object({ value: z.string() }),
-					}),
-					transitions: { DONE: { target: "consume", input: { review: event("value") } } },
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "function-vertical",
+				initial: "produce",
+				states: {
+					produce: {
+						kind: "state",
+						action: tsAction("./actions.mjs", "produce", {
+							env: { TOPIC: t`${arg("topic")}` },
+							artifacts: { report: artifact("report.json", z.object({ ok: z.boolean(), topic: z.string() })) },
+							reply: z.object({ value: z.string() }),
+						}),
+						transitions: { DONE: { target: "consume", input: { review: event("value") } } },
+					},
+					consume: {
+						kind: "state",
+						input: { review: z.string() },
+						action: tsAction("./actions.mjs", "consume", {
+							env: {
+								RESULT: t`${result("produce", "value")}`,
+								REPORT_OK: artifactOf("produce", { artifact: "report", select: "ok" }),
+							},
+							artifacts: { summary: artifact("summary.json", z.object({ absolute: z.literal(true) }).passthrough()) },
+							reply: z.object({ ok: z.literal(true) }),
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					failed: failed(),
 				},
-				consume: {
-					kind: "state",
-					input: { review: z.string() },
-					action: tsAction("./actions.mjs", "consume", {
-						env: {
-							RESULT: t`${result("produce", "value")}`,
-							REPORT_OK: artifactOf("produce", { artifact: "report", select: "ok" }),
-						},
-						artifacts: { summary: artifact("summary.json", z.object({ absolute: z.literal(true) }).passthrough()) },
-						reply: z.object({ ok: z.literal(true) }),
-					}),
-					transitions: { DONE: "done" },
-				},
-				done: final(),
-				failed: failed(),
-			},
-		}));
+			}),
+		);
 		expect(parsed.ok).toBe(true);
 		if (!parsed.ok) return;
 		const store = new MemoryLogStore();
-		const runtime = withRunStorage(storage, () => new ChartRuntime({
-			ast: parsed.ast,
-			branchId: "main",
-			logStore: store,
-			agentExecutor: new FakeAgentExecutor(),
-			chartDir,
-			workDir,
-			projectDir,
-			runId,
-			schemaRegistry: parsed.schemaRegistry,
-		}));
+		const runtime = withRunStorage(
+			storage,
+			() =>
+				new ChartRuntime({
+					ast: parsed.ast,
+					branchId: "main",
+					logStore: store,
+					agentExecutor: new FakeAgentExecutor(),
+					chartDir,
+					workDir,
+					projectDir,
+					runId,
+					schemaRegistry: parsed.schemaRegistry,
+				}),
+		);
 
 		const state = await withTimeout(start(runtime, { topic: "durable functions" }));
 		await runtime.dispose();
@@ -182,41 +192,83 @@ export async function consume(params, ctx) {
 
 		const records = await collectHistoryRecords(store, "main");
 		const inspected = inspectChartAst(parsed.ast).states.find((candidate) => candidate.id === "consume");
-		expect(inspected).toMatchObject({ kind: "tsImport", module: "./actions.mjs", export: "consume", env: [{ name: "RESULT" }, { name: "REPORT_OK" }] });
-		const hosted = hyperchartRunFromRuntime(inspectChartAst(parsed.ast), parsed.ast, records).states.find((candidate) => candidate.id === "consume");
+		expect(inspected).toMatchObject({
+			kind: "tsImport",
+			module: "./actions.mjs",
+			export: "consume",
+			env: [{ name: "RESULT" }, { name: "REPORT_OK" }],
+		});
+		const hosted = hyperchartRunFromRuntime(inspectChartAst(parsed.ast), parsed.ast, records).states.find(
+			(candidate) => candidate.id === "consume",
+		);
 		expect(hosted).toMatchObject({
 			type: "tsImport",
 			module: "./actions.mjs",
 			export: "consume",
-			visitHistory: [{ invocation: { kind: "tsImport", module: "./actions.mjs", export: "consume", params: { RESULT: "from-result" } } }],
+			visitHistory: [
+				{
+					invocation: {
+						kind: "tsImport",
+						module: "./actions.mjs",
+						export: "consume",
+						params: { RESULT: "from-result" },
+					},
+				},
+			],
 		});
 		const hostedInvocation = hosted?.visitHistory?.[0]?.invocation;
-		expect(hostedInvocation?.kind === "tsImport" ? hostedInvocation.params?.REPORT_OK : undefined).toMatchObject({ path: "report.json", select: "ok" });
+		expect(hostedInvocation?.kind === "tsImport" ? hostedInvocation.params?.REPORT_OK : undefined).toMatchObject({
+			path: "report.json",
+			select: "ok",
+		});
 		const completes = records.filter((record) => record.type === "state_action" && record.kind === "complete");
 		expect(completes).toHaveLength(2);
 		const summaryComplete = completes.find((record) => record.actionUid.state === "consume");
-		if (summaryComplete?.type !== "state_action" || summaryComplete.kind !== "complete") throw new Error("missing completion");
+		if (summaryComplete?.type !== "state_action" || summaryComplete.kind !== "complete")
+			throw new Error("missing completion");
 		const summaryPin = summaryComplete.artifacts?.["summary.json"];
-		expect(summaryPin?.hash).toBe(createHash("sha256").update(await readFile(join(workDir, "summary.json"))).digest("hex"));
+		expect(summaryPin?.hash).toBe(
+			createHash("sha256")
+				.update(await readFile(join(workDir, "summary.json")))
+				.digest("hex"),
+		);
 		expect(state.projection.artifactPins["summary.json"]).toEqual(summaryPin);
 		if (summaryPin === undefined) throw new Error("missing summary artifact pin");
-		expect(await readFile(await new ArtifactStore(runDir).get(summaryPin.hash), "utf8")).toBe(await readFile(join(workDir, "summary.json"), "utf8"));
+		expect(await readFile(await new ArtifactStore(runDir).get(summaryPin.hash), "utf8")).toBe(
+			await readFile(join(workDir, "summary.json"), "utf8"),
+		);
 	});
 
 	it("converts imported exceptions into durable FAILED completion", async () => {
 		const root = await tempDir();
 		await writeFile(join(root, "throw.mjs"), `export function run() { throw new Error("imported boom"); }\n`);
-		const chartAst = ast(chart({
-			kind: "chart", id: "function-failed", initial: "work",
-			states: { work: { kind: "state", action: tsAction("./throw.mjs", "run"), transitions: { DONE: "done" } }, done: final() },
-		}));
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "function-failed",
+				initial: "work",
+				states: {
+					work: { kind: "state", action: tsAction("./throw.mjs", "run"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const store = new MemoryLogStore();
-		const runtime = new ChartRuntime({ ast: chartAst, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), chartDir: root, workDir: root });
+		const runtime = new ChartRuntime({
+			ast: chartAst,
+			branchId: "main",
+			logStore: store,
+			agentExecutor: new FakeAgentExecutor(),
+			chartDir: root,
+			workDir: root,
+		});
 		const state = await withTimeout(start(runtime));
 		await runtime.dispose();
 
 		expect(state.projection.failure).toMatchObject({ origin: "work", error: "imported boom" });
-		const failureIntent = (await collectHistoryRecords(store, "main")).find((record) => record.type === "failure_intent");
+		const failureIntent = (await collectHistoryRecords(store, "main")).find(
+			(record) => record.type === "failure_intent",
+		);
 		expect(failureIntent).toMatchObject({ type: "failure_intent", origin: "work", error: "imported boom" });
 	});
 
@@ -232,31 +284,52 @@ export function run(_params, ctx) {
 }
 `,
 		);
-		const chartAst = ast(chart({
-			kind: "chart", id: "function-timeout", initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					action: tsAction("./abort.mjs", "run", { artifacts: { ready: "ready.txt", aborted: "aborted.txt" } }),
-					after: { delayMs: 200, target: "timeout" },
-					transitions: { DONE: "done" },
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "function-timeout",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: tsAction("./abort.mjs", "run", { artifacts: { ready: "ready.txt", aborted: "aborted.txt" } }),
+						after: { delayMs: 200, target: "timeout" },
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					timeout: final(),
 				},
-				done: final(), timeout: final(),
-			},
-		}));
+			}),
+		);
 		const store = new MemoryLogStore();
-		const runtime = new ChartRuntime({ ast: chartAst, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), chartDir: root, workDir: root });
+		const runtime = new ChartRuntime({
+			ast: chartAst,
+			branchId: "main",
+			logStore: store,
+			agentExecutor: new FakeAgentExecutor(),
+			chartDir: root,
+			workDir: root,
+		});
 		const state = await withTimeout(start(runtime));
-		await waitUntil(async () => (await readFile(join(root, "aborted.txt"), "utf8").catch(() => undefined)) === "aborted");
+		await waitUntil(
+			async () => (await readFile(join(root, "aborted.txt"), "utf8").catch(() => undefined)) === "aborted",
+		);
 		await runtime.dispose();
 
 		expect(state.projection.activeLeaves).toEqual(["timeout"]);
-		expect((await collectHistoryRecords(store, "main")).filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(0);
+		expect(
+			(await collectHistoryRecords(store, "main")).filter(
+				(record) => record.type === "state_action" && record.kind === "complete",
+			),
+		).toHaveLength(0);
 	});
 
 	it("uses shared completion validation for unsupported events and FAILED-without-error", async () => {
 		const root = await tempDir();
-		await writeFile(join(root, "invalid.mjs"), `export const unsupported = () => ({ type: "OTHER" });\nexport const failedWithoutError = () => ({ type: "FAILED" });\n`);
+		await writeFile(
+			join(root, "invalid.mjs"),
+			`export const unsupported = () => ({ type: "OTHER" });\nexport const failedWithoutError = () => ({ type: "FAILED" });\n`,
+		);
 		const runner = new FunctionRunner({ chartDir: root, workDir: root });
 		await expect(runner.run(effect("./invalid.mjs", "unsupported"))).resolves.toEqual({
 			type: "FAILED",
@@ -307,14 +380,29 @@ export function hang(_params, ctx) {
 }
 `,
 		);
-		const chartAst = ast(chart({
-			kind: "chart", id: "function-dispose", initial: "work",
-			states: {
-				work: { kind: "state", action: tsAction("./hang.mjs", "hang", { artifacts: { ready: "ready.txt" } }), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
-		const runtime = new ChartRuntime({ ast: chartAst, branchId: "main", logStore: new MemoryLogStore(), agentExecutor: new FakeAgentExecutor(), chartDir: root, workDir: root });
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "function-dispose",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: tsAction("./hang.mjs", "hang", { artifacts: { ready: "ready.txt" } }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const runtime = new ChartRuntime({
+			ast: chartAst,
+			branchId: "main",
+			logStore: new MemoryLogStore(),
+			agentExecutor: new FakeAgentExecutor(),
+			chartDir: root,
+			workDir: root,
+		});
 		const running = start(runtime).catch(() => undefined);
 		await waitUntil(async () => (await readFile(join(root, "ready.txt"), "utf8").catch(() => undefined)) === "ready");
 		await withTimeout(runtime.dispose(), 150);

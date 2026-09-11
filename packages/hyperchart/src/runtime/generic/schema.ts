@@ -55,9 +55,7 @@ function checkRuntimeSchemaSync(
 	} catch (error) {
 		return {
 			ok: false,
-			errors: [
-				`runtime contract ${contractLabel(contract)} requires async validation: ${errorMessage(error)}`,
-			],
+			errors: [`runtime contract ${contractLabel(contract)} requires async validation: ${errorMessage(error)}`],
 		};
 	}
 }

@@ -104,7 +104,13 @@ class ActorRuntime implements Runtime {
 				let seqId = this.records.at(-1)?.seqId ?? 0;
 				let parentId = seqId === 0 ? null : seqId;
 				const records = effect.records.map((draft) => {
-					const record = { ...draft, seqId: ++seqId, parentId, branchId: this.branchId, timestamp: Date.now() } as DurableLogRecord;
+					const record = {
+						...draft,
+						seqId: ++seqId,
+						parentId,
+						branchId: this.branchId,
+						timestamp: Date.now(),
+					} as DurableLogRecord;
 					parentId = record.seqId;
 					return record;
 				});
@@ -112,31 +118,62 @@ class ActorRuntime implements Runtime {
 				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
 				const reply = this.agentReplies[effect.actionUid.state]?.shift();
-				if (reply !== undefined) this.queue.send({ kind: "agent", effectId: effect.id,
+				if (reply !== undefined)
+					this.queue.send({
+						kind: "agent",
+						effectId: effect.id,
 						outcome: { kind: "completed", event: typeof reply === "string" ? { type: reply } : reply },
 					});
 			} else if (effect.kind === "actor_create") {
-				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "create", ok: this.fail !== "create", ...(this.fail === "create" ? { error: "create validation" } : {}) });
+				this.queue.send({
+					kind: "actor_effect",
+					effectId: effect.id,
+					operation: "create",
+					ok: this.fail !== "create",
+					...(this.fail === "create" ? { error: "create validation" } : {}),
+				});
 			} else if (effect.kind === "actor_enqueue") {
-				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "enqueue", ok: this.fail !== "enqueue", ...(this.fail === "enqueue" ? { error: "batch validation" } : {}) });
+				this.queue.send({
+					kind: "actor_effect",
+					effectId: effect.id,
+					operation: "enqueue",
+					ok: this.fail !== "enqueue",
+					...(this.fail === "enqueue" ? { error: "batch validation" } : {}),
+				});
 			} else if (effect.kind === "actor_reply") {
-				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "reply", ok: this.fail !== "reply", ...(this.fail === "reply" ? { error: "reply validation" } : {}) });
+				this.queue.send({
+					kind: "actor_effect",
+					effectId: effect.id,
+					operation: "reply",
+					ok: this.fail !== "reply",
+					...(this.fail === "reply" ? { error: "reply validation" } : {}),
+				});
 			} else if (effect.kind === "timer") {
 				this.queue.send({ kind: "timer", effectId: effect.id });
 			}
 		}
 	}
-	eventsQueue() { return this.queue; }
-	async loadAst() { return this.ast; }
-	async loadProjection() { return projectBranch(createBranchProjection(this.ast), this.ast, this.records); }
-	async loadLogs() { return this.records; }
+	eventsQueue() {
+		return this.queue;
+	}
+	async loadAst() {
+		return this.ast;
+	}
+	async loadProjection() {
+		return projectBranch(createBranchProjection(this.ast), this.ast, this.records);
+	}
+	async loadLogs() {
+		return this.records;
+	}
 }
 
-function isSelfEnqueue(record: DurableLogRecord): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> {
+function isSelfEnqueue(
+	record: DurableLogRecord,
+): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> {
 	return (
-		record.type === "actor_messages_enqueued"
-		&& (record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch")
-		&& record.source.definition.self === true
+		record.type === "actor_messages_enqueued" &&
+		(record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch") &&
+		record.source.definition.self === true
 	);
 }
 
@@ -147,11 +184,17 @@ function parsed(input: unknown = actorChart()) {
 }
 
 function enqueuedMessages(records: readonly DurableLogRecord[], occurrence: string) {
-	return records.flatMap((record) => record.type === "actor_messages_enqueued" && record.occurrence === occurrence ? [...record.messages] : []);
+	return records.flatMap((record) =>
+		record.type === "actor_messages_enqueued" && record.occurrence === occurrence ? [...record.messages] : [],
+	);
 }
 
 function settledMessageIds(records: readonly DurableLogRecord[], occurrence: string): string[] {
-	return records.flatMap((record) => record.type === "actor_message" && record.kind === "settled" && record.occurrence === occurrence ? [record.messageId] : []);
+	return records.flatMap((record) =>
+		record.type === "actor_message" && record.kind === "settled" && record.occurrence === occurrence
+			? [record.messageId]
+			: [],
+	);
 }
 
 async function waitFor<T>(read: () => T | undefined, message: string): Promise<T> {
@@ -166,38 +209,69 @@ async function waitFor<T>(read: () => T | undefined, message: string): Promise<T
 describe("explicit event-sourced actors", () => {
 	it("validates refs on named actor-call transition objects for isolation and dominance", () => {
 		const ServiceProtocol = protocol({
-			CHECK: message({ input: z.object({}).strict(), replies: { ACCEPTED: z.object({ commit: z.string() }), REJECTED: z.object({ reason: z.string() }) } }),
+			CHECK: message({
+				input: z.object({}).strict(),
+				replies: { ACCEPTED: z.object({ commit: z.string() }), REJECTED: z.object({ reason: z.string() }) },
+			}),
 		});
 		const Service = actor({
-			input: z.object({}).strict(), protocol: ServiceProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: ServiceProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { CHECK: "accept" } }),
 				accept: reply({ target: "idle", event: "ACCEPTED", output: { commit: "ok" } }),
 			},
 		});
 		const service = Service({});
-		const ClientProtocol = protocol({ RUN: message({ input: z.object({}).strict(), reply: z.object({ ok: z.boolean() }) }) });
+		const ClientProtocol = protocol({
+			RUN: message({ input: z.object({}).strict(), reply: z.object({ ok: z.boolean() }) }),
+		});
 		const clientChart = (binding: ReturnType<typeof result> | ReturnType<typeof arg>, bypassProducer = false) => {
 			const Client = actor({
-				input: z.object({}).strict(), protocol: ClientProtocol, initial: "idle",
+				input: z.object({}).strict(),
+				protocol: ClientProtocol,
+				initial: "idle",
 				states: {
 					idle: receive({ on: { RUN: bypassProducer ? "choose" : "produce" } }),
-					...(bypassProducer ? { choose: { kind: "state" as const, action: agent("choose"), transitions: { PRODUCE: "produce", BYPASS: "check" } } } : {}),
-					produce: { kind: "state" as const, action: agent("produce", { reply: z.object({ id: z.string() }) }), transitions: { DONE: "check" } },
+					...(bypassProducer
+						? {
+								choose: {
+									kind: "state" as const,
+									action: agent("choose"),
+									transitions: { PRODUCE: "produce", BYPASS: "check" },
+								},
+							}
+						: {}),
+					produce: {
+						kind: "state" as const,
+						action: agent("produce", { reply: z.object({ id: z.string() }) }),
+						transitions: { DONE: "check" },
+					},
 					check: call({
-						to: service, event: "CHECK", input: {},
+						to: service,
+						event: "CHECK",
+						input: {},
 						transitions: {
 							ACCEPTED: { target: "finish", input: { id: binding } },
 							REJECTED: { target: "finish", input: { id: binding } },
 						},
 					}),
-					finish: { kind: "state" as const, input: { id: z.string() }, action: agent("finish"), transitions: { DONE: "settle" } },
+					finish: {
+						kind: "state" as const,
+						input: { id: z.string() },
+						action: agent("finish"),
+						transitions: { DONE: "settle" },
+					},
 					settle: reply({ target: "idle", output: { ok: true } }),
 				},
 			} as any);
 			const client = Client({});
 			return chart({
-				kind: "chart", id: "actor-call-transition-refs", actors: { service, client }, initial: "start",
+				kind: "chart",
+				id: "actor-call-transition-refs",
+				actors: { service, client },
+				initial: "start",
 				states: { start: send({ to: client, event: "RUN", input: {}, target: "done" }), done: final() },
 			});
 		};
@@ -205,9 +279,13 @@ describe("explicit event-sourced actors", () => {
 		const valid = normalizeChartConfig(clientChart(result("produce", "id")));
 		if (!valid.ok) throw new Error(JSON.stringify(valid.diagnostics));
 		const isolated = normalizeChartConfig(clientChart(arg("global")));
-		expect(isolated.ok ? [] : isolated.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "ACTOR_ISOLATION_VIOLATION" })]));
+		expect(isolated.ok ? [] : isolated.diagnostics).toEqual(
+			expect.arrayContaining([expect.objectContaining({ code: "ACTOR_ISOLATION_VIOLATION" })]),
+		);
 		const nonDominated = normalizeChartConfig(clientChart(result("produce", "id"), true));
-		expect(nonDominated.ok ? [] : nonDominated.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "NON_DOMINATED_REF" })]));
+		expect(nonDominated.ok ? [] : nonDominated.diagnostics).toEqual(
+			expect.arrayContaining([expect.objectContaining({ code: "NON_DOMINATED_REF" })]),
+		);
 	});
 
 	it("ignores a stale ok actor-effect response as a race loser instead of erroring the run", async () => {
@@ -231,14 +309,19 @@ describe("explicit event-sourced actors", () => {
 		expect(settledMessageIds(runtime.records, "@auditor")).toHaveLength(1);
 		const accepted = runtime.records.find((record) => record.type === "actor_message" && record.kind === "accepted");
 		expect(accepted).toMatchObject({ occurrence: "@auditor", receiveState: "@auditor.idle" });
-		expect(runtime.records.map((record) => record.type)).toEqual(expect.arrayContaining([
-			"actor_created",
-			"actor_messages_enqueued",
-			"actor_message",
-			"actor_scope",
-		]));
-		expect(runtime.records.filter((record) => record.type === "actor_created").every((record) => !("logicalOccurrence" in record))).toBe(true);
-		const replayed = projectBranch(createBranchProjection(runtime.ast), runtime.ast, JSON.parse(JSON.stringify(runtime.records)) as DurableLogRecord[]);
+		expect(runtime.records.map((record) => record.type)).toEqual(
+			expect.arrayContaining(["actor_created", "actor_messages_enqueued", "actor_message", "actor_scope"]),
+		);
+		expect(
+			runtime.records
+				.filter((record) => record.type === "actor_created")
+				.every((record) => !("logicalOccurrence" in record)),
+		).toBe(true);
+		const replayed = projectBranch(
+			createBranchProjection(runtime.ast),
+			runtime.ast,
+			JSON.parse(JSON.stringify(runtime.records)) as DurableLogRecord[],
+		);
 		expect(replayed.actors).toEqual(state.projection.actors);
 		expect(replayed.activeLeaves).toEqual(state.projection.activeLeaves);
 	});
@@ -247,19 +330,30 @@ describe("explicit event-sourced actors", () => {
 		const CrawlInput = z.object({ url: z.string() }).strict();
 		const CrawlProtocol = protocol({ CRAWL: message({ input: CrawlInput }) });
 		const Crawler = actor({
-			input: z.object({}).strict(), protocol: CrawlProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: CrawlProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { CRAWL: "crawl" } }),
-				crawl: { kind: "state", action: agent("crawler", { reply: z.array(CrawlInput) }), transitions: { LINKS: "queue", LEAF: "settle" } },
+				crawl: {
+					kind: "state",
+					action: agent("crawler", { reply: z.array(CrawlInput) }),
+					transitions: { LINKS: "queue", LEAF: "settle" },
+				},
 				queue: sendBatch({ to: self(), event: "CRAWL", inputs: result("crawl"), target: "settle" }),
 				settle: reply({ target: "idle" }),
 			},
 		});
 		const crawler = Crawler({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-self-send", actors: { crawler }, initial: "start",
-			states: { start: send({ to: crawler, event: "CRAWL", input: { url: "root" }, target: "done" }), done: final() },
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-self-send",
+				actors: { crawler },
+				initial: "start",
+				states: { start: send({ to: crawler, event: "CRAWL", input: { url: "root" }, target: "done" }), done: final() },
+			}),
+		);
 		const queue = ast.actors["@crawler"]?.kind === "actor" ? ast.actors["@crawler"].states.queue : undefined;
 		expect(queue).toMatchObject({ kind: "sendBatch", to: "@crawler", self: true });
 		expect(inspectChartAst(ast).states.find((state) => state.id === "@crawler.queue")).toMatchObject({
@@ -281,16 +375,28 @@ describe("explicit event-sourced actors", () => {
 			{ url: "b" },
 		]);
 		expect(settledMessageIds(runtime.records, "@crawler")).toHaveLength(3);
-		const selfEnqueue = runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState === "@crawler.queue");
-		expect(selfEnqueue).toMatchObject({ occurrence: "@crawler", generation: 1, source: { targetDeclaration: "@crawler", definition: { self: true } } });
-		expect(explainReplay(ast, runtime.records)).toMatchObject({ prefixEnd: runtime.records.length, stale: [], skipped: [] });
+		const selfEnqueue = runtime.records.find(
+			(record) => record.type === "actor_messages_enqueued" && record.source.producerState === "@crawler.queue",
+		);
+		expect(selfEnqueue).toMatchObject({
+			occurrence: "@crawler",
+			generation: 1,
+			source: { targetDeclaration: "@crawler", definition: { self: true } },
+		});
+		expect(explainReplay(ast, runtime.records)).toMatchObject({
+			prefixEnd: runtime.records.length,
+			stale: [],
+			skipped: [],
+		});
 	});
 
 	it("keeps singleton self-sends inside each map-owned occurrence while draining", async () => {
 		const WorkInput = z.object({ id: z.string() }).strict();
 		const WorkProtocol = protocol({ ROOT: message({ input: WorkInput }), CHILD: message({ input: WorkInput }) });
 		const Worker = actor({
-			input: z.object({ itemId: z.string() }).strict(), protocol: WorkProtocol, initial: "idle",
+			input: z.object({ itemId: z.string() }).strict(),
+			protocol: WorkProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { ROOT: "queue", CHILD: "settleChild" } }),
 				queue: send({ to: self(), event: "CHILD", input: messageInput("ROOT"), target: "settleRoot" }),
@@ -299,21 +405,30 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const worker = Worker({ itemId: item("id") });
-		const ast = parsed(chart({
-			kind: "chart", id: "map-self-send", initial: "prepare",
-			states: {
-				prepare: { kind: "state", action: agent("prepare-map-self"), transitions: { OK: "projects" } },
-				projects: map({
-					over: result("prepare", "items"), actors: { worker }, initial: "start", onDone: "done",
-					states: {
-						start: send({ to: worker, event: "ROOT", input: { id: item("id") }, target: "finished" }),
-						finished: final(),
-					},
-				}),
-				done: final(),
-			},
-		}));
-		const runtime = new ActorRuntime(ast, undefined, { prepare: [{ type: "OK", output: { items: { a: { id: "a" }, b: { id: "b" } } } }] });
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "map-self-send",
+				initial: "prepare",
+				states: {
+					prepare: { kind: "state", action: agent("prepare-map-self"), transitions: { OK: "projects" } },
+					projects: map({
+						over: result("prepare", "items"),
+						actors: { worker },
+						initial: "start",
+						onDone: "done",
+						states: {
+							start: send({ to: worker, event: "ROOT", input: { id: item("id") }, target: "finished" }),
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		const runtime = new ActorRuntime(ast, undefined, {
+			prepare: [{ type: "OK", output: { items: { a: { id: "a" }, b: { id: "b" } } } }],
+		});
 		const _state = await loop(runtime);
 		for (const key of ["a", "b"]) {
 			const occurrence = `projects#${key}.@worker`;
@@ -324,38 +439,59 @@ describe("explicit event-sourced actors", () => {
 			expect(settledMessageIds(runtime.records, occurrence)).toHaveLength(2);
 		}
 		const selfEnqueues = runtime.records.filter(isSelfEnqueue);
-		expect(selfEnqueues.map((record) => [record.source.producerState, record.occurrence])).toEqual(expect.arrayContaining([
-			["projects#a.@worker.queue", "projects#a.@worker"],
-			["projects#b.@worker.queue", "projects#b.@worker"],
-		]));
+		expect(selfEnqueues.map((record) => [record.source.producerState, record.occurrence])).toEqual(
+			expect.arrayContaining([
+				["projects#a.@worker.queue", "projects#a.@worker"],
+				["projects#b.@worker.queue", "projects#b.@worker"],
+			]),
+		);
 
 		const redirected = structuredClone(runtime.records);
-		const fromA = redirected.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState === "projects#a.@worker.queue");
+		const fromA = redirected.find(
+			(record) =>
+				record.type === "actor_messages_enqueued" && record.source.producerState === "projects#a.@worker.queue",
+		);
 		if (fromA?.type !== "actor_messages_enqueued") throw new Error("missing map self enqueue");
 		(fromA as { occurrence: string }).occurrence = "projects#b.@worker";
 		const redirectedReplay = explainReplay(ast, redirected);
-		expect(redirectedReplay.stale.map((entry) => entry.message)).toContain("Actor self-send escaped its producer occurrence for projects#a.@worker.queue");
+		expect(redirectedReplay.stale.map((entry) => entry.message)).toContain(
+			"Actor self-send escaped its producer occurrence for projects#a.@worker.queue",
+		);
 	});
 
 	it("routes pool worker self-send batches through the shared FIFO endpoint", async () => {
 		const WorkInput = z.object({ id: z.number() }).strict();
 		const WorkProtocol = protocol({ WORK: message({ input: WorkInput }) });
 		const Worker = actor({
-			input: z.object({}).strict(), protocol: WorkProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: WorkProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { WORK: "work" } }),
-				work: { kind: "state", action: agent("pool-self-worker", { reply: z.array(WorkInput) }), transitions: { MORE: "queue", DONE: "settle" } },
+				work: {
+					kind: "state",
+					action: agent("pool-self-worker", { reply: z.array(WorkInput) }),
+					transitions: { MORE: "queue", DONE: "settle" },
+				},
 				queue: sendBatch({ to: self(), event: "WORK", inputs: result("work"), target: "settle" }),
 				settle: reply({ target: "idle" }),
 			},
 		});
 		const workers = actorPool({ concurrency: 2, worker: Worker })({});
-		const ast = parsed(chart({
-			kind: "chart", id: "pool-self-send", actors: { workers }, initial: "start",
-			states: { start: send({ to: workers, event: "WORK", input: { id: 0 }, target: "done" }), done: final() },
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "pool-self-send",
+				actors: { workers },
+				initial: "start",
+				states: { start: send({ to: workers, event: "WORK", input: { id: 0 }, target: "done" }), done: final() },
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, {
-			"@workers.$worker-0.work": [{ type: "MORE", output: [{ id: 1 }, { id: 2 }] }, { type: "DONE", output: [] }],
+			"@workers.$worker-0.work": [
+				{ type: "MORE", output: [{ id: 1 }, { id: 2 }] },
+				{ type: "DONE", output: [] },
+			],
 			"@workers.$worker-1.work": [{ type: "DONE", output: [] }],
 		});
 		const state = await loop(runtime);
@@ -363,9 +499,20 @@ describe("explicit event-sourced actors", () => {
 		expect(pool).not.toHaveProperty("messages");
 		expect(enqueuedMessages(runtime.records, "@workers")).toHaveLength(3);
 		expect(settledMessageIds(runtime.records, "@workers")).toHaveLength(3);
-		const acceptedWorkers = runtime.records.flatMap((record) => record.type === "actor_message" && record.kind === "accepted" && record.occurrence === "@workers" && record.workerIndex !== undefined ? [record.workerIndex] : []);
+		const acceptedWorkers = runtime.records.flatMap((record) =>
+			record.type === "actor_message" &&
+			record.kind === "accepted" &&
+			record.occurrence === "@workers" &&
+			record.workerIndex !== undefined
+				? [record.workerIndex]
+				: [],
+		);
 		expect(new Set(acceptedWorkers)).toEqual(new Set([0, 1]));
-		expect(runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.source.producerState.includes(".$worker-"))).toMatchObject({
+		expect(
+			runtime.records.find(
+				(record) => record.type === "actor_messages_enqueued" && record.source.producerState.includes(".$worker-"),
+			),
+		).toMatchObject({
 			occurrence: "@workers",
 			source: { targetDeclaration: "@workers", definition: { self: true } },
 		});
@@ -374,7 +521,9 @@ describe("explicit event-sourced actors", () => {
 	it("holds an actor-owning compound final until queued mail drains before invoking its successor", async () => {
 		const WorkProtocol = protocol({ WORK: message({ input: z.object({ id: z.number() }).strict() }) });
 		const Worker = actor({
-			input: z.object({}).strict(), protocol: WorkProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: WorkProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { WORK: "work" } }),
 				work: { kind: "state", action: agent("mail-worker"), transitions: { DONE: "settle" } },
@@ -382,20 +531,26 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const worker = Worker({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-compound-drain-gate", initial: "phase",
-			states: {
-				phase: compound({
-					actors: { worker }, initial: "dispatch", onDone: "successor",
-					states: {
-						dispatch: sendBatch({ to: worker, event: "WORK", inputs: [{ id: 1 }, { id: 2 }], target: "finished" }),
-						finished: final(),
-					},
-				}),
-				successor: { kind: "state", action: agent("successor"), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-compound-drain-gate",
+				initial: "phase",
+				states: {
+					phase: compound({
+						actors: { worker },
+						initial: "dispatch",
+						onDone: "successor",
+						states: {
+							dispatch: sendBatch({ to: worker, event: "WORK", inputs: [{ id: 1 }, { id: 2 }], target: "finished" }),
+							finished: final(),
+						},
+					}),
+					successor: { kind: "state", action: agent("successor"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, {
 			"phase.@worker.work": ["DONE", "DONE"],
 			successor: ["DONE"],
@@ -406,8 +561,12 @@ describe("explicit event-sourced actors", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(enqueuedMessages(runtime.records, "phase.@worker")).toHaveLength(2);
 		expect(state.projection.actors["phase.@worker"]).not.toHaveProperty("messages");
-		const stopped = runtime.records.find((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "phase.@worker");
-		const successorInvoke = runtime.records.find((record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "successor");
+		const stopped = runtime.records.find(
+			(record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "phase.@worker",
+		);
+		const successorInvoke = runtime.records.find(
+			(record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "successor",
+		);
 		expect(stopped).toBeDefined();
 		expect(successorInvoke).toBeDefined();
 		assert(stopped !== undefined && successorInvoke !== undefined, "missing drain/successor facts");
@@ -417,7 +576,9 @@ describe("explicit event-sourced actors", () => {
 	it("keeps one actor handler invocation across unrelated main-chart transitions", async () => {
 		const WorkProtocol = protocol({ WORK: message({ input: z.object({}).strict() }) });
 		const Worker = actor({
-			input: z.object({}).strict(), protocol: WorkProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: WorkProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { WORK: "handle" } }),
 				handle: { kind: "state", action: agent("mail-worker"), transitions: { HANDLED: "settle" } },
@@ -425,32 +586,49 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const worker = Worker({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-handler-main-transition", actors: { worker }, initial: "dispatch",
-			states: {
-				dispatch: send({ to: worker, event: "WORK", input: {}, target: "advance" }),
-				advance: { kind: "state", action: agent("advance"), transitions: { NEXT: "done" } },
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-handler-main-transition",
+				actors: { worker },
+				initial: "dispatch",
+				states: {
+					dispatch: send({ to: worker, event: "WORK", input: {}, target: "advance" }),
+					advance: { kind: "state", action: agent("advance"), transitions: { NEXT: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, { advance: ["NEXT"] });
 		const running = loop(runtime);
 		const handler = await waitFor(
-			() => runtime.effectsSeen.find((effect): effect is Extract<Effect, { kind: "agent" }> =>
-				effect.kind === "agent" && effect.actionUid.state === "@worker.handle"),
+			() =>
+				runtime.effectsSeen.find(
+					(effect): effect is Extract<Effect, { kind: "agent" }> =>
+						effect.kind === "agent" && effect.actionUid.state === "@worker.handle",
+				),
 			"actor handler was not invoked",
 		);
 		await waitFor(
-			() => runtime.records.find((record) => record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "@worker"),
+			() =>
+				runtime.records.find(
+					(record) => record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "@worker",
+				),
 			"root actor did not begin closing after the main chart reached final",
 		);
 
-		const handlerInvokes = runtime.records.filter((record) =>
-			record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "@worker.handle");
+		const handlerInvokes = runtime.records.filter(
+			(record) =>
+				record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "@worker.handle",
+		);
 		expect(handlerInvokes).toHaveLength(1);
-		expect(runtime.effectsSeen.filter((effect) => effect.kind === "agent" && effect.actionUid.state === "@worker.handle")).toHaveLength(1);
+		expect(
+			runtime.effectsSeen.filter((effect) => effect.kind === "agent" && effect.actionUid.state === "@worker.handle"),
+		).toHaveLength(1);
 
-		runtime.queue.send({ kind: "agent", effectId: handler.id,
+		runtime.queue.send({
+			kind: "agent",
+			effectId: handler.id,
 			outcome: { kind: "completed", event: { type: "HANDLED" } },
 		});
 		const state = await running;
@@ -459,67 +637,85 @@ describe("explicit event-sourced actors", () => {
 	});
 
 	it("keeps compounds without actors atomic on final entry", () => {
-		const ast = parsed(chart({
-			kind: "chart", id: "compound-atomic-exit", initial: "phase",
-			states: {
-				phase: compound({ initial: "finished", onDone: "successor", states: { finished: final() } }),
-				successor: { kind: "state", action: agent("successor"), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "compound-atomic-exit",
+				initial: "phase",
+				states: {
+					phase: compound({ initial: "finished", onDone: "successor", states: { finished: final() } }),
+					successor: { kind: "state", action: agent("successor"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 
 		expect(createBranchProjection(ast).activeLeaves).toEqual(["successor"]);
 	});
 
 	it("drains an actor owned by a completed parallel region before the parallel joins", async () => {
 		const auditor = Auditor({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-parallel-region", initial: "audit",
-			states: {
-				audit: parallel({
-					onDone: "done",
-					states: {
-						a: compound({
-							actors: { auditor }, initial: "record",
-							states: {
-								record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "adone" }),
-								adone: final(),
-							},
-						}),
-						b: compound({ initial: "bdone", states: { bdone: final() } }),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-parallel-region",
+				initial: "audit",
+				states: {
+					audit: parallel({
+						onDone: "done",
+						states: {
+							a: compound({
+								actors: { auditor },
+								initial: "record",
+								states: {
+									record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "adone" }),
+									adone: final(),
+								},
+							}),
+							b: compound({ initial: "bdone", states: { bdone: final() } }),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.actors["audit.a.@auditor"]).toMatchObject({ status: "stopped" });
-		expect(runtime.records.flatMap((record) => record.type === "actor_scope" && record.occurrence === "audit.a.@auditor" ? [record.kind] : [])).toEqual(["closing", "stopped"]);
+		expect(
+			runtime.records.flatMap((record) =>
+				record.type === "actor_scope" && record.occurrence === "audit.a.@auditor" ? [record.kind] : [],
+			),
+		).toEqual(["closing", "stopped"]);
 	});
 
 	it("drains an actor owned directly by a parallel before the parallel joins", async () => {
 		const auditor = Auditor({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-parallel-owner", initial: "audit",
-			states: {
-				audit: parallel({
-					actors: { auditor }, onDone: "done",
-					states: {
-						a: compound({
-							initial: "record",
-							states: {
-								record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "adone" }),
-								adone: final(),
-							},
-						}),
-						b: compound({ initial: "bdone", states: { bdone: final() } }),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-parallel-owner",
+				initial: "audit",
+				states: {
+					audit: parallel({
+						actors: { auditor },
+						onDone: "done",
+						states: {
+							a: compound({
+								initial: "record",
+								states: {
+									record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "adone" }),
+									adone: final(),
+								},
+							}),
+							b: compound({ initial: "bdone", states: { bdone: final() } }),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
@@ -527,19 +723,28 @@ describe("explicit event-sourced actors", () => {
 	});
 
 	it("preserves unknown kind objects in chart-level send input", async () => {
-		const DataProtocol = protocol({ STORE: message({ input: z.object({ note: z.object({ kind: z.string() }).strict() }).strict() }) });
+		const DataProtocol = protocol({
+			STORE: message({ input: z.object({ note: z.object({ kind: z.string() }).strict() }).strict() }),
+		});
 		const Store = actor({
-			input: z.object({}).strict(), protocol: DataProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: DataProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { STORE: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const store = Store({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-data-kind-send", actors: { store }, initial: "send",
-			states: {
-				send: send({ to: store, event: "STORE", input: { note: { kind: "unit" } }, target: "done" }),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-data-kind-send",
+				actors: { store },
+				initial: "send",
+				states: {
+					send: send({ to: store, event: "STORE", input: { note: { kind: "unit" } }, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
@@ -555,10 +760,15 @@ describe("explicit event-sourced actors", () => {
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const placed = Placed({ meta: { kind: "unit" } });
-		const normalized = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-data-kind-placement", actors: { placed }, initial: "ping",
-			states: { ping: send({ to: placed, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
+		const normalized = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-data-kind-placement",
+				actors: { placed },
+				initial: "ping",
+				states: { ping: send({ to: placed, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		expect(normalized.ok).toBe(true);
 		assert(normalized.ok, JSON.stringify(normalized.diagnostics));
 		expect(normalized.diagnostics).toEqual([]);
@@ -568,37 +778,66 @@ describe("explicit event-sourced actors", () => {
 	});
 
 	it("settles an actor message through an after-only timer path", async () => {
-		const TimedProtocol = protocol({ RUN: message({ input: z.object({}).strict(), reply: z.object({ timedOut: z.boolean() }).strict() }) });
+		const TimedProtocol = protocol({
+			RUN: message({ input: z.object({}).strict(), reply: z.object({ timedOut: z.boolean() }).strict() }),
+		});
 		const Timed = actor({
-			input: z.object({}).strict(), protocol: TimedProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: TimedProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { RUN: "work" } }),
-				work: { kind: "state", action: agent("slow-worker"), transitions: {}, after: { delayMs: 10, target: "settle" } },
+				work: {
+					kind: "state",
+					action: agent("slow-worker"),
+					transitions: {},
+					after: { delayMs: 10, target: "settle" },
+				},
 				settle: reply({ target: "idle", output: { timedOut: true } }),
 			},
 		});
 		const timed = Timed({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-after-execution", actors: { timed }, initial: "run",
-			states: { run: call({ to: timed, event: "RUN", input: {}, target: "done" }), done: final() },
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-after-execution",
+				actors: { timed },
+				initial: "run",
+				states: { run: call({ to: timed, event: "RUN", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.results.run).toEqual({ timedOut: true });
-		expect(runtime.records.some((record) => record.type === "state_action" && record.kind === "timer_fired" && record.actionUid.state === "@timed.work")).toBe(true);
+		expect(
+			runtime.records.some(
+				(record) =>
+					record.type === "state_action" && record.kind === "timer_fired" && record.actionUid.state === "@timed.work",
+			),
+		).toBe(true);
 		expect(settledMessageIds(runtime.records, "@timed")).toHaveLength(1);
 	});
 
 	it("processes an authored-order batch one message at a time", async () => {
 		const auditor = Auditor({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-batch", actors: { auditor }, initial: "record",
-			states: {
-				record: sendBatch({ to: auditor, event: "RECORD", inputs: [{ path: "a" }, { path: "b" }, { path: "c" }], target: "done" }),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-batch",
+				actors: { auditor },
+				initial: "record",
+				states: {
+					record: sendBatch({
+						to: auditor,
+						event: "RECORD",
+						inputs: [{ path: "a" }, { path: "b" }, { path: "c" }],
+						target: "done",
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(enqueuedMessages(runtime.records, "@auditor").map((entry) => entry.input)).toEqual([
@@ -614,38 +853,63 @@ describe("explicit event-sourced actors", () => {
 
 	it("correlates a call and routes the exact named reply", async () => {
 		const editor = Editor({ file: "src/index.ts" });
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-call", actors: { editor }, initial: "apply",
-			states: {
-				apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "rework" } }),
-				rework: failed(),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-call",
+				actors: { editor },
+				initial: "apply",
+				states: {
+					apply: call({
+						to: editor,
+						event: "APPLY",
+						input: { patch: "p" },
+						transitions: { APPLIED: "done", REJECTED: "rework" },
+					}),
+					rework: failed(),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.results.apply).toEqual({ commit: "c1" });
 		expect(state.projection.pendingActorCalls).toEqual({});
 		expect(state.projection.liveActorMessages).toEqual({});
-		expect(runtime.records.some((record) => record.type === "actor_call_resolved" && record.replyEvent === "APPLIED")).toBe(true);
+		expect(
+			runtime.records.some((record) => record.type === "actor_call_resolved" && record.replyEvent === "APPLIED"),
+		).toBe(true);
 	});
 
 	it("creates isolated map-local occurrences and waits for their structured drain", async () => {
 		const editor = Editor({ file: item("file") });
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-map", initial: "projects",
-			states: {
-				projects: map({
-					over: arg("projects"), actors: { editor }, initial: "apply", onDone: "done",
-					states: {
-						apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "finished", REJECTED: "failed" } }),
-						finished: final(), failed: failed(),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-map",
+				initial: "projects",
+				states: {
+					projects: map({
+						over: arg("projects"),
+						actors: { editor },
+						initial: "apply",
+						onDone: "done",
+						states: {
+							apply: call({
+								to: editor,
+								event: "APPLY",
+								input: { patch: "p" },
+								transitions: { APPLIED: "finished", REJECTED: "failed" },
+							}),
+							finished: final(),
+							failed: failed(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await start(runtime, { projects: { a: { file: "a.ts" }, b: { file: "b.ts" } } });
 		expect(state.projection.activeLeaves).toEqual(["done"]);
@@ -664,7 +928,9 @@ describe("explicit event-sourced actors", () => {
 	it("allows one map item to invoke main-chart work while another item's actor drains", async () => {
 		const WorkProtocol = protocol({ WORK: message({ input: z.object({}).strict() }) });
 		const Worker = actor({
-			input: z.object({}).strict(), protocol: WorkProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: WorkProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { WORK: "handle" } }),
 				handle: { kind: "state", action: agent("actor-handler"), transitions: { DONE: "settle" } },
@@ -672,63 +938,110 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const worker = Worker({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-map-independent-drain", initial: "projects",
-			states: {
-				projects: map({
-					over: arg("projects"), actors: { worker }, initial: "dispatch", onDone: "done",
-					states: {
-						dispatch: send({ to: worker, event: "WORK", input: {}, target: "choose" }),
-						choose: { kind: "state", action: agent("chooser"), transitions: { FINISH: "finished", CONTINUE: "continue" } },
-						continue: { kind: "state", action: agent("continuation"), transitions: { DONE: "finished" } },
-						finished: final(),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-map-independent-drain",
+				initial: "projects",
+				states: {
+					projects: map({
+						over: arg("projects"),
+						actors: { worker },
+						initial: "dispatch",
+						onDone: "done",
+						states: {
+							dispatch: send({ to: worker, event: "WORK", input: {}, target: "choose" }),
+							choose: {
+								kind: "state",
+								action: agent("chooser"),
+								transitions: { FINISH: "finished", CONTINUE: "continue" },
+							},
+							continue: { kind: "state", action: agent("continuation"), transitions: { DONE: "finished" } },
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const running = start(runtime, { projects: { a: {}, b: {} } });
-		const agentEffect = (statePath: string) => [...runtime.effectsSeen].reverse().find(
-			(effect): effect is Extract<Effect, { kind: "agent" }> => effect.kind === "agent" && effect.actionUid.state === statePath,
-		);
+		const agentEffect = (statePath: string) =>
+			[...runtime.effectsSeen]
+				.reverse()
+				.find(
+					(effect): effect is Extract<Effect, { kind: "agent" }> =>
+						effect.kind === "agent" && effect.actionUid.state === statePath,
+				);
 
 		const chooseA = await waitFor(() => agentEffect("projects#a.choose"), "item #a chooser was not invoked");
 		const chooseB = await waitFor(() => agentEffect("projects#b.choose"), "item #b chooser was not invoked");
 		await waitFor(() => agentEffect("projects#a.@worker.handle"), "item #a actor handler was not invoked");
 		await waitFor(() => agentEffect("projects#b.@worker.handle"), "item #b actor handler was not invoked");
-		runtime.queue.send({ kind: "agent", effectId: chooseA.id,
+		runtime.queue.send({
+			kind: "agent",
+			effectId: chooseA.id,
 			outcome: { kind: "completed", event: { type: "FINISH" } },
 		});
 		await waitFor(
-			() => runtime.records.find((record) => record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "projects#a.@worker"),
+			() =>
+				runtime.records.find(
+					(record) =>
+						record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "projects#a.@worker",
+				),
 			"item #a actor did not begin draining",
 		);
-		expect(runtime.records.some((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "projects#a.@worker")).toBe(false);
+		expect(
+			runtime.records.some(
+				(record) =>
+					record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "projects#a.@worker",
+			),
+		).toBe(false);
 
-		runtime.queue.send({ kind: "agent", effectId: chooseB.id,
+		runtime.queue.send({
+			kind: "agent",
+			effectId: chooseB.id,
 			outcome: { kind: "completed", event: { type: "CONTINUE" } },
 		});
-		const continuation = await waitFor(() => agentEffect("projects#b.continue"), "item #b continuation was serialized behind item #a drain");
-		expect(runtime.records.some((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "projects#a.@worker")).toBe(false);
+		const continuation = await waitFor(
+			() => agentEffect("projects#b.continue"),
+			"item #b continuation was serialized behind item #a drain",
+		);
+		expect(
+			runtime.records.some(
+				(record) =>
+					record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "projects#a.@worker",
+			),
+		).toBe(false);
 
-		runtime.queue.send({ kind: "agent", effectId: continuation.id,
+		runtime.queue.send({
+			kind: "agent",
+			effectId: continuation.id,
 			outcome: { kind: "completed", event: { type: "DONE" } },
 		});
 		await waitFor(
-			() => runtime.records.find((record) => record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "projects#b.@worker"),
+			() =>
+				runtime.records.find(
+					(record) =>
+						record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "projects#b.@worker",
+				),
 			"item #b actor did not begin draining",
 		);
 		for (const statePath of ["projects#a.@worker.handle", "projects#b.@worker.handle"]) {
 			const handler = agentEffect(statePath);
 			assert(handler !== undefined, `missing ${statePath}`);
-			runtime.queue.send({ kind: "agent", effectId: handler.id,
+			runtime.queue.send({
+				kind: "agent",
+				effectId: handler.id,
 				outcome: { kind: "completed", event: { type: "DONE" } },
 			});
 		}
 		for (const occurrence of ["projects#a.@worker", "projects#b.@worker"]) {
 			await waitFor(
-				() => runtime.records.find((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === occurrence),
+				() =>
+					runtime.records.find(
+						(record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === occurrence,
+					),
 				`${occurrence} did not stop`,
 			);
 		}
@@ -739,7 +1052,9 @@ describe("explicit event-sourced actors", () => {
 	it("keeps chart-level actors open while a map waits for item actors to drain", async () => {
 		const WorkerProtocol = protocol({ PROCESS: message({ input: z.object({}).strict() }) });
 		const Worker = actor({
-			input: z.object({}).strict(), protocol: WorkerProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: WorkerProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { PROCESS: "work" } }),
 				work: { kind: "state", action: agent("item-worker"), transitions: { DONE: "settle" } },
@@ -748,20 +1063,28 @@ describe("explicit event-sourced actors", () => {
 		});
 		const auditor = Auditor({});
 		const worker = Worker({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-root-map-drain", actors: { auditor }, initial: "projects",
-			states: {
-				projects: map({
-					over: arg("projects"), actors: { worker }, initial: "process", onDone: "record",
-					states: {
-						process: send({ to: worker, event: "PROCESS", input: {}, target: "finished" }),
-						finished: final(),
-					},
-				}),
-				record: send({ to: auditor, event: "RECORD", input: { path: "after-map.log" }, target: "done" }),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-root-map-drain",
+				actors: { auditor },
+				initial: "projects",
+				states: {
+					projects: map({
+						over: arg("projects"),
+						actors: { worker },
+						initial: "process",
+						onDone: "record",
+						states: {
+							process: send({ to: worker, event: "PROCESS", input: {}, target: "finished" }),
+							finished: final(),
+						},
+					}),
+					record: send({ to: auditor, event: "RECORD", input: { path: "after-map.log" }, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, {
 			"projects#a.@worker.work": ["DONE"],
 			"projects#b.@worker.work": ["DONE"],
@@ -775,49 +1098,83 @@ describe("explicit event-sourced actors", () => {
 
 		const mapItemSeqIds = runtime.records.flatMap((record) => {
 			if (record.type === "state_action" && record.actionUid.state.startsWith("projects#")) return [record.seqId];
-			if ("occurrence" in record && typeof record.occurrence === "string" && record.occurrence.startsWith("projects#")) return [record.seqId];
+			if ("occurrence" in record && typeof record.occurrence === "string" && record.occurrence.startsWith("projects#"))
+				return [record.seqId];
 			return [];
 		});
 		expect(mapItemSeqIds.length).toBeGreaterThan(0);
-		const auditorClosing = runtime.records.find((record) => record.type === "actor_scope" && record.occurrence === "@auditor" && record.kind === "closing");
-		const auditorEnqueue = runtime.records.find((record) => record.type === "actor_messages_enqueued" && record.occurrence === "@auditor");
+		const auditorClosing = runtime.records.find(
+			(record) => record.type === "actor_scope" && record.occurrence === "@auditor" && record.kind === "closing",
+		);
+		const auditorEnqueue = runtime.records.find(
+			(record) => record.type === "actor_messages_enqueued" && record.occurrence === "@auditor",
+		);
 		expect(auditorClosing).toBeDefined();
 		expect(auditorEnqueue).toBeDefined();
 		assert(auditorClosing !== undefined && auditorEnqueue !== undefined, "missing auditor lifecycle facts");
 		expect(auditorClosing.seqId).toBeGreaterThan(Math.max(...mapItemSeqIds));
 		expect(auditorClosing.seqId).toBeGreaterThan(auditorEnqueue.seqId);
-		expect(runtime.records.flatMap((record) => record.type === "actor_scope" && record.occurrence === "@auditor" ? [record.kind] : [])).toEqual(["closing", "stopped"]);
+		expect(
+			runtime.records.flatMap((record) =>
+				record.type === "actor_scope" && record.occurrence === "@auditor" ? [record.kind] : [],
+			),
+		).toEqual(["closing", "stopped"]);
 	});
 
 	it("projects faithful inspector hierarchy, unique occurrences, internal states, and call edges", async () => {
 		const editor = Editor({ file: item("file") });
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-inspector", initial: "projects",
-			states: {
-				projects: map({
-					over: arg("projects"), actors: { editor }, initial: "apply", onDone: "done",
-					states: {
-						apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "finished", REJECTED: "failed" } }),
-						finished: final(), failed: failed(),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-inspector",
+				initial: "projects",
+				states: {
+					projects: map({
+						over: arg("projects"),
+						actors: { editor },
+						initial: "apply",
+						onDone: "done",
+						states: {
+							apply: call({
+								to: editor,
+								event: "APPLY",
+								input: { patch: "p" },
+								transitions: { APPLIED: "finished", REJECTED: "failed" },
+							}),
+							finished: final(),
+							failed: failed(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		await start(runtime, { projects: { a: { file: "a.ts" }, b: { file: "b.ts" } } });
 		const run = hyperchartRunFromRuntime(inspectChartAst(ast), ast, runtime.records);
 		expect(new Set(run.states.map((entry) => entry.id)).size).toBe(run.states.length);
-		expect(run.states).toEqual(expect.arrayContaining([
-			expect.objectContaining({
-				id: "projects#a.@editor",
-				scopeParentId: "projects#a",
-				actorDeclaration: expect.objectContaining({ declarationPath: "projects.@editor" }),
-				actorOccurrence: expect.objectContaining({ occurrencePath: "projects#a.@editor", generation: 1 }),
-			}),
-			expect.objectContaining({ id: "projects#a.@editor.idle", scopeParentId: "projects#a.@editor", runtimeStatePath: "projects#a.@editor.idle", type: "receive" }),
-			expect.objectContaining({ id: "projects#a.@editor.applied", scopeParentId: "projects#a.@editor", runtimeStatePath: "projects#a.@editor.applied", type: "reply" }),
-		]));
+		expect(run.states).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: "projects#a.@editor",
+					scopeParentId: "projects#a",
+					actorDeclaration: expect.objectContaining({ declarationPath: "projects.@editor" }),
+					actorOccurrence: expect.objectContaining({ occurrencePath: "projects#a.@editor", generation: 1 }),
+				}),
+				expect.objectContaining({
+					id: "projects#a.@editor.idle",
+					scopeParentId: "projects#a.@editor",
+					runtimeStatePath: "projects#a.@editor.idle",
+					type: "receive",
+				}),
+				expect.objectContaining({
+					id: "projects#a.@editor.applied",
+					scopeParentId: "projects#a.@editor",
+					runtimeStatePath: "projects#a.@editor.applied",
+					type: "reply",
+				}),
+			]),
+		);
 		const caller = run.states.find((entry) => entry.id === "projects#a.apply");
 		expect(caller?.actorMessageLink).toEqual({
 			kind: "call",
@@ -829,10 +1186,18 @@ describe("explicit event-sourced actors", () => {
 
 	it("fails an invalid batch atomically without writing a partial enqueue", async () => {
 		const auditor = Auditor({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-invalid-batch", actors: { auditor }, initial: "record",
-			states: { record: sendBatch({ to: auditor, event: "RECORD", inputs: [{ path: "a" }], target: "done" }), done: final() },
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-invalid-batch",
+				actors: { auditor },
+				initial: "record",
+				states: {
+					record: sendBatch({ to: auditor, event: "RECORD", inputs: [{ path: "a" }], target: "done" }),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast, "enqueue");
 		const state = await loop(runtime);
 		expect(state.projection.failure?.error).toBe("batch validation");
@@ -841,13 +1206,23 @@ describe("explicit event-sourced actors", () => {
 
 	it("terminalizes actor failure without durable cancellation records", async () => {
 		const editor = Editor({ file: "src/index.ts" });
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-failure", actors: { editor }, initial: "apply",
-			states: {
-				apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "done" } }),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-failure",
+				actors: { editor },
+				initial: "apply",
+				states: {
+					apply: call({
+						to: editor,
+						event: "APPLY",
+						input: { patch: "p" },
+						transitions: { APPLIED: "done", REJECTED: "done" },
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast, "reply");
 		const state = await loop(runtime);
 		expect(state.projection.failure?.error).toBe("reply validation");
@@ -860,54 +1235,81 @@ describe("explicit event-sourced actors", () => {
 			B: message({ input: z.object({ value: z.string() }) }),
 		});
 		const Mixed = actor({
-			input: z.object({}), protocol: MixedProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: MixedProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { A: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const mixed = Mixed({});
-		const ast = parsed(chart({
-			kind: "chart", id: "unsupported-head", actors: { mixed }, initial: "send",
-			states: { send: send({ to: mixed, event: "B", input: { value: "bad" }, target: "done" }), done: final() },
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "unsupported-head",
+				actors: { mixed },
+				initial: "send",
+				states: { send: send({ to: mixed, event: "B", input: { value: "bad" }, target: "done" }), done: final() },
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		const state = await loop(runtime);
 		expect(state.projection.failure?.error).toContain("unsupported");
-		const types = runtime.records.map((record) => record.type === "actor_message" ? `${record.type}/${record.kind}` : record.type);
+		const types = runtime.records.map((record) =>
+			record.type === "actor_message" ? `${record.type}/${record.kind}` : record.type,
+		);
 		expect(types).not.toContain("actor_message/accepted");
 		expect(types.indexOf("failure_intent")).toBeGreaterThan(types.indexOf("actor_messages_enqueued"));
 	});
 
 	it("accepts the next resumed message using live receive routing while preserving logged provenance", async () => {
-		const RouteProtocol = protocol({ PING: message({ input: z.object({}).strict(), reply: z.object({ route: z.string() }).strict() }) });
+		const RouteProtocol = protocol({
+			PING: message({ input: z.object({}).strict(), reply: z.object({ route: z.string() }).strict() }),
+		});
 		const makeChart = (target: "logged" | "live") => {
-			const Routed = target === "logged"
-				? actor({
-					input: z.object({}).strict(), protocol: RouteProtocol, initial: "idle",
-					states: {
-						idle: receive({ on: { PING: "logged" } }),
-						logged: reply({ target: "idle", output: { route: "logged" } }),
-					},
-				})
-				: actor({
-					input: z.object({}).strict(), protocol: RouteProtocol, initial: "idle",
-					states: {
-						idle: receive({ on: { PING: "live" } }),
-						live: reply({ target: "idle", output: { route: "live" } }),
-					},
-				});
+			const Routed =
+				target === "logged"
+					? actor({
+							input: z.object({}).strict(),
+							protocol: RouteProtocol,
+							initial: "idle",
+							states: {
+								idle: receive({ on: { PING: "logged" } }),
+								logged: reply({ target: "idle", output: { route: "logged" } }),
+							},
+						})
+					: actor({
+							input: z.object({}).strict(),
+							protocol: RouteProtocol,
+							initial: "idle",
+							states: {
+								idle: receive({ on: { PING: "live" } }),
+								live: reply({ target: "idle", output: { route: "live" } }),
+							},
+						});
 			const routed = Routed({});
-			return parsed(chart({
-				kind: "chart", id: "actor-live-routing", actors: { routed }, initial: "ping",
-				states: { ping: call({ to: routed, event: "PING", input: {}, target: "done" }), done: final() },
-			}));
+			return parsed(
+				chart({
+					kind: "chart",
+					id: "actor-live-routing",
+					actors: { routed },
+					initial: "ping",
+					states: { ping: call({ to: routed, event: "PING", input: {}, target: "done" }), done: final() },
+				}),
+			);
 		};
 		const oldAst = makeChart("logged");
 		const oldRuntime = new ActorRuntime(oldAst);
 		await loop(oldRuntime);
-		const acceptedIndex = oldRuntime.records.findIndex((record) => record.type === "actor_message" && record.kind === "accepted");
+		const acceptedIndex = oldRuntime.records.findIndex(
+			(record) => record.type === "actor_message" && record.kind === "accepted",
+		);
 		expect(acceptedIndex).toBeGreaterThan(0);
 		const prefix = JSON.parse(JSON.stringify(oldRuntime.records.slice(0, acceptedIndex))) as DurableLogRecord[];
 		const created = prefix.find((record) => record.type === "actor_created");
-		expect(created?.type === "actor_created" && created.definition.kind === "actor" ? created.definition.states.idle : undefined).toMatchObject({ kind: "receive", on: { PING: "logged" } });
+		expect(
+			created?.type === "actor_created" && created.definition.kind === "actor"
+				? created.definition.states.idle
+				: undefined,
+		).toMatchObject({ kind: "receive", on: { PING: "logged" } });
 
 		const liveRuntime = new ActorRuntime(makeChart("live"));
 		liveRuntime.records.push(...prefix);
@@ -920,13 +1322,23 @@ describe("explicit event-sourced actors", () => {
 
 	it("rejects reuse of a settled message identity from the retained producer visit", async () => {
 		const editor = Editor({ file: "src/index.ts" });
-		const ast = parsed(chart({
-			kind: "chart", id: "settled-message-id-reuse", actors: { editor }, initial: "apply",
-			states: {
-				apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "done" } }),
-				done: final(),
-			},
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "settled-message-id-reuse",
+				actors: { editor },
+				initial: "apply",
+				states: {
+					apply: call({
+						to: editor,
+						event: "APPLY",
+						input: { patch: "p" },
+						transitions: { APPLIED: "done", REJECTED: "done" },
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const runtime = new ActorRuntime(ast);
 		await loop(runtime);
 		const reused = structuredClone(runtime.records);
@@ -946,25 +1358,41 @@ describe("explicit event-sourced actors", () => {
 		const originalRuntime = new ActorRuntime(parsed());
 		await loop(originalRuntime);
 		const changedAuditor = Auditor({});
-		const changed = parsed(chart({
-			kind: "chart", id: "actor-void-send", actors: { auditor: changedAuditor }, initial: "record",
-			states: {
-				record: send({ to: changedAuditor, event: "RECORD", input: { path: "audit.log" }, target: "after" }),
-				after: final(), done: final(),
-			},
-		}));
-		expect(explainReplay(changed, originalRuntime.records).stale).toEqual(expect.arrayContaining([
-			expect.objectContaining({ reason: "actor_message_source_changed", state: "record" }),
-		]));
+		const changed = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-void-send",
+				actors: { auditor: changedAuditor },
+				initial: "record",
+				states: {
+					record: send({ to: changedAuditor, event: "RECORD", input: { path: "audit.log" }, target: "after" }),
+					after: final(),
+					done: final(),
+				},
+			}),
+		);
+		expect(explainReplay(changed, originalRuntime.records).stale).toEqual(
+			expect.arrayContaining([expect.objectContaining({ reason: "actor_message_source_changed", state: "record" })]),
+		);
 
 		const editor = Editor({ file: "src/index.ts" });
-		const callAst = parsed(chart({
-			kind: "chart", id: "broken-call-order", actors: { editor }, initial: "apply",
-			states: {
-				apply: call({ to: editor, event: "APPLY", input: { patch: "p" }, transitions: { APPLIED: "done", REJECTED: "done" } }),
-				done: final(),
-			},
-		}));
+		const callAst = parsed(
+			chart({
+				kind: "chart",
+				id: "broken-call-order",
+				actors: { editor },
+				initial: "apply",
+				states: {
+					apply: call({
+						to: editor,
+						event: "APPLY",
+						input: { patch: "p" },
+						transitions: { APPLIED: "done", REJECTED: "done" },
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const callRuntime = new ActorRuntime(callAst);
 		await loop(callRuntime);
 		const broken = [...callRuntime.records];
@@ -987,7 +1415,9 @@ describe("explicit event-sourced actors", () => {
 			APPLY: message({ input: z.object({ patch: z.string() }), reply: z.object({ commit: z.string() }) }),
 		});
 		const Local = actor({
-			input: z.object({ file: z.string() }), protocol: LocalProtocol, initial: "idle",
+			input: z.object({ file: z.string() }),
+			protocol: LocalProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { APPLY: "work" } }),
 				work: {
@@ -1013,18 +1443,27 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const local = Local({ file: "src/file.ts" });
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-local", actors: { local }, initial: "apply",
-			states: { apply: call({ to: local, event: "APPLY", input: { patch: "p1" }, target: "done" }), done: final() },
-		}));
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-local",
+				actors: { local },
+				initial: "apply",
+				states: { apply: call({ to: local, event: "APPLY", input: { patch: "p1" }, target: "done" }), done: final() },
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, {
 			"@local.work": [{ type: "DONE", output: { commit: "c1" } }],
 			"@local.verify": [{ type: "VERIFIED", output: { commit: "c1" } }],
 		});
 		const state = await loop(runtime);
 		expect(state.projection.results.apply).toEqual({ commit: "c1" });
-		const work = runtime.effectsSeen.find((effect) => effect.kind === "agent" && effect.actionUid.state === "@local.work");
-		const verify = runtime.effectsSeen.find((effect) => effect.kind === "agent" && effect.actionUid.state === "@local.verify");
+		const work = runtime.effectsSeen.find(
+			(effect) => effect.kind === "agent" && effect.actionUid.state === "@local.work",
+		);
+		const verify = runtime.effectsSeen.find(
+			(effect) => effect.kind === "agent" && effect.actionUid.state === "@local.verify",
+		);
 		expect(work?.kind === "agent" ? work.task : undefined).toBe("apply p1 to src/file.ts");
 		expect(work?.kind === "agent" ? work.artifacts?.[0]?.path : undefined).toBe("src/file.ts.changed");
 		expect(verify?.kind === "agent" ? verify.task : undefined).toBe("verify c1");
@@ -1033,24 +1472,38 @@ describe("explicit event-sourced actors", () => {
 
 	it("creates a new generation after a compound owner exits and re-enters", async () => {
 		const auditor = Auditor({});
-		const ast = parsed(chart({
-			kind: "chart", id: "actor-reentry", initial: "phase",
-			states: {
-				phase: {
-					kind: "compound", actors: { auditor }, initial: "record", onDone: "between",
-					states: {
-						record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "finished" }),
-						finished: final(),
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "actor-reentry",
+				initial: "phase",
+				states: {
+					phase: {
+						kind: "compound",
+						actors: { auditor },
+						initial: "record",
+						onDone: "between",
+						states: {
+							record: send({ to: auditor, event: "RECORD", input: { path: "audit.log" }, target: "finished" }),
+							finished: final(),
+						},
 					},
+					between: {
+						kind: "state",
+						action: { kind: "agent", name: "chooser" },
+						transitions: { AGAIN: "phase", DONE: "done" },
+					},
+					done: final(),
 				},
-				between: { kind: "state", action: { kind: "agent", name: "chooser" }, transitions: { AGAIN: "phase", DONE: "done" } },
-				done: final(),
-			},
-		}));
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, { between: ["AGAIN", "DONE"] });
 		const state = await loop(runtime);
 		expect(Object.keys(state.projection.actors)).toEqual(["phase.@auditor", "phase.@auditor~2"]);
-		expect(Object.values(state.projection.actors).map((entry) => [entry.generation, entry.status])).toEqual([[1, "stopped"], [2, "stopped"]]);
+		expect(Object.values(state.projection.actors).map((entry) => [entry.generation, entry.status])).toEqual([
+			[1, "stopped"],
+			[2, "stopped"],
+		]);
 		const run = hyperchartRunFromRuntime(inspectChartAst(ast), ast, runtime.records);
 		const actorNodes = run.states.filter((entry) => entry.actorOccurrence?.logicalPath === "phase.@auditor");
 		expect(actorNodes).toHaveLength(1);
@@ -1073,7 +1526,9 @@ describe("explicit event-sourced actors", () => {
 		const Ping = z.object({ value: z.string() }).strict();
 		const SelfProtocol = protocol({ ROOT: message({ input: Ping }), CHILD: message({ input: Ping }) });
 		const SelfWorker = actor({
-			input: z.object({}).strict(), protocol: SelfProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: SelfProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { ROOT: "queue", CHILD: "settleChild" } }),
 				queue: send({ to: self(), event: "CHILD", input: messageInput("ROOT"), target: "settleRoot" }),
@@ -1082,17 +1537,31 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const worker = SelfWorker({});
-		const ast = parsed(chart({
-			kind: "chart", id: "self-reentry", initial: "phase",
-			states: {
-				phase: {
-					kind: "compound", actors: { worker }, initial: "start", onDone: "between",
-					states: { start: send({ to: worker, event: "ROOT", input: { value: "ping" }, target: "finished" }), finished: final() },
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "self-reentry",
+				initial: "phase",
+				states: {
+					phase: {
+						kind: "compound",
+						actors: { worker },
+						initial: "start",
+						onDone: "between",
+						states: {
+							start: send({ to: worker, event: "ROOT", input: { value: "ping" }, target: "finished" }),
+							finished: final(),
+						},
+					},
+					between: {
+						kind: "state",
+						action: agent("self-reentry-choice"),
+						transitions: { AGAIN: "phase", DONE: "done" },
+					},
+					done: final(),
 				},
-				between: { kind: "state", action: agent("self-reentry-choice"), transitions: { AGAIN: "phase", DONE: "done" } },
-				done: final(),
-			},
-		}));
+			}),
+		);
 		const runtime = new ActorRuntime(ast, undefined, { between: ["AGAIN", "DONE"] });
 		await loop(runtime);
 		const selfEnqueues = runtime.records.filter(isSelfEnqueue);
@@ -1100,19 +1569,29 @@ describe("explicit event-sourced actors", () => {
 			["phase.@worker", 1, "phase.@worker.queue"],
 			["phase.@worker~2", 2, "phase.@worker~2.queue"],
 		]);
-		expect(explainReplay(ast, runtime.records)).toMatchObject({ prefixEnd: runtime.records.length, stale: [], skipped: [] });
+		expect(explainReplay(ast, runtime.records)).toMatchObject({
+			prefixEnd: runtime.records.length,
+			stale: [],
+			skipped: [],
+		});
 	});
 
 	it("rejects self() outside actors and on recursive calls", () => {
-		const outside = normalizeChartConfig(chart({
-			kind: "chart", id: "self-outside", initial: "send",
-			states: { send: send({ to: self(), event: "RECORD", input: { path: "x" }, target: "done" }), done: final() },
-		}));
+		const outside = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "self-outside",
+				initial: "send",
+				states: { send: send({ to: self(), event: "RECORD", input: { path: "x" }, target: "done" }), done: final() },
+			}),
+		);
 		expect(outside.ok).toBe(false);
 		if (!outside.ok) expect(outside.diagnostics.map((entry) => entry.code)).toContain("SELF_OUTSIDE_ACTOR");
 
 		const Recursive = (actor as (options: unknown) => (input: unknown) => ReturnType<typeof Auditor>)({
-			input: z.object({}).strict(), protocol: AuditProtocol, initial: "idle",
+			input: z.object({}).strict(),
+			protocol: AuditProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { RECORD: "recurse" } }),
 				recurse: { kind: "call", to: self(), event: "RECORD", input: { path: "x" }, target: "settle" },
@@ -1120,51 +1599,94 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		const recursive = Recursive({});
-		const recursiveCall = normalizeChartConfig(chart({
-			kind: "chart", id: "self-call", actors: { recursive }, initial: "start",
-			states: { start: send({ to: recursive, event: "RECORD", input: { path: "x" }, target: "done" }), done: final() },
-		}));
+		const recursiveCall = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "self-call",
+				actors: { recursive },
+				initial: "start",
+				states: {
+					start: send({ to: recursive, event: "RECORD", input: { path: "x" }, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
 		expect(recursiveCall.ok).toBe(false);
-		if (!recursiveCall.ok) expect(recursiveCall.diagnostics.map((entry) => entry.code)).toContain("SELF_CALL_FORBIDDEN");
+		if (!recursiveCall.ok)
+			expect(recursiveCall.diagnostics.map((entry) => entry.code)).toContain("SELF_CALL_FORBIDDEN");
 	});
 
 	it("rejects declarations in runtime data, duplicate or unused placement, illegal owners, and unavailable placement refs", () => {
 		const auditor = Auditor({});
-		const duplicate = normalizeChartConfig(chart({
-			kind: "chart", id: "duplicate", actors: { first: auditor, second: auditor }, initial: "done", states: { done: final() },
-		}));
+		const duplicate = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "duplicate",
+				actors: { first: auditor, second: auditor },
+				initial: "done",
+				states: { done: final() },
+			}),
+		);
 		expect(duplicate.ok).toBe(false);
 		if (!duplicate.ok) expect(duplicate.diagnostics.map((entry) => entry.code)).toContain("DUPLICATE_ACTOR_PLACEMENT");
 
-		const unused = normalizeChartConfig(chart({
-			kind: "chart", id: "unused-actor", actors: { auditor: Auditor({}) }, initial: "done", states: { done: final() },
-		}));
+		const unused = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "unused-actor",
+				actors: { auditor: Auditor({}) },
+				initial: "done",
+				states: { done: final() },
+			}),
+		);
 		expect(unused.ok).toBe(false);
 		if (!unused.ok) expect(unused.diagnostics.map((entry) => entry.code)).toContain("UNUSED_ACTOR");
 
 		const embedded = normalizeChartConfig({
-			kind: "chart", id: "embedded", actors: { auditor }, initial: "record",
-			states: { record: { kind: "send", to: auditor, event: "RECORD", input: { path: auditor }, target: "done" }, done: final() },
+			kind: "chart",
+			id: "embedded",
+			actors: { auditor },
+			initial: "record",
+			states: {
+				record: { kind: "send", to: auditor, event: "RECORD", input: { path: auditor }, target: "done" },
+				done: final(),
+			},
 		});
 		expect(embedded.ok).toBe(false);
 		if (!embedded.ok) expect(embedded.diagnostics.map((entry) => entry.code)).toContain("ACTOR_DECLARATION_IN_DATA");
 
 		const illegalOwner = normalizeChartConfig({
-			kind: "chart", id: "illegal-owner", initial: "work",
-			states: { work: { kind: "state", actors: { auditor: Auditor({}) }, action: agent("worker"), transitions: { DONE: "done" } }, done: final() },
+			kind: "chart",
+			id: "illegal-owner",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					actors: { auditor: Auditor({}) },
+					action: agent("worker"),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
 		});
 		expect(illegalOwner.ok).toBe(false);
 		if (!illegalOwner.ok) expect(illegalOwner.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_OWNER");
 
 		const lateEditor = Editor({ file: result("prepare", "file") });
-		const latePlacement = normalizeChartConfig(chart({
-			kind: "chart", id: "late-placement", actors: { lateEditor }, initial: "prepare",
-			states: {
-				prepare: { kind: "state", action: agent("planner"), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+		const latePlacement = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "late-placement",
+				actors: { lateEditor },
+				initial: "prepare",
+				states: {
+					prepare: { kind: "state", action: agent("planner"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		expect(latePlacement.ok).toBe(false);
-		if (!latePlacement.ok) expect(latePlacement.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_PLACEMENT_REF");
+		if (!latePlacement.ok)
+			expect(latePlacement.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_PLACEMENT_REF");
 	});
 });

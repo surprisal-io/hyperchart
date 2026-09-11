@@ -18,7 +18,11 @@ export async function initializeRun(runId: string): Promise<void> {
 	const { runDir } = resolveRunPaths(runId);
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const store = await openRunLogStore(runId, { access: "writer" });
-	try { await store.initializeRootBranch(); } finally { await store.close(); }
+	try {
+		await store.initializeRootBranch();
+	} finally {
+		await store.close();
+	}
 }
 
 export async function loadRunMeta(runId: string): Promise<RunMeta> {
@@ -30,22 +34,34 @@ export async function loadRunMeta(runId: string): Promise<RunMeta> {
 			error.code = "ENOENT";
 			throw error;
 		}
-		if (meta.runId !== undefined && meta.runId !== runId) throw new Error(`Hyperchart run identity mismatch for '${runId}'`);
+		if (meta.runId !== undefined && meta.runId !== runId)
+			throw new Error(`Hyperchart run identity mismatch for '${runId}'`);
 		return { ...normalizeRunMeta(meta), runId };
-	} finally { await store.close(); }
+	} finally {
+		await store.close();
+	}
 }
 
 export async function saveRunMeta(runId: string, meta: RunMeta): Promise<void> {
 	const { runDir } = resolveRunPaths(runId);
-	if (meta.runId !== undefined && meta.runId !== runId) throw new Error(`Hyperchart run identity mismatch for '${runId}'`);
+	if (meta.runId !== undefined && meta.runId !== runId)
+		throw new Error(`Hyperchart run identity mismatch for '${runId}'`);
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const store = await openRunLogStore(runId, { access: "writer" });
-	try { await store.writeRunMeta({ ...normalizeRunMeta(meta), runId }); } finally { await store.close(); }
+	try {
+		await store.writeRunMeta({ ...normalizeRunMeta(meta), runId });
+	} finally {
+		await store.close();
+	}
 }
 
 export async function deleteRunStorage(runId: string): Promise<void> {
 	const store = await openRunLogStore(runId, { access: "writer" });
-	try { await store.deleteRunData(); } finally { await store.close(); }
+	try {
+		await store.deleteRunData();
+	} finally {
+		await store.close();
+	}
 }
 
 /** Enumerate authoritative storage keys, never infer identity from a caller's path. */
@@ -56,23 +72,35 @@ export async function listRunIds(storage: RunStorage | undefined = currentRunSto
 		const client = new pg.Client({ connectionString: storage.dsn });
 		await client.connect();
 		try {
-			const result = await client.query<{ run_id: string }>("select run_id from hyperchart_run_meta where chart_path is not null order by run_id");
-			return result.rows.map(({ run_id }) => { assertRunId(run_id, storage.layout); return run_id; });
+			const result = await client.query<{ run_id: string }>(
+				"select run_id from hyperchart_run_meta where chart_path is not null order by run_id",
+			);
+			return result.rows.map(({ run_id }) => {
+				assertRunId(run_id, storage.layout);
+				return run_id;
+			});
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "42P01") return [];
 			throw error;
-		} finally { await client.end(); }
+		} finally {
+			await client.end();
+		}
 	}
 	if (!existsSync(storage.rootDir)) return [];
 	const result: string[] = [];
 	for (const entry of readdirSync(storage.rootDir, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
-		if (storage.layout === "run-id") { assertRunId(entry.name); result.push(entry.name); continue; }
+		if (storage.layout === "run-id") {
+			assertRunId(entry.name);
+			result.push(entry.name);
+			continue;
+		}
 		const path = join(storage.rootDir, entry.name, "meta.json");
 		if (!existsSync(path)) continue;
 		const meta = JSON.parse(readFileSync(path, "utf8")) as RunMeta;
 		if (meta.runId === undefined) throw new Error(`Hashed JSONL run metadata lacks runId: ${path}`);
-		if (resolveRunPaths(meta.runId, storage).runDir !== resolve(storage.rootDir, entry.name)) throw new Error(`Hashed JSONL run identity mismatch: ${path}`);
+		if (resolveRunPaths(meta.runId, storage).runDir !== resolve(storage.rootDir, entry.name))
+			throw new Error(`Hashed JSONL run identity mismatch: ${path}`);
 		result.push(meta.runId);
 	}
 	return result.sort();

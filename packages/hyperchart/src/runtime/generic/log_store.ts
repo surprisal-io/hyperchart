@@ -1,17 +1,7 @@
 import { dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
-import {
-	mkdir,
-	open,
-	stat,
-} from "node:fs/promises";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, open, stat } from "node:fs/promises";
 import {
 	isDurableRecordEntry,
 	type BranchHead,
@@ -58,10 +48,15 @@ export type PrepareStampedCommit = (records: readonly DurableLogRecord[]) => Pre
 
 /** @internal Validate and clone before any backend mutates journal or cache state. */
 export function cloneOpaqueCheckpoint(checkpoint: OpaqueCheckpointEnvelope): OpaqueCheckpointEnvelope {
-	if (typeof checkpoint.checkpointId !== "string" || checkpoint.checkpointId.length === 0
-		|| !(checkpoint.headSeqId === null || Number.isSafeInteger(checkpoint.headSeqId) && checkpoint.headSeqId > 0)
-		|| typeof checkpoint.selectorKey !== "string" || checkpoint.selectorKey.length === 0
-		|| !Number.isSafeInteger(checkpoint.createdAt) || checkpoint.createdAt < 0) {
+	if (
+		typeof checkpoint.checkpointId !== "string" ||
+		checkpoint.checkpointId.length === 0 ||
+		!(checkpoint.headSeqId === null || (Number.isSafeInteger(checkpoint.headSeqId) && checkpoint.headSeqId > 0)) ||
+		typeof checkpoint.selectorKey !== "string" ||
+		checkpoint.selectorKey.length === 0 ||
+		!Number.isSafeInteger(checkpoint.createdAt) ||
+		checkpoint.createdAt < 0
+	) {
 		throw new Error("Invalid opaque Hyperchart checkpoint coordinates");
 	}
 	return structuredClone(checkpoint);
@@ -126,8 +121,14 @@ export type ActorMessageHistoryItem = Readonly<{
 
 export class BranchHeadMovedError extends Error {
 	readonly name = "BranchHeadMovedError";
-	constructor(readonly branchId: BranchId, readonly expectedHeadSeqId: number | null, readonly actualHeadSeqId: number | null) {
-		super(`Branch '${branchId}' moved: expected head ${expectedHeadSeqId ?? "null"}, found ${actualHeadSeqId ?? "null"}`);
+	constructor(
+		readonly branchId: BranchId,
+		readonly expectedHeadSeqId: number | null,
+		readonly actualHeadSeqId: number | null,
+	) {
+		super(
+			`Branch '${branchId}' moved: expected head ${expectedHeadSeqId ?? "null"}, found ${actualHeadSeqId ?? "null"}`,
+		);
 	}
 }
 
@@ -156,12 +157,35 @@ export interface RunHistoryStore {
 	containsInHistory(input: { headSeqId: number | null; seqId: number }): Promise<boolean>;
 	countRecords(): Promise<number>;
 	readRecords(input: { snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<DurableLogRecord>>;
-	readStateVisits(input: { snapshot: HistorySnapshot; state: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<StateVisitHistoryItem>>;
-	readMapVisits(input: { snapshot: HistorySnapshot; mapPath: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<MapVisitHistoryItem>>;
-	readActorGenerations(input: { snapshot: HistorySnapshot; logicalOccurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorGenerationHistoryItem>>;
-	readActorMessages(input: { snapshot: HistorySnapshot; occurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorMessageHistoryItem>>;
-	cursorAt(input: { snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined>;
-	findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined>;
+	readStateVisits(input: {
+		snapshot: HistorySnapshot;
+		state: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<StateVisitHistoryItem>>;
+	readMapVisits(input: {
+		snapshot: HistorySnapshot;
+		mapPath: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<MapVisitHistoryItem>>;
+	readActorGenerations(input: {
+		snapshot: HistorySnapshot;
+		logicalOccurrence: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<ActorGenerationHistoryItem>>;
+	readActorMessages(input: {
+		snapshot: HistorySnapshot;
+		occurrence: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<ActorMessageHistoryItem>>;
+	cursorAt(input: {
+		snapshot: HistorySnapshot;
+		subject: HistorySubject;
+		seqId: number;
+	}): Promise<HistoryCursor | undefined>;
+	findUserInteractionResponse(input: {
+		headSeqId: number | null;
+		gateSeqId: number;
+	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined>;
 }
 
 /** @internal Materialized index used only by file and memory backends. */
@@ -187,9 +211,17 @@ export class MaterializedRunLogIndex {
 		this.entries.push(entry);
 		if (!isDurableRecordEntry(entry)) {
 			const previous = this.branches.get(entry.branchId);
-			this.branches.set(entry.branchId, entry.op === "create"
-				? { branchId: entry.branchId, headSeqId: entry.headSeqId, createdAt: entry.committedAt, ...(entry.metadata === undefined ? {} : { metadata: entry.metadata }) }
-				: { ...previous!, headSeqId: entry.headSeqId });
+			this.branches.set(
+				entry.branchId,
+				entry.op === "create"
+					? {
+							branchId: entry.branchId,
+							headSeqId: entry.headSeqId,
+							createdAt: entry.committedAt,
+							...(entry.metadata === undefined ? {} : { metadata: entry.metadata }),
+						}
+					: { ...previous!, headSeqId: entry.headSeqId },
+			);
 			this.nextSeqId = entry.seqId + 1;
 			return;
 		}
@@ -229,7 +261,6 @@ export class MaterializedRunLogIndex {
 		}
 		return reversed.reverse();
 	}
-
 }
 
 type HistoryCursorPayload = Readonly<{
@@ -241,28 +272,45 @@ type HistoryCursorPayload = Readonly<{
 }>;
 type BranchCursorPayload = Readonly<{ version: 1; createdSeqId: number; branchId: BranchId }>;
 
-type AnyHistoryItem = DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem;
+type AnyHistoryItem =
+	| DurableLogRecord
+	| StateVisitHistoryItem
+	| MapVisitHistoryItem
+	| ActorGenerationHistoryItem
+	| ActorMessageHistoryItem;
 
 /** @internal Canonical subject identity shared by cursor validation across backends. */
 export function historySubjectKey(subject: HistorySubject): string {
 	switch (subject.kind) {
-		case "records": return JSON.stringify([subject.kind]);
-		case "state-visits": return JSON.stringify([subject.kind, subject.state]);
-		case "map-visits": return JSON.stringify([subject.kind, subject.mapPath]);
-		case "actor-generations": return JSON.stringify([subject.kind, subject.logicalOccurrence]);
-		case "actor-messages": return JSON.stringify([subject.kind, subject.occurrence]);
+		case "records":
+			return JSON.stringify([subject.kind]);
+		case "state-visits":
+			return JSON.stringify([subject.kind, subject.state]);
+		case "map-visits":
+			return JSON.stringify([subject.kind, subject.mapPath]);
+		case "actor-generations":
+			return JSON.stringify([subject.kind, subject.logicalOccurrence]);
+		case "actor-messages":
+			return JSON.stringify([subject.kind, subject.occurrence]);
 	}
 }
 
-function encodeOpaque(value: object): string { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url"); }
+function encodeOpaque(value: object): string {
+	return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+}
 function decodeOpaque(value: string, kind: "history" | "branch"): unknown {
-	try { return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown; }
-	catch { throw new HistoryCursorError(`Invalid Hyperchart ${kind} cursor`); }
+	try {
+		return JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+	} catch {
+		throw new HistoryCursorError(`Invalid Hyperchart ${kind} cursor`);
+	}
 }
 function sameSnapshot(left: HistorySnapshot, right: HistorySnapshot): boolean {
 	return left.branchId === right.branchId && left.headSeqId === right.headSeqId;
 }
-function itemSeqId(item: AnyHistoryItem): number { return item.seqId; }
+function itemSeqId(item: AnyHistoryItem): number {
+	return item.seqId;
+}
 
 /** @internal */
 export function encodeBranchListCursor(createdSeqId: number, branchId: BranchId): BranchListCursor {
@@ -271,7 +319,13 @@ export function encodeBranchListCursor(createdSeqId: number, branchId: BranchId)
 /** @internal */
 export function decodeBranchListCursor(cursor: BranchListCursor): BranchCursorPayload {
 	const value = decodeOpaque(cursor, "branch");
-	if (!isRecord(value) || value.version !== 1 || !Number.isSafeInteger(value.createdSeqId) || (value.createdSeqId as number) <= 0 || typeof value.branchId !== "string") {
+	if (
+		!isRecord(value) ||
+		value.version !== 1 ||
+		!Number.isSafeInteger(value.createdSeqId) ||
+		(value.createdSeqId as number) <= 0 ||
+		typeof value.branchId !== "string"
+	) {
 		throw new HistoryCursorError("Invalid Hyperchart branch cursor");
 	}
 	return value as unknown as BranchCursorPayload;
@@ -282,15 +336,23 @@ function encodeHistoryCursor(payload: Omit<HistoryCursorPayload, "version">): Hi
 }
 function decodeHistoryCursor(cursor: HistoryCursor, snapshot: HistorySnapshot, subject: string): HistoryCursorPayload {
 	const value = decodeOpaque(cursor, "history");
-	if (!isRecord(value) || value.version !== 1 || !isRecord(value.snapshot) || typeof value.snapshot.branchId !== "string"
-		|| !(value.snapshot.headSeqId === null || Number.isSafeInteger(value.snapshot.headSeqId))
-		|| typeof value.subject !== "string" || !["at", "older", "newer"].includes(String(value.direction))
-		|| !Number.isSafeInteger(value.boundarySeqId)) {
+	if (
+		!isRecord(value) ||
+		value.version !== 1 ||
+		!isRecord(value.snapshot) ||
+		typeof value.snapshot.branchId !== "string" ||
+		!(value.snapshot.headSeqId === null || Number.isSafeInteger(value.snapshot.headSeqId)) ||
+		typeof value.subject !== "string" ||
+		!["at", "older", "newer"].includes(String(value.direction)) ||
+		!Number.isSafeInteger(value.boundarySeqId)
+	) {
 		throw new HistoryCursorError("Invalid Hyperchart history cursor");
 	}
 	const decoded = value as unknown as HistoryCursorPayload;
-	if (!sameSnapshot(decoded.snapshot, snapshot)) throw new HistoryCursorError("Hyperchart history cursor belongs to a different snapshot");
-	if (decoded.subject !== subject) throw new HistoryCursorError("Hyperchart history cursor belongs to a different subject");
+	if (!sameSnapshot(decoded.snapshot, snapshot))
+		throw new HistoryCursorError("Hyperchart history cursor belongs to a different snapshot");
+	if (decoded.subject !== subject)
+		throw new HistoryCursorError("Hyperchart history cursor belongs to a different subject");
 	return decoded;
 }
 
@@ -306,12 +368,14 @@ export function historyChunkFromItems<T extends AnyHistoryItem>(
 	if (cursor !== undefined) {
 		const decoded = decodeHistoryCursor(cursor, snapshot, subjectKey);
 		const boundary = itemsNewestFirst.findIndex((item) => itemSeqId(item) === decoded.boundarySeqId);
-		if (boundary < 0) throw new HistoryCursorError("Hyperchart history cursor boundary is not visible in its snapshot subject");
-		start = decoded.direction === "older"
-			? boundary + 1
-			: decoded.direction === "newer"
-				? Math.max(0, boundary - HISTORY_READ_ITEMS)
-				: boundary;
+		if (boundary < 0)
+			throw new HistoryCursorError("Hyperchart history cursor boundary is not visible in its snapshot subject");
+		start =
+			decoded.direction === "older"
+				? boundary + 1
+				: decoded.direction === "newer"
+					? Math.max(0, boundary - HISTORY_READ_ITEMS)
+					: boundary;
 		const end = decoded.direction === "newer" ? boundary : start + HISTORY_READ_ITEMS;
 		const page = itemsNewestFirst.slice(start, end);
 		return chunkWithEdges(snapshot, subjectKey, itemsNewestFirst, page, start, end);
@@ -335,8 +399,12 @@ function chunkWithEdges<T extends AnyHistoryItem>(
 	return {
 		snapshot,
 		items: page,
-		...(end < all.length ? { older: encodeHistoryCursor({ snapshot, subject, direction: "older", boundarySeqId: itemSeqId(last) }) } : {}),
-		...(start > 0 ? { newer: encodeHistoryCursor({ snapshot, subject, direction: "newer", boundarySeqId: itemSeqId(first) }) } : {}),
+		...(end < all.length
+			? { older: encodeHistoryCursor({ snapshot, subject, direction: "older", boundarySeqId: itemSeqId(last) }) }
+			: {}),
+		...(start > 0
+			? { newer: encodeHistoryCursor({ snapshot, subject, direction: "newer", boundarySeqId: itemSeqId(first) }) }
+			: {}),
 	};
 }
 
@@ -348,50 +416,107 @@ export function cursorAtItems<T extends AnyHistoryItem>(
 	seqId: number,
 ): HistoryCursor | undefined {
 	const item = itemsNewestFirst.find((candidate) => itemSeqId(candidate) === seqId);
-	return item === undefined ? undefined : encodeHistoryCursor({ snapshot, subject: historySubjectKey(subject), direction: "at", boundarySeqId: itemSeqId(item) });
+	return item === undefined
+		? undefined
+		: encodeHistoryCursor({
+				snapshot,
+				subject: historySubjectKey(subject),
+				direction: "at",
+				boundarySeqId: itemSeqId(item),
+			});
 }
 
 /** @internal Derive durable record-level subject groups without importing AST/projector/host layers. */
-export function historyItemsForSubject(ancestry: readonly DurableLogRecord[], subject: HistorySubject): readonly AnyHistoryItem[] {
+export function historyItemsForSubject(
+	ancestry: readonly DurableLogRecord[],
+	subject: HistorySubject,
+): readonly AnyHistoryItem[] {
 	switch (subject.kind) {
-		case "records": return [...ancestry].reverse();
-		case "state-visits": return stateVisitItems(ancestry, subject.state);
-		case "map-visits": return ancestry
-			.filter((record): record is Extract<DurableLogRecord, { type: "spawned" }> => record.type === "spawned" && record.path === subject.mapPath)
-			.map((spawn, index): MapVisitHistoryItem => ({ kind: "map-visit", mapPath: subject.mapPath, seqId: spawn.seqId, visit: index + 1, spawn, records: [spawn] }))
-			.reverse();
-		case "actor-generations": return actorGenerationItems(ancestry, subject.logicalOccurrence);
-		case "actor-messages": return actorMessageItems(ancestry, subject.occurrence);
+		case "records":
+			return [...ancestry].reverse();
+		case "state-visits":
+			return stateVisitItems(ancestry, subject.state);
+		case "map-visits":
+			return ancestry
+				.filter(
+					(record): record is Extract<DurableLogRecord, { type: "spawned" }> =>
+						record.type === "spawned" && record.path === subject.mapPath,
+				)
+				.map(
+					(spawn, index): MapVisitHistoryItem => ({
+						kind: "map-visit",
+						mapPath: subject.mapPath,
+						seqId: spawn.seqId,
+						visit: index + 1,
+						spawn,
+						records: [spawn],
+					}),
+				)
+				.reverse();
+		case "actor-generations":
+			return actorGenerationItems(ancestry, subject.logicalOccurrence);
+		case "actor-messages":
+			return actorMessageItems(ancestry, subject.occurrence);
 	}
 }
 
 function stateVisitItems(ancestry: readonly DurableLogRecord[], state: StatePath): StateVisitHistoryItem[] {
-	type Mutable = { kind: "state-visit"; state: StatePath; seqId: number; visit: number; invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>; records: DurableLogRecord[] };
+	type Mutable = {
+		kind: "state-visit";
+		state: StatePath;
+		seqId: number;
+		visit: number;
+		invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>;
+		records: DurableLogRecord[];
+	};
 	const items: Mutable[] = [];
 	const current = new Map<string, Mutable>();
 	for (const record of ancestry) {
 		if (record.type === "state_action" && record.kind === "invoke") {
 			if (record.actionUid.state !== state) continue;
-			const item: Mutable = { kind: "state-visit", state, seqId: record.seqId, visit: items.length + 1, invoke: record, records: [record] };
+			const item: Mutable = {
+				kind: "state-visit",
+				state,
+				seqId: record.seqId,
+				visit: items.length + 1,
+				invoke: record,
+				records: [record],
+			};
 			items.push(item);
 			current.set(actionUidKey(record.actionUid), item);
 			continue;
 		}
 		const actionUid = "actionUid" in record ? record.actionUid : undefined;
-		if (actionUid !== undefined && actionUid.state === state) current.get(actionUidKey(actionUid))?.records.push(record);
+		if (actionUid !== undefined && actionUid.state === state)
+			current.get(actionUidKey(actionUid))?.records.push(record);
 		else if (record.type === "failure_intent" && record.origin === state) items.at(-1)?.records.push(record);
 	}
 	return items.reverse();
 }
 
-function actorGenerationItems(ancestry: readonly DurableLogRecord[], logicalOccurrence: StatePath): ActorGenerationHistoryItem[] {
-	type Mutable = { kind: "actor-generation"; logicalOccurrence: StatePath; seqId: number; created: Extract<DurableLogRecord, { type: "actor_created" }>; records: DurableLogRecord[] };
+function actorGenerationItems(
+	ancestry: readonly DurableLogRecord[],
+	logicalOccurrence: StatePath,
+): ActorGenerationHistoryItem[] {
+	type Mutable = {
+		kind: "actor-generation";
+		logicalOccurrence: StatePath;
+		seqId: number;
+		created: Extract<DurableLogRecord, { type: "actor_created" }>;
+		records: DurableLogRecord[];
+	};
 	const items: Mutable[] = [];
 	const byOccurrence = new Map<StatePath, Mutable>();
 	for (const record of ancestry) {
 		if (record.type === "actor_created") {
 			if (actorLogicalOccurrencePath(record.occurrence, record.generation) !== logicalOccurrence) continue;
-			const item: Mutable = { kind: "actor-generation", logicalOccurrence, seqId: record.seqId, created: record, records: [record] };
+			const item: Mutable = {
+				kind: "actor-generation",
+				logicalOccurrence,
+				seqId: record.seqId,
+				created: record,
+				records: [record],
+			};
 			items.push(item);
 			byOccurrence.set(record.occurrence, item);
 			continue;
@@ -403,20 +528,37 @@ function actorGenerationItems(ancestry: readonly DurableLogRecord[], logicalOccu
 }
 
 function actorMessageItems(ancestry: readonly DurableLogRecord[], occurrence: StatePath): ActorMessageHistoryItem[] {
-	type Mutable = { kind: "actor-message-batch"; occurrence: StatePath; seqId: number; enqueued: Extract<DurableLogRecord, { type: "actor_messages_enqueued" }>; records: DurableLogRecord[] };
+	type Mutable = {
+		kind: "actor-message-batch";
+		occurrence: StatePath;
+		seqId: number;
+		enqueued: Extract<DurableLogRecord, { type: "actor_messages_enqueued" }>;
+		records: DurableLogRecord[];
+	};
 	const items: Mutable[] = [];
 	const byMessageId = new Map<string, Mutable>();
 	for (const record of ancestry) {
 		if (record.type === "actor_messages_enqueued" && record.occurrence === occurrence) {
-			const item: Mutable = { kind: "actor-message-batch", occurrence, seqId: record.seqId, enqueued: record, records: [record] };
+			const item: Mutable = {
+				kind: "actor-message-batch",
+				occurrence,
+				seqId: record.seqId,
+				enqueued: record,
+				records: [record],
+			};
 			items.push(item);
 			for (const message of record.messages) byMessageId.set(message.messageId, item);
 			continue;
 		}
-		if (record.type === "actor_message" && record.occurrence === occurrence) byMessageId.get(record.messageId)?.records.push(record);
+		if (record.type === "actor_message" && record.occurrence === occurrence)
+			byMessageId.get(record.messageId)?.records.push(record);
 		if (record.type === "actor_call_resolved") byMessageId.get(record.messageId)?.records.push(record);
 		if (record.type === "actor_batch_call_resolved") {
-			const targets = new Set(record.messageIds.map((messageId) => byMessageId.get(messageId)).filter((item): item is Mutable => item !== undefined));
+			const targets = new Set(
+				record.messageIds
+					.map((messageId) => byMessageId.get(messageId))
+					.filter((item): item is Mutable => item !== undefined),
+			);
 			for (const item of targets) item.records.push(record);
 		}
 	}
@@ -429,10 +571,14 @@ function recordOccurrence(record: DurableLogRecord): StatePath | undefined {
 
 /** @internal Validate a replay boundary and return the first record after it. */
 /** @internal */
-export function findUserInteractionResponseInAncestry(ancestry: readonly DurableLogRecord[], gateSeqId: number): Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined {
+export function findUserInteractionResponseInAncestry(
+	ancestry: readonly DurableLogRecord[],
+	gateSeqId: number,
+): Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined {
 	for (let index = ancestry.length - 1; index >= 0; index--) {
 		const record = ancestry[index]!;
-		if (record.type === "user_interaction" && record.kind === "resolved" && record.gateSeqId === gateSeqId) return record;
+		if (record.type === "user_interaction" && record.kind === "resolved" && record.gateSeqId === gateSeqId)
+			return record;
 	}
 	return undefined;
 }
@@ -446,7 +592,10 @@ export function boundedForwardReplayPage(index: MaterializedRunLogIndex, input: 
 	while (current !== null) {
 		const record = index.recordsBySeqId.get(current);
 		if (record === undefined) throw new Error(`Missing durable parent record ${current}`);
-		if (input.afterSeqId !== null && record.seqId === input.afterSeqId) { foundBoundary = true; break; }
+		if (input.afterSeqId !== null && record.seqId === input.afterSeqId) {
+			foundBoundary = true;
+			break;
+		}
 		retainedNewestFirst.push(record);
 		if (retainedNewestFirst.length > REPLAY_PAGE_RECORDS) retainedNewestFirst.shift();
 		count++;
@@ -454,7 +603,10 @@ export function boundedForwardReplayPage(index: MaterializedRunLogIndex, input: 
 	}
 	if (!foundBoundary) throw new Error(`Execution replay boundary ${input.afterSeqId} is not in target ancestry`);
 	const records = retainedNewestFirst.reverse();
-	return { records, ...(count > REPLAY_PAGE_RECORDS && records.at(-1) !== undefined ? { nextAfterSeqId: records.at(-1)!.seqId } : {}) };
+	return {
+		records,
+		...(count > REPLAY_PAGE_RECORDS && records.at(-1) !== undefined ? { nextAfterSeqId: records.at(-1)!.seqId } : {}),
+	};
 }
 
 function replayStart(ancestry: readonly DurableLogRecord[], afterSeqId: number | null): number {
@@ -513,17 +665,21 @@ export type AppendAtHeadInput = Readonly<{
 	drafts: readonly DurableRecordDraft[];
 }>;
 export type BranchMutationOptions = Readonly<{ checkpoint?: OpaqueCheckpointEnvelope }>;
-export type BranchMoveResult = BranchHead & Readonly<{
-	moveSeqId: number;
-	/** Branch head observed at the serialized move commit boundary. */
-	previousHeadSeqId: number | null;
-	/** Durable machine-record count observed at that same boundary. */
-	preservedRecords: number;
-}>;
+export type BranchMoveResult = BranchHead &
+	Readonly<{
+		moveSeqId: number;
+		/** Branch head observed at the serialized move commit boundary. */
+		previousHeadSeqId: number | null;
+		/** Durable machine-record count observed at that same boundary. */
+		preservedRecords: number;
+	}>;
 
 export interface LogStore extends RunHistoryStore {
 	readonly branchId: BranchId;
-	appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
+	appendDrafts(
+		drafts: readonly DurableRecordDraft[],
+		prepare?: PrepareStampedCommit,
+	): Promise<readonly DurableLogRecord[]>;
 	appendDraftsAtHead(input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
 }
 
@@ -534,7 +690,12 @@ export interface RunLogStore extends LogStore, CheckpointRepository {
 	writeRunMeta(meta: RunMeta): Promise<void>;
 	deleteRunData(): Promise<void>;
 	initializeRootBranch(metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
-	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
+	createBranch(
+		branchId: BranchId,
+		headSeqId: number,
+		metadata?: BranchMetadata,
+		options?: BranchMutationOptions,
+	): Promise<BranchHead>;
 	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult>;
 	close(): Promise<void>;
 }
@@ -561,7 +722,12 @@ export function stampDrafts(
 /** @internal */
 export function materializeJournal(values: readonly unknown[]): MaterializedRunLogIndex {
 	const entries = [...values] as StorageEntry[];
-	const index = new MaterializedRunLogIndex({ entries: [], recordsBySeqId: new Map(), branches: new Map(), nextSeqId: 1 });
+	const index = new MaterializedRunLogIndex({
+		entries: [],
+		recordsBySeqId: new Map(),
+		branches: new Map(),
+		nextSeqId: 1,
+	});
 	for (const entry of entries) index.applyEntry(entry);
 	return index;
 }
@@ -603,48 +769,83 @@ export class JsonlLogStore implements RunLogStore {
 	}
 
 	/** Number of full-file reads performed by this shared journal. */
-	fullReadCount(): number { return this.journal.fullReadCount; }
+	fullReadCount(): number {
+		return this.journal.fullReadCount;
+	}
 
-	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }, options?: BranchMutationOptions): Promise<BranchHead> {
+	async initializeRootBranch(
+		metadata: BranchMetadata = { name: this.branchId },
+		options?: BranchMutationOptions,
+	): Promise<BranchHead> {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		const branch = await this.commitBuilt((index) => {
 			if (index.entries.length !== 0) throw new Error("Cannot initialize a non-empty Hyperchart journal");
 			const committedAt = Date.now();
-			const entry: StorageEntry = { kind: "branch", op: "create", seqId: index.nextSeqId, branchId: this.branchId, headSeqId: null, metadata, committedAt };
-			return { entries: [entry], result: { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata } };
+			const entry: StorageEntry = {
+				kind: "branch",
+				op: "create",
+				seqId: index.nextSeqId,
+				branchId: this.branchId,
+				headSeqId: null,
+				metadata,
+				committedAt,
+			};
+			return {
+				entries: [entry],
+				result: { branchId: this.branchId, headSeqId: null, createdAt: committedAt, metadata },
+			};
 		});
 		if (checkpoint !== undefined) this.rememberClonedCheckpoint(checkpoint);
 		return branch;
 	}
 
-	async appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+	async appendDrafts(
+		drafts: readonly DurableRecordDraft[],
+		prepare?: PrepareStampedCommit,
+	): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
 		return enqueueJsonlWrite(this.journal.filePath, async () => {
-			if (this.journal.poisoned) throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
+			if (this.journal.poisoned)
+				throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
 			this.openJournal();
 			const records = stampDrafts(this.index(), this.branchId, drafts, Date.now());
 			const prepared = prepare?.(records);
 			const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
 			await this.appendLocked(records);
 			for (const checkpoint of checkpoints) this.rememberClonedCheckpoint(checkpoint);
-			try { prepared?.committed(); } catch (error) { this.journal.poisoned = true; throw error; }
+			try {
+				prepared?.committed();
+			} catch (error) {
+				this.journal.poisoned = true;
+				throw error;
+			}
 			return records;
 		});
 	}
 
-	async appendDraftsAtHead(input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+	async appendDraftsAtHead(
+		input: AppendAtHeadInput,
+		prepare?: PrepareStampedCommit,
+	): Promise<readonly DurableLogRecord[]> {
 		if (input.drafts.length === 0) return [];
 		return enqueueJsonlWrite(this.journal.filePath, async () => {
-			if (this.journal.poisoned) throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
+			if (this.journal.poisoned)
+				throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
 			this.openJournal();
 			const branch = this.index().branch(this.branchId);
-			if (branch.headSeqId !== input.expectedHeadSeqId) throw new BranchHeadMovedError(this.branchId, input.expectedHeadSeqId, branch.headSeqId);
+			if (branch.headSeqId !== input.expectedHeadSeqId)
+				throw new BranchHeadMovedError(this.branchId, input.expectedHeadSeqId, branch.headSeqId);
 			const records = stampDrafts(this.index(), this.branchId, input.drafts, Date.now());
 			const prepared = prepare?.(records);
 			const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
 			await this.appendLocked(records);
 			for (const checkpoint of checkpoints) this.rememberClonedCheckpoint(checkpoint);
-			try { prepared?.committed(); } catch (error) { this.journal.poisoned = true; throw error; }
+			try {
+				prepared?.committed();
+			} catch (error) {
+				this.journal.poisoned = true;
+				throw error;
+			}
 			return records;
 		});
 	}
@@ -657,18 +858,32 @@ export class JsonlLogStore implements RunLogStore {
 		const index = this.index();
 		const decoded = cursor === undefined ? undefined : decodeBranchListCursor(cursor);
 		const creates = index.entries
-			.filter((entry): entry is Extract<StorageEntry, { kind: "branch"; op: "create" }> => !isDurableRecordEntry(entry) && entry.op === "create")
+			.filter(
+				(entry): entry is Extract<StorageEntry, { kind: "branch"; op: "create" }> =>
+					!isDurableRecordEntry(entry) && entry.op === "create",
+			)
 			.sort((left, right) => left.seqId - right.seqId || left.branchId.localeCompare(right.branchId));
-		const after = creates.filter((entry) => decoded === undefined || entry.seqId > decoded.createdSeqId || entry.seqId === decoded.createdSeqId && entry.branchId > decoded.branchId);
+		const after = creates.filter(
+			(entry) =>
+				decoded === undefined ||
+				entry.seqId > decoded.createdSeqId ||
+				(entry.seqId === decoded.createdSeqId && entry.branchId > decoded.branchId),
+		);
 		const page = after.slice(0, HISTORY_READ_ITEMS);
 		return {
 			items: page.map((entry) => index.branch(entry.branchId)),
 			totalCount: creates.length,
-			...(after.length > page.length && page.at(-1) !== undefined ? { next: encodeBranchListCursor(page.at(-1)!.seqId, page.at(-1)!.branchId) } : {}),
+			...(after.length > page.length && page.at(-1) !== undefined
+				? { next: encodeBranchListCursor(page.at(-1)!.seqId, page.at(-1)!.branchId) }
+				: {}),
 		};
 	}
-	async getBranch(branchId: BranchId): Promise<BranchHead> { return this.index().branch(branchId); }
-	async getRecord(seqId: number): Promise<DurableLogRecord | undefined> { return this.index().recordsBySeqId.get(seqId); }
+	async getBranch(branchId: BranchId): Promise<BranchHead> {
+		return this.index().branch(branchId);
+	}
+	async getRecord(seqId: number): Promise<DurableLogRecord | undefined> {
+		return this.index().recordsBySeqId.get(seqId);
+	}
 	async containsInHistory(input: { headSeqId: number | null; seqId: number }): Promise<boolean> {
 		if (input.headSeqId === null) return false;
 		let current: number | null = input.headSeqId;
@@ -680,46 +895,104 @@ export class JsonlLogStore implements RunLogStore {
 		}
 		return false;
 	}
-	async readRecords(input: { snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<DurableLogRecord>> {
+	async readRecords(input: {
+		snapshot: HistorySnapshot;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<DurableLogRecord>> {
 		return this.readSubject(input.snapshot, { kind: "records" }, input.cursor) as HistoryChunk<DurableLogRecord>;
 	}
-	async readStateVisits(input: { snapshot: HistorySnapshot; state: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<StateVisitHistoryItem>> {
-		return this.readSubject(input.snapshot, { kind: "state-visits", state: input.state }, input.cursor) as HistoryChunk<StateVisitHistoryItem>;
+	async readStateVisits(input: {
+		snapshot: HistorySnapshot;
+		state: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<StateVisitHistoryItem>> {
+		return this.readSubject(
+			input.snapshot,
+			{ kind: "state-visits", state: input.state },
+			input.cursor,
+		) as HistoryChunk<StateVisitHistoryItem>;
 	}
-	async readMapVisits(input: { snapshot: HistorySnapshot; mapPath: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<MapVisitHistoryItem>> {
-		return this.readSubject(input.snapshot, { kind: "map-visits", mapPath: input.mapPath }, input.cursor) as HistoryChunk<MapVisitHistoryItem>;
+	async readMapVisits(input: {
+		snapshot: HistorySnapshot;
+		mapPath: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<MapVisitHistoryItem>> {
+		return this.readSubject(
+			input.snapshot,
+			{ kind: "map-visits", mapPath: input.mapPath },
+			input.cursor,
+		) as HistoryChunk<MapVisitHistoryItem>;
 	}
-	async readActorGenerations(input: { snapshot: HistorySnapshot; logicalOccurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorGenerationHistoryItem>> {
-		return this.readSubject(input.snapshot, { kind: "actor-generations", logicalOccurrence: input.logicalOccurrence }, input.cursor) as HistoryChunk<ActorGenerationHistoryItem>;
+	async readActorGenerations(input: {
+		snapshot: HistorySnapshot;
+		logicalOccurrence: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<ActorGenerationHistoryItem>> {
+		return this.readSubject(
+			input.snapshot,
+			{ kind: "actor-generations", logicalOccurrence: input.logicalOccurrence },
+			input.cursor,
+		) as HistoryChunk<ActorGenerationHistoryItem>;
 	}
-	async readActorMessages(input: { snapshot: HistorySnapshot; occurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorMessageHistoryItem>> {
-		return this.readSubject(input.snapshot, { kind: "actor-messages", occurrence: input.occurrence }, input.cursor) as HistoryChunk<ActorMessageHistoryItem>;
+	async readActorMessages(input: {
+		snapshot: HistorySnapshot;
+		occurrence: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<ActorMessageHistoryItem>> {
+		return this.readSubject(
+			input.snapshot,
+			{ kind: "actor-messages", occurrence: input.occurrence },
+			input.cursor,
+		) as HistoryChunk<ActorMessageHistoryItem>;
 	}
-	async cursorAt(input: { snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined> {
+	async cursorAt(input: {
+		snapshot: HistorySnapshot;
+		subject: HistorySubject;
+		seqId: number;
+	}): Promise<HistoryCursor | undefined> {
 		const ancestry = this.ancestryForSnapshot(input.snapshot);
 		return cursorAtItems(input.snapshot, input.subject, historyItemsForSubject(ancestry, input.subject), input.seqId);
 	}
-	async findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
-		return findUserInteractionResponseInAncestry(this.index().materializeHistoryToHead(input.headSeqId), input.gateSeqId);
+	async findUserInteractionResponse(input: {
+		headSeqId: number | null;
+		gateSeqId: number;
+	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
+		return findUserInteractionResponseInAncestry(
+			this.index().materializeHistoryToHead(input.headSeqId),
+			input.gateSeqId,
+		);
 	}
-	async countRecords(): Promise<number> { return this.index().recordsBySeqId.size; }
+	async countRecords(): Promise<number> {
+		return this.index().recordsBySeqId.size;
+	}
 	async loadExactCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
-		const checkpoint = this.journal.checkpoints.find((candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.selectorKey === input.selectorKey);
+		const checkpoint = this.journal.checkpoints.find(
+			(candidate) => candidate.headSeqId === input.targetHeadSeqId && candidate.selectorKey === input.selectorKey,
+		);
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
 	async findNearestCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		const ancestry = this.index().materializeHistoryToHead(input.targetHeadSeqId);
 		const distance = new Map(ancestry.map((record, index) => [record.seqId, ancestry.length - index - 1]));
 		const checkpoint = this.journal.checkpoints
-			.filter((candidate) => candidate.selectorKey === input.selectorKey && (candidate.headSeqId === null || distance.has(candidate.headSeqId)))
-			.sort((left, right) => checkpointDistance(left, distance) - checkpointDistance(right, distance) || right.createdAt - left.createdAt)[0];
+			.filter(
+				(candidate) =>
+					candidate.selectorKey === input.selectorKey &&
+					(candidate.headSeqId === null || distance.has(candidate.headSeqId)),
+			)
+			.sort(
+				(left, right) =>
+					checkpointDistance(left, distance) - checkpointDistance(right, distance) || right.createdAt - left.createdAt,
+			)[0];
 		return checkpoint === undefined ? undefined : structuredClone(checkpoint);
 	}
 	async discardCheckpoint(checkpointId: string): Promise<void> {
 		const index = this.journal.checkpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
 		if (index >= 0) this.journal.checkpoints.splice(index, 1);
 	}
-	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> { this.rememberClonedCheckpoint(cloneOpaqueCheckpoint(checkpoint)); }
+	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
+		this.rememberClonedCheckpoint(cloneOpaqueCheckpoint(checkpoint));
+	}
 	async close(): Promise<void> {}
 	async readRunMeta(): Promise<RunMeta | undefined> {
 		const path = join(dirname(this.journal.filePath), "meta.json");
@@ -734,7 +1007,12 @@ export class JsonlLogStore implements RunLogStore {
 		rmSync(join(dirname(this.journal.filePath), "meta.json"), { force: true });
 		rmSync(this.journal.filePath, { force: true });
 	}
-	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead> {
+	async createBranch(
+		branchId: BranchId,
+		headSeqId: number,
+		metadata?: BranchMetadata,
+		options?: BranchMutationOptions,
+	): Promise<BranchHead> {
 		requireBranchId(branchId, "branchId");
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		const result = await this.commitBuilt((index) => {
@@ -742,7 +1020,17 @@ export class JsonlLogStore implements RunLogStore {
 			if (!index.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
 			const committedAt = Date.now();
 			return {
-				entries: [{ kind: "branch", op: "create", seqId: index.nextSeqId, branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt }],
+				entries: [
+					{
+						kind: "branch",
+						op: "create",
+						seqId: index.nextSeqId,
+						branchId,
+						headSeqId,
+						...(metadata === undefined ? {} : { metadata }),
+						committedAt,
+					},
+				],
 				result: { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) },
 			};
 		});
@@ -750,17 +1038,28 @@ export class JsonlLogStore implements RunLogStore {
 		return result;
 	}
 
-	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult> {
+	async moveBranch(
+		branchId: BranchId,
+		headSeqId: number | null,
+		options?: BranchMutationOptions,
+	): Promise<BranchMoveResult> {
 		requireBranchId(branchId, "branchId");
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		const result = await this.commitBuilt((index) => {
 			const branch = index.branches.get(branchId);
 			if (branch === undefined) throw new Error(`Unknown Hyperchart branch '${branchId}'`);
-			if (headSeqId !== null && !index.recordsBySeqId.has(headSeqId)) throw new Error(`No durable log record with seqId ${headSeqId}`);
+			if (headSeqId !== null && !index.recordsBySeqId.has(headSeqId))
+				throw new Error(`No durable log record with seqId ${headSeqId}`);
 			const moveSeqId = index.nextSeqId;
 			return {
 				entries: [{ kind: "branch", op: "move", seqId: moveSeqId, branchId, headSeqId, committedAt: Date.now() }],
-				result: { ...branch, headSeqId, moveSeqId, previousHeadSeqId: branch.headSeqId, preservedRecords: index.recordsBySeqId.size },
+				result: {
+					...branch,
+					headSeqId,
+					moveSeqId,
+					previousHeadSeqId: branch.headSeqId,
+					preservedRecords: index.recordsBySeqId.size,
+				},
 			};
 		});
 		if (checkpoint !== undefined) this.rememberClonedCheckpoint(checkpoint);
@@ -768,7 +1067,9 @@ export class JsonlLogStore implements RunLogStore {
 	}
 
 	private rememberClonedCheckpoint(checkpoint: OpaqueCheckpointEnvelope): void {
-		const duplicate = this.journal.checkpoints.find((candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.selectorKey === checkpoint.selectorKey);
+		const duplicate = this.journal.checkpoints.find(
+			(candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.selectorKey === checkpoint.selectorKey,
+		);
 		if (duplicate === undefined) this.journal.checkpoints.push(checkpoint);
 	}
 
@@ -776,7 +1077,11 @@ export class JsonlLogStore implements RunLogStore {
 		registerReplayPageReader(this, async (input) => boundedForwardReplayPage(this.index(), input));
 	}
 
-	private readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): HistoryChunk<AnyHistoryItem> {
+	private readSubject(
+		snapshot: HistorySnapshot,
+		subject: HistorySubject,
+		cursor?: HistoryCursor,
+	): HistoryChunk<AnyHistoryItem> {
 		const ancestry = this.ancestryForSnapshot(snapshot);
 		return historyChunkFromItems(snapshot, subject, historyItemsForSubject(ancestry, subject), cursor);
 	}
@@ -784,7 +1089,8 @@ export class JsonlLogStore implements RunLogStore {
 	private ancestryForSnapshot(snapshot: HistorySnapshot): readonly DurableLogRecord[] {
 		const index = this.index();
 		index.branch(snapshot.branchId);
-		if (snapshot.headSeqId !== null && !index.recordsBySeqId.has(snapshot.headSeqId)) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
+		if (snapshot.headSeqId !== null && !index.recordsBySeqId.has(snapshot.headSeqId))
+			throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
 		return index.materializeHistoryToHead(snapshot.headSeqId);
 	}
 
@@ -802,7 +1108,9 @@ export class JsonlLogStore implements RunLogStore {
 		return this.journal.index;
 	}
 
-	private commitBuilt<T>(builder: (index: MaterializedRunLogIndex) => { entries: readonly StorageEntry[]; result: T }): Promise<T> {
+	private commitBuilt<T>(
+		builder: (index: MaterializedRunLogIndex) => { entries: readonly StorageEntry[]; result: T },
+	): Promise<T> {
 		return enqueueJsonlWrite(this.journal.filePath, async () => {
 			this.openJournal();
 			const built = builder(this.index());
@@ -812,13 +1120,16 @@ export class JsonlLogStore implements RunLogStore {
 	}
 
 	private async appendLocked(entries: readonly StorageEntry[]): Promise<void> {
-		if (this.journal.poisoned) throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
+		if (this.journal.poisoned)
+			throw new Error("JSONL Hyperchart journal is unusable after a post-commit confirmation failure");
 		const index = this.journal.index;
 		const expectedByteLength = this.journal.expectedByteLength;
 		if (index === undefined || expectedByteLength === undefined) throw new Error("Hyperchart journal is not open");
 		const currentByteLength = await journalByteLengthAsync(this.journal.filePath);
 		if (currentByteLength !== expectedByteLength) {
-			throw new Error(`Stale Hyperchart journal writer: expected ${expectedByteLength} bytes but found ${currentByteLength}; reopen the run before writing`);
+			throw new Error(
+				`Stale Hyperchart journal writer: expected ${expectedByteLength} bytes but found ${currentByteLength}; reopen the run before writing`,
+			);
 		}
 		const payload = Buffer.from(entries.map((entry) => `${JSON.stringify(entry)}\n`).join(""), "utf8");
 		await appendEntriesOnce(this.journal.filePath, payload);
@@ -835,15 +1146,24 @@ function readEntryValues(filePath: string): OpenedEntryValues {
 	const values: unknown[] = [];
 	for (const [index, line] of content.split(/\r?\n/).entries()) {
 		if (line.length === 0) continue;
-		try { values.push(JSON.parse(line) as unknown); }
-		catch (error) { throw new Error(`Failed to parse durable log ${filePath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`); }
+		try {
+			values.push(JSON.parse(line) as unknown);
+		} catch (error) {
+			throw new Error(
+				`Failed to parse durable log ${filePath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`,
+			);
+		}
 	}
 	return { values, byteLength: Buffer.byteLength(content, "utf8") };
 }
 
 async function journalByteLengthAsync(filePath: string): Promise<number> {
-	try { return (await stat(filePath)).size; }
-	catch (error) { if (isNodeError(error) && error.code === "ENOENT") return 0; throw error; }
+	try {
+		return (await stat(filePath)).size;
+	} catch (error) {
+		if (isNodeError(error) && error.code === "ENOENT") return 0;
+		throw error;
+	}
 }
 
 async function appendEntriesOnce(filePath: string, payload: Buffer): Promise<void> {
@@ -851,8 +1171,11 @@ async function appendEntriesOnce(filePath: string, payload: Buffer): Promise<voi
 	const handle = await open(filePath, "a");
 	try {
 		const { bytesWritten } = await handle.write(payload, 0, payload.byteLength, null);
-		if (bytesWritten !== payload.byteLength) throw new Error(`Short Hyperchart journal append: wrote ${bytesWritten} of ${payload.byteLength} bytes`);
-	} finally { await handle.close(); }
+		if (bytesWritten !== payload.byteLength)
+			throw new Error(`Short Hyperchart journal append: wrote ${bytesWritten} of ${payload.byteLength} bytes`);
+	} finally {
+		await handle.close();
+	}
 }
 
 const jsonlWriteChains = new Map<string, Promise<void>>();
@@ -861,17 +1184,28 @@ function enqueueJsonlWrite<T>(filePath: string, task: () => Promise<T>): Promise
 	const key = resolve(filePath);
 	const previous = jsonlWriteChains.get(key) ?? Promise.resolve();
 	const result = previous.then(task);
-	const settled = result.then(() => undefined, () => undefined);
+	const settled = result.then(
+		() => undefined,
+		() => undefined,
+	);
 	jsonlWriteChains.set(key, settled);
-	void settled.finally(() => { if (jsonlWriteChains.get(key) === settled) jsonlWriteChains.delete(key); });
+	void settled.finally(() => {
+		if (jsonlWriteChains.get(key) === settled) jsonlWriteChains.delete(key);
+	});
 	return result;
 }
 
 /** @internal */
 export function assertDurableRecordDraft(value: DurableRecordDraft): void {
-	if (!isRecord(value) || typeof value.type !== "string") throw new Error("Durable record draft must contain a machine record type");
-	if ("seqId" in value || "parentId" in value || "branchId" in value || "timestamp" in value) throw new Error("Durable record coordinates are assigned only by the run writer");
-	if ("input" in value && value.input !== undefined && (value.type === "state_action" || value.type === "user_interaction" && value.kind === "opened")) {
+	if (!isRecord(value) || typeof value.type !== "string")
+		throw new Error("Durable record draft must contain a machine record type");
+	if ("seqId" in value || "parentId" in value || "branchId" in value || "timestamp" in value)
+		throw new Error("Durable record coordinates are assigned only by the run writer");
+	if (
+		"input" in value &&
+		value.input !== undefined &&
+		(value.type === "state_action" || (value.type === "user_interaction" && value.kind === "opened"))
+	) {
 		requireResolvedInput(value.input, `${value.type}.input`);
 	}
 }
@@ -892,11 +1226,13 @@ function requireJsonValue(value: unknown, coordinate: string, ancestors = new Se
 	ancestors.add(value);
 	try {
 		if (Array.isArray(value)) {
-			for (let index = 0; index < value.length; index++) requireJsonValue(value[index], `${coordinate}[${index}]`, ancestors);
+			for (let index = 0; index < value.length; index++)
+				requireJsonValue(value[index], `${coordinate}[${index}]`, ancestors);
 			return;
 		}
 		const prototype = Object.getPrototypeOf(value);
-		if (prototype !== Object.prototype && prototype !== null) throw new Error(`${coordinate} must contain only plain JSON objects`);
+		if (prototype !== Object.prototype && prototype !== null)
+			throw new Error(`${coordinate} must contain only plain JSON objects`);
 		for (const [key, entry] of Object.entries(value)) requireJsonValue(entry, `${coordinate}.${key}`, ancestors);
 	} finally {
 		ancestors.delete(value);
@@ -904,12 +1240,19 @@ function requireJsonValue(value: unknown, coordinate: string, ancestors = new Se
 }
 
 function checkpointDistance(checkpoint: OpaqueCheckpointEnvelope, distance: ReadonlyMap<number, number>): number {
-	return checkpoint.headSeqId === null ? Number.MAX_SAFE_INTEGER : distance.get(checkpoint.headSeqId) ?? Number.MAX_SAFE_INTEGER;
+	return checkpoint.headSeqId === null
+		? Number.MAX_SAFE_INTEGER
+		: (distance.get(checkpoint.headSeqId) ?? Number.MAX_SAFE_INTEGER);
 }
 
 function requireBranchId(value: unknown, coordinate: string): BranchId {
-	if (typeof value !== "string" || value.trim().length === 0 || value.length > 128 || /[\0/\\]/.test(value)) throw new Error(`${coordinate} must be a non-empty branch id without path separators`);
+	if (typeof value !== "string" || value.trim().length === 0 || value.length > 128 || /[\0/\\]/.test(value))
+		throw new Error(`${coordinate} must be a non-empty branch id without path separators`);
 	return value;
 }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-function isNodeError(error: unknown): error is NodeJS.ErrnoException { return error instanceof Error && "code" in error; }
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return error instanceof Error && "code" in error;
+}

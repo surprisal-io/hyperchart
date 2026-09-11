@@ -31,7 +31,9 @@ function stripAnsi(value: string): string {
 }
 
 function staticLines(theme: TuiTheme, width: TuiWidth, kind: TuiComponentKind, preset: string): string[] {
-	return staticFrames[theme][width][kind][preset] ?? staticFrames[theme][width][kind].initial ?? ["TUI preview unavailable"];
+	return (
+		staticFrames[theme][width][kind][preset] ?? staticFrames[theme][width][kind].initial ?? ["TUI preview unavailable"]
+	);
 }
 
 async function post(path: string, body: Record<string, unknown>): Promise<PreviewResponse> {
@@ -44,13 +46,7 @@ async function post(path: string, body: Record<string, unknown>): Promise<Previe
 	return (await response.json()) as PreviewResponse;
 }
 
-export function TuiTerminalPreview({
-	kind,
-	width,
-	theme,
-	preset,
-	interactive = true,
-}: TuiTerminalPreviewProps) {
+export function TuiTerminalPreview({ kind, width, theme, preset, interactive = true }: TuiTerminalPreviewProps) {
 	const hostRef = useRef<HTMLDivElement>(null);
 	const terminalRef = useRef<Terminal | null>(null);
 	const sessionIdRef = useRef<string | null>(null);
@@ -73,7 +69,8 @@ export function TuiTerminalPreview({
 			.then((payload) => {
 				createdSessionId = payload.sessionId;
 				if (disposed) {
-					if (createdSessionId !== undefined) void post("dispose", { sessionId: createdSessionId }).catch(() => undefined);
+					if (createdSessionId !== undefined)
+						void post("dispose", { sessionId: createdSessionId }).catch(() => undefined);
 					return;
 				}
 				sessionIdRef.current = payload.sessionId ?? null;
@@ -106,7 +103,7 @@ export function TuiTerminalPreview({
 			.catch(() => setMode("static"));
 		queueMicrotask(() => terminalRef.current?.focus());
 	};
-	
+
 	sendRef.current = send;
 
 	useLayoutEffect(() => {
@@ -164,13 +161,30 @@ export function TuiTerminalPreview({
 			{interactive && kind !== "widget" && (
 				<div className="flex flex-wrap items-center gap-2 text-xs">
 					<fieldset disabled={controlsDisabled} className="contents disabled:opacity-50">
-					<button type="button" onClick={() => send("\u001b[A", "up")} className="rounded border px-2 py-1">↑</button>
-					<button type="button" onClick={() => send("\u001b[B", "down")} className="rounded border px-2 py-1">↓</button>
-					<button type="button" onClick={() => send("\r", "enter")} className="rounded border px-2 py-1">Enter · open inspector</button>
-					<button type="button" onClick={() => send("\u001b", "escape")} className="rounded border px-2 py-1">Esc</button>
+						<button type="button" onClick={() => send("\u001b[A", "up")} className="rounded border px-2 py-1">
+							↑
+						</button>
+						<button type="button" onClick={() => send("\u001b[B", "down")} className="rounded border px-2 py-1">
+							↓
+						</button>
+						<button type="button" onClick={() => send("\r", "enter")} className="rounded border px-2 py-1">
+							Enter · open inspector
+						</button>
+						<button type="button" onClick={() => send("\u001b", "escape")} className="rounded border px-2 py-1">
+							Esc
+						</button>
 					</fieldset>
-					<button type="button" onClick={reset} disabled={mode === "loading"} className="rounded border px-2 py-1 disabled:opacity-50">Reset</button>
-					<span className="text-[var(--text-muted)]">{mode === "live" ? "Live Node fixture" : mode === "loading" ? "Connecting…" : "Static build preview"}</span>
+					<button
+						type="button"
+						onClick={reset}
+						disabled={mode === "loading"}
+						className="rounded border px-2 py-1 disabled:opacity-50"
+					>
+						Reset
+					</button>
+					<span className="text-[var(--text-muted)]">
+						{mode === "live" ? "Live Node fixture" : mode === "loading" ? "Connecting…" : "Static build preview"}
+					</span>
 				</div>
 			)}
 			<div

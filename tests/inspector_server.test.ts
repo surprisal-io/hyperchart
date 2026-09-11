@@ -1,10 +1,7 @@
 import { createServer } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HyperchartInspectorDataSource, HyperchartRunInfo } from "@surprisal/hyperchart/host";
-import {
-	closeRunInspectorServer,
-	openRunInspector,
-} from "../packages/hyperchart/src/inspect/inspector_server.js";
+import { closeRunInspectorServer, openRunInspector } from "../packages/hyperchart/src/inspect/inspector_server.js";
 
 beforeEach(() => {
 	// Inspector overrides exported by the developer's shell must not leak into tests.
@@ -23,14 +20,23 @@ describe("browser run inspector server", () => {
 		const selectedBranches: Array<string | undefined> = [];
 		const first = await openRunInspector({
 			runId: "run-one",
-			branchId: "main",			loadRun: async () => ({ runId: "run-one", status: "running" }) as unknown as HyperchartRunInfo,
+			branchId: "main",
+			loadRun: async () => ({ runId: "run-one", status: "running" }) as unknown as HyperchartRunInfo,
 			openBrowser: (url) => {
 				opened.push(url);
 			},
 		});
 		const second = await openRunInspector({
 			runId: "run-two",
-			branchId: "main",			loadRun: async (branchId) => { selectedBranches.push(branchId); return ({ runId: "run-two", status: "complete", ...(branchId === undefined ? {} : { branchId }) }) as unknown as HyperchartRunInfo; },
+			branchId: "main",
+			loadRun: async (branchId) => {
+				selectedBranches.push(branchId);
+				return {
+					runId: "run-two",
+					status: "complete",
+					...(branchId === undefined ? {} : { branchId }),
+				} as unknown as HyperchartRunInfo;
+			},
 			openBrowser: (url) => {
 				opened.push(url);
 			},
@@ -47,7 +53,9 @@ describe("browser run inspector server", () => {
 		expect(await response.json()).toEqual({ run: { runId: "run-two", status: "complete" } });
 		expect(response.headers.get("cache-control")).toBe("no-store");
 		const branchResponse = await fetch(`${new URL(second.url).origin}/api/runs/${token}?branchId=experiment`);
-		expect(await branchResponse.json()).toEqual({ run: { runId: "run-two", status: "complete", branchId: "experiment" } });
+		expect(await branchResponse.json()).toEqual({
+			run: { runId: "run-two", status: "complete", branchId: "experiment" },
+		});
 		expect(selectedBranches).toEqual([undefined, "experiment"]);
 	});
 
@@ -55,7 +63,8 @@ describe("browser run inspector server", () => {
 		const steering: Array<{ branchId: string; actionKey: string; message: string }> = [];
 		const { url } = await openRunInspector({
 			runId: "run-one",
-			branchId: "main",			loadRun: async () => ({ runId: "run-one" }) as HyperchartRunInfo,
+			branchId: "main",
+			loadRun: async () => ({ runId: "run-one" }) as HyperchartRunInfo,
 			steerSession: (branchId, actionKey, message) => {
 				steering.push({ branchId, actionKey, message });
 			},
@@ -84,24 +93,48 @@ describe("browser run inspector server", () => {
 			cursorAt: async () => undefined,
 			readVisitSession: async () => undefined,
 		};
-		const { url } = await openRunInspector({ runId: "missing-history", branchId: "main", loadRun: async () => ({ runId: "missing-history" }) as HyperchartRunInfo, historyDataSource, openBrowser: () => undefined });
-		for (const [operation, input] of [["cursorAt", { snapshot, subject: { kind: "records" }, seqId: 99 }], ["readVisitSession", { branchId: "main", invokeSeqId: 99 }]] as const) {
-			const response = await fetch(`${url.replace("/runs/", "/api/runs/")}/history`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation, input }) });
+		const { url } = await openRunInspector({
+			runId: "missing-history",
+			branchId: "main",
+			loadRun: async () => ({ runId: "missing-history" }) as HyperchartRunInfo,
+			historyDataSource,
+			openBrowser: () => undefined,
+		});
+		for (const [operation, input] of [
+			["cursorAt", { snapshot, subject: { kind: "records" }, seqId: 99 }],
+			["readVisitSession", { branchId: "main", invokeSeqId: 99 }],
+		] as const) {
+			const response = await fetch(`${url.replace("/runs/", "/api/runs/")}/history`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ operation, input }),
+			});
 			expect(response.status).toBe(200);
 			expect(await response.json()).toEqual({ found: false });
 		}
 	});
 
 	it("rejects malformed steering branch ids", async () => {
-		const { url } = await openRunInspector({ runId: "bad-branch", branchId: "main", loadRun: async () => ({ runId: "bad-branch" }) as HyperchartRunInfo, steerSession: () => undefined, openBrowser: () => undefined });
-		const response = await fetch(`${url.replace("/runs/", "/api/runs/")}/steer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branchId: "../other", actionKey: "agent", message: "no" }) });
+		const { url } = await openRunInspector({
+			runId: "bad-branch",
+			branchId: "main",
+			loadRun: async () => ({ runId: "bad-branch" }) as HyperchartRunInfo,
+			steerSession: () => undefined,
+			openBrowser: () => undefined,
+		});
+		const response = await fetch(`${url.replace("/runs/", "/api/runs/")}/steer`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ branchId: "../other", actionKey: "agent", message: "no" }),
+		});
 		expect(response.status).toBe(400);
 	});
 
 	it("does not expose unregistered run tokens", async () => {
 		const { url } = await openRunInspector({
 			runId: "run-one",
-			branchId: "main",			loadRun: async () => ({ runId: "run-one" }) as HyperchartRunInfo,
+			branchId: "main",
+			loadRun: async () => ({ runId: "run-one" }) as HyperchartRunInfo,
 			openBrowser: () => undefined,
 		});
 		const response = await fetch(`${new URL(url).origin}/api/runs/not-registered`);
@@ -130,7 +163,8 @@ describe("remote-friendly inspector options", () => {
 		process.env.HYPERCHART_INSPECTOR_PORT = String(probe);
 		const { url } = await openRunInspector({
 			runId: "fixed-port",
-			branchId: "main",			loadRun: async () => ({ runId: "fixed-port" }) as never,
+			branchId: "main",
+			loadRun: async () => ({ runId: "fixed-port" }) as never,
 			openBrowser: () => undefined,
 		});
 		expect(new URL(url).port).toBe(String(probe));
@@ -150,7 +184,8 @@ describe("remote-friendly inspector options", () => {
 			process.env.HYPERCHART_INSPECTOR_PORT = String(blockedPort);
 			const { url } = await openRunInspector({
 				runId: "fallback-port",
-				branchId: "main",				loadRun: async () => ({ runId: "fallback-port" }) as never,
+				branchId: "main",
+				loadRun: async () => ({ runId: "fallback-port" }) as never,
 				openBrowser: () => undefined,
 			});
 			expect(new URL(url).port).not.toBe(String(blockedPort));
@@ -165,7 +200,8 @@ describe("remote-friendly inspector options", () => {
 		// No openBrowser stub: without the SSH guard this would spawn a real browser.
 		const { url } = await openRunInspector({
 			runId: "ssh-run",
-			branchId: "main",			loadRun: async () => ({ runId: "ssh-run" }) as never,
+			branchId: "main",
+			loadRun: async () => ({ runId: "ssh-run" }) as never,
 		});
 		expect((await fetch(url)).status).toBe(200);
 	});
@@ -174,7 +210,8 @@ describe("remote-friendly inspector options", () => {
 		process.env.HYPERCHART_INSPECTOR_HOST = "0.0.0.0";
 		const { url } = await openRunInspector({
 			runId: "lan-run",
-			branchId: "main",			loadRun: async () => ({ runId: "lan-run" }) as never,
+			branchId: "main",
+			loadRun: async () => ({ runId: "lan-run" }) as never,
 			openBrowser: () => undefined,
 		});
 		const parsed = new URL(url);

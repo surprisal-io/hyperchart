@@ -77,12 +77,16 @@ function args(seqId = 1): DurableLogRecord {
 	return { type: "args", args: {}, parentId: null, seqId, branchId: "main", timestamp: seqId };
 }
 
-function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst = definitionForUid(uid),
-	_validation: GuardRefAst | null = null): DurableLogRecord {
+function invoke(
+	uid: ActionUID,
+	seqId: number,
+	actionDefinition: StateActionAst = definitionForUid(uid),
+	_validation: GuardRefAst | null = null,
+): DurableLogRecord {
 	return {
 		type: "state_action",
 		kind: "invoke",
-			sessionId: "session-id",
+		sessionId: "session-id",
 		actionUid: uid,
 		definition: actionDefinition,
 		...meta(seqId),
@@ -99,7 +103,11 @@ function complete(uid: ActionUID, eventType: string, seqId: number, output?: unk
 	};
 }
 
-function validated(uid: ActionUID, eventType: string, seqId: number, guard: GuardRefAst = { kind: "tsImport", module: "./checks.js", export: "ok" },
+function validated(
+	uid: ActionUID,
+	eventType: string,
+	seqId: number,
+	guard: GuardRefAst = { kind: "tsImport", module: "./checks.js", export: "ok" },
 ): DurableLogRecord {
 	return {
 		type: "state_action",
@@ -116,14 +124,21 @@ describe("explainReplay", () => {
 	it("rejects forged actor creation placement and generation provenance", () => {
 		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
 		const Actor = actor({
-			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: ActorProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const declaration = Actor({});
-		const current = ast(chart({
-			kind: "chart", id: "actor-replay-provenance", actors: { a: declaration }, initial: "done",
-			states: { ping: send({ to: declaration, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "actor-replay-provenance",
+				actors: { a: declaration },
+				initial: "done",
+				states: { ping: send({ to: declaration, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		const definition = current.actors["@a"]!;
 		const valid = {
 			type: "actor_created" as const,
@@ -151,19 +166,34 @@ describe("explainReplay", () => {
 	it("derives a restarted actor's logical occurrence from its concrete occurrence", () => {
 		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
 		const Actor = actor({
-			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: ActorProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const declaration = Actor({});
-		const current = ast(chart({
-			kind: "chart", id: "actor-replay-generation", actors: { a: declaration }, initial: "done",
-			states: { ping: send({ to: declaration, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "actor-replay-generation",
+				actors: { a: declaration },
+				initial: "done",
+				states: { ping: send({ to: declaration, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		const definition = current.actors["@a"]!;
 		const log: DurableLogRecord[] = [
 			{ type: "actor_created", declaration: "@a", occurrence: "@a", generation: 1, input: {}, definition, ...meta(1) },
 			{ type: "actor_scope", kind: "stopped", occurrence: "@a", ...meta(2) },
-			{ type: "actor_created", declaration: "@a", occurrence: "@a~2", generation: 2, input: {}, definition, ...meta(3) },
+			{
+				type: "actor_created",
+				declaration: "@a",
+				occurrence: "@a~2",
+				generation: 2,
+				input: {},
+				definition,
+				...meta(3),
+			},
 		];
 
 		const explanation = explainReplay(current, log);
@@ -177,72 +207,151 @@ describe("explainReplay", () => {
 		const OldProtocol = protocol({ PING: message({ input: z.object({}), reply: z.object({ value: z.string() }) }) });
 		const NewProtocol = protocol({ PING: message({ input: z.object({}), reply: z.object({ value: z.number() }) }) });
 		const OldActor = actor({
-			input: z.object({}), protocol: OldProtocol, initial: "idle",
-			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle", output: { value: "old" } }) },
+			input: z.object({}),
+			protocol: OldProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { PING: "settle" } }),
+				settle: reply({ target: "idle", output: { value: "old" } }),
+			},
 		});
 		const NewActor = actor({
-			input: z.object({}), protocol: NewProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: NewProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle", output: { value: 1 } }) },
 		});
 		const oldActor = OldActor({});
 		const newActor = NewActor({});
-		const old = ast(chart({
-			kind: "chart", id: "actor-reply-contract", actors: { worker: oldActor }, initial: "ping",
-			states: { ping: send({ to: oldActor, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
-		const current = ast(chart({
-			kind: "chart", id: "actor-reply-contract", actors: { worker: newActor }, initial: "ping",
-			states: { ping: send({ to: newActor, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
+		const old = ast(
+			chart({
+				kind: "chart",
+				id: "actor-reply-contract",
+				actors: { worker: oldActor },
+				initial: "ping",
+				states: { ping: send({ to: oldActor, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "actor-reply-contract",
+				actors: { worker: newActor },
+				initial: "ping",
+				states: { ping: send({ to: newActor, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		const declaration = old.actors["@worker"]!;
 		const source = old.states.ping;
 		assert(source?.kind === "send", "expected send source");
 		const contract = declaration.protocol.PING!;
 		assert(contract.reply.kind === "single", "expected single reply contract");
-		const envelope = { messageId: "ping:message:1:0", event: "PING", input: {}, producerState: "ping", producerVisit: 1, batchIndex: 0 };
+		const envelope = {
+			messageId: "ping:message:1:0",
+			event: "PING",
+			input: {},
+			producerState: "ping",
+			producerVisit: 1,
+			batchIndex: 0,
+		};
 		const log: DurableLogRecord[] = [
-			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: {}, definition: declaration, ...meta(1) },
-			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: { producerState: "ping", kind: "send", definition: source, targetDeclaration: "@worker", event: "PING", inputSchema: contract.input }, messages: [envelope], ...meta(2) },
-			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: envelope.messageId, receiveState: "@worker.idle", ...meta(3) },
-			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: envelope.messageId, message: "PING", output: { value: "old" }, schema: contract.reply.schema, ...meta(4) },
+			{
+				type: "actor_created",
+				declaration: "@worker",
+				occurrence: "@worker",
+				generation: 1,
+				input: {},
+				definition: declaration,
+				...meta(1),
+			},
+			{
+				type: "actor_messages_enqueued",
+				occurrence: "@worker",
+				generation: 1,
+				source: {
+					producerState: "ping",
+					kind: "send",
+					definition: source,
+					targetDeclaration: "@worker",
+					event: "PING",
+					inputSchema: contract.input,
+				},
+				messages: [envelope],
+				...meta(2),
+			},
+			{
+				type: "actor_message",
+				kind: "accepted",
+				occurrence: "@worker",
+				messageId: envelope.messageId,
+				receiveState: "@worker.idle",
+				...meta(3),
+			},
+			{
+				type: "actor_message",
+				kind: "replied",
+				occurrence: "@worker",
+				messageId: envelope.messageId,
+				message: "PING",
+				output: { value: "old" },
+				schema: contract.reply.schema,
+				...meta(4),
+			},
 		];
 
 		const explanation = explainReplay(current, log);
 
 		expect(explanation.broken).toBeUndefined();
-		expect(explanation.stale).toEqual(expect.arrayContaining([
-			expect.objectContaining({ seqId: 4, reason: "actor_reply_contract_changed", state: "@worker" }),
-		]));
+		expect(explanation.stale).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ seqId: 4, reason: "actor_reply_contract_changed", state: "@worker" }),
+			]),
+		);
 	});
 
 	it("rejects an actor creation whose map owner was not a concrete spawned occurrence", () => {
 		const ActorProtocol = protocol({ PING: message({ input: z.object({}) }) });
 		const Actor = actor({
-			input: z.object({}), protocol: ActorProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: ActorProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const declaration = Actor({});
-		const current = ast(chart({
-			kind: "chart", id: "actor-map-owner-provenance", initial: "m", states: {
-				m: map({
-					over: arg("items"), actors: { a: declaration }, initial: "work", onDone: "done",
-					states: {
-						work: { kind: "state", action: agent("worker"), transitions: { DONE: "finished" } },
-						ping: send({ to: declaration, event: "PING", input: {}, target: "finished" }),
-						finished: final(),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "actor-map-owner-provenance",
+				initial: "m",
+				states: {
+					m: map({
+						over: arg("items"),
+						actors: { a: declaration },
+						initial: "work",
+						onDone: "done",
+						states: {
+							work: { kind: "state", action: agent("worker"), transitions: { DONE: "finished" } },
+							ping: send({ to: declaration, event: "PING", input: {}, target: "finished" }),
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const definition = current.actors["m.@a"]!;
 		const log: DurableLogRecord[] = [
 			args(),
 			{ type: "spawned", path: "m", instances: { real: {} }, ...meta(2) },
 			{
-				type: "actor_created", declaration: "m.@a", owner: "m",
-				occurrence: "m.@a", generation: 1,
-				input: {}, definition, ...meta(3),
+				type: "actor_created",
+				declaration: "m.@a",
+				owner: "m",
+				occurrence: "m.@a",
+				generation: 1,
+				input: {},
+				definition,
+				...meta(3),
 			},
 		];
 
@@ -253,21 +362,42 @@ describe("explainReplay", () => {
 	});
 
 	it("treats guard env, reply, and artifact provenance as replay-sensitive", () => {
-		const make = (value: string) => ast(chart({ kind: "chart", id: "guard-provenance", initial: "work", states: {
-			work: { kind: "state", action: agent("worker", {
+		const make = (value: string) =>
+			ast(
+				chart({
+					kind: "chart",
+					id: "guard-provenance",
+					initial: "work",
+					states: {
+						work: {
+							kind: "state",
+							action: agent("worker", {
 								validation: {
-									guard: script("node", [], { env: { CHECK: value }, artifacts: { report: "report.json" }, reply: z.object({ ok: z.boolean() }) }),
+									guard: script("node", [], {
+										env: { CHECK: value },
+										artifacts: { report: "report.json" },
+										reply: z.object({ ok: z.boolean() }),
+									}),
 								},
 							}),
-							transitions: { DONE: "done" } }, done: final(),
-		} }));
+							transitions: { DONE: "done" },
+						},
+						done: final(),
+					},
+				}),
+			);
 		const original = make("one");
 		const changed = make("two");
 		const uid = actionUid(original, "work");
 		const originalAction = (original.states.work as Extract<StateAst, { kind: "state" }>).action;
 		const guard = originalAction.kind === "agent" ? originalAction.validation?.guard : undefined;
 		if (guard === undefined) throw new Error("expected guard");
-		const log: DurableLogRecord[] = [args(), invoke(uid, 2, definition(original, "work")), complete(uid, "DONE", 3), validated(uid, "DONE", 4, guard)];
+		const log: DurableLogRecord[] = [
+			args(),
+			invoke(uid, 2, definition(original, "work")),
+			complete(uid, "DONE", 3),
+			validated(uid, "DONE", 4, guard),
+		];
 		const explanation = explainReplay(changed, log);
 		expect(explanation.stale).toEqual(expect.arrayContaining([expect.objectContaining({ reason: "guard_changed" })]));
 	});
@@ -280,7 +410,11 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "first",
 				states: {
-					first: { kind: "state", action: agent("first-worker"), transitions: { FIRST_DONE: "second", OTHER: "unused" } },
+					first: {
+						kind: "state",
+						action: agent("first-worker"),
+						transitions: { FIRST_DONE: "second", OTHER: "unused" },
+					},
 					second: { kind: "state", action: agent("second-worker"), transitions: { SECOND_DONE: "done" } },
 					unused: { kind: "state", action: agent("unused-worker"), transitions: { DONE: "done" } },
 					done: final(),
@@ -323,7 +457,13 @@ describe("explainReplay", () => {
 	it("rejects pre-provenance invoke records instead of replaying them", () => {
 		const current = twoStep();
 		const first = actionUid(current, "first");
-		const oldInvoke = { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: first, ...meta(2) } as unknown as DurableLogRecord;
+		const oldInvoke = {
+			type: "state_action",
+			kind: "invoke",
+			sessionId: "session-id",
+			actionUid: first,
+			...meta(2),
+		} as unknown as DurableLogRecord;
 		const log = [args(), oldInvoke];
 
 		const explanation = explainReplay(current, log);
@@ -417,8 +557,11 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
-						transitions: { DONE: "done" } },
+					work: {
+						kind: "state",
+						action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
+						transitions: { DONE: "done" },
+					},
 					done: final(),
 				},
 			}),
@@ -462,8 +605,11 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
-						transitions: { DONE: "done" } },
+					work: {
+						kind: "state",
+						action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
+						transitions: { DONE: "done" },
+					},
 					done: final(),
 				},
 			}),
@@ -513,14 +659,25 @@ describe("explainReplay", () => {
 	});
 
 	it("reports script-to-tsAction replay as broken at the invoke identity boundary", () => {
-		const old = ast(chart({
-			kind: "chart", id: "action-kind-change", initial: "work",
-			states: { work: { kind: "state", action: script("node"), transitions: { DONE: "done" } }, done: final() },
-		}));
-		const current = ast(chart({
-			kind: "chart", id: "action-kind-change", initial: "work",
-			states: { work: { kind: "state", action: tsAction("./actions.mjs", "run"), transitions: { DONE: "done" } }, done: final() },
-		}));
+		const old = ast(
+			chart({
+				kind: "chart",
+				id: "action-kind-change",
+				initial: "work",
+				states: { work: { kind: "state", action: script("node"), transitions: { DONE: "done" } }, done: final() },
+			}),
+		);
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "action-kind-change",
+				initial: "work",
+				states: {
+					work: { kind: "state", action: tsAction("./actions.mjs", "run"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const work = actionUid(old, "work");
 		const explanation = explainReplay(current, [args(), invoke(work, 2, definition(old, "work"))]);
 
@@ -530,13 +687,22 @@ describe("explainReplay", () => {
 	});
 
 	it("marks imported action module, export, and env changes as stale provenance", () => {
-		const make = (module: string, exportName: string, value: string) => ast(chart({
-			kind: "chart", id: "imported-action-provenance", initial: "work",
-			states: {
-				work: { kind: "state", action: tsAction(module, exportName, { env: { VALUE: value } }), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+		const make = (module: string, exportName: string, value: string) =>
+			ast(
+				chart({
+					kind: "chart",
+					id: "imported-action-provenance",
+					initial: "work",
+					states: {
+						work: {
+							kind: "state",
+							action: tsAction(module, exportName, { env: { VALUE: value } }),
+							transitions: { DONE: "done" },
+						},
+						done: final(),
+					},
+				}),
+			);
 		const old = make("./old.mjs", "run", "one");
 		const uid = actionUid(old, "work");
 		for (const current of [
@@ -588,8 +754,11 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker", { validation: { guard: oldGuard } }),
-						transitions: { DONE: "done" } },
+					work: {
+						kind: "state",
+						action: agent("worker", { validation: { guard: oldGuard } }),
+						transitions: { DONE: "done" },
+					},
 					done: final(),
 				},
 			}),
@@ -600,19 +769,30 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker", { validation: { guard: newGuard } }),
-						transitions: { DONE: "done" } },
+					work: {
+						kind: "state",
+						action: agent("worker", { validation: { guard: newGuard } }),
+						transitions: { DONE: "done" },
+					},
 					done: final(),
 				},
 			}),
 		);
 		const work = actionUid(old, "work");
-		const log = [args(), invoke(work, 2, definition(old, "work"), oldGuard), complete(work, "DONE", 3), validated(work, "DONE", 4, oldGuard)];
+		const log = [
+			args(),
+			invoke(work, 2, definition(old, "work"), oldGuard),
+			complete(work, "DONE", 3),
+			validated(work, "DONE", 4, oldGuard),
+		];
 
 		const explanation = explainReplay(current, log);
 
 		expect(explanation.broken).toBeUndefined();
-		expect(explanation.stale).toMatchObject([{ seqId: 2, reason: "action_definition_changed" }, { seqId: 4, state: "work", reason: "guard_changed", invokeSeqId: 2 }]);
+		expect(explanation.stale).toMatchObject([
+			{ seqId: 2, reason: "action_definition_changed" },
+			{ seqId: 4, state: "work", reason: "guard_changed", invokeSeqId: 2 },
+		]);
 	});
 
 	it("replays spawned maps from old facts", () => {
@@ -647,15 +827,22 @@ describe("explainReplay", () => {
 	});
 
 	it("excludes state-action input copies from replay identity and accepts old records", () => {
-		const current = ast(chart({ kind: "chart", id: "state-input-replay", initial: "work", states: {
-			work: {
-				kind: "state",
-				input: { hypothesisId: z.string().default("current") },
-				action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "state-input-replay",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { hypothesisId: z.string().default("current") },
+						action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
 						transitions: { DONE: "done" },
-			},
-			done: final(),
-		} }));
+					},
+					done: final(),
+				},
+			}),
+		);
 		const uid = actionUid(current, "work");
 		const oldJournal = [
 			args(),
@@ -674,26 +861,54 @@ describe("explainReplay", () => {
 	});
 
 	it("validates opened provenance and resolved user-event legality", () => {
-		const current = ast(chart({ kind: "chart", id: "user-replay", initial: "ask", states: {
-			ask: {
-				kind: "state",
-				input: { context: z.object({ label: z.string() }).default({ label: "current" }) },
-				action: user({ prompt: "Approve?", options: ["OK"] }),
-				transitions: { OK: "done" },
-			},
-			done: final(),
-		} }));
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "user-replay",
+				initial: "ask",
+				states: {
+					ask: {
+						kind: "state",
+						input: { context: z.object({ label: z.string() }).default({ label: "current" }) },
+						action: user({ prompt: "Approve?", options: ["OK"] }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
 		const uid = actionUid(current, "ask");
 		// Pre-input-field opened records remain replay-compatible because resolved input is
 		// informational provenance rather than part of the rendered interaction identity.
-		const opened: DurableLogRecord = { type: "user_interaction", kind: "opened", actionUid: uid, phaseSeqId: 2, prompt: "Approve?", options: ["OK"], events: ["OK"], ...meta(3) };
-		const resolved: DurableLogRecord = { type: "user_interaction", kind: "resolved", gateSeqId: 3, actionUid: uid, event: { type: "OK" }, ...meta(4) };
+		const opened: DurableLogRecord = {
+			type: "user_interaction",
+			kind: "opened",
+			actionUid: uid,
+			phaseSeqId: 2,
+			prompt: "Approve?",
+			options: ["OK"],
+			events: ["OK"],
+			...meta(3),
+		};
+		const resolved: DurableLogRecord = {
+			type: "user_interaction",
+			kind: "resolved",
+			gateSeqId: 3,
+			actionUid: uid,
+			event: { type: "OK" },
+			...meta(4),
+		};
 		const prefix = [args(), invoke(uid, 2, definition(current, "ask"))];
 		expect(explainReplay(current, [...prefix, opened, resolved])).toMatchObject({ prefixEnd: 4, stale: [] });
-		const informationalInput = explainReplay(current, [...prefix, { ...opened, input: { context: { label: "historical" } } }]);
+		const informationalInput = explainReplay(current, [
+			...prefix,
+			{ ...opened, input: { context: { label: "historical" } } },
+		]);
 		expect(informationalInput.stale).toEqual([]);
 		const stale = explainReplay(current, [...prefix, { ...opened, prompt: "Changed" }]);
-		expect(stale.stale).toEqual([expect.objectContaining({ reason: "user_interaction_contract_changed", state: "ask" })]);
+		expect(stale.stale).toEqual([
+			expect.objectContaining({ reason: "user_interaction_contract_changed", state: "ask" }),
+		]);
 		const broken = explainReplay(current, [...prefix, opened, { ...resolved, event: { type: "NOPE" } }]);
 		expect(broken.broken?.error).toContain("not allowed");
 	});

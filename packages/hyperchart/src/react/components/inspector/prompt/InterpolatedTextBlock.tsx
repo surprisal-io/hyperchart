@@ -29,7 +29,15 @@ function interpolatedParts(
 				...(onHighlightRef === undefined ? {} : { onHighlightRef }),
 			});
 			const display = compactTokens ? compactTokenDisplay(token) : undefined;
-			parts.push(<InterpolationToken key={`${token}:${match.index}`} token={token} action={action} inline={compactTokens} {...(display === undefined ? {} : { display })} />);
+			parts.push(
+				<InterpolationToken
+					key={`${token}:${match.index}`}
+					token={token}
+					action={action}
+					inline={compactTokens}
+					{...(display === undefined ? {} : { display })}
+				/>,
+			);
 		} else {
 			parts.push(match[0]);
 		}
@@ -52,7 +60,13 @@ export function InterpolatedTextBlock({
 	compact = false,
 	cssCollapse = false,
 	maxPreviewCharacters,
-}: InterpolatedTextProps & { collapsedLines?: number; nowrap?: boolean; compact?: boolean; cssCollapse?: boolean; maxPreviewCharacters?: number }) {
+}: InterpolatedTextProps & {
+	collapsedLines?: number;
+	nowrap?: boolean;
+	compact?: boolean;
+	cssCollapse?: boolean;
+	maxPreviewCharacters?: number;
+}) {
 	const interpolationProps = {
 		state,
 		allStates,
@@ -75,14 +89,40 @@ export function InterpolatedTextBlock({
 				previewText={preview.text}
 				fullText={text}
 				render={(value, full, closeFull) => {
-					const fullProps = closeFull === undefined ? interpolationProps : {
-						...interpolationProps,
-						...(onHighlightInput === undefined ? {} : { onHighlightInput: (name: string) => { closeFull(); onHighlightInput(name); } }),
-						...(onHighlightReply === undefined ? {} : { onHighlightReply: (stateId: string, path: string) => { closeFull(); onHighlightReply(stateId, path); } }),
-						...(onHighlightRef === undefined ? {} : { onHighlightRef: (value: string) => { closeFull(); onHighlightRef(value); } }),
-					};
+					const fullProps =
+						closeFull === undefined
+							? interpolationProps
+							: {
+									...interpolationProps,
+									...(onHighlightInput === undefined
+										? {}
+										: {
+												onHighlightInput: (name: string) => {
+													closeFull();
+													onHighlightInput(name);
+												},
+											}),
+									...(onHighlightReply === undefined
+										? {}
+										: {
+												onHighlightReply: (stateId: string, path: string) => {
+													closeFull();
+													onHighlightReply(stateId, path);
+												},
+											}),
+									...(onHighlightRef === undefined
+										? {}
+										: {
+												onHighlightRef: (value: string) => {
+													closeFull();
+													onHighlightRef(value);
+												},
+											}),
+								};
 					return (
-						<div className={`min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] [overflow-wrap:anywhere] ${full ? "whitespace-pre-wrap" : "whitespace-normal"}`}>
+						<div
+							className={`min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] [overflow-wrap:anywhere] ${full ? "whitespace-pre-wrap" : "whitespace-normal"}`}
+						>
 							{interpolatedParts(value, fullProps)}
 						</div>
 					);
@@ -95,7 +135,9 @@ export function InterpolatedTextBlock({
 			collapsedLines={collapsedLines}
 			maxPreviewCharacters={maxPreviewCharacters ?? Math.max(240, collapsedLines * 100)}
 			renderContent={(visibleText) => (
-				<div className={`p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] ${nowrap ? "w-max min-w-full whitespace-pre [overflow-wrap:normal]" : "min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]"}`}>
+				<div
+					className={`p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] ${nowrap ? "w-max min-w-full whitespace-pre [overflow-wrap:normal]" : "min-w-0 max-w-full whitespace-pre-wrap [overflow-wrap:anywhere]"}`}
+				>
 					{interpolatedParts(visibleText, interpolationProps)}
 				</div>
 			)}

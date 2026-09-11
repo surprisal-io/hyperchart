@@ -73,9 +73,24 @@ describe("Storybook information architecture", () => {
 	it("keeps the virtualized Runtime History board focused on distinct row variants", () => {
 		const source = readFileSync(join(storyDirectory, "RuntimeHistoryVirtualizedCursorChunks.stories.tsx"), "utf8");
 		expect(source).toContain("Runtime History — Virtualized Cursor Chunks");
-		for (const story of ["TenThousandStateVisits", "TenThousandMapLaunches", "TenThousandActorGenerations", "TenThousandActorMessageBatches"])
+		for (const story of [
+			"TenThousandStateVisits",
+			"TenThousandMapLaunches",
+			"TenThousandActorGenerations",
+			"TenThousandActorMessageBatches",
+		])
 			expect(source).toContain(`export const ${story}`);
-		for (const removedUseCase of ["DeepLinkedMiddleChunk", "OppositeEdgeEvictionAndReload", "VariableHeightAnchorPreservation", "EmptyHistory", "OlderEdgeFailureAndRetry", "NewerEdgeFailureAndRetry", "BranchSnapshotSwitchCancelsInflight", "RefreshToLatestWithOlderWindow", "TranscriptOnDemand"])
+		for (const removedUseCase of [
+			"DeepLinkedMiddleChunk",
+			"OppositeEdgeEvictionAndReload",
+			"VariableHeightAnchorPreservation",
+			"EmptyHistory",
+			"OlderEdgeFailureAndRetry",
+			"NewerEdgeFailureAndRetry",
+			"BranchSnapshotSwitchCancelsInflight",
+			"RefreshToLatestWithOlderWindow",
+			"TranscriptOnDemand",
+		])
 			expect(source).not.toContain(`export const ${removedUseCase}`);
 		expect(source).toContain("captureRuntime(1).then((fixture) => scaleFixture(fixture))");
 		expect(source).toContain("captureSemanticRows(kind, 1).then((fixture) => scaleFixture(fixture))");
@@ -94,7 +109,9 @@ describe("Storybook information architecture", () => {
 			["TenThousandActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
 		] as const) {
 			expect(source).toContain(`export const ${storyName} = loadTestStory("${scenario}")`);
-			expect(source).toMatch(new RegExp(`${method}: async \\(input\\) => \\{\\s+const chunk = await source\\.load\\(input\\.cursor\\)`));
+			expect(source).toMatch(
+				new RegExp(`${method}: async \\(input\\) => \\{\\s+const chunk = await source\\.load\\(input\\.cursor\\)`),
+			);
 			expect(source).toMatch(new RegExp(`case "${scenario}":\\s+disclosure = "${disclosure}"`));
 		}
 		expect(source).not.toContain("<VirtualizedHistoryList");
@@ -137,7 +154,9 @@ describe("Storybook information architecture", () => {
 			const spec = inspectorPanelSpecs.find((candidate) => candidate.title === title);
 			expect(spec?.graphAtlas, title).not.toBe(false);
 			const scenario = spec === undefined ? undefined : inspectorPanelScenario(spec);
-			return scenario?.selectedStateId === null ? undefined : scenario?.run.states.find((state) => state.id === scenario?.selectedStateId);
+			return scenario?.selectedStateId === null
+				? undefined
+				: scenario?.run.states.find((state) => state.id === scenario?.selectedStateId);
 		};
 		expect(visualState("Send batch state")).toMatchObject({
 			type: "sendBatch",
@@ -171,53 +190,80 @@ describe("Storybook information architecture", () => {
 			notify: {
 				prompt: expect.stringContaining('result("prepare", "summary")'),
 				scope: "prepare",
-				artifacts: [expect.objectContaining({ name: "report", sourceState: "prepare", path: "artifacts/final-report.json" })],
+				artifacts: [
+					expect.objectContaining({ name: "report", sourceState: "prepare", path: "artifacts/final-report.json" }),
+				],
 			},
 		});
 		expect(visualState("Failed final")?.finalConfig).toEqual({ outcome: "failed" });
 		expect(inspectorPanelSpecs.some((spec) => spec.title === "Session failure issue")).toBe(false);
 		const failedAction = visualState("Failed action issue");
 		expect(failedAction?.taskPrompt?.length).toBeGreaterThan(400);
-		expect(failedAction?.issues).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "action_failed", source: "durable_log" })]));
+		expect(failedAction?.issues).toEqual(
+			expect.arrayContaining([expect.objectContaining({ kind: "action_failed", source: "durable_log" })]),
+		);
 		const richAgent = visualState("Rich agent");
 		expect(richAgent?.reads).toContain('notes/rich-agent-visit-{visit("rich-agent")}.md');
 		expect(richAgent?.reads?.some((read) => read.startsWith('joinArtifactOf("source-map.collect"'))).toBe(true);
 		expect(richAgent?.readArtifacts).toHaveLength(3);
 		expect(richAgent?.readArtifacts?.find((artifact) => artifact.name === "brief")?.readKind).toBe("join");
-		expect(richAgent?.artifacts).toEqual(expect.arrayContaining([
-			expect.objectContaining({ name: "note", path: 'artifacts/implementation-note-{visit("rich-agent")}.json', schema: expect.any(Object) }),
-			expect.objectContaining({ name: "appendix", path: 'artifacts/implementation-note-{visit("rich-agent")}.md' }),
-		]));
+		expect(richAgent?.artifacts).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					name: "note",
+					path: 'artifacts/implementation-note-{visit("rich-agent")}.json',
+					schema: expect.any(Object),
+				}),
+				expect.objectContaining({ name: "appendix", path: 'artifacts/implementation-note-{visit("rich-agent")}.md' }),
+			]),
+		);
 		expect(richAgent?.visitHistory).toHaveLength(2);
 		expect(richAgent?.visitHistory?.map((visit) => visit.status)).toEqual(["done", "running"]);
-		expect(richAgent?.transitions).toEqual(expect.arrayContaining([
-			expect.objectContaining({
-				event: "REVIEW_REQUIRED",
-				target: "review-follow-up",
-				input: {
-					draft: "event:draft",
-					primaryRisk: "event:review.risks.0",
-					evidence: "event:review.evidence",
-					score: "event:review.score",
-				},
-			}),
-		]));
-		const firstVisitReads = richAgent?.visitHistory?.[0]?.invocation.kind === "agent" ? richAgent.visitHistory[0].invocation.reads?.map((read) => read.path) : [];
-		expect(richAgent?.visitHistory?.[0]?.invocation.kind === "agent" ? richAgent.visitHistory[0].invocation.reads?.filter((read) => read.readKind === "join") : []).toHaveLength(2);
-		expect(firstVisitReads).toEqual(expect.arrayContaining([
-			"artifacts/source-api.json",
-			"artifacts/source-runtime.json",
-			"notes/rich-agent-visit-1.md",
-		]));
-		expect(richAgent?.visitHistory?.[1]?.invocation.kind === "agent" ? richAgent.visitHistory[1].invocation.reads?.map((read) => read.path) : []).toContain("notes/rich-agent-visit-2.md");
-		expect(richAgent?.visitHistory?.[0]?.invocation.kind === "agent" ? richAgent.visitHistory[0].invocation.artifacts?.map((artifact) => artifact.path) : []).toEqual([
-			"artifacts/implementation-note-1.json",
-			"artifacts/implementation-note-1.md",
-		]);
-		expect(richAgent?.visitHistory?.[1]?.invocation.kind === "agent" ? richAgent.visitHistory[1].invocation.artifacts?.map((artifact) => artifact.path) : []).toEqual([
-			"artifacts/implementation-note-2.json",
-			"artifacts/implementation-note-2.md",
-		]);
+		expect(richAgent?.transitions).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					event: "REVIEW_REQUIRED",
+					target: "review-follow-up",
+					input: {
+						draft: "event:draft",
+						primaryRisk: "event:review.risks.0",
+						evidence: "event:review.evidence",
+						score: "event:review.score",
+					},
+				}),
+			]),
+		);
+		const firstVisitReads =
+			richAgent?.visitHistory?.[0]?.invocation.kind === "agent"
+				? richAgent.visitHistory[0].invocation.reads?.map((read) => read.path)
+				: [];
+		expect(
+			richAgent?.visitHistory?.[0]?.invocation.kind === "agent"
+				? richAgent.visitHistory[0].invocation.reads?.filter((read) => read.readKind === "join")
+				: [],
+		).toHaveLength(2);
+		expect(firstVisitReads).toEqual(
+			expect.arrayContaining([
+				"artifacts/source-api.json",
+				"artifacts/source-runtime.json",
+				"notes/rich-agent-visit-1.md",
+			]),
+		);
+		expect(
+			richAgent?.visitHistory?.[1]?.invocation.kind === "agent"
+				? richAgent.visitHistory[1].invocation.reads?.map((read) => read.path)
+				: [],
+		).toContain("notes/rich-agent-visit-2.md");
+		expect(
+			richAgent?.visitHistory?.[0]?.invocation.kind === "agent"
+				? richAgent.visitHistory[0].invocation.artifacts?.map((artifact) => artifact.path)
+				: [],
+		).toEqual(["artifacts/implementation-note-1.json", "artifacts/implementation-note-1.md"]);
+		expect(
+			richAgent?.visitHistory?.[1]?.invocation.kind === "agent"
+				? richAgent.visitHistory[1].invocation.artifacts?.map((artifact) => artifact.path)
+				: [],
+		).toEqual(["artifacts/implementation-note-2.json", "artifacts/implementation-note-2.md"]);
 	});
 
 	it("derives dialog stories from one inspected chart and durable runtime facts", () => {
@@ -249,9 +295,11 @@ describe("Storybook information architecture", () => {
 		expect(failedRun.mode).toBe("run");
 		expect(failedRun.status).toBe("failed");
 		expect(failedRun.states.find((state) => state.id === "visual-review")?.status).toBe("failed");
-		expect(failedRun.issues).toEqual(expect.arrayContaining([
-			expect.objectContaining({ kind: "run_failed", source: "durable_log", stateId: "visual-review" }),
-		]));
+		expect(failedRun.issues).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: "run_failed", source: "durable_log", stateId: "visual-review" }),
+			]),
+		);
 	});
 
 	it("projects focused graph cards without mutating adapter-derived runs", () => {
@@ -265,14 +313,20 @@ describe("Storybook information architecture", () => {
 
 	it("keeps all actor surfaces adapter-derived", () => {
 		expect(actorIdleRun.actorOccurrences?.[0]).toMatchObject({ status: "idle", mailbox: { totalCount: 0 } });
-		expect(actorBusyFifoRun.actorOccurrences?.[0]).toMatchObject({ status: "busy", mailbox: { totalCount: 3 }, pendingCaller: { state: "apply-call", callId: "apply-call:call:1" } });
+		expect(actorBusyFifoRun.actorOccurrences?.[0]).toMatchObject({
+			status: "busy",
+			mailbox: { totalCount: 3 },
+			pendingCaller: { state: "apply-call", callId: "apply-call:call:1" },
+		});
 		expect(actorBusyFifoRun.actorOccurrences?.[0]?.mailbox.entries).toHaveLength(3);
-		expect(actorBusyFifoRun.actorOccurrences?.[0]?.mailbox.entries).not.toContainEqual(actorBusyFifoRun.actorOccurrences?.[0]?.currentMessage);
+		expect(actorBusyFifoRun.actorOccurrences?.[0]?.mailbox.entries).not.toContainEqual(
+			actorBusyFifoRun.actorOccurrences?.[0]?.currentMessage,
+		);
 		expect(actorMapLocalRun.actorOccurrences).toHaveLength(2);
 		expect(actorReentryRun.actorOccurrences).toHaveLength(1);
-		expect(actorReentryRun.states.filter((state) => state.id.startsWith("phase")).map((state) => state.status)).toEqual([
-			"stale", "stale", "stale", "stale", "stale", "stale",
-		]);
+		expect(actorReentryRun.states.filter((state) => state.id.startsWith("phase")).map((state) => state.status)).toEqual(
+			["stale", "stale", "stale", "stale", "stale", "stale"],
+		);
 		expect(actorReentryRun.states.find((state) => state.id === "between")?.status).toBe("running");
 		expect(actorReentryRun.states.find((state) => state.id === "done")?.status).toBe("pending");
 		expect(actorReentryRun.actorOccurrences?.[0]).toMatchObject({
@@ -281,9 +335,21 @@ describe("Storybook information architecture", () => {
 			generation: 3,
 			input: { journal: "audit.log", retentionDays: 30 },
 			messageHistory: [
-				expect.objectContaining({ messageId: "phase.record:message:1:0", status: "settled", receiveState: "phase.@auditor.idle" }),
-				expect.objectContaining({ messageId: "phase.record:message:2:0", status: "settled", receiveState: "phase.@auditor.idle" }),
-				expect.objectContaining({ messageId: "phase.record:message:3:0", status: "settled", receiveState: "phase.@auditor.idle" }),
+				expect.objectContaining({
+					messageId: "phase.record:message:1:0",
+					status: "settled",
+					receiveState: "phase.@auditor.idle",
+				}),
+				expect.objectContaining({
+					messageId: "phase.record:message:2:0",
+					status: "settled",
+					receiveState: "phase.@auditor.idle",
+				}),
+				expect.objectContaining({
+					messageId: "phase.record:message:3:0",
+					status: "settled",
+					receiveState: "phase.@auditor.idle",
+				}),
 			],
 			generationHistory: [
 				{ visit: 1, inputs: { input: { journal: "audit.log", retentionDays: 30 } } },
@@ -291,30 +357,50 @@ describe("Storybook information architecture", () => {
 				{ visit: 3, inputs: { input: { journal: "audit.log", retentionDays: 30 } } },
 			],
 		});
-		expect(actorReentryRun.actorOccurrences?.[0]?.messageHistory?.every((message) => message.validation === undefined)).toBe(true);
-		const reentryReceiveHistory = actorReentryRun.states.find((state) => state.id === "phase.@auditor.idle")?.actorMessageHistory;
-		const reentryReplyHistory = actorReentryRun.states.find((state) => state.id === "phase.@auditor.settle")?.actorMessageHistory;
+		expect(
+			actorReentryRun.actorOccurrences?.[0]?.messageHistory?.every((message) => message.validation === undefined),
+		).toBe(true);
+		const reentryReceiveHistory = actorReentryRun.states.find(
+			(state) => state.id === "phase.@auditor.idle",
+		)?.actorMessageHistory;
+		const reentryReplyHistory = actorReentryRun.states.find(
+			(state) => state.id === "phase.@auditor.settle",
+		)?.actorMessageHistory;
 		expect(reentryReceiveHistory).toHaveLength(1);
 		expect(reentryReplyHistory).toHaveLength(1);
 		expect(reentryReceiveHistory?.every((message) => message.receiveState === "phase.@auditor.idle")).toBe(true);
 		expect(reentryReplyHistory?.every((message) => message.replyState === "phase.@auditor.settle")).toBe(true);
-		const reentryReceiveGenerations = actorReentryRun.states.find((state) => state.id === "phase.@auditor.idle")?.actorInternal?.generations;
-		const reentryReplyGenerations = actorReentryRun.states.find((state) => state.id === "phase.@auditor.settle")?.actorInternal?.generations;
-		expect(reentryReceiveGenerations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([1, 1, 1]);
-		expect(reentryReplyGenerations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([1, 1, 1]);
+		const reentryReceiveGenerations = actorReentryRun.states.find((state) => state.id === "phase.@auditor.idle")
+			?.actorInternal?.generations;
+		const reentryReplyGenerations = actorReentryRun.states.find((state) => state.id === "phase.@auditor.settle")
+			?.actorInternal?.generations;
+		expect(reentryReceiveGenerations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([
+			1, 1, 1,
+		]);
+		expect(reentryReplyGenerations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([
+			1, 1, 1,
+		]);
 		expect(actorPendingCallRun.actorOccurrences?.[0]?.pendingCaller).toBeDefined();
 		expect(actorSendVoidRun.actorOccurrences?.[0]?.status).toBe("stopped");
-		expect(actorNamedReplyRecords).toEqual(expect.arrayContaining([
-			expect.objectContaining({ type: "actor_message", kind: "replied", replyEvent: "APPLIED" }),
-			expect.objectContaining({ type: "actor_message", kind: "settled" }),
-			expect.objectContaining({ type: "actor_call_resolved" }),
-		]));
+		expect(actorNamedReplyRecords).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ type: "actor_message", kind: "replied", replyEvent: "APPLIED" }),
+				expect.objectContaining({ type: "actor_message", kind: "settled" }),
+				expect.objectContaining({ type: "actor_call_resolved" }),
+			]),
+		);
 		expect(actorNamedReplyRun.actorOccurrences?.[0]?.pendingCaller).toBeUndefined();
-		expect(actorNamedReplyRun.actorOccurrences?.[0]?.messageHistory).toEqual(expect.arrayContaining([
-			expect.objectContaining({ status: "settled", replyEvent: "APPLIED" }),
-		]));
-		expect(actorDrainingRun.states.find((state) => state.id === "phase.dispatch")).toMatchObject({ type: "sendBatch", status: "done" });
-		expect(actorDrainingRun.states.find((state) => state.id === "phase.finished")).toMatchObject({ type: "final", status: "waiting" });
+		expect(actorNamedReplyRun.actorOccurrences?.[0]?.messageHistory).toEqual(
+			expect.arrayContaining([expect.objectContaining({ status: "settled", replyEvent: "APPLIED" })]),
+		);
+		expect(actorDrainingRun.states.find((state) => state.id === "phase.dispatch")).toMatchObject({
+			type: "sendBatch",
+			status: "done",
+		});
+		expect(actorDrainingRun.states.find((state) => state.id === "phase.finished")).toMatchObject({
+			type: "final",
+			status: "waiting",
+		});
 		expect(actorDrainingRun.status).toBe("running");
 		expect(actorDrainingRun.actorOccurrences?.[0]).toMatchObject({
 			logicalPath: "phase.@worker",
@@ -338,28 +424,66 @@ describe("Storybook information architecture", () => {
 		const overflowProtocol = actorOverflowRun.actorDeclarations?.[0]?.protocol[0];
 		expect(overflowProtocol?.event).not.toBe(fittingProtocol?.event);
 		expect(Object.keys(overflowProtocol?.reply.schemas ?? {})).toHaveLength(6);
-		expect(actorBrokenReplayRun.issues).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "replay_warning" })]));
+		expect(actorBrokenReplayRun.issues).toEqual(
+			expect.arrayContaining([expect.objectContaining({ kind: "replay_warning" })]),
+		);
 		expect(allActorPoolRuns).toEqual([
-			actorPoolIdleRun, actorPoolBusyRun, actorPoolPartialBatchRun, actorPoolOutOfOrderRun, actorPoolDrainingRun, actorPoolMapReentryRun,
+			actorPoolIdleRun,
+			actorPoolBusyRun,
+			actorPoolPartialBatchRun,
+			actorPoolOutOfOrderRun,
+			actorPoolDrainingRun,
+			actorPoolMapReentryRun,
 		]);
-		expect(actorPoolIdleRun.actorOccurrences?.[0]).toMatchObject({ kind: "actorPool", concurrency: 2, activeCount: 0, idleCount: 2, workers: [{ index: 0 }, { index: 1 }] });
-		expect(actorPoolBusyRun.actorOccurrences?.[0]).toMatchObject({ kind: "actorPool", activeCount: 2, mailbox: { totalCount: 2 }, workers: [{ currentState: "work" }, { currentState: "settle" }] });
+		expect(actorPoolIdleRun.actorOccurrences?.[0]).toMatchObject({
+			kind: "actorPool",
+			concurrency: 2,
+			activeCount: 0,
+			idleCount: 2,
+			workers: [{ index: 0 }, { index: 1 }],
+		});
+		expect(actorPoolBusyRun.actorOccurrences?.[0]).toMatchObject({
+			kind: "actorPool",
+			activeCount: 2,
+			mailbox: { totalCount: 2 },
+			workers: [{ currentState: "work" }, { currentState: "settle" }],
+		});
 		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]).toMatchObject({
 			activeCount: 1,
 			workers: expect.arrayContaining([expect.objectContaining({ currentStateId: "@workers.$worker.work" })]),
 			batchCalls: [expect.objectContaining({ callId: "batch:call:1", settled: 1, total: 4, items: expect.any(Array) })],
 		});
-		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]?.workers?.some((worker) => "nextMessageId" in worker)).toBe(false);
-		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.workers?.[1]).toMatchObject({ visits: 2, messageHistory: expect.arrayContaining([expect.objectContaining({ messageId: "batch:message:1:2", batchIndex: 2 })]) });
-		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.messageHistory?.map((message) => message.batchIndex)).toEqual([0, 1, 2, 3]);
-		expect(actorPoolDrainingRun.actorOccurrences?.[0]).toMatchObject({ status: "draining", activeCount: 2, mailbox: { totalCount: 2 } });
-		expect(actorPoolMapReentryRun.actorOccurrences?.[0]).toMatchObject({ occurrencePath: "projects#a.@workers~2", generation: 2, generationHistory: [{ visit: 1 }, { visit: 2 }] });
+		expect(actorPoolPartialBatchRun.actorOccurrences?.[0]?.workers?.some((worker) => "nextMessageId" in worker)).toBe(
+			false,
+		);
+		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.workers?.[1]).toMatchObject({
+			visits: 2,
+			messageHistory: expect.arrayContaining([
+				expect.objectContaining({ messageId: "batch:message:1:2", batchIndex: 2 }),
+			]),
+		});
+		expect(actorPoolOutOfOrderRun.actorOccurrences?.[0]?.messageHistory?.map((message) => message.batchIndex)).toEqual([
+			0, 1, 2, 3,
+		]);
+		expect(actorPoolDrainingRun.actorOccurrences?.[0]).toMatchObject({
+			status: "draining",
+			activeCount: 2,
+			mailbox: { totalCount: 2 },
+		});
+		expect(actorPoolMapReentryRun.actorOccurrences?.[0]).toMatchObject({
+			occurrencePath: "projects#a.@workers~2",
+			generation: 2,
+			generationHistory: [{ visit: 1 }, { visit: 2 }],
+		});
 		expect(actorPoolPartialBatchRun.states.some((state) => state.id === "@workers.$worker.work")).toBe(true);
-		const replyFact = actorNamedReplyRecords.find((record) => record.type === "actor_message" && record.kind === "replied");
+		const replyFact = actorNamedReplyRecords.find(
+			(record) => record.type === "actor_message" && record.kind === "replied",
+		);
 		const editorActor = actorCallAst.actors["@editor"];
 		const settle = editorActor?.kind === "actor" ? editorActor.states.settle : undefined;
 		expect(settle?.kind).toBe("reply");
-		if (replyFact?.type !== "actor_message" || replyFact.kind !== "replied" || settle?.kind !== "reply") throw new Error("expected named reply fixture facts");
+		if (replyFact?.type !== "actor_message" || replyFact.kind !== "replied" || settle?.kind !== "reply")
+			throw new Error("expected named reply fixture facts");
 		expect(replyFact).toMatchObject({ message: settle.message, replyEvent: settle.event, output: settle.output });
 	});
 
@@ -411,13 +535,17 @@ describe("Storybook information architecture", () => {
 		];
 		for (const file of semanticFiles) {
 			const source = readFileSync(file, "utf8");
-			expect(source, file).not.toMatch(/:\s*Hyperchart(?:Run|State|ActorDeclaration|ActorOccurrence|ActorMailbox)Info\s*=\s*\{/);
+			expect(source, file).not.toMatch(
+				/:\s*Hyperchart(?:Run|State|ActorDeclaration|ActorOccurrence|ActorMailbox)Info\s*=\s*\{/,
+			);
 			expect(source, file).not.toMatch(/function\s+(?:run|state|actorState|occurrence)\s*\(/);
 			expect(source, file).not.toMatch(/\.\.\.\s*state\s*,\s*session\s*:/);
 			expect(source, file).not.toMatch(/const\s+\w*Session\s*=\s*\{/);
 			expect(source, file).not.toMatch(/args\s*:\s*\{\s*session\s*:\s*\{/);
 		}
-		expect(readFileSync(join(process.cwd(), "packages/hyperchart/src/react/stories/InspectorGraph.stories.tsx"), "utf8")).not.toContain("singleStateRun");
+		expect(
+			readFileSync(join(process.cwd(), "packages/hyperchart/src/react/stories/InspectorGraph.stories.tsx"), "utf8"),
+		).not.toContain("singleStateRun");
 	});
 
 	it("keeps actor dialog and graph coverage visual-state driven", () => {
@@ -463,7 +591,6 @@ describe("Storybook information architecture", () => {
 		expect(atlasSource).toMatch(/userEvent\.click\(receive\.getAllByRole\("button"\)\[0\]!\)/);
 		expect(atlasSource).toMatch(/Pool Worker History · persistent reuse/);
 	});
-
 
 	it("does not restore mechanism-named story files", () => {
 		const names = storyFiles(storyDirectory).map((file) => file.slice(storyDirectory.length + 1));

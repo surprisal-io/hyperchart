@@ -74,7 +74,9 @@ export function formatCompletion(effect: AgentEffect): string {
 		`- event: one of ${JSON.stringify(finishableEvents(effect))}`,
 	];
 	if (effect.reply !== undefined) {
-		lines.push("- output must match this JSON schema (validation metadata only; do not write the schema object as output):");
+		lines.push(
+			"- output must match this JSON schema (validation metadata only; do not write the schema object as output):",
+		);
 		lines.push("```json");
 		lines.push(JSON.stringify(effect.reply.schema, null, 2));
 		lines.push("```");

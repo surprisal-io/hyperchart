@@ -1,7 +1,33 @@
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, event, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t, tsAction } from "../packages/hyperchart/src/core/dsl.js";
+import {
+	actor,
+	agent,
+	arg,
+	artifact,
+	artifactOf,
+	actorInput,
+	call,
+	chart,
+	event,
+	failed,
+	final,
+	item,
+	map,
+	message,
+	messageInput,
+	protocol,
+	receive,
+	reply,
+	result,
+	script,
+	self,
+	send,
+	sendBatch,
+	t,
+	tsAction,
+} from "../packages/hyperchart/src/core/dsl.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
 import { hyperchartSource } from "../packages/hyperchart/src/core/source.js";
 
@@ -27,13 +53,15 @@ function sourceForScript() {
 
 describe("hyperchart source", () => {
 	it("prints chart argument metadata in generated definition source", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "argument-source",
-			args: { topic: { description: "Research subject", default: "Hyperchart" } },
-			initial: "done",
-			states: { done: final() },
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "argument-source",
+				args: { topic: { description: "Research subject", default: "Hyperchart" } },
+				initial: "done",
+				states: { done: final() },
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 
 		const source = hyperchartSource(parsed.ast);
@@ -43,20 +71,29 @@ describe("hyperchart source", () => {
 	});
 
 	it("prints event and result transition-input bindings", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "transition-ref-source",
-			initial: "select",
-			states: {
-				select: {
-					kind: "state",
-					action: agent("selector"),
-					transitions: { SELECTED: { target: "work", input: { candidate: event("candidate"), id: result("select", "id") } } },
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "transition-ref-source",
+				initial: "select",
+				states: {
+					select: {
+						kind: "state",
+						action: agent("selector"),
+						transitions: {
+							SELECTED: { target: "work", input: { candidate: event("candidate"), id: result("select", "id") } },
+						},
+					},
+					work: {
+						kind: "state",
+						input: { candidate: z.object({}), id: z.string() },
+						action: agent("worker"),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
 				},
-				work: { kind: "state", input: { candidate: z.object({}), id: z.string() }, action: agent("worker"), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain('candidate: event("candidate")');
@@ -70,21 +107,25 @@ describe("hyperchart source", () => {
 	});
 
 	it("renders tsAction definitions and round-trips their options", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "function-source", initial: "run",
-			states: {
-				run: {
-					kind: "state",
-					action: tsAction("./actions.mjs", "score", {
-						env: { TOPIC: "durability" },
-						artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
-						reply: z.object({ score: z.number() }),
-					}),
-					transitions: { DONE: "done" },
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "function-source",
+				initial: "run",
+				states: {
+					run: {
+						kind: "state",
+						action: tsAction("./actions.mjs", "score", {
+							env: { TOPIC: "durability" },
+							artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+							reply: z.object({ score: z.number() }),
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
 				},
-				done: final(),
-			},
-		}));
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain('tsAction("./actions.mjs", "score", {');
@@ -97,16 +138,28 @@ describe("hyperchart source", () => {
 	});
 
 	it("prints complete and failed terminals with notification options", () => {
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart",
-			id: "terminal-source",
-			initial: "work",
-			states: {
-				work: { kind: "state", action: agent("worker", { artifacts: { report: artifact("report.txt") } }), transitions: { DONE: "done", ERROR: "failed" } },
-				done: final(),
-				failed: failed({ notify: { prompt: t`Failure ${result("work")}`, artifacts: [artifactOf("work", { artifact: "report" })], scope: "work" } }),
-			},
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "terminal-source",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { artifacts: { report: artifact("report.txt") } }),
+						transitions: { DONE: "done", ERROR: "failed" },
+					},
+					done: final(),
+					failed: failed({
+						notify: {
+							prompt: t`Failure ${result("work")}`,
+							artifacts: [artifactOf("work", { artifact: "report" })],
+							scope: "work",
+						},
+					}),
+				},
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("done: final()");
@@ -116,9 +169,13 @@ describe("hyperchart source", () => {
 	});
 
 	it("renders stable actor capability bindings that round-trip for root and map-local actors", () => {
-		const Protocol = protocol({ READ: message({ input: z.object({ path: z.string() }), reply: z.object({ text: z.string() }) }) });
+		const Protocol = protocol({
+			READ: message({ input: z.object({ path: z.string() }), reply: z.object({ text: z.string() }) }),
+		});
 		const Reader = actor({
-			input: z.object({ root: z.string() }), protocol: Protocol, initial: "idle",
+			input: z.object({ root: z.string() }),
+			protocol: Protocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { READ: "answer" } }),
 				answer: reply({ target: "idle", output: { text: "ok" } }),
@@ -126,23 +183,57 @@ describe("hyperchart source", () => {
 		});
 		const rootReader = Reader({ root: "root" });
 		const itemReader = Reader({ root: item("root") });
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-source", actors: { rootReader }, initial: "read",
-			states: {
-				read: call({ to: rootReader, event: "READ", input: { path: "a" }, target: "items" }),
-				items: map({
-					over: arg("items"), actors: { itemReader }, initial: "send", onDone: "done",
-					states: { send: send({ to: itemReader, event: "READ", input: { path: "b" }, target: "finished" }), finished: final() },
-				}),
-				done: final(),
-			},
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-source",
+				actors: { rootReader },
+				initial: "read",
+				states: {
+					read: call({ to: rootReader, event: "READ", input: { path: "a" }, target: "items" }),
+					items: map({
+						over: arg("items"),
+						actors: { itemReader },
+						initial: "send",
+						onDone: "done",
+						states: {
+							send: send({ to: itemReader, event: "READ", input: { path: "b" }, target: "finished" }),
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("const actorDeclaration1");
 		expect(source).toContain("to: actorDeclaration");
 		expect(source).not.toContain('to: "@rootReader"');
-		const scope = { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, send, t, z };
+		const scope = {
+			actor,
+			agent,
+			arg,
+			artifact,
+			artifactOf,
+			actorInput,
+			call,
+			chart,
+			failed,
+			final,
+			item,
+			map,
+			message,
+			messageInput,
+			protocol,
+			receive,
+			reply,
+			result,
+			script,
+			send,
+			t,
+			z,
+		};
 		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
 		const roundTrip = normalizeChartConfig(rebuilt);
 		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));
@@ -152,14 +243,21 @@ describe("hyperchart source", () => {
 	it("renders selected actor declarations and internal states instead of undefined", () => {
 		const Protocol = protocol({ PING: message({ input: z.object({}) }) });
 		const Worker = actor({
-			input: z.object({}), protocol: Protocol, initial: "idle",
+			input: z.object({}),
+			protocol: Protocol,
+			initial: "idle",
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const worker = Worker({});
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "selected-actor-source", actors: { worker }, initial: "done",
-			states: { ping: send({ to: worker, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "selected-actor-source",
+				actors: { worker },
+				initial: "done",
+				states: { ping: send({ to: worker, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		expect(hyperchartSource(parsed.ast, "@worker")).toContain("worker: actor(");
 		expect(hyperchartSource(parsed.ast, "@worker.idle")).toContain("idle: receive(");
@@ -169,7 +267,9 @@ describe("hyperchart source", () => {
 	it("renders self() symbolically and round-trips its resolved placement identity", () => {
 		const Protocol = protocol({ PING: message({ input: z.object({ id: z.number() }) }) });
 		const Worker = actor({
-			input: z.object({}), protocol: Protocol, initial: "idle",
+			input: z.object({}),
+			protocol: Protocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { PING: "again" } }),
 				again: sendBatch({ to: self(), event: "PING", inputs: [{ id: 2 }], target: "settle" }),
@@ -177,15 +277,45 @@ describe("hyperchart source", () => {
 			},
 		});
 		const worker = Worker({});
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-self-source", actors: { worker }, initial: "start",
-			states: { start: send({ to: worker, event: "PING", input: { id: 1 }, target: "done" }), done: final() },
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-self-source",
+				actors: { worker },
+				initial: "start",
+				states: { start: send({ to: worker, event: "PING", input: { id: 1 }, target: "done" }), done: final() },
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("to: self()");
 		expect(source).not.toContain('to: "@worker"');
-		const scope = { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, self, send, sendBatch, t, z };
+		const scope = {
+			actor,
+			agent,
+			arg,
+			artifact,
+			artifactOf,
+			actorInput,
+			call,
+			chart,
+			failed,
+			final,
+			item,
+			map,
+			message,
+			messageInput,
+			protocol,
+			receive,
+			reply,
+			result,
+			script,
+			self,
+			send,
+			sendBatch,
+			t,
+			z,
+		};
 		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
 		const roundTrip = normalizeChartConfig(rebuilt);
 		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));
@@ -195,13 +325,17 @@ describe("hyperchart source", () => {
 	it("preallocates actor declarations before actor-workflow dependencies", () => {
 		const TargetProtocol = protocol({ PING: message({ input: z.object({ id: z.number() }) }) });
 		const Target = actor({
-			input: z.object({}), protocol: TargetProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: TargetProtocol,
+			initial: "idle",
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const zTarget = Target({});
 		const SourceProtocol = protocol({ GO: message({ input: z.object({ id: z.number() }) }) });
 		const Source = actor({
-			input: z.object({}), protocol: SourceProtocol, initial: "idle",
+			input: z.object({}),
+			protocol: SourceProtocol,
+			initial: "idle",
 			states: {
 				idle: receive({ on: { GO: "forward" } }),
 				forward: send({ to: zTarget, event: "PING", input: { id: messageInput("GO", "id") }, target: "settle" }),
@@ -209,10 +343,15 @@ describe("hyperchart source", () => {
 			},
 		});
 		const aSource = Source({});
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "actor-dependency-source", actors: { aSource, zTarget }, initial: "kick",
-			states: { kick: send({ to: aSource, event: "GO", input: { id: 1 }, target: "done" }), done: final() },
-		}));
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-dependency-source",
+				actors: { aSource, zTarget },
+				initial: "kick",
+				states: { kick: send({ to: aSource, event: "GO", input: { id: 1 }, target: "done" }), done: final() },
+			}),
+		);
 		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
 
 		const source = hyperchartSource(parsed.ast);
@@ -222,7 +361,30 @@ describe("hyperchart source", () => {
 		expect(source).toContain("const actorDeclaration1 = Object.create(null)");
 		expect(source).toContain("const actorDeclaration2 = Object.create(null)");
 		expect(source.indexOf("const actorDeclaration2")).toBeLessThan(source.indexOf("Object.assign(actorDeclaration1"));
-		const scope = { actor, agent, arg, artifact, artifactOf, actorInput, call, chart, failed, final, item, map, message, messageInput, protocol, receive, reply, result, script, send, t, z };
+		const scope = {
+			actor,
+			agent,
+			arg,
+			artifact,
+			artifactOf,
+			actorInput,
+			call,
+			chart,
+			failed,
+			final,
+			item,
+			map,
+			message,
+			messageInput,
+			protocol,
+			receive,
+			reply,
+			result,
+			script,
+			send,
+			t,
+			z,
+		};
 		const rebuilt = Function(...Object.keys(scope), `return (${source});`)(...Object.values(scope));
 		const roundTrip = normalizeChartConfig(rebuilt);
 		assert(roundTrip.ok, JSON.stringify(roundTrip.diagnostics));

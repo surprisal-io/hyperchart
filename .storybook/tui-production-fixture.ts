@@ -8,10 +8,7 @@ import { normalizeChartConfig } from "@surprisal/hyperchart/internal/core/normal
 import { actionUidKey } from "@surprisal/hyperchart/internal/core/action_uid";
 import type { ActionUID, ChartAst, StateAst, StatePath } from "@surprisal/hyperchart/internal/core/types";
 import type { DurableLogRecord } from "@surprisal/hyperchart/internal/core/durable_events";
-import type {
-	RunComponentOptions,
-	RunHistoryItem,
-} from "../packages/pi-hyperchart/src/tui/components.js";
+import type { RunComponentOptions, RunHistoryItem } from "../packages/pi-hyperchart/src/tui/components.js";
 import type {
 	HyperchartSessionProgress,
 	HyperchartSessionProgressFile,
@@ -50,7 +47,10 @@ function templatePathFor(statePath: StatePath): StatePath {
 	return statePath.replace(/#[^.]+(?=\.|$)/g, "") as StatePath;
 }
 
-function action(ast: ChartAst, statePath: StatePath): { uid: ActionUID; definition: Extract<StateAst, { kind: "state" }>["action"] } {
+function action(
+	ast: ChartAst,
+	statePath: StatePath,
+): { uid: ActionUID; definition: Extract<StateAst, { kind: "state" }>["action"] } {
 	const templatePath = templatePathFor(statePath);
 	const state = ast.states[templatePath];
 	if (state?.kind !== "state") throw new Error(`Missing action state ${templatePath}`);
@@ -78,10 +78,19 @@ function deckLog(ast: ChartAst, variant: "single" | "many" = "single"): DurableL
 	});
 	const keys = variant === "many" ? MANY_RUNNING_KEYS : (["official", "developer", "market"] as const);
 	const buckets = Object.fromEntries(
-		keys.map((key) => [key, { queries: [`${key} agent tooling evidence`], purpose: `${key} evidence`, required_sources: 3 }]),
+		keys.map((key) => [
+			key,
+			{ queries: [`${key} agent tooling evidence`], purpose: `${key} evidence`, required_sources: 3 },
+		]),
 	);
 	const plan = action(ast, "plan");
-	push({ type: "state_action", kind: "invoke", actionUid: plan.uid, definition: plan.definition, timestamp: RUNTIME_NOW - 700_000 });
+	push({
+		type: "state_action",
+		kind: "invoke",
+		actionUid: plan.uid,
+		definition: plan.definition,
+		timestamp: RUNTIME_NOW - 700_000,
+	});
 	push({
 		type: "state_action",
 		kind: "complete",
@@ -120,7 +129,13 @@ function deckLog(ast: ChartAst, variant: "single" | "many" = "single"): DurableL
 		["developer", RUNTIME_NOW - 260_000],
 	] as const) {
 		const scout = action(ast, `research#${key}.scout` as StatePath);
-		push({ type: "state_action", kind: "invoke", actionUid: scout.uid, definition: scout.definition, timestamp: completedAt - 110_000 });
+		push({
+			type: "state_action",
+			kind: "invoke",
+			actionUid: scout.uid,
+			definition: scout.definition,
+			timestamp: completedAt - 110_000,
+		});
 		push({
 			type: "state_action",
 			kind: "complete",
@@ -130,7 +145,13 @@ function deckLog(ast: ChartAst, variant: "single" | "many" = "single"): DurableL
 		});
 	}
 	const market = action(ast, "research#market.scout");
-	push({ type: "state_action", kind: "invoke", actionUid: market.uid, definition: market.definition, timestamp: RUNTIME_NOW - 95_000 });
+	push({
+		type: "state_action",
+		kind: "invoke",
+		actionUid: market.uid,
+		definition: market.definition,
+		timestamp: RUNTIME_NOW - 95_000,
+	});
 	return records;
 }
 
@@ -145,7 +166,14 @@ function transcript(name: string, task: string, summary: string, toolPath: strin
 	const times = [0, 1, 2, 3, 4, 5].map((offset) => new Date(STORY_NOW - 120_000 + offset * 10_000).toISOString());
 	return [
 		{ type: "session", version: 3, id: sessionId, timestamp: times[0], cwd: "/Users/demo/Work/pi-hyperchart" },
-		{ type: "model_change", id: "00000001", parentId: null, timestamp: times[1], provider: "anthropic", modelId: "claude-sonnet-4-5" },
+		{
+			type: "model_change",
+			id: "00000001",
+			parentId: null,
+			timestamp: times[1],
+			provider: "anthropic",
+			modelId: "claude-sonnet-4-5",
+		},
 		{ type: "thinking_level_change", id: "00000002", parentId: "00000001", timestamp: times[1], thinkingLevel: "high" },
 		{
 			type: "message",
@@ -168,7 +196,14 @@ function transcript(name: string, task: string, summary: string, toolPath: strin
 				api: "anthropic-messages",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
-				usage: { input: 1240, output: 180, cacheRead: 0, cacheWrite: 0, totalTokens: 1420, cost: { input: 0.00372, output: 0.0027, cacheRead: 0, cacheWrite: 0, total: 0.00642 } },
+				usage: {
+					input: 1240,
+					output: 180,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 1420,
+					cost: { input: 0.00372, output: 0.0027, cacheRead: 0, cacheWrite: 0, total: 0.00642 },
+				},
 				stopReason: "toolUse",
 				timestamp: STORY_NOW - 90_000,
 			},
@@ -198,7 +233,14 @@ function transcript(name: string, task: string, summary: string, toolPath: strin
 				api: "anthropic-messages",
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
-				usage: { input: 1810, output: 220, cacheRead: 0, cacheWrite: 0, totalTokens: 2030, cost: { input: 0.00543, output: 0.0033, cacheRead: 0, cacheWrite: 0, total: 0.00873 } },
+				usage: {
+					input: 1810,
+					output: 220,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 2030,
+					cost: { input: 0.00543, output: 0.0033, cacheRead: 0, cacheWrite: 0, total: 0.00873 },
+				},
 				stopReason: "stop",
 				timestamp: STORY_NOW - 70_000,
 			},
@@ -273,7 +315,15 @@ function writeRun(storage: RunStorage, ast: ChartAst, variant: "running" | "many
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const records = capturedDeckLogs[variant === "many-running" ? "many" : "single"];
 	writeJsonl(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, metadata: { name: "main" }, committedAt: RUNTIME_NOW - 721_000 },
+		{
+			kind: "branch",
+			op: "create",
+			seqId: 1,
+			branchId: "main",
+			headSeqId: null,
+			metadata: { name: "main" },
+			committedAt: RUNTIME_NOW - 721_000,
+		},
 		...records,
 	]);
 	writeFileSync(
@@ -287,49 +337,61 @@ function writeRun(storage: RunStorage, ast: ChartAst, variant: "running" | "many
 	const planUid = action(ast, "plan").uid;
 	const officialUid = action(ast, "research#official.scout").uid;
 	const marketUid = action(ast, "research#market.scout").uid;
-	const runningSessions = variant === "many-running"
-		? MANY_RUNNING_KEYS.map((key, index) =>
-				session(runDir, action(ast, `research#${key}.scout` as StatePath).uid, {
-					name: `deck-source-scout-${key}`,
-					status: "running",
-					startedAgo: 120_000 - index * 4_000,
-					model: index % 2 === 0 ? "anthropic/claude-sonnet-4-5" : "openai/gpt-5.2",
-					turns: 2 + index,
-					tools: 3 + index,
-					tokens: 4_200 + index * 1_350,
-					task: `Collect and verify ${key} evidence.`,
-					summary: `Actively researching the ${key} evidence bucket.`,
-					currentTool: ["web_search", "read", "browser", "grep"][index % 4]!,
-				}),
-			)
-		: [];
+	const runningSessions =
+		variant === "many-running"
+			? MANY_RUNNING_KEYS.map((key, index) =>
+					session(runDir, action(ast, `research#${key}.scout` as StatePath).uid, {
+						name: `deck-source-scout-${key}`,
+						status: "running",
+						startedAgo: 120_000 - index * 4_000,
+						model: index % 2 === 0 ? "anthropic/claude-sonnet-4-5" : "openai/gpt-5.2",
+						turns: 2 + index,
+						tools: 3 + index,
+						tokens: 4_200 + index * 1_350,
+						task: `Collect and verify ${key} evidence.`,
+						summary: `Actively researching the ${key} evidence bucket.`,
+						currentTool: ["web_search", "read", "browser", "grep"][index % 4]!,
+					}),
+				)
+			: [];
 	const sessions = [
 		...runningSessions,
-		...(variant === "many-running" ? [] : [session(runDir, marketUid, {
-			name: "deck-source-scout",
-			status: variant === "running" ? "running" : variant === "stopped" ? "cancelled" : "failed",
-			startedAgo: 95_000,
-			...(variant === "running" ? {} : { completedAgo: 35_000 }),
-			model: "anthropic/claude-sonnet-4-5",
-			turns: 5,
-			tools: 9,
-			tokens: 18_420,
-			task: "Research enterprise adoption and risk signals for agentic developer tooling.",
-			summary: variant === "stale" ? "Session stopped after losing its runner heartbeat; durable work can be resumed." : "Collected market evidence; validating the final two sources.",
-			...(variant === "running" ? { currentTool: "web_search" } : {}),
-		})]),
-		...(variant === "many-running" ? [] : [session(runDir, officialUid, {
-			name: "deck-source-scout",
-			status: "completed",
-			startedAgo: 540_000,
-			completedAgo: 430_000,
-			model: "anthropic/claude-sonnet-4-5",
-			turns: 4,
-			tools: 7,
-			tokens: 13_806,
-			task: "Collect official product and SDK announcements.",
-			summary: "Verified seven official sources and wrote the normalized evidence artifact.",
-		})]),
+		...(variant === "many-running"
+			? []
+			: [
+					session(runDir, marketUid, {
+						name: "deck-source-scout",
+						status: variant === "running" ? "running" : variant === "stopped" ? "cancelled" : "failed",
+						startedAgo: 95_000,
+						...(variant === "running" ? {} : { completedAgo: 35_000 }),
+						model: "anthropic/claude-sonnet-4-5",
+						turns: 5,
+						tools: 9,
+						tokens: 18_420,
+						task: "Research enterprise adoption and risk signals for agentic developer tooling.",
+						summary:
+							variant === "stale"
+								? "Session stopped after losing its runner heartbeat; durable work can be resumed."
+								: "Collected market evidence; validating the final two sources.",
+						...(variant === "running" ? { currentTool: "web_search" } : {}),
+					}),
+				]),
+		...(variant === "many-running"
+			? []
+			: [
+					session(runDir, officialUid, {
+						name: "deck-source-scout",
+						status: "completed",
+						startedAgo: 540_000,
+						completedAgo: 430_000,
+						model: "anthropic/claude-sonnet-4-5",
+						turns: 4,
+						tools: 7,
+						tokens: 13_806,
+						task: "Collect official product and SDK announcements.",
+						summary: "Verified seven official sources and wrote the normalized evidence artifact.",
+					}),
+				]),
 		session(runDir, planUid, {
 			name: "deck-html-planner",
 			status: "completed",
@@ -346,7 +408,9 @@ function writeRun(storage: RunStorage, ast: ChartAst, variant: "running" | "many
 	const progress: HyperchartSessionProgressFile = {
 		version: 1,
 		updatedAt: STORY_NOW - 5_000,
-		sessions: Object.fromEntries(sessions.map((item) => [`${item.branchId}:${item.actionKey}:invoke:${item.invokeSeqId}`, item])),
+		sessions: Object.fromEntries(
+			sessions.map((item) => [`${item.branchId}:${item.actionKey}:invoke:${item.invokeSeqId}`, item]),
+		),
 	};
 	writeFileSync(join(runDir, "sessions", "progress.json"), `${JSON.stringify(progress, null, 2)}\n`, "utf8");
 	return { runId, runDir };

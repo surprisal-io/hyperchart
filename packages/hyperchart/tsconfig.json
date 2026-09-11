@@ -4,12 +4,6 @@
 		"rootDir": "src",
 		"outDir": "dist"
 	},
-	"include": [
-		"src/**/*.ts",
-		"src/**/*.tsx"
-	],
-	"exclude": [
-		"src/react/fixtures/**",
-		"src/react/stories/**"
-	]
+	"include": ["src/**/*.ts", "src/**/*.tsx"],
+	"exclude": ["src/react/fixtures/**", "src/react/stories/**"]
 }

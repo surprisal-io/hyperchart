@@ -19,7 +19,9 @@ async function scan() {
 		await emitPendingClaudeNotifications(options);
 	} catch (error) {
 		// stdout is reserved for one-line Claude monitor notifications.
-		process.stderr.write(`[hyperchart-monitor] ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+		process.stderr.write(
+			`[hyperchart-monitor] ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+		);
 	} finally {
 		scanning = false;
 	}

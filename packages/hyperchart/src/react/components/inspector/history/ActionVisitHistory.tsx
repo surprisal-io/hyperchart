@@ -113,7 +113,10 @@ export function ActionVisitHistory({
 						{history.rows.map((row, index) => (
 							<div key={row.invokeSeqId} className="relative pb-8 last:pb-0">
 								{index < history.rows.length - 1 && (
-									<div aria-hidden="true" className="absolute left-1/2 top-full z-0 h-8 -translate-x-1/2 -translate-y-8">
+									<div
+										aria-hidden="true"
+										className="absolute left-1/2 top-full z-0 h-8 -translate-x-1/2 -translate-y-8"
+									>
 										<div className="h-6 w-px bg-[var(--border-primary)]" />
 										<div className="-ml-[3px] h-0 w-0 border-x-4 border-t-[6px] border-x-transparent border-t-[var(--border-primary)]" />
 									</div>
@@ -145,10 +148,7 @@ export function ActionVisitHistory({
 	);
 
 	return (
-		<section
-			className="flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)] p-3"
-			aria-label="Action visit history"
-		>
+		<section className="flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)] p-3" aria-label="Action visit history">
 			<div className="mb-1 text-center">
 				<h2 className="text-sm font-semibold text-[var(--text-primary)]">Execution path</h2>
 				<p className="text-[10px] text-[var(--text-muted)]">Action visit history</p>
@@ -185,7 +185,11 @@ function ActionVisitHistoryRow({
 					{row.statePath}
 				</code>
 				<span className="shrink-0 font-mono text-[10px] text-[var(--text-muted)]">#{row.invokeSeqId}</span>
-				{visit !== undefined && <span className="shrink-0 rounded-full bg-[var(--bg-primary)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">cycle {visit.visit}</span>}
+				{visit !== undefined && (
+					<span className="shrink-0 rounded-full bg-[var(--bg-primary)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">
+						cycle {visit.visit}
+					</span>
+				)}
 			</div>
 			<div className="mt-2 flex min-w-0 items-center gap-1.5 pl-9 text-[10px] text-[var(--text-muted)]">
 				<span

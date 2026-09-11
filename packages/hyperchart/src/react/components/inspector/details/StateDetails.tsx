@@ -76,7 +76,12 @@ export function StateDetails({
 	highlightedRefValue?: string | null;
 	onHighlightRef?: (value: string) => void;
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
-	history?: { runId: string; snapshot: HistorySnapshot; dataSource: HyperchartInspectorDataSource; targetSeqId?: number };
+	history?: {
+		runId: string;
+		snapshot: HistorySnapshot;
+		dataSource: HyperchartInspectorDataSource;
+		targetSeqId?: number;
+	};
 	selectedInvokeSeqId?: number;
 	/** The state is current-definition metadata, not a replayed runtime state. */
 	definitionOnly?: boolean;
@@ -85,9 +90,13 @@ export function StateDetails({
 	const DetailKindIcon = kind.Icon;
 	const concurrencyLabel = stateConcurrencyLabel(state);
 	const agentStates = agentStatesForSelection(state, allStates);
-	const finalDrainActors = state.type === "final" && (state.status === "waiting" || state.status === "running")
-		? allStates.filter((candidate) => candidate.actorOccurrence?.status === "closing" || candidate.actorOccurrence?.status === "draining")
-		: [];
+	const finalDrainActors =
+		state.type === "final" && (state.status === "waiting" || state.status === "running")
+			? allStates.filter(
+					(candidate) =>
+						candidate.actorOccurrence?.status === "closing" || candidate.actorOccurrence?.status === "draining",
+				)
+			: [];
 	useEffect(() => {
 		if (!highlightedReply) return;
 		let outerFrame = 0;
@@ -111,7 +120,9 @@ export function StateDetails({
 		let innerFrame = 0;
 		outerFrame = requestAnimationFrame(() => {
 			innerFrame = requestAnimationFrame(() => {
-				document.getElementById(artifactContractElementId(highlightedArtifact.stateId, highlightedArtifact.name))?.scrollIntoView({ behavior: "smooth", block: "center" });
+				document
+					.getElementById(artifactContractElementId(highlightedArtifact.stateId, highlightedArtifact.name))
+					?.scrollIntoView({ behavior: "smooth", block: "center" });
 			});
 		});
 		return () => {
@@ -157,7 +168,13 @@ export function StateDetails({
 							</div>
 						)}
 						<div className="mt-1 flex flex-wrap items-center gap-1.5">
-							{definitionOnly ? <span className="text-[10px] text-[var(--hc-amber-text)]">Current definition only · Runtime status unavailable</span> : <StatusPill status={state.status} />}
+							{definitionOnly ? (
+								<span className="text-[10px] text-[var(--hc-amber-text)]">
+									Current definition only · Runtime status unavailable
+								</span>
+							) : (
+								<StatusPill status={state.status} />
+							)}
 							{state.initial === true && (
 								<span
 									className="inline-flex rounded border border-violet-500/35 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--hc-purple-text)]"
@@ -205,7 +222,9 @@ export function StateDetails({
 				<Section title="Final outcome" icon={BellIcon} defaultOpen>
 					<div className="flex flex-wrap items-center gap-2 text-[10px]">
 						<span className="text-[var(--text-muted)]">outcome</span>
-						<span className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${state.finalConfig.outcome === "failed" ? "border-red-500/35 bg-red-500/10 text-[var(--danger)]" : "border-emerald-500/35 bg-emerald-500/10 text-[var(--hc-green-text)]"}`}>
+						<span
+							className={`rounded border px-1.5 py-0.5 font-semibold uppercase ${state.finalConfig.outcome === "failed" ? "border-red-500/35 bg-red-500/10 text-[var(--danger)]" : "border-emerald-500/35 bg-emerald-500/10 text-[var(--hc-green-text)]"}`}
+						>
 							{state.finalConfig.outcome}
 						</span>
 						{state.finalConfig.notify?.scope !== undefined && (
@@ -214,7 +233,9 @@ export function StateDetails({
 					</div>
 					{state.finalConfig.notify?.prompt !== undefined && (
 						<div>
-							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">notification prompt</div>
+							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+								notification prompt
+							</div>
 							<TemplateTextBlock
 								text={state.finalConfig.notify.prompt}
 								state={state}
@@ -229,31 +250,61 @@ export function StateDetails({
 					)}
 					{state.finalConfig.notify?.artifacts?.length ? (
 						<div>
-							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">notification artifacts</div>
+							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+								notification artifacts
+							</div>
 							<div className="grid gap-1.5">
 								{state.finalConfig.notify.artifacts.map((artifact) => {
 									const joined = artifact.readKind === "join";
 									const ArtifactIcon = joined ? RectangleStackIcon : ArchiveBoxIcon;
-									const typeName = artifact.name.split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Artifact";
+									const typeName =
+										artifact.name
+											.split(/[^A-Za-z0-9_$]+/)
+											.filter(Boolean)
+											.map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+											.join("") || "Artifact";
 									const type = `type ${typeName} = ${schemaTypeText(artifact.schema)};`;
 									const content = (
 										<>
 											<span className="flex w-max items-center gap-1 whitespace-nowrap font-mono text-[10px] text-[var(--hc-purple-text)]">
-												<TypeTooltip text={joined ? "joined artifacts" : "artifact"}><span data-hyperchart-tooltip-isolated className="inline-flex"><ArtifactIcon className="h-3 w-3" aria-hidden="true" /></span></TypeTooltip>
+												<TypeTooltip text={joined ? "joined artifacts" : "artifact"}>
+													<span data-hyperchart-tooltip-isolated className="inline-flex">
+														<ArtifactIcon className="h-3 w-3" aria-hidden="true" />
+													</span>
+												</TypeTooltip>
 												{artifact.sourceState ?? "artifact"} → {artifact.name}
 											</span>
-											{artifact.path !== undefined && <span className="w-max font-mono text-[9px] text-[var(--text-muted)]">{artifact.path}</span>}
+											{artifact.path !== undefined && (
+												<span className="w-max font-mono text-[9px] text-[var(--text-muted)]">{artifact.path}</span>
+											)}
 										</>
 									);
-									const card = artifact.sourceState !== undefined && onHighlightArtifact !== undefined
-										? <button type="button" onClick={() => onHighlightArtifact(artifact.sourceState!, artifact.name)} className="flex min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-left hover:bg-purple-500/10">{content}</button>
-										: <div className="flex min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5">{content}</div>;
-									return <TypeTooltip key={`${artifact.sourceState ?? ""}:${artifact.name}`} text={type}>{card}</TypeTooltip>;
+									const card =
+										artifact.sourceState !== undefined && onHighlightArtifact !== undefined ? (
+											<button
+												type="button"
+												onClick={() => onHighlightArtifact(artifact.sourceState!, artifact.name)}
+												className="flex min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5 text-left hover:bg-purple-500/10"
+											>
+												{content}
+											</button>
+										) : (
+											<div className="flex min-w-0 flex-col items-start overflow-x-auto rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1.5">
+												{content}
+											</div>
+										);
+									return (
+										<TypeTooltip key={`${artifact.sourceState ?? ""}:${artifact.name}`} text={type}>
+											{card}
+										</TypeTooltip>
+									);
 								})}
 							</div>
 						</div>
 					) : null}
-					{state.finalConfig.notify === undefined && <div className="text-[10px] text-[var(--text-muted)]">No terminal notification configured.</div>}
+					{state.finalConfig.notify === undefined && (
+						<div className="text-[10px] text-[var(--text-muted)]">No terminal notification configured.</div>
+					)}
 				</Section>
 			)}
 
@@ -265,15 +316,36 @@ export function StateDetails({
 							const content = (
 								<>
 									<span className="min-w-0 flex-1">
-										<span className="block truncate font-mono text-[var(--text-primary)]">{actor.logicalPath ?? actor.occurrencePath}</span>
-										<span className="block truncate text-[9px] text-[var(--text-muted)]">{actor.currentState} · {actor.currentMessage === undefined ? 0 : 1} current · {actor.mailbox.totalCount} queued</span>
+										<span className="block truncate font-mono text-[var(--text-primary)]">
+											{actor.logicalPath ?? actor.occurrencePath}
+										</span>
+										<span className="block truncate text-[9px] text-[var(--text-muted)]">
+											{actor.currentState} · {actor.currentMessage === undefined ? 0 : 1} current ·{" "}
+											{actor.mailbox.totalCount} queued
+										</span>
 									</span>
-									{onNavigateToState !== undefined && <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+									{onNavigateToState !== undefined && (
+										<ArrowTopRightOnSquareIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+									)}
 								</>
 							);
-							return onNavigateToState === undefined
-								? <div key={actorState.id} className="flex items-center rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-[10px] text-[var(--text-secondary)]">{content}</div>
-								: <button key={actorState.id} type="button" onClick={() => onNavigateToState(actorState.id)} className="flex items-center gap-2 rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-left text-[10px] text-[var(--hc-amber-text)] hover:bg-amber-500/10">{content}</button>;
+							return onNavigateToState === undefined ? (
+								<div
+									key={actorState.id}
+									className="flex items-center rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-[10px] text-[var(--text-secondary)]"
+								>
+									{content}
+								</div>
+							) : (
+								<button
+									key={actorState.id}
+									type="button"
+									onClick={() => onNavigateToState(actorState.id)}
+									className="flex items-center gap-2 rounded border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-left text-[10px] text-[var(--hc-amber-text)] hover:bg-amber-500/10"
+								>
+									{content}
+								</button>
+							);
 						})}
 					</div>
 				</Section>
@@ -393,7 +465,9 @@ export function StateDetails({
 				{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 			/>
 
-			{state.actorInternal === undefined && <ActorDetailsSection state={state} {...(onNavigateToState === undefined ? {} : { onNavigateToState })} />}
+			{state.actorInternal === undefined && (
+				<ActorDetailsSection state={state} {...(onNavigateToState === undefined ? {} : { onNavigateToState })} />
+			)}
 
 			{state.actorDeclaration !== undefined && state.actorInternal === undefined && (
 				<>
@@ -419,7 +493,7 @@ export function StateDetails({
 
 			{(state.actorDeclaration === undefined || state.actorInternal !== undefined) && (
 				<RuntimeSection
-						recordOnly={definitionOnly}
+					recordOnly={definitionOnly}
 					state={state}
 					allStates={allStates}
 					{...(history === undefined ? {} : { history })}
@@ -431,11 +505,21 @@ export function StateDetails({
 			)}
 
 			{(isScriptState || isImportedActionState) && (
-				<Section title={isImportedActionState ? "Function action" : "Arguments"} icon={CodeBracketSquareIcon} defaultOpen={isImportedActionState}>
+				<Section
+					title={isImportedActionState ? "Function action" : "Arguments"}
+					icon={CodeBracketSquareIcon}
+					defaultOpen={isImportedActionState}
+				>
 					{isImportedActionState && state.module !== undefined && (
 						<div className="grid gap-1 rounded border border-fuchsia-500/20 bg-fuchsia-500/5 p-2 font-mono text-[11px]">
-							<div><span className="text-[var(--text-muted)]">module </span><span className="text-[var(--text-primary)]">{state.module}</span></div>
-							<div><span className="text-[var(--text-muted)]">export </span><span className="text-[var(--text-primary)]">{state.export}</span></div>
+							<div>
+								<span className="text-[var(--text-muted)]">module </span>
+								<span className="text-[var(--text-primary)]">{state.module}</span>
+							</div>
+							<div>
+								<span className="text-[var(--text-muted)]">export </span>
+								<span className="text-[var(--text-primary)]">{state.export}</span>
+							</div>
 						</div>
 					)}
 					{state.commandPreview && (
@@ -456,7 +540,9 @@ export function StateDetails({
 					)}
 					{state.env?.length ? (
 						<div>
-							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{isImportedActionState ? "params" : "env"}</div>
+							<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+								{isImportedActionState ? "params" : "env"}
+							</div>
 							<div className="grid gap-1">
 								{state.env.map((env) => (
 									<div
@@ -508,7 +594,6 @@ export function StateDetails({
 					{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
 				/>
 			)}
-
 
 			{definitionSource && <DefinitionSection source={definitionSource} />}
 		</div>

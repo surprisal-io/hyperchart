@@ -3,7 +3,11 @@ import { collectHistoryRecords } from "./helpers/history.js";
 import { writeFileSync } from "node:fs";
 import { BranchExecution } from "../packages/hyperchart/src/execution/branch_execution.js";
 import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
-import { decodeCheckpoint, prepareProjectionCheckpoint, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
+import {
+	decodeCheckpoint,
+	prepareProjectionCheckpoint,
+	projectionContractForAst,
+} from "../packages/hyperchart/src/execution/projection_restore.js";
 import { materializeWorkspaceFromPins } from "../packages/hyperchart/src/runtime/generic/artifact_workspace.js";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -11,7 +15,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { start } from "./helpers/execution.js";
-import { artifact, artifactOf, agent, chart, failed, final, normalizeChartConfig, script, z } from "../packages/hyperchart/src/index.js";
+import {
+	artifact,
+	artifactOf,
+	agent,
+	chart,
+	failed,
+	final,
+	normalizeChartConfig,
+	script,
+	z,
+} from "../packages/hyperchart/src/index.js";
 import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
 import type { ArtifactPin } from "../packages/hyperchart/src/core/durable_events.js";
 import { explainReplay } from "../packages/hyperchart/src/core/replay_check.js";
@@ -42,50 +56,69 @@ function make(config: ChartCst): ChartAst {
 }
 
 function scriptChart(): ChartAst {
-	return make(chart({
-		kind: "chart", id: "pins-script", initial: "work",
-		states: {
-			work: {
-				kind: "state",
-				action: script(node, ["-e", 'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))'], {
-					artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
-				}),
-				transitions: { DONE: "done" },
+	return make(
+		chart({
+			kind: "chart",
+			id: "pins-script",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: script(
+						node,
+						[
+							"-e",
+							'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))',
+						],
+						{
+							artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+						},
+					),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+				failed: failed(),
 			},
-			done: final(),
-			failed: failed(),
-		},
-	}));
+		}),
+	);
 }
 
 function agentChart(): ChartAst {
-	return make(chart({
-		kind: "chart", id: "pins-agent", initial: "work",
-		states: {
-			work: {
-				kind: "state",
-				action: agent("worker", { artifacts: { report: artifact("report.json") } }),
-				transitions: { DONE: "done" },
+	return make(
+		chart({
+			kind: "chart",
+			id: "pins-agent",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: agent("worker", { artifacts: { report: artifact("report.json") } }),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+				failed: failed(),
 			},
-			done: final(),
-			failed: failed(),
-		},
-	}));
+		}),
+	);
 }
 
 type Options = { runId?: string; executor?: FakeAgentExecutor; logStore?: MemoryLogStore };
 
 async function run(ast: ChartAst, workDir: string, options: Options = {}) {
 	const logStore = options.logStore ?? new MemoryLogStore();
-	const runtime = withRunStorage({ kind: "jsonl", rootDir: workDir, layout: "sha256" }, () => new ChartRuntime({
-		ast,
-		branchId: "main",
-		logStore,
-		agentExecutor: options.executor ?? new FakeAgentExecutor(),
-		workDir,
-		chartDir: workDir,
-		...(options.runId === undefined ? {} : { runId: options.runId }),
-	}));
+	const runtime = withRunStorage(
+		{ kind: "jsonl", rootDir: workDir, layout: "sha256" },
+		() =>
+			new ChartRuntime({
+				ast,
+				branchId: "main",
+				logStore,
+				agentExecutor: options.executor ?? new FakeAgentExecutor(),
+				workDir,
+				chartDir: workDir,
+				...(options.runId === undefined ? {} : { runId: options.runId }),
+			}),
+	);
 	try {
 		const state = await start(runtime);
 		return { state, log: await collectHistoryRecords(logStore, logStore.branchId) };
@@ -105,29 +138,75 @@ describe("artifact pins", () => {
 		const workDir = await tempDir();
 		const runId = "run";
 		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
-		const ast = make(chart({ kind: "chart", id: "guarded-pins", initial: "seed", states: {
-			seed: { kind: "state", action: script(node, ["-e", 'require("node:fs").writeFileSync("notes.md", "accepted parent"); console.log(JSON.stringify({type:"DONE"}))'], { artifacts: { notes: artifact("notes.md") } }), transitions: { DONE: "work" } },
-			work: { kind: "state", action: agent("worker", { artifacts: { notes: artifact("notes.md") },
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "guarded-pins",
+				initial: "seed",
+				states: {
+					seed: {
+						kind: "state",
+						action: script(
+							node,
+							[
+								"-e",
+								'require("node:fs").writeFileSync("notes.md", "accepted parent"); console.log(JSON.stringify({type:"DONE"}))',
+							],
+							{ artifacts: { notes: artifact("notes.md") } },
+						),
+						transitions: { DONE: "work" },
+					},
+					work: {
+						kind: "state",
+						action: agent("worker", {
+							artifacts: { notes: artifact("notes.md") },
 							validation: {
-								guard: script(node, ["-e", 'let s=""; process.stdin.on("data", c => s+=c); process.stdin.on("end", () => { require("node:fs").writeFileSync("diagnostic.txt", "guard ran"); process.exit(JSON.parse(s).output.accept ? 0 : 1); });'], { artifacts: { diagnostic: artifact("diagnostic.txt") }, env: { SELF: artifactOf("work", { artifact: "notes" }) } }),
+								guard: script(
+									node,
+									[
+										"-e",
+										'let s=""; process.stdin.on("data", c => s+=c); process.stdin.on("end", () => { require("node:fs").writeFileSync("diagnostic.txt", "guard ran"); process.exit(JSON.parse(s).output.accept ? 0 : 1); });',
+									],
+									{
+										artifacts: { diagnostic: artifact("diagnostic.txt") },
+										env: { SELF: artifactOf("work", { artifact: "notes" }) },
+									},
+								),
 							},
 						}),
-						transitions: { DONE: "done" } }, done: final(),
-		} }));
-		const executor = new FakeAgentExecutor({ work: [{ type: "DONE", output: { accept: false } }, { type: "DONE", output: { accept: true } }] });
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const executor = new FakeAgentExecutor({
+			work: [
+				{ type: "DONE", output: { accept: false } },
+				{ type: "DONE", output: { accept: true } },
+			],
+		});
 		const start = executor.start.bind(executor);
-		executor.start = (effect, emit) => { writeFileSync(join(workDir, "notes.md"),
-				effect.recovery === undefined ? "rejected bytes" : "accepted correction");
-			start(effect, emit); };
+		executor.start = (effect, emit) => {
+			writeFileSync(
+				join(workDir, "notes.md"),
+				effect.recovery === undefined ? "rejected bytes" : "accepted correction",
+			);
+			start(effect, emit);
+		};
 		const { state, log } = await run(ast, workDir, { runId, executor });
-		const completions = log.filter((entry): entry is Extract<DurableLogRecord, {type:"state_action"; kind:"complete"}> => entry.type === "state_action" && entry.kind === "complete");
+		const completions = log.filter(
+			(entry): entry is Extract<DurableLogRecord, { type: "state_action"; kind: "complete" }> =>
+				entry.type === "state_action" && entry.kind === "complete",
+		);
 		const parentPin = completions[0]?.artifacts?.["notes.md"]!;
 		const rejectedPin = completions[1]?.artifacts?.["notes.md"]!;
 		const acceptedPin = completions[2]?.artifacts?.["notes.md"];
 		if (parentPin === undefined || rejectedPin === undefined || acceptedPin === undefined)
 			throw new Error("missing artifact pins");
 		const rejection = log.findIndex(
-			(entry) => entry.type === "state_action" && entry.kind === "validated" && entry.outcome !== true);
+			(entry) => entry.type === "state_action" && entry.kind === "validated" && entry.outcome !== true,
+		);
 		for (const end of [log.indexOf(completions[1]!) + 1, rejection + 1]) {
 			const projection = projectBranch(createBranchProjection(ast), ast, log.slice(0, end));
 			const same = BranchExecution.fromProjection(ast, "main", projection);
@@ -241,25 +320,36 @@ describe("artifact pins", () => {
 
 		await writeFile(join(workDir, "report.json"), "overwritten by a sibling branch");
 
-		const resumed = make(chart({
-			kind: "chart", id: "pins-script", initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					action: script(node, ["-e", 'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))'], {
-						artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
-					}),
-					transitions: { DONE: "consume" },
+		const resumed = make(
+			chart({
+				kind: "chart",
+				id: "pins-script",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: script(
+							node,
+							[
+								"-e",
+								'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))',
+							],
+							{
+								artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+							},
+						),
+						transitions: { DONE: "consume" },
+					},
+					consume: {
+						kind: "state",
+						action: agent("reader", { reads: [artifactOf("work")] }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					failed: failed(),
 				},
-				consume: {
-					kind: "state",
-					action: agent("reader", { reads: [artifactOf("work")] }),
-					transitions: { DONE: "done" },
-				},
-				done: final(),
-				failed: failed(),
-			},
-		}));
+			}),
+		);
 		const executor = new FakeAgentExecutor({ consume: [{ type: "DONE" }] });
 		const { state } = await run(resumed, workDir, { runId, logStore, executor });
 
@@ -276,25 +366,36 @@ describe("artifact pins", () => {
 		await writeFile(join(workDir, "report.json"), "overwritten");
 		await rm(join(runDir, "artifact_store"), { recursive: true, force: true });
 
-		const resumed = make(chart({
-			kind: "chart", id: "pins-script", initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					action: script(node, ["-e", 'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))'], {
-						artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
-					}),
-					transitions: { DONE: "consume" },
+		const resumed = make(
+			chart({
+				kind: "chart",
+				id: "pins-script",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: script(
+							node,
+							[
+								"-e",
+								'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))',
+							],
+							{
+								artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+							},
+						),
+						transitions: { DONE: "consume" },
+					},
+					consume: {
+						kind: "state",
+						action: agent("reader", { reads: [artifactOf("work")] }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					failed: failed(),
 				},
-				consume: {
-					kind: "state",
-					action: agent("reader", { reads: [artifactOf("work")] }),
-					transitions: { DONE: "done" },
-				},
-				done: final(),
-				failed: failed(),
-			},
-		}));
+			}),
+		);
 		const executor = new FakeAgentExecutor({ consume: [{ type: "DONE" }] });
 		const { log } = await run(resumed, workDir, { runId, logStore, executor });
 
@@ -311,25 +412,36 @@ describe("artifact pins", () => {
 		await run(scriptChart(), workDir, { logStore });
 		await writeFile(join(workDir, "report.json"), "edited out of band");
 
-		const resumed = make(chart({
-			kind: "chart", id: "pins-script", initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					action: script(node, ["-e", 'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))'], {
-						artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
-					}),
-					transitions: { DONE: "consume" },
+		const resumed = make(
+			chart({
+				kind: "chart",
+				id: "pins-script",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: script(
+							node,
+							[
+								"-e",
+								'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))',
+							],
+							{
+								artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+							},
+						),
+						transitions: { DONE: "consume" },
+					},
+					consume: {
+						kind: "state",
+						action: agent("reader", { reads: [artifactOf("work")] }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					failed: failed(),
 				},
-				consume: {
-					kind: "state",
-					action: agent("reader", { reads: [artifactOf("work")] }),
-					transitions: { DONE: "done" },
-				},
-				done: final(),
-				failed: failed(),
-			},
-		}));
+			}),
+		);
 		const executor = new FakeAgentExecutor({ consume: [{ type: "DONE" }] });
 		const { state } = await run(resumed, workDir, { runId, logStore, executor });
 
@@ -341,18 +453,22 @@ describe("artifact pins", () => {
 		const workDir = await tempDir();
 		const runId = "run";
 		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
-		const ast = make(chart({
-			kind: "chart", id: "pins-shape", initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					action: agent("worker", { artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) } }),
-					transitions: { DONE: "done" },
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "pins-shape",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) } }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+					failed: failed(),
 				},
-				done: final(),
-				failed: failed(),
-			},
-		}));
+			}),
+		);
 		await writeFile(join(workDir, "report.json"), "not json");
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE" }] });
 

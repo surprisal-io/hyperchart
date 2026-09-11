@@ -33,10 +33,15 @@ function parsePromptInterpolationRef(token: string): PromptInterpolationRef {
 	if (inputArgs?.[0])
 		return { kind: "input", name: inputArgs[0], ...(inputArgs[1] === undefined ? {} : { path: inputArgs[1] }) };
 	const actorInputArgs = parseDslCallArgs(sourceToken, "actorInput");
-	if (actorInputArgs) return { kind: "actorInput", ...(actorInputArgs[0] === undefined ? {} : { path: actorInputArgs[0] }) };
+	if (actorInputArgs)
+		return { kind: "actorInput", ...(actorInputArgs[0] === undefined ? {} : { path: actorInputArgs[0] }) };
 	const messageInputArgs = parseDslCallArgs(sourceToken, "messageInput");
 	if (messageInputArgs?.[0])
-		return { kind: "messageInput", message: messageInputArgs[0], ...(messageInputArgs[1] === undefined ? {} : { path: messageInputArgs[1] }) };
+		return {
+			kind: "messageInput",
+			message: messageInputArgs[0],
+			...(messageInputArgs[1] === undefined ? {} : { path: messageInputArgs[1] }),
+		};
 	const resultArgs = parseDslCallArgs(sourceToken, "result");
 	if (resultArgs?.[0])
 		return { kind: "result", state: resultArgs[0], ...(resultArgs[1] === undefined ? {} : { path: resultArgs[1] }) };
@@ -55,15 +60,32 @@ function resultRefTarget(
 	if (ref.kind !== "result") return undefined;
 	const direct = allStates.find((candidate) => candidate.id === ref.state && candidate.replySchema !== undefined);
 	const actorInternal = state.actorInternal;
-	const actorLocal = actorInternal === undefined
-		? undefined
-		: allStates.find((candidate) => {
-			const target = candidate.actorInternal;
-			if (target?.declarationPath !== actorInternal.declarationPath || target.localState !== ref.state || candidate.replySchema === undefined) return false;
-			if (actorInternal.occurrencePath !== undefined && target.occurrencePath !== actorInternal.occurrencePath) return false;
-			if (actorInternal.logicalOccurrencePath !== undefined && target.logicalOccurrencePath !== actorInternal.logicalOccurrencePath) return false;
-			return actorInternal.generation === undefined || target.generation === actorInternal.generation;
-		}) ?? allStates.find((candidate) => candidate.actorInternal?.declarationPath === actorInternal.declarationPath && candidate.actorInternal.localState === ref.state && candidate.replySchema !== undefined);
+	const actorLocal =
+		actorInternal === undefined
+			? undefined
+			: (allStates.find((candidate) => {
+					const target = candidate.actorInternal;
+					if (
+						target?.declarationPath !== actorInternal.declarationPath ||
+						target.localState !== ref.state ||
+						candidate.replySchema === undefined
+					)
+						return false;
+					if (actorInternal.occurrencePath !== undefined && target.occurrencePath !== actorInternal.occurrencePath)
+						return false;
+					if (
+						actorInternal.logicalOccurrencePath !== undefined &&
+						target.logicalOccurrencePath !== actorInternal.logicalOccurrencePath
+					)
+						return false;
+					return actorInternal.generation === undefined || target.generation === actorInternal.generation;
+				}) ??
+				allStates.find(
+					(candidate) =>
+						candidate.actorInternal?.declarationPath === actorInternal.declarationPath &&
+						candidate.actorInternal.localState === ref.state &&
+						candidate.replySchema !== undefined,
+				));
 	const target = actorInternal === undefined ? direct : actorLocal;
 	return target === undefined ? undefined : { state: target, ...(ref.path === undefined ? {} : { path: ref.path }) };
 }
@@ -84,7 +106,8 @@ function actorDeclarationForState(
 ): NonNullable<HyperchartStateInfo["actorDeclaration"]> | undefined {
 	const declarationPath = state.actorInternal?.declarationPath;
 	if (declarationPath === undefined) return undefined;
-	return allStates.find((candidate) => candidate.actorDeclaration?.declarationPath === declarationPath)?.actorDeclaration;
+	return allStates.find((candidate) => candidate.actorDeclaration?.declarationPath === declarationPath)
+		?.actorDeclaration;
 }
 
 function actorLocalRefTypeInfo(
@@ -95,11 +118,17 @@ function actorLocalRefTypeInfo(
 	const declaration = actorDeclarationForState(state, allStates);
 	if (ref.kind === "actorInput") {
 		const schema = declaration?.inputSchema;
-		return { tone: "actorInput", ...(schema === undefined ? {} : { schema: schemaAtPath(schema, ref.path) ?? schema }) };
+		return {
+			tone: "actorInput",
+			...(schema === undefined ? {} : { schema: schemaAtPath(schema, ref.path) ?? schema }),
+		};
 	}
 	if (ref.kind === "messageInput") {
 		const schema = declaration?.protocol.find((message) => message.event === ref.message)?.input;
-		return { tone: "messageInput", ...(schema === undefined ? {} : { schema: schemaAtPath(schema, ref.path) ?? schema }) };
+		return {
+			tone: "messageInput",
+			...(schema === undefined ? {} : { schema: schemaAtPath(schema, ref.path) ?? schema }),
+		};
 	}
 	return undefined;
 }

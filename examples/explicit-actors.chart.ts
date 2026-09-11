@@ -61,11 +61,7 @@ export default chart({
 				apply: callBatch({
 					to: editors,
 					event: "APPLY",
-					inputs: [
-						{ patch: "first patch" },
-						{ patch: "second patch" },
-						{ patch: "third patch" },
-					],
+					inputs: [{ patch: "first patch" }, { patch: "second patch" }, { patch: "third patch" }],
 					target: "finished",
 				}),
 				finished: final(),

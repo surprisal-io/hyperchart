@@ -43,7 +43,8 @@ export function actionVisitIndexes(records: readonly HyperchartRecordInfo[]): Ac
 		}
 		if (item.type === "actor_messages_enqueued" && isRecord(item.record.source)) {
 			const state = item.record.source.producerState;
-			if (typeof state === "string") byInvocation.set(item.seqId, { invokeSeqId: item.seqId, statePath: state, originBranchId: item.branchId });
+			if (typeof state === "string")
+				byInvocation.set(item.seqId, { invokeSeqId: item.seqId, statePath: state, originBranchId: item.branchId });
 		}
 	}
 	return [...byInvocation.values()].sort((left, right) => left.invokeSeqId - right.invokeSeqId);
@@ -74,7 +75,10 @@ export function actorMessageVisitForState(
 	const messages = state.actorMessageLink?.messages?.filter((message) => message.enqueueSeqId === invokeSeqId);
 	if (messages === undefined || messages.length === 0) return undefined;
 	const first = messages[0]!;
-	const done = state.actorMessageLink?.kind === "send" || state.actorMessageLink?.kind === "sendBatch" || messages.every((message) => message.status === "settled" || message.status === "replied");
+	const done =
+		state.actorMessageLink?.kind === "send" ||
+		state.actorMessageLink?.kind === "sendBatch" ||
+		messages.every((message) => message.status === "settled" || message.status === "replied");
 	return {
 		visit: first.producerVisit,
 		invokeSeqId,
@@ -88,7 +92,8 @@ export function actorMessageVisitForState(
 
 export function actionVisitStatusLabel(visit: HyperchartVisitInfo): string {
 	switch (visit.status) {
-		case "unknown": return "Unknown · Replay incompatible";
+		case "unknown":
+			return "Unknown · Replay incompatible";
 		case "running":
 			return "In progress";
 		case "done":
@@ -123,7 +128,14 @@ export function embeddedActionVisitRows(run: HyperchartRunInfo): ActionVisitRow[
 		for (const enqueueSeqId of enqueueSeqIds) {
 			const originBranchId = run.branchId ?? "main";
 			const visit = actorMessageVisitForState(state, enqueueSeqId, originBranchId);
-			if (visit !== undefined) rows.set(enqueueSeqId, { invokeSeqId: enqueueSeqId, statePath: runtimePath, originBranchId, graphStateId: state.id, visit });
+			if (visit !== undefined)
+				rows.set(enqueueSeqId, {
+					invokeSeqId: enqueueSeqId,
+					statePath: runtimePath,
+					originBranchId,
+					graphStateId: state.id,
+					visit,
+				});
 		}
 		for (const generation of state.actorInternal?.generations ?? [])
 			append(

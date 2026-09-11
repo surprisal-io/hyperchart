@@ -19,7 +19,15 @@ export function TemplateTextBlock({
 	wrapLongLines = false,
 	maxPreviewCharacters,
 	language,
-}: InterpolatedTextProps & { collapsedLines?: number; nowrap?: boolean; compact?: boolean; cssCollapse?: boolean; wrapLongLines?: boolean; maxPreviewCharacters?: number; language?: string }) {
+}: InterpolatedTextProps & {
+	collapsedLines?: number;
+	nowrap?: boolean;
+	compact?: boolean;
+	cssCollapse?: boolean;
+	wrapLongLines?: boolean;
+	maxPreviewCharacters?: number;
+	language?: string;
+}) {
 	if (hasInterpolation(text)) {
 		return (
 			<InterpolatedTextBlock
@@ -44,9 +52,24 @@ export function TemplateTextBlock({
 				contentTruncated={preview.truncated}
 				previewText={preview.text}
 				fullText={text}
-				render={(value, full) => <div className={`min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] [overflow-wrap:anywhere] ${full ? "whitespace-pre-wrap" : "whitespace-normal"}`}>{value}</div>}
+				render={(value, full) => (
+					<div
+						className={`min-w-0 max-w-full p-2 font-mono text-[11px] leading-relaxed text-[var(--text-secondary)] [overflow-wrap:anywhere] ${full ? "whitespace-pre-wrap" : "whitespace-normal"}`}
+					>
+						{value}
+					</div>
+				)}
 			/>
 		);
 	}
-	return <ExpandablePre {...(collapsedLines === undefined ? {} : { collapsedLines })} {...(maxPreviewCharacters === undefined ? {} : { maxPreviewCharacters })} {...(language === undefined ? {} : { language })} wrapLongLines={wrapLongLines}>{text}</ExpandablePre>;
+	return (
+		<ExpandablePre
+			{...(collapsedLines === undefined ? {} : { collapsedLines })}
+			{...(maxPreviewCharacters === undefined ? {} : { maxPreviewCharacters })}
+			{...(language === undefined ? {} : { language })}
+			wrapLongLines={wrapLongLines}
+		>
+			{text}
+		</ExpandablePre>
+	);
 }

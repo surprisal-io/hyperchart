@@ -47,7 +47,13 @@ export function HighlightedBlock({
 	}
 	const preClassName = `${full ? "p-3 text-[12px] leading-relaxed" : "p-2 text-[11px]"} min-w-full text-[var(--text-secondary)]`;
 	return (
-		<pre className={wrapLongLines ? `${preClassName} w-full whitespace-pre-wrap break-words` : `${preClassName} w-max whitespace-pre [overflow-wrap:normal]`}>
+		<pre
+			className={
+				wrapLongLines
+					? `${preClassName} w-full whitespace-pre-wrap break-words`
+					: `${preClassName} w-max whitespace-pre [overflow-wrap:normal]`
+			}
+		>
 			{children}
 		</pre>
 	);

@@ -37,13 +37,19 @@ describe("Inspector prompt interpolation", () => {
 				},
 				inputValue: { file: "README.md" },
 				initialReceive: "idle",
-				protocol: [{
-					event: "APPLY",
-					input: {
-						schema: { type: "object", properties: { patch: { type: "string" }, metadata: { type: "object" } }, required: ["patch"] },
+				protocol: [
+					{
+						event: "APPLY",
+						input: {
+							schema: {
+								type: "object",
+								properties: { patch: { type: "string" }, metadata: { type: "object" } },
+								required: ["patch"],
+							},
+						},
+						reply: { kind: "void" },
 					},
-					reply: { kind: "void" },
-				}],
+				],
 			},
 		};
 		const actorState: HyperchartStateInfo = {
@@ -61,10 +67,22 @@ describe("Inspector prompt interpolation", () => {
 		};
 		const allStates = [actorDeclaration, actorState, actorResultState];
 
-		expect(interpolationAction('actorInput("file")', actorState, allStates, {})).toMatchObject({ title: "string", tone: "actorInput" });
-		expect(interpolationAction('messageInput("APPLY", "patch")', actorState, allStates, {})).toMatchObject({ title: "string", tone: "messageInput" });
-		expect(interpolationAction('json(messageInput("APPLY", "metadata"))', actorState, allStates, {})).toMatchObject({ title: "Record<string, unknown>", tone: "messageInput" });
-		expect(interpolationAction('result("prepare", "plan")', actorState, allStates, {})).toMatchObject({ title: "string", tone: "result" });
+		expect(interpolationAction('actorInput("file")', actorState, allStates, {})).toMatchObject({
+			title: "string",
+			tone: "actorInput",
+		});
+		expect(interpolationAction('messageInput("APPLY", "patch")', actorState, allStates, {})).toMatchObject({
+			title: "string",
+			tone: "messageInput",
+		});
+		expect(interpolationAction('json(messageInput("APPLY", "metadata"))', actorState, allStates, {})).toMatchObject({
+			title: "Record<string, unknown>",
+			tone: "messageInput",
+		});
+		expect(interpolationAction('result("prepare", "plan")', actorState, allStates, {})).toMatchObject({
+			title: "string",
+			tone: "result",
+		});
 		expect(hasInterpolation('Apply {messageInput("APPLY", "patch")}')).toBe(true);
 	});
 
@@ -95,12 +113,7 @@ describe("Inspector prompt interpolation", () => {
 		};
 		const allStates = [sourceState, screenshotState, prepareState];
 		const whole = interpolationAction('json(result("screenshot-report"))', sourceState, allStates, {});
-		const field = interpolationAction(
-			'json(result("prepare-chapter-work", "items"))',
-			sourceState,
-			allStates,
-			{},
-		);
+		const field = interpolationAction('json(result("prepare-chapter-work", "items"))', sourceState, allStates, {});
 
 		expect(whole.tone).toBe("result");
 		expect(whole.title).toContain("screenshots: Array<string>");

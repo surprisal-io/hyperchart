@@ -29,7 +29,12 @@ export function storyScenario(chart: ChartCst, path = `storybook:${chart.id}`): 
 		staticRun: (options = {}) => hyperchartRunFromInspectResult(inspect, options),
 		runtimeRun: (records, options = {}) => {
 			const replay = explainReplay(ast, records);
-			if (replay.broken !== undefined || replay.prefixEnd !== records.length || replay.stale.length > 0 || replay.skipped.length > 0) {
+			if (
+				replay.broken !== undefined ||
+				replay.prefixEnd !== records.length ||
+				replay.stale.length > 0 ||
+				replay.skipped.length > 0
+			) {
 				throw new Error(`invalid Storybook durable log for ${ast.id}: ${JSON.stringify(replay)}`);
 			}
 			return hyperchartRunFromRuntime(inspect, ast, records, options);
@@ -49,10 +54,35 @@ export function storyArgs(args: Record<string, unknown>, seqId = 1, timestamp = 
 
 export function storyInvoke(ast: ChartAst, statePath: string, seqId: number, timestamp = seqId): DurableLogRecord {
 	const action = actionAt(ast, statePath);
-	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid: action.uid, definition: action, parentId: seqId - 1, branchId: "main", seqId, timestamp };
+	return {
+		type: "state_action",
+		kind: "invoke",
+		sessionId: "session-id",
+		actionUid: action.uid,
+		definition: action,
+		parentId: seqId - 1,
+		branchId: "main",
+		seqId,
+		timestamp,
+	};
 }
 
-export function storyComplete(ast: ChartAst, statePath: string, event: string, seqId: number, timestamp = seqId): DurableLogRecord {
+export function storyComplete(
+	ast: ChartAst,
+	statePath: string,
+	event: string,
+	seqId: number,
+	timestamp = seqId,
+): DurableLogRecord {
 	const action = actionAt(ast, statePath);
-	return { type: "state_action", kind: "complete", actionUid: action.uid, event: { type: event }, parentId: seqId - 1, branchId: "main", seqId, timestamp };
+	return {
+		type: "state_action",
+		kind: "complete",
+		actionUid: action.uid,
+		event: { type: event },
+		parentId: seqId - 1,
+		branchId: "main",
+		seqId,
+		timestamp,
+	};
 }

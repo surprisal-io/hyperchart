@@ -1,4 +1,8 @@
-import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import {
+	withRunStorage,
+	resolveRunPaths,
+	type RunStorage,
+} from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,7 +52,11 @@ describe("hyperchart runner replay warning policy", () => {
 	});
 });
 
-function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runId: string; storage: RunStorage; configPath: string } {
+function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): {
+	runId: string;
+	storage: RunStorage;
+	configPath: string;
+} {
 	const workDir = join(tempDir, "work");
 	const agentDir = join(tempDir, "agent");
 	const runId = "run";
@@ -74,31 +82,36 @@ function writeRunFixture(opts: { ignoreReplayWarnings: boolean }): { runId: stri
 	);
 	const uid = { chart: "demo", state: "work", action: "agent" };
 	const records = [
-			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{
-				type: "state_action",
-				kind: "invoke",
-							sessionId: "session-id",
-				actionUid: uid,
-				definition: { kind: "agent", uid, name: "old-worker" },
-				parentId: 2,
-				seqId: 3,
-				branchId: "main", timestamp: 2,
-			},
-			{
-				type: "state_action",
-				kind: "complete",
-				actionUid: uid,
-				event: { type: "DONE" },
-				parentId: 3,
-				seqId: 4,
-				branchId: "main", timestamp: 3,
-			},
-		];
-	writeFileSync(join(runDir, "log.jsonl"), [
-		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
-		...records,
-	].map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+		{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
+		{
+			type: "state_action",
+			kind: "invoke",
+			sessionId: "session-id",
+			actionUid: uid,
+			definition: { kind: "agent", uid, name: "old-worker" },
+			parentId: 2,
+			seqId: 3,
+			branchId: "main",
+			timestamp: 2,
+		},
+		{
+			type: "state_action",
+			kind: "complete",
+			actionUid: uid,
+			event: { type: "DONE" },
+			parentId: 3,
+			seqId: 4,
+			branchId: "main",
+			timestamp: 3,
+		},
+	];
+	writeFileSync(
+		join(runDir, "log.jsonl"),
+		[{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 }, ...records]
+			.map((entry) => JSON.stringify(entry))
+			.join("\n") + "\n",
+		"utf8",
+	);
 	const config: HyperchartRunnerConfig = {
 		runId: "run",
 		branchId: "main",

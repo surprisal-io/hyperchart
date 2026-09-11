@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAssistantMessageEventStream, InMemoryCredentialStore, type AssistantMessage } from "@earendil-works/pi-ai";
+import {
+	createAssistantMessageEventStream,
+	InMemoryCredentialStore,
+	type AssistantMessage,
+} from "@earendil-works/pi-ai";
 import { AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "vitest";
 import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
@@ -10,24 +14,39 @@ import { PiAgentExecutor } from "../packages/pi-hyperchart/src/runtime/pi/pi_age
 
 function deferred() {
 	let resolve!: () => void;
-	const promise = new Promise<void>((done) => { resolve = done; });
+	const promise = new Promise<void>((done) => {
+		resolve = done;
+	});
 	return { promise, resolve };
 }
 
-it.each(["supersede", "cancel", "dispose"] as const)("settles real SDK before_agent_start preflight before shutdown on %s", async (operation) => {
+it.each([
+	"supersede",
+	"cancel",
+	"dispose",
+] as const)("settles real SDK before_agent_start preflight before shutdown on %s", async (operation) => {
 	const root = await mkdtemp(join(tmpdir(), "hyperchart-preflight-"));
 	const bridgeKey = `preflight-${randomUUID()}`;
 	const entered = deferred();
 	const release = deferred();
 	const abortReturned = deferred();
-	const bridge = { entered: entered.resolve, release: release.promise, gated: false, resources: 0, events: [] as string[], errors: [] as string[] };
+	const bridge = {
+		entered: entered.resolve,
+		release: release.promise,
+		gated: false,
+		resources: 0,
+		events: [] as string[],
+		errors: [] as string[],
+	};
 	Reflect.set(globalThis, bridgeKey, bridge);
 	let executor: PiAgentExecutor | undefined;
 	try {
 		await mkdir(join(root, "extensions"));
 		await mkdir(join(root, "sessions"));
 		await writeFile(join(root, "worker.md"), "---\ndescription: preflight fixture\n---\nCall finish.\n");
-		await writeFile(join(root, "extensions", "preflight.ts"), `
+		await writeFile(
+			join(root, "extensions", "preflight.ts"),
+			`
 export default function(pi) {
   const bridge = globalThis[${JSON.stringify(bridgeKey)}];
   let timer;
@@ -52,19 +71,41 @@ export default function(pi) {
     bridge.events.push("shutdown:" + ctx.sessionManager.getSessionId());
     if (timer !== undefined) { clearInterval(timer); timer = undefined; bridge.resources--; }
   });
-}`);
-		const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: join(root, "models.json"), modelsStorePath: join(root, "models-store.json"), allowModelNetwork: false });
+}`,
+		);
+		const modelRuntime = await ModelRuntime.create({
+			credentials: new InMemoryCredentialStore(),
+			modelsPath: join(root, "models.json"),
+			modelsStorePath: join(root, "models-store.json"),
+			allowModelNetwork: false,
+		});
 		const model = modelRuntime.getModels("anthropic")[0];
 		if (model === undefined) throw new Error("Missing fixture model");
 		await modelRuntime.setRuntimeApiKey(model.provider, "isolated-test-key");
 		// Only provider I/O is substituted. Real prompt, preflight, abort and idle detection run.
 		let requests = 0;
 		vi.spyOn(modelRuntime, "streamSimple").mockImplementation(() => {
-			const message: AssistantMessage = { role: "assistant", api: model.api, provider: model.provider, model: model.id,
+			const message: AssistantMessage = {
+				role: "assistant",
+				api: model.api,
+				provider: model.provider,
+				model: model.id,
 				// Bound the fake provider even when testing a broken/invalidation path.
-				content: ++requests <= 2 ? [{ type: "toolCall", id: randomUUID(), name: "finish", arguments: { event: "DONE" } }] : [{ type: "text", text: "stop" }],
-				stopReason: requests <= 2 ? "toolUse" : "stop", timestamp: Date.now(), usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
+				content:
+					++requests <= 2
+						? [{ type: "toolCall", id: randomUUID(), name: "finish", arguments: { event: "DONE" } }]
+						: [{ type: "text", text: "stop" }],
+				stopReason: requests <= 2 ? "toolUse" : "stop",
+				timestamp: Date.now(),
+				usage: {
+					input: 1,
+					output: 1,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 2,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+			};
 			const stream = createAssistantMessageEventStream();
 			stream.push({ type: "done", reason: message.stopReason as "toolUse" | "stop", message });
 			// The workspace has two pi-ai copies with nominally private stream fields.
@@ -82,27 +123,56 @@ export default function(pi) {
 			dispose.call(this);
 		});
 		let handles = 0;
-		executor = new PiAgentExecutor({ workDir: root, agentDir: root, definitionDirs: [root], sessionsDir: join(root, "sessions"), branchId: "main", modelRuntime,
-			defaultModel: `${model.provider}/${model.id}`, extensionPolicy: "ambient",
+		executor = new PiAgentExecutor({
+			workDir: root,
+			agentDir: root,
+			definitionDirs: [root],
+			sessionsDir: join(root, "sessions"),
+			branchId: "main",
+			modelRuntime,
+			defaultModel: `${model.provider}/${model.id}`,
+			extensionPolicy: "ambient",
 			sessionService: {
 				async openOrCreate(sessionId) {
 					handles++;
-					return { manager: SessionManager.inMemory(root, { id: sessionId }), sessionId, restored: false,
-						async drain() {}, async close() { handles--; bridge.events.push(`close:${sessionId}`); } };
+					return {
+						manager: SessionManager.inMemory(root, { id: sessionId }),
+						sessionId,
+						restored: false,
+						async drain() {},
+						async close() {
+							handles--;
+							bridge.events.push(`close:${sessionId}`);
+						},
+					};
 				},
-				async readTranscript() { return undefined; }, async close() { expect(handles).toBe(0); },
+				async readTranscript() {
+					return undefined;
+				},
+				async close() {
+					expect(handles).toBe(0);
+				},
 			},
 		});
 		const actionUid = { chart: "preflight", state: "work", action: "worker" };
-		const effect: AgentEffect = { kind: "agent", id: "preflight:work:worker:1:1", actionUid,
-			action: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 }, tools: ["finish"] }, events: ["DONE", "FAILED"], sessionId: "first" };
+		const effect: AgentEffect = {
+			kind: "agent",
+			id: "preflight:work:worker:1:1",
+			actionUid,
+			action: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 }, tools: ["finish"] },
+			events: ["DONE", "FAILED"],
+			sessionId: "first",
+		};
 		const firstEmission = vi.fn();
 		executor.start(effect, firstEmission);
 		await entered.promise;
 		const current = executor;
 		let nextCompletion: Promise<AgentOutcome> | undefined;
 		let cancellation: Promise<void> | undefined;
-		if (operation === "supersede") nextCompletion = new Promise((resolve) => current.start({ ...effect, id: "preflight:work:worker:2:2", sessionId: "second" }, resolve));
+		if (operation === "supersede")
+			nextCompletion = new Promise((resolve) =>
+				current.start({ ...effect, id: "preflight:work:worker:2:2", sessionId: "second" }, resolve),
+			);
 		else cancellation = operation === "cancel" ? executor.cancel(actionUid) : executor.dispose();
 		await abortReturned.promise;
 		await new Promise((resolve) => setImmediate(resolve));
@@ -110,7 +180,8 @@ export default function(pi) {
 		expect(bridge.events).toEqual(["preflight"]);
 		expect(handles).toBe(1);
 		release.resolve();
-		if (nextCompletion !== undefined) expect(await nextCompletion).toEqual({ kind: "completed", event: { type: "DONE" } });
+		if (nextCompletion !== undefined)
+			expect(await nextCompletion).toEqual({ kind: "completed", event: { type: "DONE" } });
 		await cancellation;
 		await executor.dispose();
 		expect(firstEmission).not.toHaveBeenCalled();

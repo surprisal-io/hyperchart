@@ -68,11 +68,15 @@ describe("minimal Hyperchart TUI", () => {
 	});
 
 	it("renders refresh failures instead of leaking an unhandled rejection", async () => {
-		const widget = withRunStorage({ kind: "jsonl", rootDir: "/definitely-missing-hyperchart-storage", layout: "run-id" }, () => new RunWidget(fakeTui(), testTheme, {
-			runId: "broken-run",
-			branchId: "main",
-			ast: {} as never,
-		}));
+		const widget = withRunStorage(
+			{ kind: "jsonl", rootDir: "/definitely-missing-hyperchart-storage", layout: "run-id" },
+			() =>
+				new RunWidget(fakeTui(), testTheme, {
+					runId: "broken-run",
+					branchId: "main",
+					ast: {} as never,
+				}),
+		);
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(widget.render(120).join("\n")).toContain("inspect failed");
 		widget.dispose();

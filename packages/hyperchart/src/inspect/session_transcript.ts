@@ -116,7 +116,8 @@ export function limitTranscriptMessages(
 ): HyperchartSessionMessageInfo[] {
 	const limit = options.limit === undefined ? MAX_TRANSCRIPT_MESSAGES : options.limit;
 	if (limit === false) return messages;
-	if (!Number.isFinite(limit) || limit < 0) throw new RangeError("Transcript message limit must be a finite non-negative number or false");
+	if (!Number.isFinite(limit) || limit < 0)
+		throw new RangeError("Transcript message limit must be a finite non-negative number or false");
 	const count = Math.floor(limit);
 	return count === 0 ? [] : messages.slice(-count);
 }

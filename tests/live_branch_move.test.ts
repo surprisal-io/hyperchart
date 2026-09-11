@@ -29,7 +29,9 @@ afterEach(() => {
 type Deferred = { promise: Promise<void>; resolve(): void };
 function deferred(): Deferred {
 	let resolve!: () => void;
-	const promise = new Promise<void>((done) => { resolve = done; });
+	const promise = new Promise<void>((done) => {
+		resolve = done;
+	});
 	return { promise, resolve };
 }
 
@@ -46,22 +48,40 @@ async function branchView(runDir: string, branchId: string) {
 	try {
 		const branch = await store.getBranch(branchId);
 		return { branch, records: await collectHistoryRecords(store, branchId) };
-	} finally { await store.close(); }
+	} finally {
+		await store.close();
+	}
 }
 
 function storageEntries(runDir: string): StorageEntry[] {
-	return readFileSync(join(runDir, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as StorageEntry);
+	return readFileSync(join(runDir, "log.jsonl"), "utf8")
+		.trim()
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line) as StorageEntry);
 }
 
 class PausingExecutor implements SteerableAgentExecutor {
 	emit?: (outcome: AgentOutcome) => void;
 	readonly disposalStarted = deferred();
-	constructor(readonly branchId: string, private readonly disposeGate?: Promise<void>) {}
-	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void { this.emit = emit; }
+	constructor(
+		readonly branchId: string,
+		private readonly disposeGate?: Promise<void>,
+	) {}
+	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void {
+		this.emit = emit;
+	}
 	async cancel(_actionUid: ActionUID): Promise<void> {}
-	async dispose(): Promise<void> { this.disposalStarted.resolve(); await this.disposeGate; }
-	async steer(): Promise<boolean> { return false; }
-	complete(): void { this.emit?.({ kind: "completed", event: { type: "DONE" } }); }
+	async dispose(): Promise<void> {
+		this.disposalStarted.resolve();
+		await this.disposeGate;
+	}
+	async steer(): Promise<boolean> {
+		return false;
+	}
+	complete(): void {
+		this.emit?.({ kind: "completed", event: { type: "DONE" } });
+	}
 }
 
 async function fixture(
@@ -80,29 +100,50 @@ async function fixture(
 	mkdirSync(workDir, { recursive: true });
 	mkdirSync(runDir, { recursive: true });
 	const chartPath = join(workDir, "chart.mjs");
-	writeFileSync(chartPath, `export default {
+	writeFileSync(
+		chartPath,
+		`export default {
   kind: "chart", id: "live-move", initial: "work",
   states: {
     work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },
     done: { kind: "final" }
   }
-};\n`);
-	writeFileSync(join(runDir, "log.jsonl"),
-		`${branchIds.map((branchId, index) => JSON.stringify({
-		kind: "branch", op: "create", seqId: index + 1, branchId, headSeqId: null,
-		metadata: { name: branchId }, committedAt: index + 1,
-	})).join("\n")}\n`,
+};\n`,
+	);
+	writeFileSync(
+		join(runDir, "log.jsonl"),
+		`${branchIds
+			.map((branchId, index) =>
+				JSON.stringify({
+					kind: "branch",
+					op: "create",
+					seqId: index + 1,
+					branchId,
+					headSeqId: null,
+					metadata: { name: branchId },
+					committedAt: index + 1,
+				}),
+			)
+			.join("\n")}\n`,
 	);
 	const executors = new Map<string, PausingExecutor[]>();
-	const controller = await createHyperchartRunnerController({
-		runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "live-move", workDir, branchIds: [...branchIds],
-	}, ({ config }) => {
-		const executor = new PausingExecutor(config.branchId, disposeGates.get(config.branchId));
-		const branchExecutors = executors.get(config.branchId) ?? [];
-		branchExecutors.push(executor);
-		executors.set(config.branchId, branchExecutors);
-		return executor;
-	});
+	const controller = await createHyperchartRunnerController(
+		{
+			runId: "run",
+			storage: fixtureStorage(runDir),
+			chartPath,
+			chartId: "live-move",
+			workDir,
+			branchIds: [...branchIds],
+		},
+		({ config }) => {
+			const executor = new PausingExecutor(config.branchId, disposeGates.get(config.branchId));
+			const branchExecutors = executors.get(config.branchId) ?? [];
+			branchExecutors.push(executor);
+			executors.set(config.branchId, branchExecutors);
+			return executor;
+		},
+	);
 	controller.acquireHold();
 	const completion = controller.start();
 	await waitFor(() => branchIds.every((branchId) => executors.get(branchId)?.[0]?.emit !== undefined));
@@ -152,7 +193,6 @@ describe("live branch sealing and move", () => {
 		}
 	});
 
-
 	it("fails closed before the move commit point and releases temporary seals", async () => {
 		const f = await fixture(["main"]);
 		const beforeEntries = storageEntries(f.runDir);
@@ -161,9 +201,13 @@ describe("live branch sealing and move", () => {
 
 		await expect(f.controller.moveBranch("main", 999_999)).rejects.toThrow(/No durable log record/);
 		expect(storageEntries(f.runDir)).toEqual(beforeEntries);
-		await expect(f.controller.forkBranch({
-			branchId: "after-failed-move", sourceBranchId: "main", fromSeqId: headSeqId,
-		})).resolves.toMatchObject({ branchId: "after-failed-move", headSeqId });
+		await expect(
+			f.controller.forkBranch({
+				branchId: "after-failed-move",
+				sourceBranchId: "main",
+				fromSeqId: headSeqId,
+			}),
+		).resolves.toMatchObject({ branchId: "after-failed-move", headSeqId });
 
 		await f.controller.stop();
 		await f.completion;
@@ -183,21 +227,33 @@ describe("live branch sealing and move", () => {
 		await first.disposalStarted.promise;
 		expect(f.controller.canStartBranch("main")).toBe(false);
 		expect(await f.controller.activeBranchIds()).toEqual(["main"]);
-		await expect(f.controller.forkBranch({
-			branchId: "blocked-during-drain", sourceBranchId: "main", fromSeqId: drainedHeadSeqId,
-		})).rejects.toBeInstanceOf(BranchSealedError);
+		await expect(
+			f.controller.forkBranch({
+				branchId: "blocked-during-drain",
+				sourceBranchId: "main",
+				fromSeqId: drainedHeadSeqId,
+			}),
+		).rejects.toBeInstanceOf(BranchSealedError);
 		releaseDispose.resolve();
 		await expect(draining).resolves.toEqual({ branchId: "main", outcome: "drained" });
 		expect(changes).toHaveBeenCalledTimes(1);
 		expect(f.controller.canStartBranch("main")).toBe(true);
 		unsubscribe();
-		await expect(f.controller.forkBranch({
-			branchId: "blocked-after-drain", sourceBranchId: "main", fromSeqId: drainedHeadSeqId,
-		})).rejects.toBeInstanceOf(BranchSealedError);
+		await expect(
+			f.controller.forkBranch({
+				branchId: "blocked-after-drain",
+				sourceBranchId: "main",
+				fromSeqId: drainedHeadSeqId,
+			}),
+		).rejects.toBeInstanceOf(BranchSealedError);
 		await f.controller.moveBranch("main", drainedHeadSeqId);
-		await expect(f.controller.forkBranch({
-			branchId: "blocked-after-drained-move", sourceBranchId: "main", fromSeqId: drainedHeadSeqId,
-		})).rejects.toBeInstanceOf(BranchSealedError);
+		await expect(
+			f.controller.forkBranch({
+				branchId: "blocked-after-drained-move",
+				sourceBranchId: "main",
+				fromSeqId: drainedHeadSeqId,
+			}),
+		).rejects.toBeInstanceOf(BranchSealedError);
 
 		const resumed = f.controller.startBranch("main");
 		await waitFor(() => f.executors.get("main")?.length === 2 && f.executors.get("main")?.[1]?.emit !== undefined);
@@ -214,18 +270,25 @@ describe("live branch sealing and move", () => {
 	it("seals a fork subtree, leaves an independent branch writable during drain, and resumes the moved branch from the new head", async () => {
 		const releaseMain = deferred();
 		const releaseChild = deferred();
-		const f = await fixture(["main", "sibling"], new Map([
-			["main", releaseMain.promise],
-			["child", releaseChild.promise],
-		]));
+		const f = await fixture(
+			["main", "sibling"],
+			new Map([
+				["main", releaseMain.promise],
+				["child", releaseChild.promise],
+			]),
+		);
 		const initial = await branchView(f.runDir, "main");
 		const siblingInitial = await branchView(f.runDir, "sibling");
 		const mainTargetSeqId = initial.records[0]?.seqId;
 		if (mainTargetSeqId === undefined) throw new Error("missing main target record");
 		const mainHeadSeqId = initial.branch.headSeqId!;
-		await expect(f.controller.forkBranch({
-			branchId: "malformed-child", sourceBranchId: "main", fromSeqId: siblingInitial.branch.headSeqId!,
-		})).rejects.toThrow(/not in source branch 'main' ancestry/);
+		await expect(
+			f.controller.forkBranch({
+				branchId: "malformed-child",
+				sourceBranchId: "main",
+				fromSeqId: siblingInitial.branch.headSeqId!,
+			}),
+		).rejects.toThrow(/not in source branch 'main' ancestry/);
 		await f.controller.forkBranch({ branchId: "child", sourceBranchId: "main", fromSeqId: mainHeadSeqId });
 		const childOutcome = f.controller.startBranch("child");
 		await waitFor(() => f.executors.get("child")?.[0]?.emit !== undefined);
@@ -239,15 +302,19 @@ describe("live branch sealing and move", () => {
 			return moveSeqId;
 		});
 		await Promise.all([oldMain.disposalStarted.promise, oldChild.disposalStarted.promise]);
-		await expect(f.controller.forkBranch({
-			branchId: "blocked-child-fork",
-			sourceBranchId: "child",
-			fromSeqId: (await branchView(f.runDir, "child")).branch.headSeqId!,
-		})).rejects.toBeInstanceOf(BranchSealedError);
+		await expect(
+			f.controller.forkBranch({
+				branchId: "blocked-child-fork",
+				sourceBranchId: "child",
+				fromSeqId: (await branchView(f.runDir, "child")).branch.headSeqId!,
+			}),
+		).rejects.toBeInstanceOf(BranchSealedError);
 
 		const sibling = await branchView(f.runDir, "sibling");
 		const independent = await f.controller.forkBranch({
-			branchId: "sibling-child", sourceBranchId: "sibling", fromSeqId: sibling.branch.headSeqId!,
+			branchId: "sibling-child",
+			sourceBranchId: "sibling",
+			fromSeqId: sibling.branch.headSeqId!,
 		});
 		expect(independent.branchId).toBe("sibling-child");
 		expect(moved).toBe(false);
@@ -259,8 +326,17 @@ describe("live branch sealing and move", () => {
 		const movedSnapshot = await branchView(f.runDir, "main");
 		const movedEntries = storageEntries(f.runDir);
 		expect(movedSnapshot.branch.headSeqId).toBe(mainTargetSeqId);
-		expect(movedEntries.find((entry) => "kind" in entry && entry.kind === "branch" && entry.branchId === "sibling-child")?.seqId).toBeLessThan(moveSeqId);
-		expect(movedEntries.at(-1)).toMatchObject({ kind: "branch", op: "move", seqId: moveSeqId, branchId: "main", headSeqId: mainTargetSeqId });
+		expect(
+			movedEntries.find((entry) => "kind" in entry && entry.kind === "branch" && entry.branchId === "sibling-child")
+				?.seqId,
+		).toBeLessThan(moveSeqId);
+		expect(movedEntries.at(-1)).toMatchObject({
+			kind: "branch",
+			op: "move",
+			seqId: moveSeqId,
+			branchId: "main",
+			headSeqId: mainTargetSeqId,
+		});
 
 		const resumed = f.controller.startBranch("main");
 		await waitFor(() => f.executors.get("main")?.length === 2 && f.executors.get("main")?.[1]?.emit !== undefined);
@@ -276,5 +352,5 @@ describe("live branch sealing and move", () => {
 
 /** Explicit storage configuration for this suite's generated literal-layout fixtures. */
 function fixtureStorage(runDirectory: string): RunStorage {
- return {kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id"};
+	return { kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id" };
 }

@@ -28,7 +28,9 @@ export function ExpandablePre({
 				{renderContent ? (
 					renderContent(preview.text)
 				) : (
-					<HighlightedBlock language={language} wrapLongLines={wrapLongLines}>{preview.text}</HighlightedBlock>
+					<HighlightedBlock language={language} wrapLongLines={wrapLongLines}>
+						{preview.text}
+					</HighlightedBlock>
 				)}
 			</div>
 			{preview.truncated && (

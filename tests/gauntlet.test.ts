@@ -1,8 +1,36 @@
 import { describe, expect, it } from "vitest";
-import { actor, actorPool, agent, callBatch, compound, createBranchProjection, final, failed, json, map, message, messageInput, normalizeChartConfig, parallel, projectBranch, protocol, receive, reply, t, tsImport, z } from "../packages/hyperchart/src/index.js";
+import {
+	actor,
+	actorPool,
+	agent,
+	callBatch,
+	compound,
+	createBranchProjection,
+	final,
+	failed,
+	json,
+	map,
+	message,
+	messageInput,
+	normalizeChartConfig,
+	parallel,
+	projectBranch,
+	protocol,
+	receive,
+	reply,
+	t,
+	tsImport,
+	z,
+} from "../packages/hyperchart/src/index.js";
 import { arg, chart, event, input, item, key, result } from "../packages/hyperchart/src/core/dsl.js";
 import { loop, start } from "./helpers/execution.js";
-import type { ChartAst, ChartCst, DurableLogRecord, GuardOutcome, MachineEvent } from "../packages/hyperchart/src/index.js";
+import type {
+	ChartAst,
+	ChartCst,
+	DurableLogRecord,
+	GuardOutcome,
+	MachineEvent,
+} from "../packages/hyperchart/src/index.js";
 import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 
 // The acceptance suite for the engine's core promise: a crashed run restarts from its log
@@ -48,8 +76,7 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 							events.push({
 								kind: "agent",
 								effectId: effect.id,
-								outcome: { kind: "completed", event: typeof reply === "string" ? { type: reply } : reply,
-							},
+								outcome: { kind: "completed", event: typeof reply === "string" ? { type: reply } : reply },
 							});
 						}
 						break;
@@ -69,7 +96,13 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 						let seqId = (options.logs?.at(-1)?.seqId ?? 0) + appended.length;
 						let parentId = seqId === 0 ? null : seqId;
 						const records = effect.records.map((draft) => {
-							const record = { ...draft, seqId: ++seqId, parentId, branchId: "main", timestamp: Date.now() } as DurableLogRecord;
+							const record = {
+								...draft,
+								seqId: ++seqId,
+								parentId,
+								branchId: "main",
+								timestamp: Date.now(),
+							} as DurableLogRecord;
 							parentId = record.seqId;
 							return record;
 						});
@@ -81,7 +114,12 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 					case "actor_create":
 					case "actor_enqueue":
 					case "actor_reply":
-						events.push({ kind: "actor_effect", effectId: effect.id, operation: effect.kind.slice("actor_".length) as "create" | "enqueue" | "reply", ok: true });
+						events.push({
+							kind: "actor_effect",
+							effectId: effect.id,
+							operation: effect.kind.slice("actor_".length) as "create" | "enqueue" | "reply",
+							ok: true,
+						});
 						break;
 					case "cancel":
 						break;
@@ -625,7 +663,8 @@ describe("replay gauntlet", () => {
 					work: {
 						kind: "state",
 						input: { feedback: z.string().default("keep") },
-						action: agent("worker", { task: t`${input("feedback")}`,
+						action: agent("worker", {
+							task: t`${input("feedback")}`,
 							validation: { guard: tsImport("./checks.js", "testsPass"), onFail: "fail" },
 						}),
 						transitions: { DONE: "done" },
@@ -725,17 +764,37 @@ describe("replay gauntlet", () => {
 	});
 
 	it("restarts a pool callBatch after every atomic durable boundary", async () => {
-		const Work = protocol({ WORK: message({ input: z.object({ id: z.number() }).strict(), reply: z.object({ id: z.number() }).strict() }) });
+		const Work = protocol({
+			WORK: message({ input: z.object({ id: z.number() }).strict(), reply: z.object({ id: z.number() }).strict() }),
+		});
 		const DirectWorker = actor({
-			input: z.object({}).strict(), protocol: Work, initial: "idle",
-			states: { idle: receive({ on: { WORK: "settle" } }), settle: reply({ target: "idle", output: messageInput("WORK") }) },
+			input: z.object({}).strict(),
+			protocol: Work,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { WORK: "settle" } }),
+				settle: reply({ target: "idle", output: messageInput("WORK") }),
+			},
 		});
 		const Pool = actorPool({ concurrency: 2, worker: DirectWorker });
 		const workers = Pool({});
-		const ast = make(chart({
-			kind: "chart", id: "gauntlet-pool-restart", actors: { workers }, initial: "batch",
-			states: { batch: callBatch({ to: workers, event: "WORK", inputs: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }], target: "done" }), done: final() },
-		}));
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "gauntlet-pool-restart",
+				actors: { workers },
+				initial: "batch",
+				states: {
+					batch: callBatch({
+						to: workers,
+						event: "WORK",
+						inputs: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }],
+						target: "done",
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const live = await runLive(ast, { args: {} });
 		expect(live.state.projection.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
 		let checkpointRoundTripped = createBranchProjection(ast);
@@ -746,14 +805,27 @@ describe("replay gauntlet", () => {
 		expect(checkpointRoundTripped.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
 		expect(checkpointRoundTripped.actorPools["@workers"]).not.toHaveProperty("messages");
 
-		const assignments = live.log.filter((record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> => record.type === "actor_message" && record.kind === "accepted");
-		expect(assignments.map((record) => record.messageId)).toEqual(["batch:message:1:0", "batch:message:1:1", "batch:message:1:2", "batch:message:1:3"]);
+		const assignments = live.log.filter(
+			(record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> =>
+				record.type === "actor_message" && record.kind === "accepted",
+		);
+		expect(assignments.map((record) => record.messageId)).toEqual([
+			"batch:message:1:0",
+			"batch:message:1:1",
+			"batch:message:1:2",
+			"batch:message:1:3",
+		]);
 		expect(new Set(assignments.slice(0, 2).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));
 		expect(new Set(assignments.slice(2, 4).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));
 
 		for (const boundary of live.appendBoundaries.slice(0, -1)) {
 			const restarted = await runLive(ast, { logs: live.log.slice(0, boundary) });
-			expect(restarted.state.projection.results.batch, `boundary ${boundary}`).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+			expect(restarted.state.projection.results.batch, `boundary ${boundary}`).toEqual([
+				{ id: 0 },
+				{ id: 1 },
+				{ id: 2 },
+				{ id: 3 },
+			]);
 			expect(restarted.state.projection.actorPools["@workers"]?.status, `boundary ${boundary}`).toBe("stopped");
 		}
 	});

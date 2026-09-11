@@ -27,7 +27,14 @@ import { loadRunMeta } from "../runtime/generic/run_dir.js";
 import { readSessionProgress } from "../runtime/generic/session_progress.js";
 import { parseChartModuleSync } from "../core/inspect.js";
 import type { SessionTranscriptReader } from "./run_inspect.js";
-import { actorGenerationHistoryItemToHost, actorMessageHistoryItemsToHost, actorMessageHistoryItemToHost, durableRecordToHost, mapVisitHistoryItemToHost, stateVisitHistoryItemToHost } from "./history_mapping.js";
+import {
+	actorGenerationHistoryItemToHost,
+	actorMessageHistoryItemsToHost,
+	actorMessageHistoryItemToHost,
+	durableRecordToHost,
+	mapVisitHistoryItemToHost,
+	stateVisitHistoryItemToHost,
+} from "./history_mapping.js";
 import { runtimeVisitHistoriesForInspector } from "../host/adapters.js";
 
 export async function createRunInspectorDataSource(
@@ -41,26 +48,26 @@ export async function createRunInspectorDataSource(
 	const meta = await loadRunMeta(runId);
 	const parsed =
 		options.ast === undefined
-			? parseChartModuleSync(
-					meta.chartPath,
-					meta.exportName === undefined ? {} : { exportName: meta.exportName },
-				)
+			? parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName })
 			: { ok: true as const, ast: options.ast };
-	if (!parsed.ok)
-		throw new Error(
-			parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
-		);
+	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const assertRun = (candidate: string) => {
 		if (candidate !== runId) throw new Error(`Inspector data source is bound to run '${runId}'`);
 	};
-	const withStore = async <T>(operation: (store: Awaited<ReturnType<typeof openRunLogStore>>) => Promise<T>): Promise<T> => withRunStorage(storage, async () => {
-		const store = await openRunLogStore(runId, {
-			access: "read",
-			storage,
+	const withStore = async <T>(
+		operation: (store: Awaited<ReturnType<typeof openRunLogStore>>) => Promise<T>,
+	): Promise<T> =>
+		withRunStorage(storage, async () => {
+			const store = await openRunLogStore(runId, {
+				access: "read",
+				storage,
+			});
+			try {
+				return await operation(store);
+			} finally {
+				await store.close();
+			}
 		});
-		try { return await operation(store); }
-		finally { await store.close(); }
-	});
 	return {
 		listBranches: async ({ runId: candidate, cursor }) => {
 			assertRun(candidate);
@@ -69,44 +76,68 @@ export async function createRunInspectorDataSource(
 		readStateVisits: async ({ runId: candidate, snapshot, stateId, cursor }) => {
 			assertRun(candidate);
 			return withStore(async (store) => {
-				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readStateVisits({ snapshot, state: stateId, ...(cursor === undefined ? {} : { cursor }) }));
+				const chunk = await readChunkOrEmpty(store, snapshot, () =>
+					store.readStateVisits({ snapshot, state: stateId, ...(cursor === undefined ? {} : { cursor }) }),
+				);
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const broken = explainReplay(parsed.ast, records).broken;
 				if (broken !== undefined) return mapChunk(chunk, (item) => incompatibleStateVisitToHost(item, broken));
 				const semanticVisits = runtimeVisitHistoriesForInspector(parsed.ast, records).get(stateId) ?? [];
-				return mapChunkAsync(chunk, (item) => stateVisitWithProjection(store, parsed.ast, snapshot.branchId, item, semanticVisits.find((visit) => visit.invokeSeqId === item.seqId)));
+				return mapChunkAsync(chunk, (item) =>
+					stateVisitWithProjection(
+						store,
+						parsed.ast,
+						snapshot.branchId,
+						item,
+						semanticVisits.find((visit) => visit.invokeSeqId === item.seqId),
+					),
+				);
 			});
 		},
 		readMapVisits: async ({ runId: candidate, snapshot, mapPath, cursor }) => {
 			assertRun(candidate);
-			return withStore(async (store) => mapChunk(
-				await readChunkOrEmpty(store, snapshot, () => store.readMapVisits({ snapshot, mapPath, ...(cursor === undefined ? {} : { cursor }) })),
-				mapVisitHistoryItemToHost,
-			));
+			return withStore(async (store) =>
+				mapChunk(
+					await readChunkOrEmpty(store, snapshot, () =>
+						store.readMapVisits({ snapshot, mapPath, ...(cursor === undefined ? {} : { cursor }) }),
+					),
+					mapVisitHistoryItemToHost,
+				),
+			);
 		},
 		readActorGenerations: async ({ runId: candidate, snapshot, logicalOccurrence, cursor }) => {
 			assertRun(candidate);
-			return withStore(async (store) => mapChunk(
-				await readChunkOrEmpty(store, snapshot, () => store.readActorGenerations({ snapshot, logicalOccurrence, ...(cursor === undefined ? {} : { cursor }) })),
-				actorGenerationHistoryItemToHost,
-			));
+			return withStore(async (store) =>
+				mapChunk(
+					await readChunkOrEmpty(store, snapshot, () =>
+						store.readActorGenerations({ snapshot, logicalOccurrence, ...(cursor === undefined ? {} : { cursor }) }),
+					),
+					actorGenerationHistoryItemToHost,
+				),
+			);
 		},
 		readActorMessages: async ({ runId: candidate, snapshot, occurrence, cursor }) => {
 			assertRun(candidate);
 			return withStore(async (store) => {
-				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readActorMessages({ snapshot, occurrence, ...(cursor === undefined ? {} : { cursor }) }));
+				const chunk = await readChunkOrEmpty(store, snapshot, () =>
+					store.readActorMessages({ snapshot, occurrence, ...(cursor === undefined ? {} : { cursor }) }),
+				);
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
-				const items = explainReplay(parsed.ast, records).broken === undefined
-					? actorMessageHistoryItemsToHost(chunk.items, parsed.ast, records)
-					: chunk.items.map((item) => actorMessageHistoryItemToHost(item));
+				const items =
+					explainReplay(parsed.ast, records).broken === undefined
+						? actorMessageHistoryItemsToHost(chunk.items, parsed.ast, records)
+						: chunk.items.map((item) => actorMessageHistoryItemToHost(item));
 				return { ...chunk, items };
 			});
 		},
 		readRecords: async ({ runId: candidate, snapshot, cursor, includeActionVisits }) => {
 			assertRun(candidate);
 			return withStore(async (store) => {
-				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readRecords({ snapshot, ...(cursor === undefined ? {} : { cursor }) }));
-				if (includeActionVisits !== true || !chunk.items.some(isActionInvoke)) return mapChunk(chunk, durableRecordToHost);
+				const chunk = await readChunkOrEmpty(store, snapshot, () =>
+					store.readRecords({ snapshot, ...(cursor === undefined ? {} : { cursor }) }),
+				);
+				if (includeActionVisits !== true || !chunk.items.some(isActionInvoke))
+					return mapChunk(chunk, durableRecordToHost);
 				const ancestry = await collectSnapshotRecordsForMapping(store, snapshot);
 				return {
 					...chunk,
@@ -117,9 +148,15 @@ export async function createRunInspectorDataSource(
 		cursorAt: async ({ runId: candidate, ...input }) => {
 			assertRun(candidate);
 			return withStore(async (store) => {
-				try { return await store.cursorAt(input); }
-				catch (error) {
-					if (isMissingSyntheticBranch(error) && input.snapshot.headSeqId === null && await store.countRecords() === 0) return undefined;
+				try {
+					return await store.cursorAt(input);
+				} catch (error) {
+					if (
+						isMissingSyntheticBranch(error) &&
+						input.snapshot.headSeqId === null &&
+						(await store.countRecords()) === 0
+					)
+						return undefined;
 					throw error;
 				}
 			});
@@ -128,14 +165,20 @@ export async function createRunInspectorDataSource(
 			assertRun(candidate);
 			return withStore(async (store) => {
 				const live = await store.captureSnapshot(snapshot.branchId);
-				if (snapshot.headSeqId !== null && !await store.containsInHistory({ headSeqId: live.headSeqId, seqId: snapshot.headSeqId })) return undefined;
-				if (!await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: invokeSeqId })) return undefined;
+				if (
+					snapshot.headSeqId !== null &&
+					!(await store.containsInHistory({ headSeqId: live.headSeqId, seqId: snapshot.headSeqId }))
+				)
+					return undefined;
+				if (!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: invokeSeqId }))) return undefined;
 				const record = await store.getRecord(invokeSeqId);
 				if (!isActionInvoke(record) || record.definition.kind !== "agent") return undefined;
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const broken = explainReplay(parsed.ast, records).broken;
-				const visits = broken === undefined ? runtimeVisitHistoriesForInspector(parsed.ast, records)
-					: incompatibleVisitHistories(records, broken);
+				const visits =
+					broken === undefined
+						? runtimeVisitHistoriesForInspector(parsed.ast, records)
+						: incompatibleVisitHistories(records, broken);
 				const visit = visits.get(record.actionUid.state)?.find((item) => item.invokeSeqId === invokeSeqId);
 				if (visit === undefined) return undefined;
 				const liveBoundary = live.headSeqId === snapshot.headSeqId;
@@ -143,12 +186,20 @@ export async function createRunInspectorDataSource(
 				const end = visit.endedAt ?? (broken === undefined && liveBoundary ? Date.now() : boundary);
 				// A reused session can contain later invocations. Never leak them into an
 				// unresolved record-only visit whose semantic exit could not be derived.
-				const nextInvoke = records.find((candidate) => isActionInvoke(candidate) && candidate.seqId > invokeSeqId && candidate.sessionId === record.sessionId);
+				const nextInvoke = records.find(
+					(candidate) =>
+						isActionInvoke(candidate) && candidate.seqId > invokeSeqId && candidate.sessionId === record.sessionId,
+				);
 				const progress = readSessionProgress(resolve(absoluteRunDir, "sessions"));
-				const match = Object.values(progress.sessions).filter((session) =>
-					session.sessionId === record.sessionId && session.branchId === record.branchId
-					&& session.invokeSeqId >= invokeSeqId && session.invokeSeqId <= (snapshot.headSeqId ?? 0)
-				).sort((a, b) => b.invokeSeqId - a.invokeSeqId)[0];
+				const match = Object.values(progress.sessions)
+					.filter(
+						(session) =>
+							session.sessionId === record.sessionId &&
+							session.branchId === record.branchId &&
+							session.invokeSeqId >= invokeSeqId &&
+							session.invokeSeqId <= (snapshot.headSeqId ?? 0),
+					)
+					.sort((a, b) => b.invokeSeqId - a.invokeSeqId)[0];
 				const messages = await options.readTranscript?.({ sessionId: record.sessionId });
 				return {
 					...(match === undefined || broken !== undefined ? {} : sessionFromProgress(match)),
@@ -156,18 +207,33 @@ export async function createRunInspectorDataSource(
 					status: visit.status === "done" ? "completed" : visit.status,
 					startedAt: visit.startedAt,
 					...(end === undefined ? {} : { lastActivityAt: end }),
-					...(messages === undefined ? {} : { messages: messages.filter((message) => message.timestamp !== undefined && message.timestamp >= visit.startedAt && end !== undefined && message.timestamp <= end && (broken === undefined || nextInvoke === undefined || message.timestamp < nextInvoke.timestamp)) }),
+					...(messages === undefined
+						? {}
+						: {
+								messages: messages.filter(
+									(message) =>
+										message.timestamp !== undefined &&
+										message.timestamp >= visit.startedAt &&
+										end !== undefined &&
+										message.timestamp <= end &&
+										(broken === undefined || nextInvoke === undefined || message.timestamp < nextInvoke.timestamp),
+								),
+							}),
 				};
 			});
 		},
 	};
 }
 
-export function stateVisitHistoryChunkToHost(chunk: HistoryChunk<StateVisitHistoryItem>): HistoryChunk<HyperchartVisitInfo> {
+export function stateVisitHistoryChunkToHost(
+	chunk: HistoryChunk<StateVisitHistoryItem>,
+): HistoryChunk<HyperchartVisitInfo> {
 	return mapChunk(chunk, (item) => stateVisitHistoryItemToHost(item));
 }
 
-export function actorMessageHistoryChunkToHost(chunk: HistoryChunk<ActorMessageHistoryItem>): HistoryChunk<HyperchartActorMessageBatchInfo> {
+export function actorMessageHistoryChunkToHost(
+	chunk: HistoryChunk<ActorMessageHistoryItem>,
+): HistoryChunk<HyperchartActorMessageBatchInfo> {
 	return mapChunk(chunk, (item) => actorMessageHistoryItemToHost(item));
 }
 
@@ -179,7 +245,10 @@ export function actionVisitRecordsToHost(
 	const requested = new Set(pageRecords.filter(isActionInvoke).map((record) => record.seqId));
 	const visitsBySeqId = new Map<number, HyperchartVisitInfo>();
 	const broken = explainReplay(ast, ancestry).broken;
-	const semantic = broken === undefined ? runtimeVisitHistoriesForInspector(ast, ancestry) : incompatibleVisitHistories(ancestry, broken);
+	const semantic =
+		broken === undefined
+			? runtimeVisitHistoriesForInspector(ast, ancestry)
+			: incompatibleVisitHistories(ancestry, broken);
 	for (const visits of semantic.values()) {
 		for (const visit of visits) if (requested.has(visit.invokeSeqId)) visitsBySeqId.set(visit.invokeSeqId, visit);
 		if (visitsBySeqId.size === requested.size) break;
@@ -197,37 +266,89 @@ function incompatibleStateVisitToHost(item: StateVisitHistoryItem, broken: Repla
 	const { artifactPins: _pins, endedAt: _end, completedEvent: _event, status: _status, ...recorded } = base;
 	// Without the historical guard contract, a completion is only a claim, even
 	// when no validation has been recorded yet. Never infer acceptance from its absence.
-	const terminal = [...item.records].reverse().find((record) =>
-		record.type === "failure_intent"
-		|| record.type === "state_action" && (record.kind === "timer_fired"
-			|| record.kind === "complete" && record.event.type === "FAILED"
-			|| record.kind === "validated" && record.outcome === true));
-	const event = terminal?.type === "failure_intent" ? "FAILED"
-		: terminal?.type === "state_action" && (terminal.kind === "complete" || terminal.kind === "validated") ? terminal.event.type : undefined;
-	const acceptedCompletion = terminal?.type === "state_action" && terminal.kind === "validated" && event !== "FAILED"
-		? [...item.records].reverse().find((record) => record.type === "state_action" && record.kind === "complete" && record.seqId < terminal.seqId)
-		: undefined;
-	const recordedInputs = [...item.records].reverse().find((record) => (record.type === "state_action" || record.type === "user_interaction") && "input" in record && record.input !== undefined);
+	const terminal = [...item.records]
+		.reverse()
+		.find(
+			(record) =>
+				record.type === "failure_intent" ||
+				(record.type === "state_action" &&
+					(record.kind === "timer_fired" ||
+						(record.kind === "complete" && record.event.type === "FAILED") ||
+						(record.kind === "validated" && record.outcome === true))),
+		);
+	const event =
+		terminal?.type === "failure_intent"
+			? "FAILED"
+			: terminal?.type === "state_action" && (terminal.kind === "complete" || terminal.kind === "validated")
+				? terminal.event.type
+				: undefined;
+	const acceptedCompletion =
+		terminal?.type === "state_action" && terminal.kind === "validated" && event !== "FAILED"
+			? [...item.records]
+					.reverse()
+					.find(
+						(record) => record.type === "state_action" && record.kind === "complete" && record.seqId < terminal.seqId,
+					)
+			: undefined;
+	const recordedInputs = [...item.records]
+		.reverse()
+		.find(
+			(record) =>
+				(record.type === "state_action" || record.type === "user_interaction") &&
+				"input" in record &&
+				record.input !== undefined,
+		);
 	return {
 		...recorded,
-		status: terminal === undefined ? "unknown" : event === "FAILED" ? "failed" : terminal.type === "state_action" && terminal.kind === "timer_fired" ? "cancelled" : "done",
+		status:
+			terminal === undefined
+				? "unknown"
+				: event === "FAILED"
+					? "failed"
+					: terminal.type === "state_action" && terminal.kind === "timer_fired"
+						? "cancelled"
+						: "done",
 		...(terminal === undefined ? {} : { endedAt: terminal.timestamp }),
 		...(event === undefined ? {} : { completedEvent: event }),
 		replayWarning: `Replay incompatible at seqId ${broken.seqId}: ${broken.error}. Recorded facts only; invocation templates are not rendered, runtime status and scope exits cannot be derived. Completion claims without explicit acceptance remain unknown.`,
-		...(recordedInputs !== undefined && (recordedInputs.type === "state_action" || recordedInputs.type === "user_interaction") && "input" in recordedInputs ? { inputs: { ...recordedInputs.input } } : {}),
-		...(acceptedCompletion?.type === "state_action" && acceptedCompletion.kind === "complete" && acceptedCompletion.artifacts !== undefined
-			? { artifactPins: Object.entries(acceptedCompletion.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size })) } : {}),
+		...(recordedInputs !== undefined &&
+		(recordedInputs.type === "state_action" || recordedInputs.type === "user_interaction") &&
+		"input" in recordedInputs
+			? { inputs: { ...recordedInputs.input } }
+			: {}),
+		...(acceptedCompletion?.type === "state_action" &&
+		acceptedCompletion.kind === "complete" &&
+		acceptedCompletion.artifacts !== undefined
+			? {
+					artifactPins: Object.entries(acceptedCompletion.artifacts).map(([path, pin]) => ({
+						path,
+						hash: pin.hash,
+						size: pin.size,
+					})),
+				}
+			: {}),
 	};
 }
 
-function incompatibleVisitHistories(records: readonly DurableLogRecord[], broken: ReplayBrokenRecord): ReadonlyMap<string, readonly HyperchartVisitInfo[]> {
+function incompatibleVisitHistories(
+	records: readonly DurableLogRecord[],
+	broken: ReplayBrokenRecord,
+): ReadonlyMap<string, readonly HyperchartVisitInfo[]> {
 	const states = new Set(records.filter(isActionInvoke).map((record) => record.actionUid.state));
-	return new Map([...states].map((state) => [state, historyItemsForSubject(records, { kind: "state-visits", state })
-		.filter((item): item is StateVisitHistoryItem => "kind" in item && item.kind === "state-visit")
-		.map((item) => incompatibleStateVisitToHost(item, broken)).reverse()]));
+	return new Map(
+		[...states].map((state) => [
+			state,
+			historyItemsForSubject(records, { kind: "state-visits", state })
+				.filter((item): item is StateVisitHistoryItem => "kind" in item && item.kind === "state-visit")
+				.map((item) => incompatibleStateVisitToHost(item, broken))
+				.reverse(),
+		]),
+	);
 }
 
-function isActionInvoke(record: DurableLogRecord | undefined): record is Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }> {
+function isActionInvoke(
+	record: DurableLogRecord | undefined,
+): record is Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }> {
 	return record?.type === "state_action" && record.kind === "invoke";
 }
 
@@ -236,9 +357,11 @@ async function readChunkOrEmpty<T>(
 	snapshot: { branchId: string; headSeqId: number | null },
 	read: () => Promise<HistoryChunk<T>>,
 ): Promise<HistoryChunk<T>> {
-	try { return await read(); }
-	catch (error) {
-		if (isMissingSyntheticBranch(error) && snapshot.headSeqId === null && await store.countRecords() === 0) return { snapshot, items: [] };
+	try {
+		return await read();
+	} catch (error) {
+		if (isMissingSyntheticBranch(error) && snapshot.headSeqId === null && (await store.countRecords()) === 0)
+			return { snapshot, items: [] };
 		throw error;
 	}
 }
@@ -247,7 +370,10 @@ function isMissingSyntheticBranch(error: unknown): boolean {
 	return error instanceof Error && error.message.startsWith("Unknown Hyperchart branch '");
 }
 
-async function mapChunkAsync<A, B>(chunk: HistoryChunk<A>, map: (item: A, index: number) => Promise<B>): Promise<HistoryChunk<B>> {
+async function mapChunkAsync<A, B>(
+	chunk: HistoryChunk<A>,
+	map: (item: A, index: number) => Promise<B>,
+): Promise<HistoryChunk<B>> {
 	return {
 		snapshot: chunk.snapshot,
 		items: await Promise.all(chunk.items.map(map)),
@@ -264,10 +390,19 @@ async function stateVisitWithProjection(
 	semanticVisit?: HyperchartVisitInfo,
 ): Promise<HyperchartVisitInfo> {
 	const base = semanticVisit ?? stateVisitHistoryItemToHost(item);
-	const parent = await BranchExecution.restore({ ast, branchId, store, snapshot: { branchId, headSeqId: item.invoke.parentId }, saveCheckpoint: "never" });
+	const parent = await BranchExecution.restore({
+		ast,
+		branchId,
+		store,
+		snapshot: { branchId, headSeqId: item.invoke.parentId },
+		saveCheckpoint: "never",
+	});
 	const projection = parent.inspectionProjection();
 	projectBranch(projection, ast, [item.invoke]);
-	const pending = projection.pendingActions.find((candidate): candidate is Extract<(typeof projection.pendingActions)[number], { phase: "running" }> => candidate.phase === "running" && candidate.invokeSeqId === item.seqId);
+	const pending = projection.pendingActions.find(
+		(candidate): candidate is Extract<(typeof projection.pendingActions)[number], { phase: "running" }> =>
+			candidate.phase === "running" && candidate.invokeSeqId === item.seqId,
+	);
 	if (pending === undefined) return base;
 	const invocation = actionEffectInfo(renderPendingActionInvocation(ast, projection, pending));
 	const inputs = item.invoke.input ?? projection.inputs[item.state];
@@ -277,8 +412,12 @@ async function stateVisitWithProjection(
 	return {
 		...base,
 		invocation,
-		...(inputs === undefined || !hasRecordedInput && Object.keys(inputs).length === 0 ? {} : { inputs: { ...inputs } }),
-		...(instance === undefined ? {} : { mapItem: { key: instance.key, ...(mapValue === undefined ? {} : { value: mapValue }) } }),
+		...(inputs === undefined || (!hasRecordedInput && Object.keys(inputs).length === 0)
+			? {}
+			: { inputs: { ...inputs } }),
+		...(instance === undefined
+			? {}
+			: { mapItem: { key: instance.key, ...(mapValue === undefined ? {} : { value: mapValue }) } }),
 	};
 }
 
@@ -303,24 +442,50 @@ export async function collectSnapshotRecordsForMapping(
 
 function actionEffectInfo(effect: ActionEffect): HyperchartVisitInfo["invocation"] {
 	switch (effect.kind) {
-		case "agent": return {
-			kind: "agent",
-			...(effect.task === undefined ? {} : { task: effect.task }),
-			...(effect.resume?.message === undefined ? {} : { resumeMessage: effect.resume.message }),
-			...(effect.reads === undefined ? {} : { reads: effect.reads.map(renderedArtifactInfo) }),
-			...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
-		};
-		case "script": return {
-			kind: "script", command: effect.command, args: [...effect.args],
-			...(effect.env === undefined ? {} : { env: Object.fromEntries(Object.entries(effect.env).map(([name, value]) => [name, typeof value === "string" ? value : renderedArtifactInfo(value)])) }),
-			...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
-		};
-		case "tsImport": return {
-			kind: "tsImport", module: effect.module, export: effect.export,
-			...(effect.env === undefined ? {} : { params: Object.fromEntries(Object.entries(effect.env).map(([name, value]) => [name, typeof value === "string" ? value : renderedArtifactInfo(value)])) }),
-			...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
-		};
-		case "user": return { kind: "user", prompt: effect.prompt };
+		case "agent":
+			return {
+				kind: "agent",
+				...(effect.task === undefined ? {} : { task: effect.task }),
+				...(effect.resume?.message === undefined ? {} : { resumeMessage: effect.resume.message }),
+				...(effect.reads === undefined ? {} : { reads: effect.reads.map(renderedArtifactInfo) }),
+				...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
+			};
+		case "script":
+			return {
+				kind: "script",
+				command: effect.command,
+				args: [...effect.args],
+				...(effect.env === undefined
+					? {}
+					: {
+							env: Object.fromEntries(
+								Object.entries(effect.env).map(([name, value]) => [
+									name,
+									typeof value === "string" ? value : renderedArtifactInfo(value),
+								]),
+							),
+						}),
+				...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
+			};
+		case "tsImport":
+			return {
+				kind: "tsImport",
+				module: effect.module,
+				export: effect.export,
+				...(effect.env === undefined
+					? {}
+					: {
+							params: Object.fromEntries(
+								Object.entries(effect.env).map(([name, value]) => [
+									name,
+									typeof value === "string" ? value : renderedArtifactInfo(value),
+								]),
+							),
+						}),
+				...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
+			};
+		case "user":
+			return { kind: "user", prompt: effect.prompt };
 	}
 }
 
@@ -344,7 +509,9 @@ function mapChunk<A, B>(chunk: HistoryChunk<A>, map: (item: A, index: number) =>
 	};
 }
 
-function sessionFromProgress(session: ReturnType<typeof readSessionProgress>["sessions"][string]): HyperchartAgentSessionInfo {
+function sessionFromProgress(
+	session: ReturnType<typeof readSessionProgress>["sessions"][string],
+): HyperchartAgentSessionInfo {
 	return {
 		actionKey: session.actionKey,
 		status: session.status,

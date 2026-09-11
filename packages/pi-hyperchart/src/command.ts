@@ -12,10 +12,7 @@ export interface HyperchartCommandEventBus {
  * Request command execution from the loaded pi-hyperchart extension.
  * Listeners must claim synchronously; command work may remain asynchronous.
  */
-export async function requestHyperchartCommand(
-	events: HyperchartCommandEventBus,
-	args: string,
-): Promise<boolean> {
+export async function requestHyperchartCommand(events: HyperchartCommandEventBus, args: string): Promise<boolean> {
 	let claimed = false;
 	let completion: Promise<void> | undefined;
 	const request: HyperchartCommandRequest = {

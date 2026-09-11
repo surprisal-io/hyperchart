@@ -73,14 +73,17 @@ export function createAgentDefaultsResolver(
 		let defaults: HyperchartInspectAgentDefaults;
 		try {
 			const definition = loadAgentDefinition(agentName, dirs, parse);
-			defaults = resolveAgentDefaults({
-				...(definition.description === undefined ? {} : { description: definition.description }),
-				...(definition.role === undefined ? {} : { role: definition.role }),
-				...(definition.model === undefined ? {} : { model: definition.model }),
-				...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
-				...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
-				...(definition.tools === undefined ? {} : { tools: definition.tools }),
-			}, resolution);
+			defaults = resolveAgentDefaults(
+				{
+					...(definition.description === undefined ? {} : { description: definition.description }),
+					...(definition.role === undefined ? {} : { role: definition.role }),
+					...(definition.model === undefined ? {} : { model: definition.model }),
+					...(definition.thinking === undefined ? {} : { thinking: definition.thinking }),
+					...(definition.toolset === undefined ? {} : { toolset: definition.toolset }),
+					...(definition.tools === undefined ? {} : { tools: definition.tools }),
+				},
+				resolution,
+			);
 		} catch {
 			defaults = { agentDefinitionUnavailable: true };
 		}
@@ -95,9 +98,8 @@ export function resolveAgentDefaults(
 ): HyperchartInspectAgentDefaults {
 	if (defaults.agentDefinitionUnavailable === true) return defaults;
 	const roleModel = defaults.role === undefined ? undefined : resolution.modelRoles?.[defaults.role];
-	const resolvedModel = defaults.role === undefined
-		? (defaults.model ?? resolution.defaultModel)
-		: (roleModel ?? defaults.model);
+	const resolvedModel =
+		defaults.role === undefined ? (defaults.model ?? resolution.defaultModel) : (roleModel ?? defaults.model);
 	const toolsetTools = defaults.toolset === undefined ? undefined : resolution.toolsets?.[defaults.toolset];
 	const configuredTools = defaults.toolset === undefined ? defaults.tools : (toolsetTools ?? defaults.tools);
 	const resolvedTools = configuredTools === undefined ? undefined : [...new Set([...configuredTools, "finish"])];

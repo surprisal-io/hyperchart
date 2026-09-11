@@ -19,7 +19,14 @@ export interface HyperchartInfo {
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
 export type HyperchartStateStatus =
-	| "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale" | "unknown";
+	| "pending"
+	| "waiting"
+	| "running"
+	| "done"
+	| "failed"
+	| "skipped"
+	| "stale"
+	| "unknown";
 export type HyperchartStateType =
 	| "agent"
 	| "user"
@@ -243,7 +250,9 @@ export interface HyperchartActorBatchCallInfo {
 	callerState: string;
 	status: "enqueued" | "accepted" | "partial";
 	messageIds: readonly string[];
-	items: ReadonlyArray<Pick<HyperchartActorMessageInfo, "messageId" | "batchIndex" | "status" | "workerIndex" | "workerOccurrencePath">>;
+	items: ReadonlyArray<
+		Pick<HyperchartActorMessageInfo, "messageId" | "batchIndex" | "status" | "workerIndex" | "workerOccurrencePath">
+	>;
 	settled: number;
 	total: number;
 }

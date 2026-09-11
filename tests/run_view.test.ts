@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { normalizeChartConfig } from "../packages/hyperchart/src/index.js";
 import { agent, arg, chart, final, failed, map, tsAction, tsImport } from "../packages/hyperchart/src/core/dsl.js";
-import type { ActionUID, ChartAst, ChartCst, DurableLogRecord, StateActionAst } from "../packages/hyperchart/src/index.js";
+import type {
+	ActionUID,
+	ChartAst,
+	ChartCst,
+	DurableLogRecord,
+	StateActionAst,
+} from "../packages/hyperchart/src/index.js";
 import { buildRunView } from "../packages/pi-hyperchart/src/tui/run_view.js";
 
 function make(config: ChartCst): ChartAst {
@@ -19,8 +25,10 @@ function linearChart(validate = false): ChartAst {
 			states: {
 				work: {
 					kind: "state",
-					action: agent("worker",
-						validate ? { validation: { guard: tsImport("./check.js", "ok"), onFail: { nudge: 2, restart: 0 } } } : {}),
+					action: agent(
+						"worker",
+						validate ? { validation: { guard: tsImport("./check.js", "ok"), onFail: { nudge: 2, restart: 0 } } } : {},
+					),
 					transitions: { DONE: "done", ERROR: "failed" },
 				},
 				done: final(),
@@ -53,7 +61,17 @@ function fanoutChart(): ChartAst {
 }
 
 function invoke(seqId: number, actionUid: ActionUID, timestamp = seqId * 100): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: definitionForUid(actionUid), parentId: seqId - 1, seqId, branchId: "main", timestamp };
+	return {
+		type: "state_action",
+		kind: "invoke",
+		sessionId: "session-id",
+		actionUid,
+		definition: definitionForUid(actionUid),
+		parentId: seqId - 1,
+		seqId,
+		branchId: "main",
+		timestamp,
+	};
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
@@ -84,17 +102,32 @@ describe("buildRunView", () => {
 	});
 
 	it("preserves imported function action identity in the TUI graph", () => {
-		const ast = make(chart({
-			kind: "chart", id: "view-function", initial: "score",
-			states: { score: { kind: "state", action: tsAction("./score.mjs", "score"), transitions: { DONE: "done" } }, done: final() },
-		}));
+		const ast = make(
+			chart({
+				kind: "chart",
+				id: "view-function",
+				initial: "score",
+				states: {
+					score: { kind: "state", action: tsAction("./score.mjs", "score"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const state = ast.states.score;
 		if (state?.kind !== "state") throw new Error("expected score state");
-		const log: DurableLogRecord[] = [{
-			type: "state_action", kind: "invoke", sessionId: "function-session",
-			actionUid: state.action.uid, definition: state.action,
-			parentId: null, seqId: 1, branchId: "main", timestamp: 100,
-		}];
+		const log: DurableLogRecord[] = [
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "function-session",
+				actionUid: state.action.uid,
+				definition: state.action,
+				parentId: null,
+				seqId: 1,
+				branchId: "main",
+				timestamp: 100,
+			},
+		];
 
 		const view = buildRunView(ast, log, 200);
 		expect(view.graph.find((row) => row.path === "score")).toMatchObject({
@@ -128,7 +161,8 @@ describe("buildRunView", () => {
 				event: { type: "DONE" },
 				parentId: 1,
 				seqId: 2,
-				branchId: "main", timestamp: 200,
+				branchId: "main",
+				timestamp: 200,
 			},
 			{
 				type: "state_action",
@@ -139,7 +173,8 @@ describe("buildRunView", () => {
 				outcome: { ok: false, reason: "try again" },
 				parentId: 2,
 				seqId: 3,
-				branchId: "main", timestamp: 300,
+				branchId: "main",
+				timestamp: 300,
 			},
 			{
 				type: "state_action",
@@ -161,7 +196,9 @@ describe("buildRunView", () => {
 
 		const view = buildRunView(linearChart(true), log, 1000);
 
-		expect(view.pending).toEqual([{ path: "work", phase: "running", sinceMs: 900, rejections: 1, reason: "try again" }]);
+		expect(view.pending).toEqual([
+			{ path: "work", phase: "running", sinceMs: 900, rejections: 1, reason: "try again" },
+		]);
 		expect(view.graph.find((row) => row.path === "work")).toMatchObject({
 			status: "running",
 			rejections: 1,
@@ -174,7 +211,15 @@ describe("buildRunView", () => {
 		const uid = { chart: "view-map", state: "fanout#a.work", action: "agent" };
 		const log: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: 1, b: 2 } }, parentId: null, seqId: 1, branchId: "main", timestamp: 100 },
-			{ type: "spawned", path: "fanout", instances: { a: 1, b: 2 }, parentId: 1, seqId: 2, branchId: "main", timestamp: 200 },
+			{
+				type: "spawned",
+				path: "fanout",
+				instances: { a: 1, b: 2 },
+				parentId: 1,
+				seqId: 2,
+				branchId: "main",
+				timestamp: 200,
+			},
 			invoke(3, uid, 300),
 		];
 

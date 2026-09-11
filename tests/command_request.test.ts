@@ -32,9 +32,11 @@ describe("requestHyperchartCommand", () => {
 	});
 
 	it("propagates errors from the claimed command", async () => {
-		const bus = eventBusWith((request) => request.claim(async () => {
-			throw new Error("boom");
-		}));
+		const bus = eventBusWith((request) =>
+			request.claim(async () => {
+				throw new Error("boom");
+			}),
+		);
 
 		await expect(requestHyperchartCommand(bus, "run demo")).rejects.toThrow("boom");
 	});

@@ -26,25 +26,35 @@ describe("session progress", () => {
 		const actionUid = { chart: "chart", state: "review.correctness.scan", action: "agent" };
 		const effectId = "chart:review.correctness.scan:agent:1:2";
 
-		updateSessionProgress(dir, actionUid, {
-			actionName: "reviewer",
-			status: "running",
-			role: "reviewer",
-			model: "provider/model",
-			toolset: "reading",
-			tools: ["read", "finish"],
-			turnCount: 1,
-			currentTool: "read",
-			currentToolArgs: '{"path":"src/index.ts"}',
-			currentToolStartedAt: 123,
-		}, effectId);
-		updateSessionProgress(dir, actionUid, {
-			currentTool: undefined,
-			currentToolArgs: undefined,
-			currentToolStartedAt: undefined,
-			toolCount: 1,
-			tokenCount: 1234,
-		}, effectId);
+		updateSessionProgress(
+			dir,
+			actionUid,
+			{
+				actionName: "reviewer",
+				status: "running",
+				role: "reviewer",
+				model: "provider/model",
+				toolset: "reading",
+				tools: ["read", "finish"],
+				turnCount: 1,
+				currentTool: "read",
+				currentToolArgs: '{"path":"src/index.ts"}',
+				currentToolStartedAt: 123,
+			},
+			effectId,
+		);
+		updateSessionProgress(
+			dir,
+			actionUid,
+			{
+				currentTool: undefined,
+				currentToolArgs: undefined,
+				currentToolStartedAt: undefined,
+				toolCount: 1,
+				tokenCount: 1234,
+			},
+			effectId,
+		);
 
 		const key = sessionProgressKey(actionUid, effectId);
 		const progress = readSessionProgress(dir).sessions[key];
@@ -63,14 +73,19 @@ describe("session progress", () => {
 		expect(progress?.currentToolArgs).toBeUndefined();
 		expect(progress?.currentToolStartedAt).toBeUndefined();
 
-		updateSessionProgress(dir, actionUid, {
-			status: "starting",
-			role: undefined,
-			model: undefined,
-			thinking: undefined,
-			toolset: undefined,
-			tools: undefined,
-		}, effectId);
+		updateSessionProgress(
+			dir,
+			actionUid,
+			{
+				status: "starting",
+				role: undefined,
+				model: undefined,
+				thinking: undefined,
+				toolset: undefined,
+				tools: undefined,
+			},
+			effectId,
+		);
 		const restarted = readSessionProgress(dir).sessions[key];
 		expect(restarted?.role).toBeUndefined();
 		expect(restarted?.model).toBeUndefined();
@@ -87,7 +102,13 @@ describe("session progress", () => {
 		updateSessionProgress(
 			dir,
 			actionUid,
-			{ actionName: "worker", status: "completed", sessionId: "session-1", sessionFile: "visit-1.jsonl", startedAt: 100 },
+			{
+				actionName: "worker",
+				status: "completed",
+				sessionId: "session-1",
+				sessionFile: "visit-1.jsonl",
+				startedAt: 100,
+			},
 			firstEffect,
 		);
 		updateSessionProgress(

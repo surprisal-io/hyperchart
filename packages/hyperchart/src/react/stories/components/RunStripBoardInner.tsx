@@ -35,13 +35,15 @@ const summaryProgressStates: HyperchartRunSummaryInfo[] = [
 	},
 ];
 
-const definitionCharts = [{
-	name: inspectorDialogInspectResult.chartId,
-	description: "Definition-backed Storybook chart",
-	scope: "project" as const,
-	stateCount: inspectorDialogInspectResult.states.length,
-	updatedAt: summaryRunBase.updatedAt,
-}];
+const definitionCharts = [
+	{
+		name: inspectorDialogInspectResult.chartId,
+		description: "Definition-backed Storybook chart",
+		scope: "project" as const,
+		stateCount: inspectorDialogInspectResult.states.length,
+		updatedAt: summaryRunBase.updatedAt,
+	},
+];
 
 export function RunStripBoardInner() {
 	const [selectedRunId, setSelectedRunId] = useState<string | null>(allRunStripRuns[0]?.runId ?? null);

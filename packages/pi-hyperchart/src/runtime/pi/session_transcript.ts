@@ -81,16 +81,18 @@ function messagesFromEntry(value: unknown): HyperchartSessionMessageInfo[] {
 		}
 		if (role === "toolResult" && typeof message.toolName === "string") {
 			const output = contentText(message.content);
-			return [{
-				id: value.id,
-				role: "tool",
-				toolName: message.toolName,
-				...(typeof message.toolCallId === "string" ? { toolCallId: message.toolCallId } : {}),
-				...(output === undefined ? {} : { toolOutput: output }),
-				toolStatus: message.isError === true ? "error" : "completed",
-				...(message.isError === true ? { isError: true } : {}),
-				...(timestamp === undefined ? {} : { timestamp }),
-			}];
+			return [
+				{
+					id: value.id,
+					role: "tool",
+					toolName: message.toolName,
+					...(typeof message.toolCallId === "string" ? { toolCallId: message.toolCallId } : {}),
+					...(output === undefined ? {} : { toolOutput: output }),
+					toolStatus: message.isError === true ? "error" : "completed",
+					...(message.isError === true ? { isError: true } : {}),
+					...(timestamp === undefined ? {} : { timestamp }),
+				},
+			];
 		}
 	}
 	if (value.type === "compaction" && typeof value.summary === "string") {

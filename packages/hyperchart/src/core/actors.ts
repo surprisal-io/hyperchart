@@ -52,7 +52,9 @@ export function actorPoolWorkerTemplatePath(poolDeclaration: StatePath): StatePa
 	return `${poolDeclaration}.$worker`;
 }
 
-export function parseActorPoolWorkerOccurrence(path: StatePath): { endpointOccurrence: StatePath; workerIndex: number } | undefined {
+export function parseActorPoolWorkerOccurrence(
+	path: StatePath,
+): { endpointOccurrence: StatePath; workerIndex: number } | undefined {
 	const match = /^(.*)\.\$worker-([0-9]+)$/.exec(path);
 	if (match === null) return undefined;
 	const workerIndex = Number(match[2]);
@@ -64,7 +66,10 @@ export function actorStatePath(occurrence: StatePath, localState: StatePath): St
 	return `${occurrence}.${localState}`;
 }
 
-export function actorDeclarationForOccurrence(ast: ChartAst, occurrence: StatePath): ActorEndpointDeclarationAst | undefined {
+export function actorDeclarationForOccurrence(
+	ast: ChartAst,
+	occurrence: StatePath,
+): ActorEndpointDeclarationAst | undefined {
 	const worker = parseActorPoolWorkerOccurrence(occurrence);
 	const endpoint = worker?.endpointOccurrence ?? occurrence;
 	return ast.actors[templatePath(endpoint)];

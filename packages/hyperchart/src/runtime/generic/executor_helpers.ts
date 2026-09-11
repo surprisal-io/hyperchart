@@ -72,7 +72,10 @@ export function shouldRecoverRestoredFinish(runOptions: { resumePrompt?: string;
 
 export function validateDeclaredReadPaths(reads: readonly { path: string }[] | undefined): void {
 	for (const artifact of reads ?? []) {
-		if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path)) throw new Error(`Read '${artifact.path}' is a web URL, not a local artifact; use browser/search acquisition first`);
+		if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path))
+			throw new Error(
+				`Read '${artifact.path}' is a web URL, not a local artifact; use browser/search acquisition first`,
+			);
 	}
 }
 
@@ -149,8 +152,8 @@ export type EvaluateAgentTurnOptions = {
 export async function evaluateAgentTurn(options: EvaluateAgentTurnOptions): Promise<AgentOutcome | undefined> {
 	if (options.isCancelled()) return undefined;
 	if (options.sink.captured === undefined) {
-			const assistantError = options.lastAssistantError?.();
-			if (assistantError !== undefined) {
+		const assistantError = options.lastAssistantError?.();
+		if (assistantError !== undefined) {
 			return { kind: "failed", failure: { kind: "provider", retryable: false, message: assistantError } };
 		}
 		return {
@@ -162,15 +165,16 @@ export async function evaluateAgentTurn(options: EvaluateAgentTurnOptions): Prom
 			},
 		};
 	}
-		if (options.sink.captured.type !== "FAILED") {
-			const artifactErrors = await options.checkArtifacts();
-			if (artifactErrors.length > 0) {
+	if (options.sink.captured.type !== "FAILED") {
+		const artifactErrors = await options.checkArtifacts();
+		if (artifactErrors.length > 0) {
 			return {
 				kind: "failed",
 				failure: {
 					kind: "artifacts",
 					retryable: true,
-					message: buildArtifactFeedbackPrompt(artifactErrors)},
+					message: buildArtifactFeedbackPrompt(artifactErrors),
+				},
 			};
 		}
 	}
@@ -186,7 +190,12 @@ export function branchSessionSegment(branchId: BranchId): string {
 
 /** Branch-scoped session directory for one action invocation. */
 export function actionSessionDir(sessionsDir: string, branchId: BranchId, effect: AgentEffect): string {
-	const dir = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid), sanitizeSegment(sessionKey(effect.id)));
+	const dir = join(
+		sessionsDir,
+		branchSessionSegment(branchId),
+		actionUidDirName(effect.actionUid),
+		sanitizeSegment(sessionKey(effect.id)),
+	);
 	if (!existsSync(dir)) {
 		mkdirSync(dir, { recursive: true });
 	}

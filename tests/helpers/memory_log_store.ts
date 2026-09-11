@@ -4,7 +4,10 @@ import { MemoryLogStore } from "../../packages/hyperchart/src/runtime/generic/me
 /** Test-only seeding through the same public append path used by execution. */
 export async function seedMemoryLogStore(records: readonly DurableLogRecord[]): Promise<MemoryLogStore> {
 	const store = new MemoryLogStore();
-	const drafts = records.map(({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft }) => draft as DurableRecordDraft);
+	const drafts = records.map(
+		({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft }) =>
+			draft as DurableRecordDraft,
+	);
 	await store.appendDrafts(drafts);
 	return store;
 }

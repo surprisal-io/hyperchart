@@ -26,7 +26,11 @@ describe("React actor inspector structure", () => {
 	it("builds every actor inspector board case from normalized runtime data", () => {
 		const actorGroups = new Set(["actorDefinitions", "actorMessaging", "actorRuntime"]);
 		const actorSpecs = inspectorPanelSpecs.filter((spec) => actorGroups.has(spec.group));
-		expect(Object.fromEntries([...actorGroups].map((group) => [group, actorSpecs.filter((spec) => spec.group === group).length]))).toEqual({
+		expect(
+			Object.fromEntries(
+				[...actorGroups].map((group) => [group, actorSpecs.filter((spec) => spec.group === group).length]),
+			),
+		).toEqual({
 			actorDefinitions: 3,
 			actorMessaging: 8,
 			actorRuntime: 4,
@@ -53,20 +57,26 @@ describe("React actor inspector structure", () => {
 			expect(tile.variant).toBe("panel");
 			if (tile.variant !== "panel" || tile.selectedStateId === null) continue;
 			expect(tile.run.states.some((state) => state.id === tile.selectedStateId)).toBe(true);
-			expect(tile.runtimeSources.map((source) => source.title)).toEqual(expect.arrayContaining([
-				"Definition",
-				"log records",
-				"status.json",
-			]));
+			expect(tile.runtimeSources.map((source) => source.title)).toEqual(
+				expect.arrayContaining(["Definition", "log records", "status.json"]),
+			);
 		}
 		const batchStates = [];
-		for (const [title, kind] of [["Send batch state", "sendBatch"], ["Call batch state", "callBatch"]] as const) {
+		for (const [title, kind] of [
+			["Send batch state", "sendBatch"],
+			["Call batch state", "callBatch"],
+		] as const) {
 			const tile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === title)!);
 			if (tile.variant !== "panel" || tile.selectedStateId === null) throw new Error(`missing ${title} fixture`);
 			const state = tile.run.states.find((candidate) => candidate.id === tile.selectedStateId);
 			expect(state?.type).toBe(kind);
 			if (state !== undefined) batchStates.push(state);
-			const markup = state === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state, allStates: tile.run.states, onNavigateToState: () => undefined }));
+			const markup =
+				state === undefined
+					? ""
+					: renderToStaticMarkup(
+							createElement(StateDetails, { state, allStates: tile.run.states, onNavigateToState: () => undefined }),
+						);
 			expect(markup).toContain(kind);
 			expect(markup).toContain("Outgoing message definition");
 			expect(markup).toContain("inputs expression");
@@ -82,53 +92,117 @@ describe("React actor inspector structure", () => {
 			actorMessageLink: { kind: "sendBatch", to: "@workers", event: "CRAWL", self: true },
 			actorMessageDefinition: { to: "self()", resolvedTo: "@workers", targetKind: "self" },
 		});
-		const selfMarkup = selfState === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state: selfState, allStates: selfTile.run.states, onNavigateToState: () => undefined }));
+		const selfMarkup =
+			selfState === undefined
+				? ""
+				: renderToStaticMarkup(
+						createElement(StateDetails, {
+							state: selfState,
+							allStates: selfTile.run.states,
+							onNavigateToState: () => undefined,
+						}),
+					);
 		expect(selfMarkup).toContain("Self()");
 		expect(selfMarkup).toContain('aria-label="Navigate to actor state @workers"');
 		expect(selfMarkup).toContain("@workers");
 		expect(selfMarkup).toContain("react-syntax-highlighter");
 		const selfGraph = buildGraph(selfTile.run, new Set(["@workers.$worker.fanout", "@workers"]));
-		expect(selfGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "@workers.$worker.fanout", target: "@workers", label: "sendBatch · CRAWL · self" }),
-		]));
+		expect(selfGraph.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					source: "@workers.$worker.fanout",
+					target: "@workers",
+					label: "sendBatch · CRAWL · self",
+				}),
+			]),
+		);
 
-		const poolTile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === "Actor pool workers and backlog")!);
+		const poolTile = inspectorPanelTileProps(
+			actorSpecs.find((spec) => spec.title === "Actor pool workers and backlog")!,
+		);
 		expect(poolTile.variant).toBe("panel");
-		if (poolTile.variant !== "panel" || poolTile.selectedStateId === null) throw new Error("missing actor pool panel fixture");
+		if (poolTile.variant !== "panel" || poolTile.selectedStateId === null)
+			throw new Error("missing actor pool panel fixture");
 		const poolState = poolTile.run.states.find((state) => state.id === poolTile.selectedStateId);
-		expect(poolState?.actorOccurrence).toMatchObject({ kind: "actorPool", activeCount: 2, concurrency: 2, mailbox: { totalCount: 4 } });
-		const poolMarkup = poolState === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state: poolState, allStates: poolTile.run.states, onNavigateToState: () => undefined }));
+		expect(poolState?.actorOccurrence).toMatchObject({
+			kind: "actorPool",
+			activeCount: 2,
+			concurrency: 2,
+			mailbox: { totalCount: 4 },
+		});
+		const poolMarkup =
+			poolState === undefined
+				? ""
+				: renderToStaticMarkup(
+						createElement(StateDetails, {
+							state: poolState,
+							allStates: poolTile.run.states,
+							onNavigateToState: () => undefined,
+						}),
+					);
 		expect(poolMarkup).toContain("Workers · 2/2 active");
 		expect(poolMarkup).toContain("$worker-0");
 		expect(poolMarkup).toContain("$worker-1");
 		const poolOccurrence = poolState?.actorOccurrence;
-		expect(poolOccurrence?.workers?.[0]).toMatchObject({ currentMessage: { messageId: "batch:message:1:4" }, messageHistory: [{ messageId: "batch:message:1:0" }, { messageId: "batch:message:1:2" }] });
-		expect(poolOccurrence?.workers?.[1]).toMatchObject({ currentMessage: { messageId: "batch:message:1:5" }, messageHistory: [{ messageId: "batch:message:1:1" }, { messageId: "batch:message:1:3" }] });
+		expect(poolOccurrence?.workers?.[0]).toMatchObject({
+			currentMessage: { messageId: "batch:message:1:4" },
+			messageHistory: [{ messageId: "batch:message:1:0" }, { messageId: "batch:message:1:2" }],
+		});
+		expect(poolOccurrence?.workers?.[1]).toMatchObject({
+			currentMessage: { messageId: "batch:message:1:5" },
+			messageHistory: [{ messageId: "batch:message:1:1" }, { messageId: "batch:message:1:3" }],
+		});
 		expect(poolTile.run.states.find((state) => state.id === "batch")?.type).toBe("callBatch");
 		const poolGraph = buildGraph(poolTile.run, new Set(["batch", "@workers"]));
-		expect(poolGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "batch", target: "@workers", label: "callBatch · WORK" }),
-		]));
+		expect(poolGraph.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: "batch", target: "@workers", label: "callBatch · WORK" }),
+			]),
+		);
 	});
 
 	it("keeps re-entered actor mailboxes separated by durable generation", () => {
 		const occurrence = mailboxReentryRun.actorOccurrences?.[0];
 		expect(occurrence?.mailboxInstances).toHaveLength(2);
-		expect(occurrence?.mailboxInstances[0]).toMatchObject({ generation: 1, status: "stopped", mailbox: { totalCount: 0 } });
+		expect(occurrence?.mailboxInstances[0]).toMatchObject({
+			generation: 1,
+			status: "stopped",
+			mailbox: { totalCount: 0 },
+		});
 		expect(occurrence?.mailboxInstances[0]?.messageHistory).toHaveLength(2);
-		expect(occurrence?.mailboxInstances[1]).toMatchObject({ generation: 2, status: "busy", mailbox: { totalCount: 1 }, currentMessage: { event: "PING", status: "accepted" } });
+		expect(occurrence?.mailboxInstances[1]).toMatchObject({
+			generation: 2,
+			status: "busy",
+			mailbox: { totalCount: 1 },
+			currentMessage: { event: "PING", status: "accepted" },
+		});
 		const receive = mailboxReentryRun.states.find((state) => state.id === "phase.@worker.idle");
 		const replyState = mailboxReentryRun.states.find((state) => state.id === "phase.@worker.settle");
 		expect(receive?.actorMessageHistory).toHaveLength(1);
-		expect(receive?.actorInternal?.generations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([2, 1]);
+		expect(
+			receive?.actorInternal?.generations?.map((generation) => generation.actorMessageHistory?.length ?? 0),
+		).toEqual([2, 1]);
 		expect(replyState?.actorMessageHistory).toHaveLength(0);
-		expect(replyState?.actorInternal?.generations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([2, 0]);
-		const receiveMarkup = receive === undefined ? "" : renderToStaticMarkup(createElement(StateDetails, { state: receive, allStates: mailboxReentryRun.states, onNavigateToState: () => undefined }));
+		expect(
+			replyState?.actorInternal?.generations?.map((generation) => generation.actorMessageHistory?.length ?? 0),
+		).toEqual([2, 0]);
+		const receiveMarkup =
+			receive === undefined
+				? ""
+				: renderToStaticMarkup(
+						createElement(StateDetails, {
+							state: receive,
+							allStates: mailboxReentryRun.states,
+							onNavigateToState: () => undefined,
+						}),
+					);
 		expect(receiveMarkup).toContain("Latest instance");
 		expect(receiveMarkup).toContain("phase.@worker · generation 2");
 		expect(receiveMarkup).toContain("Show history");
 		expect(receiveMarkup).not.toContain("generation 1");
-		const markup = renderToStaticMarkup(createElement(ActorMailboxCard, { instances: occurrence?.mailboxInstances ?? [] }));
+		const markup = renderToStaticMarkup(
+			createElement(ActorMailboxCard, { instances: occurrence?.mailboxInstances ?? [] }),
+		);
 		expect(markup).toContain("Latest instance · generation 2");
 		expect(markup).toContain("Show history");
 		expect(markup).not.toContain("Processed messages");
@@ -159,12 +233,28 @@ describe("React actor inspector structure", () => {
 				logicalOccurrencePath: "@worker",
 				generation: 2,
 				generations: [
-					{ occurrencePath: "@worker", logicalPath: "@worker", generation: 1, actorStatus: "stopped" as const, stateStatus: "done" as const, actorMessages: [sent(1, 1)] },
-					{ occurrencePath: "@worker~2", logicalPath: "@worker", generation: 2, actorStatus: "busy" as const, stateStatus: "done" as const, actorMessages: [sent(2, 2)] },
+					{
+						occurrencePath: "@worker",
+						logicalPath: "@worker",
+						generation: 1,
+						actorStatus: "stopped" as const,
+						stateStatus: "done" as const,
+						actorMessages: [sent(1, 1)],
+					},
+					{
+						occurrencePath: "@worker~2",
+						logicalPath: "@worker",
+						generation: 2,
+						actorStatus: "busy" as const,
+						stateStatus: "done" as const,
+						actorMessages: [sent(2, 2)],
+					},
 				],
 			},
 		};
-		const markup = renderToStaticMarkup(createElement(StateDetails, { state, allStates: [state], onNavigateToState: () => undefined }));
+		const markup = renderToStaticMarkup(
+			createElement(StateDetails, { state, allStates: [state], onNavigateToState: () => undefined }),
+		);
 		expect(markup).toContain("@worker · generation 2");
 		expect(markup).toContain("target");
 		expect(markup).toContain("@sink");
@@ -174,35 +264,49 @@ describe("React actor inspector structure", () => {
 	});
 
 	it("adapts static definitions and runtime occurrences into one navigable actor hierarchy", () => {
-		expect(actorStaticAdapterRun.states).toEqual(expect.arrayContaining([
-			expect.objectContaining({ id: "@editor", type: "actor-declaration", definitionSource: expect.stringContaining("editor: actor(") }),
-			expect.objectContaining({ id: "@editor.idle", scopeParentId: "@editor", type: "receive" }),
-			expect.objectContaining({ id: "@editor.apply", scopeParentId: "@editor", type: "agent" }),
-			expect.objectContaining({ id: "@editor.settle", scopeParentId: "@editor", type: "reply" }),
-		]));
-		expect(actorRuntimeAdapterRun.states).toEqual(expect.arrayContaining([
-			expect.objectContaining({
-				id: "queue",
-				type: "sendBatch",
-				status: "done",
-				actorMessageLink: expect.objectContaining({
-					event: "APPLY",
-					to: "@editor",
-					messages: expect.arrayContaining([expect.objectContaining({ input: { patch: "patch-0" } })]),
+		expect(actorStaticAdapterRun.states).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: "@editor",
+					type: "actor-declaration",
+					definitionSource: expect.stringContaining("editor: actor("),
 				}),
-			}),
-			expect.objectContaining({ id: "apply-call", type: "call", status: "running" }),
-			expect.objectContaining({
-				id: "@editor",
-				type: "actor-occurrence",
-				definitionSource: expect.stringContaining("editor: actor("),
-				actorDeclaration: expect.objectContaining({ declarationPath: "@editor" }),
-				actorOccurrence: expect.objectContaining({ occurrencePath: "@editor" }),
-			}),
-			expect.objectContaining({ id: "@editor.idle", scopeParentId: "@editor", type: "receive", status: "done", completedEvent: "APPLY" }),
-			expect.objectContaining({ id: "@editor.apply", scopeParentId: "@editor", type: "agent", status: "running" }),
-			expect.objectContaining({ id: "@editor.settle", scopeParentId: "@editor", type: "reply" }),
-		]));
+				expect.objectContaining({ id: "@editor.idle", scopeParentId: "@editor", type: "receive" }),
+				expect.objectContaining({ id: "@editor.apply", scopeParentId: "@editor", type: "agent" }),
+				expect.objectContaining({ id: "@editor.settle", scopeParentId: "@editor", type: "reply" }),
+			]),
+		);
+		expect(actorRuntimeAdapterRun.states).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: "queue",
+					type: "sendBatch",
+					status: "done",
+					actorMessageLink: expect.objectContaining({
+						event: "APPLY",
+						to: "@editor",
+						messages: expect.arrayContaining([expect.objectContaining({ input: { patch: "patch-0" } })]),
+					}),
+				}),
+				expect.objectContaining({ id: "apply-call", type: "call", status: "running" }),
+				expect.objectContaining({
+					id: "@editor",
+					type: "actor-occurrence",
+					definitionSource: expect.stringContaining("editor: actor("),
+					actorDeclaration: expect.objectContaining({ declarationPath: "@editor" }),
+					actorOccurrence: expect.objectContaining({ occurrencePath: "@editor" }),
+				}),
+				expect.objectContaining({
+					id: "@editor.idle",
+					scopeParentId: "@editor",
+					type: "receive",
+					status: "done",
+					completedEvent: "APPLY",
+				}),
+				expect.objectContaining({ id: "@editor.apply", scopeParentId: "@editor", type: "agent", status: "running" }),
+				expect.objectContaining({ id: "@editor.settle", scopeParentId: "@editor", type: "reply" }),
+			]),
+		);
 		const sendBatchState = actorRuntimeAdapterRun.states.find((state) => state.id === "queue");
 		expect(sendBatchState).not.toHaveProperty("taskPrompt");
 		expect(sendBatchState?.actorMessageDefinition).toMatchObject({
@@ -220,24 +324,37 @@ describe("React actor inspector structure", () => {
 			event: "APPLY",
 			payload: { label: "input", source: expect.stringContaining('patch: "follow-up patch"') },
 		});
-		expect(actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.idle")?.actorMessageDefinition).toMatchObject({
+		expect(
+			actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.idle")?.actorMessageDefinition,
+		).toMatchObject({
 			kind: "receive",
-			contracts: expect.arrayContaining([expect.objectContaining({ event: "APPLY" }), expect.objectContaining({ event: "REVIEW" })]),
+			contracts: expect.arrayContaining([
+				expect.objectContaining({ event: "APPLY" }),
+				expect.objectContaining({ event: "REVIEW" }),
+			]),
 		});
-		expect(actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.settle")?.actorMessageDefinition).toMatchObject({
+		expect(
+			actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.settle")?.actorMessageDefinition,
+		).toMatchObject({
 			kind: "reply",
 			event: "APPLIED",
-			payload: { label: "output", source: expect.stringContaining('commit: "storybook-commit"'), schema: { schema: expect.any(Object) } },
+			payload: {
+				label: "output",
+				source: expect.stringContaining('commit: "storybook-commit"'),
+				schema: { schema: expect.any(Object) },
+			},
 		});
 		expect(applyCall?.actorMessageLink).toMatchObject({
 			event: "APPLY",
-			messages: [expect.objectContaining({
-				input: { patch: "follow-up patch" },
-				messageId: "apply-call:message:1:0",
-				targetOccurrencePath: "@editor",
-				targetLogicalPath: "@editor",
-				targetGeneration: 1,
-			})],
+			messages: [
+				expect.objectContaining({
+					input: { patch: "follow-up patch" },
+					messageId: "apply-call:message:1:0",
+					targetOccurrencePath: "@editor",
+					targetLogicalPath: "@editor",
+					targetGeneration: 1,
+				}),
+			],
 		});
 		expect(actorStaticAdapterRun.actorDeclarations?.[0]?.inputValue).toEqual({ file: "src/index.ts" });
 		expect(actorRuntimeAdapterRun.actorOccurrences?.[0]).toMatchObject({
@@ -265,7 +382,9 @@ describe("React actor inspector structure", () => {
 			B: message({ input: z.object({ value: z.string() }), replies: { B_OK: z.object({ result: z.string() }) } }),
 		});
 		const Worker = actor({
-			input: z.object({ name: z.string() }), protocol: TestProtocol, initial: "receiveA",
+			input: z.object({ name: z.string() }),
+			protocol: TestProtocol,
+			initial: "receiveA",
 			states: {
 				receiveA: receive({ on: { A: "replyA" } }),
 				replyA: reply({ target: "receiveB", event: "A_OK", output: { result: "a" } }),
@@ -274,63 +393,193 @@ describe("React actor inspector structure", () => {
 			},
 		});
 		const worker = Worker({ name: "worker" });
-		const scenario = storyScenario(chart({
-			kind: "chart", id: "actor-history-isolation", actors: { worker }, initial: "sendA",
-			states: {
-				sendA: send({ to: worker, event: "A", input: { value: "input-a" }, target: "sendB" }),
-				sendB: send({ to: worker, event: "B", input: { value: "input-b" }, target: "done" }),
-				done: final(),
-			},
-		}), "test:actor-history-isolation");
+		const scenario = storyScenario(
+			chart({
+				kind: "chart",
+				id: "actor-history-isolation",
+				actors: { worker },
+				initial: "sendA",
+				states: {
+					sendA: send({ to: worker, event: "A", input: { value: "input-a" }, target: "sendB" }),
+					sendB: send({ to: worker, event: "B", input: { value: "input-b" }, target: "done" }),
+					done: final(),
+				},
+			}),
+			"test:actor-history-isolation",
+		);
 		const ast = scenario.ast;
 		const declaration = ast.actors["@worker"];
 		const sendA = ast.states.sendA;
 		const sendB = ast.states.sendB;
-		if (declaration === undefined || sendA === undefined || sendB === undefined) throw new Error("missing actor fixture");
+		if (declaration === undefined || sendA === undefined || sendB === undefined)
+			throw new Error("missing actor fixture");
 		const replyAContract = declaration.protocol.A?.reply;
 		const replyBContract = declaration.protocol.B?.reply;
-		if (sendA.kind !== "send" || sendB.kind !== "send" || replyAContract === undefined ||
+		if (
+			sendA.kind !== "send" ||
+			sendB.kind !== "send" ||
+			replyAContract === undefined ||
 			replyBContract === undefined ||
-			replyAContract.kind !== "named" || replyBContract.kind !== "named") throw new Error("expected send states and named replies");
-		const source = (definition: typeof sendA, event: "A" | "B") => ({ producerState: definition.id, kind: "send" as const, definition, targetDeclaration: "@worker", event, inputSchema: declaration.protocol[event]!.input });
-		const envelope = (producerState: string, event: "A" | "B", value: string) => ({ messageId: `${producerState}:message:1:0`, event, input: { value }, producerState, producerVisit: 1, batchIndex: 0 });
-		const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: 1_700_100_000_000 + seqId });
+			replyAContract.kind !== "named" ||
+			replyBContract.kind !== "named"
+		)
+			throw new Error("expected send states and named replies");
+		const source = (definition: typeof sendA, event: "A" | "B") => ({
+			producerState: definition.id,
+			kind: "send" as const,
+			definition,
+			targetDeclaration: "@worker",
+			event,
+			inputSchema: declaration.protocol[event]!.input,
+		});
+		const envelope = (producerState: string, event: "A" | "B", value: string) => ({
+			messageId: `${producerState}:message:1:0`,
+			event,
+			input: { value },
+			producerState,
+			producerVisit: 1,
+			batchIndex: 0,
+		});
+		const stamp = (seqId: number) => ({
+			parentId: seqId === 1 ? null : seqId - 1,
+			seqId,
+			branchId: "main",
+			timestamp: 1_700_100_000_000 + seqId,
+		});
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...stamp(1) },
-			{ type: "actor_created", declaration: "@worker", occurrence: "@worker", generation: 1, input: { name: "worker" }, definition: declaration, ...stamp(2) },
-			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: source(sendA, "A"), messages: [envelope("sendA", "A", "input-a")], ...stamp(3) },
-			{ type: "actor_messages_enqueued", occurrence: "@worker", generation: 1, source: source(sendB, "B"), messages: [envelope("sendB", "B", "input-b")], ...stamp(4) },
-			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: "sendA:message:1:0", receiveState: "@worker.receiveA", ...stamp(5) },
-			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: "sendA:message:1:0", message: "A", replyEvent: "A_OK", output: { result: "a" }, schema: replyAContract.schemas.A_OK!, ...stamp(6) },
+			{
+				type: "actor_created",
+				declaration: "@worker",
+				occurrence: "@worker",
+				generation: 1,
+				input: { name: "worker" },
+				definition: declaration,
+				...stamp(2),
+			},
+			{
+				type: "actor_messages_enqueued",
+				occurrence: "@worker",
+				generation: 1,
+				source: source(sendA, "A"),
+				messages: [envelope("sendA", "A", "input-a")],
+				...stamp(3),
+			},
+			{
+				type: "actor_messages_enqueued",
+				occurrence: "@worker",
+				generation: 1,
+				source: source(sendB, "B"),
+				messages: [envelope("sendB", "B", "input-b")],
+				...stamp(4),
+			},
+			{
+				type: "actor_message",
+				kind: "accepted",
+				occurrence: "@worker",
+				messageId: "sendA:message:1:0",
+				receiveState: "@worker.receiveA",
+				...stamp(5),
+			},
+			{
+				type: "actor_message",
+				kind: "replied",
+				occurrence: "@worker",
+				messageId: "sendA:message:1:0",
+				message: "A",
+				replyEvent: "A_OK",
+				output: { result: "a" },
+				schema: replyAContract.schemas.A_OK!,
+				...stamp(6),
+			},
 			{ type: "actor_message", kind: "settled", occurrence: "@worker", messageId: "sendA:message:1:0", ...stamp(7) },
-			{ type: "actor_message", kind: "accepted", occurrence: "@worker", messageId: "sendB:message:1:0", receiveState: "@worker.receiveB", ...stamp(8) },
-			{ type: "actor_message", kind: "replied", occurrence: "@worker", messageId: "sendB:message:1:0", message: "B", replyEvent: "B_OK", output: { result: "b" }, schema: replyBContract.schemas.B_OK!, ...stamp(9) },
+			{
+				type: "actor_message",
+				kind: "accepted",
+				occurrence: "@worker",
+				messageId: "sendB:message:1:0",
+				receiveState: "@worker.receiveB",
+				...stamp(8),
+			},
+			{
+				type: "actor_message",
+				kind: "replied",
+				occurrence: "@worker",
+				messageId: "sendB:message:1:0",
+				message: "B",
+				replyEvent: "B_OK",
+				output: { result: "b" },
+				schema: replyBContract.schemas.B_OK!,
+				...stamp(9),
+			},
 		];
 		const run = scenario.runtimeRun(records);
 		const state = (id: string) => run.states.find((candidate) => candidate.id === id)!;
-		expect(state("@worker.receiveA").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendA:message:1:0", event: "A", input: { value: "input-a" }, producerVisit: "sendA:1", status: "settled" })]);
-		expect(state("@worker.receiveB").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendB:message:1:0", event: "B", input: { value: "input-b" }, producerVisit: "sendB:1", status: "replied" })]);
-		expect(state("@worker.replyA").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendA:message:1:0", event: "A", replyEvent: "A_OK", replyOutput: { result: "a" }, validation: "valid", replyState: "@worker.replyA" })]);
-		expect(state("@worker.replyB").actorMessageHistory).toEqual([expect.objectContaining({ messageId: "sendB:message:1:0", event: "B", replyEvent: "B_OK", replyOutput: { result: "b" }, validation: "valid", replyState: "@worker.replyB" })]);
+		expect(state("@worker.receiveA").actorMessageHistory).toEqual([
+			expect.objectContaining({
+				messageId: "sendA:message:1:0",
+				event: "A",
+				input: { value: "input-a" },
+				producerVisit: "sendA:1",
+				status: "settled",
+			}),
+		]);
+		expect(state("@worker.receiveB").actorMessageHistory).toEqual([
+			expect.objectContaining({
+				messageId: "sendB:message:1:0",
+				event: "B",
+				input: { value: "input-b" },
+				producerVisit: "sendB:1",
+				status: "replied",
+			}),
+		]);
+		expect(state("@worker.replyA").actorMessageHistory).toEqual([
+			expect.objectContaining({
+				messageId: "sendA:message:1:0",
+				event: "A",
+				replyEvent: "A_OK",
+				replyOutput: { result: "a" },
+				validation: "valid",
+				replyState: "@worker.replyA",
+			}),
+		]);
+		expect(state("@worker.replyB").actorMessageHistory).toEqual([
+			expect.objectContaining({
+				messageId: "sendB:message:1:0",
+				event: "B",
+				replyEvent: "B_OK",
+				replyOutput: { result: "b" },
+				validation: "valid",
+				replyState: "@worker.replyB",
+			}),
+		]);
 		for (const id of ["@worker.receiveA", "@worker.receiveB", "@worker.replyA", "@worker.replyB"]) {
 			const markup = renderToStaticMarkup(createElement(StateDetails, { state: state(id), allStates: run.states }));
 			expect(markup).not.toContain("Actor definition / input");
 			expect(markup).not.toContain("Protocol ·");
 		}
-		expect(renderToStaticMarkup(createElement(StateDetails, { state: state("@worker.receiveA"), allStates: run.states }))).not.toContain("input-b");
-		expect(renderToStaticMarkup(createElement(StateDetails, { state: state("@worker.replyA"), allStates: run.states }))).not.toContain("B_OK");
-		const receiveHistoryMarkup = renderToStaticMarkup(createElement(ActorInternalMessageHistory, {
-			state: state("@worker.receiveA"),
-			messages: state("@worker.receiveA").actorMessageHistory ?? [],
-		}));
+		expect(
+			renderToStaticMarkup(createElement(StateDetails, { state: state("@worker.receiveA"), allStates: run.states })),
+		).not.toContain("input-b");
+		expect(
+			renderToStaticMarkup(createElement(StateDetails, { state: state("@worker.replyA"), allStates: run.states })),
+		).not.toContain("B_OK");
+		const receiveHistoryMarkup = renderToStaticMarkup(
+			createElement(ActorInternalMessageHistory, {
+				state: state("@worker.receiveA"),
+				messages: state("@worker.receiveA").actorMessageHistory ?? [],
+			}),
+		);
 		expect(receiveHistoryMarkup).toContain("1 accepted message");
 		expect(receiveHistoryMarkup).toContain('aria-expanded="false"');
 		expect(receiveHistoryMarkup).not.toContain("A:1:0");
 		expect(receiveHistoryMarkup).not.toContain("input-a");
-		const replyHistoryMarkup = renderToStaticMarkup(createElement(ActorInternalMessageHistory, {
-			state: state("@worker.replyA"),
-			messages: state("@worker.replyA").actorMessageHistory ?? [],
-		}));
+		const replyHistoryMarkup = renderToStaticMarkup(
+			createElement(ActorInternalMessageHistory, {
+				state: state("@worker.replyA"),
+				messages: state("@worker.replyA").actorMessageHistory ?? [],
+			}),
+		);
 		expect(replyHistoryMarkup).toContain("A → A_OK");
 		expect(replyHistoryMarkup).not.toContain("result");
 	});
@@ -339,10 +588,12 @@ describe("React actor inspector structure", () => {
 		const staticVisible = new Set(actorStaticAdapterRun.states.map((state) => state.id));
 		const staticGraph = buildGraph(actorStaticAdapterRun, staticVisible);
 
-		expect(staticGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "queue", target: "@editor", label: "sendBatch · APPLY" }),
-			expect.objectContaining({ source: "apply-call", target: "@editor", label: "call · APPLY" }),
-		]));
+		expect(staticGraph.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: "queue", target: "@editor", label: "sendBatch · APPLY" }),
+				expect.objectContaining({ source: "apply-call", target: "@editor", label: "call · APPLY" }),
+			]),
+		);
 
 		const rootVisible = visibleStateIdsForScope(actorRuntimeAdapterRun.states);
 		const runtimeGraph = buildGraph(actorRuntimeAdapterRun, rootVisible);
@@ -351,11 +602,13 @@ describe("React actor inspector structure", () => {
 	});
 
 	it("offers unified actor scope navigation and renders actor-specific internal details", () => {
-		const occurrenceMarkup = renderToStaticMarkup(createElement(HyperchartInspectorSidePanel, {
-			run: actorRuntimeAdapterRun,
-			selectedStateId: "@editor",
-			onOpenScope: () => undefined,
-		}));
+		const occurrenceMarkup = renderToStaticMarkup(
+			createElement(HyperchartInspectorSidePanel, {
+				run: actorRuntimeAdapterRun,
+				selectedStateId: "@editor",
+				onOpenScope: () => undefined,
+			}),
+		);
 		expect(occurrenceMarkup).toContain("Open scope");
 		expect(occurrenceMarkup).not.toContain("Current message · APPLY");
 		expect(occurrenceMarkup).toContain("Mailbox · 1 current · 3 queued");
@@ -378,11 +631,13 @@ describe("React actor inspector structure", () => {
 		expect(actorIndex).toBeLessThan(protocolIndex);
 		expect(protocolIndex).toBeLessThan(runtimeIndex);
 		expect(runtimeIndex).toBeLessThan(mailboxIndex);
-		const completedVisitsMarkup = renderToStaticMarkup(createElement(HyperchartInspectorSidePanel, {
-			run: actorReentryRun,
-			selectedStateId: "phase.@auditor",
-			onOpenScope: () => undefined,
-		}));
+		const completedVisitsMarkup = renderToStaticMarkup(
+			createElement(HyperchartInspectorSidePanel, {
+				run: actorReentryRun,
+				selectedStateId: "phase.@auditor",
+				onOpenScope: () => undefined,
+			}),
+		);
 		expect(completedVisitsMarkup).toContain("Visit 3");
 		expect(completedVisitsMarkup).not.toContain("Message history");
 		expect(completedVisitsMarkup).toContain("Mailbox · 0 queued");
@@ -390,9 +645,11 @@ describe("React actor inspector structure", () => {
 		const reentryOccurrence = actorReentryRun.actorOccurrences?.[0];
 		expect(reentryOccurrence).toBeDefined();
 		if (reentryOccurrence !== undefined) {
-			const emptyMailboxMarkup = renderToStaticMarkup(createElement(ActorMailboxCard, {
-				instances: reentryOccurrence.mailboxInstances,
-			}));
+			const emptyMailboxMarkup = renderToStaticMarkup(
+				createElement(ActorMailboxCard, {
+					instances: reentryOccurrence.mailboxInstances,
+				}),
+			);
 			expect(emptyMailboxMarkup).toContain("Mailbox is empty.");
 			expect(emptyMailboxMarkup).toContain("Show history");
 			expect(emptyMailboxMarkup).not.toContain("phase.record:message:1:0");
@@ -404,9 +661,11 @@ describe("React actor inspector structure", () => {
 		const actorOccurrence = actorRuntimeAdapterRun.states.find((state) => state.id === "@editor")?.actorOccurrence;
 		expect(actorOccurrence).toBeDefined();
 		if (actorOccurrence !== undefined) {
-			const mailboxMarkup = renderToStaticMarkup(createElement(ActorMailboxCard, {
-				instances: actorOccurrence.mailboxInstances,
-			}));
+			const mailboxMarkup = renderToStaticMarkup(
+				createElement(ActorMailboxCard, {
+					instances: actorOccurrence.mailboxInstances,
+				}),
+			);
 			expect(mailboxMarkup).toContain("current");
 			expect(mailboxMarkup).not.toContain("queue:message:1:0");
 			expect(mailboxMarkup).toContain(">send<");
@@ -425,11 +684,13 @@ describe("React actor inspector structure", () => {
 		const drainingFinal = actorDrainingRun.states.find((state) => state.id === "phase.finished");
 		expect(drainingFinal).toBeDefined();
 		if (drainingFinal !== undefined) {
-			const drainingFinalMarkup = renderToStaticMarkup(createElement(StateDetails, {
-				state: drainingFinal,
-				allStates: actorDrainingRun.states,
-				onNavigateToState: () => undefined,
-			}));
+			const drainingFinalMarkup = renderToStaticMarkup(
+				createElement(StateDetails, {
+					state: drainingFinal,
+					allStates: actorDrainingRun.states,
+					onNavigateToState: () => undefined,
+				}),
+			);
 			expect(drainingFinalMarkup).toContain("Waiting for actors · 1");
 			expect(drainingFinalMarkup).toContain("@worker");
 			expect(drainingFinalMarkup).toContain("1 current · 3 queued");
@@ -438,10 +699,12 @@ describe("React actor inspector structure", () => {
 		const declaration = actorRuntimeAdapterRun.states.find((state) => state.id === "@editor");
 		expect(declaration).toBeDefined();
 		if (declaration === undefined) return;
-		const declarationMarkup = renderToStaticMarkup(createElement(StateDetails, {
-			state: declaration,
-			allStates: actorRuntimeAdapterRun.states,
-		}));
+		const declarationMarkup = renderToStaticMarkup(
+			createElement(StateDetails, {
+				state: declaration,
+				allStates: actorRuntimeAdapterRun.states,
+			}),
+		);
 		expect(declarationMarkup).not.toContain("Contracts in scope");
 		expect(declarationMarkup).toContain("Protocol · 3 messages");
 		expect(declarationMarkup).toContain("APPLIED");
@@ -458,10 +721,12 @@ describe("React actor inspector structure", () => {
 		const internal = actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.apply");
 		expect(internal).toBeDefined();
 		if (internal === undefined) return;
-		const internalMarkup = renderToStaticMarkup(createElement(StateDetails, {
-			state: internal,
-			allStates: actorRuntimeAdapterRun.states,
-		}));
+		const internalMarkup = renderToStaticMarkup(
+			createElement(StateDetails, {
+				state: internal,
+				allStates: actorRuntimeAdapterRun.states,
+			}),
+		);
 		expect(internalMarkup).not.toContain("Actor definition / input");
 		expect(internalMarkup).toContain("@editor");
 		expect(internalMarkup).toContain("actor-editor");

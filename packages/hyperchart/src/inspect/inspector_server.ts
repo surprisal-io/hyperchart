@@ -135,23 +135,44 @@ async function routeRequest(
 			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
 			const entry = entries.get(historyToken);
 			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
-			if (entry.historyDataSource === undefined) return sendJson(response, 409, { error: "Lazy history is unavailable for this run" });
+			if (entry.historyDataSource === undefined)
+				return sendJson(response, 409, { error: "Lazy history is unavailable for this run" });
 			entry.touchedAt = Date.now();
 			try {
 				const body = await readJsonBody(request);
-				const input = typeof body.input === "object" && body.input !== null && !Array.isArray(body.input) ? body.input as Record<string, unknown> : {};
+				const input =
+					typeof body.input === "object" && body.input !== null && !Array.isArray(body.input)
+						? (body.input as Record<string, unknown>)
+						: {};
 				const requestInput = { ...input, runId: entry.runId } as never;
 				let result: unknown;
 				switch (body.operation) {
-					case "listBranches": result = await entry.historyDataSource.listBranches(requestInput); break;
-					case "readStateVisits": result = await entry.historyDataSource.readStateVisits(requestInput); break;
-					case "readMapVisits": result = await entry.historyDataSource.readMapVisits(requestInput); break;
-					case "readActorGenerations": result = await entry.historyDataSource.readActorGenerations(requestInput); break;
-					case "readActorMessages": result = await entry.historyDataSource.readActorMessages(requestInput); break;
-					case "readRecords": result = await entry.historyDataSource.readRecords(requestInput); break;
-					case "cursorAt": result = await entry.historyDataSource.cursorAt(requestInput); break;
-					case "readVisitSession": result = await entry.historyDataSource.readVisitSession(requestInput); break;
-					default: return sendJson(response, 400, { error: "Unknown history operation" });
+					case "listBranches":
+						result = await entry.historyDataSource.listBranches(requestInput);
+						break;
+					case "readStateVisits":
+						result = await entry.historyDataSource.readStateVisits(requestInput);
+						break;
+					case "readMapVisits":
+						result = await entry.historyDataSource.readMapVisits(requestInput);
+						break;
+					case "readActorGenerations":
+						result = await entry.historyDataSource.readActorGenerations(requestInput);
+						break;
+					case "readActorMessages":
+						result = await entry.historyDataSource.readActorMessages(requestInput);
+						break;
+					case "readRecords":
+						result = await entry.historyDataSource.readRecords(requestInput);
+						break;
+					case "cursorAt":
+						result = await entry.historyDataSource.cursorAt(requestInput);
+						break;
+					case "readVisitSession":
+						result = await entry.historyDataSource.readVisitSession(requestInput);
+						break;
+					default:
+						return sendJson(response, 400, { error: "Unknown history operation" });
 				}
 				return sendJson(response, 200, result === undefined ? { found: false } : { found: true, result });
 			} catch (error) {
@@ -164,11 +185,17 @@ async function routeRequest(
 			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
 			const entry = entries.get(steerToken);
 			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
-			if (entry.steerSession === undefined) return sendJson(response, 409, { error: "Steering is unavailable for this run" });
+			if (entry.steerSession === undefined)
+				return sendJson(response, 409, { error: "Steering is unavailable for this run" });
 			entry.touchedAt = Date.now();
 			try {
 				const body = await readJsonBody(request);
-				if (typeof body.branchId !== "string" || !validBranchId(body.branchId) || typeof body.actionKey !== "string" || typeof body.message !== "string") {
+				if (
+					typeof body.branchId !== "string" ||
+					!validBranchId(body.branchId) ||
+					typeof body.actionKey !== "string" ||
+					typeof body.message !== "string"
+				) {
 					return sendJson(response, 400, { error: "valid branchId, actionKey, and message are required" });
 				}
 				await entry.steerSession(body.branchId, body.actionKey, body.message);
@@ -186,7 +213,8 @@ async function routeRequest(
 			entry.touchedAt = Date.now();
 			try {
 				const branchId = url.searchParams.get("branchId") ?? undefined;
-				if (branchId !== undefined && !validBranchId(branchId)) return sendJson(response, 400, { error: "Invalid branch id" });
+				if (branchId !== undefined && !validBranchId(branchId))
+					return sendJson(response, 400, { error: "Invalid branch id" });
 				return sendJson(response, 200, { run: await entry.loadRun(branchId) });
 			} catch (error) {
 				return sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });

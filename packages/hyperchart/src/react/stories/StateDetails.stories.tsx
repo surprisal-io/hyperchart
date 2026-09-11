@@ -75,11 +75,31 @@ function groupStory(groupId: InspectorPanelGroupId, name: string, description: s
 }
 
 export const Overview = groupStory("overview", "overview", "Run-level arguments, metadata, and chart definition.");
-export const AgentStates = groupStory("agent", "agent states", "Agent prompts, contextual reads, re-entry, and validation guards.");
+export const AgentStates = groupStory(
+	"agent",
+	"agent states",
+	"Agent prompts, contextual reads, re-entry, and validation guards.",
+);
 export const UserStates = groupStory("user", "user states", "User-input prompts and transition details.");
-export const ScriptStates = groupStory("script", "script states", "Script arguments, environment, contracts, and skipped states.");
-export const FunctionActions = groupStory("tsImport", "function actions", "Trusted imported module/export actions, params, and contracts.");
+export const ScriptStates = groupStory(
+	"script",
+	"script states",
+	"Script arguments, environment, contracts, and skipped states.",
+);
+export const FunctionActions = groupStory(
+	"tsImport",
+	"function actions",
+	"Trusted imported module/export actions, params, and contracts.",
+);
 export const MapStates = groupStory("map", "map states", "Map parent status and mapped worker details.");
-export const ParallelStates = groupStory("parallel", "parallel states", "Parallel fan-out branches and progress states.");
-export const CompoundStates = groupStory("compound", "compound states", "Nested compound scopes, agents, and contracts.");
+export const ParallelStates = groupStory(
+	"parallel",
+	"parallel states",
+	"Parallel fan-out branches and progress states.",
+);
+export const CompoundStates = groupStory(
+	"compound",
+	"compound states",
+	"Nested compound scopes, agents, and contracts.",
+);
 export const FinalStates = groupStory("final", "final states", "Terminal state details.");

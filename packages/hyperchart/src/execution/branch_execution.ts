@@ -1,10 +1,27 @@
 import type { ChartAst, ChartEvent } from "../core/types.js";
-import type { ArtifactPin, BranchId, DurableLogRecord, DurableRecordDraft, UserInteractionOpenedLog } from "../core/durable_events.js";
+import type {
+	ArtifactPin,
+	BranchId,
+	DurableLogRecord,
+	DurableRecordDraft,
+	UserInteractionOpenedLog,
+} from "../core/durable_events.js";
 import type { SchemaRegistryLike } from "../core/schema_registry.js";
 import { createMachine, type MachineState } from "../core/machine.js";
-import { createBranchProjection, isFinalState, projectBranch, type BranchProjection, type ProjectionSkippedRecord } from "../core/projection.js";
+import {
+	createBranchProjection,
+	isFinalState,
+	projectBranch,
+	type BranchProjection,
+	type ProjectionSkippedRecord,
+} from "../core/projection.js";
 import { replayRecordDiagnostics } from "../core/replay_check.js";
-import { openExecutionReplay, type CheckpointRepository, type OpaqueCheckpointEnvelope, type PrepareStampedCommit } from "../runtime/generic/log_store.js";
+import {
+	openExecutionReplay,
+	type CheckpointRepository,
+	type OpaqueCheckpointEnvelope,
+	type PrepareStampedCommit,
+} from "../runtime/generic/log_store.js";
 import { compactProjection, compileProjectionRetention } from "./projection_retention.js";
 import {
 	loadBranchProjection,
@@ -13,7 +30,10 @@ import {
 	PROJECTION_CHECKPOINT_INTERVAL,
 	type LoadedBranchProjection,
 } from "./projection_restore.js";
-import { prepareUserInteractionResponseFromProjection, type RespondToUserInteractionInput } from "./user_interaction.js";
+import {
+	prepareUserInteractionResponseFromProjection,
+	type RespondToUserInteractionInput,
+} from "./user_interaction.js";
 import { createFailureProvenanceTracker, terminalStateForFinalMachine, type RunTerminalState } from "./run_outcome.js";
 import { renderTerminalNotificationPayload } from "./terminal_notification.js";
 import type { TerminalNotificationPayload } from "../runtime/generic/terminal_notifications.js";
@@ -77,8 +97,13 @@ export class BranchExecution {
 		return new BranchExecution(ast, branchId, undefined, {
 			projection,
 			snapshot: { branchId, headSeqId: projection.seqId === 0 ? null : projection.seqId },
-			contract: projectionContractForAst(ast), checkpointHeadSeqId: null, replayedRecords: 0, replayBatches: 0,
-			checkpointSaved: false, checkpointable: false, replay: { skipped: [], stale: [], unpinned: [] },
+			contract: projectionContractForAst(ast),
+			checkpointHeadSeqId: null,
+			replayedRecords: 0,
+			replayBatches: 0,
+			checkpointSaved: false,
+			checkpointable: false,
+			replay: { skipped: [], stale: [], unpinned: [] },
 		});
 	}
 
@@ -125,9 +150,13 @@ export class BranchExecution {
 		};
 	};
 
-	machineState(): MachineState { return createMachine(this.ast, structuredClone(this.projection)); }
+	machineState(): MachineState {
+		return createMachine(this.ast, structuredClone(this.projection));
+	}
 	/** Internal execution-to-inspector bridge; never exposed by runtime or storage declarations. */
-	inspectionProjection(): BranchProjection { return structuredClone(this.projection); }
+	inspectionProjection(): BranchProjection {
+		return structuredClone(this.projection);
+	}
 	inspectionOverview(): BranchExecutionOverview {
 		const final = isFinalState(this.projection, this.ast);
 		return {
@@ -137,15 +166,31 @@ export class BranchExecution {
 			results: structuredClone(this.projection.results),
 			...(this.projection.args === undefined ? {} : { args: structuredClone(this.projection.args) }),
 			final,
-			failedTerminal: final && this.projection.activeLeaves.some((leaf) => this.ast.states[leaf]?.kind === "final" && this.ast.states[leaf]?.outcome === "failed"),
+			failedTerminal:
+				final &&
+				this.projection.activeLeaves.some(
+					(leaf) => this.ast.states[leaf]?.kind === "final" && this.ast.states[leaf]?.outcome === "failed",
+				),
 		};
 	}
-	headSeqId(): number | null { return this.projection.seqId === 0 ? null : this.projection.seqId; }
-	isFresh(): boolean { return this.projection.seqId === 0; }
-	isUnseen(records: readonly DurableLogRecord[]): boolean { return records.some((record) => record.seqId > this.projection.seqId); }
-	openUserInteraction(gateSeqId: number): UserInteractionOpenedLog | undefined { return this.projection.openUserInteractions[gateSeqId]?.opened; }
-	openUserInteractions(): readonly UserInteractionOpenedLog[] { return Object.values(this.projection.openUserInteractions).map((entry) => entry.opened); }
-	artifactPins(): Readonly<Record<string, ArtifactPin>> { return structuredClone(this.projection.artifactPins); }
+	headSeqId(): number | null {
+		return this.projection.seqId === 0 ? null : this.projection.seqId;
+	}
+	isFresh(): boolean {
+		return this.projection.seqId === 0;
+	}
+	isUnseen(records: readonly DurableLogRecord[]): boolean {
+		return records.some((record) => record.seqId > this.projection.seqId);
+	}
+	openUserInteraction(gateSeqId: number): UserInteractionOpenedLog | undefined {
+		return this.projection.openUserInteractions[gateSeqId]?.opened;
+	}
+	openUserInteractions(): readonly UserInteractionOpenedLog[] {
+		return Object.values(this.projection.openUserInteractions).map((entry) => entry.opened);
+	}
+	artifactPins(): Readonly<Record<string, ArtifactPin>> {
+		return structuredClone(this.projection.artifactPins);
+	}
 	/** Same-branch retry overlay; never part of accepted ancestry or inherited by forks. */
 	workspaceArtifactPins(): Readonly<Record<string, ArtifactPin>> {
 		const pins = structuredClone(this.projection.artifactPins);
@@ -155,9 +200,13 @@ export class BranchExecution {
 		}
 		return pins;
 	}
-	checkpointable(): boolean { return this.checkpointableValue; }
+	checkpointable(): boolean {
+		return this.checkpointableValue;
+	}
 	prepareExactCheckpoint(headSeqId: number | null = this.headSeqId()): OpaqueCheckpointEnvelope | undefined {
-		return this.checkpointableValue ? prepareProjectionCheckpoint(this.projection, this.contract, headSeqId) : undefined;
+		return this.checkpointableValue
+			? prepareProjectionCheckpoint(this.projection, this.contract, headSeqId)
+			: undefined;
 	}
 	async storeExactCheckpoint(): Promise<void> {
 		if (!this.checkpointableValue || this.recordsSinceCheckpoint === 0) return;
@@ -165,16 +214,30 @@ export class BranchExecution {
 		await this.store.storeCheckpoint(prepareProjectionCheckpoint(this.projection, this.contract));
 		this.recordsSinceCheckpoint = 0;
 	}
-	notificationRenderer(state: MachineState, input: { runId: string; workDir: string }): (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload {
+	notificationRenderer(
+		state: MachineState,
+		input: { runId: string; workDir: string },
+	): (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload {
 		const branchId = this.branchId;
-		return (outcome, error) => renderTerminalNotificationPayload(state, { ...input, branchId, outcome, ...(error === undefined ? {} : { error }) });
+		return (outcome, error) =>
+			renderTerminalNotificationPayload(state, {
+				...input,
+				branchId,
+				outcome,
+				...(error === undefined ? {} : { error }),
+			});
 	}
 
 	async finalOutcome(state: MachineState): Promise<{ terminal: RunTerminalState; error?: string }> {
 		const terminal = terminalStateForFinalMachine(state);
 		if (terminal !== "failed") return { terminal };
 		const provenance = createFailureProvenanceTracker(state);
-		if (this.store !== undefined) for await (const batch of openExecutionReplay(this.store, { targetHeadSeqId: this.headSeqId(), afterSeqId: null })) provenance.push(batch);
+		if (this.store !== undefined)
+			for await (const batch of openExecutionReplay(this.store, {
+				targetHeadSeqId: this.headSeqId(),
+				afterSeqId: null,
+			}))
+				provenance.push(batch);
 		const error = provenance.message();
 		return { terminal, ...(error === undefined ? {} : { error }) };
 	}
@@ -184,11 +247,20 @@ export class BranchExecution {
 		event: ChartEvent,
 		schemaRegistry?: SchemaRegistryLike,
 	): Promise<Extract<DurableRecordDraft, { type: "user_interaction"; kind: "resolved" }>> {
-		const input: RespondToUserInteractionInput = { ast: this.ast, gateSeqId: gate.seqId, event, ...(schemaRegistry === undefined ? {} : { schemaRegistry }) };
+		const input: RespondToUserInteractionInput = {
+			ast: this.ast,
+			gateSeqId: gate.seqId,
+			event,
+			...(schemaRegistry === undefined ? {} : { schemaRegistry }),
+		};
 		return prepareUserInteractionResponseFromProjection(this.projection, this.branchId, gate, input);
 	}
 
-	private projectFrom(base: BranchProjection, records: readonly DurableLogRecord[], skipped?: ProjectionSkippedRecord[]): BranchProjection {
+	private projectFrom(
+		base: BranchProjection,
+		records: readonly DurableLogRecord[],
+		skipped?: ProjectionSkippedRecord[],
+	): BranchProjection {
 		const projected = structuredClone(base);
 		projectBranch(projected, this.ast, records, [], skipped);
 		compactProjection(projected, this.ast, this.retention);

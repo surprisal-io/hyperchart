@@ -38,11 +38,23 @@ export function CssExpandableBlock({
 				{render(previewText, false)}
 			</div>
 			{expandable && (
-				<button type="button" onClick={() => setFullOpen(true)} className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-[var(--hc-blue-text)] hover:underline">
+				<button
+					type="button"
+					onClick={() => setFullOpen(true)}
+					className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-[var(--hc-blue-text)] hover:underline"
+				>
 					<ArrowTopRightOnSquareIcon className="h-3 w-3" aria-hidden="true" /> Open full
 				</button>
 			)}
-			{fullOpen && <FullPreDialog onClose={() => setFullOpen(false)} wrapLongLines renderContent={(text) => render(text, true, () => setFullOpen(false))}>{fullText}</FullPreDialog>}
+			{fullOpen && (
+				<FullPreDialog
+					onClose={() => setFullOpen(false)}
+					wrapLongLines
+					renderContent={(text) => render(text, true, () => setFullOpen(false))}
+				>
+					{fullText}
+				</FullPreDialog>
+			)}
 		</div>
 	);
 }

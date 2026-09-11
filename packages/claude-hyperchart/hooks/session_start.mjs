@@ -58,12 +58,14 @@ function gateContext(interaction) {
 		"Finish the current safe action and start no unrelated work. This is session recovery: if no AskUserQuestion is still in flight, invoke it again for this pinned gate; never open concurrent duplicates or infer, fabricate, or supply the answer yourself.",
 		`Immediately commit the human result with hyperchart_respond using runId=${JSON.stringify(request.runId)}, seqId=${request.seqId}, an allowed event, and output when required. Do not continue before commit.`,
 		"This is at-least-once recovery of the same pinned gate; repeated context is not a second question and must not select a queued gate.",
-	].filter((line) => line !== undefined).join("\n");
+	]
+		.filter((line) => line !== undefined)
+		.join("\n");
 }
 
 async function writeStdout(line) {
 	await new Promise((resolveWrite, rejectWrite) => {
-		process.stdout.write(line, (error) => error ? rejectWrite(error) : resolveWrite());
+		process.stdout.write(line, (error) => (error ? rejectWrite(error) : resolveWrite()));
 	});
 }
 
@@ -81,54 +83,61 @@ async function main() {
 	const sessionId = typeof input.session_id === "string" ? input.session_id : undefined;
 	const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 	const runsRoot = process.env.HYPERCHART_RUNS_ROOT ?? join(configDir, "hypercharts", "runs");
-	return withRunStorage({kind: "jsonl", rootDir: runsRoot, layout: "run-id"}, async () => {
-	if (!existsSync(runsRoot)) return;
-	const now = Date.now();
-	const lines = [];
-	let active;
-	if (sessionId !== undefined) {
-		const owner = { runsRoot, host: "claude", sessionId, workDir: cwd };
-		active = await acquireActiveUserInteraction(owner);
-		if (active?.presentation === "pending") {
-			claimUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", sessionId, { source: "session-start" });
+	return withRunStorage({ kind: "jsonl", rootDir: runsRoot, layout: "run-id" }, async () => {
+		if (!existsSync(runsRoot)) return;
+		const now = Date.now();
+		const lines = [];
+		let active;
+		if (sessionId !== undefined) {
+			const owner = { runsRoot, host: "claude", sessionId, workDir: cwd };
+			active = await acquireActiveUserInteraction(owner);
+			if (active?.presentation === "pending") {
+				claimUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", sessionId, {
+					source: "session-start",
+				});
+			}
+			// Re-arbitrate after claiming so a concurrent lower coordinate cannot also be
+			// presented by the monitor/wait path.
+			active = await acquireActiveUserInteraction(owner);
+			if (active !== undefined) lines.push(gateContext(active));
 		}
-		// Re-arbitrate after claiming so a concurrent lower coordinate cannot also be
-		// presented by the monitor/wait path.
-		active = await acquireActiveUserInteraction(owner);
-		if (active !== undefined) lines.push(gateContext(active));
-	}
-	const liveLines = [];
-	for (const runId of await listRunIds()) {
-		const meta = await loadRunMeta(runId).catch(() => undefined);
-		if (
-			meta === undefined ||
-			typeof meta.workDir !== "string" ||
-			canonicalPath(meta.workDir) !== canonicalPath(cwd) ||
-			sessionId === undefined ||
-			meta.originSessionId !== sessionId
-		) continue;
-		const status = readRunStatus(runId);
-		if (!isLive(status, now)) continue;
-		liveLines.push(`- ${runId} (chart ${status.chartId ?? meta.chartId}, ${status.state})`);
-	}
-	if (liveLines.length > 0) {
-		lines.push([
-			"Live Hyperchart runs for this exact Claude session and directory (inspect with hyperchart_run_inspect, watch with hyperchart_view):",
-			...liveLines,
-		].join("\n"));
-	}
-	if (lines.length === 0) return;
-	const context = lines.join("\n\n");
-	await writeStdout(`${JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } })}\n`);
-	// Confirm only after the hook output write succeeds. If the process dies first, the
-	// same pinned gate remains recoverable by the monitor or another SessionStart.
-	if (active !== undefined && sessionId !== undefined) {
-		try {
-			markUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", sessionId);
-		} catch {
-			// A concurrent machine close/response won after context was constructed.
+		const liveLines = [];
+		for (const runId of await listRunIds()) {
+			const meta = await loadRunMeta(runId).catch(() => undefined);
+			if (
+				meta === undefined ||
+				typeof meta.workDir !== "string" ||
+				canonicalPath(meta.workDir) !== canonicalPath(cwd) ||
+				sessionId === undefined ||
+				meta.originSessionId !== sessionId
+			)
+				continue;
+			const status = readRunStatus(runId);
+			if (!isLive(status, now)) continue;
+			liveLines.push(`- ${runId} (chart ${status.chartId ?? meta.chartId}, ${status.state})`);
 		}
-	}
+		if (liveLines.length > 0) {
+			lines.push(
+				[
+					"Live Hyperchart runs for this exact Claude session and directory (inspect with hyperchart_run_inspect, watch with hyperchart_view):",
+					...liveLines,
+				].join("\n"),
+			);
+		}
+		if (lines.length === 0) return;
+		const context = lines.join("\n\n");
+		await writeStdout(
+			`${JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } })}\n`,
+		);
+		// Confirm only after the hook output write succeeds. If the process dies first, the
+		// same pinned gate remains recoverable by the monitor or another SessionStart.
+		if (active !== undefined && sessionId !== undefined) {
+			try {
+				markUserInteractionReceipt(active.runId, active.request.branchId, active.request.seqId, "claude", sessionId);
+			} catch {
+				// A concurrent machine close/response won after context was constructed.
+			}
+		}
 	});
 }
 

@@ -45,7 +45,10 @@ describe("Storybook production TUI fixture", () => {
 			expect(Object.keys(progress.sessions)).toHaveLength(3);
 			for (const session of Object.values(progress.sessions)) {
 				expect(session.sessionFile).toBeDefined();
-				const header = JSON.parse(readFileSync(session.sessionFile!, "utf8").split("\n")[0]!) as Record<string, unknown>;
+				const header = JSON.parse(readFileSync(session.sessionFile!, "utf8").split("\n")[0]!) as Record<
+					string,
+					unknown
+				>;
 				expect(header).toMatchObject({ type: "session", version: 3 });
 				expect(() => SessionManager.open(session.sessionFile!)).not.toThrow();
 			}
@@ -54,7 +57,9 @@ describe("Storybook production TUI fixture", () => {
 
 	it("includes a many-running widget variant with shared percentage progress", async () => {
 		fixture = materializeProductionTuiFixture();
-		const progress = readSessionProgress(join(resolveRunPaths(fixture.manyRunning.runId, fixture.storage).runDir, "sessions"));
+		const progress = readSessionProgress(
+			join(resolveRunPaths(fixture.manyRunning.runId, fixture.storage).runDir, "sessions"),
+		);
 		expect(Object.values(progress.sessions).filter((session) => session.status === "running")).toHaveLength(8);
 		const data = fixture;
 		const run = await withRunStorage(data.storage, () => hyperchartRunFromRunId(data.manyRunning.runId));

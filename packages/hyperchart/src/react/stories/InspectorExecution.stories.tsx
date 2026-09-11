@@ -10,13 +10,24 @@ function ExecutedFixtureBoard() {
 	useEffect(() => {
 		let current = true;
 		void captureExecutionBoardRun().then(
-			(value) => { if (current) setRun(value); },
-			(reason) => { if (current) setError(reason instanceof Error ? reason.message : String(reason)); },
+			(value) => {
+				if (current) setRun(value);
+			},
+			(reason) => {
+				if (current) setError(reason instanceof Error ? reason.message : String(reason));
+			},
 		);
-		return () => { current = false; };
+		return () => {
+			current = false;
+		};
 	}, []);
 	if (error !== undefined) return <div className="p-6 text-sm text-red-400">{error}</div>;
-	if (run === undefined) return <div className="grid min-h-screen place-items-center bg-[var(--bg-primary)] text-sm text-[var(--text-muted)]">Executing fixture and replay-validating its durable log…</div>;
+	if (run === undefined)
+		return (
+			<div className="grid min-h-screen place-items-center bg-[var(--bg-primary)] text-sm text-[var(--text-muted)]">
+				Executing fixture and replay-validating its durable log…
+			</div>
+		);
 	return <HyperchartInspectorDialog runs={[run]} onClose={() => undefined} embedded initialCanvasMode="execution" />;
 }
 
@@ -34,7 +45,8 @@ export const CompleteExecutionBoard: Story = {
 	parameters: {
 		docs: {
 			description: {
-				story: "Rendered directly from a chart executed by the real execution loop, replay-validated durable records, and the production host adapter.",
+				story:
+					"Rendered directly from a chart executed by the real execution loop, replay-validated durable records, and the production host adapter.",
 			},
 		},
 	},

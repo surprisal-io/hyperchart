@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
 import type { RenderedArtifact } from "../packages/hyperchart/src/core/machine.js";
 import type { JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
-import { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "../packages/hyperchart/src/runtime/generic/artifacts.js";
+import {
+	checkArtifactFile,
+	resolveArtifactValue,
+	serializeEnvValue,
+} from "../packages/hyperchart/src/runtime/generic/artifacts.js";
 import { checkSchema } from "../packages/hyperchart/src/runtime/generic/schema.js";
 
 const tempDirs: string[] = [];

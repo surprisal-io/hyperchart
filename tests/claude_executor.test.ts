@@ -1,4 +1,8 @@
-import { withRunStorage, resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import {
+	withRunStorage,
+	resolveRunPaths,
+	type RunStorage,
+} from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -114,7 +118,10 @@ function assistantMessage(blocks: unknown[]): unknown {
 }
 
 function toolResultMessage(toolUseId: string, text: string): unknown {
-	return { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: text }] } };
+	return {
+		type: "user",
+		message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: text }] },
+	};
 }
 
 function chartEvent(outcome: AgentOutcome): ChartEvent {
@@ -150,7 +157,8 @@ describe("ClaudeAgentExecutor", () => {
 			workDir,
 			projectDir,
 			sessionsDir,
-			branchId: "main",			definitionDirs: [agentsDir],
+			branchId: "main",
+			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -198,7 +206,9 @@ describe("ClaudeAgentExecutor", () => {
 					return [];
 				},
 			],
-			() => { throw new Error("late stream finalization failure"); },
+			() => {
+				throw new Error("late stream finalization failure");
+			},
 		);
 		const executor = new ClaudeAgentExecutor({
 			workDir,
@@ -223,7 +233,8 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			branchId: "main",			definitionDirs: [agentsDir],
+			branchId: "main",
+			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -251,7 +262,8 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			branchId: "main",			definitionDirs: [agentsDir],
+			branchId: "main",
+			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -276,16 +288,24 @@ describe("ClaudeAgentExecutor", () => {
 			queryFn: fakeQuery([]).queryFn,
 		});
 		let releaseConstruction!: () => void;
-		const constructionGate = new Promise<void>((resolve) => { releaseConstruction = resolve; });
+		const constructionGate = new Promise<void>((resolve) => {
+			releaseConstruction = resolve;
+		});
 		let constructionStarted = false;
 		let begins = 0;
 		let aborts = 0;
 		let prompts = 0;
 		const lateSession = {
-			begin: () => { begins++; },
-			abort: () => { aborts++; },
+			begin: () => {
+				begins++;
+			},
+			abort: () => {
+				aborts++;
+			},
 			settled: async () => undefined,
-			prompt: async () => { prompts++; },
+			prompt: async () => {
+				prompts++;
+			},
 			end: () => undefined,
 		};
 		const internal = executor as unknown as {
@@ -306,7 +326,9 @@ describe("ClaudeAgentExecutor", () => {
 		const disposal = executor.dispose();
 		expect(executor.dispose()).toBe(disposal);
 		let settled = false;
-		void disposal.then(() => { settled = true; });
+		void disposal.then(() => {
+			settled = true;
+		});
 		await new Promise<void>((resolve) => setImmediate(resolve));
 		expect(settled).toBe(false);
 
@@ -323,13 +345,14 @@ describe("ClaudeAgentExecutor", () => {
 		expect(afterDispose).toEqual([{ type: "FAILED", error: "Claude agent executor is disposed" }]);
 	});
 
-	it.each(["cancel", "dispose"] as const)(
-		"ignores a delayed init progress callback after %s",
-		async (shutdownMode) => {
-			const { workDir, sessionsDir, agentsDir } = makeWorkspace();
-			let releaseInit!: () => void;
-			const initGate = new Promise<void>((resolve) => { releaseInit = resolve; });
-			const queryFn: QueryFn = () => (async function* () {
+	it.each(["cancel", "dispose"] as const)("ignores a delayed init progress callback after %s", async (shutdownMode) => {
+		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
+		let releaseInit!: () => void;
+		const initGate = new Promise<void>((resolve) => {
+			releaseInit = resolve;
+		});
+		const queryFn: QueryFn = () =>
+			(async function* () {
 				await initGate;
 				yield {
 					type: "system",
@@ -338,31 +361,30 @@ describe("ClaudeAgentExecutor", () => {
 					model: "late-model",
 				} as never;
 			})();
-			const executor = new ClaudeAgentExecutor({
-				workDir,
-				sessionsDir,
-				branchId: "main",
-				definitionDirs: [agentsDir],
-				queryFn,
-			});
-			const target = effect();
-			const emitted: ChartEvent[] = [];
-			const internal = executor as unknown as { live: Map<string, unknown> };
-			executor.start(target, (outcome) => emitted.push(chartEvent(outcome)));
-			await expect.poll(() => internal.live.size).toBe(1);
+		const executor = new ClaudeAgentExecutor({
+			workDir,
+			sessionsDir,
+			branchId: "main",
+			definitionDirs: [agentsDir],
+			queryFn,
+		});
+		const target = effect();
+		const emitted: ChartEvent[] = [];
+		const internal = executor as unknown as { live: Map<string, unknown> };
+		executor.start(target, (outcome) => emitted.push(chartEvent(outcome)));
+		await expect.poll(() => internal.live.size).toBe(1);
 
-			const shutdown = shutdownMode === "cancel" ? executor.cancel(target.actionUid) : executor.dispose();
-			releaseInit();
-			await expect(shutdown).resolves.toBeUndefined();
+		const shutdown = shutdownMode === "cancel" ? executor.cancel(target.actionUid) : executor.dispose();
+		releaseInit();
+		await expect(shutdown).resolves.toBeUndefined();
 
-			const progress = Object.values(readSessionProgress(sessionsDir).sessions)[0];
-			expect(progress).toMatchObject({ status: "cancelled" });
-			expect(progress?.model).toBeUndefined();
-			expect(progress?.sessionFile).toBeUndefined();
-			expect(emitted).toEqual([]);
-			if (shutdownMode === "cancel") await executor.dispose();
-		},
-	);
+		const progress = Object.values(readSessionProgress(sessionsDir).sessions)[0];
+		expect(progress).toMatchObject({ status: "cancelled" });
+		expect(progress?.model).toBeUndefined();
+		expect(progress?.sessionFile).toBeUndefined();
+		expect(emitted).toEqual([]);
+		if (shutdownMode === "cancel") await executor.dispose();
+	});
 
 	it("suppresses emission when the action is cancelled mid-run", async () => {
 		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
@@ -379,7 +401,8 @@ describe("ClaudeAgentExecutor", () => {
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			branchId: "main",			definitionDirs: [agentsDir],
+			branchId: "main",
+			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
 		});
 
@@ -414,9 +437,7 @@ describe("ClaudeAgentExecutor", () => {
 			async (_prompt, finish) => {
 				await finish({ event: "DONE" });
 				return [
-					assistantMessage([
-						{ type: "tool_use", id: "call-1", name: FINISH_TOOL_NAME, input: { event: "DONE" } },
-					]),
+					assistantMessage([{ type: "tool_use", id: "call-1", name: FINISH_TOOL_NAME, input: { event: "DONE" } }]),
 					toolResultMessage("call-1", "Recorded. You may stop now."),
 				];
 			},
@@ -424,7 +445,8 @@ describe("ClaudeAgentExecutor", () => {
 		const first = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			branchId: "main",			definitionDirs: [agentsDir],
+			branchId: "main",
+			definitionDirs: [agentsDir],
 			queryFn: fakeFirst.queryFn,
 			...resolution,
 		});
@@ -444,7 +466,8 @@ describe("ClaudeAgentExecutor", () => {
 		const second = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
-			branchId: "main",			definitionDirs: [agentsDir],
+			branchId: "main",
+			definitionDirs: [agentsDir],
 			queryFn: fakeSecond.queryFn,
 			...resolution,
 		});
@@ -483,7 +506,8 @@ export default chart({ kind: "chart", id: "simple", initial: "done", states: { d
 			configPath,
 			JSON.stringify({
 				runId: "run-1",
-				branchId: "main", storage,
+				branchId: "main",
+				storage,
 				chartPath,
 				chartId: "simple",
 				workDir: root,

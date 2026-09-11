@@ -4,7 +4,7 @@ import { validateLaunchArgsText } from "../packages/hyperchart/src/react/compone
 describe("validateLaunchArgsText", () => {
 	it("accepts empty arguments and JSON objects", () => {
 		expect(validateLaunchArgsText("")).toBeUndefined();
-		expect(validateLaunchArgsText("  {\"goal\":\"ship\"}  ")).toBeUndefined();
+		expect(validateLaunchArgsText('  {"goal":"ship"}  ')).toBeUndefined();
 	});
 
 	it("rejects free-form text, arrays, and scalar JSON", () => {

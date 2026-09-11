@@ -22,11 +22,12 @@ export function AgentInfoCard({
 }) {
 	const effectiveModel = state.resolvedModel ?? state.model;
 	const effectiveTools = state.resolvedTools ?? state.tools;
-	const modelTitle = state.role === undefined
-		? effectiveModel
-		: effectiveModel === undefined
-			? `Role ${state.role} is not resolved`
-			: `Role ${state.role} resolves to ${effectiveModel}`;
+	const modelTitle =
+		state.role === undefined
+			? effectiveModel
+			: effectiveModel === undefined
+				? `Role ${state.role} is not resolved`
+				: `Role ${state.role} resolves to ${effectiveModel}`;
 	return (
 		<div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-2">
 			<div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -42,7 +43,10 @@ export function AgentInfoCard({
 					</span>
 				)}
 				{effectiveModel !== undefined ? (
-					<span className="max-w-full truncate rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]" title={modelTitle}>
+					<span
+						className="max-w-full truncate rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]"
+						title={modelTitle}
+					>
 						{effectiveModel}
 					</span>
 				) : state.role !== undefined ? (
@@ -74,8 +78,8 @@ export function AgentInfoCard({
 					role="alert"
 					className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-[var(--hc-amber-text)]"
 				>
-					Agent definition could not be loaded. Model, thinking, tools, and system prompt are unavailable; this
-					 state cannot run.
+					Agent definition could not be loaded. Model, thinking, tools, and system prompt are unavailable; this state
+					cannot run.
 				</div>
 			) : null}
 			<div className="mt-2">
@@ -121,7 +125,12 @@ export function AgentInfoCard({
 					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">reads</div>
 					<div className="grid min-w-0 gap-1.5">
 						{state.readArtifacts?.map((artifact) => {
-							const typeName = artifact.name.split(/[^A-Za-z0-9_$]+/).filter(Boolean).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join("") || "Artifact";
+							const typeName =
+								artifact.name
+									.split(/[^A-Za-z0-9_$]+/)
+									.filter(Boolean)
+									.map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+									.join("") || "Artifact";
 							return (
 								<ArtifactRow
 									key={`${artifact.sourceState ?? ""}:${artifact.name}`}
@@ -129,15 +138,31 @@ export function AgentInfoCard({
 									label={`${artifact.sourceState ?? "artifact"} → ${artifact.name}`}
 									{...(artifact.path ? { detail: artifact.path } : {})}
 									typeText={`type ${typeName} = ${schemaTypeText(artifact.schema)};`}
-									{...(artifact.sourceState !== undefined && onHighlightArtifact !== undefined ? { onClick: () => onHighlightArtifact(artifact.sourceState!, artifact.name) } : {})}
+									{...(artifact.sourceState !== undefined && onHighlightArtifact !== undefined
+										? { onClick: () => onHighlightArtifact(artifact.sourceState!, artifact.name) }
+										: {})}
 								/>
 							);
 						})}
-						{state.reads.filter((read) => !/^(?:artifactOf|joinArtifactOf)\(/.test(read)).map((read) =>
-							hasInterpolation(read) ? (
-								<TemplateTextBlock key={read} text={read} state={state} allStates={allStates} nowrap compact {...(onHighlightInput === undefined ? {} : { onHighlightInput })} {...(onHighlightReply === undefined ? {} : { onHighlightReply })} {...(onHighlightRef === undefined ? {} : { onHighlightRef })} />
-							) : <PathChip key={read} value={read} />,
-						)}
+						{state.reads
+							.filter((read) => !/^(?:artifactOf|joinArtifactOf)\(/.test(read))
+							.map((read) =>
+								hasInterpolation(read) ? (
+									<TemplateTextBlock
+										key={read}
+										text={read}
+										state={state}
+										allStates={allStates}
+										nowrap
+										compact
+										{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+										{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+										{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+									/>
+								) : (
+									<PathChip key={read} value={read} />
+								),
+							)}
 					</div>
 				</div>
 			) : null}

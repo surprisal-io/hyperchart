@@ -10,7 +10,12 @@ import type { ActionUID } from "../packages/hyperchart/src/core/types.js";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
-import { createHyperchartRunnerController, runnerBranchIds, runHyperchartRunner, type SteerableAgentExecutor } from "../packages/hyperchart/src/runner/runner_main.js";
+import {
+	createHyperchartRunnerController,
+	runnerBranchIds,
+	runHyperchartRunner,
+	type SteerableAgentExecutor,
+} from "../packages/hyperchart/src/runner/runner_main.js";
 
 const roots: string[] = [];
 const originalCwd = process.cwd();
@@ -36,7 +41,10 @@ async function closeWithoutExiting(controller: unknown, signal: NodeJS.Signals =
 }
 
 function storedRecordSeqIds(runDir: string): number[] {
-	return readFileSync(join(runDir, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean)
+	return readFileSync(join(runDir, "log.jsonl"), "utf8")
+		.trim()
+		.split("\n")
+		.filter(Boolean)
 		.map((line) => JSON.parse(line) as { kind?: string; seqId: number })
 		.filter((entry) => entry.kind !== "branch")
 		.map((entry) => entry.seqId);
@@ -58,7 +66,9 @@ class ControlledExecutor implements SteerableAgentExecutor {
 		private readonly onDispose?: () => void,
 		private readonly disposeError?: Error,
 	) {}
-	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void { this.emit = emit; }
+	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void {
+		this.emit = emit;
+	}
 	async cancel(_actionUid: ActionUID): Promise<void> {}
 	async dispose(): Promise<void> {
 		this.disposed = true;
@@ -66,8 +76,12 @@ class ControlledExecutor implements SteerableAgentExecutor {
 		await this.disposeGate;
 		if (this.disposeError !== undefined) throw this.disposeError;
 	}
-	async steer(): Promise<boolean> { return true; }
-	complete(): void { this.emit?.({ kind: "completed", event: { type: "DONE" } }); }
+	async steer(): Promise<boolean> {
+		return true;
+	}
+	complete(): void {
+		this.emit?.({ kind: "completed", event: { type: "DONE" } });
+	}
 }
 
 class CompletingExecutor implements SteerableAgentExecutor {
@@ -81,34 +95,73 @@ class CompletingExecutor implements SteerableAgentExecutor {
 	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void {
 		this.activity.active++;
 		this.activity.max = Math.max(this.activity.max, this.activity.active);
-		setTimeout(() => {
-			this.activity.active--;
-			emit(this.fail ? { kind: "failed", failure: { kind: "runtime", retryable: false, message: `${this.branchId} failed` } }
+		setTimeout(
+			() => {
+				this.activity.active--;
+				emit(
+					this.fail
+						? { kind: "failed", failure: { kind: "runtime", retryable: false, message: `${this.branchId} failed` } }
 						: { kind: "completed", event: { type: "DONE" } },
 				);
-		}, this.branchId === "main" ? 20 : 10);
+			},
+			this.branchId === "main" ? 20 : 10,
+		);
 	}
 	async cancel(_actionUid: ActionUID): Promise<void> {}
-	async dispose(): Promise<void> { this.onDispose?.(); await this.disposeGate; }
-	async steer(): Promise<boolean> { return true; }
+	async dispose(): Promise<void> {
+		this.onDispose?.();
+		await this.disposeGate;
+	}
+	async steer(): Promise<boolean> {
+		return true;
+	}
 }
 
 describe("multi-branch process runner", () => {
 	it("rejects an unrelated old FAILED fact for a failed terminal across restart", async () => {
-		const root = mkdtempSync(join(tmpdir(), "hyperchart-final-provenance-")); roots.push(root);
-		const workDir = join(root, "work"); const runDir = join(root, "run"); mkdirSync(workDir, { recursive: true }); mkdirSync(runDir, { recursive: true });
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-final-provenance-"));
+		roots.push(root);
+		const workDir = join(root, "work");
+		const runDir = join(root, "run");
+		mkdirSync(workDir, { recursive: true });
+		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "failure-provenance", initial: "failed", states: { failed: { kind: "final", outcome: "failed" } } };\n`);
-		const unrelated = { type: "state_action", kind: "complete", actionUid: { chart: "failure-provenance", state: "old", action: "agent" }, event: { type: "FAILED", error: "unrelated old failure" }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 };
-		writeFileSync(join(runDir, "log.jsonl"),
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "failure-provenance", initial: "failed", states: { failed: { kind: "final", outcome: "failed" } } };\n`,
+		);
+		const unrelated = {
+			type: "state_action",
+			kind: "complete",
+			actionUid: { chart: "failure-provenance", state: "old", action: "agent" },
+			event: { type: "FAILED", error: "unrelated old failure" },
+			parentId: null,
+			seqId: 2,
+			branchId: "main",
+			timestamp: 1,
+		};
+		writeFileSync(
+			join(runDir, "log.jsonl"),
 			`${[{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 }, unrelated].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
 		);
-		const config = { runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "failure-provenance", workDir, branchId: "main" as const, ignoreReplayWarnings: true };
+		const config = {
+			runId: "run",
+			storage: fixtureStorage(runDir),
+			chartPath,
+			chartId: "failure-provenance",
+			workDir,
+			branchId: "main" as const,
+			ignoreReplayWarnings: true,
+		};
 		for (let attempt = 0; attempt < 2; attempt++) {
 			const controller = await createHyperchartRunnerController(config, () => new ControlledExecutor());
 			await controller.start();
-			expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.error).toContain("chart reached failed terminal state 'failed'");
-			expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.replayWarnings?.join("\n")).toContain("skipped");
+			expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.error).toContain(
+				"chart reached failed terminal state 'failed'",
+			);
+			expect(
+				withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.replayWarnings?.join("\n"),
+			).toContain("skipped");
 		}
 	});
 
@@ -127,15 +180,29 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "close-before-start", initial: "done", states: { done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "close-before-start", initial: "done", states: { done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let built = 0;
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "close-before-start", workDir, branchId: "main",
-		}, () => {
-			built++;
-			return new ControlledExecutor();
-		});
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "close-before-start",
+				workDir,
+				branchId: "main",
+			},
+			() => {
+				built++;
+				return new ControlledExecutor();
+			},
+		);
 
 		await expect(controller.startBranch("main")).rejects.toThrow(/must be started.*controller\.start/);
 		await closeWithoutExiting(controller);
@@ -143,7 +210,11 @@ describe("multi-branch process runner", () => {
 
 		expect(built).toBe(0);
 		expect(controller.liveBranchIds).toEqual([]);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "stopped", branchIds: [], exitCode: 143 });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "stopped",
+			branchIds: [],
+			exitCode: 143,
+		});
 	});
 
 	it("does not publish running or construct executors after shutdown during initial replay gating", async () => {
@@ -154,14 +225,27 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "close-initial-gate", initial: "done", states: { done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "close-initial-gate", initial: "done", states: { done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let releaseGate!: () => void;
-		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve;
+		});
 		let gateEntered!: () => void;
-		const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
+		const entered = new Promise<void>((resolve) => {
+			gateEntered = resolve;
+		});
 		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
-		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
+		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (
+			this: JsonlLogStore,
+			branchId: string,
+		) {
 			if (this.branchId === "main") {
 				gateEntered();
 				await gate;
@@ -169,17 +253,27 @@ describe("multi-branch process runner", () => {
 			return originalCaptureSnapshot.call(this, branchId);
 		});
 		let built = 0;
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "close-initial-gate", workDir, branchId: "main",
-		}, () => {
-			built++;
-			return new ControlledExecutor();
-		});
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "close-initial-gate",
+				workDir,
+				branchId: "main",
+			},
+			() => {
+				built++;
+				return new ControlledExecutor();
+			},
+		);
 		const completion = controller.start();
 		await entered;
 
 		let closeResolved = false;
-		const closing = closeWithoutExiting(controller, "SIGINT").then(() => { closeResolved = true; });
+		const closing = closeWithoutExiting(controller, "SIGINT").then(() => {
+			closeResolved = true;
+		});
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(closeResolved).toBe(false);
 		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.state).toBe("starting");
@@ -188,7 +282,11 @@ describe("multi-branch process runner", () => {
 		await completion;
 
 		expect(built).toBe(0);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "stopped", branchIds: [], exitCode: 130 });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "stopped",
+			branchIds: [],
+			exitCode: 130,
+		});
 	});
 
 	it("records signal-shutdown disposal failures while preserving the signal exit code", async () => {
@@ -199,12 +297,26 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "close-cleanup-failure", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "close-cleanup-failure", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executor = new ControlledExecutor(undefined, undefined, new Error("dispose exploded"));
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "close-cleanup-failure", workDir, branchId: "main",
-		}, () => executor);
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "close-cleanup-failure",
+				workDir,
+				branchId: "main",
+			},
+			() => executor,
+		);
 		const completion = controller.start();
 		await waitFor(() => executor.emit !== undefined);
 
@@ -228,25 +340,45 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "close-build", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "close-build", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let releaseBuild!: () => void;
-		const buildGate = new Promise<void>((resolve) => { releaseBuild = resolve; });
-		let buildEntered!: () => void;
-		const entered = new Promise<void>((resolve) => { buildEntered = resolve; });
-		const executor = new ControlledExecutor();
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "close-build", workDir, branchId: "main",
-		}, async () => {
-			buildEntered();
-			await buildGate;
-			return executor;
+		const buildGate = new Promise<void>((resolve) => {
+			releaseBuild = resolve;
 		});
+		let buildEntered!: () => void;
+		const entered = new Promise<void>((resolve) => {
+			buildEntered = resolve;
+		});
+		const executor = new ControlledExecutor();
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "close-build",
+				workDir,
+				branchId: "main",
+			},
+			async () => {
+				buildEntered();
+				await buildGate;
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await entered;
 
 		let closeResolved = false;
-		const closing = closeWithoutExiting(controller).then(() => { closeResolved = true; });
+		const closing = closeWithoutExiting(controller).then(() => {
+			closeResolved = true;
+		});
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(closeResolved).toBe(false);
 		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.state).toBe("running");
@@ -256,7 +388,10 @@ describe("multi-branch process runner", () => {
 
 		expect(executor.disposed).toBe(true);
 		expect(executor.emit).toBeUndefined();
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "stopped", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "stopped",
+			branchIds: [],
+		});
 	});
 
 	it("cancels a dynamically admitted branch while its replay gate is pending", async () => {
@@ -267,26 +402,47 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "close-dynamic-gate", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "close-dynamic-gate", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "close-dynamic-gate", workDir, branchId: "main",
-		}, ({ config }) => {
-			const executor = new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
-		});
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "close-dynamic-gate",
+				workDir,
+				branchId: "main",
+			},
+			({ config }) => {
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		await controller.forkBranch({ branchId: "experiment", fromSeqId: (await reader.getBranch("main")).headSeqId! });
 		let releaseGate!: () => void;
-		const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve;
+		});
 		let gateEntered!: () => void;
-		const entered = new Promise<void>((resolve) => { gateEntered = resolve; });
+		const entered = new Promise<void>((resolve) => {
+			gateEntered = resolve;
+		});
 		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
-		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
+		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (
+			this: JsonlLogStore,
+			branchId: string,
+		) {
 			if (this.branchId === "experiment") {
 				gateEntered();
 				await gate;
@@ -297,8 +453,14 @@ describe("multi-branch process runner", () => {
 		await entered;
 
 		let closeResolved = false;
-		const closing = closeWithoutExiting(controller).then(() => { closeResolved = true; });
-		expect(await experimentOutcome).toMatchObject({ branchId: "experiment", outcome: "failed", error: "Runner stopped by SIGTERM" });
+		const closing = closeWithoutExiting(controller).then(() => {
+			closeResolved = true;
+		});
+		expect(await experimentOutcome).toMatchObject({
+			branchId: "experiment",
+			outcome: "failed",
+			error: "Runner stopped by SIGTERM",
+		});
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(closeResolved).toBe(false);
 		releaseGate();
@@ -307,7 +469,10 @@ describe("multi-branch process runner", () => {
 
 		expect(executors.has("experiment")).toBe(false);
 		expect(executors.get("main")?.disposed).toBe(true);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "stopped", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "stopped",
+			branchIds: [],
+		});
 	});
 
 	it("holds dynamic replay and executor construction behind every initial replay gate", async () => {
@@ -318,19 +483,32 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "dynamic-initial-barrier", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"),
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "dynamic-initial-barrier", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
 			`${[
-			{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 },
-			{ kind: "branch", op: "create", seqId: 2, branchId: "experiment", headSeqId: null, committedAt: 2 },
-		].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+				{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 },
+				{ kind: "branch", op: "create", seqId: 2, branchId: "experiment", headSeqId: null, committedAt: 2 },
+			]
+				.map((entry) => JSON.stringify(entry))
+				.join("\n")}\n`,
 		);
 		let releaseInitialGate!: () => void;
-		const initialGate = new Promise<void>((resolve) => { releaseInitialGate = resolve; });
+		const initialGate = new Promise<void>((resolve) => {
+			releaseInitialGate = resolve;
+		});
 		let initialGateEntered!: () => void;
-		const entered = new Promise<void>((resolve) => { initialGateEntered = resolve; });
+		const entered = new Promise<void>((resolve) => {
+			initialGateEntered = resolve;
+		});
 		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
-		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (this: JsonlLogStore, branchId: string) {
+		vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(async function (
+			this: JsonlLogStore,
+			branchId: string,
+		) {
 			if (this.branchId === "main") {
 				initialGateEntered();
 				await initialGate;
@@ -339,14 +517,22 @@ describe("multi-branch process runner", () => {
 		});
 		const built: string[] = [];
 		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "dynamic-initial-barrier", workDir, branchId: "main",
-		}, ({ config }) => {
-			built.push(config.branchId);
-			const executor = new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
-		});
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "dynamic-initial-barrier",
+				workDir,
+				branchId: "main",
+			},
+			({ config }) => {
+				built.push(config.branchId);
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 
 		const completion = controller.start();
 		const experimentOutcome = controller.startBranch("experiment");
@@ -372,16 +558,29 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "gate", initial: "done", states: { done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "gate", initial: "done", states: { done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let built = 0;
-		await runHyperchartRunner({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "gate", workDir,
-			branchIds: ["missing-a", "missing-b"],
-		}, ({ config }) => {
-			built++;
-			return new CompletingExecutor(config.branchId, { active: 0, max: 0 });
-		});
+		await runHyperchartRunner(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "gate",
+				workDir,
+				branchIds: ["missing-a", "missing-b"],
+			},
+			({ config }) => {
+				built++;
+				return new CompletingExecutor(config.branchId, { active: 0, max: 0 });
+			},
+		);
 		expect(built).toBe(0);
 		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
 			state: "failed",
@@ -398,35 +597,53 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default {
+		writeFileSync(
+			chartPath,
+			`export default {
 	kind: "chart", id: "parallel", initial: "work",
 	states: {
 		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },
 		done: { kind: "final" }
 	}
-};\n`);
-		writeFileSync(join(runDir, "log.jsonl"),
+};\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
 			`${[
-			{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 },
-			{ kind: "branch", op: "create", seqId: 2, branchId: "experiment", headSeqId: null, committedAt: 2 },
-		].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+				{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 },
+				{ kind: "branch", op: "create", seqId: 2, branchId: "experiment", headSeqId: null, committedAt: 2 },
+			]
+				.map((entry) => JSON.stringify(entry))
+				.join("\n")}\n`,
 		);
 
 		const built: Array<{ branchId: string; executor: CompletingExecutor }> = [];
 		const activity = { active: 0, max: 0 };
-		await runHyperchartRunner({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "parallel", workDir,
-			branchIds: ["main", "experiment"],
-		}, ({ config }) => {
-			const executor = new CompletingExecutor(config.branchId, activity);
-			built.push({ branchId: config.branchId, executor });
-			return executor;
-		});
+		await runHyperchartRunner(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "parallel",
+				workDir,
+				branchIds: ["main", "experiment"],
+			},
+			({ config }) => {
+				const executor = new CompletingExecutor(config.branchId, activity);
+				built.push({ branchId: config.branchId, executor });
+				return executor;
+			},
+		);
 
 		expect(built.map((entry) => entry.branchId)).toEqual(["main", "experiment"]);
 		expect(new Set(built.map((entry) => entry.executor)).size).toBe(2);
 		expect(activity.max).toBe(2);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ version: 2, state: "complete", branchIds: [], exitCode: 0 });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			version: 2,
+			state: "complete",
+			branchIds: [],
+			exitCode: 0,
+		});
 
 		const main = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		expect(storedRecordSeqIds(runDir)).toEqual([3, 4, 5, 6]);
@@ -434,7 +651,8 @@ describe("multi-branch process runner", () => {
 			const ancestry = await collectHistoryRecords(main, branchId);
 			expect(ancestry.length).toBeGreaterThan(0);
 			expect(ancestry.every((record) => record.branchId === branchId)).toBe(true);
-			for (let index = 1; index < ancestry.length; index++) expect(ancestry[index]?.parentId).toBe(ancestry[index - 1]?.seqId);
+			for (let index = 1; index < ancestry.length; index++)
+				expect(ancestry[index]?.parentId).toBe(ancestry[index - 1]?.seqId);
 		}
 		expect(main.fullReadCount()).toBe(1);
 	});
@@ -447,22 +665,36 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default {
+		writeFileSync(
+			chartPath,
+			`export default {
 	kind: "chart", id: "dynamic", initial: "work",
 	states: {
 		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },
 		done: { kind: "final" }
 	}
-};\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+};\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "dynamic", workDir, branchId: "main",
-		}, ({ config }) => {
-			const executor = new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
-		});
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "dynamic",
+				workDir,
+				branchId: "main",
+			},
+			({ config }) => {
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
@@ -473,26 +705,40 @@ describe("multi-branch process runner", () => {
 		expect(fork.branchId).toBe("experiment");
 		expect(executors.has("experiment")).toBe(false);
 		expect(controller.liveBranchIds).toEqual(["main"]);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds).toEqual(["main"]);
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds).toEqual([
+			"main",
+		]);
 
 		const experimentOutcome = controller.startBranch("experiment");
 		expect(controller.liveBranchIds).toEqual(["main", "experiment"]);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds).toEqual(["main", "experiment"]);
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds).toEqual([
+			"main",
+			"experiment",
+		]);
 		await expect(controller.startBranch("experiment")).rejects.toThrow(/already admitted/);
 		await waitFor(() => executors.get("experiment")?.emit !== undefined);
 		executors.get("experiment")?.complete();
 		expect(await experimentOutcome).toMatchObject({ branchId: "experiment", outcome: "complete" });
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds).toEqual(["main"]);
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds).toEqual([
+			"main",
+		]);
 		expect(executors.get("experiment")?.disposed).toBe(true);
 
 		executors.get("main")?.complete();
 		await completion;
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "complete", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "complete",
+			branchIds: [],
+		});
 		await expect(controller.forkBranch({ branchId: "late", fromSeqId: mainHead! })).rejects.toThrow(/closed/);
 		await expect(controller.startBranch("main")).rejects.toThrow(/closed/);
 		const finalReader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		expect(storedRecordSeqIds(runDir)).toEqual([2, 4, 5]);
-		expect((await collectHistoryRecords(finalReader, "experiment")).every((record) => record.branchId === "main" || record.branchId === "experiment")).toBe(true);
+		expect(
+			(await collectHistoryRecords(finalReader, "experiment")).every(
+				(record) => record.branchId === "main" || record.branchId === "experiment",
+			),
+		).toBe(true);
 	});
 
 	it("stops and drains one live branch while its sibling keeps running", async () => {
@@ -503,20 +749,35 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "branch-drain", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "branch-drain", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let releaseExperimentDispose!: () => void;
-		const experimentDisposeGate = new Promise<void>((resolve) => { releaseExperimentDispose = resolve; });
-		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "branch-drain", workDir, branchId: "main" }, ({ config }) => {
-			const executor = new ControlledExecutor(config.branchId === "experiment" ? experimentDisposeGate : undefined);
-			executors.set(config.branchId, executor);
-			return executor;
+		const experimentDisposeGate = new Promise<void>((resolve) => {
+			releaseExperimentDispose = resolve;
 		});
+		const executors = new Map<string, ControlledExecutor>();
+		const controller = await createHyperchartRunnerController(
+			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "branch-drain", workDir, branchId: "main" },
+			({ config }) => {
+				const executor = new ControlledExecutor(config.branchId === "experiment" ? experimentDisposeGate : undefined);
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
-		await controller.forkBranch({ branchId: "experiment", fromSeqId: (await store.getBranch("main")).headSeqId!, sourceBranchId: "main" });
+		await controller.forkBranch({
+			branchId: "experiment",
+			fromSeqId: (await store.getBranch("main")).headSeqId!,
+			sourceBranchId: "main",
+		});
 		const experimentOutcome = controller.startBranch("experiment");
 		await waitFor(() => executors.get("experiment")?.emit !== undefined);
 		const journalSize = () => readFileSync(join(runDir, "log.jsonl"), "utf8").trim().split("\n").length;
@@ -534,13 +795,19 @@ describe("multi-branch process runner", () => {
 		expect(await experimentOutcome).toEqual({ branchId: "experiment", outcome: "drained" });
 		expect(controller.liveBranchIds).toEqual(["main"]);
 		expect(await controller.activeBranchIds()).toEqual(["main"]);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "running", branchIds: ["main"] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "running",
+			branchIds: ["main"],
+		});
 		expect(executors.get("experiment")?.disposed).toBe(true);
 		expect(() => controller.stopAndDrain("experiment")).toThrow(/not live/);
 
 		executors.get("main")?.complete();
 		await completion;
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "complete", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "complete",
+			branchIds: [],
+		});
 	});
 
 	it("a durable dynamic branch keeps the runner alive during async executor construction", async () => {
@@ -551,17 +818,28 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "reserve", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "reserve", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executors = new Map<string, ControlledExecutor>();
 		let releaseExperiment!: () => void;
-		const experimentBuild = new Promise<void>((resolve) => { releaseExperiment = resolve; });
-		const controller = await createHyperchartRunnerController({ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "reserve", workDir, branchId: "main" }, async ({ config }) => {
-			if (config.branchId === "experiment") await experimentBuild;
-			const executor = new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
+		const experimentBuild = new Promise<void>((resolve) => {
+			releaseExperiment = resolve;
 		});
+		const controller = await createHyperchartRunnerController(
+			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "reserve", workDir, branchId: "main" },
+			async ({ config }) => {
+				if (config.branchId === "experiment") await experimentBuild;
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
@@ -569,14 +847,22 @@ describe("multi-branch process runner", () => {
 		await controller.forkBranch({ branchId: "experiment", fromSeqId: head });
 		const experimentOutcome = controller.startBranch("experiment");
 		executors.get("main")?.complete();
-		await waitFor(() => withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds.length === 1);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "running", branchIds: ["experiment"] });
+		await waitFor(
+			() => withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.branchIds.length === 1,
+		);
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "running",
+			branchIds: ["experiment"],
+		});
 		releaseExperiment();
 		await waitFor(() => executors.get("experiment")?.emit !== undefined);
 		executors.get("experiment")?.complete();
 		expect((await experimentOutcome).outcome).toBe("complete");
 		await completion;
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "complete", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "complete",
+			branchIds: [],
+		});
 	});
 
 	it("admits a branch during delayed last-branch disposal and prevents closure", async () => {
@@ -587,18 +873,39 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "disposal-admission", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "disposal-admission", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let releaseDispose!: () => void;
-		const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
-		let disposalStarted!: () => void;
-		const startedDisposal = new Promise<void>((resolve) => { disposalStarted = resolve; });
-		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "disposal-admission", workDir, branchId: "main" }, ({ config }) => {
-			const executor = config.branchId === "main" ? new ControlledExecutor(disposeGate, disposalStarted) : new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
+		const disposeGate = new Promise<void>((resolve) => {
+			releaseDispose = resolve;
 		});
+		let disposalStarted!: () => void;
+		const startedDisposal = new Promise<void>((resolve) => {
+			disposalStarted = resolve;
+		});
+		const executors = new Map<string, ControlledExecutor>();
+		const controller = await createHyperchartRunnerController(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "disposal-admission",
+				workDir,
+				branchId: "main",
+			},
+			({ config }) => {
+				const executor =
+					config.branchId === "main" ? new ControlledExecutor(disposeGate, disposalStarted) : new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
@@ -612,7 +919,10 @@ describe("multi-branch process runner", () => {
 		executors.get("experiment")?.complete();
 		expect((await outcome).outcome).toBe("complete");
 		await completion;
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "complete", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "complete",
+			branchIds: [],
+		});
 	});
 
 	it("fails a dynamic replay gate without constructing that branch executor", async () => {
@@ -623,29 +933,50 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "dynamic-gate", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "dynamic-gate", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "dynamic-gate", workDir, branchId: "main" }, ({ config }) => {
-			const executor = new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
-		});
+		const controller = await createHyperchartRunnerController(
+			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "dynamic-gate", workDir, branchId: "main" },
+			({ config }) => {
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		const reader = new JsonlLogStore(join(runDir, "log.jsonl"), "main");
 		await controller.forkBranch({ branchId: "broken", fromSeqId: (await reader.getBranch("main")).headSeqId! });
 		const originalCaptureSnapshot = JsonlLogStore.prototype.captureSnapshot;
-		const captureSnapshot = vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(function (this: JsonlLogStore, branchId: string) {
-			return this.branchId === "broken" ? Promise.reject(new Error("incompatible ancestry")) : originalCaptureSnapshot.call(this, branchId);
+		const captureSnapshot = vi.spyOn(JsonlLogStore.prototype, "captureSnapshot").mockImplementation(function (
+			this: JsonlLogStore,
+			branchId: string,
+		) {
+			return this.branchId === "broken"
+				? Promise.reject(new Error("incompatible ancestry"))
+				: originalCaptureSnapshot.call(this, branchId);
 		});
 		const outcome = await controller.startBranch("broken");
 		captureSnapshot.mockRestore();
-		expect(outcome).toMatchObject({ branchId: "broken", outcome: "failed", error: expect.stringMatching(/Replay|replay|stale/) });
+		expect(outcome).toMatchObject({
+			branchId: "broken",
+			outcome: "failed",
+			error: expect.stringMatching(/Replay|replay|stale/),
+		});
 		expect(executors.has("broken")).toBe(false);
 		executors.get("main")?.complete();
 		await completion;
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "failed", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "failed",
+			branchIds: [],
+		});
 	});
 
 	it("keeps status non-terminal until delayed executor disposal finishes", async () => {
@@ -656,21 +987,40 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default {
+		writeFileSync(
+			chartPath,
+			`export default {
 	kind: "chart", id: "dispose-order", initial: "work",
 	states: {
 		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },
 		done: { kind: "final" }
 	}
-};\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+};\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		let releaseDispose!: () => void;
-		const disposeGate = new Promise<void>((resolve) => { releaseDispose = resolve; });
+		const disposeGate = new Promise<void>((resolve) => {
+			releaseDispose = resolve;
+		});
 		let disposalStarted!: () => void;
-		const started = new Promise<void>((resolve) => { disposalStarted = resolve; });
-		const running = runHyperchartRunner({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "dispose-order", workDir, branchId: "main",
-		}, ({ config }) => new CompletingExecutor(config.branchId, { active: 0, max: 0 }, false, disposeGate, disposalStarted));
+		const started = new Promise<void>((resolve) => {
+			disposalStarted = resolve;
+		});
+		const running = runHyperchartRunner(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "dispose-order",
+				workDir,
+				branchId: "main",
+			},
+			({ config }) =>
+				new CompletingExecutor(config.branchId, { active: 0, max: 0 }, false, disposeGate, disposalStarted),
+		);
 		await started;
 		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))?.state).toBe("running");
 		releaseDispose();
@@ -686,47 +1036,70 @@ describe("multi-branch process runner", () => {
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.ts");
-		writeFileSync(chartPath, `import { agent, artifact, artifactOf, chart, final, t } from "@surprisal/hyperchart";
+		writeFileSync(
+			chartPath,
+			`import { agent, artifact, artifactOf, chart, final, t } from "@surprisal/hyperchart";
 export default chart({ kind: "chart", id: "workspace-isolation", initial: "write", states: {
   write: { kind: "state", action: agent("writer", { artifacts: { output: artifact(t\`shared.txt\`) } }), transitions: { DONE: "read" } },
   read: { kind: "state", action: agent("reader", { reads: [artifactOf("write")] }), transitions: { DONE: "done" } },
   done: final()
-} });\n`);
-		writeFileSync(join(runDir, "log.jsonl"),
+} });\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
 			`${[
-			{ kind: "branch", op: "create", seqId: 1, branchId: "left", headSeqId: null, committedAt: 1 },
-			{ kind: "branch", op: "create", seqId: 2, branchId: "right", headSeqId: null, committedAt: 2 },
-		].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+				{ kind: "branch", op: "create", seqId: 1, branchId: "left", headSeqId: null, committedAt: 1 },
+				{ kind: "branch", op: "create", seqId: 2, branchId: "right", headSeqId: null, committedAt: 2 },
+			]
+				.map((entry) => JSON.stringify(entry))
+				.join("\n")}\n`,
 		);
 		const writerEmits: Array<() => void> = [];
 		const observedReads = new Map<string, string>();
 		const workspaceByBranch = new Map<string, string>();
 
-		await runHyperchartRunner({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "workspace-isolation", workDir, branchIds: ["left", "right"],
-		}, ({ config }) => {
-			workspaceByBranch.set(config.branchId, config.workDir);
-			expect(config.projectDir).toBe(workDir);
-			expect(config.workDir).toBe(join(runDir, "workspaces", config.branchId));
-			expect(existsSync(config.workDir)).toBe(true);
-			return new (class extends ControlledExecutor {
-				override start(effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void {
-					if (effect.action.name === "writer") {
-						writeFileSync(join(config.workDir, "shared.txt"), `${config.branchId} bytes`);
-						writerEmits.push(() => emit({ kind: "completed", event: { type: "DONE" } }));
-						if (writerEmits.length === 2) for (const done of writerEmits) done();
-						return;
+		await runHyperchartRunner(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "workspace-isolation",
+				workDir,
+				branchIds: ["left", "right"],
+			},
+			({ config }) => {
+				workspaceByBranch.set(config.branchId, config.workDir);
+				expect(config.projectDir).toBe(workDir);
+				expect(config.workDir).toBe(join(runDir, "workspaces", config.branchId));
+				expect(existsSync(config.workDir)).toBe(true);
+				return new (class extends ControlledExecutor {
+					override start(effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void {
+						if (effect.action.name === "writer") {
+							writeFileSync(join(config.workDir, "shared.txt"), `${config.branchId} bytes`);
+							writerEmits.push(() => emit({ kind: "completed", event: { type: "DONE" } }));
+							if (writerEmits.length === 2) for (const done of writerEmits) done();
+							return;
+						}
+						observedReads.set(config.branchId, readFileSync(join(config.workDir, "shared.txt"), "utf8"));
+						emit({ kind: "completed", event: { type: "DONE" } });
 					}
-					observedReads.set(config.branchId, readFileSync(join(config.workDir, "shared.txt"), "utf8"));
-					emit({ kind: "completed", event: { type: "DONE" } });
-				}
-			})();
-		});
+				})();
+			},
+		);
 
 		expect(workspaceByBranch.get("left")).not.toBe(workspaceByBranch.get("right"));
-		expect(observedReads).toEqual(new Map([["left", "left bytes"], ["right", "right bytes"]]));
+		expect(observedReads).toEqual(
+			new Map([
+				["left", "left bytes"],
+				["right", "right bytes"],
+			]),
+		);
 		const finalReader = new JsonlLogStore(join(runDir, "log.jsonl"), "left");
-		const pins = await Promise.all(["left", "right"].map(async (branchId) => latestArtifactHash(await collectHistoryRecords(finalReader, branchId), "shared.txt")));
+		const pins = await Promise.all(
+			["left", "right"].map(async (branchId) =>
+				latestArtifactHash(await collectHistoryRecords(finalReader, branchId), "shared.txt"),
+			),
+		);
 		expect(pins.every((pin) => pin !== undefined)).toBe(true);
 		expect(new Set(pins).size).toBe(2);
 	});
@@ -739,22 +1112,36 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "held-idle", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "held-idle", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executors = new Map<string, ControlledExecutor>();
-		const controller = await createHyperchartRunnerController({ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "held-idle", workDir, branchId: "main" }, ({ config }) => {
-			const executor = new ControlledExecutor();
-			executors.set(config.branchId, executor);
-			return executor;
-		});
+		const controller = await createHyperchartRunnerController(
+			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "held-idle", workDir, branchId: "main" },
+			({ config }) => {
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
 		const hold = controller.acquireHold();
 		const completion = controller.start();
 		await waitFor(() => executors.get("main")?.emit !== undefined);
 		executors.get("main")?.complete();
 		await waitFor(() => controller.liveBranchIds.length === 0);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "running", branchIds: [] });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "running",
+			branchIds: [],
+		});
 		let completed = false;
-		void completion.then(() => { completed = true; });
+		void completion.then(() => {
+			completed = true;
+		});
 		await new Promise((resolve) => setTimeout(resolve, 10));
 		expect(completed).toBe(false);
 
@@ -767,7 +1154,11 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		await waitFor(() => controller.liveBranchIds.length === 0);
 		hold.release();
 		await completion;
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "complete", branchIds: [], exitCode: 0 });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "complete",
+			branchIds: [],
+			exitCode: 0,
+		});
 	});
 
 	it("signal shutdown closes a held controller", async () => {
@@ -778,10 +1169,19 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default { kind: "chart", id: "held-signal", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
-		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		writeFileSync(
+			chartPath,
+			`export default { kind: "chart", id: "held-signal", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
+			`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+		);
 		const executor = new ControlledExecutor();
-		const controller = await createHyperchartRunnerController({ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "held-signal", workDir, branchId: "main" }, () => executor);
+		const controller = await createHyperchartRunnerController(
+			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "held-signal", workDir, branchId: "main" },
+			() => executor,
+		);
 		controller.acquireHold();
 		const completion = controller.start();
 		await waitFor(() => executor.emit !== undefined);
@@ -790,7 +1190,11 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		await completion;
 
 		expect(executor.disposed).toBe(true);
-		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({ state: "stopped", branchIds: [], exitCode: 130 });
+		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
+			state: "stopped",
+			branchIds: [],
+			exitCode: 130,
+		});
 	});
 
 	it("waits for every branch and fails the aggregate status when one branch fails", async () => {
@@ -801,27 +1205,42 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		mkdirSync(workDir, { recursive: true });
 		mkdirSync(runDir, { recursive: true });
 		const chartPath = join(workDir, "chart.mjs");
-		writeFileSync(chartPath, `export default {
+		writeFileSync(
+			chartPath,
+			`export default {
 	kind: "chart", id: "aggregate", initial: "work",
 	states: {
 		work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } },
 		done: { kind: "final" }
 	}
-};\n`);
-		writeFileSync(join(runDir, "log.jsonl"),
+};\n`,
+		);
+		writeFileSync(
+			join(runDir, "log.jsonl"),
 			`${[
-			{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 },
-			{ kind: "branch", op: "create", seqId: 2, branchId: "experiment", headSeqId: null, committedAt: 2 },
-		].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+				{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 },
+				{ kind: "branch", op: "create", seqId: 2, branchId: "experiment", headSeqId: null, committedAt: 2 },
+			]
+				.map((entry) => JSON.stringify(entry))
+				.join("\n")}\n`,
 		);
 		const activity = { active: 0, max: 0 };
-		await runHyperchartRunner({
-			runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "aggregate", workDir,
-			branchIds: ["main", "experiment"],
-		}, ({ config }) => new CompletingExecutor(config.branchId, activity, config.branchId === "experiment"));
+		await runHyperchartRunner(
+			{
+				runId: "run",
+				storage: fixtureStorage(runDir),
+				chartPath,
+				chartId: "aggregate",
+				workDir,
+				branchIds: ["main", "experiment"],
+			},
+			({ config }) => new CompletingExecutor(config.branchId, activity, config.branchId === "experiment"),
+		);
 		expect(activity).toMatchObject({ active: 0, max: 2 });
 		expect(withRunStorage(fixtureStorage(runDir), () => readRunStatus(fixtureRunId(runDir)))).toMatchObject({
-			state: "failed", branchIds: [], exitCode: 1,
+			state: "failed",
+			branchIds: [],
+			exitCode: 1,
 			error: expect.any(String),
 		});
 	});
@@ -829,5 +1248,5 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 
 /** Explicit storage configuration for this suite's generated literal-layout fixtures. */
 function fixtureStorage(runDirectory: string): RunStorage {
- return {kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id"};
+	return { kind: "jsonl", rootDir: fixtureRoot(runDirectory), layout: "run-id" };
 }

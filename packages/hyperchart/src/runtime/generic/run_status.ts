@@ -23,13 +23,18 @@ export type HyperchartRunStatus = {
 	replayWarnings?: string[];
 };
 
-export function runStatusPath(runId: string): string { return join(resolveRunPaths(runId).runDir, "status.json"); }
+export function runStatusPath(runId: string): string {
+	return join(resolveRunPaths(runId).runDir, "status.json");
+}
 
 export function readRunStatus(runId: string): HyperchartRunStatus | undefined {
 	const path = runStatusPath(runId);
 	if (!existsSync(path)) return undefined;
-	try { return normalizeStatus(JSON.parse(readFileSync(path, "utf8")) as unknown, runId); }
-	catch { return undefined; }
+	try {
+		return normalizeStatus(JSON.parse(readFileSync(path, "utf8")) as unknown, runId);
+	} catch {
+		return undefined;
+	}
 }
 
 export function writeRunStatus(runId: string, status: HyperchartRunStatus): void {
@@ -79,15 +84,28 @@ export function markRunHeartbeat(runId: string): HyperchartRunStatus {
 	return patchRunStatus(runId, { pid: process.pid, heartbeatAt: Date.now() });
 }
 
-export function isTerminalRunState(state: HyperchartRunState): boolean { return state === "complete" || state === "failed" || state === "stopped"; }
+export function isTerminalRunState(state: HyperchartRunState): boolean {
+	return state === "complete" || state === "failed" || state === "stopped";
+}
 export function isRunLive(status: HyperchartRunStatus | undefined, now = Date.now()): boolean {
 	if (status === undefined || isTerminalRunState(status.state) || status.state === "stopping") return false;
 	if (status.pid !== undefined && isPidAlive(status.pid)) return true;
 	return status.heartbeatAt !== undefined && now - status.heartbeatAt < 15_000;
 }
-export function isPidAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch { return false; } }
+export function isPidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
-function valueFor<K extends keyof RunStatusPatch>(key: K, patch: RunStatusPatch, previous: HyperchartRunStatus | undefined): HyperchartRunStatus[K] | undefined {
+function valueFor<K extends keyof RunStatusPatch>(
+	key: K,
+	patch: RunStatusPatch,
+	previous: HyperchartRunStatus | undefined,
+): HyperchartRunStatus[K] | undefined {
 	return Object.hasOwn(patch, key) ? patch[key] : previous?.[key];
 }
 
@@ -97,13 +115,20 @@ function normalizeStatus(value: unknown, expectedRunId: string): HyperchartRunSt
 	if (state === undefined) return undefined;
 	// v1 is read-only compatibility for terminal delivery and existing run discovery;
 	// every subsequent write upgrades it to v2.
-	const branchIds = value.version === 1 && typeof value.branchId === "string"
-		? [value.branchId]
-		: value.version === 2 && Array.isArray(value.branchIds) && value.branchIds.every((entry) => typeof entry === "string")
-			? value.branchIds
-			: undefined;
+	const branchIds =
+		value.version === 1 && typeof value.branchId === "string"
+			? [value.branchId]
+			: value.version === 2 &&
+					Array.isArray(value.branchIds) &&
+					value.branchIds.every((entry) => typeof entry === "string")
+				? value.branchIds
+				: undefined;
 	if (branchIds === undefined) return undefined;
-	try { assertBranchIds(branchIds); } catch { return undefined; }
+	try {
+		assertBranchIds(branchIds);
+	} catch {
+		return undefined;
+	}
 	return {
 		version: 2,
 		runId: value.runId,
@@ -117,19 +142,31 @@ function normalizeStatus(value: unknown, expectedRunId: string): HyperchartRunSt
 		...(typeof value.heartbeatAt === "number" ? { heartbeatAt: value.heartbeatAt } : {}),
 		...(typeof value.exitCode === "number" ? { exitCode: value.exitCode } : {}),
 		...(typeof value.error === "string" ? { error: value.error } : {}),
-		...(Array.isArray(value.replayWarnings) && value.replayWarnings.every((entry) => typeof entry === "string") ? { replayWarnings: value.replayWarnings } : {}),
+		...(Array.isArray(value.replayWarnings) && value.replayWarnings.every((entry) => typeof entry === "string")
+			? { replayWarnings: value.replayWarnings }
+			: {}),
 	};
 }
 
 function assertBranchIds(value: readonly string[]): void {
 	const seen = new Set<string>();
 	for (const branchId of value) {
-		if (branchId.trim().length === 0 || branchId.length > 128 || /[\0/\\]/.test(branchId)) throw new Error("Invalid Hyperchart runner branchId");
+		if (branchId.trim().length === 0 || branchId.length > 128 || /[\0/\\]/.test(branchId))
+			throw new Error("Invalid Hyperchart runner branchId");
 		if (seen.has(branchId)) throw new Error(`Duplicate Hyperchart runner branchId '${branchId}'`);
 		seen.add(branchId);
 	}
 }
 function normalizeState(value: unknown): HyperchartRunState | undefined {
-	return value === "starting" || value === "running" || value === "complete" || value === "failed" || value === "stopping" || value === "stopped" ? value : undefined;
+	return value === "starting" ||
+		value === "running" ||
+		value === "complete" ||
+		value === "failed" ||
+		value === "stopping" ||
+		value === "stopped"
+		? value
+		: undefined;
 }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}

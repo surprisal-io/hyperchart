@@ -38,11 +38,7 @@ import { readFileSync } from "node:fs";
 `,
 			"utf8",
 		);
-		writeFileSync(
-			configPath,
-			JSON.stringify({ outputPath, piModules: { codingAgent, typebox } }),
-			"utf8",
-		);
+		writeFileSync(configPath, JSON.stringify({ outputPath, piModules: { codingAgent, typebox } }), "utf8");
 
 		execFileSync(process.execPath, [bootstrap, configPath], {
 			cwd: repoRoot,

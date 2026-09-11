@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, script, send, t,
-	user } from "../packages/hyperchart/src/core/dsl.js";
+import {
+	agent,
+	actor,
+	arg,
+	chart,
+	compound,
+	event,
+	final,
+	failed,
+	input,
+	item,
+	map,
+	message,
+	parallel,
+	protocol,
+	receive,
+	reply,
+	script,
+	send,
+	t,
+	user,
+} from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
@@ -15,7 +35,10 @@ import {
 	runtimeVisitHistoriesForInspector,
 } from "../packages/hyperchart/src/host/adapters.js";
 import { inspectChartAst } from "../packages/hyperchart/src/core/inspect.js";
-import { actorPoolDrainingRun, actorPoolMapReentryRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
+import {
+	actorPoolDrainingRun,
+	actorPoolMapReentryRun,
+} from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 
 function ast(cst: ChartCst): ChartAst {
 	const parsed = normalizeChartConfig(cst, { path: "test.chart.ts" });
@@ -36,10 +59,36 @@ function baseRecord(seqId: number, timestamp = seqId * 1000) {
 
 describe("React runtime adapter", () => {
 	it("resolves descendant actor messages through lexical map ancestry", () => {
-		expect(actorTargetForInspectorState("projects#a.nested.send", "projects.@editor", [
-			{ kind: "actor", declarationPath: "projects.@editor", ownerPath: "projects#b", occurrencePath: "projects#b.@editor", logicalPath: "projects#b.@editor", generation: 1, input: {}, status: "idle", currentState: "idle", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
-			{ kind: "actor", declarationPath: "projects.@editor", ownerPath: "projects#a", occurrencePath: "projects#a.@editor~2", logicalPath: "projects#a.@editor", generation: 2, input: {}, status: "busy", currentState: "apply", mailbox: { totalCount: 0, entries: [] }, mailboxInstances: [] },
-		])).toBe("projects#a.@editor");
+		expect(
+			actorTargetForInspectorState("projects#a.nested.send", "projects.@editor", [
+				{
+					kind: "actor",
+					declarationPath: "projects.@editor",
+					ownerPath: "projects#b",
+					occurrencePath: "projects#b.@editor",
+					logicalPath: "projects#b.@editor",
+					generation: 1,
+					input: {},
+					status: "idle",
+					currentState: "idle",
+					mailbox: { totalCount: 0, entries: [] },
+					mailboxInstances: [],
+				},
+				{
+					kind: "actor",
+					declarationPath: "projects.@editor",
+					ownerPath: "projects#a",
+					occurrencePath: "projects#a.@editor~2",
+					logicalPath: "projects#a.@editor",
+					generation: 2,
+					input: {},
+					status: "busy",
+					currentState: "apply",
+					mailbox: { totalCount: 0, entries: [] },
+					mailboxInstances: [],
+				},
+			]),
+		).toBe("projects#a.@editor");
 	});
 
 	it("projects map-owned pool status and internal states from the production fixture", () => {
@@ -53,7 +102,9 @@ describe("React runtime adapter", () => {
 			"projects#a.@workers.$worker.work",
 			"projects#a.@workers.$worker.settle",
 		]);
-		expect(new Set(actorPoolMapReentryRun.states.map((state) => state.id)).size).toBe(actorPoolMapReentryRun.states.length);
+		expect(new Set(actorPoolMapReentryRun.states.map((state) => state.id)).size).toBe(
+			actorPoolMapReentryRun.states.length,
+		);
 	});
 
 	it("keeps a finalized owner waiting while its pool drains", () => {
@@ -89,13 +140,15 @@ describe("React runtime adapter", () => {
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const worker = Worker({ file: "configured.ts" });
-		const chartAst = ast(chart({
-			kind: "chart",
-			id: "actor-input-adapter",
-			actors: { worker },
-			initial: "ping",
-			states: { ping: send({ to: worker, event: "PING", input: {}, target: "done" }), done: final() },
-		}));
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "actor-input-adapter",
+				actors: { worker },
+				initial: "ping",
+				states: { ping: send({ to: worker, event: "PING", input: {}, target: "done" }), done: final() },
+			}),
+		);
 		const declaration = chartAst.actors["@worker"];
 		if (declaration === undefined) throw new Error("missing actor declaration");
 		const inspect = inspectChartAst(chartAst);
@@ -139,10 +192,12 @@ describe("React runtime adapter", () => {
 		);
 
 		const run = hyperchartRunFromInspectResult(inspectChartAst(chartAst));
-		expect(run.states.filter((state) => state.initial).map((state) => state.id).sort()).toEqual([
-			"pipeline",
-			"pipeline.work",
-		]);
+		expect(
+			run.states
+				.filter((state) => state.initial)
+				.map((state) => state.id)
+				.sort(),
+		).toEqual(["pipeline", "pipeline.work"]);
 		expect(run.states.filter((state) => state.final).every((state) => state.status === "pending")).toBe(true);
 	});
 
@@ -297,11 +352,29 @@ describe("React runtime adapter", () => {
 		if (route?.kind !== "state" || publish?.kind !== "state") throw new Error("missing action state");
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "pipeline.route"), definition: route.action, ...baseRecord(2) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "pipeline.route"), event: { type: "FAST" }, ...baseRecord(3) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(4) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "pipeline.route"),
+				definition: route.action,
+				...baseRecord(2),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "pipeline.route"),
+				event: { type: "FAST" },
+				...baseRecord(3),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "publish"),
+				definition: publish.action,
+				...baseRecord(4),
+			},
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
@@ -404,11 +477,29 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "items#a.route"), definition: route.action, ...baseRecord(3) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#a.route"), event: { type: "FAST" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(5) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "items#a.route"),
+				definition: route.action,
+				...baseRecord(3),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "items#a.route"),
+				event: { type: "FAST" },
+				...baseRecord(4),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "publish"),
+				definition: publish.action,
+				...baseRecord(5),
+			},
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
@@ -456,14 +547,44 @@ describe("React runtime adapter", () => {
 		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "fan.left.route"), definition: leftRoute.action, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "fan.right.work"), definition: rightWork.action, ...baseRecord(3) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "fan.left.route"), event: { type: "FAST" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "fan.right.work"), event: { type: "DONE" }, ...baseRecord(5) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "publish"), definition: publish.action, ...baseRecord(6) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "fan.left.route"),
+				definition: leftRoute.action,
+				...baseRecord(2),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "fan.right.work"),
+				definition: rightWork.action,
+				...baseRecord(3),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "fan.left.route"),
+				event: { type: "FAST" },
+				...baseRecord(4),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "fan.right.work"),
+				event: { type: "DONE" },
+				...baseRecord(5),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "publish"),
+				definition: publish.action,
+				...baseRecord(6),
+			},
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
@@ -553,21 +674,29 @@ describe("React runtime adapter", () => {
 	});
 
 	it("ignores non-agent entries in session progress", () => {
-		const chartAst = ast(chart({
-			kind: "chart",
-			id: "script-session-progress",
-			initial: "work",
-			states: {
-				work: { kind: "state", action: script("true"), transitions: { DONE: "done" } },
-				done: final(),
-			},
-		}));
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "script-session-progress",
+				initial: "work",
+				states: {
+					work: { kind: "state", action: script("true"), transitions: { DONE: "done" } },
+					done: final(),
+				},
+			}),
+		);
 		const uid = actionUid(chartAst, "work");
 		const definition = (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action;
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "script-invocation", actionUid: uid, definition, ...baseRecord(2) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "script-invocation",
+				actionUid: uid,
+				definition,
+				...baseRecord(2),
+			},
 		];
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records, {
 			sessionProgress: {
@@ -588,37 +717,69 @@ describe("React runtime adapter", () => {
 	});
 
 	it("surfaces durable state-action and opened inputs while preserving the replay fallback", () => {
-		const chartAst = ast(chart({
-			kind: "chart",
-			id: "recorded-visit-inputs",
-			initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					input: { feedback: z.string().default("derived") },
-					action: agent("worker", { task: t`Feedback ${input("feedback")}` }),
-					transitions: { NEXT: { target: "ask", input: { context: event("context") } } },
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "recorded-visit-inputs",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						input: { feedback: z.string().default("derived") },
+						action: agent("worker", { task: t`Feedback ${input("feedback")}` }),
+						transitions: { NEXT: { target: "ask", input: { context: event("context") } } },
+					},
+					ask: {
+						kind: "state",
+						input: { context: z.string() },
+						action: user({ prompt: t`Context ${input("context")}`, options: ["SELECTED"] }),
+						transitions: { SELECTED: "done" },
+					},
+					done: final(),
 				},
-				ask: {
-					kind: "state",
-					input: { context: z.string() },
-					action: user({ prompt: t`Context ${input("context")}`, options: ["SELECTED"] }),
-					transitions: { SELECTED: "done" },
-				},
-				done: final(),
-			},
-		}));
+			}),
+		);
 		const work = chartAst.states.work;
 		const ask = chartAst.states.ask;
 		if (work?.kind !== "state" || ask?.kind !== "state") throw new Error("missing input story actions");
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: work.action.uid, input: { feedback: "recorded invoke" }, definition: work.action, ...baseRecord(2) },
-			{ type: "state_action", kind: "complete", actionUid: work.action.uid, input: { feedback: "recorded complete" }, event: { type: "NEXT", output: { context: "derived transition" } }, ...baseRecord(3) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: ask.action.uid, definition: ask.action, ...baseRecord(4) },
-			{ type: "user_interaction", kind: "opened", actionUid: ask.action.uid, phaseSeqId: 4, input: { context: "recorded opened" }, prompt: "Context derived transition", options: ["SELECTED"], events: ["SELECTED"], ...baseRecord(5) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: work.action.uid,
+				input: { feedback: "recorded invoke" },
+				definition: work.action,
+				...baseRecord(2),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: work.action.uid,
+				input: { feedback: "recorded complete" },
+				event: { type: "NEXT", output: { context: "derived transition" } },
+				...baseRecord(3),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: ask.action.uid,
+				definition: ask.action,
+				...baseRecord(4),
+			},
+			{
+				type: "user_interaction",
+				kind: "opened",
+				actionUid: ask.action.uid,
+				phaseSeqId: 4,
+				input: { context: "recorded opened" },
+				prompt: "Context derived transition",
+				options: ["SELECTED"],
+				events: ["SELECTED"],
+				...baseRecord(5),
+			},
 		];
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
 		expect(run.states.find((state) => state.id === "work")?.visitHistory?.[0]).toMatchObject({
@@ -798,15 +959,33 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "first" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "first" }, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: workerUid, definition: workerDefinition, ...baseRecord(3) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: workerUid,
+				definition: workerDefinition,
+				...baseRecord(3),
+			},
 			{ type: "state_action", kind: "complete", actionUid: workerUid, event: { type: "DONE" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: publishUid, definition: publishDefinition, ...baseRecord(5) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: publishUid,
+				definition: publishDefinition,
+				...baseRecord(5),
+			},
 			{ type: "state_action", kind: "complete", actionUid: publishUid, event: { type: "RETRY" }, ...baseRecord(6) },
 			{ type: "spawned", path: "items", instances: { a: "second" }, ...baseRecord(7) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: workerUid, definition: workerDefinition, ...baseRecord(8) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: workerUid,
+				definition: workerDefinition,
+				...baseRecord(8),
+			},
 		];
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
 		expect(run.states.find((state) => state.id === "items#a.work")?.status).toBe("running");
@@ -1030,7 +1209,9 @@ describe("React runtime adapter", () => {
 			endedAt: 3000,
 			endedReason: "timed_out",
 		});
-		expect(runtimeVisitHistoriesForInspector(timedAst, timedRecords).get("work")?.[0]).toEqual(timedRun.states.find((state) => state.id === "work")?.visitHistory?.[0]);
+		expect(runtimeVisitHistoriesForInspector(timedAst, timedRecords).get("work")?.[0]).toEqual(
+			timedRun.states.find((state) => state.id === "work")?.visitHistory?.[0],
+		);
 
 		const fanAst = ast(
 			chart({
@@ -1097,8 +1278,12 @@ describe("React runtime adapter", () => {
 			completedEvent: "FAILED",
 		});
 		const lazyFan = runtimeVisitHistoriesForInspector(fanAst, fanRecords);
-		expect(lazyFan.get("fan.left.work")?.[0]).toEqual(fanRun.states.find((state) => state.id === "fan.left.work")?.visitHistory?.[0]);
-		expect(lazyFan.get("fan.right.work")?.[0]).toEqual(fanRun.states.find((state) => state.id === "fan.right.work")?.visitHistory?.[0]);
+		expect(lazyFan.get("fan.left.work")?.[0]).toEqual(
+			fanRun.states.find((state) => state.id === "fan.left.work")?.visitHistory?.[0],
+		);
+		expect(lazyFan.get("fan.right.work")?.[0]).toEqual(
+			fanRun.states.find((state) => state.id === "fan.right.work")?.visitHistory?.[0],
+		);
 	});
 
 	it("maps run-level status errors and replay warnings", () => {
@@ -1117,7 +1302,8 @@ describe("React runtime adapter", () => {
 			{
 				status: {
 					runId: "run",
-					branchId: "main",					state: "failed",
+					branchId: "main",
+					state: "failed",
 					error: "runner crashed",
 					exitCode: 1,
 					replayWarnings: ["Replay warning: stale provenance"],
@@ -1169,7 +1355,7 @@ describe("React runtime adapter", () => {
 				...baseRecord(2),
 			},
 			{
-					type: "failure_intent",
+				type: "failure_intent",
 				origin: "work",
 				error: "boom",
 				...baseRecord(3),
@@ -1306,7 +1492,9 @@ describe("React runtime adapter", () => {
 
 		const acceptedRecords: DurableLogRecord[] = [
 			...records,
-			{ type: "state_action", kind: "retry",
+			{
+				type: "state_action",
+				kind: "retry",
 				actionUid: uid,
 				failure: { kind: "validation", message: "no" },
 				scope: "validation",
@@ -1423,8 +1611,14 @@ describe("React runtime adapter", () => {
 		];
 
 		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records);
-		expect(run.states.find((state) => state.id === "items#a.work")).toMatchObject({ status: "running", scopeParentId: "items#a" });
-		expect(run.states.find((state) => state.id === "items#b.work")).toMatchObject({ status: "waiting", scopeParentId: "items#b" });
+		expect(run.states.find((state) => state.id === "items#a.work")).toMatchObject({
+			status: "running",
+			scopeParentId: "items#a",
+		});
+		expect(run.states.find((state) => state.id === "items#b.work")).toMatchObject({
+			status: "waiting",
+			scopeParentId: "items#b",
+		});
 		expect(run.states.find((state) => state.id === "items#c.work")?.status).toBe("waiting");
 		expect(run.states.find((state) => state.id === "items#b.work")?.session).toBeUndefined();
 		const mapState = run.states.find((state) => state.id === "items");
@@ -1500,14 +1694,19 @@ describe("React runtime adapter", () => {
 		expect(run.states.filter((state) => state.id.startsWith("items."))).toEqual([]);
 		const mapState = run.states.find((state) => state.id === "items");
 		expect(mapState?.mapConfig?.items).toMatchObject([
-			{ key: "a", label: "Alpha", summary: "first", status: "done", value: { title: "Alpha", summary: "first" }, visits: [1] },
+			{
+				key: "a",
+				label: "Alpha",
+				summary: "first",
+				status: "done",
+				value: { title: "Alpha", summary: "first" },
+				visits: [1],
+			},
 			{ key: "b", label: "Beta", status: "running", value: { title: "Beta" }, visits: [1] },
 			{ key: "c", label: "Gamma", status: "failed", value: { title: "Gamma" }, visits: [1] },
 		]);
 		expect(mapState?.visits).toBe(1);
-		expect(mapState?.mapConfig?.visitHistory).toEqual([
-			{ visit: 1, spawnSeqId: 2, startedAt: 2000, instances },
-		]);
+		expect(mapState?.mapConfig?.visitHistory).toEqual([{ visit: 1, spawnSeqId: 2, startedAt: 2000, instances }]);
 		expect(mapState?.subProgress).toEqual({ done: 1, running: 1, failed: 1, total: 3 });
 		const itemBWorker = run.states.find((state) => state.id === "items#b.work");
 		const itemCWorker = run.states.find((state) => state.id === "items#c.work");
@@ -1545,19 +1744,38 @@ describe("React runtime adapter", () => {
 		const itemUid = actionUid(chartAst, "items#a.work");
 		const secondItemUid = actionUid(chartAst, "items#b.work");
 		const gateUid = actionUid(chartAst, "gate");
-		const itemDefinition = (chartAst.states["items.work"] as Extract<ChartAst["states"][string], { kind: "state" }>).action;
+		const itemDefinition = (chartAst.states["items.work"] as Extract<ChartAst["states"][string], { kind: "state" }>)
+			.action;
 		const gateDefinition = (chartAst.states.gate as Extract<ChartAst["states"][string], { kind: "state" }>).action;
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: firstInstances }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: firstInstances, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: itemUid, definition: itemDefinition, ...baseRecord(3) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: itemUid,
+				definition: itemDefinition,
+				...baseRecord(3),
+			},
 			{ type: "state_action", kind: "complete", actionUid: itemUid, event: { type: "DONE" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: secondItemUid, definition: itemDefinition, ...baseRecord(5) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: secondItemUid,
+				definition: itemDefinition,
+				...baseRecord(5),
+			},
 			{ type: "state_action", kind: "complete", actionUid: secondItemUid, event: { type: "DONE" }, ...baseRecord(6) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: gateUid, definition: gateDefinition, ...baseRecord(7) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: gateUid,
+				definition: gateDefinition,
+				...baseRecord(7),
+			},
 			{ type: "state_action", kind: "complete", actionUid: gateUid, event: { type: "REDO" }, ...baseRecord(8) },
 			{ type: "spawned", path: "items", instances: secondInstances, ...baseRecord(9) },
 		];
@@ -1605,19 +1823,67 @@ describe("React runtime adapter", () => {
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "items#a.work"), definition: worker.action, ...baseRecord(3) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#a.work"), event: { type: "DONE" }, ...baseRecord(4) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(5) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "gate"), event: { type: "REDO" }, ...baseRecord(6) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "items#a.work"),
+				definition: worker.action,
+				...baseRecord(3),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "items#a.work"),
+				event: { type: "DONE" },
+				...baseRecord(4),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "gate"),
+				definition: gate.action,
+				...baseRecord(5),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "gate"),
+				event: { type: "REDO" },
+				...baseRecord(6),
+			},
 			{ type: "spawned", path: "items", instances: { b: "Beta" }, ...baseRecord(7) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "items#b.work"), definition: worker.action, ...baseRecord(8) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "items#b.work"), event: { type: "DONE" }, ...baseRecord(9) },
-			{ type: "state_action", kind: "invoke",
-				sessionId: "session-id", actionUid: actionUid(chartAst, "gate"), definition: gate.action, ...baseRecord(10) },
-			{ type: "state_action", kind: "complete", actionUid: actionUid(chartAst, "gate"), event: { type: "PASS" }, ...baseRecord(11) },
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "items#b.work"),
+				definition: worker.action,
+				...baseRecord(8),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "items#b.work"),
+				event: { type: "DONE" },
+				...baseRecord(9),
+			},
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: actionUid(chartAst, "gate"),
+				definition: gate.action,
+				...baseRecord(10),
+			},
+			{
+				type: "state_action",
+				kind: "complete",
+				actionUid: actionUid(chartAst, "gate"),
+				event: { type: "PASS" },
+				...baseRecord(11),
+			},
 		];
 
 		const mapState = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records).states.find(
@@ -1691,34 +1957,36 @@ describe("React runtime adapter", () => {
 			states: { idle: receive({ on: { PING: "settle" } }), settle: reply({ target: "idle" }) },
 		});
 		const worker = Worker({});
-		const chartAst = ast(chart({
-			kind: "chart",
-			id: "nested-map-actor-owner",
-			args: { outer: {} },
-			initial: "outer",
-			states: {
-				outer: map({
-					over: arg("outer"),
-					initial: "inner",
-					onDone: "done",
-					states: {
-						inner: map({
-							over: item("inner"),
-							actors: { worker },
-							initial: "work",
-							onDone: "finished",
-							states: {
-								work: { kind: "state", action: agent("nested-worker"), transitions: { DONE: "done" } },
-								ping: send({ to: worker, event: "PING", input: {}, target: "done" }),
-								done: final(),
-							},
-						}),
-						finished: final(),
-					},
-				}),
-				done: final(),
-			},
-		}));
+		const chartAst = ast(
+			chart({
+				kind: "chart",
+				id: "nested-map-actor-owner",
+				args: { outer: {} },
+				initial: "outer",
+				states: {
+					outer: map({
+						over: arg("outer"),
+						initial: "inner",
+						onDone: "done",
+						states: {
+							inner: map({
+								over: item("inner"),
+								actors: { worker },
+								initial: "work",
+								onDone: "finished",
+								states: {
+									work: { kind: "state", action: agent("nested-worker"), transitions: { DONE: "done" } },
+									ping: send({ to: worker, event: "PING", input: {}, target: "done" }),
+									done: final(),
+								},
+							}),
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
 		const declaration = chartAst.actors["outer.inner.@worker"];
 		if (declaration === undefined) throw new Error("missing nested actor declaration");
 		const records: DurableLogRecord[] = [

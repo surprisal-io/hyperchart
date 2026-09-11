@@ -1,5 +1,22 @@
 import { z } from "zod";
-import { actor, arg, agent, call, chart, compound, final, map, message, parallel, protocol, receive, reply, script, sendBatch, tsAction } from "../../core/dsl.js";
+import {
+	actor,
+	arg,
+	agent,
+	call,
+	chart,
+	compound,
+	final,
+	map,
+	message,
+	parallel,
+	protocol,
+	receive,
+	reply,
+	script,
+	sendBatch,
+	tsAction,
+} from "../../core/dsl.js";
 import type { DurableLogRecord } from "../../core/durable_events.js";
 import { createMachine, type Effect, type MachineEvent } from "../../core/machine.js";
 import { normalizeChartConfig } from "../../core/normalize.js";
@@ -24,7 +41,11 @@ const Worker = actor({
 	initial: "idle",
 	states: {
 		idle: receive({ on: { WORK: "process" } }),
-		process: { kind: "state", action: agent("actor-worker", { task: "Process the accepted actor message." }), transitions: { DONE: "respond" } },
+		process: {
+			kind: "state",
+			action: agent("actor-worker", { task: "Process the accepted actor message." }),
+			transitions: { DONE: "respond" },
+		},
 		respond: reply({ target: "idle", event: "COMPLETED", output: { item: "processed", accepted: true } }),
 	},
 });
@@ -39,7 +60,11 @@ const cst = chart({
 	actors: { worker },
 	initial: "plan",
 	states: {
-		plan: { kind: "state", action: agent("planner", { task: "Plan the execution." }), transitions: { DONE: "prepare" } },
+		plan: {
+			kind: "state",
+			action: agent("planner", { task: "Plan the execution." }),
+			transitions: { DONE: "prepare" },
+		},
 		prepare: { kind: "state", action: script("node", ["scripts/prepare.mjs"]), transitions: { DONE: "score" } },
 		score: { kind: "state", action: tsAction("./actions/score.ts", "score"), transitions: { DONE: "fanout" } },
 		fanout: parallel({
@@ -47,16 +72,32 @@ const cst = chart({
 				research: compound({
 					initial: "collect",
 					states: {
-						collect: { kind: "state", action: agent("parallel-researcher", { task: "Collect evidence in parallel." }), transitions: { DONE: "summarize" } },
-						summarize: { kind: "state", action: script("node", ["scripts/summarize.mjs"]), transitions: { DONE: "done" } },
+						collect: {
+							kind: "state",
+							action: agent("parallel-researcher", { task: "Collect evidence in parallel." }),
+							transitions: { DONE: "summarize" },
+						},
+						summarize: {
+							kind: "state",
+							action: script("node", ["scripts/summarize.mjs"]),
+							transitions: { DONE: "done" },
+						},
 						done: final(),
 					},
 				}),
 				evaluation: compound({
 					initial: "measure",
 					states: {
-						measure: { kind: "state", action: tsAction("./actions/measure.ts", "measure"), transitions: { DONE: "review" } },
-						review: { kind: "state", action: agent("parallel-reviewer", { task: "Review metrics in parallel." }), transitions: { DONE: "done" } },
+						measure: {
+							kind: "state",
+							action: tsAction("./actions/measure.ts", "measure"),
+							transitions: { DONE: "review" },
+						},
+						review: {
+							kind: "state",
+							action: agent("parallel-reviewer", { task: "Review metrics in parallel." }),
+							transitions: { DONE: "done" },
+						},
 						done: final(),
 					},
 				}),
@@ -69,9 +110,21 @@ const cst = chart({
 			initial: "research",
 			onDone: "dispatch",
 			states: {
-				research: { kind: "state", action: agent("researcher", { task: "Research this map item." }), transitions: { DONE: "transform" } },
-				transform: { kind: "state", action: script("node", ["scripts/transform.mjs"]), transitions: { DONE: "evaluate" } },
-				evaluate: { kind: "state", action: tsAction("./actions/evaluate.ts", "evaluate"), transitions: { DONE: "done" } },
+				research: {
+					kind: "state",
+					action: agent("researcher", { task: "Research this map item." }),
+					transitions: { DONE: "transform" },
+				},
+				transform: {
+					kind: "state",
+					action: script("node", ["scripts/transform.mjs"]),
+					transitions: { DONE: "evaluate" },
+				},
+				evaluate: {
+					kind: "state",
+					action: tsAction("./actions/evaluate.ts", "evaluate"),
+					transitions: { DONE: "done" },
+				},
 				done: final(),
 			},
 		}),
@@ -87,7 +140,11 @@ const cst = chart({
 			input: { item: "final" },
 			transitions: { COMPLETED: "publish" },
 		}),
-		publish: { kind: "state", action: agent("publisher", { task: "Publish the final result." }), transitions: { DONE: "done" } },
+		publish: {
+			kind: "state",
+			action: agent("publisher", { task: "Publish the final result." }),
+			transitions: { DONE: "done" },
+		},
 		done: final(),
 	},
 });
@@ -106,23 +163,36 @@ class ExecutionBoardRuntime implements Runtime {
 		this.projection = createBranchProjection(ast);
 	}
 
-	async loadAst() { return this.ast; }
-	async loadProjection() { return this.projection; }
+	async loadAst() {
+		return this.ast;
+	}
+	async loadProjection() {
+		return this.projection;
+	}
 
 	async runEffects(effects: Effect[]) {
 		for (const effect of effects) {
 			switch (effect.kind) {
 				case "durable_records": {
-					const records = effect.records.map((draft): DurableLogRecord => ({
-						...draft,
-						seqId: ++this.seqId,
-						parentId: this.seqId === 1 ? null : this.seqId - 1,
-						branchId: "main",
-						timestamp: 1_700_200_000_000 + this.seqId * 1_000,
-					}) as DurableLogRecord);
+					const records = effect.records.map(
+						(draft): DurableLogRecord =>
+							({
+								...draft,
+								seqId: ++this.seqId,
+								parentId: this.seqId === 1 ? null : this.seqId - 1,
+								branchId: "main",
+								timestamp: 1_700_200_000_000 + this.seqId * 1_000,
+							}) as DurableLogRecord,
+					);
 					this.records.push(...records);
 					if (effect.id === "args") projectBranch(this.projection, this.ast, records);
-					if (records.some((record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "publish")) throw new CaptureComplete();
+					if (
+						records.some(
+							(record) =>
+								record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "publish",
+						)
+					)
+						throw new CaptureComplete();
 					this.push({ kind: "durable_records_added", effectId: effect.id, records });
 					break;
 				}
@@ -141,7 +211,8 @@ class ExecutionBoardRuntime implements Runtime {
 					this.push({
 						kind: "actor_effect",
 						effectId: effect.id,
-						operation: effect.kind === "actor_create" ? "create" : effect.kind === "actor_enqueue" ? "enqueue" : "reply",
+						operation:
+							effect.kind === "actor_create" ? "create" : effect.kind === "actor_enqueue" ? "enqueue" : "reply",
 						ok: true,
 					});
 					break;
@@ -178,7 +249,18 @@ async function capture(): Promise<HyperchartRunInfo> {
 	const normalized = normalizeChartConfig(cst, { path: "storybook:complete-execution" });
 	if (!normalized.ok) throw new Error(normalized.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const runtime = new ExecutionBoardRuntime(normalized.ast);
-	await runtime.runEffects([{ kind: "durable_records", id: "args", records: [{ type: "args", args: { items: { alpha: { value: 1 }, beta: { value: 2 }, gamma: { value: 3 }, delta: { value: 4 } } } }] }]);
+	await runtime.runEffects([
+		{
+			kind: "durable_records",
+			id: "args",
+			records: [
+				{
+					type: "args",
+					args: { items: { alpha: { value: 1 }, beta: { value: 2 }, gamma: { value: 3 }, delta: { value: 4 } } },
+				},
+			],
+		},
+	]);
 	const semantic = { machineState: () => createMachine(normalized.ast, structuredClone(runtime.projection)) };
 	try {
 		await loop(runtime, semantic);
@@ -186,20 +268,30 @@ async function capture(): Promise<HyperchartRunInfo> {
 		if (!(error instanceof CaptureComplete)) throw error;
 	}
 	const replay = explainReplay(normalized.ast, runtime.records);
-	if (replay.broken !== undefined || replay.prefixEnd !== runtime.records.length || replay.skipped.length > 0 || replay.stale.length > 0) {
+	if (
+		replay.broken !== undefined ||
+		replay.prefixEnd !== runtime.records.length ||
+		replay.skipped.length > 0 ||
+		replay.stale.length > 0
+	) {
 		throw new Error(`Execution board failed replay validation: ${JSON.stringify(replay)}`);
 	}
-	return hyperchartRunFromRuntime(inspectChartAst(normalized.ast, { chartPath: "storybook:complete-execution" }), normalized.ast, runtime.records, {
-		runId: "storybook:complete-execution",
-		status: {
+	return hyperchartRunFromRuntime(
+		inspectChartAst(normalized.ast, { chartPath: "storybook:complete-execution" }),
+		normalized.ast,
+		runtime.records,
+		{
 			runId: "storybook:complete-execution",
-			chartId: normalized.ast.id,
-			state: "running",
-			startedAt: 1_700_200_000_000,
+			status: {
+				runId: "storybook:complete-execution",
+				chartId: normalized.ast.id,
+				state: "running",
+				startedAt: 1_700_200_000_000,
+				updatedAt: 1_700_200_100_000,
+			},
+			cwd: "/storybook/executed-fixture",
+			createdAt: 1_700_200_000_000,
 			updatedAt: 1_700_200_100_000,
 		},
-		cwd: "/storybook/executed-fixture",
-		createdAt: 1_700_200_000_000,
-		updatedAt: 1_700_200_100_000,
-	});
+	);
 }

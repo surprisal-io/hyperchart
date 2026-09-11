@@ -58,16 +58,8 @@ function samplePolyline(points: ElkPoint[], count: number): ElkPoint[] {
 function cubicPoint(t: number, start: ElkPoint, controlA: ElkPoint, controlB: ElkPoint, end: ElkPoint): ElkPoint {
 	const inverse = 1 - t;
 	return {
-		x:
-			inverse ** 3 * start.x +
-			3 * inverse ** 2 * t * controlA.x +
-			3 * inverse * t ** 2 * controlB.x +
-			t ** 3 * end.x,
-		y:
-			inverse ** 3 * start.y +
-			3 * inverse ** 2 * t * controlA.y +
-			3 * inverse * t ** 2 * controlB.y +
-			t ** 3 * end.y,
+		x: inverse ** 3 * start.x + 3 * inverse ** 2 * t * controlA.x + 3 * inverse * t ** 2 * controlB.x + t ** 3 * end.x,
+		y: inverse ** 3 * start.y + 3 * inverse ** 2 * t * controlA.y + 3 * inverse * t ** 2 * controlB.y + t ** 3 * end.y,
 	};
 }
 

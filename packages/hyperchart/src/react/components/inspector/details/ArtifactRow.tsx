@@ -32,7 +32,9 @@ export function ArtifactRow({
 	const Icon = kind === "join" ? RectangleStackIcon : ArchiveBoxIcon;
 	const content = (
 		<>
-			<span className={`flex w-max items-center gap-1 whitespace-nowrap font-mono text-[10px] ${accent ? "text-[var(--hc-purple-text)]" : "text-[var(--text-secondary)]"}`}>
+			<span
+				className={`flex w-max items-center gap-1 whitespace-nowrap font-mono text-[10px] ${accent ? "text-[var(--hc-purple-text)]" : "text-[var(--text-secondary)]"}`}
+			>
 				{kind !== undefined && (
 					<TypeTooltip text={ICON_TOOLTIPS[kind]}>
 						<span data-hyperchart-tooltip-isolated data-artifact-read-kind={kind} className="inline-flex">
@@ -42,16 +44,27 @@ export function ArtifactRow({
 				)}
 				<span>{label}</span>
 			</span>
-			{detail !== undefined && <span className="w-max whitespace-nowrap font-mono text-[9px] text-[var(--text-muted)]">{detail}</span>}
+			{detail !== undefined && (
+				<span className="w-max whitespace-nowrap font-mono text-[9px] text-[var(--text-muted)]">{detail}</span>
+			)}
 		</>
 	);
-	const box = accent ? "border-purple-500/20 bg-purple-500/5" : "border-[var(--border-secondary)] bg-[var(--bg-tertiary)]";
-	const trigger = onClick !== undefined ? (
-		<button type="button" onClick={onClick} className={`flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border px-2 py-1.5 text-left hover:bg-purple-500/10 ${box}`}>
-			{content}
-		</button>
-	) : (
-		<div className={`flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border px-2 py-1.5 ${box}`}>{content}</div>
-	);
+	const box = accent
+		? "border-purple-500/20 bg-purple-500/5"
+		: "border-[var(--border-secondary)] bg-[var(--bg-tertiary)]";
+	const trigger =
+		onClick !== undefined ? (
+			<button
+				type="button"
+				onClick={onClick}
+				className={`flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border px-2 py-1.5 text-left hover:bg-purple-500/10 ${box}`}
+			>
+				{content}
+			</button>
+		) : (
+			<div className={`flex w-full min-w-0 flex-col items-start overflow-x-auto rounded border px-2 py-1.5 ${box}`}>
+				{content}
+			</div>
+		);
 	return typeText === undefined ? trigger : <TypeTooltip text={typeText}>{trigger}</TypeTooltip>;
 }

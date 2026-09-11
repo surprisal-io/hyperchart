@@ -11,9 +11,7 @@ const resources = {
 		["assets/readme/architecture.svg", "packages/pi-hyperchart/assets/readme/architecture.svg"],
 		["skills/pi", "packages/pi-hyperchart/skills/hyperchart"],
 	],
-	claude: [
-		["skills/claude", "packages/claude-hyperchart/skills/hyperchart"],
-	],
+	claude: [["skills/claude", "packages/claude-hyperchart/skills/hyperchart"]],
 };
 
 if ((command !== "stage" && command !== "clean") || !(packageName in resources)) {

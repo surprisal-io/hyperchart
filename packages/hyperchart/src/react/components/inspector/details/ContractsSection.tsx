@@ -25,7 +25,10 @@ export function ContractsSection({
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
 }) {
-	const contractStates = contractStatesForSelection(state, allStates, highlightedReply, [...revealedReplyStateIds, ...revealedArtifactStateIds]);
+	const contractStates = contractStatesForSelection(state, allStates, highlightedReply, [
+		...revealedReplyStateIds,
+		...revealedArtifactStateIds,
+	]);
 	if (contractStates.length === 0) return null;
 	return (
 		<Section
@@ -40,7 +43,9 @@ export function ContractsSection({
 						allStates={allStates}
 						showStateName={contractState.id !== state.id || contractStates.length > 1}
 						{...(contractState.id === highlightedReply?.stateId ? { highlightedReplyPath: highlightedReply.path } : {})}
-						{...(contractState.id === highlightedArtifact?.stateId ? { highlightedArtifactName: highlightedArtifact.name } : {})}
+						{...(contractState.id === highlightedArtifact?.stateId
+							? { highlightedArtifactName: highlightedArtifact.name }
+							: {})}
 						{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 						{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 						{...(onHighlightRef === undefined ? {} : { onHighlightRef })}

@@ -93,11 +93,13 @@ describe("ArtifactStore", () => {
 
 		await expect(store.put(join(dir, "does-not-exist"))).rejects.toThrow();
 
-		const pin = await store.put(await (async () => {
-			const path = join(dir, "later.txt");
-			await writeFile(path, "x");
-			return path;
-		})());
+		const pin = await store.put(
+			await (async () => {
+				const path = join(dir, "later.txt");
+				await writeFile(path, "x");
+				return path;
+			})(),
+		);
 		expect(await store.has(pin.hash)).toBe(true);
 	});
 });

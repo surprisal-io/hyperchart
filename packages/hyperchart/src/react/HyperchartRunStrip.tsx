@@ -73,16 +73,14 @@ const MemoizedHyperchartRunStrip = memo(function MemoizedHyperchartRunStrip({
 
 	if (!run) return null;
 
-	const progress = "states" in run
-		? summarizeHyperchartProgress(run)
-		: run.progressDone !== undefined && run.progressTotal !== undefined && run.progressPercent !== undefined
-			? { pct: run.progressPercent }
-			: undefined;
-	const running = "states" in run
-		? runningHyperchartStates(run)
-		: run.activeState === undefined
-			? []
-			: [{ id: run.activeState }];
+	const progress =
+		"states" in run
+			? summarizeHyperchartProgress(run)
+			: run.progressDone !== undefined && run.progressTotal !== undefined && run.progressPercent !== undefined
+				? { pct: run.progressPercent }
+				: undefined;
+	const running =
+		"states" in run ? runningHyperchartStates(run) : run.activeState === undefined ? [] : [{ id: run.activeState }];
 	const runningCount = "states" in run ? running.length : (run.activeStateCount ?? running.length);
 	const hiddenRunningCount = Math.max(0, runningCount - Math.min(3, running.length));
 	const usage = formatHyperchartUsage(run.totalUsage);

@@ -57,28 +57,28 @@ async function seed(f: ReturnType<typeof fixture>) {
 }
 
 describe("runId storage identity", () => {
-	it.each(["run-id", "sha256"] as const)(
-		"addresses metadata and deferred history in declared %s layout",
-		async (layout) => {
-			const f = fixture(layout);
-			const source = await withRunStorage(f.storage, async () => {
-				await seed(f);
-				expect((await loadRunMeta(f.runId)).runId).toBe(f.runId);
-				expect(await listRunIds()).toEqual([f.runId]);
-				expect((await hyperchartRunFromRunId(f.runId)).runId).toBe(f.runId);
-				return createRunInspectorDataSource(f.runId);
-			});
-			const foreign = fixture(layout);
-			await withRunStorage(foreign.storage, async () => {
-				expect((await source.listBranches({ runId: f.runId })).items[0]?.branchId).toBe("main");
-				await expect(loadRunMeta(f.runId)).rejects.toMatchObject({ code: "ENOENT" });
-			});
-			await expect(source.listBranches({ runId: "wrong-id" })).rejects.toThrow("bound to run");
-			expect(basename(resolveRunPaths(f.runId, f.storage).runDir)).toEqual(
-				layout === "run-id" ? f.runId : expect.stringMatching(/^[a-f0-9]{64}$/),
-			);
-		},
-	);
+	it.each([
+		"run-id",
+		"sha256",
+	] as const)("addresses metadata and deferred history in declared %s layout", async (layout) => {
+		const f = fixture(layout);
+		const source = await withRunStorage(f.storage, async () => {
+			await seed(f);
+			expect((await loadRunMeta(f.runId)).runId).toBe(f.runId);
+			expect(await listRunIds()).toEqual([f.runId]);
+			expect((await hyperchartRunFromRunId(f.runId)).runId).toBe(f.runId);
+			return createRunInspectorDataSource(f.runId);
+		});
+		const foreign = fixture(layout);
+		await withRunStorage(foreign.storage, async () => {
+			expect((await source.listBranches({ runId: f.runId })).items[0]?.branchId).toBe("main");
+			await expect(loadRunMeta(f.runId)).rejects.toMatchObject({ code: "ENOENT" });
+		});
+		await expect(source.listBranches({ runId: "wrong-id" })).rejects.toThrow("bound to run");
+		expect(basename(resolveRunPaths(f.runId, f.storage).runDir)).toEqual(
+			layout === "run-id" ? f.runId : expect.stringMatching(/^[a-f0-9]{64}$/),
+		);
+	});
 	it("preserves old literal metadata bytes without adding a required serialized identity", async () => {
 		const f = fixture("run-id");
 		const { runDir } = resolveRunPaths(f.runId, f.storage);

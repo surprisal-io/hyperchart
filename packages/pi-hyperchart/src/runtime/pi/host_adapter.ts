@@ -1,9 +1,18 @@
-import { assertRunId, listRunIds, resolveRunPaths, withRunStorage, type RunStorage } from "@surprisal/hyperchart/runtime";
+import {
+	assertRunId,
+	listRunIds,
+	resolveRunPaths,
+	withRunStorage,
+	type RunStorage,
+} from "@surprisal/hyperchart/runtime";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 import * as ts from "typescript";
-import { inspectChartModuleSync, type HyperchartInspectAgentDefaults } from "@surprisal/hyperchart/internal/core/inspect";
+import {
+	inspectChartModuleSync,
+	type HyperchartInspectAgentDefaults,
+} from "@surprisal/hyperchart/internal/core/inspect";
 import { createRunInspectorDataSource, hyperchartRunOverviewFromRunId } from "@surprisal/hyperchart/inspect";
 import type {
 	HyperchartHostAdapter,
@@ -11,14 +20,23 @@ import type {
 	HyperchartSnapshotOptions,
 } from "@surprisal/hyperchart/host";
 import { hyperchartRunFromInspectResult } from "@surprisal/hyperchart/host";
-import type { HyperchartInfo, HyperchartRunInfo, HyperchartRunSummaryInfo, HyperchartSummaryInfo } from "@surprisal/hyperchart/host";
+import type {
+	HyperchartInfo,
+	HyperchartRunInfo,
+	HyperchartRunSummaryInfo,
+	HyperchartSummaryInfo,
+} from "@surprisal/hyperchart/host";
 import { loadRunMeta, type RunMeta } from "@surprisal/hyperchart/runtime";
-import { getHyperchartRunsRoot, getProjectHyperchartsDir, getSharedHyperchartsDir, listProjectHypercharts } from "./paths.js";
+import {
+	getHyperchartRunsRoot,
+	getProjectHyperchartsDir,
+	getSharedHyperchartsDir,
+	listProjectHypercharts,
+} from "./paths.js";
 import { createAgentDefaultsResolver } from "./agent_definitions.js";
 import { createPiFileTranscriptReader } from "./run_inspect.js";
 import { createAsyncGate, createAsyncMemo, type AsyncMemo } from "./async_gate.js";
 import { readRunStatus, type HyperchartRunStatus } from "@surprisal/hyperchart/sessions";
-
 
 export interface PiHyperchartHostOptions {
 	storage?: RunStorage;
@@ -37,17 +55,24 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 	// Promise caching also coalesces simultaneous cwd snapshots across backends.
 	const readRunMeta = createAsyncMemo(limitedRunMetaRead);
 	const agentDir = resolve(options.agentDir ?? defaultAgentDir());
-	const storage: RunStorage = options.storage ?? { kind: "jsonl", rootDir: getHyperchartRunsRoot(agentDir), layout: "run-id" };
-	const dataSourceFor = (runId: string) => createRunInspectorDataSource(runId, {
-		readTranscript: createPiFileTranscriptReader(runId),
-	});
+	const storage: RunStorage = options.storage ?? {
+		kind: "jsonl",
+		rootDir: getHyperchartRunsRoot(agentDir),
+		layout: "run-id",
+	};
+	const dataSourceFor = (runId: string) =>
+		createRunInspectorDataSource(runId, {
+			readTranscript: createPiFileTranscriptReader(runId),
+		});
 
 	const adapter: HyperchartHostAdapter = {
 		readSessionSnapshot: (cwd, snapshotOptions = {}) =>
 			readSessionSnapshot(resolve(cwd), agentDir, snapshotOptions, failedRunMetaFingerprints, readRunMeta),
 		readChartSnapshot: async (cwd, chartName) => {
 			const resolvedCwd = resolve(cwd);
-			const chart = (await discoverHypercharts(resolvedCwd, agentDir)).find((candidate) => candidate.name === chartName);
+			const chart = (await discoverHypercharts(resolvedCwd, agentDir)).find(
+				(candidate) => candidate.name === chartName,
+			);
 			if (chart === undefined) return undefined;
 			return readChart(chart.source, chart.root, chart.scope, resolvedCwd, agentDir, options.agentDefaults);
 		},
@@ -69,10 +94,14 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 		cursorAt: async (input) => (await dataSourceFor(input.runId)).cursorAt(input),
 		readVisitSession: async (input) => (await dataSourceFor(input.runId)).readVisitSession(input),
 	};
-	return new Proxy(adapter, { get(target, key) {
-		const value = Reflect.get(target, key, target) as unknown;
-		return typeof value === "function" ? (...args: unknown[]) => withRunStorage(storage, () => value.apply(target, args)) : value;
-	} });
+	return new Proxy(adapter, {
+		get(target, key) {
+			const value = Reflect.get(target, key, target) as unknown;
+			return typeof value === "function"
+				? (...args: unknown[]) => withRunStorage(storage, () => value.apply(target, args))
+				: value;
+		},
+	});
 }
 
 export const piHyperchartHost: HyperchartHostAdapter = createPiHyperchartHost();
@@ -160,7 +189,8 @@ function inspectLiteralChartModule(text: string, source: string): { name?: strin
 	if (definition === undefined) return undefined;
 	const id = propertyInitializer(definition, "id");
 	const states = propertyInitializer(definition, "states");
-	const name = id !== undefined && (ts.isStringLiteral(id) || ts.isNoSubstitutionTemplateLiteral(id)) ? id.text : undefined;
+	const name =
+		id !== undefined && (ts.isStringLiteral(id) || ts.isNoSubstitutionTemplateLiteral(id)) ? id.text : undefined;
 	const stateCount = states === undefined ? undefined : countLiteralStates(states, sourceFile);
 	return {
 		...(name === undefined ? {} : { name }),
@@ -179,7 +209,11 @@ function literalObject(expression: ts.Expression, sourceFile: ts.SourceFile): ts
 		for (const statement of sourceFile.statements) {
 			if (!ts.isVariableStatement(statement)) continue;
 			for (const declaration of statement.declarationList.declarations) {
-				if (ts.isIdentifier(declaration.name) && declaration.name.text === unwrapped.text && declaration.initializer !== undefined) {
+				if (
+					ts.isIdentifier(declaration.name) &&
+					declaration.name.text === unwrapped.text &&
+					declaration.initializer !== undefined
+				) {
 					return literalObject(declaration.initializer, sourceFile);
 				}
 			}
@@ -214,14 +248,16 @@ function propertyInitializer(object: ts.ObjectLiteralExpression, name: string): 
 		if (
 			(ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName) || ts.isNumericLiteral(propertyName)) &&
 			propertyName.text === name
-		) initializer = unwrapExpression(property.initializer);
+		)
+			initializer = unwrapExpression(property.initializer);
 	}
 	return initializer;
 }
 
 function countLiteralStates(expression: ts.Expression, sourceFile: ts.SourceFile): number | undefined {
 	const states = literalObject(expression, sourceFile);
-	if (states === undefined || states.properties.some((property) => !ts.isPropertyAssignment(property))) return undefined;
+	if (states === undefined || states.properties.some((property) => !ts.isPropertyAssignment(property)))
+		return undefined;
 	let count = states.properties.length;
 	for (const property of states.properties) {
 		if (!ts.isPropertyAssignment(property)) return undefined;
@@ -279,7 +315,9 @@ async function readRuns(
 	failedRunMetaFingerprints: Map<string, string>,
 	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartRunSummaryInfo[]> {
-	const runs = await Promise.all((await listRunIds()).map((runId) => readRunSummary(runId, cwd, failedRunMetaFingerprints, readRunMeta)));
+	const runs = await Promise.all(
+		(await listRunIds()).map((runId) => readRunSummary(runId, cwd, failedRunMetaFingerprints, readRunMeta)),
+	);
 
 	return runs
 		.filter((run): run is HyperchartRunSummaryInfo => run !== undefined)
@@ -308,7 +346,7 @@ async function readRunSummary(
 	const persistedStatus = readRunStatus(runId);
 	const metaCreatedAt = Date.parse(meta.createdAt);
 	const createdAt = persistedStatus?.startedAt ?? (Number.isFinite(metaCreatedAt) ? metaCreatedAt : 0);
-	const updatedAt = persistedStatus?.updatedAt ?? await runUpdatedAt(runId, createdAt);
+	const updatedAt = persistedStatus?.updatedAt ?? (await runUpdatedAt(runId, createdAt));
 	return {
 		runId: runId,
 		chartName: persistedStatus?.chartId ?? meta.chartId,
@@ -326,13 +364,18 @@ async function readRunSummary(
 
 function summaryRunStatus(status: HyperchartRunStatus | undefined): HyperchartRunInfo["status"] {
 	switch (status?.state) {
-		case "complete": return "completed";
-		case "failed": return "failed";
+		case "complete":
+			return "completed";
+		case "failed":
+			return "failed";
 		case "stopped":
-		case "stopping": return "paused";
+		case "stopping":
+			return "paused";
 		case "starting":
-		case "running": return "running";
-		default: return "blocked";
+		case "running":
+			return "running";
+		default:
+			return "blocked";
 	}
 }
 

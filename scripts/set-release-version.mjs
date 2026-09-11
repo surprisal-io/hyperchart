@@ -86,26 +86,14 @@ lockfile.packages["packages/claude-hyperchart"].version = version;
 lockfile.packages["packages/claude-hyperchart"].dependencies[coreManifest.name] = version;
 
 replaceExact("package.json", `"version": "${current}"`, `"version": "${version}"`);
-replaceExact(
-	"packages/hyperchart/package.json",
-	`"version": "${current}"`,
-	`"version": "${version}"`,
-);
-replaceExact(
-	"packages/pi-hyperchart/package.json",
-	`"version": "${current}"`,
-	`"version": "${version}"`,
-);
+replaceExact("packages/hyperchart/package.json", `"version": "${current}"`, `"version": "${version}"`);
+replaceExact("packages/pi-hyperchart/package.json", `"version": "${current}"`, `"version": "${version}"`);
 replaceExact(
 	"packages/pi-hyperchart/package.json",
 	`"${coreManifest.name}": "${current}"`,
 	`"${coreManifest.name}": "${version}"`,
 );
-replaceExact(
-	"packages/claude-hyperchart/package.json",
-	`"version": "${current}"`,
-	`"version": "${version}"`,
-);
+replaceExact("packages/claude-hyperchart/package.json", `"version": "${current}"`, `"version": "${version}"`);
 replaceExact(
 	"packages/claude-hyperchart/package.json",
 	`"${coreManifest.name}": "${current}"`,
@@ -118,25 +106,18 @@ replaceExact(
 );
 writeJson("package-lock.json", lockfile);
 replaceExact("README.md", `experimental version ${current}`, `experimental version ${version}`);
-replaceExact(
-	"packages/hyperchart/README.md",
-	`experimental \`${current}\``,
-	`experimental \`${version}\``,
-);
-replaceExact(
-	"packages/pi-hyperchart/README.md",
-	`experimental \`${current}\``,
-	`experimental \`${version}\``,
-);
+replaceExact("packages/hyperchart/README.md", `experimental \`${current}\``, `experimental \`${version}\``);
+replaceExact("packages/pi-hyperchart/README.md", `experimental \`${current}\``, `experimental \`${version}\``);
 
 console.log(`Updated release version ${current} -> ${version}.`);
 
 function isValidVersion(value) {
-	const match = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);
+	const match =
+		/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+			value,
+		);
 	if (!match) return false;
-	return !match[1]
-		?.split(".")
-		.some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith("0"));
+	return !match[1]?.split(".").some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith("0"));
 }
 
 function readJson(path) {

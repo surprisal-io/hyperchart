@@ -7,11 +7,22 @@ import type { HyperchartRunInfo, HyperchartStateInfo } from "../packages/hyperch
 import { HyperchartInspectorSidePanel } from "../packages/hyperchart/src/react/components/inspector/HyperchartInspectorSidePanel.js";
 import { HyperchartInspectorDialog } from "../packages/hyperchart/src/react/HyperchartInspectorDialog.js";
 import { runningRun } from "../packages/hyperchart/src/react/fixtures/hyperchart-fixtures.js";
-import { RuntimeSection, useTargetCursor } from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
+import {
+	RuntimeSection,
+	useTargetCursor,
+} from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
 import { MapVisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/MapVisitHistory.js";
 import { VisitHistory } from "../packages/hyperchart/src/react/components/inspector/details/VisitHistory.js";
-import { HISTORY_PLAIN_LIST_ITEMS, HISTORY_PREFETCH_ITEMS, HISTORY_VIRTUAL_OVERSCAN, VirtualizedHistoryList } from "../packages/hyperchart/src/react/components/inspector/history/VirtualizedHistoryList.js";
-import { mergeHistoryWindow, useHistoryWindow } from "../packages/hyperchart/src/react/components/inspector/history/useHistoryWindow.js";
+import {
+	HISTORY_PLAIN_LIST_ITEMS,
+	HISTORY_PREFETCH_ITEMS,
+	HISTORY_VIRTUAL_OVERSCAN,
+	VirtualizedHistoryList,
+} from "../packages/hyperchart/src/react/components/inspector/history/VirtualizedHistoryList.js";
+import {
+	mergeHistoryWindow,
+	useHistoryWindow,
+} from "../packages/hyperchart/src/react/components/inspector/history/useHistoryWindow.js";
 import type { HistoryChunk, HistoryCursor } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 
 const snapshot = { branchId: "main", headSeqId: 20_000 } as const;
@@ -20,35 +31,68 @@ const originalScrollTo = HTMLElement.prototype.scrollTo;
 
 beforeAll(() => {
 	Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 320 });
-	Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return Number.parseFloat((this.firstElementChild as HTMLElement | null)?.style.height ?? "320") || 320; } });
+	Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+		configurable: true,
+		get() {
+			return Number.parseFloat((this.firstElementChild as HTMLElement | null)?.style.height ?? "320") || 320;
+		},
+	});
 	HTMLElement.prototype.getBoundingClientRect = function () {
 		const key = this.getAttribute("data-history-row");
 		const height = this.classList.contains("overflow-auto") ? 320 : key !== null && Number(key) % 3 === 0 ? 140 : 52;
 		return { x: 0, y: 0, width: 800, height, top: 0, right: 800, bottom: height, left: 0, toJSON() {} };
 	};
-	HTMLElement.prototype.scrollTo = function (first?: number | ScrollToOptions, second?: number) { this.scrollTop = typeof first === "number" ? second ?? 0 : first?.top ?? 0; };
-	vi.stubGlobal("ResizeObserver", class {
-		constructor(private readonly callback: ResizeObserverCallback) {}
-		observe(target: Element) { this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver); }
-		unobserve() {}
-		disconnect() {}
-	});
+	HTMLElement.prototype.scrollTo = function (first?: number | ScrollToOptions, second?: number) {
+		this.scrollTop = typeof first === "number" ? (second ?? 0) : (first?.top ?? 0);
+	};
+	vi.stubGlobal(
+		"ResizeObserver",
+		class {
+			constructor(private readonly callback: ResizeObserverCallback) {}
+			observe(target: Element) {
+				this.callback(
+					[{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry],
+					this as unknown as ResizeObserver,
+				);
+			}
+			unobserve() {}
+			disconnect() {}
+		},
+	);
 });
 afterEach(() => cleanup());
-afterAll(() => { HTMLElement.prototype.getBoundingClientRect = originalRect; HTMLElement.prototype.scrollTo = originalScrollTo; vi.unstubAllGlobals(); });
+afterAll(() => {
+	HTMLElement.prototype.getBoundingClientRect = originalRect;
+	HTMLElement.prototype.scrollTo = originalScrollTo;
+	vi.unstubAllGlobals();
+});
 
-function rows(start: number, count: number) { return Array.from({ length: count }, (_, index) => ({ id: start + index })); }
+function rows(start: number, count: number) {
+	return Array.from({ length: count }, (_, index) => ({ id: start + index }));
+}
 const RowHistoryList = VirtualizedHistoryList<{ id: number }>;
 
 function pagedChunk(page: number): HistoryChunk<{ id: number }> {
-	return { snapshot, items: rows(page * 100, 100), ...(page < 19 ? { older: `page:${page + 1}` } : {}), ...(page > 0 ? { newer: `page:${page - 1}` } : {}) };
+	return {
+		snapshot,
+		items: rows(page * 100, 100),
+		...(page < 19 ? { older: `page:${page + 1}` } : {}),
+		...(page > 0 ? { newer: `page:${page - 1}` } : {}),
+	};
 }
 
 describe("interactive bounded history", () => {
 	it("loads both directions, evicts above 1,000, and reloads the evicted edge", async () => {
 		const calls: Array<HistoryCursor | undefined> = [];
-		const source = { load: async (cursor?: HistoryCursor) => { calls.push(cursor); return pagedChunk(cursor === undefined ? 0 : Number(cursor.split(":")[1])); } };
-		const { result } = renderHook(() => useHistoryWindow({ cacheKey: "main:head", source, identity: (item) => String(item.id) }));
+		const source = {
+			load: async (cursor?: HistoryCursor) => {
+				calls.push(cursor);
+				return pagedChunk(cursor === undefined ? 0 : Number(cursor.split(":")[1]));
+			},
+		};
+		const { result } = renderHook(() =>
+			useHistoryWindow({ cacheKey: "main:head", source, identity: (item) => String(item.id) }),
+		);
 		await waitFor(() => expect(result.current.window.items).toHaveLength(100));
 		for (let page = 1; page <= 11; page++) await act(() => result.current.loadOlder());
 		expect(result.current.window.items).toHaveLength(1_000);
@@ -66,15 +110,29 @@ describe("interactive bounded history", () => {
 		expect(HISTORY_PREFETCH_ITEMS).toBeGreaterThanOrEqual(40);
 		expect(HISTORY_PLAIN_LIST_ITEMS).toBe(40);
 		const source = { load: async () => ({ snapshot, items: rows(0, 6) }) };
-		render(createElement(RowHistoryList, { cacheKey: "short", source, identity: (item: { id: number }) => String(item.id), renderItem: (item: { id: number }) => createElement("div", null, item.id) }));
+		render(
+			createElement(RowHistoryList, {
+				cacheKey: "short",
+				source,
+				identity: (item: { id: number }) => String(item.id),
+				renderItem: (item: { id: number }) => createElement("div", null, item.id),
+			}),
+		);
 		const list = await screen.findByTestId("virtualized-history");
 		expect(list.getAttribute("data-history-layout")).toBe("plain");
 	});
 
 	it("drops stale responses across subject, snapshot, and branch cache changes", async () => {
 		const resolvers = new Map<string, (chunk: HistoryChunk<{ id: number }>) => void>();
-		const source = { load: (cursor?: HistoryCursor) => new Promise<HistoryChunk<{ id: number }>>((resolve) => resolvers.set(cursor ?? "initial", resolve)) };
-		const { result, rerender } = renderHook(({ cacheKey, cursor }) => useHistoryWindow({ cacheKey, source, identity: (item) => String(item.id), initialCursor: cursor }), { initialProps: { cacheKey: "run:main:1:state:a", cursor: "old" } });
+		const source = {
+			load: (cursor?: HistoryCursor) =>
+				new Promise<HistoryChunk<{ id: number }>>((resolve) => resolvers.set(cursor ?? "initial", resolve)),
+		};
+		const { result, rerender } = renderHook(
+			({ cacheKey, cursor }) =>
+				useHistoryWindow({ cacheKey, source, identity: (item) => String(item.id), initialCursor: cursor }),
+			{ initialProps: { cacheKey: "run:main:1:state:a", cursor: "old" } },
+		);
 		rerender({ cacheKey: "run:fork:2:state:b", cursor: "new" });
 		await act(async () => resolvers.get("new")?.({ snapshot: { branchId: "fork", headSeqId: 2 }, items: [{ id: 2 }] }));
 		await waitFor(() => expect(result.current.window.items).toEqual([{ id: 2 }]));
@@ -84,12 +142,25 @@ describe("interactive bounded history", () => {
 
 	it("stops automatic edge retries until the explicit Retry action", async () => {
 		let calls = 0;
-		const source = { load: async (cursor?: HistoryCursor) => {
-			calls += 1;
-			if (cursor !== undefined && calls <= 2) throw new Error("persistent edge failure");
-			return { snapshot, items: cursor === undefined ? rows(0, 8) : rows(8, 2), ...(cursor === undefined ? { older: "older" } : {}) };
-		} };
-		render(createElement(RowHistoryList, { cacheKey: "retry", source, identity: (item: { id: number }) => String(item.id), renderItem: (item: { id: number }) => createElement("div", null, item.id) }));
+		const source = {
+			load: async (cursor?: HistoryCursor) => {
+				calls += 1;
+				if (cursor !== undefined && calls <= 2) throw new Error("persistent edge failure");
+				return {
+					snapshot,
+					items: cursor === undefined ? rows(0, 8) : rows(8, 2),
+					...(cursor === undefined ? { older: "older" } : {}),
+				};
+			},
+		};
+		render(
+			createElement(RowHistoryList, {
+				cacheKey: "retry",
+				source,
+				identity: (item: { id: number }) => String(item.id),
+				renderItem: (item: { id: number }) => createElement("div", null, item.id),
+			}),
+		);
 		const list = await screen.findByTestId("virtualized-history");
 		expect(list.getAttribute("data-history-layout")).toBe("virtual");
 		expect(list.innerHTML).not.toContain("translateY");
@@ -107,13 +178,28 @@ describe("interactive bounded history", () => {
 
 	it("refreshes a production RuntimeSection after older pages without changing the selected state subject", async () => {
 		const calls: Array<{ stateId: string; headSeqId: number; cursor?: HistoryCursor }> = [];
-		const visitRows = (start: number, count = 8) => Array.from({ length: count }, (_, index) => ({ visit: start + index, invokeSeqId: start + index, startedAt: start + index, status: "done" as const, invocation: { kind: "script" as const, command: "node", args: ["-e", "process.exit(0)"] } }));
+		const visitRows = (start: number, count = 8) =>
+			Array.from({ length: count }, (_, index) => ({
+				visit: start + index,
+				invokeSeqId: start + index,
+				startedAt: start + index,
+				status: "done" as const,
+				invocation: { kind: "script" as const, command: "node", args: ["-e", "process.exit(0)"] },
+			}));
 		const dataSource = {
 			readStateVisits: vi.fn(async (input: { stateId: string; snapshot: typeof snapshot; cursor?: HistoryCursor }) => {
-				calls.push({ stateId: input.stateId, headSeqId: input.snapshot.headSeqId, ...(input.cursor === undefined ? {} : { cursor: input.cursor }) });
+				calls.push({
+					stateId: input.stateId,
+					headSeqId: input.snapshot.headSeqId,
+					...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+				});
 				return input.cursor === undefined
 					? { snapshot: input.snapshot, items: visitRows(input.snapshot.headSeqId), older: "older:selected-work" }
-					: { snapshot: input.snapshot, items: visitRows(input.snapshot.headSeqId - 100), newer: "newer:selected-work" };
+					: {
+							snapshot: input.snapshot,
+							items: visitRows(input.snapshot.headSeqId - 100),
+							newer: "newer:selected-work",
+						};
 			}),
 			readVisitSession: vi.fn(),
 		} as unknown as HyperchartInspectorDataSource;
@@ -122,24 +208,33 @@ describe("interactive bounded history", () => {
 		const rendered = render(createElement(RuntimeSection, { state, history: firstHistory }));
 		fireEvent.click(rendered.getByRole("button", { name: /Runtime/ }));
 		await rendered.findByTestId("virtualized-history");
-		await waitFor(() => expect(calls).toEqual([
-			{ stateId: "selected-work", headSeqId: 200 },
-			{ stateId: "selected-work", headSeqId: 200, cursor: "older:selected-work" },
-		]));
+		await waitFor(() =>
+			expect(calls).toEqual([
+				{ stateId: "selected-work", headSeqId: 200 },
+				{ stateId: "selected-work", headSeqId: 200, cursor: "older:selected-work" },
+			]),
+		);
 
 		const refreshedHistory = { runId: "run", snapshot: { branchId: "main", headSeqId: 300 } as const, dataSource };
 		rendered.rerender(createElement(RuntimeSection, { state, history: refreshedHistory }));
-		await waitFor(() => expect(calls).toEqual([
-			{ stateId: "selected-work", headSeqId: 200 },
-			{ stateId: "selected-work", headSeqId: 200, cursor: "older:selected-work" },
-			{ stateId: "selected-work", headSeqId: 300 },
-		]));
+		await waitFor(() =>
+			expect(calls).toEqual([
+				{ stateId: "selected-work", headSeqId: 200 },
+				{ stateId: "selected-work", headSeqId: 200, cursor: "older:selected-work" },
+				{ stateId: "selected-work", headSeqId: 300 },
+			]),
+		);
 		expect(calls.every((call) => call.stateId === "selected-work")).toBe(true);
 		expect(rendered.getByTestId("virtualized-history").getAttribute("data-retained-items")).toBe("8");
 	});
 
 	it("keeps resolved map items while exposing lazy launch history separately", async () => {
-		const state = { id: "items", type: "map" as const, status: "running" as const, mapConfig: { items: [{ key: "a", label: "Resolved Alpha", value: { result: "kept" } }] } };
+		const state = {
+			id: "items",
+			type: "map" as const,
+			status: "running" as const,
+			mapConfig: { items: [{ key: "a", label: "Resolved Alpha", value: { result: "kept" } }] },
+		};
 		const history = { runId: "run", snapshot, dataSource: {} as HyperchartInspectorDataSource };
 		const rendered = render(createElement(RuntimeSection, { state, history }));
 		fireEvent.click(rendered.getByRole("button", { name: /Runtime/ }));
@@ -148,7 +243,11 @@ describe("interactive bounded history", () => {
 	});
 
 	it("keeps map visits closed and unmounted until expanded", () => {
-		const rendered = render(createElement(MapVisitHistory, { visits: [{ visit: 1, spawnSeqId: 9, startedAt: 1, instances: { a: { title: "Alpha" } } }] }));
+		const rendered = render(
+			createElement(MapVisitHistory, {
+				visits: [{ visit: 1, spawnSeqId: 9, startedAt: 1, instances: { a: { title: "Alpha" } } }],
+			}),
+		);
 		expect(rendered.queryByText("spawn seq 9")).toBeNull();
 		const details = rendered.container.querySelector("details");
 		if (details === null) throw new Error("map visit details missing");
@@ -158,9 +257,19 @@ describe("interactive bounded history", () => {
 	});
 
 	it("does not mount expensive visit details until the row is expanded", () => {
-		const visit = { visit: 1, invokeSeqId: 7, startedAt: 1, endedAt: 2, status: "done" as const, completedEvent: "DONE", invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] } };
+		const visit = {
+			visit: 1,
+			invokeSeqId: 7,
+			startedAt: 1,
+			endedAt: 2,
+			status: "done" as const,
+			completedEvent: "DONE",
+			invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] },
+		};
 		const state = { id: "work", type: "script" as const, status: "done" as const };
-		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], lazyDetails: true }));
+		const rendered = render(
+			createElement(VisitHistory, { visits: [visit], state, allStates: [state], lazyDetails: true }),
+		);
 		expect(rendered.queryByText("completed event")).toBeNull();
 		const details = rendered.container.querySelector("details");
 		if (details === null) throw new Error("visit details missing");
@@ -170,9 +279,25 @@ describe("interactive bounded history", () => {
 	});
 
 	it("opens and highlights the exact selected invocation", () => {
-		const visit = { visit: 2, invokeSeqId: 17, startedAt: 1, endedAt: 2, status: "done" as const, completedEvent: "DONE", invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] } };
+		const visit = {
+			visit: 2,
+			invokeSeqId: 17,
+			startedAt: 1,
+			endedAt: 2,
+			status: "done" as const,
+			completedEvent: "DONE",
+			invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] },
+		};
 		const state = { id: "work", type: "script" as const, status: "done" as const };
-		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], lazyDetails: true, selectedInvokeSeqId: 17 }));
+		const rendered = render(
+			createElement(VisitHistory, {
+				visits: [visit],
+				state,
+				allStates: [state],
+				lazyDetails: true,
+				selectedInvokeSeqId: 17,
+			}),
+		);
 		const details = rendered.container.querySelector("details");
 		expect(details?.open).toBe(true);
 		expect(details?.getAttribute("aria-current")).toBe("true");
@@ -180,10 +305,20 @@ describe("interactive bounded history", () => {
 	});
 
 	it("clicks an unfolded execution node through to the exact invocation details", async () => {
-		render(createElement(HyperchartInspectorDialog, { runs: [runningRun], selectedRunId: runningRun.runId, initialCanvasMode: "execution", onClose: vi.fn(), portal: (children) => children }));
+		render(
+			createElement(HyperchartInspectorDialog, {
+				runs: [runningRun],
+				selectedRunId: runningRun.runId,
+				initialCanvasMode: "execution",
+				onClose: vi.fn(),
+				portal: (children) => children,
+			}),
+		);
 		await waitFor(() => expect(document.querySelector('[data-id="visit-2"]')).not.toBeNull());
 		fireEvent.click(document.querySelector('[data-id="visit-2"]')!);
-		await waitFor(() => expect(document.querySelector('details[aria-current="true"]')?.getAttribute("open")).not.toBeNull());
+		await waitFor(() =>
+			expect(document.querySelector('details[aria-current="true"]')?.getAttribute("open")).not.toBeNull(),
+		);
 		expect(screen.getByText("completed event")).toBeTruthy();
 	});
 
@@ -193,45 +328,51 @@ describe("interactive bounded history", () => {
 		const dataSource = {
 			readRecords: vi.fn(async ({ snapshot: requested }: { snapshot: typeof firstSnapshot | typeof nextSnapshot }) => ({
 				snapshot: requested,
-				items: [{
-					seqId: requested.headSeqId,
-					parentId: requested.headSeqId - 1,
-					branchId: "main",
-					type: "state_action",
-					timestamp: requested.headSeqId,
-					record: { type: "state_action", kind: "invoke", actionUid: { state: "visual-review" } },
-					actionVisit: {
-						visit: 1,
-						invokeSeqId: requested.headSeqId,
-						originBranchId: "main",
-						startedAt: requested.headSeqId,
-						status: "running",
-						invocation: { kind: "agent" },
+				items: [
+					{
+						seqId: requested.headSeqId,
+						parentId: requested.headSeqId - 1,
+						branchId: "main",
+						type: "state_action",
+						timestamp: requested.headSeqId,
+						record: { type: "state_action", kind: "invoke", actionUid: { state: "visual-review" } },
+						actionVisit: {
+							visit: 1,
+							invokeSeqId: requested.headSeqId,
+							originBranchId: "main",
+							startedAt: requested.headSeqId,
+							status: "running",
+							invocation: { kind: "agent" },
+						},
 					},
-				}],
+				],
 			})),
 		} as unknown as HyperchartInspectorDataSource;
 		const firstRun = { ...runningRun, branchId: "main", historySnapshot: firstSnapshot };
-		const rendered = render(createElement(HyperchartInspectorDialog, {
-			runs: [firstRun],
-			selectedRunId: firstRun.runId,
-			initialCanvasMode: "execution",
-			historyDataSource: dataSource,
-			onClose: vi.fn(),
-			portal: (children) => children,
-		}));
+		const rendered = render(
+			createElement(HyperchartInspectorDialog, {
+				runs: [firstRun],
+				selectedRunId: firstRun.runId,
+				initialCanvasMode: "execution",
+				historyDataSource: dataSource,
+				onClose: vi.fn(),
+				portal: (children) => children,
+			}),
+		);
 		await waitFor(() => expect(document.querySelector('[data-id="visit-8"]')).not.toBeNull());
 		const flow = rendered.container.querySelector(".react-flow");
 		expect(flow).not.toBeNull();
 
-		rendered.rerender(createElement(HyperchartInspectorDialog, {
-			runs: [{ ...firstRun, historySnapshot: nextSnapshot, updatedAt: firstRun.updatedAt + 1 }],
-			selectedRunId: firstRun.runId,
-			initialCanvasMode: "execution",
-			historyDataSource: dataSource,
-			onClose: vi.fn(),
-			portal: (children) => children,
-		}));
+		rendered.rerender(
+			createElement(HyperchartInspectorDialog, {
+				runs: [{ ...firstRun, historySnapshot: nextSnapshot, updatedAt: firstRun.updatedAt + 1 }],
+				selectedRunId: firstRun.runId,
+				initialCanvasMode: "execution",
+				historyDataSource: dataSource,
+				onClose: vi.fn(),
+				portal: (children) => children,
+			}),
+		);
 		await act(async () => undefined);
 
 		expect(dataSource.readRecords).toHaveBeenCalledTimes(1);
@@ -240,11 +381,32 @@ describe("interactive bounded history", () => {
 	});
 
 	it("propagates an exact embedded visit through the side panel without a lazy data source", () => {
-		const selected = { visit: 1, invokeSeqId: 27, originBranchId: "main", startedAt: 1, endedAt: 2, status: "done" as const, completedEvent: "DONE", invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] } };
+		const selected = {
+			visit: 1,
+			invokeSeqId: 27,
+			originBranchId: "main",
+			startedAt: 1,
+			endedAt: 2,
+			status: "done" as const,
+			completedEvent: "DONE",
+			invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] },
+		};
 		const other = { ...selected, visit: 2, invokeSeqId: 28, completedEvent: "OTHER" };
 		const state: HyperchartStateInfo = { id: "work", type: "script", status: "done", visitHistory: [selected, other] };
-		const run: HyperchartRunInfo = { runId: "embedded", chartName: "embedded", status: "completed", cwd: "/tmp", createdAt: 1, updatedAt: 2, args: {}, states: [state], stateCount: 1 };
-		const rendered = render(createElement(HyperchartInspectorSidePanel, { run, selectedStateId: "work", selectedInvokeSeqId: 27 }));
+		const run: HyperchartRunInfo = {
+			runId: "embedded",
+			chartName: "embedded",
+			status: "completed",
+			cwd: "/tmp",
+			createdAt: 1,
+			updatedAt: 2,
+			args: {},
+			states: [state],
+			stateCount: 1,
+		};
+		const rendered = render(
+			createElement(HyperchartInspectorSidePanel, { run, selectedStateId: "work", selectedInvokeSeqId: 27 }),
+		);
 		const current = rendered.container.querySelector<HTMLDetailsElement>('details[aria-current="true"]');
 		expect(current?.open).toBe(true);
 		expect(rendered.getByRole("button", { name: "Runtime" }).getAttribute("aria-expanded")).toBe("true");
@@ -253,8 +415,24 @@ describe("interactive bounded history", () => {
 	});
 
 	it("reveals and opens an exact actor-internal visit from an older generation", async () => {
-		const selected = { visit: 2, invokeSeqId: 44, originBranchId: "main", startedAt: 1, endedAt: 2, status: "done" as const, completedEvent: "DONE", invocation: { kind: "agent" as const } };
-		const latest = { visit: 3, invokeSeqId: 45, originBranchId: "main", startedAt: 3, status: "running" as const, invocation: { kind: "agent" as const } };
+		const selected = {
+			visit: 2,
+			invokeSeqId: 44,
+			originBranchId: "main",
+			startedAt: 1,
+			endedAt: 2,
+			status: "done" as const,
+			completedEvent: "DONE",
+			invocation: { kind: "agent" as const },
+		};
+		const latest = {
+			visit: 3,
+			invokeSeqId: 45,
+			originBranchId: "main",
+			startedAt: 3,
+			status: "running" as const,
+			invocation: { kind: "agent" as const },
+		};
 		const state: HyperchartStateInfo = {
 			id: "workers.process",
 			type: "agent",
@@ -263,13 +441,29 @@ describe("interactive bounded history", () => {
 				declarationPath: "workers",
 				localState: "process",
 				generations: [
-					{ occurrencePath: "@workers-generation-1", logicalPath: "workers", generation: 1, actorStatus: "stopped", stateStatus: "done", visitHistory: [selected] },
-					{ occurrencePath: "@workers-generation-2", logicalPath: "workers", generation: 2, actorStatus: "busy", stateStatus: "running", visitHistory: [latest] },
+					{
+						occurrencePath: "@workers-generation-1",
+						logicalPath: "workers",
+						generation: 1,
+						actorStatus: "stopped",
+						stateStatus: "done",
+						visitHistory: [selected],
+					},
+					{
+						occurrencePath: "@workers-generation-2",
+						logicalPath: "workers",
+						generation: 2,
+						actorStatus: "busy",
+						stateStatus: "running",
+						visitHistory: [latest],
+					},
 				],
 			},
 		};
 		const rendered = render(createElement(RuntimeSection, { state, selectedInvokeSeqId: 44 }));
-		await waitFor(() => expect(rendered.container.querySelector<HTMLDetailsElement>('details[aria-current="true"]')?.open).toBe(true));
+		await waitFor(() =>
+			expect(rendered.container.querySelector<HTMLDetailsElement>('details[aria-current="true"]')?.open).toBe(true),
+		);
 		expect(rendered.queryByRole("button", { name: "Hide history" })).toBeNull();
 		expect(rendered.getByRole("button", { name: "workers · generation 1" })).toBeTruthy();
 		expect(rendered.getByText("Visit 2")).toBeTruthy();
@@ -283,14 +477,16 @@ describe("interactive bounded history", () => {
 			id: "work",
 			type: "script",
 			status: "done",
-			visitHistory: [{
-				visit: 1,
-				invokeSeqId: 7,
-				startedAt: 1,
-				endedAt: 2,
-				status: "done",
-				invocation: { kind: "script", command: "true", args: [] },
-			}],
+			visitHistory: [
+				{
+					visit: 1,
+					invokeSeqId: 7,
+					startedAt: 1,
+					endedAt: 2,
+					status: "done",
+					invocation: { kind: "script", command: "true", args: [] },
+				},
+			],
 		};
 		const history = {
 			runId: "run",
@@ -305,10 +501,23 @@ describe("interactive bounded history", () => {
 	});
 
 	it("loads a visit transcript only when its session is opened", async () => {
-		const readVisitSession = vi.fn().mockResolvedValue({ actionKey: "chart:work:agent", status: "completed", messages: [{ role: "assistant", text: "on demand transcript" }] });
-		const visit = { visit: 1, invokeSeqId: 7, originBranchId: "main", startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const } };
+		const readVisitSession = vi.fn().mockResolvedValue({
+			actionKey: "chart:work:agent",
+			status: "completed",
+			messages: [{ role: "assistant", text: "on demand transcript" }],
+		});
+		const visit = {
+			visit: 1,
+			invokeSeqId: 7,
+			originBranchId: "main",
+			startedAt: 1,
+			status: "done" as const,
+			invocation: { kind: "agent" as const },
+		};
 		const state = { id: "work", type: "agent" as const, status: "done" as const };
-		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], onReadSession: readVisitSession }));
+		const rendered = render(
+			createElement(VisitHistory, { visits: [visit], state, allStates: [state], onReadSession: readVisitSession }),
+		);
 		expect(readVisitSession).not.toHaveBeenCalled();
 		fireEvent.click(rendered.getByRole("button", { name: "View session for visit 1" }));
 		await waitFor(() => expect(readVisitSession).toHaveBeenCalledWith(7, "main"));
@@ -317,12 +526,30 @@ describe("interactive bounded history", () => {
 
 	it("shows per-invocation transcript rejection and retries exactly once to recovery", async () => {
 		let rejectFirst: ((error: Error) => void) | undefined;
-		const readVisitSession = vi.fn()
-			.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectFirst = reject; }))
-			.mockResolvedValueOnce({ actionKey: "chart:work:agent", status: "completed", messages: [{ role: "assistant", text: "recovered transcript" }] });
-		const visit = { visit: 1, invokeSeqId: 17, startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const } };
+		const readVisitSession = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise((_resolve, reject) => {
+						rejectFirst = reject;
+					}),
+			)
+			.mockResolvedValueOnce({
+				actionKey: "chart:work:agent",
+				status: "completed",
+				messages: [{ role: "assistant", text: "recovered transcript" }],
+			});
+		const visit = {
+			visit: 1,
+			invokeSeqId: 17,
+			startedAt: 1,
+			status: "done" as const,
+			invocation: { kind: "agent" as const },
+		};
 		const state = { id: "work", type: "agent" as const, status: "done" as const };
-		const rendered = render(createElement(VisitHistory, { visits: [visit], state, allStates: [state], onReadSession: readVisitSession }));
+		const rendered = render(
+			createElement(VisitHistory, { visits: [visit], state, allStates: [state], onReadSession: readVisitSession }),
+		);
 		fireEvent.click(rendered.getByRole("button", { name: "View session for visit 1" }));
 		expect(rendered.getByRole("status").textContent).toBe("Loading transcript…");
 		fireEvent.click(rendered.getByRole("button", { name: "View session for visit 1" }));
@@ -341,13 +568,27 @@ describe("interactive bounded history", () => {
 
 	it("reports cursor lookup rejection and succeeds only after explicit retry", async () => {
 		let calls = 0;
-		const dataSource = { cursorAt: async () => { calls += 1; if (calls === 1) throw new Error("lookup offline"); return "cursor:9"; } } as unknown as HyperchartInspectorDataSource;
+		const dataSource = {
+			cursorAt: async () => {
+				calls += 1;
+				if (calls === 1) throw new Error("lookup offline");
+				return "cursor:9";
+			},
+		} as unknown as HyperchartInspectorDataSource;
 		const history = { runId: "run", snapshot, dataSource, targetSeqId: 9 };
 		const { result } = renderHook(() => useTargetCursor(history, { kind: "state-visits", state: "work" }));
-		await waitFor(() => expect(result.current.ready && "error" in result.current ? result.current.error : undefined).toBe("lookup offline"));
+		await waitFor(() =>
+			expect(result.current.ready && "error" in result.current ? result.current.error : undefined).toBe(
+				"lookup offline",
+			),
+		);
 		expect(calls).toBe(1);
-		act(() => { if ("retry" in result.current) result.current.retry(); });
-		await waitFor(() => expect(result.current.ready && "cursor" in result.current ? result.current.cursor : undefined).toBe("cursor:9"));
+		act(() => {
+			if ("retry" in result.current) result.current.retry();
+		});
+		await waitFor(() =>
+			expect(result.current.ready && "cursor" in result.current ? result.current.cursor : undefined).toBe("cursor:9"),
+		);
 		expect(calls).toBe(2);
 	});
 });

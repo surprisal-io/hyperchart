@@ -46,7 +46,10 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 	if (!live) assertStoppedRun(opts.runId, "rewinding");
 	await assertRunOwnership(opts.runId, opts.cwd);
 	const meta = await loadRunMeta(opts.runId);
-	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
+	const parsed = parseChartModuleSync(
+		meta.chartPath,
+		meta.exportName === undefined ? {} : { exportName: meta.exportName },
+	);
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 
 	const store = await openRunLogStore(opts.runId, { branchId: opts.branchId, access: live ? "read" : "writer" });
@@ -59,10 +62,24 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 			throw new Error(`Rewind would not move branch '${opts.branchId}'; choose a different target`);
 		}
 		if (!live) {
-			const semantic = await BranchExecution.restore({ ast: parsed.ast, branchId: opts.branchId, store, saveCheckpoint: "never", snapshot: { branchId: opts.branchId, headSeqId: match.targetHeadSeqId } });
+			const semantic = await BranchExecution.restore({
+				ast: parsed.ast,
+				branchId: opts.branchId,
+				store,
+				saveCheckpoint: "never",
+				snapshot: { branchId: opts.branchId, headSeqId: match.targetHeadSeqId },
+			});
 			const checkpoint = semantic.prepareExactCheckpoint(match.targetHeadSeqId);
-			const moved = await store.moveBranch(opts.branchId, match.targetHeadSeqId, checkpoint === undefined ? undefined : { checkpoint });
-			moveCommit = { moveSeqId: moved.moveSeqId, previousHeadSeqId: moved.previousHeadSeqId, preservedRecords: moved.preservedRecords };
+			const moved = await store.moveBranch(
+				opts.branchId,
+				match.targetHeadSeqId,
+				checkpoint === undefined ? undefined : { checkpoint },
+			);
+			moveCommit = {
+				moveSeqId: moved.moveSeqId,
+				previousHeadSeqId: moved.previousHeadSeqId,
+				preservedRecords: moved.preservedRecords,
+			};
 		}
 	} finally {
 		await store.close();

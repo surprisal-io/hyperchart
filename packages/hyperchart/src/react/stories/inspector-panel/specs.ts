@@ -8,7 +8,8 @@ import {
 	chart,
 	compound,
 	event,
-	final, failed,
+	final,
+	failed,
 	input,
 	joinArtifactOf,
 	json,
@@ -34,7 +35,12 @@ import {
 	mailboxReentryChart,
 	mailboxReentryRecords,
 } from "../../fixtures/actor-runtime-fixtures.js";
-import { actorPoolChart, actorPoolCrowdedChart, actorPoolCrowdedRecords, actorSelfChart } from "../../fixtures/actor-fixtures.js";
+import {
+	actorPoolChart,
+	actorPoolCrowdedChart,
+	actorPoolCrowdedRecords,
+	actorSelfChart,
+} from "../../fixtures/actor-fixtures.js";
 
 export type InspectorPanelRuntime = {
 	selectedStateId: StatePath | null;
@@ -51,7 +57,18 @@ export type InspectorPanelRuntime = {
 };
 
 export type InspectorPanelGroupId =
-	| "overview" | "agent" | "actorDefinitions" | "actorMessaging" | "actorRuntime" | "user" | "script" | "tsImport" | "map" | "parallel" | "compound" | "final";
+	| "overview"
+	| "agent"
+	| "actorDefinitions"
+	| "actorMessaging"
+	| "actorRuntime"
+	| "user"
+	| "script"
+	| "tsImport"
+	| "map"
+	| "parallel"
+	| "compound"
+	| "final";
 
 export type InspectorPanelSpecInput = {
 	group: InspectorPanelGroupId;
@@ -65,82 +82,85 @@ export type InspectorPanelSpecInput = {
 
 export type InspectorPanelSpec = InspectorPanelSpecInput;
 
-export const inspectorPanelGroups: Array<{ id: InspectorPanelGroupId; title: string; description: string; storyId: string;
-}> =
-	[
-		{
-			id: "overview",
-			title: "Overview",
-			description: "No selected node: run-level arguments, activity, metadata, and chart definition.",
-			storyId: "hyperchart-visual-tests-inspector-panel--overview",
-		},
-		{
-			id: "agent",
-			title: "Agent states",
-			description: "Agent nodes: minimal, rich prompt, refs/re-entry, and validation guard variants.",
-			storyId: "hyperchart-visual-tests-inspector-panel--agent-states",
-		},
-		{
-			id: "actorDefinitions",
-			title: "Actor declarations & pools",
-			description: "Actor and pool declarations, placement inputs, protocols, workers, and pool backlog.",
-			storyId: "hyperchart-visual-tests-inspector-panel-actors--declarations-and-pools",
-		},
-		{
-			id: "actorMessaging",
-			title: "Actor messaging states",
-			description: "Actor-local prompts plus send, call, receive, reply, batch, and self-send states.",
-			storyId: "hyperchart-visual-tests-inspector-panel-actors--messaging-states",
-		},
-		{
-			id: "actorRuntime",
-			title: "Actor runtime & history",
-			description: "Materialized occurrences, mailboxes, re-entry generations, and retained receive/reply history.",
-			storyId: "hyperchart-visual-tests-inspector-panel-actors--runtime-and-history",
-		},
-		{
-			id: "user",
-			title: "User states",
-			description: "User-input states and their prompt/transition details.",
-			storyId: "hyperchart-visual-tests-inspector-panel--user-states",
-		},
-		{
-			id: "script",
-			title: "Script states",
-			description: "Script command arguments, env values, contracts, and skipped state.",
-			storyId: "hyperchart-visual-tests-inspector-panel--script-states",
-		},
-		{
-			id: "tsImport",
-			title: "Function actions",
-			description: "Trusted in-process module/export identity, parameter declarations, and contracts.",
-			storyId: "hyperchart-visual-tests-inspector-panel--function-actions",
-		},
-		{
-			id: "map",
-			title: "Map states",
-			description: "Map parent status plus mapped item worker details.",
-			storyId: "hyperchart-visual-tests-inspector-panel--map-states",
-		},
-		{
-			id: "parallel",
-			title: "Parallel states",
-			description: "Parallel fan-out state with branch progress/status.",
-			storyId: "hyperchart-visual-tests-inspector-panel--parallel-states",
-		},
-		{
-			id: "compound",
-			title: "Compound states",
-			description: "Compound scope state with nested agents/contracts, including branch scopes inside parallel.",
-			storyId: "hyperchart-visual-tests-inspector-panel--compound-states",
-		},
-		{
-			id: "final",
-			title: "Final states",
-			description: "Terminal state details.",
-			storyId: "hyperchart-visual-tests-inspector-panel--final-states",
-		},
-	];
+export const inspectorPanelGroups: Array<{
+	id: InspectorPanelGroupId;
+	title: string;
+	description: string;
+	storyId: string;
+}> = [
+	{
+		id: "overview",
+		title: "Overview",
+		description: "No selected node: run-level arguments, activity, metadata, and chart definition.",
+		storyId: "hyperchart-visual-tests-inspector-panel--overview",
+	},
+	{
+		id: "agent",
+		title: "Agent states",
+		description: "Agent nodes: minimal, rich prompt, refs/re-entry, and validation guard variants.",
+		storyId: "hyperchart-visual-tests-inspector-panel--agent-states",
+	},
+	{
+		id: "actorDefinitions",
+		title: "Actor declarations & pools",
+		description: "Actor and pool declarations, placement inputs, protocols, workers, and pool backlog.",
+		storyId: "hyperchart-visual-tests-inspector-panel-actors--declarations-and-pools",
+	},
+	{
+		id: "actorMessaging",
+		title: "Actor messaging states",
+		description: "Actor-local prompts plus send, call, receive, reply, batch, and self-send states.",
+		storyId: "hyperchart-visual-tests-inspector-panel-actors--messaging-states",
+	},
+	{
+		id: "actorRuntime",
+		title: "Actor runtime & history",
+		description: "Materialized occurrences, mailboxes, re-entry generations, and retained receive/reply history.",
+		storyId: "hyperchart-visual-tests-inspector-panel-actors--runtime-and-history",
+	},
+	{
+		id: "user",
+		title: "User states",
+		description: "User-input states and their prompt/transition details.",
+		storyId: "hyperchart-visual-tests-inspector-panel--user-states",
+	},
+	{
+		id: "script",
+		title: "Script states",
+		description: "Script command arguments, env values, contracts, and skipped state.",
+		storyId: "hyperchart-visual-tests-inspector-panel--script-states",
+	},
+	{
+		id: "tsImport",
+		title: "Function actions",
+		description: "Trusted in-process module/export identity, parameter declarations, and contracts.",
+		storyId: "hyperchart-visual-tests-inspector-panel--function-actions",
+	},
+	{
+		id: "map",
+		title: "Map states",
+		description: "Map parent status plus mapped item worker details.",
+		storyId: "hyperchart-visual-tests-inspector-panel--map-states",
+	},
+	{
+		id: "parallel",
+		title: "Parallel states",
+		description: "Parallel fan-out state with branch progress/status.",
+		storyId: "hyperchart-visual-tests-inspector-panel--parallel-states",
+	},
+	{
+		id: "compound",
+		title: "Compound states",
+		description: "Compound scope state with nested agents/contracts, including branch scopes inside parallel.",
+		storyId: "hyperchart-visual-tests-inspector-panel--compound-states",
+	},
+	{
+		id: "final",
+		title: "Final states",
+		description: "Terminal state details.",
+		storyId: "hyperchart-visual-tests-inspector-panel--final-states",
+	},
+];
 
 const longPrompt = [
 	"Write a detailed implementation note for the selected change.",
@@ -156,38 +176,48 @@ const longPrompt = [
 ].join("\n");
 
 const sectionMapSchema = z.record(z.string(), z.object({ title: z.string(), summary: z.string().optional() }));
-const writerReplySchema = z.object({
-	draft: z.string(),
-	review: z.object({
-		risks: z.array(z.string()),
-		evidence: z.array(z.object({ file: z.string(), line: z.number().int() })),
-		score: z.number(),
-	}),
-}).strict();
+const writerReplySchema = z
+	.object({
+		draft: z.string(),
+		review: z.object({
+			risks: z.array(z.string()),
+			evidence: z.array(z.object({ file: z.string(), line: z.number().int() })),
+			score: z.number(),
+		}),
+	})
+	.strict();
 const renderReplySchema = z.object({
 	ok: z.boolean(),
 	url: z.string().optional(),
 	sections: sectionMapSchema.optional(),
 });
 const reportDataSchema = z.object({ title: z.string(), sections: z.array(z.string()) });
-const richAgentContextSchema = z.object({
-	title: z.string().describe("Document title."),
-	risks: z.array(z.string()).describe("Known implementation risks."),
-	testCommands: z.array(z.string()).describe("Commands that verify the change."),
-}).describe("Implementation context the writer must read before starting.");
-const richAgentConventionsSchema = z.object({
-	style: z.enum(["concise", "detailed"]),
-	requiredSections: z.array(z.string()),
-}).describe("Writing conventions for the implementation note.");
-const richAgentNoteSchema = z.object({
-	summary: z.string(),
-	risks: z.array(z.string()),
-	verification: z.array(z.object({ command: z.string(), expected: z.string() })),
-}).describe("Structured implementation note produced by the writer.");
-const richAgentSourceBriefSchema = z.object({
-	source: z.string(),
-	findings: z.array(z.string()),
-}).describe("One source brief produced by a map instance.");
+const richAgentContextSchema = z
+	.object({
+		title: z.string().describe("Document title."),
+		risks: z.array(z.string()).describe("Known implementation risks."),
+		testCommands: z.array(z.string()).describe("Commands that verify the change."),
+	})
+	.describe("Implementation context the writer must read before starting.");
+const richAgentConventionsSchema = z
+	.object({
+		style: z.enum(["concise", "detailed"]),
+		requiredSections: z.array(z.string()),
+	})
+	.describe("Writing conventions for the implementation note.");
+const richAgentNoteSchema = z
+	.object({
+		summary: z.string(),
+		risks: z.array(z.string()),
+		verification: z.array(z.object({ command: z.string(), expected: z.string() })),
+	})
+	.describe("Structured implementation note produced by the writer.");
+const richAgentSourceBriefSchema = z
+	.object({
+		source: z.string(),
+		findings: z.array(z.string()),
+	})
+	.describe("One source brief produced by a map instance.");
 const scopedPlanSchema = z.object({ next: z.string().optional() });
 
 function panelChart(id: string, initial: string, states: ChartCst["states"]): ChartCst {
@@ -254,7 +284,10 @@ const STORY_RUNTIME_STARTED_AT = 1_700_000_000_000;
 const storyTimestamp = (seqId: number) => STORY_RUNTIME_STARTED_AT + seqId * 1_000;
 
 export function storyLog(args: Record<string, unknown> = { topic: "visual QA board" }): StoryLogBuilder {
-	return { records: [{ type: "args", args, parentId: null, seqId: 1, branchId: "main", timestamp: storyTimestamp(1) }], seq: 1 };
+	return {
+		records: [{ type: "args", args, parentId: null, seqId: 1, branchId: "main", timestamp: storyTimestamp(1) }],
+		seq: 1,
+	};
 }
 
 function storyActionUid(ast: ChartAst, statePath: StatePath): ActionUID {
@@ -274,17 +307,24 @@ function pushInvoke(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePat
 	builder.records.push({
 		type: "state_action",
 		kind: "invoke",
-			sessionId: "session-id",
+		sessionId: "session-id",
 		actionUid,
 		definition: storyActionDefinition(ast, statePath),
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		branchId: "main", timestamp: storyTimestamp(builder.seq),
+		branchId: "main",
+		timestamp: storyTimestamp(builder.seq),
 	});
 	return actionUid;
 }
 
-function pushComplete(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event: ChartEvent, artifacts?: Readonly<Record<string, ArtifactPin>>): void {
+function pushComplete(
+	builder: StoryLogBuilder,
+	ast: ChartAst,
+	statePath: StatePath,
+	event: ChartEvent,
+	artifacts?: Readonly<Record<string, ArtifactPin>>,
+): void {
 	builder.records.push({
 		type: "state_action",
 		kind: "complete",
@@ -293,18 +333,33 @@ function pushComplete(builder: StoryLogBuilder, ast: ChartAst, statePath: StateP
 		...(artifacts === undefined ? {} : { artifacts }),
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		branchId: "main", timestamp: storyTimestamp(builder.seq),
+		branchId: "main",
+		timestamp: storyTimestamp(builder.seq),
 	});
 }
 
-function pushAction(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, event?: ChartEvent, artifacts?: Readonly<Record<string, ArtifactPin>>): void {
+function pushAction(
+	builder: StoryLogBuilder,
+	ast: ChartAst,
+	statePath: StatePath,
+	event?: ChartEvent,
+	artifacts?: Readonly<Record<string, ArtifactPin>>,
+): void {
 	pushInvoke(builder, ast, statePath);
 	if (event !== undefined) pushComplete(builder, ast, statePath, event, artifacts);
 }
 
 function pushFailure(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, error: unknown): void {
 	pushInvoke(builder, ast, statePath);
-	builder.records.push({ type: "failure_intent", origin: statePath, error, parentId: builder.seq, seqId: ++builder.seq, branchId: "main", timestamp: storyTimestamp(builder.seq) });
+	builder.records.push({
+		type: "failure_intent",
+		origin: statePath,
+		error,
+		parentId: builder.seq,
+		seqId: ++builder.seq,
+		branchId: "main",
+		timestamp: storyTimestamp(builder.seq),
+	});
 }
 
 function pushValidated(
@@ -326,7 +381,8 @@ function pushValidated(
 		outcome: { ok: false, reason },
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		branchId: "main", timestamp: storyTimestamp(builder.seq),
+		branchId: "main",
+		timestamp: storyTimestamp(builder.seq),
 	});
 }
 
@@ -337,7 +393,8 @@ function pushSpawned(builder: StoryLogBuilder, path: StatePath, instances: Recor
 		instances,
 		parentId: builder.seq,
 		seqId: ++builder.seq,
-		branchId: "main", timestamp: storyTimestamp(builder.seq),
+		branchId: "main",
+		timestamp: storyTimestamp(builder.seq),
 	});
 }
 
@@ -360,33 +417,60 @@ function storyLiveSession(ast: ChartAst, statePath: StatePath): HyperchartRuntim
 				currentToolArgs: '{\n  "path": "src/react/session.tsx"\n}',
 				lastMessage: "I found the existing inspector styles and am wiring the live session view.",
 				messages: [
-					{ id: "m1", role: "user", text: "Add the live agent session view and keep it consistent with the inspector.", timestamp: 1_700_000_000_000 },
-					{ id: "m2", role: "assistant", text: "I’ll inspect the existing card and modal patterns first.", timestamp: 1_700_000_010_000 },
-					{ id: "m3", role: "tool", toolName: "read", text: "AgentInfoCard.tsx\nHyperchartInspectorDialogInner.tsx", timestamp: 1_700_000_020_000 },
-					{ id: "m4", role: "assistant", text: "The inspector already has the right portal and theme primitives. I’m reusing those and adding a compact transcript renderer.", timestamp: 1_700_000_040_000 },
+					{
+						id: "m1",
+						role: "user",
+						text: "Add the live agent session view and keep it consistent with the inspector.",
+						timestamp: 1_700_000_000_000,
+					},
+					{
+						id: "m2",
+						role: "assistant",
+						text: "I’ll inspect the existing card and modal patterns first.",
+						timestamp: 1_700_000_010_000,
+					},
+					{
+						id: "m3",
+						role: "tool",
+						toolName: "read",
+						text: "AgentInfoCard.tsx\nHyperchartInspectorDialogInner.tsx",
+						timestamp: 1_700_000_020_000,
+					},
+					{
+						id: "m4",
+						role: "assistant",
+						text: "The inspector already has the right portal and theme primitives. I’m reusing those and adding a compact transcript renderer.",
+						timestamp: 1_700_000_040_000,
+					},
 				],
 			},
 		},
 	};
 }
 
-function mapReviewRecords(ast: ChartAst, opts: { failRisk?: boolean; overflow?: boolean; complete?: boolean } = {}): DurableLogRecord[] {
+function mapReviewRecords(
+	ast: ChartAst,
+	opts: { failRisk?: boolean; overflow?: boolean; complete?: boolean } = {},
+): DurableLogRecord[] {
 	const b = storyLog();
-	const sections = opts.overflow === true
-		? Object.fromEntries(Array.from({ length: 14 }, (_, index) => [
-				`section-${index + 1}`,
-				{
-					title: `A deliberately long section title ${index + 1} that must remain bounded inside the resolved map input card`,
-					summary: `Verified evidence summary ${index + 1}. `.repeat(12),
-				},
-			]))
-		: opts.failRisk === true
-			? { risk: { title: "Risk", summary: "Citation gap" } }
-			: {
-					intro: { title: "Intro", summary: "Done" },
-					risk: { title: "Risk", summary: "Running" },
-					market: { title: "Market", summary: "Failed" },
-				};
+	const sections =
+		opts.overflow === true
+			? Object.fromEntries(
+					Array.from({ length: 14 }, (_, index) => [
+						`section-${index + 1}`,
+						{
+							title: `A deliberately long section title ${index + 1} that must remain bounded inside the resolved map input card`,
+							summary: `Verified evidence summary ${index + 1}. `.repeat(12),
+						},
+					]),
+				)
+			: opts.failRisk === true
+				? { risk: { title: "Risk", summary: "Citation gap" } }
+				: {
+						intro: { title: "Intro", summary: "Done" },
+						risk: { title: "Risk", summary: "Running" },
+						market: { title: "Market", summary: "Failed" },
+					};
 	pushAction(b, ast, "script-contracts", { type: "RENDERED", output: { sections } });
 	pushSpawned(b, "map-review", sections);
 	if (opts.failRisk === true) {
@@ -513,7 +597,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "agent",
 		title: "Rich agent",
-		description: "Definition-only agent card, short prompt, and run-specific live session inside Runtime alongside visits.",
+		description:
+			"Definition-only agent card, short prompt, and run-specific live session inside Runtime alongside visits.",
 		chart: panelChart("inspector-rich-agent", "prepare-context", {
 			"prepare-context": {
 				kind: "state",
@@ -630,7 +715,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "agent",
 		title: "Pinned deliverables",
-		description: "Completed visit showing the immutable content revisions (path, sha256, size) accepted with the completion.",
+		description:
+			"Completed visit showing the immutable content revisions (path, sha256, size) accepted with the completion.",
 		chart: panelChart("inspector-pinned-artifacts", "report-writer", {
 			"report-writer": {
 				kind: "state",
@@ -649,10 +735,22 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			selectedStateId: "report-writer",
 			records: (ast) => {
 				const b = storyLog();
-				pushAction(b, ast, "report-writer", { type: "DONE" }, {
-					"artifacts/findings-report.md": { hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", size: 18_324 },
-					"artifacts/findings-summary.json": { hash: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae", size: 96 },
-				});
+				pushAction(
+					b,
+					ast,
+					"report-writer",
+					{ type: "DONE" },
+					{
+						"artifacts/findings-report.md": {
+							hash: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+							size: 18_324,
+						},
+						"artifacts/findings-summary.json": {
+							hash: "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+							size: 96,
+						},
+					},
+				);
 				return b.records;
 			},
 		},
@@ -741,14 +839,16 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "actorMessaging",
 		title: "Actor-local prompt references",
-		description: "An actor action prompt with typed actorInput() plus JSON-wrapped messageInput() references to nested revision and policy objects.",
+		description:
+			"An actor action prompt with typed actorInput() plus JSON-wrapped messageInput() references to nested revision and policy objects.",
 		chart: actorInspectorChart,
 		runtime: { selectedStateId: "@editor.review" },
 	},
 	{
 		group: "actorRuntime",
 		title: "Mailbox across re-entry",
-		description: "A simple actor with two generations: processed messages in the first instance and a current plus queued message in the second.",
+		description:
+			"A simple actor with two generations: processed messages in the first instance and a current plus queued message in the second.",
 		chart: mailboxReentryChart,
 		runtime: { selectedStateId: "phase.@worker", records: mailboxReentryRecords },
 	},
@@ -762,7 +862,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "actorDefinitions",
 		title: "Actor pool workers and backlog",
-		description: "Ten batch messages: four queued at the endpoint while each persistent worker shows two processed messages and one current assignment.",
+		description:
+			"Ten batch messages: four queued at the endpoint while each persistent worker shows two processed messages and one current assignment.",
 		chart: actorPoolCrowdedChart,
 		runtime: { selectedStateId: "@workers", records: () => actorPoolCrowdedRecords },
 	},
@@ -783,7 +884,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "actorMessaging",
 		title: "Self-send state",
-		description: "Actor-local sendBatch targets self(), resolves to the shared pool endpoint, and retains the typed CRAWL contract.",
+		description:
+			"Actor-local sendBatch targets self(), resolves to the shared pool endpoint, and retains the typed CRAWL contract.",
 		chart: actorSelfChart,
 		runtime: { selectedStateId: "@workers.$worker.fanout" },
 	},
@@ -797,7 +899,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "actorMessaging",
 		title: "Call batch state",
-		description: "Running callBatch against a two-worker pool with ordered inputs, per-message assignments, replies, and backlog.",
+		description:
+			"Running callBatch against a two-worker pool with ordered inputs, per-message assignments, replies, and backlog.",
 		chart: actorPoolCrowdedChart,
 		runtime: { selectedStateId: "batch", records: () => actorPoolCrowdedRecords },
 	},
@@ -851,7 +954,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "user",
 		title: "Completed user decision",
-		description: "Completed user state with two possible transitions; APPROVED was selected and execution advanced to publish.",
+		description:
+			"Completed user state with two possible transitions; APPROVED was selected and execution advanced to publish.",
 		chart: panelChart("inspector-user-decision-complete", "user-decision", {
 			"user-decision": {
 				kind: "state",
@@ -906,7 +1010,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "tsImport",
 		title: "Imported function action",
-		description: "Definition-only tsAction card with module/export identity, declared params, artifacts, and reply contract.",
+		description:
+			"Definition-only tsAction card with module/export identity, declared params, artifacts, and reply contract.",
 		graphAtlas: true,
 		chart: panelChart("inspector-function-action", "prepare", {
 			score: {
@@ -918,7 +1023,11 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				}),
 				transitions: { SCORED: "done" },
 			},
-			prepare: { kind: "state", action: agent("planner", { reply: z.object({ seed: z.number() }) }), transitions: { DONE: "score" } },
+			prepare: {
+				kind: "state",
+				action: agent("planner", { reply: z.object({ seed: z.number() }) }),
+				transitions: { DONE: "score" },
+			},
 			done: final(),
 		}),
 		runtime: { selectedStateId: "score", mode: "static" },
@@ -1059,7 +1168,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		chart: panelChart("inspector-validation-rejected", "validation-rejected", {
 			"validation-rejected": {
 				kind: "state",
-				action: agent("reviewer", { tools: [],
+				action: agent("reviewer", {
+					tools: [],
 					validation: { guard: script("node", ["scripts/validate-review.mjs"]), onFail: { nudge: 2, restart: 0 } },
 				}),
 				transitions: { PASS: "done", ERROR: "failed" },
@@ -1092,7 +1202,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		chart: panelChart("inspector-imported-guard", "coverage-review", {
 			"coverage-review": {
 				kind: "state",
-				action: agent("coverage-reviewer", { task: "Review source coverage before rendering.",
+				action: agent("coverage-reviewer", {
+					task: "Review source coverage before rendering.",
 					validation: { guard: tsImport("./guards/coverage.ts", "coverageGuard"), onFail: { nudge: 0, restart: 1 } },
 				}),
 				transitions: { PASS: "done", ERROR: "failed" },
@@ -1123,7 +1234,8 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 	{
 		group: "final",
 		title: "Final notification",
-		description: "Reached successful terminal with a typed notification prompt, artifact attachment, and explicit render scope.",
+		description:
+			"Reached successful terminal with a typed notification prompt, artifact attachment, and explicit render scope.",
 		chart: panelChart("inspector-final-notification", "prepare", {
 			prepare: {
 				kind: "state",

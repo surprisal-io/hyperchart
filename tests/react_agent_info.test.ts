@@ -13,12 +13,20 @@ describe("Agent inspector details", () => {
 			status: "running",
 			agent: "writer",
 			reads: ['artifactOf("prepare", { artifact: "context" })'],
-			readArtifacts: [{
-				name: "context",
-				sourceState: "prepare",
-				path: "artifacts/context.json",
-				schema: { schema: { type: "object", description: "Context the writer must read.", properties: { risks: { type: "array", items: { type: "string" } } } } },
-			}],
+			readArtifacts: [
+				{
+					name: "context",
+					sourceState: "prepare",
+					path: "artifacts/context.json",
+					schema: {
+						schema: {
+							type: "object",
+							description: "Context the writer must read.",
+							properties: { risks: { type: "array", items: { type: "string" } } },
+						},
+					},
+				},
+			],
 		};
 		const markup = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
 		expect(markup).toContain("prepare → context");
@@ -35,28 +43,52 @@ describe("Agent inspector details", () => {
 			status: "running",
 			agent: "writer",
 			reads: ['joinArtifactOf("research.collect", { artifact: "brief" })'],
-			readArtifacts: [{ name: "brief", sourceState: "research.collect", path: "artifacts/source-{key}.json", readKind: "join" }],
+			readArtifacts: [
+				{ name: "brief", sourceState: "research.collect", path: "artifacts/source-{key}.json", readKind: "join" },
+			],
 		};
 		const authored = renderToStaticMarkup(createElement(AgentInfoCard, { state, allStates: [state] }));
-		const resolved = renderToStaticMarkup(createElement(VisitInvocationDetails, {
-			state,
-			allStates: [state],
-			invocation: { kind: "agent", reads: [{ name: "brief", sourceState: "research#a.collect", path: "artifacts/source-a.json", readKind: "join" }] },
-		}));
+		const resolved = renderToStaticMarkup(
+			createElement(VisitInvocationDetails, {
+				state,
+				allStates: [state],
+				invocation: {
+					kind: "agent",
+					reads: [
+						{ name: "brief", sourceState: "research#a.collect", path: "artifacts/source-a.json", readKind: "join" },
+					],
+				},
+			}),
+		);
 		expect(authored).toContain('data-artifact-read-kind="join"');
 		expect(resolved).toContain('data-artifact-read-kind="join"');
 	});
 
 	it("keeps artifact schemas on resolved reads", () => {
 		const state: HyperchartStateInfo = { id: "write", type: "agent", status: "running", agent: "writer" };
-		const markup = renderToStaticMarkup(createElement(VisitInvocationDetails, {
-			state,
-			allStates: [state],
-			invocation: {
-				kind: "agent",
-				reads: [{ path: "artifacts/context.json", name: "context", sourceState: "prepare", schema: { schema: { type: "object", description: "Resolved context contract.", properties: { title: { type: "string" } } } } }],
-			},
-		}));
+		const markup = renderToStaticMarkup(
+			createElement(VisitInvocationDetails, {
+				state,
+				allStates: [state],
+				invocation: {
+					kind: "agent",
+					reads: [
+						{
+							path: "artifacts/context.json",
+							name: "context",
+							sourceState: "prepare",
+							schema: {
+								schema: {
+									type: "object",
+									description: "Resolved context contract.",
+									properties: { title: { type: "string" } },
+								},
+							},
+						},
+					],
+				},
+			}),
+		);
 		expect(markup).toContain("resolved reads");
 		expect(markup).toContain("prepare → context");
 		expect(markup).toContain("artifacts/context.json");
@@ -65,18 +97,26 @@ describe("Agent inspector details", () => {
 	});
 
 	it("renders imported function identity, resolved params, and artifacts", () => {
-		const state: HyperchartStateInfo = { id: "score", type: "tsImport", status: "running", module: "./score.mjs", export: "score" };
-		const markup = renderToStaticMarkup(createElement(VisitInvocationDetails, {
-			state,
-			allStates: [state],
-			invocation: {
-				kind: "tsImport",
-				module: "./score.mjs",
-				export: "score",
-				params: { node: { path: "node.json", select: "value" } },
-				artifacts: [{ name: "reward", path: "reward.json" }],
-			},
-		}));
+		const state: HyperchartStateInfo = {
+			id: "score",
+			type: "tsImport",
+			status: "running",
+			module: "./score.mjs",
+			export: "score",
+		};
+		const markup = renderToStaticMarkup(
+			createElement(VisitInvocationDetails, {
+				state,
+				allStates: [state],
+				invocation: {
+					kind: "tsImport",
+					module: "./score.mjs",
+					export: "score",
+					params: { node: { path: "node.json", select: "value" } },
+					artifacts: [{ name: "reward", path: "reward.json" }],
+				},
+			}),
+		);
 		expect(markup).toContain("resolved function");
 		expect(markup).toContain("./score.mjs#score");
 		expect(markup).toContain("resolved params");

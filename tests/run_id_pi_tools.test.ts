@@ -87,13 +87,15 @@ for (const kind of ["jsonl", "postgres"] as const) {
 				const inspected = await execute({ action: "run_inspect", runId });
 				expect(inspected.details.runId).toBe(runId);
 				expect(inspected.details).not.toHaveProperty("runDir");
-				await expect(execute({ action: "run_inspect", runDir: resolveRunPaths(runId, storage).runDir })).rejects.toThrow(
-					"runDir is not supported",
-				);
+				await expect(
+					execute({ action: "run_inspect", runDir: resolveRunPaths(runId, storage).runDir }),
+				).rejects.toThrow("runDir is not supported");
 				await expect(execute({ action: "run_inspect", runId: resolveRunPaths(runId, storage).runDir })).rejects.toThrow(
 					"No Hyperchart run metadata",
 				);
-				await expect(execute({ action: "run_inspect", runId: "missing" })).rejects.toThrow("No Hyperchart run metadata");
+				await expect(execute({ action: "run_inspect", runId: "missing" })).rejects.toThrow(
+					"No Hyperchart run metadata",
+				);
 				await expect(execute({ action: "run_inspect", runId }, { ...ctx, cwd: tmpdir() })).rejects.toThrow(
 					"belongs to another working directory",
 				);

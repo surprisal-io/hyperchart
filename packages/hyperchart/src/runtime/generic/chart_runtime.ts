@@ -60,7 +60,9 @@ export class ChartRuntime implements Runtime {
 
 	constructor(private readonly options: ChartRuntimeOptions) {
 		if (options.logStore.branchId !== options.branchId) {
-			throw new Error(`ChartRuntime branch '${options.branchId}' does not match log store branch '${options.logStore.branchId}'`);
+			throw new Error(
+				`ChartRuntime branch '${options.branchId}' does not match log store branch '${options.logStore.branchId}'`,
+			);
 		}
 		this.branchId = options.branchId;
 		this.scripts = new ScriptRunner({
@@ -81,17 +83,23 @@ export class ChartRuntime implements Runtime {
 
 	/** Composition metadata used by the execution layer; contains no projection state. */
 	executionInputs(): { ast: ChartAst; store: LogStore & CheckpointRepository; schemaRegistry?: SchemaRegistryLike } {
-		return { ast: this.options.ast, store: this.options.logStore, ...(this.options.schemaRegistry === undefined ? {} : { schemaRegistry: this.options.schemaRegistry }) };
+		return {
+			ast: this.options.ast,
+			store: this.options.logStore,
+			...(this.options.schemaRegistry === undefined ? {} : { schemaRegistry: this.options.schemaRegistry }),
+		};
 	}
 
 	/** Composition hook: accepts an opaque callback without importing execution semantics. */
 	bindArtifactValidator(validate: (artifact: RenderedArtifact, content: string) => Promise<SchemaCheck>): void {
-		if (this.options.validateArtifactSnapshot !== undefined && this.options.validateArtifactSnapshot !== validate) throw new Error("ChartRuntime artifact validator is already bound");
+		if (this.options.validateArtifactSnapshot !== undefined && this.options.validateArtifactSnapshot !== validate)
+			throw new Error("ChartRuntime artifact validator is already bound");
 		this.options.validateArtifactSnapshot = validate;
 	}
 
 	bindStampedCommit(prepare: PrepareStampedCommit): void {
-		if (this.options.prepareStampedCommit !== undefined && this.options.prepareStampedCommit !== prepare) throw new Error("ChartRuntime commit preparer is already bound");
+		if (this.options.prepareStampedCommit !== undefined && this.options.prepareStampedCommit !== prepare)
+			throw new Error("ChartRuntime commit preparer is already bound");
 		this.options.prepareStampedCommit = prepare;
 	}
 
@@ -113,143 +121,174 @@ export class ChartRuntime implements Runtime {
 			for (const effect of effects) {
 				if (this.quiescing) return;
 				switch (effect.kind) {
-				case "durable_records": {
-					const records = await this.options.logStore.appendDrafts(effect.records, this.options.prepareStampedCommit);
-					if (!this.quiescing) this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
-					break;
-				}
-				case "actor_create":
-					this.track(
-						checkSchemaAsync(effect.declaration.input, effect.input, this.options.schemaRegistry).then((check) => {
-							this.send({
-								kind: "actor_effect",
-								effectId: effect.id,
-								operation: "create",
-								ok: check.ok,
-								...(check.ok ? {} : { error: `Actor input does not match exact placement schema: ${check.errors.join("; ")}` }),
-							});
-						}),
-					);
-					break;
-				case "actor_enqueue":
-					this.track(
-						Promise.all(effect.messages.map((message) => checkSchemaAsync(effect.schema, message.input, this.options.schemaRegistry))).then((checks) => {
-							const errors = checks.flatMap((check, index) => check.ok ? [] : check.errors.map((error) => `inputs[${index}]: ${error}`));
-							this.send({
-								kind: "actor_effect",
-								effectId: effect.id,
-								operation: "enqueue",
-								ok: errors.length === 0,
-								...(errors.length === 0 ? {} : { error: `Atomic actor batch validation failed: ${errors.join("; ")}` }),
-							});
-						}),
-					);
-					break;
-				case "actor_reply":
-					this.track(
-						(effect.schema === undefined
-							? Promise.resolve({ ok: true } as const)
-							: checkSchemaAsync(effect.schema, effect.output, this.options.schemaRegistry)
-						).then((check) => {
-							this.send({
-								kind: "actor_effect",
-								effectId: effect.id,
-								operation: "reply",
-								ok: check.ok,
-								...(check.ok ? {} : { error: `Actor reply does not match exact protocol schema: ${check.errors.join("; ")}` }),
-							});
-						}),
-					);
-					break;
-				case "agent":
-					this.track(
-						this.restorePinnedReads(effect.reads)
-							.then(() => {
-								if (this.quiescing) return;
-								this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
-							})
-							.catch((error: unknown) => {
-								this.send({ kind: "agent", effectId: effect.id,
+					case "durable_records": {
+						const records = await this.options.logStore.appendDrafts(effect.records, this.options.prepareStampedCommit);
+						if (!this.quiescing) this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
+						break;
+					}
+					case "actor_create":
+						this.track(
+							checkSchemaAsync(effect.declaration.input, effect.input, this.options.schemaRegistry).then((check) => {
+								this.send({
+									kind: "actor_effect",
+									effectId: effect.id,
+									operation: "create",
+									ok: check.ok,
+									...(check.ok
+										? {}
+										: { error: `Actor input does not match exact placement schema: ${check.errors.join("; ")}` }),
+								});
+							}),
+						);
+						break;
+					case "actor_enqueue":
+						this.track(
+							Promise.all(
+								effect.messages.map((message) =>
+									checkSchemaAsync(effect.schema, message.input, this.options.schemaRegistry),
+								),
+							).then((checks) => {
+								const errors = checks.flatMap((check, index) =>
+									check.ok ? [] : check.errors.map((error) => `inputs[${index}]: ${error}`),
+								);
+								this.send({
+									kind: "actor_effect",
+									effectId: effect.id,
+									operation: "enqueue",
+									ok: errors.length === 0,
+									...(errors.length === 0
+										? {}
+										: { error: `Atomic actor batch validation failed: ${errors.join("; ")}` }),
+								});
+							}),
+						);
+						break;
+					case "actor_reply":
+						this.track(
+							(effect.schema === undefined
+								? Promise.resolve({ ok: true } as const)
+								: checkSchemaAsync(effect.schema, effect.output, this.options.schemaRegistry)
+							).then((check) => {
+								this.send({
+									kind: "actor_effect",
+									effectId: effect.id,
+									operation: "reply",
+									ok: check.ok,
+									...(check.ok
+										? {}
+										: { error: `Actor reply does not match exact protocol schema: ${check.errors.join("; ")}` }),
+								});
+							}),
+						);
+						break;
+					case "agent":
+						this.track(
+							this.restorePinnedReads(effect.reads)
+								.then(() => {
+									if (this.quiescing) return;
+									this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
+								})
+								.catch((error: unknown) => {
+									this.send({
+										kind: "agent",
+										effectId: effect.id,
 										outcome: {
 											kind: "failed",
 											failure: { kind: "runtime", retryable: false, message: errorMessage(error) },
 										},
 									});
+								}),
+						);
+						break;
+					case "script":
+						this.track(
+							this.restorePinnedReads(envArtifacts(effect.env))
+								.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
+								.then((event) =>
+									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
+								)
+								.then((admitted) => {
+									if (admitted !== undefined) this.send({ kind: "script", effectId: effect.id, ...admitted });
+								})
+								.catch((error: unknown) => {
+									this.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) });
+								}),
+						);
+						break;
+					case "tsImport":
+						this.track(
+							this.functions
+								.run(effect, undefined, () => this.restorePinnedReads(envArtifacts(effect.env)))
+								.then((event) =>
+									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
+								)
+								.then((admitted) => {
+									if (admitted !== undefined) this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
+								})
+								.catch((error: unknown) => {
+									this.send({ kind: "tsImport", effectId: effect.id, event: toFailedEvent(error) });
+								}),
+						);
+						break;
+					case "validate": {
+						this.track(
+							(effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId
+								? Promise.resolve<GuardOutcome>({
+										ok: false,
+										reason: foreignCompletionReason(effect.completionBranchId, this.branchId),
+									})
+								: runGuard(
+										effect.guard,
+										effect.event,
+										{
+											chartDir: this.options.chartDir,
+											workDir: this.options.workDir,
+											invocation: {
+												branchId: this.branchId,
+												actionUid: effect.actionUid,
+												invocationId: effect.invocationId,
+											},
+										},
+										{
+											scripts: this.scripts,
+											...(effect.env === undefined ? {} : { env: effect.env }),
+											...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
+											...(effect.reply === undefined ? {} : { reply: effect.reply }),
+											actionUid: effect.actionUid,
+										} satisfies RenderedGuardInvocation,
+									)
+							)
+								.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
+								.then((outcome) => this.send({ kind: "validated", effectId: effect.id, outcome })),
+						);
+						break;
+					}
+					case "timer": {
+						const delay = Math.max(0, effect.firesAt - this.now());
+						const timer = setTimeout(() => {
+							this.timers.delete(effect.id);
+							this.send({ kind: "timer", effectId: effect.id });
+						}, delay);
+						timer.unref();
+						this.timers.set(effect.id, timer);
+						break;
+					}
+					case "cancel": {
+						const cancellations = [
+							this.options.agentExecutor.cancel(effect.actionUid),
+							this.scripts.cancel(effect.actionUid),
+							this.functions.cancel(effect.actionUid),
+						];
+						this.track(
+							Promise.allSettled(cancellations).then((results) => {
+								for (const result of results) {
+									if (result.status === "rejected")
+										this.onWarn(`Cancellation ${effect.id} failed: ${errorMessage(result.reason)}`);
+								}
 							}),
-					);
-					break;
-				case "script":
-					this.track(
-						this.restorePinnedReads(envArtifacts(effect.env))
-							.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
-								.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts))
-							.then((admitted) => {
-								if (admitted !== undefined) this.send({ kind: "script", effectId: effect.id, ...admitted });
-							})
-							.catch((error: unknown) => {
-								this.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) });
-							}),
-					);
-					break;
-				case "tsImport":
-					this.track(
-						this.functions
-							.run(effect, undefined, () => this.restorePinnedReads(envArtifacts(effect.env)))
-							.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts))
-							.then((admitted) => {
-								if (admitted !== undefined) this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
-							})
-							.catch((error: unknown) => {
-								this.send({ kind: "tsImport", effectId: effect.id, event: toFailedEvent(error) });
-							}),
-					);
-					break;
-				case "validate": {
-					this.track(
-						(effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId
-							? Promise.resolve<GuardOutcome>({ ok: false, reason: foreignCompletionReason(effect.completionBranchId, this.branchId) })
-							: runGuard(
-							effect.guard,
-							effect.event,
-							{ chartDir: this.options.chartDir, workDir: this.options.workDir,
-								invocation: { branchId: this.branchId, actionUid: effect.actionUid, invocationId: effect.invocationId } },
-							{
-								scripts: this.scripts,
-								...(effect.env === undefined ? {} : { env: effect.env }),
-								...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
-								...(effect.reply === undefined ? {} : { reply: effect.reply }),
-								actionUid: effect.actionUid,
-							} satisfies RenderedGuardInvocation,
-						))
-							.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
-							.then((outcome) => this.send({ kind: "validated", effectId: effect.id, outcome })),
-					);
-					break;
-				}
-				case "timer": {
-					const delay = Math.max(0, effect.firesAt - this.now());
-					const timer = setTimeout(() => {
-						this.timers.delete(effect.id);
-						this.send({ kind: "timer", effectId: effect.id });
-					}, delay);
-					timer.unref();
-					this.timers.set(effect.id, timer);
-					break;
-				}
-				case "cancel": {
-					const cancellations = [
-						this.options.agentExecutor.cancel(effect.actionUid),
-						this.scripts.cancel(effect.actionUid),
-						this.functions.cancel(effect.actionUid),
-					];
-					this.track(Promise.allSettled(cancellations).then((results) => {
-						for (const result of results) {
-							if (result.status === "rejected") this.onWarn(`Cancellation ${effect.id} failed: ${errorMessage(result.reason)}`);
-						}
-					}));
-					break;
-				}
-
+						);
+						break;
+					}
 				}
 			}
 		} finally {
@@ -306,15 +345,17 @@ export class ChartRuntime implements Runtime {
 
 	private track(task: Promise<unknown>): void {
 		let tracked!: Promise<void>;
-		tracked = task.then(
-			() => undefined,
-			(error: unknown) => {
-				this.backgroundErrors.push(error);
-				this.onWarn(`Runtime background task failed: ${errorMessage(error)}`);
-			},
-		).finally(() => {
-			this.pending.delete(tracked);
-		});
+		tracked = task
+			.then(
+				() => undefined,
+				(error: unknown) => {
+					this.backgroundErrors.push(error);
+					this.onWarn(`Runtime background task failed: ${errorMessage(error)}`);
+				},
+			)
+			.finally(() => {
+				this.pending.delete(tracked);
+			});
 		this.pending.add(tracked);
 	}
 
@@ -339,9 +380,13 @@ export class ChartRuntime implements Runtime {
 		}
 		this.track(
 			this.admitCompletion(outcome.event, effect.artifacts)
-				.then((admitted) => this.send({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", ...admitted } }))
+				.then((admitted) =>
+					this.send({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", ...admitted } }),
+				)
 				.catch((error: unknown) => {
-					this.send({ kind: "agent", effectId: effect.id,
+					this.send({
+						kind: "agent",
+						effectId: effect.id,
 						outcome: { kind: "failed", failure: { kind: "artifacts", retryable: true, message: errorMessage(error) } },
 					});
 				}),
@@ -410,7 +455,6 @@ function toFailedEvent(error: unknown): { type: "FAILED"; error: string } {
 function envArtifacts(env: Readonly<Record<string, string | RenderedArtifact>> | undefined): RenderedArtifact[] {
 	return Object.values(env ?? {}).filter((value): value is RenderedArtifact => typeof value !== "string");
 }
-
 
 async function matchesHash(path: string, hash: string): Promise<boolean> {
 	try {

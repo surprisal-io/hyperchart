@@ -29,32 +29,32 @@ afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-it.each(["run-id", "sha256"] as const)(
-	"releaseActiveUserInteraction removes the unchanged ID's claim and confirmation in %s scope only",
-	(layout) => {
-		const home = root();
-		const storage: RunStorage = { kind: "jsonl", rootDir: join(home, "owner"), layout };
-		const foreign: RunStorage = { ...storage, rootDir: join(home, "foreign") };
-		const runId = layout === "sha256" ? "autodiscovery:release/opaque" : "release:opaque";
-		const owner = { runsRoot: storage.rootDir, host: "pi", sessionId: "session", workDir: home };
-		const coordinate = { runId, branchId: "main", seqId: 9 };
-		const read = () => readUserInteractionReceipt(runId, "main", 9, "pi", "session");
-		for (const scope of [storage, foreign])
-			withRunStorage(scope, () => {
-				expect(claimUserInteractionReceipt(runId, "main", 9, "pi", "session")).toBe(true);
-				markUserInteractionReceipt(runId, "main", 9, "pi", "session");
-				expect(read()?.state).toBe("confirmed");
-			});
-		withRunStorage(foreign, () =>
-			expect(() => releaseActiveUserInteraction(owner, coordinate)).toThrow("outside the configured runs root"),
-		);
-		withRunStorage(storage, () => {
-			releaseActiveUserInteraction(owner, coordinate);
-			expect(read()).toBeUndefined();
+it.each([
+	"run-id",
+	"sha256",
+] as const)("releaseActiveUserInteraction removes the unchanged ID's claim and confirmation in %s scope only", (layout) => {
+	const home = root();
+	const storage: RunStorage = { kind: "jsonl", rootDir: join(home, "owner"), layout };
+	const foreign: RunStorage = { ...storage, rootDir: join(home, "foreign") };
+	const runId = layout === "sha256" ? "autodiscovery:release/opaque" : "release:opaque";
+	const owner = { runsRoot: storage.rootDir, host: "pi", sessionId: "session", workDir: home };
+	const coordinate = { runId, branchId: "main", seqId: 9 };
+	const read = () => readUserInteractionReceipt(runId, "main", 9, "pi", "session");
+	for (const scope of [storage, foreign])
+		withRunStorage(scope, () => {
+			expect(claimUserInteractionReceipt(runId, "main", 9, "pi", "session")).toBe(true);
+			markUserInteractionReceipt(runId, "main", 9, "pi", "session");
+			expect(read()?.state).toBe("confirmed");
 		});
-		expect(withRunStorage(foreign, read)?.state).toBe("confirmed");
-	},
-);
+	withRunStorage(foreign, () =>
+		expect(() => releaseActiveUserInteraction(owner, coordinate)).toThrow("outside the configured runs root"),
+	);
+	withRunStorage(storage, () => {
+		releaseActiveUserInteraction(owner, coordinate);
+		expect(read()).toBeUndefined();
+	});
+	expect(withRunStorage(foreign, read)?.state).toBe("confirmed");
+});
 
 it("Claude monitor uses explicit runsRoot under conflicting ambient storage and receipts only that root", async () => {
 	const home = root();

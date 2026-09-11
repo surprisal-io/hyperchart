@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { BoltIcon, CommandLineIcon, EnvelopeIcon } from "@heroicons/react/24/outline";
-import type { HyperchartActorGenerationInfo, HyperchartActorMessageBatchInfo, HyperchartActorMessageInfo, HyperchartActorSentMessageInfo, HyperchartInspectorDataSource, HyperchartStateInfo, HyperchartVisitInfo, HyperchartMapVisitInfo } from "../../../types.js";
+import type {
+	HyperchartActorGenerationInfo,
+	HyperchartActorMessageBatchInfo,
+	HyperchartActorMessageInfo,
+	HyperchartActorSentMessageInfo,
+	HyperchartInspectorDataSource,
+	HyperchartStateInfo,
+	HyperchartVisitInfo,
+	HyperchartMapVisitInfo,
+} from "../../../types.js";
 import type { HistoryCursor, HistorySnapshot, HistorySubject } from "../../../../runtime/generic/log_store.js";
 import { formatHyperchartDateTime, formatHyperchartUsage } from "../../../hyperchart-display.js";
 import { stateHasRuntimeDetails } from "../helpers/state.js";
@@ -15,7 +24,12 @@ import { MapVisitHistory } from "./MapVisitHistory.js";
 import { VisitHistory } from "./VisitHistory.js";
 import { VirtualizedHistoryList } from "../history/VirtualizedHistoryList.js";
 
-export type RuntimeHistoryContext = { runId: string; snapshot: HistorySnapshot; dataSource: HyperchartInspectorDataSource; targetSeqId?: number };
+export type RuntimeHistoryContext = {
+	runId: string;
+	snapshot: HistorySnapshot;
+	dataSource: HyperchartInspectorDataSource;
+	targetSeqId?: number;
+};
 
 function ActorInternalMessageRow({ message, replies }: { message: HyperchartActorMessageInfo; replies: boolean }) {
 	const [open, setOpen] = useState(false);
@@ -35,7 +49,9 @@ function ActorInternalMessageRow({ message, replies }: { message: HyperchartActo
 			}}
 		>
 			<div className="flex min-w-0 items-center gap-2">
-				<ChevronRightIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform ${open ? "rotate-90" : ""}`} />
+				<ChevronRightIcon
+					className={`h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform ${open ? "rotate-90" : ""}`}
+				/>
 				<span className="min-w-0 flex-1 truncate font-semibold text-[var(--text-primary)]">
 					{replies ? `${message.event} → ${message.replyEvent ?? "void"}` : message.event}
 				</span>
@@ -44,29 +60,82 @@ function ActorInternalMessageRow({ message, replies }: { message: HyperchartActo
 			{open && (
 				<div className="mt-2 min-w-0 space-y-2 pl-5">
 					<dl className="grid min-w-0 gap-1 text-[var(--text-tertiary)] sm:grid-cols-2">
-						<div className="min-w-0"><dt className="text-[var(--text-muted)]">message</dt><dd className="truncate font-mono" title={message.messageId}>{message.messageId}</dd></div>
-						<div className="min-w-0"><dt className="text-[var(--text-muted)]">producer</dt><dd className="truncate font-mono" title={message.producerVisit}>{message.producerVisit}</dd></div>
-						{message.callId !== undefined && <div className="min-w-0"><dt className="text-[var(--text-muted)]">call</dt><dd className="truncate font-mono">{message.callId}</dd></div>}
-						{message.acceptedAt !== undefined && <div><dt className="text-[var(--text-muted)]">accepted</dt><dd>{formatHyperchartDateTime(message.acceptedAt)}</dd></div>}
-						{message.repliedAt !== undefined && <div><dt className="text-[var(--text-muted)]">replied</dt><dd>{formatHyperchartDateTime(message.repliedAt)}</dd></div>}
-						{replies && message.validation !== undefined && <div><dt className="text-[var(--text-muted)]">validation</dt><dd>{message.validation}</dd></div>}
+						<div className="min-w-0">
+							<dt className="text-[var(--text-muted)]">message</dt>
+							<dd className="truncate font-mono" title={message.messageId}>
+								{message.messageId}
+							</dd>
+						</div>
+						<div className="min-w-0">
+							<dt className="text-[var(--text-muted)]">producer</dt>
+							<dd className="truncate font-mono" title={message.producerVisit}>
+								{message.producerVisit}
+							</dd>
+						</div>
+						{message.callId !== undefined && (
+							<div className="min-w-0">
+								<dt className="text-[var(--text-muted)]">call</dt>
+								<dd className="truncate font-mono">{message.callId}</dd>
+							</div>
+						)}
+						{message.acceptedAt !== undefined && (
+							<div>
+								<dt className="text-[var(--text-muted)]">accepted</dt>
+								<dd>{formatHyperchartDateTime(message.acceptedAt)}</dd>
+							</div>
+						)}
+						{message.repliedAt !== undefined && (
+							<div>
+								<dt className="text-[var(--text-muted)]">replied</dt>
+								<dd>{formatHyperchartDateTime(message.repliedAt)}</dd>
+							</div>
+						)}
+						{replies && message.validation !== undefined && (
+							<div>
+								<dt className="text-[var(--text-muted)]">validation</dt>
+								<dd>{message.validation}</dd>
+							</div>
+						)}
 					</dl>
-					{!replies && <ExpandablePre collapsedLines={4} language="json">{JSON.stringify(message.input, null, 2)}</ExpandablePre>}
-					{replies && Object.hasOwn(message, "replyOutput") && <ExpandablePre collapsedLines={4} language="json">{JSON.stringify(message.replyOutput, null, 2)}</ExpandablePre>}
+					{!replies && (
+						<ExpandablePre collapsedLines={4} language="json">
+							{JSON.stringify(message.input, null, 2)}
+						</ExpandablePre>
+					)}
+					{replies && Object.hasOwn(message, "replyOutput") && (
+						<ExpandablePre collapsedLines={4} language="json">
+							{JSON.stringify(message.replyOutput, null, 2)}
+						</ExpandablePre>
+					)}
 				</div>
 			)}
 		</div>
 	);
 }
 
-export function ActorInternalMessageHistory({ state, messages }: { state: HyperchartStateInfo; messages: HyperchartActorMessageInfo[] }) {
+export function ActorInternalMessageHistory({
+	state,
+	messages,
+}: {
+	state: HyperchartStateInfo;
+	messages: HyperchartActorMessageInfo[];
+}) {
 	const replies = state.type === "reply";
 	return (
 		<div className="grid gap-1.5">
 			<div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-				{messages.length} {replies ? (messages.length === 1 ? "reply" : "replies") : (messages.length === 1 ? "accepted message" : "accepted messages")}
+				{messages.length}{" "}
+				{replies
+					? messages.length === 1
+						? "reply"
+						: "replies"
+					: messages.length === 1
+						? "accepted message"
+						: "accepted messages"}
 			</div>
-			{messages.map((message, index) => <ActorInternalMessageRow key={`${message.messageId}:${index}`} message={message} replies={replies} />)}
+			{messages.map((message, index) => (
+				<ActorInternalMessageRow key={`${message.messageId}:${index}`} message={message} replies={replies} />
+			))}
 		</div>
 	);
 }
@@ -88,9 +157,13 @@ function ActorInternalGenerationRuntime({
 }) {
 	const [showHistory, setShowHistory] = useState(false);
 	const generations = state.actorInternal?.generations ?? [];
-	const selectedInPreviousGeneration = selectedInvokeSeqId !== undefined && generations
-		.slice(0, -1)
-		.some((generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true);
+	const selectedInPreviousGeneration =
+		selectedInvokeSeqId !== undefined &&
+		generations
+			.slice(0, -1)
+			.some(
+				(generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true,
+			);
 	useEffect(() => {
 		if (selectedInPreviousGeneration) setShowHistory(true);
 	}, [selectedInPreviousGeneration]);
@@ -99,15 +172,20 @@ function ActorInternalGenerationRuntime({
 	const previous = generations.slice(0, -1).reverse();
 	const renderGeneration = (generation: (typeof generations)[number], latestInstance: boolean) => {
 		const focused = selectedInvokeSeqId !== undefined;
-		const messages = focused ? [] : generation.actorMessageHistory ?? [];
-		const sentMessages = focused ? [] : generation.actorMessages ?? [];
+		const messages = focused ? [] : (generation.actorMessageHistory ?? []);
+		const sentMessages = focused ? [] : (generation.actorMessages ?? []);
 		const visits = focused
 			? (generation.visitHistory ?? []).filter((visit) => visit.invokeSeqId === selectedInvokeSeqId)
-			: generation.visitHistory ?? [];
+			: (generation.visitHistory ?? []);
 		return (
-			<section key={generation.occurrencePath} className={latestInstance ? "" : "border-t border-[var(--border-secondary)] pt-2"}>
+			<section
+				key={generation.occurrencePath}
+				className={latestInstance ? "" : "border-t border-[var(--border-secondary)] pt-2"}
+			>
 				<div className="mb-2 flex flex-wrap items-center gap-2 text-[10px]">
-					<span className="font-semibold text-[var(--text-primary)]">{latestInstance ? "Latest instance" : "Instance"}</span>
+					<span className="font-semibold text-[var(--text-primary)]">
+						{latestInstance ? "Latest instance" : "Instance"}
+					</span>
 					<button
 						type="button"
 						className="font-mono text-[var(--hc-cyan-text)] hover:underline"
@@ -132,30 +210,42 @@ function ActorInternalGenerationRuntime({
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					/>
 				)}
-				{messages.length === 0 && sentMessages.length === 0 && visits.length === 0 && <div className="text-[10px] text-[var(--text-muted)]">No activity in this generation.</div>}
+				{messages.length === 0 && sentMessages.length === 0 && visits.length === 0 && (
+					<div className="text-[10px] text-[var(--text-muted)]">No activity in this generation.</div>
+				)}
 			</section>
 		);
 	};
 	if (selectedInvokeSeqId !== undefined) {
-		const selectedGeneration = generations.find((generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true);
-		if (selectedGeneration !== undefined) return <div className="grid gap-2">{renderGeneration(selectedGeneration, selectedGeneration === latest)}</div>;
+		const selectedGeneration = generations.find(
+			(generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true,
+		);
+		if (selectedGeneration !== undefined)
+			return <div className="grid gap-2">{renderGeneration(selectedGeneration, selectedGeneration === latest)}</div>;
 	}
 	return (
 		<div className="grid gap-2">
 			{renderGeneration(latest, true)}
 			{previous.length > 0 && (
-				<button type="button" className="justify-self-start text-[10px] text-[var(--hc-cyan-text)]" onClick={() => setShowHistory((value) => !value)}>
+				<button
+					type="button"
+					className="justify-self-start text-[10px] text-[var(--hc-cyan-text)]"
+					onClick={() => setShowHistory((value) => !value)}
+				>
 					{showHistory ? "Hide history" : "Show history"}
 				</button>
 			)}
-			{showHistory && <div className="grid gap-2">{previous.map((generation) => renderGeneration(generation, false))}</div>}
+			{showHistory && (
+				<div className="grid gap-2">{previous.map((generation) => renderGeneration(generation, false))}</div>
+			)}
 		</div>
 	);
 }
 
 function messagesByVisit(messages: HyperchartActorSentMessageInfo[] | undefined) {
 	const visits = new Map<number, HyperchartActorSentMessageInfo[]>();
-	for (const message of messages ?? []) visits.set(message.producerVisit, [...(visits.get(message.producerVisit) ?? []), message]);
+	for (const message of messages ?? [])
+		visits.set(message.producerVisit, [...(visits.get(message.producerVisit) ?? []), message]);
 	return [...visits.entries()];
 }
 
@@ -177,22 +267,34 @@ function ActorSentMessageVisits({
 			{messagesByVisit(messages).map(([visit, visitMessages]) => (
 				<div key={visit} className="grid gap-2 rounded-lg border border-[var(--border-secondary)] p-2">
 					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
-						<span className="font-semibold text-[var(--text-secondary)]">Visit {visit} · {visitMessages.length} {visitMessages.length === 1 ? "message" : "messages"}</span>
+						<span className="font-semibold text-[var(--text-secondary)]">
+							Visit {visit} · {visitMessages.length} {visitMessages.length === 1 ? "message" : "messages"}
+						</span>
 						{visitMessages[0] !== undefined && (
 							<span className="ml-auto text-[var(--text-muted)]">
-								target <code className="text-[var(--text-secondary)]">{visitMessages[0].targetLogicalPath}</code> · generation {visitMessages[0].targetGeneration}
+								target <code className="text-[var(--text-secondary)]">{visitMessages[0].targetLogicalPath}</code> ·
+								generation {visitMessages[0].targetGeneration}
 							</span>
 						)}
 					</div>
-					{[...visitMessages].sort((left, right) => left.batchIndex - right.batchIndex).map((message) => (
-						<div key={message.messageId} className="rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]">
-							<div className="flex items-center justify-between gap-2">
-								<code className="truncate text-[var(--text-tertiary)]" title={message.messageId}>{message.messageId}</code>
-								<span className="shrink-0 text-[var(--text-muted)]">{message.status}</span>
+					{[...visitMessages]
+						.sort((left, right) => left.batchIndex - right.batchIndex)
+						.map((message) => (
+							<div
+								key={message.messageId}
+								className="rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]"
+							>
+								<div className="flex items-center justify-between gap-2">
+									<code className="truncate text-[var(--text-tertiary)]" title={message.messageId}>
+										{message.messageId}
+									</code>
+									<span className="shrink-0 text-[var(--text-muted)]">{message.status}</span>
+								</div>
+								<ExpandablePre collapsedLines={6} language="json">
+									{JSON.stringify(message.input, null, 2)}
+								</ExpandablePre>
 							</div>
-							<ExpandablePre collapsedLines={6} language="json">{JSON.stringify(message.input, null, 2)}</ExpandablePre>
-						</div>
-					))}
+						))}
 				</div>
 			))}
 		</div>
@@ -201,7 +303,19 @@ function ActorSentMessageVisits({
 
 function HistoryDisclosure({ label, children }: { label: string; children: ReactNode }) {
 	const [open, setOpen] = useState(false);
-	return <div className="grid gap-2"><button type="button" aria-expanded={open} className="justify-self-start text-[10px] text-[var(--hc-cyan-text)]" onClick={() => setOpen((value) => !value)}>{open ? `Hide ${label}` : `Load ${label}`}</button>{open && children}</div>;
+	return (
+		<div className="grid gap-2">
+			<button
+				type="button"
+				aria-expanded={open}
+				className="justify-self-start text-[10px] text-[var(--hc-cyan-text)]"
+				onClick={() => setOpen((value) => !value)}
+			>
+				{open ? `Hide ${label}` : `Load ${label}`}
+			</button>
+			{open && children}
+		</div>
+	);
 }
 
 function historyCacheKey(history: RuntimeHistoryContext, kind: string, subject: string): string {
@@ -216,22 +330,42 @@ export function useTargetCursor(history: RuntimeHistoryContext, subject: History
 	useEffect(() => {
 		if (history.targetSeqId === undefined) return;
 		let current = true;
-		void history.dataSource.cursorAt({ runId: history.runId, snapshot: history.snapshot, subject, seqId: history.targetSeqId }).then((cursor) => {
-			if (current) setResolved({ key, ...(cursor === undefined ? {} : { cursor }) });
-		}, (error: unknown) => {
-			if (current) setResolved({ key, error: error instanceof Error ? error.message : String(error) });
-		});
-		return () => { current = false; };
+		void history.dataSource
+			.cursorAt({ runId: history.runId, snapshot: history.snapshot, subject, seqId: history.targetSeqId })
+			.then(
+				(cursor) => {
+					if (current) setResolved({ key, ...(cursor === undefined ? {} : { cursor }) });
+				},
+				(error: unknown) => {
+					if (current) setResolved({ key, error: error instanceof Error ? error.message : String(error) });
+				},
+			);
+		return () => {
+			current = false;
+		};
 	}, [attempt, history.dataSource, history.runId, history.snapshot, history.targetSeqId, key]);
 	return history.targetSeqId === undefined
 		? { ready: true as const, missing: false }
 		: resolved?.key === key
-			? { ready: true as const, missing: resolved.error === undefined && resolved.cursor === undefined, cursor: resolved.cursor, error: resolved.error, retry: () => setAttempt((value) => value + 1) }
+			? {
+					ready: true as const,
+					missing: resolved.error === undefined && resolved.cursor === undefined,
+					cursor: resolved.cursor,
+					error: resolved.error,
+					retry: () => setAttempt((value) => value + 1),
+				}
 			: { ready: false as const, missing: false };
 }
 
 function TargetCursorError({ error, onRetry }: { error: string; onRetry: () => void }) {
-	return <div className="flex items-center gap-2 text-[10px] text-[var(--danger)]"><span>Could not locate history item: {error}</span><button type="button" className="text-[var(--hc-cyan-text)]" onClick={onRetry}>Retry</button></div>;
+	return (
+		<div className="flex items-center gap-2 text-[10px] text-[var(--danger)]">
+			<span>Could not locate history item: {error}</span>
+			<button type="button" className="text-[var(--hc-cyan-text)]" onClick={onRetry}>
+				Retry
+			</button>
+		</div>
+	);
 }
 
 type VisitSessionReader = NonNullable<Parameters<typeof VisitHistory>[0]["onReadSession"]>;
@@ -244,7 +378,11 @@ export function useVisitSessionReader(history: RuntimeHistoryContext | undefined
 		return (invokeSeqId: number) => {
 			const existing = cache.get(invokeSeqId);
 			if (existing !== undefined) return existing;
-			const pending = history.dataSource.readVisitSession({ runId: history.runId, snapshot: history.snapshot, invokeSeqId });
+			const pending = history.dataSource.readVisitSession({
+				runId: history.runId,
+				snapshot: history.snapshot,
+				invokeSeqId,
+			});
 			cache.set(invokeSeqId, pending);
 			void pending.catch(() => cache.delete(invokeSeqId));
 			return pending;
@@ -252,8 +390,15 @@ export function useVisitSessionReader(history: RuntimeHistoryContext | undefined
 	}, [history?.dataSource, history?.runId, history?.snapshot.branchId, history?.snapshot.headSeqId]);
 }
 
-function LazyStateVisits({ history, state, allStates, onSteerSession, onHighlightArtifact, readSession }: {
- readSession: VisitSessionReader;
+function LazyStateVisits({
+	history,
+	state,
+	allStates,
+	onSteerSession,
+	onHighlightArtifact,
+	readSession,
+}: {
+	readSession: VisitSessionReader;
 	history: RuntimeHistoryContext;
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -262,67 +407,183 @@ function LazyStateVisits({ history, state, allStates, onSteerSession, onHighligh
 }) {
 	const stateId = state.runtimeStatePath ?? state.id;
 	const target = useTargetCursor(history, { kind: "state-visits", state: stateId });
-	const source = useMemo(() => ({ load: async (cursor?: HistoryCursor) => {
-		const chunk = await history.dataSource.readStateVisits({ runId: history.runId, snapshot: history.snapshot, stateId, ...(cursor === undefined ? {} : { cursor }) });
-		if (history.targetSeqId === undefined) return chunk;
-		return { snapshot: chunk.snapshot, items: chunk.items.filter((visit) => visit.invokeSeqId === history.targetSeqId) };
-	} }), [history.dataSource, history.runId, history.snapshot, history.targetSeqId, stateId]);
+	const source = useMemo(
+		() => ({
+			load: async (cursor?: HistoryCursor) => {
+				const chunk = await history.dataSource.readStateVisits({
+					runId: history.runId,
+					snapshot: history.snapshot,
+					stateId,
+					...(cursor === undefined ? {} : { cursor }),
+				});
+				if (history.targetSeqId === undefined) return chunk;
+				return {
+					snapshot: chunk.snapshot,
+					items: chunk.items.filter((visit) => visit.invokeSeqId === history.targetSeqId),
+				};
+			},
+		}),
+		[history.dataSource, history.runId, history.snapshot, history.targetSeqId, stateId],
+	);
 	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a visit of this state.</div>;
-	return <VirtualizedHistoryList<HyperchartVisitInfo>
-		cacheKey={`${historyCacheKey(history, "state-visits", stateId)}:${history.targetSeqId ?? "all"}`} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
-		identity={(visit) => String(visit.invokeSeqId)} estimateSize={88} emptyLabel="No visits in this snapshot."
-		renderItem={(visit) => <VisitHistory visits={[visit]} state={state} allStates={allStates} lazyDetails {...(history.targetSeqId === undefined ? {} : { selectedInvokeSeqId: history.targetSeqId })} {...(state.agent === undefined ? {} : { agentName: state.agent })} onReadSession={readSession} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />}
-	/>;
+	if ("error" in target && target.error !== undefined)
+		return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing)
+		return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a visit of this state.</div>;
+	return (
+		<VirtualizedHistoryList<HyperchartVisitInfo>
+			cacheKey={`${historyCacheKey(history, "state-visits", stateId)}:${history.targetSeqId ?? "all"}`}
+			source={source}
+			{...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+			identity={(visit) => String(visit.invokeSeqId)}
+			estimateSize={88}
+			emptyLabel="No visits in this snapshot."
+			renderItem={(visit) => (
+				<VisitHistory
+					visits={[visit]}
+					state={state}
+					allStates={allStates}
+					lazyDetails
+					{...(history.targetSeqId === undefined ? {} : { selectedInvokeSeqId: history.targetSeqId })}
+					{...(state.agent === undefined ? {} : { agentName: state.agent })}
+					onReadSession={readSession}
+					{...(onSteerSession === undefined ? {} : { onSteerSession })}
+					{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+				/>
+			)}
+		/>
+	);
 }
 
 function LazyMapVisits({ history, state }: { history: RuntimeHistoryContext; state: HyperchartStateInfo }) {
 	const mapPath = state.runtimeStatePath ?? state.id;
 	const target = useTargetCursor(history, { kind: "map-visits", mapPath });
-	const source = useMemo(() => ({ load: async (cursor?: HistoryCursor) => {
-		const chunk = await history.dataSource.readMapVisits({ runId: history.runId, snapshot: history.snapshot, mapPath, ...(cursor === undefined ? {} : { cursor }) });
-		if (history.targetSeqId === undefined) return chunk;
-		return { snapshot: chunk.snapshot, items: chunk.items.filter((visit) => visit.spawnSeqId === history.targetSeqId) };
-	} }), [history.dataSource, history.runId, history.snapshot, history.targetSeqId, mapPath]);
+	const source = useMemo(
+		() => ({
+			load: async (cursor?: HistoryCursor) => {
+				const chunk = await history.dataSource.readMapVisits({
+					runId: history.runId,
+					snapshot: history.snapshot,
+					mapPath,
+					...(cursor === undefined ? {} : { cursor }),
+				});
+				if (history.targetSeqId === undefined) return chunk;
+				return {
+					snapshot: chunk.snapshot,
+					items: chunk.items.filter((visit) => visit.spawnSeqId === history.targetSeqId),
+				};
+			},
+		}),
+		[history.dataSource, history.runId, history.snapshot, history.targetSeqId, mapPath],
+	);
 	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a launch of this map.</div>;
-	return <VirtualizedHistoryList<HyperchartMapVisitInfo>
-		cacheKey={`${historyCacheKey(history, "map-visits", mapPath)}:${history.targetSeqId ?? "all"}`} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
-		identity={(visit) => String(visit.spawnSeqId)} estimateSize={62} emptyLabel="No map launches in this snapshot."
-		renderItem={(visit) => <MapVisitHistory visits={[visit]} {...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })} />}
-	/>;
+	if ("error" in target && target.error !== undefined)
+		return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing)
+		return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a launch of this map.</div>;
+	return (
+		<VirtualizedHistoryList<HyperchartMapVisitInfo>
+			cacheKey={`${historyCacheKey(history, "map-visits", mapPath)}:${history.targetSeqId ?? "all"}`}
+			source={source}
+			{...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+			identity={(visit) => String(visit.spawnSeqId)}
+			estimateSize={62}
+			emptyLabel="No map launches in this snapshot."
+			renderItem={(visit) => (
+				<MapVisitHistory visits={[visit]} {...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })} />
+			)}
+		/>
+	);
 }
 
-function LazyActorGenerations({ history, logicalOccurrence }: { history: RuntimeHistoryContext; logicalOccurrence: string }) {
+function LazyActorGenerations({
+	history,
+	logicalOccurrence,
+}: {
+	history: RuntimeHistoryContext;
+	logicalOccurrence: string;
+}) {
 	const target = useTargetCursor(history, { kind: "actor-generations", logicalOccurrence });
-	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readActorGenerations({ runId: history.runId, snapshot: history.snapshot, logicalOccurrence, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, logicalOccurrence]);
+	const source = useMemo(
+		() => ({
+			load: (cursor?: HistoryCursor) =>
+				history.dataSource.readActorGenerations({
+					runId: history.runId,
+					snapshot: history.snapshot,
+					logicalOccurrence,
+					...(cursor === undefined ? {} : { cursor }),
+				}),
+		}),
+		[history.dataSource, history.runId, history.snapshot, logicalOccurrence],
+	);
 	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not an actor generation.</div>;
-	return <VirtualizedHistoryList<HyperchartActorGenerationInfo>
-		cacheKey={historyCacheKey(history, "actor-generations", logicalOccurrence)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
-		identity={(generation) => `${generation.occurrencePath}:${generation.createdSeqId}`}
-		estimateSize={53}
-		emptyLabel="No actor generations in this snapshot."
-		renderItem={(generation) => <div className="rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]"><div className="font-semibold text-[var(--text-primary)]">Generation {generation.generation}</div><code className="text-[var(--text-muted)]">{generation.occurrencePath} · seq {generation.createdSeqId}</code></div>}
-	/>;
+	if ("error" in target && target.error !== undefined)
+		return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing)
+		return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not an actor generation.</div>;
+	return (
+		<VirtualizedHistoryList<HyperchartActorGenerationInfo>
+			cacheKey={historyCacheKey(history, "actor-generations", logicalOccurrence)}
+			source={source}
+			{...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+			identity={(generation) => `${generation.occurrencePath}:${generation.createdSeqId}`}
+			estimateSize={53}
+			emptyLabel="No actor generations in this snapshot."
+			renderItem={(generation) => (
+				<div className="rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]">
+					<div className="font-semibold text-[var(--text-primary)]">Generation {generation.generation}</div>
+					<code className="text-[var(--text-muted)]">
+						{generation.occurrencePath} · seq {generation.createdSeqId}
+					</code>
+				</div>
+			)}
+		/>
+	);
 }
 
 function LazyActorMessages({ history, occurrence }: { history: RuntimeHistoryContext; occurrence: string }) {
 	const target = useTargetCursor(history, { kind: "actor-messages", occurrence });
-	const source = useMemo(() => ({ load: (cursor?: HistoryCursor) => history.dataSource.readActorMessages({ runId: history.runId, snapshot: history.snapshot, occurrence, ...(cursor === undefined ? {} : { cursor }) }) }), [history.dataSource, history.runId, history.snapshot, occurrence]);
+	const source = useMemo(
+		() => ({
+			load: (cursor?: HistoryCursor) =>
+				history.dataSource.readActorMessages({
+					runId: history.runId,
+					snapshot: history.snapshot,
+					occurrence,
+					...(cursor === undefined ? {} : { cursor }),
+				}),
+		}),
+		[history.dataSource, history.runId, history.snapshot, occurrence],
+	);
 	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined) return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing) return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not an enqueue batch for this actor.</div>;
-	return <VirtualizedHistoryList<HyperchartActorMessageBatchInfo>
-		cacheKey={historyCacheKey(history, "actor-messages", occurrence)} source={source} {...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
-		identity={(batch) => `${batch.occurrencePath}:${batch.enqueueSeqId}`}
-		estimateSize={80}
-		emptyLabel="No actor messages in this snapshot."
-		renderItem={(batch) => <div className="grid gap-1 rounded border border-[var(--border-secondary)] p-2"><div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Enqueue seq {batch.enqueueSeqId} · {batch.messages.length} message{batch.messages.length === 1 ? "" : "s"}</div>{batch.messages.map((message, index) => <ActorMailboxMessageRow key={message.messageId} message={message} index={index} />)}</div>}
-	/>;
+	if ("error" in target && target.error !== undefined)
+		return <TargetCursorError error={target.error} onRetry={target.retry} />;
+	if (target.missing)
+		return (
+			<div className="text-[10px] text-[var(--text-muted)]">
+				The linked record is not an enqueue batch for this actor.
+			</div>
+		);
+	return (
+		<VirtualizedHistoryList<HyperchartActorMessageBatchInfo>
+			cacheKey={historyCacheKey(history, "actor-messages", occurrence)}
+			source={source}
+			{...(target.cursor === undefined ? {} : { initialCursor: target.cursor })}
+			identity={(batch) => `${batch.occurrencePath}:${batch.enqueueSeqId}`}
+			estimateSize={80}
+			emptyLabel="No actor messages in this snapshot."
+			renderItem={(batch) => (
+				<div className="grid gap-1 rounded border border-[var(--border-secondary)] p-2">
+					<div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+						Enqueue seq {batch.enqueueSeqId} · {batch.messages.length} message{batch.messages.length === 1 ? "" : "s"}
+					</div>
+					{batch.messages.map((message, index) => (
+						<ActorMailboxMessageRow key={message.messageId} message={message} index={index} />
+					))}
+				</div>
+			)}
+		/>
+	);
 }
 
 export function RuntimeSection({
@@ -349,30 +610,52 @@ export function RuntimeSection({
 	const readSession = useVisitSessionReader(history);
 	const targetInvoke = history?.targetSeqId ?? selectedInvokeSeqId ?? state.visitHistory?.at(-1)?.invokeSeqId;
 	const sessionScope = `${history?.runId ?? "embedded"}:${history?.snapshot.branchId ?? ""}:${history?.snapshot.headSeqId ?? "root"}:${targetInvoke ?? "none"}`;
-	const [resolvedSession, setResolvedSession] = useState<{ key: string; value?: HyperchartVisitInfo["session"]; error?: string }>();
+	const [resolvedSession, setResolvedSession] = useState<{
+		key: string;
+		value?: HyperchartVisitInfo["session"];
+		error?: string;
+	}>();
 	useEffect(() => {
 		if (state.type !== "agent" || readSession === undefined || targetInvoke === undefined) return;
 		let current = true;
-		void readSession(targetInvoke).then((value) => {
-			if (current) setResolvedSession({ key: sessionScope, value });
-		}, (error: unknown) => {
-			if (current) setResolvedSession({ key: sessionScope, error: error instanceof Error ? error.message : String(error) });
-		});
-		return () => { current = false; };
+		void readSession(targetInvoke).then(
+			(value) => {
+				if (current) setResolvedSession({ key: sessionScope, value });
+			},
+			(error: unknown) => {
+				if (current)
+					setResolvedSession({ key: sessionScope, error: error instanceof Error ? error.message : String(error) });
+			},
+		);
+		return () => {
+			current = false;
+		};
 	}, [state.type, readSession, targetInvoke, sessionScope]);
-	const session = state.type !== "agent" ? undefined
-		: readSession === undefined ? state.session
-			: resolvedSession?.key === sessionScope ? resolvedSession.value : undefined;
+	const session =
+		state.type !== "agent"
+			? undefined
+			: readSession === undefined
+				? state.session
+				: resolvedSession?.key === sessionScope
+					? resolvedSession.value
+					: undefined;
 	const sessionIdentity = `${sessionScope}:${state.id}:${session?.actionKey ?? "none"}:${session?.startedAt ?? "unknown"}`;
 	if (!stateHasRuntimeDetails(state) && !(recordOnly && history !== undefined)) return null;
 	const sessionIsLive = session?.status === "running" || session?.status === "starting";
 	const actorOccurrence = state.actorOccurrence;
-	const actorMessage = state.type === "send" || state.type === "sendBatch" || state.type === "call" || state.type === "callBatch"
-		? state.actorMessageLink
-		: undefined;
+	const actorMessage =
+		state.type === "send" || state.type === "sendBatch" || state.type === "call" || state.type === "callBatch"
+			? state.actorMessageLink
+			: undefined;
 	const actorInternalMessages = state.actorMessageHistory;
 	const actorInternalGenerations = state.actorInternal?.generations;
-	const linkedOccurrence = actorMessage === undefined ? undefined : allStates.find((candidate) => (candidate.actorOccurrence?.logicalPath ?? candidate.actorOccurrence?.occurrencePath) === actorMessage.to)?.actorOccurrence?.occurrencePath;
+	const linkedOccurrence =
+		actorMessage === undefined
+			? undefined
+			: allStates.find(
+					(candidate) =>
+						(candidate.actorOccurrence?.logicalPath ?? candidate.actorOccurrence?.occurrencePath) === actorMessage.to,
+				)?.actorOccurrence?.occurrencePath;
 	const historyOccurrence = actorOccurrence?.occurrencePath ?? state.actorInternal?.occurrencePath ?? linkedOccurrence;
 	const historyLogicalOccurrence = actorOccurrence?.logicalPath ?? state.actorInternal?.logicalOccurrencePath;
 	return (
@@ -381,10 +664,19 @@ export function RuntimeSection({
 				key={`runtime:${state.id}:${targetInvoke ?? "state"}`}
 				title={recordOnly ? "Recorded history" : "Runtime"}
 				icon={BoltIcon}
-				defaultOpen={recordOnly || sessionIsLive || actorOccurrence !== undefined || actorInternalGenerations !== undefined || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
+				defaultOpen={
+					recordOnly ||
+					sessionIsLive ||
+					actorOccurrence !== undefined ||
+					actorInternalGenerations !== undefined ||
+					selectedInvokeSeqId !== undefined ||
+					history?.targetSeqId !== undefined
+				}
 				forceOpen={sessionIsLive || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
 			>
-				{resolvedSession?.key === sessionScope && resolvedSession.error !== undefined && <div role="alert">Could not load session: {resolvedSession.error}</div>}
+				{resolvedSession?.key === sessionScope && resolvedSession.error !== undefined && (
+					<div role="alert">Could not load session: {resolvedSession.error}</div>
+				)}
 				{session !== undefined && actorInternalGenerations === undefined && (
 					<div className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 p-2">
 						<div className="flex flex-wrap items-start justify-between gap-2">
@@ -433,10 +725,22 @@ export function RuntimeSection({
 				{actorOccurrence !== undefined && (
 					<div className="grid gap-2">
 						<dl className="grid grid-cols-2 gap-2 text-[10px]">
-							<div><dt className="text-[var(--text-muted)]">actor path</dt><dd className="break-all font-mono">{actorOccurrence.logicalPath ?? actorOccurrence.occurrencePath}</dd></div>
-							<div><dt className="text-[var(--text-muted)]">generation</dt><dd className="font-mono">{actorOccurrence.generation}</dd></div>
-							<div><dt className="text-[var(--text-muted)]">current state</dt><dd className="font-mono">{actorOccurrence.currentState}</dd></div>
-							<div><dt className="text-[var(--text-muted)]">status</dt><dd>{actorOccurrence.status}</dd></div>
+							<div>
+								<dt className="text-[var(--text-muted)]">actor path</dt>
+								<dd className="break-all font-mono">{actorOccurrence.logicalPath ?? actorOccurrence.occurrencePath}</dd>
+							</div>
+							<div>
+								<dt className="text-[var(--text-muted)]">generation</dt>
+								<dd className="font-mono">{actorOccurrence.generation}</dd>
+							</div>
+							<div>
+								<dt className="text-[var(--text-muted)]">current state</dt>
+								<dd className="font-mono">{actorOccurrence.currentState}</dd>
+							</div>
+							<div>
+								<dt className="text-[var(--text-muted)]">status</dt>
+								<dd>{actorOccurrence.status}</dd>
+							</div>
 						</dl>
 						{actorOccurrence.generationHistory !== undefined && (
 							<VisitHistory
@@ -448,7 +752,12 @@ export function RuntimeSection({
 								{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 							/>
 						)}
-						{actorOccurrence.drain !== undefined && <div className="rounded border border-amber-500/25 p-2 text-[10px]">Drain · {actorOccurrence.drain.current} current · {actorOccurrence.drain.queued} queued · {actorOccurrence.drain.settled} settled</div>}
+						{actorOccurrence.drain !== undefined && (
+							<div className="rounded border border-amber-500/25 p-2 text-[10px]">
+								Drain · {actorOccurrence.drain.current} current · {actorOccurrence.drain.queued} queued ·{" "}
+								{actorOccurrence.drain.settled} settled
+							</div>
+						)}
 					</div>
 				)}
 				{actorInternalGenerations !== undefined && (
@@ -461,57 +770,89 @@ export function RuntimeSection({
 						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 					/>
 				)}
-				{actorInternalGenerations === undefined && actorInternalMessages !== undefined && <ActorInternalMessageHistory state={state} messages={actorInternalMessages} />}
-				{actorMessage !== undefined && actorMessage.messages !== undefined && <ActorSentMessageVisits link={actorMessage} messages={actorMessage.messages} />}
-				{actorMessage !== undefined && actorMessage.messages === undefined && <div className="text-[10px] text-[var(--text-muted)]">No message enqueued yet.</div>}
-				{actorInternalGenerations === undefined && (state.startedAt !== undefined ||
-					state.endedAt !== undefined ||
-					state.mapItemLabel ||
-					state.visits !== undefined) && (
-					<dl className="grid grid-cols-2 gap-2 text-[11px]">
-						{state.startedAt !== undefined && (
-							<div>
-								<dt className="text-[var(--text-muted)]">started</dt>
-								<dd>{formatHyperchartDateTime(state.startedAt)}</dd>
-							</div>
-						)}
-						{state.endedAt !== undefined && (
-							<div>
-								<dt className="text-[var(--text-muted)]">ended</dt>
-								<dd>{formatHyperchartDateTime(state.endedAt)}</dd>
-							</div>
-						)}
-						{state.mapItemLabel && (
-							<div className="min-w-0">
-								<dt className="text-[var(--text-muted)]">map item</dt>
-								<dd className="truncate" title={state.mapItemLabel}>
-									{state.mapItemLabel}
-								</dd>
-							</div>
-						)}
-						{state.visits !== undefined && (
-							<div>
-								<dt className="text-[var(--text-muted)]">visits</dt>
-								<dd>{state.visits}</dd>
-							</div>
-						)}
-					</dl>
+				{actorInternalGenerations === undefined && actorInternalMessages !== undefined && (
+					<ActorInternalMessageHistory state={state} messages={actorInternalMessages} />
 				)}
+				{actorMessage !== undefined && actorMessage.messages !== undefined && (
+					<ActorSentMessageVisits link={actorMessage} messages={actorMessage.messages} />
+				)}
+				{actorMessage !== undefined && actorMessage.messages === undefined && (
+					<div className="text-[10px] text-[var(--text-muted)]">No message enqueued yet.</div>
+				)}
+				{actorInternalGenerations === undefined &&
+					(state.startedAt !== undefined ||
+						state.endedAt !== undefined ||
+						state.mapItemLabel ||
+						state.visits !== undefined) && (
+						<dl className="grid grid-cols-2 gap-2 text-[11px]">
+							{state.startedAt !== undefined && (
+								<div>
+									<dt className="text-[var(--text-muted)]">started</dt>
+									<dd>{formatHyperchartDateTime(state.startedAt)}</dd>
+								</div>
+							)}
+							{state.endedAt !== undefined && (
+								<div>
+									<dt className="text-[var(--text-muted)]">ended</dt>
+									<dd>{formatHyperchartDateTime(state.endedAt)}</dd>
+								</div>
+							)}
+							{state.mapItemLabel && (
+								<div className="min-w-0">
+									<dt className="text-[var(--text-muted)]">map item</dt>
+									<dd className="truncate" title={state.mapItemLabel}>
+										{state.mapItemLabel}
+									</dd>
+								</div>
+							)}
+							{state.visits !== undefined && (
+								<div>
+									<dt className="text-[var(--text-muted)]">visits</dt>
+									<dd>{state.visits}</dd>
+								</div>
+							)}
+						</dl>
+					)}
 				<FanoutStatusCard state={state} />
 				{state.usage && (
 					<div className="text-[11px] text-[var(--text-tertiary)]">
 						usage: {formatHyperchartUsage(state.usage) ?? JSON.stringify(state.usage)}
 					</div>
 				)}
-				{history !== undefined && state.visitHistory === undefined && (state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport") && (
-					<LazyStateVisits readSession={readSession!} history={history} state={state} allStates={allStates} {...(onSteerSession === undefined ? {} : { onSteerSession })} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
+				{history !== undefined &&
+					state.visitHistory === undefined &&
+					(state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport") && (
+						<LazyStateVisits
+							readSession={readSession!}
+							history={history}
+							state={state}
+							allStates={allStates}
+							{...(onSteerSession === undefined ? {} : { onSteerSession })}
+							{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+						/>
+					)}
+				{history !== undefined && state.type === "map" && state.mapConfig?.visitHistory === undefined && (
+					<HistoryDisclosure label="map launch history">
+						<LazyMapVisits history={history} state={state} />
+					</HistoryDisclosure>
 				)}
-				{history !== undefined && state.type === "map" && state.mapConfig?.visitHistory === undefined && <HistoryDisclosure label="map launch history"><LazyMapVisits history={history} state={state} /></HistoryDisclosure>}
-				{history !== undefined && historyLogicalOccurrence !== undefined && <HistoryDisclosure label="actor generations"><LazyActorGenerations history={history} logicalOccurrence={historyLogicalOccurrence} /></HistoryDisclosure>}
-				{history !== undefined && historyOccurrence !== undefined && <HistoryDisclosure label="actor message history"><LazyActorMessages history={history} occurrence={historyOccurrence} /></HistoryDisclosure>}
+				{history !== undefined && historyLogicalOccurrence !== undefined && (
+					<HistoryDisclosure label="actor generations">
+						<LazyActorGenerations history={history} logicalOccurrence={historyLogicalOccurrence} />
+					</HistoryDisclosure>
+				)}
+				{history !== undefined && historyOccurrence !== undefined && (
+					<HistoryDisclosure label="actor message history">
+						<LazyActorMessages history={history} occurrence={historyOccurrence} />
+					</HistoryDisclosure>
+				)}
 				{actorInternalGenerations === undefined && state.visitHistory !== undefined && (
 					<VisitHistory
-						visits={selectedInvokeSeqId === undefined ? state.visitHistory : state.visitHistory.filter((visit) => visit.invokeSeqId === selectedInvokeSeqId)}
+						visits={
+							selectedInvokeSeqId === undefined
+								? state.visitHistory
+								: state.visitHistory.filter((visit) => visit.invokeSeqId === selectedInvokeSeqId)
+						}
 						{...(readSession === undefined ? {} : { onReadSession: readSession })}
 						state={state}
 						allStates={allStates}
@@ -523,7 +864,11 @@ export function RuntimeSection({
 				)}
 				{state.type === "map" && state.mapConfig?.visitHistory !== undefined && (
 					<MapVisitHistory
-						visits={selectedInvokeSeqId === undefined ? state.mapConfig.visitHistory : state.mapConfig.visitHistory.filter((visit) => visit.spawnSeqId === selectedInvokeSeqId)}
+						visits={
+							selectedInvokeSeqId === undefined
+								? state.mapConfig.visitHistory
+								: state.mapConfig.visitHistory.filter((visit) => visit.spawnSeqId === selectedInvokeSeqId)
+						}
 						{...(state.onReenter === undefined ? {} : { onReenter: state.onReenter })}
 					/>
 				)}

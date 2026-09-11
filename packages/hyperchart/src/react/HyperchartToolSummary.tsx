@@ -88,7 +88,7 @@ export function HyperchartToolSummary({
 	const meta = run
 		? isDefinition
 			? "definition"
-			: usage ?? run.status
+			: (usage ?? run.status)
 		: status === "running"
 			? "waiting…"
 			: "not found";
@@ -105,7 +105,9 @@ export function HyperchartToolSummary({
 				disabled={!canOpen}
 				onClick={open}
 				className={`group flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-left text-xs transition ${canOpen ? "hover:bg-blue-500/5" : "cursor-default opacity-80"}`}
-				data-testid={toolName === "hyperchart" && args?.action === "inspect" ? "inspected-hyperchart-graph-snippet" : undefined}
+				data-testid={
+					toolName === "hyperchart" && args?.action === "inspect" ? "inspected-hyperchart-graph-snippet" : undefined
+				}
 			>
 				<span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-[var(--hc-blue-text)]">
 					{run?.status === "running" ? (

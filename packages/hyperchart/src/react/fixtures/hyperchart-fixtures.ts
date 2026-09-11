@@ -39,7 +39,9 @@ export const inspectorDialogChart: ChartCst = chart({
 		},
 		"visual-review": {
 			kind: "state",
-			action: agent("deck-vision-scout", { task: "Check visual consistency, unsupported numbers, and data references." }),
+			action: agent("deck-vision-scout", {
+				task: "Check visual consistency, unsupported numbers, and data references.",
+			}),
 			transitions: { DONE: "approval" },
 		},
 		approval: {
@@ -64,18 +66,14 @@ function timestamp(seqId: number): number {
 	return STARTED_AT + seqId * 1_000;
 }
 
-function actionRecord(
-	statePath: string,
-	kind: "invoke" | "complete",
-	seqId: number,
-	event?: string,
-): DurableLogRecord {
+function actionRecord(statePath: string, kind: "invoke" | "complete", seqId: number, event?: string): DurableLogRecord {
 	const state = inspectorDialogAst.states[statePath];
 	if (state?.kind !== "state") throw new Error(`expected action state at ${statePath}`);
 	const session = {
 		parentId: seqId === 1 ? null : seqId - 1,
 		seqId,
-		branchId: "main", timestamp: timestamp(seqId),
+		branchId: "main",
+		timestamp: timestamp(seqId),
 	};
 	if (kind === "invoke") {
 		return {
@@ -108,10 +106,7 @@ const commonRecords: DurableLogRecord[] = [
 ];
 
 /** Durable facts for an active run currently executing visual-review. */
-const runningRunSchedule: DurableLogRecord[] = [
-	...commonRecords,
-	actionRecord("visual-review", "invoke", 8),
-];
+const runningRunSchedule: DurableLogRecord[] = [...commonRecords, actionRecord("visual-review", "invoke", 8)];
 
 /** Durable prefix paused at an explicit user-input boundary. */
 const blockedRunSchedule: DurableLogRecord[] = [
@@ -137,7 +132,8 @@ const failedRunSchedule: DurableLogRecord[] = [
 		error: "Visual validation rejected unsupported evidence.",
 		parentId: 8,
 		seqId: 9,
-		branchId: "main", timestamp: timestamp(9),
+		branchId: "main",
+		timestamp: timestamp(9),
 	},
 ];
 
@@ -153,65 +149,65 @@ export const inspectRun = inspectorDialogScenario.staticRun({
 	updatedAt: FIXTURE_NOW,
 });
 
-export const runningRun = inspectorDialogScenario.runtimeRun(
-	runningRunRecords,
-	{
+export const runningRun = inspectorDialogScenario.runtimeRun(runningRunRecords, {
+	runId: "deck-director-20260707-224500",
+	status: {
 		runId: "deck-director-20260707-224500",
-		status: {
-			runId: "deck-director-20260707-224500",
-			chartId: inspectorDialogAst.id,
-			state: "running",
-			pid: 42420,
-			startedAt: STARTED_AT,
-			updatedAt: timestamp(8),
-		},
-		cwd: "/Users/demo/Work/pi-hyperchart",
-		branchWorkspace: "/Users/demo/.pi/hyperchart-runs/deck-director-20260707-224500/workspaces/main",
-		createdAt: STARTED_AT,
+		chartId: inspectorDialogAst.id,
+		state: "running",
+		pid: 42420,
+		startedAt: STARTED_AT,
 		updatedAt: timestamp(8),
-		description: "Google I/O 2026 announcement narrative deck",
 	},
-);
+	cwd: "/Users/demo/Work/pi-hyperchart",
+	branchWorkspace: "/Users/demo/.pi/hyperchart-runs/deck-director-20260707-224500/workspaces/main",
+	createdAt: STARTED_AT,
+	updatedAt: timestamp(8),
+	description: "Google I/O 2026 announcement narrative deck",
+});
 
-export const blockedRun = inspectorDialogScenario.runtimeRun(
-	blockedRunRecords,
-	{
+export const blockedRun = inspectorDialogScenario.runtimeRun(blockedRunRecords, {
+	runId: "deck-director-approval-blocked",
+	status: {
 		runId: "deck-director-approval-blocked",
-		status: { runId: "deck-director-approval-blocked", chartId: inspectorDialogAst.id, state: "running", startedAt: STARTED_AT, updatedAt: timestamp(10) },
-		cwd: "/Users/demo/Work/pi-hyperchart",
-		createdAt: STARTED_AT,
+		chartId: inspectorDialogAst.id,
+		state: "running",
+		startedAt: STARTED_AT,
 		updatedAt: timestamp(10),
 	},
-);
+	cwd: "/Users/demo/Work/pi-hyperchart",
+	createdAt: STARTED_AT,
+	updatedAt: timestamp(10),
+});
 
-export const completedRun = inspectorDialogScenario.runtimeRun(
-	completedRunRecords,
-	{
+export const completedRun = inspectorDialogScenario.runtimeRun(completedRunRecords, {
+	runId: "deck-director-completed",
+	status: {
 		runId: "deck-director-completed",
-		status: { runId: "deck-director-completed", chartId: inspectorDialogAst.id, state: "complete", startedAt: STARTED_AT, updatedAt: timestamp(13) },
-		cwd: "/Users/demo/Work/pi-hyperchart",
-		createdAt: STARTED_AT,
+		chartId: inspectorDialogAst.id,
+		state: "complete",
+		startedAt: STARTED_AT,
 		updatedAt: timestamp(13),
 	},
-);
+	cwd: "/Users/demo/Work/pi-hyperchart",
+	createdAt: STARTED_AT,
+	updatedAt: timestamp(13),
+});
 
-export const failedRun = inspectorDialogScenario.runtimeRun(
-	failedRunRecords,
-	{
+export const failedRun = inspectorDialogScenario.runtimeRun(failedRunRecords, {
+	runId: "deck-director-20260706-234626",
+	status: {
 		runId: "deck-director-20260706-234626",
-		status: {
-			runId: "deck-director-20260706-234626",
-			chartId: inspectorDialogAst.id,
-			state: "failed",
-			startedAt: STARTED_AT,
-			updatedAt: timestamp(11),
-		},
-		cwd: "/Users/demo/Work/pi-hyperchart",
-		createdAt: STARTED_AT,
+		chartId: inspectorDialogAst.id,
+		state: "failed",
+		startedAt: STARTED_AT,
 		updatedAt: timestamp(11),
-		description: "Google I/O 2026 announcement narrative deck",
 	},
-);
+	cwd: "/Users/demo/Work/pi-hyperchart",
+	createdAt: STARTED_AT,
+	updatedAt: timestamp(11),
+	description: "Google I/O 2026 announcement narrative deck",
+});
 
 export const allRuns = [runningRun, failedRun, inspectRun];
 export const allRunStripRuns = [runningRun, completedRun, blockedRun, failedRun, inspectRun];

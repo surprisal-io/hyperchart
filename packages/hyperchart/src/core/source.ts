@@ -24,16 +24,28 @@ const DSL_INDENT = "\t";
 
 export function hyperchartSource(ast: ChartAst, selectedStateId: StatePath | null = null): string {
 	if (selectedStateId === null) {
-		const actorBindings = new Map(Object.keys(ast.actors).sort().map((path, index) => [path, `actorDeclaration${index + 1}`]));
+		const actorBindings = new Map(
+			Object.keys(ast.actors)
+				.sort()
+				.map((path, index) => [path, `actorDeclaration${index + 1}`]),
+		);
 		if (actorBindings.size === 0) return `chart(${chartDsl(ast, actorBindings)})`;
 		// Allocate every static capability before evaluating any actor body. This keeps
 		// actor-to-actor send cycles representable without strings or temporal-dead-zone
 		// failures; Object.create(null) is intentionally typed as `any` in generated TS.
-		const placeholders = [...actorBindings.values()].map((binding) => `const ${binding} = Object.create(null);`).join("\n");
-		const declarations = [...actorBindings].map(([path, binding]) => `Object.assign(${binding}, ${actorDeclarationDsl(ast.actors[path]!, actorBindings)});`).join("\n");
+		const placeholders = [...actorBindings.values()]
+			.map((binding) => `const ${binding} = Object.create(null);`)
+			.join("\n");
+		const declarations = [...actorBindings]
+			.map(([path, binding]) => `Object.assign(${binding}, ${actorDeclarationDsl(ast.actors[path]!, actorBindings)});`)
+			.join("\n");
 		return `(() => {\n${indentDslValue(`${placeholders}\n${declarations}`)}\n\treturn chart(${indentDslValue(chartDsl(ast, actorBindings))});\n})()`;
 	}
-	const actorBindings = new Map(Object.keys(ast.actors).sort().map((path, index) => [path, `actorDeclaration${index + 1}`]));
+	const actorBindings = new Map(
+		Object.keys(ast.actors)
+			.sort()
+			.map((path, index) => [path, `actorDeclaration${index + 1}`]),
+	);
 	const actor = ast.actors[selectedStateId];
 	if (actor !== undefined) return `${objectKeyDsl(actor.name)}: ${actorDeclarationDsl(actor, actorBindings)}`;
 	const actorOwner = Object.values(ast.actors)
@@ -41,7 +53,9 @@ export function hyperchartSource(ast: ChartAst, selectedStateId: StatePath | nul
 		.sort((left, right) => right.path.length - left.path.length)[0];
 	if (actorOwner !== undefined) {
 		const workerPrefix = actorOwner.kind === "actorPool" ? "$worker." : "";
-		const localState = selectedStateId.slice(actorOwner.path.length + 1).replace(new RegExp(`^${workerPrefix.replace("$", "\\$")}`), "");
+		const localState = selectedStateId
+			.slice(actorOwner.path.length + 1)
+			.replace(new RegExp(`^${workerPrefix.replace("$", "\\$")}`), "");
 		const actorState = actorDefinition(actorOwner).states[localState];
 		if (actorState !== undefined) return `${objectKeyDsl(localState)}: ${actorStateDsl(actorState, actorBindings)}`;
 	}
@@ -92,13 +106,15 @@ function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>):
 			"args",
 			ast.args === undefined
 				? undefined
-				: objectDsl(Object.entries(ast.args).map(([name, metadata]) => [
-						name,
-						objectDsl([
-							["description", metadata.description === undefined ? undefined : stringDsl(metadata.description)],
-							["default", metadata.default === undefined ? undefined : jsonValueDsl(metadata.default)],
+				: objectDsl(
+						Object.entries(ast.args).map(([name, metadata]) => [
+							name,
+							objectDsl([
+								["description", metadata.description === undefined ? undefined : stringDsl(metadata.description)],
+								["default", metadata.default === undefined ? undefined : jsonValueDsl(metadata.default)],
+							]),
 						]),
-					])),
+					),
 		],
 		["actors", actorsDsl(ast, undefined, actorBindings)],
 		["initial", stringDsl(ast.initial)],
@@ -107,7 +123,8 @@ function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>):
 }
 
 export function hyperchartValueSource(value: import("./types.js").ValueAst): string {
-	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return JSON.stringify(value);
+	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+		return JSON.stringify(value);
 	if (Array.isArray(value)) return arrayDsl(value.map(hyperchartValueSource));
 	if (isInputRef(value)) return inputRefDsl(value);
 	return objectDsl(Object.entries(value).map(([key, child]) => [key, hyperchartValueSource(child)]));
@@ -121,55 +138,129 @@ function jsonValueDsl(value: JsonValue): string {
 	return objectDsl(Object.entries(value).map(([key, child]) => [key, jsonValueDsl(child)]));
 }
 
-function statesDsl(ast: ChartAst, parent: StatePath | undefined, actorBindings: ReadonlyMap<StatePath, string>): string {
-	return objectDsl(childStatePaths(ast, parent).map((path) => [ast.states[path]?.id ?? path, stateDsl(ast, path, actorBindings)]));
+function statesDsl(
+	ast: ChartAst,
+	parent: StatePath | undefined,
+	actorBindings: ReadonlyMap<StatePath, string>,
+): string {
+	return objectDsl(
+		childStatePaths(ast, parent).map((path) => [ast.states[path]?.id ?? path, stateDsl(ast, path, actorBindings)]),
+	);
 }
 
-function actorsDsl(ast: ChartAst, owner: StatePath | undefined, actorBindings: ReadonlyMap<StatePath, string>): string | undefined {
+function actorsDsl(
+	ast: ChartAst,
+	owner: StatePath | undefined,
+	actorBindings: ReadonlyMap<StatePath, string>,
+): string | undefined {
 	const declarations = Object.values(ast.actors).filter((actor) => actor.owner === owner);
 	if (declarations.length === 0) return undefined;
-	return objectDsl(declarations.map((actor) => [actor.name, actorBindings.get(actor.path) ?? actorDeclarationDsl(actor, actorBindings)]));
+	return objectDsl(
+		declarations.map((actor) => [
+			actor.name,
+			actorBindings.get(actor.path) ?? actorDeclarationDsl(actor, actorBindings),
+		]),
+	);
 }
 
 function actorDefinition(actor: ActorEndpointDeclarationAst): ActorDefinitionAst {
-	return actor.kind === "actorPool" ? actor.worker : { input: actor.input, protocol: actor.protocol, initial: actor.initial, states: actor.states };
+	return actor.kind === "actorPool"
+		? actor.worker
+		: { input: actor.input, protocol: actor.protocol, initial: actor.initial, states: actor.states };
 }
 
-function actorDeclarationDsl(actor: ActorEndpointDeclarationAst, actorBindings: ReadonlyMap<StatePath, string>): string {
+function actorDeclarationDsl(
+	actor: ActorEndpointDeclarationAst,
+	actorBindings: ReadonlyMap<StatePath, string>,
+): string {
 	const definition = actorDefinition(actor);
-	const protocol = `protocol(${objectDsl(Object.entries(definition.protocol).map(([event, message]) => [
-		event,
-		`message(${objectDsl([
-			["input", schemaDsl(message.input)],
-			["reply", message.reply.kind === "single" ? schemaDsl(message.reply.schema) : undefined],
-			["replies", message.reply.kind === "named" ? objectDsl(Object.entries(message.reply.schemas).map(([name, schema]) => [name, schemaDsl(schema)])) : undefined],
-		])})`,
-	]))})`;
+	const protocol = `protocol(${objectDsl(
+		Object.entries(definition.protocol).map(([event, message]) => [
+			event,
+			`message(${objectDsl([
+				["input", schemaDsl(message.input)],
+				["reply", message.reply.kind === "single" ? schemaDsl(message.reply.schema) : undefined],
+				[
+					"replies",
+					message.reply.kind === "named"
+						? objectDsl(Object.entries(message.reply.schemas).map(([name, schema]) => [name, schemaDsl(schema)]))
+						: undefined,
+				],
+			])})`,
+		]),
+	)})`;
 	const worker = `actor(${objectDsl([
 		["input", schemaDsl(definition.input)],
 		["protocol", protocol],
 		["initial", stringDsl(definition.initial)],
-		["states", objectDsl(Object.entries(definition.states).map(([id, state]) => [id, actorStateDsl(state, actorBindings)]))],
+		[
+			"states",
+			objectDsl(Object.entries(definition.states).map(([id, state]) => [id, actorStateDsl(state, actorBindings)])),
+		],
 	])})`;
-	const template = actor.kind === "actorPool"
-		? `actorPool(${objectDsl([["concurrency", String(actor.concurrency)], ["worker", worker]])})`
-		: worker;
+	const template =
+		actor.kind === "actorPool"
+			? `actorPool(${objectDsl([
+					["concurrency", String(actor.concurrency)],
+					["worker", worker],
+				])})`
+			: worker;
 	return `${template}(${hyperchartValueSource(actor.inputValue)})`;
 }
 
 function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<StatePath, string>): string {
-	if (state.kind === "receive") return `receive(${objectDsl([["on", objectDsl(Object.entries(state.on).map(([event, target]) => [event, stringDsl(target)]))]])})`;
-	if (state.kind === "reply") return `reply(${objectDsl([["target", stringDsl(state.target)], ["event", state.event === undefined ? undefined : stringDsl(state.event)], ["output", state.output === undefined ? undefined : hyperchartValueSource(state.output)]])})`;
-	if (state.kind === "send") return `send(${objectDsl([["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))], ["event", stringDsl(state.event)], ["input", hyperchartValueSource(state.input)], ["target", stringDsl(state.target)]])})`;
-	if (state.kind === "sendBatch") return `sendBatch(${objectDsl([["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))], ["event", stringDsl(state.event)], ["inputs", hyperchartValueSource(state.inputs)], ["target", stringDsl(state.target)]])})`;
-	if (state.kind === "call") return `call(${objectDsl([["to", actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["input", hyperchartValueSource(state.input)], ["target", state.target === undefined ? undefined : stringDsl(state.target)], ["transitions", transitionsDsl(state.transitions)]])})`;
-	if (state.kind === "callBatch") return `callBatch(${objectDsl([["to", actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["inputs", hyperchartValueSource(state.inputs)], ["target", stringDsl(state.target)]])})`;
-	if (state.kind === "state") return objectDsl([
-		["kind", stringDsl("state")],
-		["input", schemaRecordDsl(state.input)],
-		["action", actionDsl(state.action)],
-		["transitions", transitionsDsl(state.transitions)],
-		["after", state.after === undefined ? undefined : objectDsl([["delayMs", String(state.after.delayMs)], ["target", stringDsl(state.after.target)]])],
+	if (state.kind === "receive")
+		return `receive(${objectDsl([["on", objectDsl(Object.entries(state.on).map(([event, target]) => [event, stringDsl(target)]))]])})`;
+	if (state.kind === "reply")
+		return `reply(${objectDsl([
+			["target", stringDsl(state.target)],
+			["event", state.event === undefined ? undefined : stringDsl(state.event)],
+			["output", state.output === undefined ? undefined : hyperchartValueSource(state.output)],
+		])})`;
+	if (state.kind === "send")
+		return `send(${objectDsl([
+			["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))],
+			["event", stringDsl(state.event)],
+			["input", hyperchartValueSource(state.input)],
+			["target", stringDsl(state.target)],
+		])})`;
+	if (state.kind === "sendBatch")
+		return `sendBatch(${objectDsl([
+			["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))],
+			["event", stringDsl(state.event)],
+			["inputs", hyperchartValueSource(state.inputs)],
+			["target", stringDsl(state.target)],
+		])})`;
+	if (state.kind === "call")
+		return `call(${objectDsl([
+			["to", actorBindings.get(state.to) ?? stringDsl(state.to)],
+			["event", stringDsl(state.event)],
+			["input", hyperchartValueSource(state.input)],
+			["target", state.target === undefined ? undefined : stringDsl(state.target)],
+			["transitions", transitionsDsl(state.transitions)],
+		])})`;
+	if (state.kind === "callBatch")
+		return `callBatch(${objectDsl([
+			["to", actorBindings.get(state.to) ?? stringDsl(state.to)],
+			["event", stringDsl(state.event)],
+			["inputs", hyperchartValueSource(state.inputs)],
+			["target", stringDsl(state.target)],
+		])})`;
+	if (state.kind === "state")
+		return objectDsl([
+			["kind", stringDsl("state")],
+			["input", schemaRecordDsl(state.input)],
+			["action", actionDsl(state.action)],
+			["transitions", transitionsDsl(state.transitions)],
+			[
+				"after",
+				state.after === undefined
+					? undefined
+					: objectDsl([
+							["delayMs", String(state.after.delayMs)],
+							["target", stringDsl(state.after.target)],
+						]),
+			],
 		]);
 	return "undefined";
 }
@@ -182,7 +273,8 @@ function stateDsl(ast: ChartAst, path: StatePath, actorBindings: ReadonlyMap<Sta
 		if (state.notify === undefined) return `${factory}()`;
 		const notifyEntries: [string, string | undefined][] = [];
 		if (state.notify.prompt !== undefined) notifyEntries.push(["prompt", templateDsl(state.notify.prompt)]);
-		if (state.notify.artifacts !== undefined) notifyEntries.push(["artifacts", arrayDsl(state.notify.artifacts.map(readDsl))]);
+		if (state.notify.artifacts !== undefined)
+			notifyEntries.push(["artifacts", arrayDsl(state.notify.artifacts.map(readDsl))]);
 		if (state.notify.scope !== undefined) notifyEntries.push(["scope", stringDsl(state.notify.scope)]);
 		const notify = objectDsl(notifyEntries);
 		return `${factory}(${objectDsl([["notify", notify]])})`;
@@ -321,11 +413,15 @@ function actionDsl(action: StateActionAst): string {
 	])})`;
 }
 
-function scriptDsl(value: Extract<StateActionAst, { kind: "script" }> | Extract<GuardRefAst, { kind: "script" }>): string {
+function scriptDsl(
+	value: Extract<StateActionAst, { kind: "script" }> | Extract<GuardRefAst, { kind: "script" }>,
+): string {
 	const args = "args" in value && value.args.length > 0 ? value.args : undefined;
 	const optionEntries: Array<[string, string | undefined]> = [["env", envDsl(value.env)]];
-	if ("artifacts" in value) optionEntries.push(["artifacts", artifactsDsl(value.artifacts as Readonly<Record<string, ArtifactAst>>)]);
-	if ("reply" in value) optionEntries.push(["reply", value.reply === undefined ? undefined : schemaDsl(value.reply as SchemaAst)]);
+	if ("artifacts" in value)
+		optionEntries.push(["artifacts", artifactsDsl(value.artifacts as Readonly<Record<string, ArtifactAst>>)]);
+	if ("reply" in value)
+		optionEntries.push(["reply", value.reply === undefined ? undefined : schemaDsl(value.reply as SchemaAst)]);
 	const options = objectDsl(optionEntries);
 	const callArgs = [
 		stringDsl(value.command),
@@ -368,7 +464,9 @@ function transitionInputsDsl(input: Readonly<Record<string, TransitionInputAst>>
 		Object.entries(input).map(([name, binding]) => [
 			name,
 			binding.kind === "event"
-				? binding.path === undefined ? "event()" : `event(${stringDsl(binding.path)})`
+				? binding.path === undefined
+					? "event()"
+					: `event(${stringDsl(binding.path)})`
 				: inputRefDsl(binding),
 		]),
 	);
@@ -665,5 +763,7 @@ function envDsl(
 	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined,
 ): string | undefined {
 	if (env === undefined || Object.keys(env).length === 0) return undefined;
-	return objectDsl(Object.entries(env).map(([name, value]) => [name, typeof value === "string" ? stringDsl(value) : readDsl(value)]));
+	return objectDsl(
+		Object.entries(env).map(([name, value]) => [name, typeof value === "string" ? stringDsl(value) : readDsl(value)]),
+	);
 }

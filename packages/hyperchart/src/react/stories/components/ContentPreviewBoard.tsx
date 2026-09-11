@@ -14,7 +14,10 @@ import { PreviewStateCard } from "./PreviewStateCard.js";
 function requiredScenarioState(group: "agent" | "map", title: string) {
 	const spec = inspectorPanelSpecs.find((candidate) => candidate.group === group && candidate.title === title);
 	const scenario = spec === undefined ? undefined : inspectorPanelScenario(spec);
-	const state = scenario?.selectedStateId === null ? undefined : scenario?.run.states.find((candidate) => candidate.id === scenario?.selectedStateId);
+	const state =
+		scenario?.selectedStateId === null
+			? undefined
+			: scenario?.run.states.find((candidate) => candidate.id === scenario?.selectedStateId);
 	if (state === undefined) throw new Error(`adapter-derived content preview state is unavailable: ${title}`);
 	return state;
 }
@@ -81,7 +84,10 @@ function required<T>(value: T | undefined, name: string): T {
 const fittingActorContract = required(actorNamedReplyRun.actorDeclarations?.[0]?.protocol[0], "fitting protocol");
 const clippedActorContract = required(actorOverflowRun.actorDeclarations?.[0]?.protocol[0], "overflow protocol");
 const fittingActorMailbox = required(actorBusyFifoRun.actorOccurrences?.[0]?.mailboxInstances, "fitting mailbox");
-const clippedActorMailbox = required(actorOverflowRun.actorOccurrences?.find((occurrence) => occurrence.mailbox.totalCount > 0)?.mailboxInstances, "overflow mailbox");
+const clippedActorMailbox = required(
+	actorOverflowRun.actorOccurrences?.find((occurrence) => occurrence.mailbox.totalCount > 0)?.mailboxInstances,
+	"overflow mailbox",
+);
 
 const clippedMapState = requiredScenarioState("map", "Map parent overflow");
 

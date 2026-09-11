@@ -45,7 +45,5 @@ export function contract<S extends ZodType>(id: string, version: string, schema:
 }
 
 export function runtimeContractMetadata(value: unknown): RuntimeContractMetadata | undefined {
-	return typeof value === "object" && value !== null
-		? (value as ContractedSchema)[RUNTIME_CONTRACT]
-		: undefined;
+	return typeof value === "object" && value !== null ? (value as ContractedSchema)[RUNTIME_CONTRACT] : undefined;
 }

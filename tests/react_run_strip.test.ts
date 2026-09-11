@@ -19,7 +19,8 @@ const chart: HyperchartSummaryInfo = {
 function run(index: number): HyperchartRunInfo {
 	return {
 		runId: `run-${index}`,
-		branchId: "main",		chartName: chart.name,
+		branchId: "main",
+		chartName: chart.name,
 		status: "completed",
 		cwd: "/workspace",
 		createdAt: index,
@@ -43,7 +44,8 @@ describe("HyperchartRunStrip", () => {
 			runs: [
 				{
 					runId: "summary-run",
-					branchId: "main",					chartName: "release",
+					branchId: "main",
+					chartName: "release",
 					status: "running",
 					cwd: "/workspace",
 					createdAt: 1,
@@ -81,7 +83,8 @@ describe("HyperchartRunStrip", () => {
 	it("hides progress when summary progress metadata is omitted but keeps known running state", () => {
 		const summary: HyperchartRunSummaryInfo = {
 			runId: "no-progress",
-			branchId: "main",			chartName: "release",
+			branchId: "main",
+			chartName: "release",
 			status: "running",
 			cwd: "/workspace",
 			createdAt: 1,
@@ -98,7 +101,8 @@ describe("HyperchartRunStrip", () => {
 	it("hides progress when summary progress metadata is only partial", () => {
 		const summary: HyperchartRunSummaryInfo = {
 			runId: "partial-progress",
-			branchId: "main",			chartName: "release",
+			branchId: "main",
+			chartName: "release",
 			status: "blocked",
 			cwd: "/workspace",
 			createdAt: 1,
@@ -113,9 +117,7 @@ describe("HyperchartRunStrip", () => {
 	});
 
 	it("labels chart actions as Run instead of overflow", () => {
-		const markup = renderToStaticMarkup(
-			createElement(HyperchartRunStrip, { hypercharts: [chart], runs: [run(1)] }),
-		);
+		const markup = renderToStaticMarkup(createElement(HyperchartRunStrip, { hypercharts: [chart], runs: [run(1)] }));
 
 		expect(markup).toContain("Run…");
 		expect(markup).not.toContain("More (1)");

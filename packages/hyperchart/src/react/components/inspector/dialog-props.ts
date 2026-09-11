@@ -1,4 +1,9 @@
-import type { HyperchartInspectorDataSource, HyperchartPortalRenderer, HyperchartRunInfo, HyperchartUiTheme } from "../../types.js";
+import type {
+	HyperchartInspectorDataSource,
+	HyperchartPortalRenderer,
+	HyperchartRunInfo,
+	HyperchartUiTheme,
+} from "../../types.js";
 
 export interface HyperchartInspectorDialogProps {
 	runs: HyperchartRunInfo[];

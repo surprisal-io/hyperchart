@@ -3,7 +3,15 @@ import { useState } from "react";
 import type { HyperchartActorMailboxInstanceInfo, HyperchartActorMessageInfo } from "../../../types.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
 
-export function ActorMailboxMessageRow({ message, index, current = false }: { message: HyperchartActorMessageInfo; index?: number; current?: boolean }) {
+export function ActorMailboxMessageRow({
+	message,
+	index,
+	current = false,
+}: {
+	message: HyperchartActorMessageInfo;
+	index?: number;
+	current?: boolean;
+}) {
 	const [open, setOpen] = useState(false);
 	const toggle = () => setOpen((value) => !value);
 	return (
@@ -21,22 +29,63 @@ export function ActorMailboxMessageRow({ message, index, current = false }: { me
 			}}
 		>
 			<div className="flex min-w-0 items-center gap-2">
-				<ChevronRightIcon className={`h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform ${open ? "rotate-90" : ""}`} />
-				<span className={`shrink-0 font-mono ${current ? "text-[var(--hc-purple-text)]" : "w-4 text-[var(--text-muted)]"}`}>{current ? "current" : (index ?? 0) + 1}</span>
+				<ChevronRightIcon
+					className={`h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition-transform ${open ? "rotate-90" : ""}`}
+				/>
+				<span
+					className={`shrink-0 font-mono ${current ? "text-[var(--hc-purple-text)]" : "w-4 text-[var(--text-muted)]"}`}
+				>
+					{current ? "current" : (index ?? 0) + 1}
+				</span>
 				<code className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{message.event}</code>
-				<span className={`shrink-0 rounded border px-1 py-0.5 uppercase ${message.callId === undefined ? "border-cyan-500/30 text-[var(--hc-cyan-text)]" : "border-violet-500/30 text-[var(--hc-purple-text)]"}`}>{message.callId === undefined ? "send" : "call"}</span>
-				<span className="shrink-0 rounded border border-[var(--border-secondary)] px-1 py-0.5 uppercase">{message.status}</span>
+				<span
+					className={`shrink-0 rounded border px-1 py-0.5 uppercase ${message.callId === undefined ? "border-cyan-500/30 text-[var(--hc-cyan-text)]" : "border-violet-500/30 text-[var(--hc-purple-text)]"}`}
+				>
+					{message.callId === undefined ? "send" : "call"}
+				</span>
+				<span className="shrink-0 rounded border border-[var(--border-secondary)] px-1 py-0.5 uppercase">
+					{message.status}
+				</span>
 			</div>
 			{open && (
 				<div className="mt-2 min-w-0 space-y-2 pl-5">
 					<dl className="grid min-w-0 gap-1 text-[var(--text-tertiary)] sm:grid-cols-2">
-						<div className="min-w-0"><dt className="text-[var(--text-muted)]">message</dt><dd className="truncate font-mono" title={message.messageId}>{message.messageId}</dd></div>
-						<div className="min-w-0"><dt className="text-[var(--text-muted)]">producer</dt><dd className="truncate font-mono" title={message.producerVisit}>{message.producerVisit}</dd></div>
-						{message.receiveState !== undefined && <div className="min-w-0"><dt className="text-[var(--text-muted)]">receive</dt><dd className="truncate font-mono" title={message.receiveState}>{message.receiveState}</dd></div>}
-						{message.replyEvent !== undefined && <div className="min-w-0"><dt className="text-[var(--text-muted)]">reply</dt><dd className="truncate font-mono">{message.replyEvent}</dd></div>}
-						{message.validation !== undefined && <div><dt className="text-[var(--text-muted)]">validation</dt><dd>{message.validation}</dd></div>}
+						<div className="min-w-0">
+							<dt className="text-[var(--text-muted)]">message</dt>
+							<dd className="truncate font-mono" title={message.messageId}>
+								{message.messageId}
+							</dd>
+						</div>
+						<div className="min-w-0">
+							<dt className="text-[var(--text-muted)]">producer</dt>
+							<dd className="truncate font-mono" title={message.producerVisit}>
+								{message.producerVisit}
+							</dd>
+						</div>
+						{message.receiveState !== undefined && (
+							<div className="min-w-0">
+								<dt className="text-[var(--text-muted)]">receive</dt>
+								<dd className="truncate font-mono" title={message.receiveState}>
+									{message.receiveState}
+								</dd>
+							</div>
+						)}
+						{message.replyEvent !== undefined && (
+							<div className="min-w-0">
+								<dt className="text-[var(--text-muted)]">reply</dt>
+								<dd className="truncate font-mono">{message.replyEvent}</dd>
+							</div>
+						)}
+						{message.validation !== undefined && (
+							<div>
+								<dt className="text-[var(--text-muted)]">validation</dt>
+								<dd>{message.validation}</dd>
+							</div>
+						)}
 					</dl>
-					<ExpandablePre collapsedLines={5} language="json">{JSON.stringify(message.input, null, 2)}</ExpandablePre>
+					<ExpandablePre collapsedLines={5} language="json">
+						{JSON.stringify(message.input, null, 2)}
+					</ExpandablePre>
 				</div>
 			)}
 		</div>
@@ -63,25 +112,45 @@ export function ActorMailboxCard({
 	return (
 		<div className="rounded-lg border border-[var(--border-secondary)] p-2">
 			<div className="mb-2 flex min-w-0 items-center gap-2 text-[10px]">
-				<span className="font-semibold text-[var(--text-primary)]">Latest instance · generation {latest.generation}</span>
+				<span className="font-semibold text-[var(--text-primary)]">
+					Latest instance · generation {latest.generation}
+				</span>
 				<span className="ml-auto shrink-0 uppercase text-[var(--text-muted)]">{latest.status}</span>
 			</div>
 			{(!hideHeader || (mailboxEntries?.length ?? 0) > 4) && (
 				<div className="flex items-center justify-between gap-2">
-					{!hideHeader && <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">FIFO mailbox · {latest.mailbox.totalCount} queued</div>}
-					{(mailboxEntries?.length ?? 0) > 4 && <button type="button" className="ml-auto text-[10px] text-[var(--hc-cyan-text)]" onClick={() => setExpanded((value) => !value)}>{expanded ? "Compact" : `Show all ${mailboxEntries?.length ?? 0}`}</button>}
+					{!hideHeader && (
+						<div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+							FIFO mailbox · {latest.mailbox.totalCount} queued
+						</div>
+					)}
+					{(mailboxEntries?.length ?? 0) > 4 && (
+						<button
+							type="button"
+							className="ml-auto text-[10px] text-[var(--hc-cyan-text)]"
+							onClick={() => setExpanded((value) => !value)}
+						>
+							{expanded ? "Compact" : `Show all ${mailboxEntries?.length ?? 0}`}
+						</button>
+					)}
 				</div>
 			)}
 			<div className="grid gap-1">
 				{latest.currentMessage !== undefined && <ActorMailboxMessageRow message={latest.currentMessage} current />}
 				{summarizedHead !== undefined && <ActorMailboxMessageRow message={summarizedHead} index={0} />}
-				{entries.map((entry, index) => <ActorMailboxMessageRow key={entry.messageId} message={entry} index={index} />)}
+				{entries.map((entry, index) => (
+					<ActorMailboxMessageRow key={entry.messageId} message={entry} index={index} />
+				))}
 				{mailboxEntries === undefined && latest.mailbox.totalCount > 0 && (
 					<div className="text-[10px] text-[var(--text-muted)]">
-						{summarizedHead === undefined ? "Mailbox contents are summarized." : "Showing the retained mailbox head."} {latest.mailbox.totalCount.toLocaleString()} queued in the pinned overview; load actor message history for durable batches.
+						{summarizedHead === undefined ? "Mailbox contents are summarized." : "Showing the retained mailbox head."}{" "}
+						{latest.mailbox.totalCount.toLocaleString()} queued in the pinned overview; load actor message history for
+						durable batches.
 					</div>
 				)}
-				{latest.currentMessage === undefined && latest.mailbox.totalCount === 0 && <div className="text-[10px] text-[var(--text-muted)]">Mailbox is empty.</div>}
+				{latest.currentMessage === undefined && latest.mailbox.totalCount === 0 && (
+					<div className="text-[10px] text-[var(--text-muted)]">Mailbox is empty.</div>
+				)}
 				{hasHistory && (
 					<button
 						type="button"
@@ -95,25 +164,49 @@ export function ActorMailboxCard({
 					<div className="mt-1 grid gap-2 border-t border-[var(--border-secondary)] pt-2">
 						{messageHistory.length > 0 && (
 							<section>
-								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed in latest instance · {messageHistory.length}</div>
+								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+									Processed in latest instance · {messageHistory.length}
+								</div>
 								<div className="grid gap-1">
-									{messageHistory.map((entry, index) => <ActorMailboxMessageRow key={`history:${latest.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
+									{messageHistory.map((entry, index) => (
+										<ActorMailboxMessageRow
+											key={`history:${latest.occurrencePath}:${entry.messageId}`}
+											message={entry}
+											index={index}
+										/>
+									))}
 								</div>
 							</section>
 						)}
 						{[...previousInstances].reverse().map((instance, instanceIndex) => (
 							<section
 								key={instance.occurrencePath}
-								className={messageHistory.length === 0 && instanceIndex === 0 ? "" : "border-t border-[var(--border-secondary)] pt-2"}
+								className={
+									messageHistory.length === 0 && instanceIndex === 0
+										? ""
+										: "border-t border-[var(--border-secondary)] pt-2"
+								}
 							>
 								<div className="mb-1.5 flex min-w-0 items-center gap-2 text-[10px]">
-									<span className="font-semibold text-[var(--text-primary)]">Instance · generation {instance.generation}</span>
+									<span className="font-semibold text-[var(--text-primary)]">
+										Instance · generation {instance.generation}
+									</span>
 									<span className="ml-auto shrink-0 uppercase text-[var(--text-muted)]">{instance.status}</span>
 								</div>
-								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Processed messages · {instance.messageHistory?.length ?? 0}</div>
+								<div className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+									Processed messages · {instance.messageHistory?.length ?? 0}
+								</div>
 								<div className="grid gap-1">
-									{instance.messageHistory?.map((entry, index) => <ActorMailboxMessageRow key={`history:${instance.occurrencePath}:${entry.messageId}`} message={entry} index={index} />)}
-									{(instance.messageHistory?.length ?? 0) === 0 && <div className="text-[10px] text-[var(--text-muted)]">No processed messages.</div>}
+									{instance.messageHistory?.map((entry, index) => (
+										<ActorMailboxMessageRow
+											key={`history:${instance.occurrencePath}:${entry.messageId}`}
+											message={entry}
+											index={index}
+										/>
+									))}
+									{(instance.messageHistory?.length ?? 0) === 0 && (
+										<div className="text-[10px] text-[var(--text-muted)]">No processed messages.</div>
+									)}
 								</div>
 							</section>
 						))}

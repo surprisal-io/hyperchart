@@ -39,7 +39,9 @@ for (const path of paths.sort()) {
 }
 
 const extractNames = (file) =>
-	[...new Set([...readFileSync(file, "utf8").matchAll(/name: "(hyperchart[a-z_]*)"/g)].map((match) => match[1]))].sort();
+	[
+		...new Set([...readFileSync(file, "utf8").matchAll(/name: "(hyperchart[a-z_]*)"/g)].map((match) => match[1])),
+	].sort();
 const registry = {
 	claude: extractNames("packages/claude-hyperchart/src/mcp/tools.ts"),
 	pi: extractNames("packages/pi-hyperchart/extensions/hyperchart.ts"),

@@ -1,5 +1,13 @@
 import { isDeepStrictEqual } from "node:util";
-import { isDurableRecordEntry, type BranchHead, type BranchId, type BranchMetadata, type DurableLogRecord, type DurableRecordDraft, type StorageEntry } from "../../core/durable_events.js";
+import {
+	isDurableRecordEntry,
+	type BranchHead,
+	type BranchId,
+	type BranchMetadata,
+	type DurableLogRecord,
+	type DurableRecordDraft,
+	type StorageEntry,
+} from "../../core/durable_events.js";
 import {
 	BranchHeadMovedError,
 	DEFAULT_BRANCH_ID,
@@ -99,7 +107,13 @@ const JOURNAL_BRANCH_CREATE_INDEX_DDL = `CREATE INDEX IF NOT EXISTS hyperchart_j
   ON ${JOURNAL_TABLE}(run_id, branch_id, seq) WHERE kind = 'branch_create'`;
 
 export type PostgresLogAccess = "writer" | "read";
-export type OpenPostgresLogStoreOptions = Readonly<{ dsn: string; runId: string; branchId?: BranchId; onWarn?: (message: string) => void; access?: PostgresLogAccess }>;
+export type OpenPostgresLogStoreOptions = Readonly<{
+	dsn: string;
+	runId: string;
+	branchId?: BranchId;
+	onWarn?: (message: string) => void;
+	access?: PostgresLogAccess;
+}>;
 export type PgQueryResult = { rows: Record<string, unknown>[] };
 export type PgClientLike = {
 	connect(): Promise<void>;
@@ -133,13 +147,31 @@ export type SqlCommitTransaction = Readonly<{
 	query(text: string, values?: readonly unknown[]): Promise<PgQueryResult>;
 }>;
 export type SqlCommitParticipant<T> = (tx: SqlCommitTransaction) => Promise<T>;
-export type PostgresRunTransaction = SqlCommitTransaction & Readonly<{
-	appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
-	appendDraftsAtHead(branchId: BranchId, input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]>;
-	createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead>;
-	moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult>;
-	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void>;
-}>;
+export type PostgresRunTransaction = SqlCommitTransaction &
+	Readonly<{
+		appendDrafts(
+			branchId: BranchId,
+			drafts: readonly DurableRecordDraft[],
+			prepare?: PrepareStampedCommit,
+		): Promise<readonly DurableLogRecord[]>;
+		appendDraftsAtHead(
+			branchId: BranchId,
+			input: AppendAtHeadInput,
+			prepare?: PrepareStampedCommit,
+		): Promise<readonly DurableLogRecord[]>;
+		createBranch(
+			branchId: BranchId,
+			headSeqId: number,
+			metadata?: BranchMetadata,
+			options?: BranchMutationOptions,
+		): Promise<BranchHead>;
+		moveBranch(
+			branchId: BranchId,
+			headSeqId: number | null,
+			options?: BranchMutationOptions,
+		): Promise<BranchMoveResult>;
+		storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void>;
+	}>;
 export type PostgresForkAndAppendInput = Readonly<{
 	sourceBranchId: BranchId;
 	newBranchId: BranchId;
@@ -151,15 +183,28 @@ export type PostgresForkAndAppendInput = Readonly<{
 	prepare?: PrepareStampedCommit;
 }>;
 export interface SqlTransactionalRunLogStore extends RunLogStore {
-	appendDraftsAtHeadWithParticipant<T>(branchId: BranchId, input: AppendAtHeadInput, prepare: PrepareStampedCommit | undefined, participate: SqlCommitParticipant<T>): Promise<{ records: readonly DurableLogRecord[]; participant: T }>;
-	forkAndAppend<T>(input: PostgresForkAndAppendInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; records: readonly DurableLogRecord[]; participant: T }>;
+	appendDraftsAtHeadWithParticipant<T>(
+		branchId: BranchId,
+		input: AppendAtHeadInput,
+		prepare: PrepareStampedCommit | undefined,
+		participate: SqlCommitParticipant<T>,
+	): Promise<{ records: readonly DurableLogRecord[]; participant: T }>;
+	forkAndAppend<T>(
+		input: PostgresForkAndAppendInput,
+		participate: SqlCommitParticipant<T>,
+	): Promise<{ branch: BranchHead; records: readonly DurableLogRecord[]; participant: T }>;
 }
 
 export class PostgresLogStore implements RunLogStore {
 	readonly canStoreCheckpoints: boolean;
-	private constructor(private readonly journal: SharedPgJournal, readonly branchId: BranchId) {
+	private constructor(
+		private readonly journal: SharedPgJournal,
+		readonly branchId: BranchId,
+	) {
 		this.canStoreCheckpoints = journal.access === "writer";
-		registerReplayPageReader(this, (input) => readForwardReplayPageDirect(journal.client, journal.runId, input, journal.access));
+		registerReplayPageReader(this, (input) =>
+			readForwardReplayPageDirect(journal.client, journal.runId, input, journal.access),
+		);
 	}
 
 	static async open(options: OpenPostgresLogStoreOptions): Promise<PostgresLogStore> {
@@ -171,14 +216,28 @@ export class PostgresLogStore implements RunLogStore {
 				await ensureJournalTable(client);
 				await ensureRunMetaTable(client);
 				await ensureCheckpointTable(client);
-				const locked = await client.query("SELECT pg_try_advisory_lock(hashtextextended('hyperchart:run:' || $1, 0)) AS locked", [options.runId]);
-				if (locked.rows[0]?.locked !== true) throw new Error(`Another live writer holds Hyperchart run '${options.runId}' in Postgres; stop it before writing`);
+				const locked = await client.query(
+					"SELECT pg_try_advisory_lock(hashtextextended('hyperchart:run:' || $1, 0)) AS locked",
+					[options.runId],
+				);
+				if (locked.rows[0]?.locked !== true)
+					throw new Error(
+						`Another live writer holds Hyperchart run '${options.runId}' in Postgres; stop it before writing`,
+					);
 			}
-			return new PostgresLogStore({ client, runId: options.runId, access, writeChain: Promise.resolve(), closed: false, poisoned: false }, branchId);
-		} catch (error) { await client.end().catch(() => {}); throw error; }
+			return new PostgresLogStore(
+				{ client, runId: options.runId, access, writeChain: Promise.resolve(), closed: false, poisoned: false },
+				branchId,
+			);
+		} catch (error) {
+			await client.end().catch(() => {});
+			throw error;
+		}
 	}
 
-	forBranch(branchId: BranchId): PostgresLogStore { return new PostgresLogStore(this.journal, branchId); }
+	forBranch(branchId: BranchId): PostgresLogStore {
+		return new PostgresLogStore(this.journal, branchId);
+	}
 
 	async captureSnapshot(branchId: BranchId): Promise<HistorySnapshot> {
 		const branch = await this.getBranch(branchId);
@@ -190,7 +249,10 @@ export class PostgresLogStore implements RunLogStore {
 	}
 	async getBranch(branchId: BranchId): Promise<BranchHead> {
 		await this.awaitReadable();
-		return requireBranch(await findBranchDirect(this.journal.client, this.journal.runId, branchId, this.journal.access), branchId);
+		return requireBranch(
+			await findBranchDirect(this.journal.client, this.journal.runId, branchId, this.journal.access),
+			branchId,
+		);
 	}
 	async getRecord(seqId: number): Promise<DurableLogRecord | undefined> {
 		await this.awaitReadable();
@@ -198,20 +260,81 @@ export class PostgresLogStore implements RunLogStore {
 	}
 	async containsInHistory(input: { headSeqId: number | null; seqId: number }): Promise<boolean> {
 		await this.awaitReadable();
-		return containsInHistoryDirect(this.journal.client, this.journal.runId, input.headSeqId, input.seqId, this.journal.access);
+		return containsInHistoryDirect(
+			this.journal.client,
+			this.journal.runId,
+			input.headSeqId,
+			input.seqId,
+			this.journal.access,
+		);
 	}
-	async readRecords(input: { snapshot: HistorySnapshot; cursor?: HistoryCursor }): Promise<HistoryChunk<DurableLogRecord>> { return this.readSubject(input.snapshot, { kind: "records" }, input.cursor) as Promise<HistoryChunk<DurableLogRecord>>; }
-	async readStateVisits(input: { snapshot: HistorySnapshot; state: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<StateVisitHistoryItem>> { return this.readSubject(input.snapshot, { kind: "state-visits", state: input.state }, input.cursor) as Promise<HistoryChunk<StateVisitHistoryItem>>; }
-	async readMapVisits(input: { snapshot: HistorySnapshot; mapPath: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<MapVisitHistoryItem>> { return this.readSubject(input.snapshot, { kind: "map-visits", mapPath: input.mapPath }, input.cursor) as Promise<HistoryChunk<MapVisitHistoryItem>>; }
-	async readActorGenerations(input: { snapshot: HistorySnapshot; logicalOccurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorGenerationHistoryItem>> { return this.readSubject(input.snapshot, { kind: "actor-generations", logicalOccurrence: input.logicalOccurrence }, input.cursor) as Promise<HistoryChunk<ActorGenerationHistoryItem>>; }
-	async readActorMessages(input: { snapshot: HistorySnapshot; occurrence: StatePath; cursor?: HistoryCursor }): Promise<HistoryChunk<ActorMessageHistoryItem>> { return this.readSubject(input.snapshot, { kind: "actor-messages", occurrence: input.occurrence }, input.cursor) as Promise<HistoryChunk<ActorMessageHistoryItem>>; }
-	async cursorAt(input: { snapshot: HistorySnapshot; subject: HistorySubject; seqId: number }): Promise<HistoryCursor | undefined> {
+	async readRecords(input: {
+		snapshot: HistorySnapshot;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<DurableLogRecord>> {
+		return this.readSubject(input.snapshot, { kind: "records" }, input.cursor) as Promise<
+			HistoryChunk<DurableLogRecord>
+		>;
+	}
+	async readStateVisits(input: {
+		snapshot: HistorySnapshot;
+		state: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<StateVisitHistoryItem>> {
+		return this.readSubject(input.snapshot, { kind: "state-visits", state: input.state }, input.cursor) as Promise<
+			HistoryChunk<StateVisitHistoryItem>
+		>;
+	}
+	async readMapVisits(input: {
+		snapshot: HistorySnapshot;
+		mapPath: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<MapVisitHistoryItem>> {
+		return this.readSubject(input.snapshot, { kind: "map-visits", mapPath: input.mapPath }, input.cursor) as Promise<
+			HistoryChunk<MapVisitHistoryItem>
+		>;
+	}
+	async readActorGenerations(input: {
+		snapshot: HistorySnapshot;
+		logicalOccurrence: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<ActorGenerationHistoryItem>> {
+		return this.readSubject(
+			input.snapshot,
+			{ kind: "actor-generations", logicalOccurrence: input.logicalOccurrence },
+			input.cursor,
+		) as Promise<HistoryChunk<ActorGenerationHistoryItem>>;
+	}
+	async readActorMessages(input: {
+		snapshot: HistorySnapshot;
+		occurrence: StatePath;
+		cursor?: HistoryCursor;
+	}): Promise<HistoryChunk<ActorMessageHistoryItem>> {
+		return this.readSubject(
+			input.snapshot,
+			{ kind: "actor-messages", occurrence: input.occurrence },
+			input.cursor,
+		) as Promise<HistoryChunk<ActorMessageHistoryItem>>;
+	}
+	async cursorAt(input: {
+		snapshot: HistorySnapshot;
+		subject: HistorySubject;
+		seqId: number;
+	}): Promise<HistoryCursor | undefined> {
 		const ancestry = await this.ancestryForSnapshot(input.snapshot);
 		return cursorAtItems(input.snapshot, input.subject, historyItemsForSubject(ancestry, input.subject), input.seqId);
 	}
-	async findUserInteractionResponse(input: { headSeqId: number | null; gateSeqId: number }): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
+	async findUserInteractionResponse(input: {
+		headSeqId: number | null;
+		gateSeqId: number;
+	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
 		await this.awaitReadable();
-		const ancestry = await materializeHistoryToHeadDirect(this.journal.client, this.journal.runId, input.headSeqId, this.journal.access);
+		const ancestry = await materializeHistoryToHeadDirect(
+			this.journal.client,
+			this.journal.runId,
+			input.headSeqId,
+			this.journal.access,
+		);
 		return findUserInteractionResponseInAncestry(ancestry, input.gateSeqId);
 	}
 	async countRecords(): Promise<number> {
@@ -220,18 +343,23 @@ export class PostgresLogStore implements RunLogStore {
 	}
 	async loadExactCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		await this.awaitReadable();
-		const rows = await queryRows(this.journal.client, this.journal.access,
+		const rows = await queryRows(
+			this.journal.client,
+			this.journal.access,
 			`SELECT checkpoint_id, head_seq_id, selector_key, blob, created_at_ms
 			   FROM ${CHECKPOINT_TABLE}
 			  WHERE run_id = $1 AND head_seq_id IS NOT DISTINCT FROM $2
 			    AND selector_key = $3
 			  ORDER BY created_at_ms DESC LIMIT 1`,
-			[this.journal.runId, input.targetHeadSeqId, input.selectorKey]);
+			[this.journal.runId, input.targetHeadSeqId, input.selectorKey],
+		);
 		return rows[0] === undefined ? undefined : decodeCheckpointRow(rows[0]);
 	}
 	async findNearestCheckpoint(input: CheckpointQuery): Promise<OpaqueCheckpointEnvelope | undefined> {
 		await this.awaitReadable();
-		const rows = await queryRows(this.journal.client, this.journal.access,
+		const rows = await queryRows(
+			this.journal.client,
+			this.journal.access,
 			`WITH RECURSIVE ancestry AS (
 			   SELECT seq, parent_id, 0 AS depth FROM ${JOURNAL_TABLE}
 			    WHERE run_id = $1 AND seq = $2 AND kind = 'record'
@@ -246,25 +374,48 @@ export class PostgresLogStore implements RunLogStore {
 			  WHERE checkpoint.run_id = $1 AND checkpoint.selector_key = $3
 			    AND (checkpoint.head_seq_id IS NULL OR ancestry.seq IS NOT NULL)
 			  ORDER BY COALESCE(ancestry.depth, 2147483647), checkpoint.created_at_ms DESC LIMIT 1`,
-			[this.journal.runId, input.targetHeadSeqId, input.selectorKey]);
+			[this.journal.runId, input.targetHeadSeqId, input.selectorKey],
+		);
 		return rows[0] === undefined ? undefined : decodeCheckpointRow(rows[0]);
 	}
 	discardCheckpoint(checkpointId: string): Promise<void> {
-		return this.transaction(async (tx) => { await tx.query(`DELETE FROM ${CHECKPOINT_TABLE} WHERE run_id = $1 AND checkpoint_id = $2`, [this.journal.runId, checkpointId]); });
+		return this.transaction(async (tx) => {
+			await tx.query(`DELETE FROM ${CHECKPOINT_TABLE} WHERE run_id = $1 AND checkpoint_id = $2`, [
+				this.journal.runId,
+				checkpointId,
+			]);
+		});
 	}
 	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
 		const cloned = cloneOpaqueCheckpoint(checkpoint);
 		return this.transaction((tx) => tx.storeCheckpoint(cloned));
 	}
 
-	private async readSubject(snapshot: HistorySnapshot, subject: HistorySubject, cursor?: HistoryCursor): Promise<HistoryChunk<DurableLogRecord | StateVisitHistoryItem | MapVisitHistoryItem | ActorGenerationHistoryItem | ActorMessageHistoryItem>> {
+	private async readSubject(
+		snapshot: HistorySnapshot,
+		subject: HistorySubject,
+		cursor?: HistoryCursor,
+	): Promise<
+		HistoryChunk<
+			| DurableLogRecord
+			| StateVisitHistoryItem
+			| MapVisitHistoryItem
+			| ActorGenerationHistoryItem
+			| ActorMessageHistoryItem
+		>
+	> {
 		const ancestry = await this.ancestryForSnapshot(snapshot);
 		return historyChunkFromItems(snapshot, subject, historyItemsForSubject(ancestry, subject), cursor);
 	}
 	private async ancestryForSnapshot(snapshot: HistorySnapshot): Promise<readonly DurableLogRecord[]> {
 		await this.awaitReadable();
 		await requireSnapshotBranchDirect(this.journal.client, this.journal.runId, snapshot, this.journal.access);
-		return materializeHistoryToHeadDirect(this.journal.client, this.journal.runId, snapshot.headSeqId, this.journal.access);
+		return materializeHistoryToHeadDirect(
+			this.journal.client,
+			this.journal.runId,
+			snapshot.headSeqId,
+			this.journal.access,
+		);
 	}
 
 	async readRunMeta(): Promise<RunMeta | undefined> {
@@ -274,8 +425,13 @@ export class PostgresLogStore implements RunLogStore {
 				`SELECT chart_path, export_name, work_dir, chart_id, created_at, origin_session_id FROM ${RUN_META_TABLE} WHERE run_id = $1`,
 				[this.journal.runId],
 			);
-			return result.rows[0] === undefined || result.rows[0].chart_path === null ? undefined : decodeRunMeta(result.rows[0]);
-		} catch (error) { if (isUndefinedTable(error)) return undefined; throw error; }
+			return result.rows[0] === undefined || result.rows[0].chart_path === null
+				? undefined
+				: decodeRunMeta(result.rows[0]);
+		} catch (error) {
+			if (isUndefinedTable(error)) return undefined;
+			throw error;
+		}
 	}
 	writeRunMeta(meta: RunMeta): Promise<void> {
 		return this.enqueueWrite(async () => {
@@ -293,13 +449,29 @@ export class PostgresLogStore implements RunLogStore {
 					   created_at = EXCLUDED.created_at,
 					   origin_session_id = EXCLUDED.origin_session_id
 					 WHERE ${RUN_META_TABLE}.chart_path IS NULL`,
-					[runId, meta.chartPath, meta.exportName ?? null, meta.workDir, meta.chartId, meta.createdAt, meta.originSessionId ?? null],
+					[
+						runId,
+						meta.chartPath,
+						meta.exportName ?? null,
+						meta.workDir,
+						meta.chartId,
+						meta.createdAt,
+						meta.originSessionId ?? null,
+					],
 				);
 				const stored = await this.readRunMetaDirect();
 				const { runId: metadataRunId, ...fields } = meta;
-				if ((metadataRunId !== undefined && metadataRunId !== runId) || stored === undefined || !isDeepStrictEqual(stored, fields)) throw new Error(`Conflicting metadata for Hyperchart run '${runId}'`);
+				if (
+					(metadataRunId !== undefined && metadataRunId !== runId) ||
+					stored === undefined ||
+					!isDeepStrictEqual(stored, fields)
+				)
+					throw new Error(`Conflicting metadata for Hyperchart run '${runId}'`);
 				await client.query("COMMIT");
-			} catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+			} catch (error) {
+				await client.query("ROLLBACK").catch(() => {});
+				throw error;
+			}
 		});
 	}
 	deleteRunData(): Promise<void> {
@@ -311,7 +483,10 @@ export class PostgresLogStore implements RunLogStore {
 				await client.query(`DELETE FROM ${RUN_META_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query(`DELETE FROM ${JOURNAL_TABLE} WHERE run_id = $1`, [runId]);
 				await client.query("COMMIT");
-			} catch (error) { await client.query("ROLLBACK").catch(() => {}); throw error; }
+			} catch (error) {
+				await client.query("ROLLBACK").catch(() => {});
+				throw error;
+			}
 		});
 	}
 	private async readRunMetaDirect(): Promise<RunMeta | undefined> {
@@ -319,10 +494,15 @@ export class PostgresLogStore implements RunLogStore {
 			`SELECT chart_path, export_name, work_dir, chart_id, created_at, origin_session_id FROM ${RUN_META_TABLE} WHERE run_id = $1`,
 			[this.journal.runId],
 		);
-		return result.rows[0] === undefined || result.rows[0].chart_path === null ? undefined : decodeRunMeta(result.rows[0]);
+		return result.rows[0] === undefined || result.rows[0].chart_path === null
+			? undefined
+			: decodeRunMeta(result.rows[0]);
 	}
 
-	async initializeRootBranch(metadata: BranchMetadata = { name: this.branchId }, options?: BranchMutationOptions): Promise<BranchHead> {
+	async initializeRootBranch(
+		metadata: BranchMetadata = { name: this.branchId },
+		options?: BranchMutationOptions,
+	): Promise<BranchHead> {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		return this.transaction(async (tx) => {
 			const impl = tx as TransactionImpl;
@@ -332,7 +512,10 @@ export class PostgresLogStore implements RunLogStore {
 			return branch;
 		});
 	}
-	appendDrafts(drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+	appendDrafts(
+		drafts: readonly DurableRecordDraft[],
+		prepare?: PrepareStampedCommit,
+	): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return Promise.resolve([]);
 		return this.transaction((tx) => tx.appendDrafts(this.branchId, drafts, prepare));
 	}
@@ -340,13 +523,26 @@ export class PostgresLogStore implements RunLogStore {
 		if (input.drafts.length === 0) return Promise.resolve([]);
 		return this.transaction((tx) => tx.appendDraftsAtHead(this.branchId, input, prepare));
 	}
-	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead> {
+	async createBranch(
+		branchId: BranchId,
+		headSeqId: number,
+		metadata?: BranchMetadata,
+		options?: BranchMutationOptions,
+	): Promise<BranchHead> {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
-		return this.transaction((tx) => tx.createBranch(branchId, headSeqId, metadata, checkpoint === undefined ? undefined : { checkpoint }));
+		return this.transaction((tx) =>
+			tx.createBranch(branchId, headSeqId, metadata, checkpoint === undefined ? undefined : { checkpoint }),
+		);
 	}
-	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult> {
+	async moveBranch(
+		branchId: BranchId,
+		headSeqId: number | null,
+		options?: BranchMutationOptions,
+	): Promise<BranchMoveResult> {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
-		return this.transaction((tx) => tx.moveBranch(branchId, headSeqId, checkpoint === undefined ? undefined : { checkpoint }));
+		return this.transaction((tx) =>
+			tx.moveBranch(branchId, headSeqId, checkpoint === undefined ? undefined : { checkpoint }),
+		);
 	}
 
 	/** Managed transaction: journal mutations and host-domain SQL share one client and commit. */
@@ -373,17 +569,29 @@ export class PostgresLogStore implements RunLogStore {
 		});
 	}
 
-	appendDraftsAtHeadWithParticipant<T>(branchId: BranchId, input: AppendAtHeadInput, prepare: PrepareStampedCommit | undefined, participate: SqlCommitParticipant<T>): Promise<{ records: readonly DurableLogRecord[]; participant: T }> {
-		return this.transaction(async (tx) => ({ records: await tx.appendDraftsAtHead(branchId, input, prepare), participant: await participate(restrictTransaction(tx)) }));
+	appendDraftsAtHeadWithParticipant<T>(
+		branchId: BranchId,
+		input: AppendAtHeadInput,
+		prepare: PrepareStampedCommit | undefined,
+		participate: SqlCommitParticipant<T>,
+	): Promise<{ records: readonly DurableLogRecord[]; participant: T }> {
+		return this.transaction(async (tx) => ({
+			records: await tx.appendDraftsAtHead(branchId, input, prepare),
+			participant: await participate(restrictTransaction(tx)),
+		}));
 	}
-	async forkAndAppend<T>(input: PostgresForkAndAppendInput, participate: SqlCommitParticipant<T>): Promise<{ branch: BranchHead; records: readonly DurableLogRecord[]; participant: T }> {
+	async forkAndAppend<T>(
+		input: PostgresForkAndAppendInput,
+		participate: SqlCommitParticipant<T>,
+	): Promise<{ branch: BranchHead; records: readonly DurableLogRecord[]; participant: T }> {
 		const checkpoint = input.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(input.checkpoint);
 		if (input.appendBranchId !== input.sourceBranchId && input.appendBranchId !== input.newBranchId) {
 			return Promise.reject(new Error("appendBranchId must be the source branch or the newly created branch"));
 		}
 		return this.transaction(async (tx) => {
 			const impl = tx as TransactionImpl;
-			if (!await impl.containsInBranchHistory(input.sourceBranchId, input.fromSeqId)) throw new Error(`Fork point ${input.fromSeqId} is not in source branch '${input.sourceBranchId}' ancestry`);
+			if (!(await impl.containsInBranchHistory(input.sourceBranchId, input.fromSeqId)))
+				throw new Error(`Fork point ${input.fromSeqId} is not in source branch '${input.sourceBranchId}' ancestry`);
 			const branch = await impl.ensureExactBranch(input.newBranchId, input.fromSeqId, input.metadata);
 			if (checkpoint !== undefined) await tx.storeCheckpoint(checkpoint);
 			const records = await tx.appendDraftsAtHead(input.appendBranchId, input.append, input.prepare);
@@ -399,11 +607,16 @@ export class PostgresLogStore implements RunLogStore {
 		await this.journal.client.end().catch(() => {});
 	}
 	private enqueueWrite<T>(task: () => Promise<T>): Promise<T> {
-		if (this.journal.access !== "writer") return Promise.reject(new Error(`Hyperchart run '${this.journal.runId}' was opened read-only`));
+		if (this.journal.access !== "writer")
+			return Promise.reject(new Error(`Hyperchart run '${this.journal.runId}' was opened read-only`));
 		if (this.journal.closed) return Promise.reject(new Error("Postgres Hyperchart journal is closed"));
-		if (this.journal.poisoned) return Promise.reject(new Error("Postgres Hyperchart journal is unusable after an uncertain commit"));
+		if (this.journal.poisoned)
+			return Promise.reject(new Error("Postgres Hyperchart journal is unusable after an uncertain commit"));
 		const result = this.journal.writeChain.then(task);
-		this.journal.writeChain = result.then(() => undefined, () => undefined);
+		this.journal.writeChain = result.then(
+			() => undefined,
+			() => undefined,
+		);
 		return result;
 	}
 	private async awaitReadable(): Promise<void> {
@@ -415,29 +628,64 @@ export class PostgresLogStore implements RunLogStore {
 
 class TransactionImpl implements PostgresRunTransaction {
 	private readonly confirmations: Array<() => void> = [];
-	constructor(readonly client: PgClientLike, readonly runId: string) {}
-	confirmCommitted(): void { for (const confirm of this.confirmations) confirm(); }
-	query(text: string, values?: readonly unknown[]): Promise<PgQueryResult> { return this.client.query(text, values); }
+	constructor(
+		readonly client: PgClientLike,
+		readonly runId: string,
+	) {}
+	confirmCommitted(): void {
+		for (const confirm of this.confirmations) confirm();
+	}
+	query(text: string, values?: readonly unknown[]): Promise<PgQueryResult> {
+		return this.client.query(text, values);
+	}
 	async hasAnyEntry(): Promise<boolean> {
-		const result = await this.client.query(`SELECT EXISTS (SELECT 1 FROM ${JOURNAL_TABLE} WHERE run_id = $1) AS present`, [this.runId]);
+		const result = await this.client.query(
+			`SELECT EXISTS (SELECT 1 FROM ${JOURNAL_TABLE} WHERE run_id = $1) AS present`,
+			[this.runId],
+		);
 		return result.rows[0]?.present === true;
 	}
 	async createRootBranch(branchId: BranchId, metadata: BranchMetadata): Promise<BranchHead> {
 		const committedAt = Date.now();
-		await this.commitEntries([{ kind: "branch", op: "create", seqId: await this.allocateOne(), branchId, headSeqId: null, metadata, committedAt }]);
+		await this.commitEntries([
+			{
+				kind: "branch",
+				op: "create",
+				seqId: await this.allocateOne(),
+				branchId,
+				headSeqId: null,
+				metadata,
+				committedAt,
+			},
+		]);
 		return { branchId, headSeqId: null, createdAt: committedAt, metadata };
 	}
-	async appendDrafts(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+	async appendDrafts(
+		branchId: BranchId,
+		drafts: readonly DurableRecordDraft[],
+		prepare?: PrepareStampedCommit,
+	): Promise<readonly DurableLogRecord[]> {
 		return this.appendStamped(branchId, drafts, prepare);
 	}
-	async appendDraftsAtHead(branchId: BranchId, input: AppendAtHeadInput, prepare?: PrepareStampedCommit): Promise<readonly DurableLogRecord[]> {
+	async appendDraftsAtHead(
+		branchId: BranchId,
+		input: AppendAtHeadInput,
+		prepare?: PrepareStampedCommit,
+	): Promise<readonly DurableLogRecord[]> {
 		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
-		if (branch.headSeqId !== input.expectedHeadSeqId) throw new BranchHeadMovedError(branchId, input.expectedHeadSeqId, branch.headSeqId);
+		if (branch.headSeqId !== input.expectedHeadSeqId)
+			throw new BranchHeadMovedError(branchId, input.expectedHeadSeqId, branch.headSeqId);
 		return this.appendStamped(branchId, input.drafts, prepare, branch);
 	}
-	private async appendStamped(branchId: BranchId, drafts: readonly DurableRecordDraft[], prepare?: PrepareStampedCommit, knownBranch?: BranchHead): Promise<readonly DurableLogRecord[]> {
+	private async appendStamped(
+		branchId: BranchId,
+		drafts: readonly DurableRecordDraft[],
+		prepare?: PrepareStampedCommit,
+		knownBranch?: BranchHead,
+	): Promise<readonly DurableLogRecord[]> {
 		if (drafts.length === 0) return [];
-		const branch = knownBranch ?? requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
+		const branch =
+			knownBranch ?? requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
 		let seqId = await this.allocate(drafts.length);
 		let parentId = branch.headSeqId;
 		const now = Date.now();
@@ -454,45 +702,78 @@ class TransactionImpl implements PostgresRunTransaction {
 		if (prepared !== undefined) this.confirmations.push(prepared.committed);
 		return records;
 	}
-	async createBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata, options?: BranchMutationOptions): Promise<BranchHead> {
-		if (await findBranchDirect(this.client, this.runId, branchId, "writer") !== undefined) throw new Error(`Hyperchart branch '${branchId}' already exists`);
-		if (await findRecordDirect(this.client, this.runId, headSeqId, "writer") === undefined) throw new Error(`No durable log record with seqId ${headSeqId}`);
+	async createBranch(
+		branchId: BranchId,
+		headSeqId: number,
+		metadata?: BranchMetadata,
+		options?: BranchMutationOptions,
+	): Promise<BranchHead> {
+		if ((await findBranchDirect(this.client, this.runId, branchId, "writer")) !== undefined)
+			throw new Error(`Hyperchart branch '${branchId}' already exists`);
+		if ((await findRecordDirect(this.client, this.runId, headSeqId, "writer")) === undefined)
+			throw new Error(`No durable log record with seqId ${headSeqId}`);
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		const committedAt = Date.now();
-		await this.commitEntries([{ kind: "branch", op: "create", seqId: await this.allocateOne(), branchId, headSeqId, ...(metadata === undefined ? {} : { metadata }), committedAt }]);
+		await this.commitEntries([
+			{
+				kind: "branch",
+				op: "create",
+				seqId: await this.allocateOne(),
+				branchId,
+				headSeqId,
+				...(metadata === undefined ? {} : { metadata }),
+				committedAt,
+			},
+		]);
 		if (checkpoint !== undefined) await this.storeCheckpoint(checkpoint);
 		return { branchId, headSeqId, createdAt: committedAt, ...(metadata === undefined ? {} : { metadata }) };
 	}
 	async ensureExactBranch(branchId: BranchId, headSeqId: number, metadata?: BranchMetadata): Promise<BranchHead> {
 		const existing = await findBranchDirect(this.client, this.runId, branchId, "writer");
 		if (existing === undefined) return this.createBranch(branchId, headSeqId, metadata);
-		if (!await containsInBranchHistoryDirect(this.client, this.runId, branchId, headSeqId, "writer") || !isDeepStrictEqual(existing.metadata, metadata)) {
+		if (
+			!(await containsInBranchHistoryDirect(this.client, this.runId, branchId, headSeqId, "writer")) ||
+			!isDeepStrictEqual(existing.metadata, metadata)
+		) {
 			throw new Error(`Conflicting retry for Hyperchart branch '${branchId}'`);
 		}
 		return existing;
 	}
-	async moveBranch(branchId: BranchId, headSeqId: number | null, options?: BranchMutationOptions): Promise<BranchMoveResult> {
+	async moveBranch(
+		branchId: BranchId,
+		headSeqId: number | null,
+		options?: BranchMutationOptions,
+	): Promise<BranchMoveResult> {
 		const checkpoint = options?.checkpoint === undefined ? undefined : cloneOpaqueCheckpoint(options.checkpoint);
 		// Sequence allocation is the per-run serialization boundary. Read the old
 		// head and record count only after holding it so the acknowledgement names
 		// the exact durable state immediately preceding this move.
 		const moveSeqId = await this.allocateOne();
 		const branch = requireBranch(await findBranchDirect(this.client, this.runId, branchId, "writer"), branchId);
-		if (headSeqId !== null && await findRecordDirect(this.client, this.runId, headSeqId, "writer") === undefined) throw new Error(`No durable log record with seqId ${headSeqId}`);
+		if (headSeqId !== null && (await findRecordDirect(this.client, this.runId, headSeqId, "writer")) === undefined)
+			throw new Error(`No durable log record with seqId ${headSeqId}`);
 		const preservedRecords = await countRecordsDirect(this.client, this.runId, "writer");
-		await this.commitEntries([{ kind: "branch", op: "move", seqId: moveSeqId, branchId, headSeqId, committedAt: Date.now() }]);
+		await this.commitEntries([
+			{ kind: "branch", op: "move", seqId: moveSeqId, branchId, headSeqId, committedAt: Date.now() },
+		]);
 		if (checkpoint !== undefined) await this.storeCheckpoint(checkpoint);
 		return { ...branch, headSeqId, moveSeqId, previousHeadSeqId: branch.headSeqId, preservedRecords };
 	}
-	containsInBranchHistory(branchId: BranchId, seqId: number): Promise<boolean> { return containsInBranchHistoryDirect(this.client, this.runId, branchId, seqId, "writer"); }
-	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> { return saveCheckpointDirect(this.client, this.runId, cloneOpaqueCheckpoint(checkpoint)); }
-	private async allocateOne(): Promise<number> { return this.allocate(1); }
+	containsInBranchHistory(branchId: BranchId, seqId: number): Promise<boolean> {
+		return containsInBranchHistoryDirect(this.client, this.runId, branchId, seqId, "writer");
+	}
+	storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
+		return saveCheckpointDirect(this.client, this.runId, cloneOpaqueCheckpoint(checkpoint));
+	}
+	private async allocateOne(): Promise<number> {
+		return this.allocate(1);
+	}
 	private async allocate(count: number): Promise<number> {
-		if (!Number.isSafeInteger(count) || count <= 0) throw new Error(`Invalid Hyperchart sequence allocation size ${count}`);
-		await this.client.query(
-			`INSERT INTO ${RUN_META_TABLE} (run_id) VALUES ($1) ON CONFLICT (run_id) DO NOTHING`,
-			[this.runId],
-		);
+		if (!Number.isSafeInteger(count) || count <= 0)
+			throw new Error(`Invalid Hyperchart sequence allocation size ${count}`);
+		await this.client.query(`INSERT INTO ${RUN_META_TABLE} (run_id) VALUES ($1) ON CONFLICT (run_id) DO NOTHING`, [
+			this.runId,
+		]);
 		const result = await this.client.query(
 			`UPDATE ${RUN_META_TABLE}
 			    SET next_seq = next_seq + $2
@@ -511,7 +792,17 @@ class TransactionImpl implements PostgresRunTransaction {
 				const { seqId, parentId, branchId, type, ...payload } = entry;
 				values.push(seqId, "record", branchId, parentId, null, type, JSON.stringify(payload), null, payload.timestamp);
 			} else {
-				values.push(entry.seqId, entry.op === "create" ? "branch_create" : "branch_move", entry.branchId, null, entry.headSeqId, null, null, entry.op === "create" && entry.metadata !== undefined ? JSON.stringify(entry.metadata) : null, entry.committedAt);
+				values.push(
+					entry.seqId,
+					entry.op === "create" ? "branch_create" : "branch_move",
+					entry.branchId,
+					null,
+					entry.headSeqId,
+					null,
+					null,
+					entry.op === "create" && entry.metadata !== undefined ? JSON.stringify(entry.metadata) : null,
+					entry.committedAt,
+				);
 			}
 			return `($1, $${parameter}, $${parameter + 1}, $${parameter + 2}, $${parameter + 3}, $${parameter + 4}, $${parameter + 5}, $${parameter + 6}::jsonb, $${parameter + 7}::jsonb, $${parameter + 8})`;
 		});
@@ -527,37 +818,61 @@ class TransactionImpl implements PostgresRunTransaction {
 
 async function connectPg(dsn: string, onWarn: (message: string) => void): Promise<PgClientLike> {
 	let pg: { Client: new (config: { connectionString: string }) => PgClientLike };
-	try { pg = (await import("pg")) as unknown as typeof pg; }
-	catch { throw new Error("Postgres Hyperchart log storage requires the optional 'pg' package; install it to use HYPERCHART_PG_DSN"); }
+	try {
+		pg = (await import("pg")) as unknown as typeof pg;
+	} catch {
+		throw new Error(
+			"Postgres Hyperchart log storage requires the optional 'pg' package; install it to use HYPERCHART_PG_DSN",
+		);
+	}
 	const client = new pg.Client({ connectionString: dsn });
 	client.on("error", (error) => onWarn(`Hyperchart Postgres journal connection error: ${error.message}`));
 	await client.connect();
 	return client;
 }
 async function ensureRunMetaTable(client: PgClientLike): Promise<void> {
-	try { await client.query(RUN_META_DDL); }
-	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(RUN_META_DDL); }
+	try {
+		await client.query(RUN_META_DDL);
+	} catch (error) {
+		if (!isDuplicateObject(error)) throw error;
+		await client.query(RUN_META_DDL);
+	}
 }
 async function ensureCheckpointTable(client: PgClientLike): Promise<void> {
-	try { await client.query(CHECKPOINT_DDL); }
-	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(CHECKPOINT_DDL); }
+	try {
+		await client.query(CHECKPOINT_DDL);
+	} catch (error) {
+		if (!isDuplicateObject(error)) throw error;
+		await client.query(CHECKPOINT_DDL);
+	}
 	await client.query(CHECKPOINT_IDENTITY_DDL);
 }
 async function ensureJournalTable(client: PgClientLike): Promise<void> {
-	try { await client.query(JOURNAL_DDL); }
-	catch (error) { if (!isDuplicateObject(error)) throw error; await client.query(JOURNAL_DDL); }
+	try {
+		await client.query(JOURNAL_DDL);
+	} catch (error) {
+		if (!isDuplicateObject(error)) throw error;
+		await client.query(JOURNAL_DDL);
+	}
 	await client.query(JOURNAL_PARENT_INDEX_DDL);
 	await client.query(JOURNAL_BRANCH_INDEX_DDL);
 	await client.query(JOURNAL_BRANCH_CREATE_INDEX_DDL);
 }
 
-async function listBranchesDirect(client: PgClientLike, runId: string, access: PostgresLogAccess, cursor?: BranchListCursor): Promise<BranchListChunk> {
+async function listBranchesDirect(
+	client: PgClientLike,
+	runId: string,
+	access: PostgresLogAccess,
+	cursor?: BranchListCursor,
+): Promise<BranchListChunk> {
 	const decoded = cursor === undefined ? undefined : decodeBranchListCursor(cursor);
 	const values: unknown[] = [runId];
 	const boundary = decoded === undefined ? "" : "AND (seq, branch_id) > ($2, $3)";
 	if (decoded !== undefined) values.push(decoded.createdSeqId, decoded.branchId);
 	const [rows, totals] = await Promise.all([
-		queryRows(client, access,
+		queryRows(
+			client,
+			access,
 			`WITH creates AS (
 			   SELECT seq AS created_seq_id, branch_id, metadata, committed_at_ms
 			     FROM ${JOURNAL_TABLE}
@@ -574,19 +889,35 @@ async function listBranchesDirect(client: PgClientLike, runId: string, access: P
 			      WHERE run_id = $1 AND branch_id = creates.branch_id
 			      ORDER BY seq DESC LIMIT 1
 			   ) latest
-			  ORDER BY creates.created_seq_id, creates.branch_id`, values),
-		queryRows(client, access, `SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id=$1 AND kind='branch_create'`, [runId]),
+			  ORDER BY creates.created_seq_id, creates.branch_id`,
+			values,
+		),
+		queryRows(
+			client,
+			access,
+			`SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id=$1 AND kind='branch_create'`,
+			[runId],
+		),
 	]);
 	const page = rows.slice(0, HISTORY_READ_ITEMS);
 	const last = page.at(-1);
 	return {
 		items: page.map(decodeBranchRow),
 		totalCount: totals[0] === undefined ? 0 : pgNumber(totals[0].count),
-		...(rows.length > page.length && last !== undefined ? { next: encodeBranchListCursor(pgNumber(last.created_seq_id), last.branch_id as BranchId) } : {}),
+		...(rows.length > page.length && last !== undefined
+			? { next: encodeBranchListCursor(pgNumber(last.created_seq_id), last.branch_id as BranchId) }
+			: {}),
 	};
 }
-async function findBranchDirect(client: PgClientLike, runId: string, branchId: BranchId, access: PostgresLogAccess): Promise<BranchHead | undefined> {
-	const rows = await queryRows(client, access,
+async function findBranchDirect(
+	client: PgClientLike,
+	runId: string,
+	branchId: BranchId,
+	access: PostgresLogAccess,
+): Promise<BranchHead | undefined> {
+	const rows = await queryRows(
+		client,
+		access,
 		`WITH created AS (
 		   SELECT branch_id, metadata, committed_at_ms
 		     FROM ${JOURNAL_TABLE}
@@ -601,16 +932,35 @@ async function findBranchDirect(client: PgClientLike, runId: string, branchId: B
 		 SELECT created.branch_id,
 		        CASE WHEN latest.kind = 'record' THEN latest.seq ELSE latest.head_seq_id END AS current_head_seq_id,
 		        created.metadata, created.committed_at_ms
-		   FROM created CROSS JOIN latest`, [runId, branchId]);
+		   FROM created CROSS JOIN latest`,
+		[runId, branchId],
+	);
 	return rows[0] === undefined ? undefined : decodeBranchRow(rows[0]);
 }
-async function findRecordDirect(client: PgClientLike, runId: string, seqId: number, access: PostgresLogAccess): Promise<DurableLogRecord | undefined> {
-	const rows = await queryRows(client, access, `SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'`, [runId, seqId]);
+async function findRecordDirect(
+	client: PgClientLike,
+	runId: string,
+	seqId: number,
+	access: PostgresLogAccess,
+): Promise<DurableLogRecord | undefined> {
+	const rows = await queryRows(
+		client,
+		access,
+		`SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'`,
+		[runId, seqId],
+	);
 	return rows[0] === undefined ? undefined : decodeRecordRow(rows[0] as JournalSqlRow);
 }
-async function materializeHistoryToHeadDirect(client: PgClientLike, runId: string, headSeqId: number | null, access: PostgresLogAccess): Promise<DurableLogRecord[]> {
+async function materializeHistoryToHeadDirect(
+	client: PgClientLike,
+	runId: string,
+	headSeqId: number | null,
+	access: PostgresLogAccess,
+): Promise<DurableLogRecord[]> {
 	if (headSeqId === null) return [];
-	const rows = await queryRows(client, access,
+	const rows = await queryRows(
+		client,
+		access,
 		`WITH RECURSIVE ancestry AS (
 		   SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms, 0 AS depth
 		     FROM ${JOURNAL_TABLE}
@@ -623,7 +973,9 @@ async function materializeHistoryToHeadDirect(client: PgClientLike, runId: strin
 		    WHERE parent.kind = 'record'
 		 )
 		 SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms
-		   FROM ancestry ORDER BY depth DESC`, [runId, headSeqId]);
+		   FROM ancestry ORDER BY depth DESC`,
+		[runId, headSeqId],
+	);
 	if (rows.length === 0) throw new Error(`No durable log record with seqId ${headSeqId}`);
 	return rows.map((row) => decodeRecordRow(row as JournalSqlRow));
 }
@@ -634,7 +986,9 @@ async function readForwardReplayPageDirect(
 	access: PostgresLogAccess,
 ): Promise<{ records: readonly DurableLogRecord[]; nextAfterSeqId?: number }> {
 	if (input.targetHeadSeqId === null) return { records: [] };
-	const rows = await queryRows(client, access,
+	const rows = await queryRows(
+		client,
+		access,
 		`WITH RECURSIVE ancestry AS (
 		   SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms
 		     FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'
@@ -648,48 +1002,95 @@ async function readForwardReplayPageDirect(
 		 SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms
 		   FROM ancestry
 		  WHERE ($3::bigint IS NULL OR seq > $3)
-		  ORDER BY seq ASC LIMIT 501`, [runId, input.targetHeadSeqId, input.afterSeqId]);
-	if (rows.length === 0 && input.afterSeqId === null && await findRecordDirect(client, runId, input.targetHeadSeqId, access) === undefined) {
+		  ORDER BY seq ASC LIMIT 501`,
+		[runId, input.targetHeadSeqId, input.afterSeqId],
+	);
+	if (
+		rows.length === 0 &&
+		input.afterSeqId === null &&
+		(await findRecordDirect(client, runId, input.targetHeadSeqId, access)) === undefined
+	) {
 		throw new Error(`No durable log record with seqId ${input.targetHeadSeqId}`);
 	}
 	const page = rows.slice(0, 500).map((row) => decodeRecordRow(row as JournalSqlRow));
 	return { records: page, ...(rows.length > 500 ? { nextAfterSeqId: page.at(-1)!.seqId } : {}) };
 }
 
-async function requireSnapshotBranchDirect(client: PgClientLike, runId: string, snapshot: HistorySnapshot, access: PostgresLogAccess): Promise<void> {
-	if (await findBranchDirect(client, runId, snapshot.branchId, access) === undefined) throw new Error(`Unknown Hyperchart branch '${snapshot.branchId}'`);
-	if (snapshot.headSeqId !== null && await findRecordDirect(client, runId, snapshot.headSeqId, access) === undefined) throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
+async function requireSnapshotBranchDirect(
+	client: PgClientLike,
+	runId: string,
+	snapshot: HistorySnapshot,
+	access: PostgresLogAccess,
+): Promise<void> {
+	if ((await findBranchDirect(client, runId, snapshot.branchId, access)) === undefined)
+		throw new Error(`Unknown Hyperchart branch '${snapshot.branchId}'`);
+	if (snapshot.headSeqId !== null && (await findRecordDirect(client, runId, snapshot.headSeqId, access)) === undefined)
+		throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
 }
-async function containsInBranchHistoryDirect(client: PgClientLike, runId: string, branchId: BranchId, seqId: number, access: PostgresLogAccess): Promise<boolean> {
+async function containsInBranchHistoryDirect(
+	client: PgClientLike,
+	runId: string,
+	branchId: BranchId,
+	seqId: number,
+	access: PostgresLogAccess,
+): Promise<boolean> {
 	const branch = await findBranchDirect(client, runId, branchId, access);
 	if (branch === undefined) {
-		if (!await hasAnyEntryDirect(client, runId, access)) return false;
+		if (!(await hasAnyEntryDirect(client, runId, access))) return false;
 		throw new Error(`Unknown Hyperchart branch '${branchId}'`);
 	}
 	return containsInHistoryDirect(client, runId, branch.headSeqId, seqId, access);
 }
-async function containsInHistoryDirect(client: PgClientLike, runId: string, headSeqId: number | null, seqId: number, access: PostgresLogAccess): Promise<boolean> {
+async function containsInHistoryDirect(
+	client: PgClientLike,
+	runId: string,
+	headSeqId: number | null,
+	seqId: number,
+	access: PostgresLogAccess,
+): Promise<boolean> {
 	if (headSeqId === null) return false;
-	const rows = await queryRows(client, access,
+	const rows = await queryRows(
+		client,
+		access,
 		`WITH RECURSIVE ancestry AS (
 		   SELECT seq, parent_id FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'
 		   UNION ALL
 		   SELECT parent.seq, parent.parent_id
 		     FROM ancestry child JOIN ${JOURNAL_TABLE} parent ON parent.run_id = $1 AND parent.seq = child.parent_id
 		    WHERE parent.kind = 'record'
-		 ) SELECT EXISTS (SELECT 1 FROM ancestry WHERE seq = $3) AS present`, [runId, headSeqId, seqId]);
+		 ) SELECT EXISTS (SELECT 1 FROM ancestry WHERE seq = $3) AS present`,
+		[runId, headSeqId, seqId],
+	);
 	return rows[0]?.present === true;
 }
 async function hasAnyEntryDirect(client: PgClientLike, runId: string, access: PostgresLogAccess): Promise<boolean> {
-	const rows = await queryRows(client, access, `SELECT EXISTS (SELECT 1 FROM ${JOURNAL_TABLE} WHERE run_id = $1) AS present`, [runId]);
+	const rows = await queryRows(
+		client,
+		access,
+		`SELECT EXISTS (SELECT 1 FROM ${JOURNAL_TABLE} WHERE run_id = $1) AS present`,
+		[runId],
+	);
 	return rows[0]?.present === true;
 }
 async function countRecordsDirect(client: PgClientLike, runId: string, access: PostgresLogAccess): Promise<number> {
-	const rows = await queryRows(client, access, `SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND kind = 'record'`, [runId]);
+	const rows = await queryRows(
+		client,
+		access,
+		`SELECT COUNT(*) AS count FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND kind = 'record'`,
+		[runId],
+	);
 	return rows.length === 0 ? 0 : pgNumber(rows[0]?.count);
 }
-async function saveCheckpointDirect(client: PgClientLike, runId: string, checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
-	if (checkpoint.checkpointId.length === 0 || checkpoint.selectorKey.length === 0 || !Number.isSafeInteger(checkpoint.createdAt)) {
+async function saveCheckpointDirect(
+	client: PgClientLike,
+	runId: string,
+	checkpoint: OpaqueCheckpointEnvelope,
+): Promise<void> {
+	if (
+		checkpoint.checkpointId.length === 0 ||
+		checkpoint.selectorKey.length === 0 ||
+		!Number.isSafeInteger(checkpoint.createdAt)
+	) {
 		throw new Error("Invalid opaque Hyperchart checkpoint coordinates");
 	}
 	await client.query(
@@ -697,7 +1098,14 @@ async function saveCheckpointDirect(client: PgClientLike, runId: string, checkpo
 		   (run_id, checkpoint_id, head_seq_id, selector_key, blob, created_at_ms)
 		 VALUES ($1, $2, $3, $4, $5::jsonb, $6)
 		 ON CONFLICT DO NOTHING`,
-		[runId, checkpoint.checkpointId, checkpoint.headSeqId, checkpoint.selectorKey, JSON.stringify(checkpoint.blob), checkpoint.createdAt],
+		[
+			runId,
+			checkpoint.checkpointId,
+			checkpoint.headSeqId,
+			checkpoint.selectorKey,
+			JSON.stringify(checkpoint.blob),
+			checkpoint.createdAt,
+		],
 	);
 }
 function decodeCheckpointRow(row: Record<string, unknown>): OpaqueCheckpointEnvelope {
@@ -709,9 +1117,18 @@ function decodeCheckpointRow(row: Record<string, unknown>): OpaqueCheckpointEnve
 		createdAt: pgNumber(row.created_at_ms),
 	};
 }
-async function queryRows(client: PgClientLike, access: PostgresLogAccess, text: string, values: readonly unknown[]): Promise<Record<string, unknown>[]> {
-	try { return (await client.query(text, values)).rows; }
-	catch (error) { if (access === "read" && isUndefinedTable(error)) return []; throw error; }
+async function queryRows(
+	client: PgClientLike,
+	access: PostgresLogAccess,
+	text: string,
+	values: readonly unknown[],
+): Promise<Record<string, unknown>[]> {
+	try {
+		return (await client.query(text, values)).rows;
+	} catch (error) {
+		if (access === "read" && isUndefinedTable(error)) return [];
+		throw error;
+	}
 }
 function decodeRecordRow(row: JournalSqlRow): DurableLogRecord {
 	return {
@@ -723,7 +1140,7 @@ function decodeRecordRow(row: JournalSqlRow): DurableLogRecord {
 	} as unknown as DurableLogRecord;
 }
 function decodeBranchRow(row: Record<string, unknown>): BranchHead {
-	const metadata = row.metadata === null || row.metadata === undefined ? undefined : row.metadata as BranchMetadata;
+	const metadata = row.metadata === null || row.metadata === undefined ? undefined : (row.metadata as BranchMetadata);
 	return {
 		branchId: row.branch_id as string,
 		headSeqId: row.current_head_seq_id === null ? null : pgNumber(row.current_head_seq_id),
@@ -736,8 +1153,12 @@ function requireBranch(branch: BranchHead | undefined, branchId: BranchId): Bran
 	return branch;
 }
 function decodeRunMeta(row: Record<string, unknown>): RunMeta {
-	const exportName = row.export_name === null || row.export_name === undefined ? undefined : row.export_name as string;
-	const originSessionId = row.origin_session_id === null || row.origin_session_id === undefined ? undefined : row.origin_session_id as string;
+	const exportName =
+		row.export_name === null || row.export_name === undefined ? undefined : (row.export_name as string);
+	const originSessionId =
+		row.origin_session_id === null || row.origin_session_id === undefined
+			? undefined
+			: (row.origin_session_id as string);
 	return {
 		chartPath: row.chart_path as string,
 		...(exportName === undefined ? {} : { exportName }),
@@ -747,15 +1168,34 @@ function decodeRunMeta(row: Record<string, unknown>): RunMeta {
 		...(originSessionId === undefined ? {} : { originSessionId }),
 	};
 }
-function pgNumber(value: unknown): number { return typeof value === "number" ? value : Number(value); }
-function restrictTransaction(tx: PostgresRunTransaction): SqlCommitTransaction { return { query: (text, values) => tx.query(text, values) }; }
-export function supportsSqlTransactions(store: RunLogStore): store is SqlTransactionalRunLogStore { return store instanceof PostgresLogStore; }
+function pgNumber(value: unknown): number {
+	return typeof value === "number" ? value : Number(value);
+}
+function restrictTransaction(tx: PostgresRunTransaction): SqlCommitTransaction {
+	return { query: (text, values) => tx.query(text, values) };
+}
+export function supportsSqlTransactions(store: RunLogStore): store is SqlTransactionalRunLogStore {
+	return store instanceof PostgresLogStore;
+}
 function normalizeUnique(error: unknown, runId: string): unknown {
 	return pgErrorCode(error) === "23505" && pgErrorConstraint(error) === "hyperchart_journal_pkey"
 		? new Error(`Stale Hyperchart journal writer for run '${runId}'; retry the serialized transaction`)
 		: error;
 }
-function pgErrorCode(error: unknown): string | undefined { return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : undefined; }
-function pgErrorConstraint(error: unknown): string | undefined { return typeof error === "object" && error !== null && "constraint" in error && typeof error.constraint === "string" ? error.constraint : undefined; }
-function isUndefinedTable(error: unknown): boolean { return pgErrorCode(error) === "42P01"; }
-function isDuplicateObject(error: unknown): boolean { const code = pgErrorCode(error); return code === "42P07" || code === "23505"; }
+function pgErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+		? error.code
+		: undefined;
+}
+function pgErrorConstraint(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "constraint" in error && typeof error.constraint === "string"
+		? error.constraint
+		: undefined;
+}
+function isUndefinedTable(error: unknown): boolean {
+	return pgErrorCode(error) === "42P01";
+}
+function isDuplicateObject(error: unknown): boolean {
+	const code = pgErrorCode(error);
+	return code === "42P07" || code === "23505";
+}

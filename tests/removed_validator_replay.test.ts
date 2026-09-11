@@ -13,12 +13,12 @@ function ast(validated: boolean): ChartAst {
 			states: {
 				work: {
 					kind: "state",
-					action: agent("worker", validated ? { validation: { guard: tsImport("./checks.js", "ok") }
-} : {}),
-					transitions: { DONE: "done" } },
+					action: agent("worker", validated ? { validation: { guard: tsImport("./checks.js", "ok") } } : {}),
+					transitions: { DONE: "done" },
+				},
 				done: final(),
-			}
-	}),
+			},
+		}),
 	);
 	if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
 	return parsed.ast;
@@ -26,11 +26,11 @@ function ast(validated: boolean): ChartAst {
 
 it("pins agent validation and recovery policy in the invoke definition", () => {
 	const original = ast(true);
-		const current = ast(false);
-		const state = original.states.work;
+	const current = ast(false);
+	const state = original.states.work;
 	if (state?.kind !== "state" || state.action.kind !== "agent" || state.action.validation === undefined)
 		throw new Error("expected validated agent");
-		const uid = state.action.uid;
+	const uid = state.action.uid;
 	const records: DurableLogRecord[] = [
 		{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },
 		{
@@ -68,8 +68,9 @@ it("pins agent validation and recovery policy in the invoke definition", () => {
 		},
 	];
 	const projected = projectBranch(createBranchProjection(original), original, records);
-		expect(projected.activeLeaves).toEqual(["done"]);
-		expect(state.action.onFail).toEqual({ nudge: 2, restart: 1 });
+	expect(projected.activeLeaves).toEqual(["done"]);
+	expect(state.action.onFail).toEqual({ nudge: 2, restart: 1 });
 	expect(explainReplay(current, records).stale).toEqual(
-		expect.arrayContaining([expect.objectContaining({ reason: "guard_removed" })]));
-	});
+		expect.arrayContaining([expect.objectContaining({ reason: "guard_removed" })]),
+	);
+});

@@ -62,9 +62,7 @@ export function effectiveDisplayType(
 }
 
 function directChildrenOf(state: HyperchartStateInfo, states: HyperchartStateInfo[]): HyperchartStateInfo[] {
-	return states.filter(
-		(candidate) => stateScopeParentId(candidate) === state.id && !isImplicitFailedFinal(candidate),
-	);
+	return states.filter((candidate) => stateScopeParentId(candidate) === state.id && !isImplicitFailedFinal(candidate));
 }
 
 export function childPreviewForState(

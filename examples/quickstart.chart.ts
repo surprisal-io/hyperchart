@@ -7,13 +7,9 @@ export default chart({
 	states: {
 		write: {
 			kind: "state",
-			action: script(
-				"node",
-				["-e", `require("node:fs").writeFileSync("hello.txt", "Hello from Hyperchart\\n")`],
-				{
-					artifacts: { greeting: artifact("hello.txt") },
-				},
-			),
+			action: script("node", ["-e", `require("node:fs").writeFileSync("hello.txt", "Hello from Hyperchart\\n")`], {
+				artifacts: { greeting: artifact("hello.txt") },
+			}),
 			transitions: { DONE: "done" },
 		},
 		done: final(),

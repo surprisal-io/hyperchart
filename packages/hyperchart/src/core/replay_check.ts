@@ -1,6 +1,11 @@
 import { actionUidKey } from "./action_uid.js";
 import type { DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
-import { actorContextForState, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath } from "./actors.js";
+import {
+	actorContextForState,
+	actorGenerationPath,
+	actorLogicalOccurrencePath,
+	actorOccurrencePath,
+} from "./actors.js";
 import { declaredArtifactsForState } from "./normalize.js";
 import { nodeAt, templatePath } from "./paths.js";
 import {
@@ -75,7 +80,12 @@ export type ReplayRecordDiagnostics = Readonly<{
 }>;
 
 /** @internal Streaming compatibility diagnostics evaluated against the projection prefix. */
-export function replayRecordDiagnostics(ast: ChartAst, projection: BranchProjection, index: number, record: DurableLogRecord): ReplayRecordDiagnostics {
+export function replayRecordDiagnostics(
+	ast: ChartAst,
+	projection: BranchProjection,
+	index: number,
+	record: DurableLogRecord,
+): ReplayRecordDiagnostics {
 	const unpinned = unpinnedRecordFor(ast, index, record);
 	return {
 		stale: staleRecordsFor(ast, projection, index, record),
@@ -84,7 +94,9 @@ export function replayRecordDiagnostics(ast: ChartAst, projection: BranchProject
 }
 
 /** Removed-guard verdicts are informational; every other compatibility gate remains. */
-export function hasBlockingReplayWarnings(explanation: { skipped: readonly ProjectionSkippedRecord[]; stale: readonly ReplayStaleRecord[];
+export function hasBlockingReplayWarnings(explanation: {
+	skipped: readonly ProjectionSkippedRecord[];
+	stale: readonly ReplayStaleRecord[];
 }): boolean {
 	return explanation.skipped.length > 0 || explanation.stale.some((entry) => entry.reason !== "guard_removed");
 }
@@ -150,63 +162,144 @@ function staleRecordsFor(
 	record: DurableLogRecord,
 ): ReplayStaleRecord[] {
 	if (record.type === "user_interaction" && record.kind === "opened") {
-		const pending = projection.pendingActions.find((entry) =>
-			sameActionUid(entry.actionUid, record.actionUid) &&
-			entry.seqId === record.phaseSeqId &&
+		const pending = projection.pendingActions.find(
+			(entry) =>
+				sameActionUid(entry.actionUid, record.actionUid) &&
+				entry.seqId === record.phaseSeqId &&
 				entry.phase === "running",
 		);
 		if (pending === undefined) return [];
 		const expected = userInteractionOpenedDraft({ ast, projection }, pending);
 		// Resolved gate input is durable informational provenance for consumers, not replay identity.
 		// Omitting it preserves old opened records, while all pre-existing rendered-contract checks remain exact.
-		if (expected !== undefined && stableStringify(openedComparable(expected)) === stableStringify(openedComparable(record))) return [];
-		return [{
-			index,
-			seqId: record.seqId,
-			record,
-			state: record.actionUid.state,
-			reason: "user_interaction_contract_changed",
-			message: `Rendered user interaction contract for ${record.actionUid.state} changed since gate seqId ${record.seqId}`,
-			invokeSeqId: pending.invokeSeqId,
-		}];
+		if (
+			expected !== undefined &&
+			stableStringify(openedComparable(expected)) === stableStringify(openedComparable(record))
+		)
+			return [];
+		return [
+			{
+				index,
+				seqId: record.seqId,
+				record,
+				state: record.actionUid.state,
+				reason: "user_interaction_contract_changed",
+				message: `Rendered user interaction contract for ${record.actionUid.state} changed since gate seqId ${record.seqId}`,
+				invokeSeqId: pending.invokeSeqId,
+			},
+		];
 	}
 	if (record.type === "actor_created") {
 		const actor = ast.actors[record.declaration];
-		if (actor === undefined) return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor declaration ${record.declaration} was removed or moved` }];
-		const ownerMatches = (actor.owner === undefined) === (record.owner === undefined)
-			&& (actor.owner === undefined || (record.owner !== undefined && templatePath(record.owner) === actor.owner));
+		if (actor === undefined)
+			return [
+				{
+					index,
+					seqId: record.seqId,
+					record,
+					state: record.declaration,
+					reason: "actor_placement_changed",
+					message: `Actor declaration ${record.declaration} was removed or moved`,
+				},
+			];
+		const ownerMatches =
+			(actor.owner === undefined) === (record.owner === undefined) &&
+			(actor.owner === undefined || (record.owner !== undefined && templatePath(record.owner) === actor.owner));
 		const logicalOccurrence = actorLogicalOccurrencePath(record.occurrence, record.generation);
 		const expectedLogicalOccurrence = actorOccurrencePath(actor, record.owner);
-		if (!ownerMatches || logicalOccurrence !== expectedLogicalOccurrence || record.occurrence !== actorGenerationPath(logicalOccurrence, record.generation)) {
-			return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_placement_changed", message: `Actor owner, occurrence, or generation placement changed for ${record.declaration}` }];
+		if (
+			!ownerMatches ||
+			logicalOccurrence !== expectedLogicalOccurrence ||
+			record.occurrence !== actorGenerationPath(logicalOccurrence, record.generation)
+		) {
+			return [
+				{
+					index,
+					seqId: record.seqId,
+					record,
+					state: record.declaration,
+					reason: "actor_placement_changed",
+					message: `Actor owner, occurrence, or generation placement changed for ${record.declaration}`,
+				},
+			];
 		}
 		if (stableStringify(actor) === stableStringify(record.definition)) return [];
-		return [{ index, seqId: record.seqId, record, state: record.declaration, reason: "actor_definition_changed", message: `Actor definition or protocol for ${record.declaration} changed since creation seqId ${record.seqId}` }];
+		return [
+			{
+				index,
+				seqId: record.seqId,
+				record,
+				state: record.declaration,
+				reason: "actor_definition_changed",
+				message: `Actor definition or protocol for ${record.declaration} changed since creation seqId ${record.seqId}`,
+			},
+		];
 	}
 	if (record.type === "actor_messages_enqueued") {
 		const actorContext = actorContextForState(ast, record.source.producerState);
 		const current = actorContext?.node ?? nodeAt(ast, record.source.producerState);
 		const selfSource = (current?.kind === "send" || current?.kind === "sendBatch") && current.self === true;
-		if (selfSource && (actorContext === undefined || record.occurrence !== actorContext.endpointOccurrence || record.source.targetDeclaration !== actorContext.declaration.path)) {
-			return [{ index, seqId: record.seqId, record, state: record.source.producerState, reason: "actor_message_source_changed", message: `Actor self-send escaped its producer occurrence for ${record.source.producerState}` }];
+		if (
+			selfSource &&
+			(actorContext === undefined ||
+				record.occurrence !== actorContext.endpointOccurrence ||
+				record.source.targetDeclaration !== actorContext.declaration.path)
+		) {
+			return [
+				{
+					index,
+					seqId: record.seqId,
+					record,
+					state: record.source.producerState,
+					reason: "actor_message_source_changed",
+					message: `Actor self-send escaped its producer occurrence for ${record.source.producerState}`,
+				},
+			];
 		}
 		const target = ast.actors[record.source.targetDeclaration];
 		const schema = target?.protocol[record.source.event]?.input;
-		const matches = (current?.kind === "send" || current?.kind === "sendBatch" || current?.kind === "call" || current?.kind === "callBatch")
-			&& stableStringify(current) === stableStringify(record.source.definition)
-			&& current.kind === record.source.kind
-			&& current.to === record.source.targetDeclaration
-			&& current.event === record.source.event
-			&& stableStringify(schema) === stableStringify(record.source.inputSchema);
+		const matches =
+			(current?.kind === "send" ||
+				current?.kind === "sendBatch" ||
+				current?.kind === "call" ||
+				current?.kind === "callBatch") &&
+			stableStringify(current) === stableStringify(record.source.definition) &&
+			current.kind === record.source.kind &&
+			current.to === record.source.targetDeclaration &&
+			current.event === record.source.event &&
+			stableStringify(schema) === stableStringify(record.source.inputSchema);
 		if (matches) return [];
-		return [{ index, seqId: record.seqId, record, state: record.source.producerState, reason: "actor_message_source_changed", message: `Actor ${record.source.kind} source, target, event, schema, or routing changed for ${record.source.producerState}` }];
+		return [
+			{
+				index,
+				seqId: record.seqId,
+				record,
+				state: record.source.producerState,
+				reason: "actor_message_source_changed",
+				message: `Actor ${record.source.kind} source, target, event, schema, or routing changed for ${record.source.producerState}`,
+			},
+		];
 	}
 	if (record.type === "actor_message" && record.kind === "replied") {
 		const actor = projectedActorEndpoint(projection, record.occurrence);
 		const contract = actor === undefined ? undefined : ast.actors[actor.declaration]?.protocol[record.message]?.reply;
-		const schema = contract?.kind === "single" ? contract.schema : contract?.kind === "named" && record.replyEvent !== undefined ? contract.schemas[record.replyEvent] : undefined;
+		const schema =
+			contract?.kind === "single"
+				? contract.schema
+				: contract?.kind === "named" && record.replyEvent !== undefined
+					? contract.schemas[record.replyEvent]
+					: undefined;
 		if (stableStringify(schema) === stableStringify(record.schema)) return [];
-		return [{ index, seqId: record.seqId, record, state: record.occurrence, reason: "actor_reply_contract_changed", message: `Actor reply contract for ${record.occurrence}/${record.message} changed` }];
+		return [
+			{
+				index,
+				seqId: record.seqId,
+				record,
+				state: record.occurrence,
+				reason: "actor_reply_contract_changed",
+				message: `Actor reply contract for ${record.occurrence}/${record.message} changed`,
+			},
+		];
 	}
 	if (record.type !== "state_action") return [];
 	// Resolved state-action input is informational provenance. Replay identity remains the
@@ -235,17 +328,28 @@ function staleRecordsFor(
 		const currentGuard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 		const invokedGuard = pending?.definition.kind === "agent" ? pending.definition.validation?.guard : undefined;
 		if (currentGuard === undefined) {
-			const issues: ReplayStaleRecord[] = [{
-				index, seqId: record.seqId, record, state, reason: "guard_removed",
-				message: `Validator removed from state ${state}; replay uses the recorded ${record.outcome === true ? "positive" : "rejected"} verdict, not the removed validator`,
-				...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
-			}];
+			const issues: ReplayStaleRecord[] = [
+				{
+					index,
+					seqId: record.seqId,
+					record,
+					state,
+					reason: "guard_removed",
+					message: `Validator removed from state ${state}; replay uses the recorded ${record.outcome === true ? "positive" : "rejected"} verdict, not the removed validator`,
+					...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
+				},
+			];
 			// Removing the current guard must not hide a different historical guard change.
-			if (invokedGuard !== undefined && stableStringify(invokedGuard) !== stableStringify(record.guard)) issues.push({
-				index, seqId: record.seqId, record, state, reason: "guard_changed",
+			if (invokedGuard !== undefined && stableStringify(invokedGuard) !== stableStringify(record.guard))
+				issues.push({
+					index,
+					seqId: record.seqId,
+					record,
+					state,
+					reason: "guard_changed",
 					...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
 					message: `Recorded guard for state ${state} differs from its invocation validation policy`,
-			});
+				});
 			return issues;
 		}
 		if (stableStringify(record.guard) === stableStringify(currentGuard)) return [];
@@ -288,8 +392,10 @@ function brokenRecordFor(
 		}
 		if (record.type === "spawned") return { ...base, state: record.path };
 		if (record.type === "actor_created") return { ...base, state: record.occurrence };
-		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope") return { ...base, state: record.occurrence };
-		if (record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") return { ...base, state: record.callerState };
+		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope")
+			return { ...base, state: record.occurrence };
+		if (record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved")
+			return { ...base, state: record.callerState };
 		if (record.type === "failure_intent") return { ...base, state: record.origin };
 		return base;
 	}

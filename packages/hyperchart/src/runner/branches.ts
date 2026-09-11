@@ -48,12 +48,15 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 	assertStoppedRun(options.runId, "forking");
 	await assertRunOwnership(options.runId, options.cwd);
 	const meta = await loadRunMeta(options.runId);
-	const parsed = parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName });
+	const parsed = parseChartModuleSync(
+		meta.chartPath,
+		meta.exportName === undefined ? {} : { exportName: meta.exportName },
+	);
 	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
 	const store = await openRunLogStore(options.runId, { access: "writer" });
 	let branch: BranchHead;
 	try {
-		if (await store.getRecord(options.fromSeqId) === undefined) {
+		if ((await store.getRecord(options.fromSeqId)) === undefined) {
 			throw new Error(`No durable log record with seqId ${options.fromSeqId}`);
 		}
 		if ((await collectBranches(store)).some((candidate) => candidate.branchId === options.branchId)) {
@@ -61,7 +64,7 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 		}
 		if (options.sourceBranchId !== undefined) {
 			const source = await store.captureSnapshot(options.sourceBranchId);
-			if (!await store.containsInHistory({ headSeqId: source.headSeqId, seqId: options.fromSeqId })) {
+			if (!(await store.containsInHistory({ headSeqId: source.headSeqId, seqId: options.fromSeqId }))) {
 				throw new Error(`Fork point ${options.fromSeqId} is not in source branch '${options.sourceBranchId}' history`);
 			}
 		}
@@ -71,9 +74,20 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 			...(options.sourceBranchId === undefined ? {} : { sourceBranchId: options.sourceBranchId }),
 			sourceSeqId: options.fromSeqId,
 		};
-		const semantic = await BranchExecution.restore({ ast: parsed.ast, branchId: options.branchId, store, saveCheckpoint: "never", snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId } });
+		const semantic = await BranchExecution.restore({
+			ast: parsed.ast,
+			branchId: options.branchId,
+			store,
+			saveCheckpoint: "never",
+			snapshot: { branchId: options.branchId, headSeqId: options.fromSeqId },
+		});
 		const checkpoint = semantic.prepareExactCheckpoint(options.fromSeqId);
-		branch = await store.createBranch(options.branchId, options.fromSeqId, metadata, checkpoint === undefined ? undefined : { checkpoint });
+		branch = await store.createBranch(
+			options.branchId,
+			options.fromSeqId,
+			metadata,
+			checkpoint === undefined ? undefined : { checkpoint },
+		);
 	} finally {
 		await store.close();
 	}
