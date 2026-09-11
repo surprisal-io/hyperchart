@@ -1,12 +1,12 @@
-import { basename as fixtureRunId, dirname as fixtureRoot } from "node:path";
+import { dirname as fixtureRoot } from "node:path";
 import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { collectHistoryRecords } from "./helpers/history.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
-import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/core/types.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
+import type { ActionUID } from "../packages/hyperchart/src/core/types.js";
 import { parseChartModuleSync } from "../packages/hyperchart/src/core/inspect.js";
 import { createBranchProjection } from "../packages/hyperchart/src/core/projection.js";
 import { prepareProjectionCheckpoint, projectionContractForAst } from "../packages/hyperchart/src/execution/projection_restore.js";
@@ -23,10 +23,7 @@ const roots: string[] = [];
 const runIds: string[] = [];
 
 class NoopExecutor implements SteerableAgentExecutor {
-  start(_effect: AgentEffect, _emit: (event: ChartEvent) => void): void {}
-  reject(_effect: RejectedEffect, emit: (event: ChartEvent) => void): void {
-    emit({ type: "FAILED", error: "rejected" });
-  }
+  start(_effect: AgentEffect, _emit: (outcome: AgentOutcome) => void): void {}
   async cancel(_actionUid: ActionUID): Promise<void> {}
   async dispose(): Promise<void> {}
   async steer(): Promise<boolean> {

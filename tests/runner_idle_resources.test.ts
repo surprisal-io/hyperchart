@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import type { ChartEvent } from "../packages/hyperchart/src/core/types.js";
+import type { AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { createHyperchartRunnerController } from "../packages/hyperchart/src/runner/runner_main.js";
 import { collectHistoryRecords } from "./helpers/history.js";
@@ -19,16 +19,17 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
   work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "ask" } }
 } };`);
 	const log = join(runDir, "log.jsonl");
-	writeFileSync(log, JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 }) + "\n");
-	const emissions = new Map<string, (event: ChartEvent) => void>();
+	writeFileSync(log,
+		`${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`,
+	);
+	const emissions = new Map<string, (outcome: AgentOutcome) => void>();
 	let resident = 0;
 	let built = 0;
 	const controller = await createHyperchartRunnerController({ runId: "idle-resources", storage, chartPath, chartId: "idle-resources", workDir: root, branchId: "main" }, ({ config }) => {
 		resident++; built++;
 		return {
 			start(_effect, emit) { emissions.set(config.branchId, emit); },
-			reject(_effect, emit) { emit({ type: "FAILED" }); },
-			async cancel() {},
+				async cancel() {},
 			async dispose() { resident--; emissions.delete(config.branchId); },
 			async steer() { return false; },
 		};
@@ -63,7 +64,7 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
 			expect(await controller.activeBranchIds()).toEqual([branchId]);
 			await expect(controller.unloadBranch(branchId)).rejects.toThrow("not idle");
 			expect(resident).toBe(controller.liveBranchIds.length);
-			emissions.get(branchId)!({ type: "DONE" });
+			emissions.get(branchId)?.({ kind: "completed", event: { type: "DONE" } });
 			await vi.waitFor(async () => expect(await controller.activeBranchIds()).toEqual([]));
 			expect(await gate(branchId)).toBeGreaterThan(seq);
 			const parked = readFileSync(log, "utf8");

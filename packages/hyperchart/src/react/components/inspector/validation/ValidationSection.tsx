@@ -6,30 +6,26 @@ import { Section } from "../ui/Section.js";
 
 export function ValidationSection({ state }: { state: HyperchartStateInfo }) {
 	const validationLabel = validationRetryLabel(state);
+	const guard = state.validationPolicy?.guard;
+	const policy = state.validationPolicy?.onFail;
 	const rejectionReason =
 		state.validation?.latestRejectedReason ??
 		state.issues?.find((issue) => issue.kind === "validation_rejected")?.message;
-	if (
-		state.guard === undefined &&
-		state.onReject === undefined &&
-		state.retry === undefined &&
-		validationLabel === undefined &&
+	if (guard === undefined && validationLabel === undefined &&
 		rejectionReason === undefined
 	)
 		return null;
-	const retryText =
-		state.retry?.max === undefined ? "unbounded" : `${state.retry.max} retr${state.retry.max === 1 ? "y" : "ies"}`;
 	return (
 		<Section title="Validation guard" icon={CheckBadgeIcon}>
-			{state.guard === undefined ? (
+			{guard === undefined ? (
 				<div className="text-[var(--text-muted)]">No guard definition available.</div>
-			) : state.guard.kind === "script" ? (
+			) : guard.kind === "script" ? (
 				<div className="space-y-1">
 					<div className="inline-flex rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--hc-green-text)]">
 						script guard
 					</div>
 					<ExpandablePre collapsedLines={5} language="bash">
-						{[state.guard.command, ...(state.guard.args ?? [])].join(" ")}
+						{[guard.command, ...(guard.args ?? [])].join(" ")}
 					</ExpandablePre>
 				</div>
 			) : (
@@ -42,7 +38,7 @@ export function ValidationSection({ state }: { state: HyperchartStateInfo }) {
 							<dt className="text-[var(--text-muted)]">module</dt>
 							<dd>
 								<code className="block overflow-x-auto whitespace-pre rounded bg-[var(--bg-code)] px-1.5 py-0.5 font-mono text-[10px]">
-									{state.guard.module}
+									{guard.module}
 								</code>
 							</dd>
 						</div>
@@ -50,7 +46,7 @@ export function ValidationSection({ state }: { state: HyperchartStateInfo }) {
 							<dt className="text-[var(--text-muted)]">export</dt>
 							<dd>
 								<code className="block overflow-x-auto whitespace-pre rounded bg-[var(--bg-code)] px-1.5 py-0.5 font-mono text-[10px]">
-									{state.guard.export}
+									{guard.export}
 								</code>
 							</dd>
 						</div>
@@ -69,18 +65,18 @@ export function ValidationSection({ state }: { state: HyperchartStateInfo }) {
 					<div className="whitespace-pre-wrap break-words">{rejectionReason}</div>
 				</div>
 			)}
-			<dl className="grid grid-cols-2 gap-2 text-[11px]">
-				{state.guard !== undefined && (
+			{policy !== undefined && (
+				<dl className="grid grid-cols-2 gap-2 text-[11px]">
 					<div>
-						<dt className="text-[var(--text-muted)]">on reject</dt>
-						<dd>{state.onReject ?? "resume"}</dd>
+						<dt className="text-[var(--text-muted)]">nudges/session</dt>
+						<dd>{policy.nudge}</dd>
 					</div>
-				)}
-				<div>
-					<dt className="text-[var(--text-muted)]">retry budget</dt>
-					<dd>{retryText}</dd>
-				</div>
-			</dl>
+					<div>
+						<dt className="text-[var(--text-muted)]">restarts</dt>
+						<dd>{policy.restart}</dd>
+					</div>
+				</dl>
+			)}
 		</Section>
 	);
 }

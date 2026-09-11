@@ -34,10 +34,11 @@ const MODEL_ENVELOPE_FIELDS = new Set([
 	"omittedOptionCount", "omittedPendingStateCount", "omittedPromptChars", "omittedReadCount", "omittedRegionCount",
 	"omittedRemovedByStateCount", "omittedResolvedToolCount", "omittedRunCount", "omittedStateCount", "omittedStoppedCount",
 	"omittedToolCount", "omittedTransitionCount", "omittedUnavailableAgentCount", "omittedQueuedCount",
-	"next", "onReject", "open", "optional", "options", "originalBytes", "originalChars", "omittedChars", "outcome", "output", "outputHint", "outputRequired", "over", "path", "pattern", "pendingStateIds",
+	"next",
+	"open", "optional", "options", "originalBytes", "originalChars", "omittedChars", "outcome", "output", "outputHint", "outputRequired", "over", "path", "pattern", "pendingStateIds",
 	"pid", "presentation", "preservedRecords", "previousHeadSeqId", "preview", "projectChartsDir", "promptPreview", "propertyNames", "queued", "queuedCount", "reads", "records", "regions", "label",
 	"removedByState", "replayWarningCount", "requestId", "required", "resolvedModel", "resolvedTools",
-	"retries", "role", "runId", "runnerBranchIds", "runs", "running", "scope", "seqId", "sessionDigest",
+	"role", "runId", "runnerBranchIds", "runs", "running", "scope", "seqId", "sessionDigest",
 	"selectedBranchChanged", "severity", "sourceBranchId", "stale", "started", "state", "stateCount", "stateDigests", "stateId", "status", "stopped", "stoppedCount",
 	"subProgress", "target", "targetLabel", "text", "thinking", "toolCount", "tools", "toolset", "total", "totalUsage", "tupleItems",
 	"tokenCount", "totalCount", "transitionDigests", "turnCount", "type", "types", "unavailableAgents", "uniqueItems", "updatedAt", "updates", "url", "userChartsDir", "userInteractions", "value",
@@ -236,7 +237,8 @@ export class ReplyContractSummaryError extends Error {
 	readonly code = "REPLY_CONTRACT_SUMMARY_UNAVAILABLE";
 	constructor(
 		message: string,
-		readonly metadata: { path: string; limit: "depth" | "nodes" | "bytes" | "collection" | "string" | "identity" | "unsupported"; collection?: string; omittedCount?: number },
+		readonly metadata: { path: string; limit: "depth" | "nodes" | "bytes" | "collection" | "string" | "identity" | "unsupported"; collection?: string; omittedCount?: number;
+		},
 	) {
 		super(`${message} Cannot safely deliver this user gate through a model tool. Open the browser inspector and complete the user interaction there.`);
 		this.name = "ReplyContractSummaryError";
@@ -520,8 +522,6 @@ export type ChartInspectStateSummary = {
 	concurrency?: number;
 	regions?: string[];
 	omittedRegionCount?: number;
-	retries?: number;
-	onReject?: HyperchartInspectState["onReject"];
 	reads?: string[];
 	omittedReadCount?: number;
 	artifacts?: string[];
@@ -587,8 +587,6 @@ function summarizeInspectState(state: HyperchartInspectState): ChartInspectState
 		...(state.over === undefined ? {} : { over: truncate(state.over) }),
 		...(state.concurrency === undefined ? {} : { concurrency: state.concurrency }),
 		...spreadCapped("regions", "omittedRegionCount", regions),
-		...(state.retries === undefined ? {} : { retries: state.retries }),
-		...(state.onReject === undefined ? {} : { onReject: state.onReject }),
 		...spreadCapped("reads", "omittedReadCount", reads),
 		...spreadCapped("artifacts", "omittedArtifactCount", artifacts),
 		...(transitions === undefined ? {} : {
@@ -604,7 +602,8 @@ export type RunInspectStateSummary = {
 	resolvedModel?: string; toolset?: string; resolvedTools?: string[]; omittedResolvedToolCount?: number; completedEvent?: string;
 	attempts?: number; validationAttempts?: number; visitCount?: number; mapKey?: string; subProgress?: HyperchartStateInfo["subProgress"];
 	artifacts?: string[]; omittedArtifactCount?: number;
-	sessionDigest?: { status: string; actionKey?: string; role?: string; model?: string; thinking?: string; toolset?: string; tools?: string[]; omittedToolCount?: number; turnCount?: number; toolCount?: number; tokenCount?: number; currentTool?: string; lastMessage?: string; error?: string };
+	sessionDigest?: { status: string; actionKey?: string; role?: string; model?: string; thinking?: string; toolset?: string; tools?: string[]; omittedToolCount?: number; turnCount?: number; toolCount?: number; tokenCount?: number; currentTool?: string; lastMessage?: string; error?: string;
+	};
 	issues?: IssueSummary[]; omittedIssueCount?: number;
 };
 export type RunInspectSummary = {
@@ -678,7 +677,7 @@ function cappedStrings(values: readonly string[] | undefined, maxChars = PREVIEW
 }
 function cappedArtifactPaths(values: readonly { path?: string }[] | undefined, maxChars: number): { values?: string[]; omitted: number } {
 	if (values === undefined) return { omitted: 0 };
-	const paths = values.flatMap((artifact) => artifact.path === undefined ? [] : [artifact.path]);
+	const paths = values.flatMap((artifact) => (artifact.path === undefined ? [] : [artifact.path]));
 	const capped = capStrings(paths, maxChars);
 	return { values: capped, omitted: values.length - capped.length };
 }

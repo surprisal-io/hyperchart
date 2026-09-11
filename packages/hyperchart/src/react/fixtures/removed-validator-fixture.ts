@@ -8,9 +8,10 @@ export const removedValidatorDefinition = (guarded: boolean) => chart({
 	kind: "chart", id: "recorded-validation", initial: "work",
 	states: {
 		work: {
-			kind: "state", action: agent("worker", { artifacts: { result: "result.txt" } }),
-			...(guarded ? { validate: tsImport("./checks.js", "ok") } : {}),
-			transitions: { AGAIN: "work", DONE: "done" },
+			kind: "state", action: agent("worker", { artifacts: { result: "result.txt" },
+					...(guarded ? { validation: { guard: tsImport("./checks.js", "ok") } } : {}),
+				}),
+				transitions: { AGAIN: "work", DONE: "done" },
 		},
 		done: final(),
 	},

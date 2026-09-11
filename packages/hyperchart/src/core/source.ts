@@ -160,8 +160,8 @@ function actorDeclarationDsl(actor: ActorEndpointDeclarationAst, actorBindings: 
 function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<StatePath, string>): string {
 	if (state.kind === "receive") return `receive(${objectDsl([["on", objectDsl(Object.entries(state.on).map(([event, target]) => [event, stringDsl(target)]))]])})`;
 	if (state.kind === "reply") return `reply(${objectDsl([["target", stringDsl(state.target)], ["event", state.event === undefined ? undefined : stringDsl(state.event)], ["output", state.output === undefined ? undefined : hyperchartValueSource(state.output)]])})`;
-	if (state.kind === "send") return `send(${objectDsl([["to", state.self === true ? "self()" : actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["input", hyperchartValueSource(state.input)], ["target", stringDsl(state.target)]])})`;
-	if (state.kind === "sendBatch") return `sendBatch(${objectDsl([["to", state.self === true ? "self()" : actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["inputs", hyperchartValueSource(state.inputs)], ["target", stringDsl(state.target)]])})`;
+	if (state.kind === "send") return `send(${objectDsl([["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))], ["event", stringDsl(state.event)], ["input", hyperchartValueSource(state.input)], ["target", stringDsl(state.target)]])})`;
+	if (state.kind === "sendBatch") return `sendBatch(${objectDsl([["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))], ["event", stringDsl(state.event)], ["inputs", hyperchartValueSource(state.inputs)], ["target", stringDsl(state.target)]])})`;
 	if (state.kind === "call") return `call(${objectDsl([["to", actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["input", hyperchartValueSource(state.input)], ["target", state.target === undefined ? undefined : stringDsl(state.target)], ["transitions", transitionsDsl(state.transitions)]])})`;
 	if (state.kind === "callBatch") return `callBatch(${objectDsl([["to", actorBindings.get(state.to) ?? stringDsl(state.to)], ["event", stringDsl(state.event)], ["inputs", hyperchartValueSource(state.inputs)], ["target", stringDsl(state.target)]])})`;
 	if (state.kind === "state") return objectDsl([
@@ -170,10 +170,7 @@ function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<
 		["action", actionDsl(state.action)],
 		["transitions", transitionsDsl(state.transitions)],
 		["after", state.after === undefined ? undefined : objectDsl([["delayMs", String(state.after.delayMs)], ["target", stringDsl(state.after.target)]])],
-		["validate", state.validate === undefined ? undefined : guardDsl(state.validate)],
-		["onReject", state.onReject === undefined ? undefined : stringDsl(state.onReject)],
-		["retries", state.retries === undefined ? undefined : String(state.retries)],
-	]);
+		]);
 	return "undefined";
 }
 
@@ -205,10 +202,6 @@ function stateDsl(ast: ChartAst, path: StatePath, actorBindings: ReadonlyMap<Sta
 							["target", stringDsl(state.after.target)],
 						]),
 			],
-			["validate", state.validate === undefined ? undefined : guardDsl(state.validate)],
-			["onReject", state.onReject === undefined ? undefined : stringDsl(state.onReject)],
-			["onReenter", onReenterDsl(state.onReenter)],
-			["retries", state.retries === undefined ? undefined : String(state.retries)],
 		]);
 	}
 	if (state.kind === "send") {
@@ -286,6 +279,36 @@ function actionDsl(action: StateActionAst): string {
 			["thinking", action.thinking === undefined ? undefined : stringDsl(action.thinking)],
 			["tools", action.tools === undefined ? undefined : arrayDsl(action.tools.map(stringDsl))],
 			["reply", action.reply === undefined ? undefined : schemaDsl(action.reply)],
+			[
+				"onFail",
+				objectDsl([
+					["nudge", String(action.onFail.nudge)],
+					["restart", String(action.onFail.restart)],
+				]),
+			],
+			[
+				"validation",
+				action.validation === undefined
+					? undefined
+					: objectDsl([
+							["guard", guardDsl(action.validation.guard)],
+							[
+								"onFail",
+								objectDsl([
+									["nudge", String(action.validation.onFail.nudge)],
+									["restart", String(action.validation.onFail.restart)],
+								]),
+							],
+						]),
+			],
+			[
+				"reentry",
+				action.reentry === undefined
+					? undefined
+					: action.reentry === "restart"
+						? stringDsl("restart")
+						: objectDsl([["resume", templateDsl(action.reentry.resume)]]),
+			],
 		]);
 		return options === "{}" ? `agent(${stringDsl(action.name)})` : `agent(${stringDsl(action.name)}, ${options})`;
 	}

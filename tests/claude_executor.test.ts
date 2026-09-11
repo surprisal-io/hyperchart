@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
-import type { AgentEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import type { ChartEvent, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
 import { readSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import { readNeutralSessionTranscript } from "../packages/hyperchart/src/inspect/session_transcript.js";
@@ -44,7 +44,7 @@ function effect(overrides: Partial<AgentEffect> = {}): AgentEffect {
 		kind: "agent",
 		id: "chart:work:worker:1:1",
 		actionUid,
-		action: { kind: "agent", uid: actionUid, name: "worker" },
+		action: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } },
 		events: ["DONE", "FAILED"],
 		...overrides,
 		sessionId: overrides.sessionId ?? "session-id",
@@ -117,9 +117,13 @@ function toolResultMessage(toolUseId: string, text: string): unknown {
 	return { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: toolUseId, content: text }] } };
 }
 
+function chartEvent(outcome: AgentOutcome): ChartEvent {
+	return outcome.kind === "completed" ? outcome.event : { type: "FAILED", error: outcome.failure.message };
+}
+
 function startAndAwait(executor: ClaudeAgentExecutor, target: AgentEffect): Promise<ChartEvent> {
 	return new Promise((resolve) => {
-		executor.start(target, (event) => resolve(event));
+		executor.start(target, (outcome) => resolve(chartEvent(outcome)));
 	});
 }
 
@@ -205,7 +209,7 @@ describe("ClaudeAgentExecutor", () => {
 		});
 		const emitted: ChartEvent[] = [];
 
-		executor.start(effect(), (event) => emitted.push(event));
+		executor.start(effect(), (outcome) => emitted.push(chartEvent(outcome)));
 
 		await expect.poll(() => Object.values(readSessionProgress(sessionsDir).sessions)[0]?.status).toBe("completed");
 		expect(emitted).toEqual([{ type: "DONE" }]);
@@ -213,9 +217,9 @@ describe("ClaudeAgentExecutor", () => {
 		expect(emitted).toEqual([{ type: "DONE" }]);
 	});
 
-	it("nudges a silent agent and fails after the retry budget", async () => {
+	it("reports a retryable incomplete outcome after one silent turn", async () => {
 		const { workDir, sessionsDir, agentsDir } = makeWorkspace();
-		const fake = fakeQuery([() => [], () => [], () => []]);
+		const fake = fakeQuery([() => []]);
 		const executor = new ClaudeAgentExecutor({
 			workDir,
 			sessionsDir,
@@ -226,8 +230,7 @@ describe("ClaudeAgentExecutor", () => {
 		const event = await startAndAwait(executor, effect());
 
 		expect(event.type).toBe("FAILED");
-		expect(fake.prompts).toHaveLength(3);
-		expect(fake.prompts[1]).toContain("finished responding without making an accepted tool call");
+		expect(fake.prompts).toHaveLength(1);
 		await expect.poll(() => Object.values(readSessionProgress(sessionsDir).sessions)[0]?.status).toBe("failed");
 		await executor.dispose();
 	});
@@ -297,7 +300,7 @@ describe("ClaudeAgentExecutor", () => {
 			return lateSession;
 		};
 		const emitted: ChartEvent[] = [];
-		executor.start(effect(), (event) => emitted.push(event));
+		executor.start(effect(), (outcome) => emitted.push(chartEvent(outcome)));
 		await expect.poll(() => constructionStarted).toBe(true);
 
 		const disposal = executor.dispose();
@@ -316,7 +319,7 @@ describe("ClaudeAgentExecutor", () => {
 		expect(internal.cancellations.size).toBe(0);
 
 		const afterDispose: ChartEvent[] = [];
-		executor.start(effect(), (event) => afterDispose.push(event));
+		executor.start(effect(), (outcome) => afterDispose.push(chartEvent(outcome)));
 		expect(afterDispose).toEqual([{ type: "FAILED", error: "Claude agent executor is disposed" }]);
 	});
 
@@ -345,7 +348,7 @@ describe("ClaudeAgentExecutor", () => {
 			const target = effect();
 			const emitted: ChartEvent[] = [];
 			const internal = executor as unknown as { live: Map<string, unknown> };
-			executor.start(target, (event) => emitted.push(event));
+			executor.start(target, (outcome) => emitted.push(chartEvent(outcome)));
 			await expect.poll(() => internal.live.size).toBe(1);
 
 			const shutdown = shutdownMode === "cancel" ? executor.cancel(target.actionUid) : executor.dispose();
@@ -378,13 +381,12 @@ describe("ClaudeAgentExecutor", () => {
 			sessionsDir,
 			branchId: "main",			definitionDirs: [agentsDir],
 			queryFn: fake.queryFn,
-			maxFinishRetries: 5,
 		});
 
 		let emitted: ChartEvent | undefined;
 		const target = effect();
-		executor.start(target, (event) => {
-			emitted = event;
+		executor.start(target, (outcome) => {
+			emitted = chartEvent(outcome);
 		});
 		await expect.poll(() => fake.prompts.length).toBe(1);
 		executor.cancel(target.actionUid);

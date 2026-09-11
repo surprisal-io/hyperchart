@@ -105,9 +105,15 @@ export default chart({
 	args: {
 		topic: { description: "Subject or question for the report", default: "Google I/O 2026 announcements" },
 		audience: { description: "Primary readers", default: "executives" },
-		goal: { description: "Decision or outcome the report should support", default: "Explain the most important changes" },
+		goal: {
+			description: "Decision or outcome the report should support",
+			default: "Explain the most important changes",
+		},
 		style: { description: "Desired editorial and visual style", default: "analytical" },
-		constraints: { description: "Additional scope or sourcing constraints", default: "Use primary sources where possible" },
+		constraints: {
+			description: "Additional scope or sourcing constraints",
+			default: "Use primary sources where possible",
+		},
 	},
 	initial: "plan",
 	states: {
@@ -161,11 +167,6 @@ Your bucket (${key("research")}): ${json(item("research"))}`,
 				},
 				artifacts: { evidence: artifact(t`${result("plan", "artifacts_dir")}/evidence.json`, Evidence) },
 			}),
-			// The coverage gate: verdict is stored in the log as a validated fact; onReject=restart
-			// is taskflow's onBlock:retry, retries: 2 its retry.max — the third rejection records global failure intent.
-			validate: script("python3", ["bin/check_coverage.py"]),
-			onReject: "restart",
-			retries: 2,
 			transitions: { NORMALIZED: "claims" },
 		},
 
@@ -193,10 +194,8 @@ Your bucket (${key("research")}): ${json(item("research"))}`,
 				reply: Chapters,
 				// the one frontmatter override in this chart: synthesis wants deeper thinking
 				thinking: "xhigh",
+				validation: { guard: script("python3", ["bin/check_narrative_design.py"]), onFail: { nudge: 0, restart: 2 } },
 			}),
-			validate: script("python3", ["bin/check_narrative_design.py"]),
-			onReject: "restart",
-			retries: 2,
 			transitions: { NARRATIVE_READY: "chapters" },
 		},
 
@@ -232,10 +231,8 @@ Your work item: ${json(item("chapters"))}`,
 				// the agent-side fan-in: one chapter file per map instance
 				reads: [joinArtifactOf("chapters.author")],
 				artifacts: { interactions: artifact(t`${result("plan", "artifacts_dir")}/interactions.json`, Interactions) },
+				validation: { guard: script("python3", ["bin/validate_report_data.py"]), onFail: { nudge: 0, restart: 2 } },
 			}),
-			validate: script("python3", ["bin/validate_report_data.py"]),
-			onReject: "restart",
-			retries: 2,
 			transitions: { INTERACTIONS_READY: "assemble" },
 		},
 
@@ -252,9 +249,6 @@ Your work item: ${json(item("chapters"))}`,
 				},
 				artifacts: { report: artifact(t`${result("plan", "artifacts_dir")}/report.qmd`, ReportSource) },
 			}),
-			validate: script("python3", ["bin/check_quarto_source.py"]),
-			onReject: "restart",
-			retries: 2,
 			transitions: { ASSEMBLED: "render" },
 		},
 

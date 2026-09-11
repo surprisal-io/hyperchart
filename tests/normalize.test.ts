@@ -247,7 +247,7 @@ describe("normalizeChartConfig", () => {
 		]);
 	});
 
-	it("normalizes validate with a default onReject of resume", () => {
+	it("normalizes agent validation with resolved recovery defaults", () => {
 		const result = normalizeChartConfig(
 			chart({
 				kind: "chart",
@@ -256,8 +256,7 @@ describe("normalizeChartConfig", () => {
 				states: {
 					work: {
 						kind: "state",
-						action: agent("coder"),
-						validate: tsImport("./checks.js", "testsPass"),
+						action: agent("coder", { validation: { guard: tsImport("./checks.js", "testsPass") } }),
 						transitions: { DONE: "done" },
 					},
 					done: final(),
@@ -269,8 +268,10 @@ describe("normalizeChartConfig", () => {
 		if (!result.ok) throw new Error("expected valid chart");
 		const work = result.ast.states.work;
 		if (work?.kind !== "state") throw new Error("expected action state");
-		expect(work.validate).toEqual({ kind: "tsImport", module: "./checks.js", export: "testsPass" });
-		expect(work.onReject).toBe("resume");
+		expect(work.action.kind === "agent" ? work.action.validation : undefined).toEqual({
+			guard: { kind: "tsImport", module: "./checks.js", export: "testsPass" },
+			onFail: { nudge: 2, restart: 1 },
+		});
 	});
 
 	it("normalizes compounds into a flat path-keyed AST", () => {
@@ -1026,7 +1027,7 @@ describe("normalizeChartConfig", () => {
 		});
 
 		expect(result.ok).toBe(false);
-		expect(result.diagnostics.map((d) => d.code)).toContain("INVALID_GUARD");
+		expect(result.diagnostics.map((d) => d.code)).toContain("LEGACY_AGENT_POLICY");
 	});
 
 	it("rejects onReject without validate and invalid onReject values", () => {
@@ -1039,7 +1040,7 @@ describe("normalizeChartConfig", () => {
 			},
 		});
 		expect(withoutValidate.ok).toBe(false);
-		expect(withoutValidate.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REJECT");
+		expect(withoutValidate.diagnostics.map((d) => d.code)).toContain("LEGACY_AGENT_POLICY");
 
 		const badValue = normalizeChartConfig({
 			id: "bad-on-reject",
@@ -1055,7 +1056,7 @@ describe("normalizeChartConfig", () => {
 			},
 		});
 		expect(badValue.ok).toBe(false);
-		expect(badValue.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REJECT");
+		expect(badValue.diagnostics.map((d) => d.code)).toContain("LEGACY_AGENT_POLICY");
 	});
 
 	it("normalizes onReenter resume for agents and rejects meaningless resume targets", () => {
@@ -1068,8 +1069,7 @@ describe("normalizeChartConfig", () => {
 					work: {
 						kind: "state",
 						input: { feedback: z.string().default("none") },
-						onReenter: resume(t`Fix: ${input("feedback")}`),
-						action: agent("coder"),
+						action: agent("coder", { reentry: { resume: t`Fix: ${input("feedback")}` } }),
 						transitions: { DONE: "done" },
 					},
 					done: final(),
@@ -1079,7 +1079,9 @@ describe("normalizeChartConfig", () => {
 		expect(valid.ok).toBe(true);
 		if (!valid.ok) throw new Error("expected valid chart");
 		const work = valid.ast.states.work;
-		expect(work?.kind === "state" ? work.onReenter : undefined).toMatchObject({ kind: "resume" });
+		expect(work?.kind === "state" && work.action.kind === "agent" ? work.action.reentry : undefined).toMatchObject({
+			resume: { kind: "template" },
+		});
 
 		const invalid = normalizeChartConfig(
 			chart({
@@ -1098,7 +1100,7 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(invalid.ok).toBe(false);
-		expect(invalid.diagnostics.map((d) => d.code)).toContain("INVALID_ON_REENTER");
+		expect(invalid.diagnostics.map((d) => d.code)).toContain("LEGACY_AGENT_POLICY");
 	});
 
 	it("validates the retry budget declaration", () => {
@@ -1111,17 +1113,17 @@ describe("normalizeChartConfig", () => {
 			},
 		});
 		expect(withoutValidate.ok).toBe(false);
-		expect(withoutValidate.diagnostics.map((d) => d.code)).toContain("INVALID_RETRIES");
+		expect(withoutValidate.diagnostics.map((d) => d.code)).toContain("LEGACY_AGENT_POLICY");
 
 		const noRoute = normalizeChartConfig({
 			id: "no-route",
 			initial: "work",
 			states: {
 				work: {
-					action: agent("coder"),
-					validate: tsImport("./checks.js", "testsPass"),
-					retries: 2,
-					transitions: { DONE: "done" }, // nowhere for the exhausted budget to go
+					action: agent("coder", {
+						validation: { guard: tsImport("./checks.js", "testsPass"), onFail: { nudge: 2, restart: 0 } },
+					}),
+					transitions: { DONE: "done" },
 				},
 				done: final(),
 			},

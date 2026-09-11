@@ -42,14 +42,14 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 		onRunEffects(effects) {
 			for (const effect of effects) {
 				switch (effect.kind) {
-					case "agent":
-					case "rejected": {
+					case "agent": {
 						const reply = agents.get(effect.actionUid.state)?.shift();
 						if (reply !== undefined) {
 							events.push({
 								kind: "agent",
 								effectId: effect.id,
-								event: typeof reply === "string" ? { type: reply } : reply,
+								outcome: { kind: "completed", event: typeof reply === "string" ? { type: reply } : reply,
+							},
 							});
 						}
 						break;
@@ -148,8 +148,7 @@ function validatedChart(): ChartAst {
 			states: {
 				work: {
 					kind: "state",
-					action: agent("coder"),
-					validate: tsImport("./checks.js", "testsPass"),
+					action: agent("coder", { validation: { guard: tsImport("./checks.js", "testsPass") } }),
 					transitions: { DONE: "done" },
 				},
 				done: final(),
@@ -521,7 +520,7 @@ describe("replay gauntlet", () => {
 		expect(agentRuns).toEqual(["review"]);
 	});
 
-	it("modified chart: validation added later checks the logged completion live", async () => {
+	it("modified chart: validation added later does not rewrite pinned invocation semantics", async () => {
 		const v1 = make(
 			chart({
 				kind: "chart",
@@ -543,20 +542,19 @@ describe("replay gauntlet", () => {
 				states: {
 					work: {
 						kind: "state",
-						action: agent("coder"),
-						validate: tsImport("./checks.js", "testsPass"),
+						action: agent("coder", { validation: { guard: tsImport("./checks.js", "testsPass") } }),
 						transitions: { DONE: "done" },
 					},
 					done: final(),
 				},
 			}),
 		);
-		const resumed = await runLive(v2, { logs: live.log, verdicts: [true] });
+		const resumed = await runLive(v2, { logs: live.log });
 
 		expect(resumed.state.projection.activeLeaves).toEqual(["done"]);
 		const kinds = resumed.runtime.effectBatches.flat().map((effect) => effect.kind);
 		expect(kinds.filter((kind) => kind === "agent")).toEqual([]);
-		expect(kinds.filter((kind) => kind === "validate")).toEqual(["validate"]);
+		expect(kinds.filter((kind) => kind === "validate")).toEqual([]);
 	});
 
 	it("transition input is replay-derived and rebinds under a changed chart", async () => {
@@ -627,9 +625,9 @@ describe("replay gauntlet", () => {
 					work: {
 						kind: "state",
 						input: { feedback: z.string().default("keep") },
-						action: agent("worker", { task: t`${input("feedback")}` }),
-						validate: tsImport("./checks.js", "testsPass"),
-						retries: 0,
+						action: agent("worker", { task: t`${input("feedback")}`,
+							validation: { guard: tsImport("./checks.js", "testsPass"), onFail: "fail" },
+						}),
 						transitions: { DONE: "done" },
 					},
 					done: final(),

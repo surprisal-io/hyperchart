@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { getPackageDir, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod";
 import register from "../packages/pi-hyperchart/extensions/hyperchart.js";
 import { HYPERCHART_COMMAND_EVENT, requestHyperchartCommand, type HyperchartCommandRequest } from "../packages/pi-hyperchart/src/command.js";
 import { actionUidDirName, actionUidKey, sanitizeSegment } from "../packages/hyperchart/src/core/action_uid.js";
@@ -19,17 +18,14 @@ import {
 	removeTerminalNotificationOutbox,
 } from "../packages/hyperchart/src/runtime/generic/terminal_notifications.js";
 import {
-	hasUserInteractionReceipt,
-	readUserInteractionResponse,
-} from "../packages/hyperchart/src/runner/user_interactions.js";
+	hasUserInteractionReceipt } from "../packages/hyperchart/src/runner/user_interactions.js";
 import { patchRunStatus, readRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
-import { readSessionProgress, sessionProgressKey, updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
+import { readSessionProgress,
+	updateSessionProgress } from "../packages/hyperchart/src/runtime/generic/session_progress.js";
 import {
 	closeRunInspectorServer,
 	openRunInspector,
 } from "../packages/hyperchart/src/inspect/inspector_server.js";
-import type { ReplySchemaSummary } from "../packages/hyperchart/src/host/summarize.js";
-import { answerFromReplySummary } from "./reply_summary_helpers.js";
 
 type HyperchartCommand = {
 	handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
@@ -60,29 +56,36 @@ function testStorage(): RunStorage {
 }
 
 function writeV2Log(runDir: string, records: readonly Record<string, unknown>[]): void {
-	writeFileSync(join(runDir, "log.jsonl"), [
+	writeFileSync(join(runDir, "log.jsonl"),
+		`${[
 		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
 		...records,
-	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+	].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+	);
 }
 
 function writeTwoBranchV2Log(runDir: string): void {
 	const uid = { chart: "demo", state: "work", action: "agent" };
-	writeFileSync(join(runDir, "log.jsonl"), [
+	writeFileSync(join(runDir, "log.jsonl"),
+		`${[
 		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
 					{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 		{ kind: "branch", op: "create", seqId: 3, branchId: "experiment", headSeqId: 2, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 2 } },
-					{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 4, branchId: "experiment", timestamp: 2 },
+					{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 4, branchId: "experiment", timestamp: 2 },
 			{ type: "state_action", kind: "complete", actionUid: uid, event: { type: "DONE" }, parentId: 4, seqId: 5, branchId: "experiment", timestamp: 3 },
-	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+	].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+	);
 }
 
 function writeTwoBranchFinalLog(runDir: string): void {
-	writeFileSync(join(runDir, "log.jsonl"), [
+	writeFileSync(join(runDir, "log.jsonl"),
+		`${[
 		{ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 0 },
 					{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 		{ kind: "branch", op: "create", seqId: 3, branchId: "experiment", headSeqId: 2, committedAt: 2, metadata: { name: "experiment", sourceBranchId: "main", sourceSeqId: 2 } },
-	].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+	].map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+	);
 }
 
 beforeEach(() => {
@@ -388,12 +391,14 @@ describe("hyperchart extension", () => {
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		await store.appendDrafts([{ type: "args", args: {} }]);
-		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
+		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid: state.action.uid, definition: state.action }]);
+		if (invoke === undefined) throw new Error("missing invocation record");
 		const [opened] = await store.appendDrafts([{
 			type: "user_interaction",
 			kind: "opened",
 			actionUid: state.action.uid,
-			phaseSeqId: invoke!.seqId,
+			phaseSeqId: invoke.seqId,
 			prompt: "Approve?",
 			options: ["APPROVED"],
 			events: ["APPROVED"],
@@ -407,7 +412,8 @@ describe("hyperchart extension", () => {
 			message: expect.objectContaining({ customType: "hyperchart-user-request", display: true }),
 			options: { deliverAs: "followUp", triggerTurn: true },
 		})]);
-		expect(withRunStorage(testStorage(), () => hasUserInteractionReceipt(runId, "main", opened!.seqId, "pi", "session-a"))).toBe(true);
+		if (opened === undefined) throw new Error("missing opened interaction");
+		expect(withRunStorage(testStorage(), () => hasUserInteractionReceipt(runId, "main", opened.seqId, "pi", "session-a"))).toBe(true);
 	});
 
 	it("recovers terminal notifications only into the exact owning session and workDir", async () => {
@@ -444,7 +450,8 @@ describe("hyperchart extension", () => {
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
 		register(pi);
-		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] };
+		};
 		context.sessionManager.getEntries = () => [];
 
 		await sessionStart?.({ reason: "startup" }, context);
@@ -478,7 +485,8 @@ describe("hyperchart extension", () => {
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
 		register(pi);
-		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] };
+		};
 		context.sessionManager.getEntries = () => [];
 
 		await sessionStart?.({ reason: "startup" }, context);
@@ -513,7 +521,8 @@ describe("hyperchart extension", () => {
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
 		register(pi);
-		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] };
+		};
 		context.sessionManager.getEntries = () => [{
 			type: "custom_message",
 			id: "entry",
@@ -558,7 +567,8 @@ describe("hyperchart extension", () => {
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
 		register(pi);
-		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] } };
+		const context = commandContext(projectDir).ctx as ExtensionCommandContext & { sessionManager: { getEntries(): unknown[] };
+		};
 		context.sessionManager.getEntries = () => [{
 			type: "custom_message",
 			id: "old-terminal",
@@ -681,7 +691,8 @@ describe("hyperchart extension", () => {
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
-		for (let index = 0; index < 105; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		if (root === undefined) throw new Error("missing root record");
+		for (let index = 0; index < 105; index++) await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root.seqId);
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
 		const first = await tool.execute("branches-first", { action: "branches", runId }, new AbortController().signal, () => undefined, ctx);
@@ -690,7 +701,8 @@ describe("hyperchart extension", () => {
 		expect(firstDetails.totalCount).toBe(106);
 		expect(firstDetails.next).toBeTypeOf("string");
 		const second = await tool.execute("branches-second", { action: "branches", runId, cursor: firstDetails.next }, new AbortController().signal, () => undefined, ctx);
-		const secondDetails = second.details as { branches: Array<{ branchId: string }>; totalCount: number; next?: string };
+		const secondDetails = second.details as { branches: Array<{ branchId: string }>; totalCount: number; next?: string;
+		};
 		expect(secondDetails.branches).toHaveLength(6);
 		expect(secondDetails.totalCount).toBe(106);
 		expect(secondDetails.next).toBeUndefined();
@@ -902,7 +914,9 @@ describe("hyperchart extension", () => {
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } },
+				parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]);
 		const transcriptFile = join(runDir, "sessions", "tool-view.jsonl");
 		writeFileSync(transcriptFile, `${JSON.stringify({ id: "assistant-1", timestamp: new Date(3).toISOString(), type: "message", message: { role: "assistant", content: "inspector transcript" } })}\n`);
@@ -941,7 +955,8 @@ describe("hyperchart extension", () => {
 		const runResponse = await fetch(new URL(`/api/runs/${token}`, inspectorUrl));
 		expect(runResponse.status).toBe(200);
 		const runPayload = (await runResponse.json()) as {
-			run: { runId: string; historySnapshot: { branchId: string; headSeqId: number | null }; states: Array<{ id: string; session?: { messages?: unknown[] } }> };
+			run: { runId: string; historySnapshot: { branchId: string; headSeqId: number | null }; states: Array<{ id: string; session?: { messages?: unknown[] } }>;
+			};
 		};
 		expect(runPayload).toMatchObject({ run: { runId } });
 		expect(runPayload.run.states.find((state) => state.id === "work")?.session?.messages).toBeUndefined();
@@ -951,7 +966,7 @@ describe("hyperchart extension", () => {
 			body: JSON.stringify({ operation: "readVisitSession", input: { snapshot: runPayload.run.historySnapshot, invokeSeqId: 3 } }),
 		});
 		expect(sessionResponse.status).toBe(200);
-		const sessionPayload = await sessionResponse.json() as { result: { messages?: unknown[] } };
+		const sessionPayload = (await sessionResponse.json()) as { result: { messages?: unknown[] } };
 		expect(sessionPayload.result.messages).toEqual([{ id: "assistant-1", role: "assistant", text: "inspector transcript", timestamp: 3 }]);
 
 		const steerResponse = await fetch(new URL(`/api/runs/${token}/steer`, inspectorUrl), {
@@ -1019,7 +1034,8 @@ describe("hyperchart extension", () => {
 		const uid = { chart: "demo", state: "work", action: "agent" };
 		writeV2Log(runDir, [
 			{ type: "args", args: { topic: "wire runtime" }, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid: uid, definition: { kind: "agent", uid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 			{ type: "failure_intent", origin: "work", error: { code: 2, stderr: "nope" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3 },
 		]);
 		withRunStorage(testStorage(), () => patchRunStatus(runId, { chartId: "demo", state: "failed", exitCode: 1, error: "runner failed", replayWarnings: ["Replay warning: stale provenance"] }));
@@ -1040,12 +1056,13 @@ describe("hyperchart extension", () => {
 		const inferred = await tool.execute("tool-call-inferred", { action: "run_inspect", runId }, new AbortController().signal, () => undefined, ctx);
 		expect(inferred.details).toMatchObject({ branchId: "main" });
 		await expect(tool.execute("tool-call-full", { action: "run_inspect", branchId: "main", runId, verbose: true }, new AbortController().signal, () => undefined, ctx)).rejects.toThrow(/hyperchart view/);
-		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; stateDigests: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }> };
+		const details = result.details as { mode?: string; args?: Record<string, unknown>; issues?: Array<{ kind: string }>; stateDigests: Array<{ id: string; issues?: Array<{ kind: string; message: string }> }>;
+		};
 
 		expect(JSON.stringify(details)).not.toContain("verbose Pi transcript");
 		expect(details.mode).toBe("run");
 		expect(details.args).toBeUndefined();
-		expect(details.issues?.map((issue) => issue.kind)).toEqual(["run_failed", "replay_warning"]);
+		expect(details.issues?.map((issue) => issue.kind)).toEqual(["run_failed", "replay_warning", "replay_warning"]);
 		expect(details.stateDigests.find((state) => state.id === "work")?.issues).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ kind: "action_failed", message: "Script exited with code 2: nope" }),
@@ -1098,10 +1115,12 @@ describe("hyperchart extension", () => {
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
 			{
 				type: "state_action",
-				kind: "invoke", validation: null,
-			sessionId: "session-id",
+				kind: "invoke",
+				sessionId: "session-id",
 				actionUid: { chart: "demo", state: "first", action: "agent" },
-				definition: { kind: "agent", uid: { chart: "demo", state: "first", action: "agent" }, name: "old-worker" },
+				definition: { kind: "agent", uid: { chart: "demo", state: "first", action: "agent" }, name: "old-worker",
+					onFail: { nudge: 2, restart: 1 },
+				},
 				parentId: 2,
 				seqId: 3,
 				branchId: "main", timestamp: 2,
@@ -1148,14 +1167,17 @@ describe("hyperchart extension", () => {
 		const { runId, runDir } = createRun("rewind-visits", projectDir, chartPath);
 		mkdirSync(runDir, { recursive: true });
 		const actionUid = { chart: "demo", state: "work", action: "agent" };
-		const definition = { kind: "agent", uid: actionUid, name: "worker" };
+		const definition = { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } };
 		writeV2Log(runDir, [
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid, definition, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 3, seqId: 4, branchId: "main", timestamp: 3 },
-			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition, parentId: 4, seqId: 5, branchId: "main", timestamp: 4 },
+			{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid, definition, parentId: 4, seqId: 5, branchId: "main", timestamp: 4 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "AGAIN" }, parentId: 5, seqId: 6, branchId: "main", timestamp: 5 },
-			{ type: "state_action", kind: "invoke", validation: null, sessionId: "session-id", actionUid, definition, parentId: 6, seqId: 7, branchId: "main", timestamp: 6 },
+			{ type: "state_action", kind: "invoke",
+				sessionId: "session-id", actionUid, definition, parentId: 6, seqId: 7, branchId: "main", timestamp: 6 },
 			{ type: "state_action", kind: "complete", actionUid, event: { type: "DONE" }, parentId: 7, seqId: 8, branchId: "main", timestamp: 7 },
 		]);
 		const sessionsDir = join(runDir, "sessions");
@@ -1169,12 +1191,12 @@ describe("hyperchart extension", () => {
 		mkdirSync(thirdVisitDir, { recursive: true });
 		writeFileSync(
 			sharedSessionFile,
-			[
+			`${[
 				{ type: "session", id: "shared", timestamp: "1970-01-01T00:00:00.001Z" },
 				{ type: "message", timestamp: "1970-01-01T00:00:00.002Z", message: { role: "assistant", content: "retained visit" } },
 				{ type: "message", timestamp: "1970-01-01T00:00:00.004Z", message: { role: "assistant", content: "removed visit two" } },
 				{ type: "message", timestamp: "1970-01-01T00:00:00.006Z", message: { role: "assistant", content: "removed visit three" } },
-			].map((record) => JSON.stringify(record)).join("\n") + "\n",
+			].map((record) => JSON.stringify(record)).join("\n")}\n`,
 		);
 		writeFileSync(join(secondVisitDir, "visit.marker"), "removed");
 		writeFileSync(join(thirdVisitDir, "visit.marker"), "removed");
@@ -1308,7 +1330,8 @@ function registeredTool(name: string): HyperchartTool {
 	return tool;
 }
 
-function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[]; widgetKeys: string[] } {
+function commandContext(cwd: string): { ctx: ExtensionCommandContext; notifications: Notification[]; widgetKeys: string[];
+} {
 	const notifications: Notification[] = [];
 	const widgetKeys: string[] = [];
 	return {

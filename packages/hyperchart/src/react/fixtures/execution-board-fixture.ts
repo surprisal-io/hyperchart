@@ -127,7 +127,7 @@ class ExecutionBoardRuntime implements Runtime {
 					break;
 				}
 				case "agent":
-					this.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+					this.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "DONE" } } });
 					break;
 				case "script":
 					this.push({ kind: "script", effectId: effect.id, event: { type: "DONE" } });

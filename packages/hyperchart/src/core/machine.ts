@@ -17,7 +17,7 @@ import type {
 	GuardRefAst,
 	InputRef,
 	JsonValue,
-	OnReject,
+	RecoveryPolicyAst,
 	OnReenterAst,
 	SchemaAst,
 	ScriptActionAst,
@@ -29,7 +29,11 @@ import type {
 	ValueAst,
 } from "./types.js";
 import { isInputRef } from "./types.js";
-import type { ActorMessageEnvelope, ActorMessageSource, ArtifactPin, DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
+import type { ActorMessageEnvelope, ActorMessageSource,
+	AgentFailureKind,
+	AgentRecoveryMode,
+	AgentRecoveryScope,
+	ArtifactPin, DurableLogRecord, DurableRecordDraft } from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import { declaredArtifactsForState } from "./normalize.js";
@@ -82,6 +86,25 @@ export type ResumeRequest = Readonly<{
 	session?: string;
 }>;
 
+export type AgentFailure = Readonly<{
+	kind: AgentFailureKind;
+	retryable: boolean;
+	message: string;
+	code?: string;
+}>;
+
+export type AgentOutcome =
+	| Readonly<{ kind: "completed"; event: ChartEvent }>
+	| Readonly<{ kind: "failed"; failure: AgentFailure }>;
+
+export type AgentRecoveryRequest = Readonly<{
+	mode: AgentRecoveryMode;
+	scope: AgentRecoveryScope;
+	nudgeAttempt: number;
+	restartAttempt: number;
+	failure: Readonly<{ kind: AgentFailureKind; message: string; code?: string }>;
+}>;
+
 // A file parameter with its path rendered and — when the producer declared one — the shape of
 // its content; the runtime uses the shape both to instruct the agent and to verify the file.
 export type RenderedArtifact = Readonly<{
@@ -118,6 +141,8 @@ export type AgentEffect = Readonly<{
 	events: readonly string[];
 	reply?: SchemaAst;
 	resume?: ResumeRequest;
+	/** Durable retry instruction; absent on the original invocation. */
+	recovery?: AgentRecoveryRequest;
 	/** Opaque identity durably assigned to this action invocation. */
 	sessionId: string;
 }>;
@@ -237,25 +262,6 @@ export type ValidateEffect = Readonly<{
 	reply?: SchemaAst;
 }>;
 
-// A completion did not pass the state's validate check. The action is still pending; the runtime
-// must deliver the feedback per onReject, and the action completes again with a fixed result.
-export type RejectedEffect = Readonly<{
-	kind: "rejected";
-	completionBranchId?: string;
-	id: EffectId;
-	/** Durable rejected-validation fact that caused this retry phase. */
-	seqId: number;
-	actionUid: ActionUID;
-	event: ChartEvent;
-	onReject: OnReject;
-	// Which rejected validation round this is (1-based); the budget lives in the state's `retries`.
-	validationAttempts: number;
-	reason?: string;
-	// Fully rendered invocation reconstructed from chart + replayed facts using the original
-	// invoke seqId. Used when a rejected action must continue/restart after process memory is gone.
-	invocation: ActionEffect;
-}>;
-
 // A deadline racing a running action: fires at `firesAt` (absolute — the invoke fact's timestamp
 // plus the state's after.delayMs, so a restarted machine waits only the remaining time). The
 // runtime answers with a `timer` event; whether the firing still matters is the machine's call.
@@ -282,7 +288,6 @@ export type Effect =
 	| DurableRecordsEffect
 	| ActorEffect
 	| ValidateEffect
-	| RejectedEffect
 	| TimerEffect
 	| CancelEffect;
 
@@ -297,9 +302,14 @@ export type RecordAppend = Readonly<{
 export type AgentMachineEvent = Readonly<{
 	kind: "agent";
 	effectId: EffectId;
-	event: ChartEvent;
-	/** Revisions of the declared deliverables snapshotted at admission, keyed by rendered path. */
-	artifacts?: Readonly<Record<string, ArtifactPin>>;
+	outcome:
+		| Readonly<{
+				kind: "completed";
+				event: ChartEvent;
+				/** Revisions of declared deliverables snapshotted at admission. */
+				artifacts?: Readonly<Record<string, ArtifactPin>>;
+}>
+		| Readonly<{ kind: "failed"; failure: AgentFailure }>;
 }>;
 
 // A script's completion: same shape and handling as an agent's — the runtime maps the process
@@ -505,13 +515,6 @@ export function userInteractionOpenedDraft(
 		options: node.action.options,
 		events: allowedEventsForAction(state.ast, pending.actionUid.state).filter((event) => event !== "FAILED"),
 		...(node.action.reply === undefined ? {} : { reply: node.action.reply }),
-		...(pending.phase === "rejected" ? {
-			rejection: {
-				attempt: pending.validationAttempts,
-				onReject: node.onReject ?? "resume",
-				...(pending.reason === undefined ? {} : { reason: pending.reason }),
-			},
-		} : {}),
 	};
 }
 
@@ -551,10 +554,15 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 	const id = pendingEffectId(pending);
 	switch (pending.phase) {
 		case "running":
-			return actionInvocationForAction(state, pending.actionUid, node.action, id, pending.seqId, pending.sessionId);
+			return actionInvocationForAction(state, pending.actionUid,
+				pending.definition,
+				id, pending.seqId, pending.sessionId,
+				pending.lastRetry,
+			);
 		case "validating": {
-			if (node.validate === undefined) {
-				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without a validator`);
+			const validation = pending.definition.kind === "agent" ? pending.definition.validation : undefined;
+			if (validation === undefined) {
+				throw new Error(`Cannot validate a completion for state ${pending.actionUid.state} without an agent validator`);
 			}
 			// Render from the same projection and original invoke context as the action effect. The
 			// completion is still pending, so its output has not entered results and cannot perturb
@@ -565,33 +573,14 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 				invocationId: pending.sessionId,
 				id,
 				actionUid: pending.actionUid,
-				guard: node.validate,
+				guard: validation.guard,
 				event: pending.event,
-				...(node.validate.kind === "script"
-					? renderScriptOptions(state, node.validate as ScriptOptionsAst, pending.actionUid.state, pending.actionUid.state)
+				...(validation.guard.kind === "script"
+					? renderScriptOptions(state,
+							validation.guard as ScriptOptionsAst, pending.actionUid.state, pending.actionUid.state)
 					: {}),
 			};
 		}
-		case "rejected":
-			return {
-				kind: "rejected",
-				...(pending.completionArtifacts === undefined ? {} : { completionBranchId: pending.completionArtifacts.branchId }),
-				id,
-				seqId: pending.seqId,
-				actionUid: pending.actionUid,
-				event: pending.event,
-				onReject: node.onReject ?? "resume",
-				validationAttempts: pending.validationAttempts,
-				...(pending.reason === undefined ? {} : { reason: pending.reason }),
-				invocation: actionInvocationForAction(
-					state,
-					pending.actionUid,
-					node.action,
-					actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
-					pending.invokeSeqId,
-					pending.sessionId,
-				),
-			};
 	}
 }
 
@@ -621,10 +610,11 @@ function actionInvocationForAction(
 	id: EffectId,
 	seqId: number,
 	sessionId: string,
+	recovery?: PendingAction["lastRetry"],
 ): ActionEffect {
 	switch (action.kind) {
 		case "agent":
-			return agentInvocationForAction(state, actionUid, action, id, sessionId);
+			return agentInvocationForAction(state, actionUid, action, id, sessionId, recovery);
 		case "script":
 			return scriptInvocationForAction(state, actionUid, action, id);
 		case "tsImport":
@@ -640,6 +630,7 @@ function agentInvocationForAction(
 	action: AgentActionAst,
 	id: EffectId,
 	sessionId: string,
+	recovery?: PendingAction["lastRetry"],
 ): AgentEffect {
 	const resume = resumeRequestForAction(state, actionUid, id);
 	return {
@@ -651,6 +642,7 @@ function agentInvocationForAction(
 		events: allowedEventsForAction(state.ast, actionUid.state),
 		...(action.reply === undefined ? {} : { reply: action.reply }),
 		...(resume === undefined ? {} : { resume }),
+		...(recovery === undefined ? {} : { recovery }),
 		...(action.task === undefined ? {} : { task: renderTemplate(state, action.task, actionUid.state) }),
 		...(action.artifacts === undefined
 			? {}
@@ -791,8 +783,10 @@ function onReenterForAction(
 	statePath: StatePath,
 ): { policy: OnReenterAst; scope: StatePath } | undefined {
 	const own = nodeAt(ast, statePath);
-	if (own?.kind === "state" && own.onReenter !== undefined) {
-		return { policy: own.onReenter, scope: statePath };
+	if (own?.kind === "state" && own.action.kind === "agent" && own.action.reentry !== undefined) {
+		const policy: OnReenterAst =
+			own.action.reentry === "restart" ? "restart" : { kind: "resume", message: own.action.reentry.resume };
+		return { policy, scope: statePath };
 	}
 	let cur = parentPath(statePath);
 	while (cur !== undefined) {
@@ -820,6 +814,46 @@ function sameActionUid(left: ActionUID, right: ActionUID): boolean {
 	return left.chart === right.chart && left.state === right.state && left.action === right.action;
 }
 
+function recoveryDecisionRecords(
+	pending: PendingAction,
+	failure: AgentFailure,
+	scope: AgentRecoveryScope,
+): DurableRecordDraft[] {
+	if (!failure.retryable || pending.definition.kind !== "agent") {
+		return [{ type: "failure_intent", origin: pending.actionUid.state, error: failure.message }];
+	}
+	const policy: RecoveryPolicyAst =
+		scope === "validation"
+			? (pending.definition.validation?.onFail ?? pending.definition.onFail)
+			: pending.definition.onFail;
+	const counters = pending.recovery[scope];
+	let mode: AgentRecoveryMode | undefined;
+	if (counters.nudges < policy.nudge) mode = "nudge";
+	else if (counters.restarts < policy.restart) mode = "restart";
+	if (mode === undefined) {
+		return [{ type: "failure_intent", origin: pending.actionUid.state, error: failure.message }];
+	}
+	const sessionId = mode === "restart" ? randomUUID() : pending.sessionId;
+	return [
+		{
+			type: "state_action",
+			kind: "retry",
+			actionUid: pending.actionUid,
+			failure: {
+				kind: failure.kind,
+				message: failure.message,
+				...(failure.code === undefined ? {} : { code: failure.code }),
+			},
+			scope,
+			mode,
+			previousSessionId: pending.sessionId,
+			resultingSessionId: sessionId,
+			nudgeAttempt: mode === "nudge" ? counters.nudges + 1 : 0,
+			restartAttempt: mode === "restart" ? counters.restarts + 1 : counters.restarts,
+		},
+	];
+}
+
 export function stepMachine(state: MachineState, event: MachineEvent): MachineOutput {
 	if (
 		state.projection.failure !== undefined &&
@@ -827,18 +861,64 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 		event.kind !== "start"
 	) return createMachineOutput(state, []);
 	switch (event.kind) {
-		case "agent":
+		case "agent": {
+			const pending = findPendingAction(state, event.effectId);
+			if (pending === null) break;
+			if (typeof pending === "string") return { kind: "error", state, error: pending };
+			if (event.outcome.kind === "failed") {
+				return createMachineOutput(state, [
+					{
+						kind: "append",
+						id: `recovery:${event.effectId}`,
+						records: recoveryDecisionRecords(pending, event.outcome.failure, "general"),
+					},
+				]);
+			}
+			const completion = event.outcome;
+			if (completion.event.type === "FAILED") {
+				return createMachineOutput(state, [
+					{
+						kind: "append",
+						id: `failure:${event.effectId}`,
+						records: [
+							{
+								type: "failure_intent",
+								origin: pending.actionUid.state,
+								error: "error" in completion.event ? completion.event.error : "Agent emitted FAILED",
+							},
+						],
+					},
+				]);
+			}
+			if (!hasActionTransition(state.ast, pending.actionUid.state, completion.event.type)) {
+				return {
+					kind: "error",
+					state,
+					error: `No transition found for event type ${completion.event.type} in state ${pending.actionUid.state}`,
+				};
+			}
+			return createMachineOutput(state, [
+				{
+					kind: "append",
+					id: event.effectId,
+					records: [
+						{
+							type: "state_action",
+							kind: "complete",
+							actionUid: pending.actionUid,
+							...resolvedStateInput(state, pending.actionUid),
+							event: completion.event,
+							...(completion.artifacts === undefined ? {} : { artifacts: completion.artifacts }),
+						},
+					],
+				},
+			]);
+		}
 		case "script":
 		case "tsImport": {
 			const pending = findPendingAction(state, event.effectId);
-			if (pending === null) {
-				// The action is no longer pending — it lost a race (e.g. its timer fired first).
-				// The late completion is ignored.
-				break;
-			}
-			if (typeof pending === "string") {
-				return { kind: "error", state, error: pending };
-			}
+			if (pending === null) break;
+			if (typeof pending === "string") return { kind: "error", state, error: pending };
 			if (event.event.type === "FAILED") {
 				return createMachineOutput(state, [
 					{
@@ -848,15 +928,12 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					},
 				]);
 			}
-			if (!hasActionTransition(state.ast, pending.actionUid.state, event.event.type)) {
+			if (!hasActionTransition(state.ast, pending.actionUid.state, event.event.type))
 				return {
 					kind: "error",
 					state,
 					error: `No transition found for event type ${event.event.type} in state ${pending.actionUid.state}`,
 				};
-			}
-			// The completion is logged unconditionally; whether it needs validation before the
-			// transition is the projection's decision.
 			return createMachineOutput(state, [
 				{
 					kind: "append",
@@ -873,36 +950,35 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			if (!validating) {
 				return { kind: "error", state, error: `No pending validation found for effectId ${event.effectId}` };
 			}
-			const node = actionStateAtMachine(state.ast, validating.actionUid.state);
-			if (node?.validate === undefined) {
-				return { kind: "error", state, error: `State ${validating.actionUid.state} has no validator` };
+			const validation = validating.definition.kind === "agent" ? validating.definition.validation : undefined;
+			if (validation === undefined) {
+				return { kind: "error", state, error: `State ${validating.actionUid.state} has no agent validator` };
 			}
-			// The verdict is a fact: stored with the guard ref that produced it, never re-evaluated.
-			// Exhausting validation retries is a reserved runtime failure, never an authored route.
-			const exhausted = event.outcome !== true && node.retries !== undefined && validating.validationAttempts + 1 > node.retries;
-			return createMachineOutput(state, [
-				{
-					kind: "append",
-					id: event.effectId,
-					records: [
-						{
-							type: "state_action",
+			const validated: DurableRecordDraft = {
+				type: "state_action",
 							kind: "validated",
 							actionUid: validating.actionUid,
 							...resolvedStateInput(state, validating.actionUid),
 							event: validating.event,
-							guard: node.validate,
-							outcome: event.outcome,
-						},
-						...(exhausted
-							? [{
-								type: "failure_intent" as const,
-								origin: validating.actionUid.state,
-								error: typeof event.outcome === "object" ? event.outcome.reason : "Validation retry budget exhausted",
-							}]
-							: []),
-					],
-				},
+							guard: validation.guard,
+				outcome: event.outcome,
+						};
+			const records =
+				event.outcome === true
+					? [validated]
+					: [
+							validated,
+							...recoveryDecisionRecords(
+								validating,
+								{
+									kind: "validation",
+									retryable: true,
+									message: typeof event.outcome === "object" ? event.outcome.reason : "Agent completion was rejected by validation",
+								},
+								"validation",
+							),
+					];
+			return createMachineOutput(state, [{ kind: "append", id: event.effectId, records },
 			]);
 		}
 		case "actor_effect": {
@@ -912,7 +988,8 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			// no-ops, mirroring invoke/spawn facts on inactive leaves.
 			if (effect === undefined) break;
 			if (!event.ok) {
-				const origin = effect.kind === "actor_enqueue" ? effect.messages[0]?.producerState ?? effect.occurrence : effect.occurrence;
+				const origin = effect.kind === "actor_enqueue" ? (effect.messages[0]?.producerState ?? effect.occurrence)
+						: effect.occurrence;
 				return createMachineOutput(state, [{
 					kind: "append",
 					id: `failure:${effect.id}`,
@@ -1034,14 +1111,9 @@ function actorCallResolutionAfterReply(state: MachineState, effect: ActorReplyEf
 	}];
 }
 
-type PendingActionContext = {
-	actionUid: ActionUID;
-	state: ActionStateAst;
-};
-
 // null means "nothing pending for this action" — not an error, the completion may simply have
 // lost a race; a string is a protocol violation to report.
-function findPendingAction(machine: MachineState, effectId: EffectId): PendingActionContext | string | null {
+function findPendingAction(machine: MachineState, effectId: EffectId): PendingAction | string | null {
 	const parsed = effectIdParts(effectId);
 	if (!parsed) {
 		return `Invalid effectId ${effectId}`;
@@ -1059,7 +1131,7 @@ function findPendingAction(machine: MachineState, effectId: EffectId): PendingAc
 	if (curState === undefined) {
 		return `State ${parsed.actionUid.state} is not actionable`;
 	}
-	return { actionUid: parsed.actionUid, state: curState };
+	return pending;
 }
 
 // The machine decides when actions start: an invoke record is due for every active action-leaf
@@ -1641,7 +1713,6 @@ function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 				sessionId: randomUUID(),
 				...resolvedStateInput(state, actionUid),
 				definition: node.action,
-				validation: node.validate ?? null,
 			},
 		],
 	};
@@ -1681,32 +1752,15 @@ function pendingValidationExecutionError(ast: ChartAst, projection: BranchProjec
 	}
 
 	for (const pending of projection.pendingActions) {
+		if (pending.phase === "running") continue;
 		const statePath = pending.actionUid.state;
 		const currentState = actionStateAtMachine(ast, statePath);
-		if (currentState?.validate !== undefined) {
-			// The current chart can validate/retry this invocation. Guard identity mismatches
-			// are handled separately by replay compatibility diagnostics.
-			continue;
-		}
-
-		const wasExplicitlyUnguarded = pending.validation === null;
-		if (pending.phase === "running" && wasExplicitlyUnguarded) {
-			// Only explicit null proves that this invocation never required a validator.
-			// Missing legacy provenance is not equivalent to an unguarded invocation.
-			continue;
-		}
-
-		let reason: string;
-		if (pending.validation === undefined) {
-			reason = "legacy invocation lacks validation provenance";
-		} else {
-			reason = "historical validator was removed";
-		}
-
-		return `Cannot resume state ${statePath} (invoke seqId ${pending.invokeSeqId}): ${reason}; `
-			+ "no recorded positive validation accepts this invocation. "
-			+ "Restore the original validator, rewind before the invocation, or restart. "
-			+ "Replay warning overrides cannot accept this claim.";
+		if (currentState?.action.kind === "agent" && currentState.action.validation !== undefined) continue;
+		return (
+			`Cannot resume state ${statePath} (invoke seqId ${pending.invokeSeqId}): historical agent validator was removed; `
+			+
+			"restore it or rewind before the invocation."
+		);
 	}
 
 	return undefined;

@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import pg from "pg";
 import { sanitizeSegment } from "../../core/action_uid.js";
 import type { RunMeta } from "./log_store.js";
 import { openRunLogStore } from "./log_store_factory.js";
@@ -53,6 +52,7 @@ export async function deleteRunStorage(runId: string): Promise<void> {
 export async function listRunIds(storage: RunStorage | undefined = currentRunStorage()): Promise<string[]> {
 	if (storage === undefined) throw new Error("Hyperchart run storage scope is required");
 	if (storage.kind === "postgres") {
+		const { default: pg } = await import("pg");
 		const client = new pg.Client({ connectionString: storage.dsn });
 		await client.connect();
 		try {

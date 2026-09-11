@@ -23,7 +23,9 @@ export async function prepareUserInteractionResponseFromProjection(
 	const pending = projection.pendingActions.find((entry) =>
 		entry.gateSeqId === input.gateSeqId && entry.actionUid.chart === gate.actionUid.chart
 		&& entry.actionUid.state === gate.actionUid.state && entry.actionUid.action === gate.actionUid.action
-		&& (entry.phase === "running" || entry.phase === "rejected"));
+		&&
+			entry.phase === "running",
+	);
 	if (projection.failure !== undefined || projected?.status !== "open" || pending === undefined) throw new Error(`User interaction ${input.gateSeqId} is stale or closed`);
 	if (input.event.type === "FAILED") throw new Error("FAILED is reserved and cannot be returned by a user");
 	if (!gate.events.includes(input.event.type)) throw new Error(`Event '${input.event.type}' is not allowed; expected one of ${gate.events.join(", ")}`);

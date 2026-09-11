@@ -9,7 +9,8 @@ import { originalReplayScenario, changedReplayScenario } from "../../packages/hy
 /** Execute rejection, acceptance/re-entry, and another acceptance through the real loop. */
 export async function captureRemovedValidatorHistory(
 	append: (drafts: readonly DurableRecordDraft[]) => Promise<readonly DurableLogRecord[]>,
-	options: { branchId?: string; unguarded?: boolean; projection?: BranchProjection; pins?: readonly ArtifactPin[] } = {},
+	options: { branchId?: string; unguarded?: boolean; projection?: BranchProjection; pins?: readonly ArtifactPin[];
+	} = {},
 ) {
 	const ast = options.unguarded ? removedValidationScenario.ast : guardedValidationScenario.ast;
 	const records: DurableLogRecord[] = [];
@@ -19,10 +20,12 @@ export async function captureRemovedValidatorHistory(
 	const projection = options.projection ?? projectBranch(createBranchProjection(ast), ast, initial);
 	let attempts = 0;
 	let verdicts = 0;
-	const completion = (effect: Extract<Effect, { kind: "agent" | "rejected" }>) => {
+	const completion = (effect: Extract<Effect, { kind: "agent" }>) => {
 		const pin = options.pins?.[attempts];
 		const event = { type: options.unguarded || attempts >= 2 ? "DONE" : "AGAIN", output: { attempt: ++attempts } };
-		queue.push({ kind: "agent", effectId: effect.id, event, ...(pin === undefined ? {} : { artifacts: { "result.txt": pin } }) });
+		queue.push({ kind: "agent", effectId: effect.id,
+			outcome: { kind: "completed", event, ...(pin === undefined ? {} : { artifacts: { "result.txt": pin } }) },
+		});
 	};
 	const state = await loop({
 		branchId: options.branchId ?? "main",
@@ -32,7 +35,7 @@ export async function captureRemovedValidatorHistory(
 					const added = await append(effect.records);
 					records.push(...added);
 					queue.push({ kind: "durable_records_added", effectId: effect.id, records: added });
-				} else if (effect.kind === "agent" || effect.kind === "rejected") completion(effect);
+				} else if (effect.kind === "agent") completion(effect);
 				else if (effect.kind === "validate") queue.push({ kind: "validated", effectId: effect.id, outcome: ++verdicts === 1 ? { ok: false, reason: "candidate rejected" } : true });
 				else if (effect.kind !== "cancel") throw new Error(`Unexpected validation fixture effect ${effect.kind}`);
 			}
@@ -74,16 +77,20 @@ export async function captureReplayIncompatibleHistory(
 				} else if (effect.kind === "agent") {
 					if (effect.actionUid.state === "suffix.clock.work") { clockEffectId = effect.id; continue; }
 					const event = effect.actionUid.state === "after" && ++subsequentVisits < 55 ? "AGAIN" : "DONE";
-					queue.push({ kind: "agent", effectId: effect.id, event: { type: event }, ...(effect.actionUid.state === "suffix.guarded.work" && suffixArtifacts !== undefined ? { artifacts: suffixArtifacts } : {}) });
+					queue.push({ kind: "agent", effectId: effect.id,
+							outcome: {
+								kind: "completed",
+								event: { type: event }, ...(effect.actionUid.state === "suffix.guarded.work" && suffixArtifacts !== undefined ? { artifacts: suffixArtifacts } : {}) },
+						});
 				} else if (effect.kind === "script" || effect.kind === "tsImport") {
 					queue.push({ kind: effect.kind, effectId: effect.id, event: { type: "DONE" } });
-				} else if (effect.kind === "rejected") {
-					queue.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
 				} else if (effect.kind === "validate") {
 					if (effect.actionUid.state === "suffix.guarded.work") {
 						suffixValidationEffectId = effect.id;
 						if (clockEffectId === undefined) throw new Error("Clock must be invoked before suffix validation");
-						queue.push({ kind: "agent", effectId: clockEffectId, event: { type: "DONE" } });
+						queue.push({ kind: "agent", effectId: clockEffectId,
+								outcome: { kind: "completed", event: { type: "DONE" } },
+							});
 						continue;
 					}
 					queue.push({ kind: "validated", effectId: effect.id, outcome: ++validations === 1 ? { ok: false, reason: "record lab notes and retry" } : true });

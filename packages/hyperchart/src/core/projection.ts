@@ -1,6 +1,17 @@
 import assert from "./assert.js";
-import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, GuardRefAst, InputRef, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
-import type { ActorMessageEnvelope, ArtifactPin, DurableLogRecord, UserInteractionOpenedLog } from "./durable_events.js";
+import type { ActionStateAst, ActionUID,
+	ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent,
+	InputRef, SchemaAst,
+	StateActionAst,
+	StateAst, StatePath, TransitionAst } from "./types.js";
+import type {
+	ActorMessageEnvelope,
+	AgentRecoveryScope,
+	ArtifactPin,
+	DurableLogRecord,
+	StateActionRetryLog,
+	UserInteractionOpenedLog,
+} from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
@@ -17,9 +28,8 @@ import {
 	underScope,
 } from "./paths.js";
 
-// A pending action and the phase it is in, each phase started by a log record: invoke —
-// "running"; a completion on a validated state — "validating"; a negative verdict — "rejected"
-// (feedback to deliver); a new completion restarts the cycle. An accepted verdict (or a
+// A pending action and the phase it is in, each phase started by a log record: invoke or retry —
+// "running"; a completion on a validated state — "validating". An accepted verdict (or a
 // completion needing no validation) removes the entry and applies the transition. The action's
 // session is alive through the whole cycle. seqId is the record that started the current phase;
 // it makes the effect id of each phase unique.
@@ -30,37 +40,45 @@ export type ProjectionSkippedRecord = Readonly<{
 	activeLeaves: readonly StatePath[];
 }>;
 
-export type PendingAction = { validation?: GuardRefAst | null } & (
-	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
-	// validationAttempts counts the rejected rounds of this invoke cycle — derived from validated(false)
-	// facts, it decides when the retry budget (state.retries) is exhausted.
-	| { actionUid: ActionUID; visitId: number; seqId: number; invokeSeqId: number; sessionId: string; timestamp: number; phase: "running"; gateSeqId?: number }
-	| {
+type RecoveryCounters = Readonly<Record<AgentRecoveryScope, Readonly<{ nudges: number; restarts: number }>>>;
+
+const EMPTY_RECOVERY_COUNTERS: RecoveryCounters = {
+	general: { nudges: 0, restarts: 0 },
+	validation: { nudges: 0, restarts: 0 },
+};
+
+type PendingActionBase = {
 			actionUid: ActionUID;
 			visitId: number;
 			seqId: number;
 			invokeSeqId: number;
 			sessionId: string;
+	/** Resolved action definition pinned by the original invoke fact. */
+	definition: StateActionAst;
+	/** Original invoke timestamp — the anchor for the state's after deadline. */
+	timestamp: number;
+	gateSeqId?: number;
+	recovery: RecoveryCounters;
+	lastRetry?: Readonly<{
+		mode: "nudge" | "restart";
+		scope: AgentRecoveryScope;
+		nudgeAttempt: number;
+		restartAttempt: number;
+		failure: Readonly<{
+			kind: "incomplete" | "artifacts" | "validation" | "provider" | "runtime" | "explicit";
+			message: string;
+			code?: string;
+		}>;
+	}>;
+};
+
+export type PendingAction =
+	| (PendingActionBase & { phase: "running" })
+	| (PendingActionBase & {
 			phase: "validating";
-			gateSeqId?: number;
 			event: ChartEvent;
-			validationAttempts: number;
 			/** Provisional completion bytes: recover only on their originating branch. */
 			completionArtifacts?: { branchId: string; pins: Readonly<Record<string, ArtifactPin>> };
-	  }
-	| {
-			actionUid: ActionUID;
-			visitId: number;
-			seqId: number;
-			invokeSeqId: number;
-			sessionId: string;
-			phase: "rejected";
-			gateSeqId?: number;
-			event: ChartEvent;
-			validationAttempts: number;
-			/** Provisional completion bytes: recover only on their originating branch. */
-			completionArtifacts?: { branchId: string; pins: Readonly<Record<string, ArtifactPin>> };
-			reason?: string;
 	  });
 
 export type ProjectedActorMessage = ActorMessageEnvelope & {
@@ -269,15 +287,17 @@ export function projectBranch(
 					projection.liveActorMessages[envelope.messageId] = { ...envelope, status: "queued" };
 					actor.mailbox.push(envelope.messageId);
 				}
-				const callId = record.messages[0]?.callId;
+				const firstMessage = record.messages[0];
+				if (firstMessage === undefined) throw new Error("Actor enqueue record must contain at least one message");
+				const callId = firstMessage.callId;
 				if (callId !== undefined) {
 					projection.pendingActorCalls[callId] = record.source.kind === "callBatch"
 						? { kind: "batch", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageIds: record.messages.map((message) => message.messageId), status: "enqueued" }
-						: { kind: "singleton", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageId: record.messages[0]!.messageId, status: "enqueued" };
+						: { kind: "singleton", callId, callerState: record.source.producerState, occurrence: record.occurrence, messageId: firstMessage.messageId, status: "enqueued" };
 				}
-				const producer = record.messages[0]?.producerState;
+				const producer = firstMessage.producerState;
 				if (producer !== undefined) {
-					projection.actorProducerVisits[producer] = record.messages[0]!.producerVisit;
+					projection.actorProducerVisits[producer] = firstMessage.producerVisit;
 					advanceActorProducerAfterEnqueue(projection, ast, producer, abandoned);
 				}
 				break;
@@ -400,8 +420,7 @@ export function projectBranch(
 			case "user_interaction": {
 				if (record.kind === "opened") {
 					const pending = projection.pendingActions.find((entry) =>
-						sameActionUid(entry.actionUid, record.actionUid) &&
-						(entry.phase === "running" || entry.phase === "rejected"),
+						sameActionUid(entry.actionUid, record.actionUid) && entry.phase === "running",
 					);
 					if (pending === undefined || pending.seqId !== record.phaseSeqId) {
 						throw new Error(`No matching pending user phase for opened gate in state ${record.actionUid.state}`);
@@ -418,7 +437,7 @@ export function projectBranch(
 				const gate = projection.openUserInteractions[record.gateSeqId];
 				const pending = projection.pendingActions.find((entry) =>
 					sameActionUid(entry.actionUid, record.actionUid) &&
-					(entry.phase === "running" || entry.phase === "rejected") &&
+						entry.phase === "running" &&
 					entry.gateSeqId === record.gateSeqId,
 				);
 				if (gate === undefined || gate.status !== "open" || pending === undefined || !sameActionUid(gate.opened.actionUid, record.actionUid)) {
@@ -453,9 +472,10 @@ export function projectBranch(
 								seqId: record.seqId,
 								invokeSeqId: record.seqId,
 								sessionId: record.sessionId,
+								definition: record.definition,
 								timestamp: record.timestamp,
+								recovery: EMPTY_RECOVERY_COUNTERS,
 								phase: "running",
-								...(record.validation === undefined ? {} : { validation: record.validation }),
 							});
 						} else {
 							recordSkipped(skipped, projection, record, record.actionUid.state);
@@ -463,6 +483,9 @@ export function projectBranch(
 						break;
 					case "complete":
 						applyActionCompletion(projection, ast, record.actionUid, record.event, record.seqId, abandoned, skipped, record);
+						break;
+					case "retry":
+						applyActionRetry(projection, record);
 						break;
 					case "timer_fired":
 						// The active-leaf guard makes race losers no-ops: a completion logged after the
@@ -495,26 +518,9 @@ export function projectBranch(
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
 							break;
 						}
-						const node = actionStateAt(ast, record.actionUid.state);
-						const retries = node?.retries;
-						const validationAttempts = validating.validationAttempts + 1;
-						if (retries !== undefined && validationAttempts > retries) {
-							// The machine appends failure_intent in the same durable transaction. Keep the
-							// action pending so terminalization can issue a best-effort runtime cancel.
-							break;
-						}
 						projection.pendingActions[projection.pendingActions.indexOf(validating)] = {
-							actionUid: validating.actionUid,
-							visitId: validating.visitId,
+							...validating,
 							seqId: record.seqId,
-							invokeSeqId: validating.invokeSeqId,
-							sessionId: validating.sessionId,
-							phase: "rejected",
-							validation: record.guard,
-							event: validating.event,
-							validationAttempts,
-							...(validating.completionArtifacts === undefined ? {} : { completionArtifacts: validating.completionArtifacts }),
-							...(typeof record.outcome === "object" ? { reason: record.outcome.reason } : {}),
 						};
 						break;
 					}
@@ -631,6 +637,107 @@ function refreshPendingBatchStatus(projection: BranchProjection, callId: string)
 	pending.status = settled > 0 || (accepted > 0 && accepted < messages.length) ? "partial" : accepted === messages.length ? "accepted" : "enqueued";
 }
 
+function applyActionRetry(projection: BranchProjection, record: StateActionRetryLog): void {
+	const pendingIndex = projection.pendingActions.findIndex((pending) =>
+		sameActionUid(pending.actionUid, record.actionUid),
+	);
+	const pending = projection.pendingActions[pendingIndex];
+	assert(pending !== undefined, `No pending action for retry in ${record.actionUid.state}`);
+	assert(pending.sessionId === record.previousSessionId, `Retry session mismatch in ${record.actionUid.state}`);
+	assert(pending.definition.kind === "agent", `Retry requires an agent action in ${record.actionUid.state}`);
+
+	const policy = recoveryPolicyFor(pending, record.scope);
+	validateRetryAttempt(record, pending.recovery[record.scope], policy);
+
+	projection.pendingActions[pendingIndex] = {
+		actionUid: pending.actionUid,
+		visitId: pending.visitId,
+		seqId: record.seqId,
+		invokeSeqId: pending.invokeSeqId,
+		sessionId: record.resultingSessionId,
+		definition: pending.definition,
+		timestamp: pending.timestamp,
+		phase: "running",
+		recovery: recoveryCountersAfter(pending.recovery, record),
+		lastRetry: {
+			mode: record.mode,
+			scope: record.scope,
+			nudgeAttempt: record.nudgeAttempt,
+			restartAttempt: record.restartAttempt,
+			failure: record.failure,
+		},
+	};
+}
+
+function recoveryPolicyFor(pending: PendingAction, scope: AgentRecoveryScope) {
+	assert(pending.definition.kind === "agent", "Agent recovery policy requires an agent action");
+	switch (scope) {
+		case "general":
+			return pending.definition.onFail;
+		case "validation":
+			assert(
+				pending.definition.validation !== undefined,
+				`Validation retry requires a validation policy in ${pending.actionUid.state}`,
+			);
+			return pending.definition.validation.onFail ?? pending.definition.onFail;
+	}
+}
+
+function validateRetryAttempt(
+	record: StateActionRetryLog,
+	counters: RecoveryCounters[AgentRecoveryScope],
+	policy: { nudge: number; restart: number },
+): void {
+	switch (record.mode) {
+		case "nudge":
+			assert(counters.nudges < policy.nudge, `Nudge exceeds recovery policy in ${record.actionUid.state}`);
+			assert(
+				record.nudgeAttempt === counters.nudges + 1 && record.restartAttempt === counters.restarts,
+				`Non-monotonic retry counters in ${record.actionUid.state}`,
+			);
+			assert(
+				record.resultingSessionId === record.previousSessionId,
+				`Nudge changed session in ${record.actionUid.state}`,
+			);
+			break;
+		case "restart":
+			assert(
+				counters.nudges >= policy.nudge && counters.restarts < policy.restart,
+				`Restart violates recovery order or policy in ${record.actionUid.state}`,
+			);
+			assert(
+				record.nudgeAttempt === 0 && record.restartAttempt === counters.restarts + 1,
+				`Non-monotonic retry counters in ${record.actionUid.state}`,
+			);
+			assert(
+				record.resultingSessionId !== record.previousSessionId,
+				`Restart reused session in ${record.actionUid.state}`,
+			);
+			break;
+	}
+}
+
+function recoveryCountersAfter(
+	previous: RecoveryCounters,
+	record: StateActionRetryLog,
+): RecoveryCounters {
+	return {
+		general: recoveryCountersForScope("general", previous.general, record),
+		validation: recoveryCountersForScope("validation", previous.validation, record),
+	};
+}
+
+function recoveryCountersForScope(
+	scope: AgentRecoveryScope,
+	previous: RecoveryCounters[AgentRecoveryScope],
+	record: StateActionRetryLog,
+): RecoveryCounters[AgentRecoveryScope] {
+	return {
+		nudges: record.mode === "restart" ? 0 : record.scope === scope ? record.nudgeAttempt : previous.nudges,
+		restarts: record.scope === scope ? record.restartAttempt : previous.restarts,
+	};
+}
+
 function applyActionCompletion(
 	projection: BranchProjection,
 	ast: ChartAst,
@@ -649,12 +756,11 @@ function applyActionCompletion(
 	assertActiveActionUid(ast, actionUid.state, actionUid, "complete");
 	const completionArtifacts = record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined
 		? { branchId: record.branchId, pins: record.artifacts } : undefined;
-	const state = actionStateAt(ast, actionUid.state);
 	const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
 	if (previous === undefined) throw new Error(`No pending invocation for completion in ${actionUid.state}`);
 	if (previous.phase === "validating") throw new Error(`Completion before validation verdict in ${actionUid.state}`);
-	if ((state?.validate !== undefined || previous.validation !== null) && event.type !== "FAILED") {
-		const validationAttempts = previous.phase === "rejected" ? previous.validationAttempts : 0;
+	const validation = previous.definition.kind === "agent" ? previous.definition.validation : undefined;
+	if (validation !== undefined && event.type !== "FAILED") {
 		removePendingAction(projection, actionUid);
 		projection.pendingActions.push({
 			actionUid,
@@ -662,11 +768,12 @@ function applyActionCompletion(
 			seqId,
 			invokeSeqId: previous.invokeSeqId,
 			sessionId: previous.sessionId,
+			definition: previous.definition,
+			timestamp: previous.timestamp,
 			phase: "validating",
-			...(previous.validation === undefined ? {} : { validation: previous.validation }),
+			recovery: previous.recovery,
 			...(completionArtifacts === undefined ? {} : { completionArtifacts }),
 			event,
-			validationAttempts,
 		});
 		return;
 	}
@@ -1061,7 +1168,7 @@ function assertActorCreated(
 			const key = lastSegmentKey(record.owner);
 			const spawned = projection.spawns[stripLastKey(record.owner)];
 			assert(
-				key !== undefined && spawned !== undefined && Object.prototype.hasOwnProperty.call(spawned, key),
+				key !== undefined && spawned !== undefined && Object.hasOwn(spawned, key),
 				`Actor creation ${record.occurrence} targets an owner map occurrence that was not spawned`,
 			);
 		}
@@ -1554,12 +1661,16 @@ function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: Action
 function sameRecordedValue(left: unknown, right: unknown): boolean {
 	if (left === right) return true;
 	if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
-	if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
-		&& left.length === right.length && left.every((value, index) => sameRecordedValue(value, right[index]));
+	if (Array.isArray(left) || Array.isArray(right)) return (
+			Array.isArray(left) && Array.isArray(right)
+		&& left.length === right.length && left.every((value, index) => sameRecordedValue(value, right[index]))
+		);
 	const a = left as Record<string, unknown>;
 	const b = right as Record<string, unknown>;
 	const keys = Object.keys(a);
-	return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameRecordedValue(a[key], b[key]));
+	return (
+		keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameRecordedValue(a[key], b[key]))
+	);
 }
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {

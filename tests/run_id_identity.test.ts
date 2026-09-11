@@ -123,7 +123,6 @@ describe("runId storage identity", () => {
 					start() {
 						starts++;
 					},
-					reject() {},
 					async cancel() {},
 					async dispose() {},
 					async steer() {

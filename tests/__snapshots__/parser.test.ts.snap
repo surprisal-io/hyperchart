@@ -47,6 +47,10 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "coder",
+        "onFail": {
+          "nudge": 2,
+          "restart": 1,
+        },
         "uid": {
           "action": "agent",
           "chart": "review-and-fix",
@@ -65,6 +69,10 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "planner",
+        "onFail": {
+          "nudge": 2,
+          "restart": 1,
+        },
         "reply": {
           "kind": "jsonSchema",
           "schema": {
@@ -102,6 +110,10 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
       "action": {
         "kind": "agent",
         "name": "researcher",
+        "onFail": {
+          "nudge": 2,
+          "restart": 1,
+        },
         "reply": {
           "kind": "jsonSchema",
           "schema": {

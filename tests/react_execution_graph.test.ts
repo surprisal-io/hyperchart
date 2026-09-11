@@ -83,7 +83,7 @@ describe("hierarchical execution graph", () => {
 		expect(parallel?.data).toEqual({ state: expect.objectContaining({ id: "fanout", type: "parallel" }), stateId: "fanout" });
 		const regions = graph.nodes.filter((node) => node.type === "workerLane");
 		expect(regions).toHaveLength(2);
-		expect(regions.map((node) => node.data.label)).toEqual(["left", "right"]);
+		expect(regions.map((node) => ("label" in node.data ? node.data.label : undefined))).toEqual(["left", "right"]);
 		expect(graph.nodes.find((node) => node.id === "visit-4")?.parentId).toBe(regions[0]?.id);
 	});
 

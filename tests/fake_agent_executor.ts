@@ -1,12 +1,11 @@
 import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/index.js";
-import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
-import type { AgentExecutor, EmitCompletion } from "../packages/hyperchart/src/runtime/generic/agent_executor.js";
+import type { AgentEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentExecutor, EmitAgentOutcome } from "../packages/hyperchart/src/runtime/generic/agent_executor.js";
 
 type Reply = ChartEvent | undefined;
 
 export class FakeAgentExecutor implements AgentExecutor {
 	readonly starts: AgentEffect[] = [];
-	readonly rejects: RejectedEffect[] = [];
 	readonly cancels: ActionUID[] = [];
 	private readonly replies = new Map<string, Reply[]>();
 	private readonly startWaiters: Array<{ count: number; resolve: () => void }> = [];
@@ -17,14 +16,9 @@ export class FakeAgentExecutor implements AgentExecutor {
 		}
 	}
 
-	start(effect: AgentEffect, emit: EmitCompletion): void {
+	start(effect: AgentEffect, emit: EmitAgentOutcome): void {
 		this.starts.push(effect);
 		this.resolveStartWaiters();
-		this.emitNext(effect.actionUid.state, emit);
-	}
-
-	reject(effect: RejectedEffect, emit: EmitCompletion): void {
-		this.rejects.push(effect);
 		this.emitNext(effect.actionUid.state, emit);
 	}
 
@@ -41,10 +35,10 @@ export class FakeAgentExecutor implements AgentExecutor {
 		});
 	}
 
-	private emitNext(state: string, emit: EmitCompletion): void {
+	private emitNext(state: string, emit: EmitAgentOutcome): void {
 		const reply = this.replies.get(state)?.shift();
 		if (reply !== undefined) {
-			queueMicrotask(() => emit(reply));
+			queueMicrotask(() => emit({ kind: "completed", event: reply }));
 		}
 	}
 

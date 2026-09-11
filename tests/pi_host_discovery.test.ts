@@ -413,7 +413,7 @@ console.log(JSON.stringify(snapshot.runs));`;
 		const actionUid = { chart: "sample", state: "work", action: "agent" };
 		await writeFile(join(runDir, "log.jsonl"), v2Jsonl([
 			{ type: "args", args: {}, parentId: null, seqId: 2, branchId: "main", timestamp: 1 },
-			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
+			{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } }, parentId: 2, seqId: 3, branchId: "main", timestamp: 2 },
 		]), "utf8");
 		const transcriptFile = join(sessionsDir, "transcript.jsonl");
 		await writeFile(transcriptFile, `${JSON.stringify({ id: "message-1", type: "message", message: { role: "assistant", content: "large transcript payload", timestamp: 3 } })}\n`, "utf8");

@@ -107,21 +107,27 @@ describe("artifact pins", () => {
 		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		const ast = make(chart({ kind: "chart", id: "guarded-pins", initial: "seed", states: {
 			seed: { kind: "state", action: script(node, ["-e", 'require("node:fs").writeFileSync("notes.md", "accepted parent"); console.log(JSON.stringify({type:"DONE"}))'], { artifacts: { notes: artifact("notes.md") } }), transitions: { DONE: "work" } },
-			work: { kind: "state", action: agent("worker", { artifacts: { notes: artifact("notes.md") } }),
-				validate: script(node, ["-e", 'let s=""; process.stdin.on("data", c => s+=c); process.stdin.on("end", () => { require("node:fs").writeFileSync("diagnostic.txt", "guard ran"); process.exit(JSON.parse(s).output.accept ? 0 : 1); });'], { artifacts: { diagnostic: artifact("diagnostic.txt") }, env: { SELF: artifactOf("work", { artifact: "notes" }) } }),
-				onReject: "resume", transitions: { DONE: "done" } }, done: final(),
+			work: { kind: "state", action: agent("worker", { artifacts: { notes: artifact("notes.md") },
+							validation: {
+								guard: script(node, ["-e", 'let s=""; process.stdin.on("data", c => s+=c); process.stdin.on("end", () => { require("node:fs").writeFileSync("diagnostic.txt", "guard ran"); process.exit(JSON.parse(s).output.accept ? 0 : 1); });'], { artifacts: { diagnostic: artifact("diagnostic.txt") }, env: { SELF: artifactOf("work", { artifact: "notes" }) } }),
+							},
+						}),
+						transitions: { DONE: "done" } }, done: final(),
 		} }));
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE", output: { accept: false } }, { type: "DONE", output: { accept: true } }] });
 		const start = executor.start.bind(executor);
-		executor.start = (effect, emit) => { writeFileSync(join(workDir, "notes.md"), "rejected bytes"); start(effect, emit); };
-		const reject = executor.reject.bind(executor);
-		executor.reject = (effect, emit) => { writeFileSync(join(workDir, "notes.md"), "accepted correction"); reject(effect, emit); };
+		executor.start = (effect, emit) => { writeFileSync(join(workDir, "notes.md"),
+				effect.recovery === undefined ? "rejected bytes" : "accepted correction");
+			start(effect, emit); };
 		const { state, log } = await run(ast, workDir, { runId, executor });
-		const completions = log.filter((entry): entry is Extract<DurableLogRecord, {type:"state_action",kind:"complete"}> => entry.type === "state_action" && entry.kind === "complete");
-		const parentPin = completions[0]!.artifacts!["notes.md"]!;
-		const rejectedPin = completions[1]!.artifacts!["notes.md"]!;
-		const acceptedPin = completions[2]!.artifacts!["notes.md"]!;
-		const rejection = log.findIndex(entry => entry.type === "state_action" && entry.kind === "validated" && entry.outcome !== true);
+		const completions = log.filter((entry): entry is Extract<DurableLogRecord, {type:"state_action"; kind:"complete"}> => entry.type === "state_action" && entry.kind === "complete");
+		const parentPin = completions[0]?.artifacts?.["notes.md"]!;
+		const rejectedPin = completions[1]?.artifacts?.["notes.md"]!;
+		const acceptedPin = completions[2]?.artifacts?.["notes.md"];
+		if (parentPin === undefined || rejectedPin === undefined || acceptedPin === undefined)
+			throw new Error("missing artifact pins");
+		const rejection = log.findIndex(
+			(entry) => entry.type === "state_action" && entry.kind === "validated" && entry.outcome !== true);
 		for (const end of [log.indexOf(completions[1]!) + 1, rejection + 1]) {
 			const projection = projectBranch(createBranchProjection(ast), ast, log.slice(0, end));
 			const same = BranchExecution.fromProjection(ast, "main", projection);
@@ -170,7 +176,7 @@ describe("artifact pins", () => {
 	it("exposes pins on the host runtime view as visit artifactPins", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
-		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
+		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		const ast = scriptChart();
 
 		const { log } = await run(ast, workDir, { runId });
@@ -201,7 +207,7 @@ describe("artifact pins", () => {
 	it("fails admission when a declared deliverable is missing at snapshot time", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
-		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
+		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE" }] });
 
 		const { log } = await run(agentChart(), workDir, { runId, executor });
@@ -213,7 +219,7 @@ describe("artifact pins", () => {
 	it("pins agent deliverables snapshotted at admission", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
-		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
+		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		await writeFile(join(workDir, "report.json"), "agent report");
 		const executor = new FakeAgentExecutor({ work: [{ type: "DONE" }] });
 
@@ -227,7 +233,7 @@ describe("artifact pins", () => {
 	it("restores a pinned read overwritten between runs to its accepted revision", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
-		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
+		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		const logStore = new MemoryLogStore();
 		const { state: first } = await run(scriptChart(), workDir, { runId, logStore });
 		expect(first.projection.activeLeaves).toEqual(["done"]);
@@ -299,7 +305,7 @@ describe("artifact pins", () => {
 	it("keeps current-file semantics for reads of unpinned legacy completions", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
-		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
+		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		const logStore = new MemoryLogStore();
 		// Producer ran on a runtime without an artifact store: its completion is unpinned.
 		await run(scriptChart(), workDir, { logStore });
@@ -334,7 +340,7 @@ describe("artifact pins", () => {
 	it("rejects a snapshot whose stored bytes do not match the declared shape", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
-		const runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
+		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
 		const ast = make(chart({
 			kind: "chart", id: "pins-shape", initial: "work",
 			states: {

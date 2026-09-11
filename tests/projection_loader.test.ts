@@ -121,7 +121,11 @@ class RepresentativeRuntime implements Runtime {
 				const records = await this.store.appendDrafts(effect.records);
 				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
-				this.queue.send({ kind: "agent", effectId: effect.id, event: { type: "BUILT" }, artifacts: { "report.txt": { hash: "a".repeat(64), size: 12 } } });
+				this.queue.send({ kind: "agent", effectId: effect.id,
+					outcome: {
+						kind: "completed",
+						event: { type: "BUILT" }, artifacts: { "report.txt": { hash: "a".repeat(64), size: 12 } } },
+				});
 			} else if (effect.kind === "actor_create") this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "create", ok: true });
 			else if (effect.kind === "actor_enqueue") this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "enqueue", ok: true });
 			else if (effect.kind === "actor_reply" && !this.pauseActorReply) this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "reply", ok: true });
@@ -173,7 +177,9 @@ describe("projection checkpoint schema", () => {
 		expect(restored.projection).toEqual(projection);
 
 		const malformed = structuredClone(encoded);
-		const opened = ((malformed.blob as { projection: { openUserInteractions: Record<string, { opened: Record<string, unknown> }> } }).projection.openUserInteractions[String(records.at(-1)!.seqId)]!.opened);
+		const opened = (
+			malformed.blob as { projection: { openUserInteractions: Record<string, { opened: Record<string, unknown> }> } }).projection.openUserInteractions[String(records.at(-1)!.seqId)]?.opened;
+		if (opened === undefined) throw new Error("missing opened interaction");
 		opened.input = { invalid: Number.POSITIVE_INFINITY };
 		expect(decodeCheckpoint(malformed, chartAst)).toBeUndefined();
 	});
@@ -205,7 +211,7 @@ describe("projection checkpoint schema", () => {
 			const checkpoint = { checkpointId: "isolated", headSeqId: null, selectorKey: "test", blob: { nested: { value: 1 } }, createdAt: 1 };
 			await store.storeCheckpoint(checkpoint);
 			const first = await store.loadExactCheckpoint({ targetHeadSeqId: null, selectorKey: "test" });
-			(first!.blob as { nested: { value: number } }).nested.value = 99;
+			(first?.blob as { nested: { value: number } }).nested.value = 99;
 			const second = await store.findNearestCheckpoint({ targetHeadSeqId: null, selectorKey: "test" });
 			expect(second?.blob).toEqual({ nested: { value: 1 } });
 		}
@@ -301,7 +307,7 @@ describe("projection loader", () => {
 		const dir = await mkdtemp(join(tmpdir(), "hyperchart-coordinate-poison-")); dirs.push(dir);
 		const chartAst = representativeAst(); const source = new JsonlLogStore(join(dir, "log.jsonl")); await source.initializeRootBranch();
 		const runtime = new RepresentativeRuntime(chartAst, source); void start(runtime, {}); await waitForOpen(source);
-		const records = await collectHistoryRecords(source, "main"); const reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
+		const records = await collectHistoryRecords(source, "main"); const _reference = fullyProject(chartAst, records); const contract = projectionContractForAst(chartAst);
 		type MutableProjection = {
 			seqId: number;
 			pendingActions: Array<{ actionUid: Record<string, unknown>; seqId: number }>;
@@ -309,11 +315,15 @@ describe("projection loader", () => {
 			actorPools: Record<string, { workers: Array<{ currentState: string }> }>;
 		};
 		const mutations: Array<(projection: MutableProjection) => void> = [
-			(projection) => { (projection.pendingActions[0]!.actionUid as Record<string, unknown>).state = "missing-action"; },
+			(projection) => { (projection.pendingActions[0]?.actionUid as Record<string, unknown>).state = "missing-action"; },
 			(projection) => { projection.pendingActions[0]!.seqId = projection.seqId + 1; },
 			(projection) => { projection.actors[Object.keys(projection.actors)[0]!]!.declaration = "@missing"; },
 			(projection) => { projection.actors[Object.keys(projection.actors)[0]!]!.currentState = "@endpoint.missing"; },
-			(projection) => { projection.actorPools[Object.keys(projection.actorPools)[0]!]!.workers[0]!.currentState = "@pool.$worker-0.missing"; },
+			(projection) => {
+				const pool = projection.actorPools[Object.keys(projection.actorPools)[0]!];
+				const worker = pool?.workers[0];
+				if (worker === undefined) throw new Error("missing actor pool worker");
+				worker.currentState = "@pool.$worker-0.missing"; },
 			(projection) => { const key = Object.keys(projection.actors)[0]!; projection.actors.wrong = projection.actors[key]!; delete projection.actors[key]; },
 		];
 		for (const [index, mutate] of mutations.entries()) {

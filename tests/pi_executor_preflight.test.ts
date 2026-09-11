@@ -5,8 +5,7 @@ import { join } from "node:path";
 import { createAssistantMessageEventStream, InMemoryCredentialStore, type AssistantMessage } from "@earendil-works/pi-ai";
 import { AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { expect, it, vi } from "vitest";
-import type { AgentEffect } from "../packages/hyperchart/src/core/machine.js";
-import type { ChartEvent } from "../packages/hyperchart/src/core/types.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import { PiAgentExecutor } from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
 
 function deferred() {
@@ -96,12 +95,12 @@ export default function(pi) {
 		});
 		const actionUid = { chart: "preflight", state: "work", action: "worker" };
 		const effect: AgentEffect = { kind: "agent", id: "preflight:work:worker:1:1", actionUid,
-			action: { kind: "agent", uid: actionUid, name: "worker", tools: ["finish"] }, events: ["DONE", "FAILED"], sessionId: "first" };
+			action: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 }, tools: ["finish"] }, events: ["DONE", "FAILED"], sessionId: "first" };
 		const firstEmission = vi.fn();
 		executor.start(effect, firstEmission);
 		await entered.promise;
 		const current = executor;
-		let nextCompletion: Promise<ChartEvent> | undefined;
+		let nextCompletion: Promise<AgentOutcome> | undefined;
 		let cancellation: Promise<void> | undefined;
 		if (operation === "supersede") nextCompletion = new Promise((resolve) => current.start({ ...effect, id: "preflight:work:worker:2:2", sessionId: "second" }, resolve));
 		else cancellation = operation === "cancel" ? executor.cancel(actionUid) : executor.dispose();
@@ -111,7 +110,7 @@ export default function(pi) {
 		expect(bridge.events).toEqual(["preflight"]);
 		expect(handles).toBe(1);
 		release.resolve();
-		if (nextCompletion !== undefined) expect(await nextCompletion).toEqual({ type: "DONE" });
+		if (nextCompletion !== undefined) expect(await nextCompletion).toEqual({ kind: "completed", event: { type: "DONE" } });
 		await cancellation;
 		await executor.dispose();
 		expect(firstEmission).not.toHaveBeenCalled();

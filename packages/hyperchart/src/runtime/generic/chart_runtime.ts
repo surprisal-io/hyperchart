@@ -5,12 +5,10 @@ import type { Runtime } from "../runtime.js";
 import type { ChartAst, ChartEvent, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
-import type { AgentEffect, Effect, MachineEvent, RejectedEffect, RenderedArtifact } from "../../core/machine.js";
+import type { AgentEffect, AgentOutcome, Effect, MachineEvent, RenderedArtifact } from "../../core/machine.js";
 import { ArtifactStore, hashFile } from "./artifact_store.js";
 import { renderedArtifactPath } from "./artifacts.js";
 import type { SchemaCheck } from "./schema.js";
-import { actorContextForState } from "../../core/actors.js";
-import { nodeAt } from "../../core/paths.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { AgentExecutor } from "./agent_executor.js";
@@ -168,18 +166,23 @@ export class ChartRuntime implements Runtime {
 						this.restorePinnedReads(effect.reads)
 							.then(() => {
 								if (this.quiescing) return;
-								this.options.agentExecutor.start(effect, (event) => this.dispatchAgentCompletion(effect, event));
+								this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
 							})
 							.catch((error: unknown) => {
-								this.send({ kind: "agent", effectId: effect.id, event: toFailedEvent(error) });
+								this.send({ kind: "agent", effectId: effect.id,
+										outcome: {
+											kind: "failed",
+											failure: { kind: "runtime", retryable: false, message: errorMessage(error) },
+										},
+									});
 							}),
 					);
 					break;
 				case "script":
 					this.track(
 						this.restorePinnedReads(envArtifacts(effect.env))
-							.then(() => this.quiescing ? undefined : this.scripts.run(effect))
-							.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts))
+							.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
+								.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts))
 							.then((admitted) => {
 								if (admitted !== undefined) this.send({ kind: "script", effectId: effect.id, ...admitted });
 							})
@@ -223,9 +226,6 @@ export class ChartRuntime implements Runtime {
 					);
 					break;
 				}
-				case "rejected":
-					this.dispatchRejected(effect);
-					break;
 				case "timer": {
 					const delay = Math.max(0, effect.firesAt - this.now());
 					const timer = setTimeout(() => {
@@ -296,7 +296,7 @@ export class ChartRuntime implements Runtime {
 		await this.drainPending();
 		this.queue.close();
 		const errors = [
-			...cleanupResults.flatMap((result) => result.status === "rejected" ? [result.reason] : []),
+			...cleanupResults.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
 			...this.backgroundErrors,
 		];
 		if (errors.length > 0) {
@@ -331,13 +331,19 @@ export class ChartRuntime implements Runtime {
 		this.queue.send(event);
 	}
 
-	private dispatchAgentCompletion(effect: AgentEffect, event: ChartEvent): void {
+	private dispatchAgentOutcome(effect: AgentEffect, outcome: AgentOutcome): void {
 		if (this.quiescing) return;
+		if (outcome.kind === "failed") {
+			this.send({ kind: "agent", effectId: effect.id, outcome });
+			return;
+		}
 		this.track(
-			this.admitCompletion(event, effect.artifacts)
-				.then((admitted) => this.send({ kind: "agent", effectId: effect.id, ...admitted }))
+			this.admitCompletion(outcome.event, effect.artifacts)
+				.then((admitted) => this.send({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", ...admitted } }))
 				.catch((error: unknown) => {
-					this.send({ kind: "agent", effectId: effect.id, event: toFailedEvent(error) });
+					this.send({ kind: "agent", effectId: effect.id,
+						outcome: { kind: "failed", failure: { kind: "artifacts", retryable: true, message: errorMessage(error) } },
+					});
 				}),
 		);
 	}
@@ -395,90 +401,6 @@ export class ChartRuntime implements Runtime {
 			return { event: toFailedEvent(error) };
 		}
 	}
-
-	private dispatchRejected(effect: RejectedEffect): void {
-		if (this.quiescing) return;
-		if (effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId) {
-			effect = { ...effect, reason: [foreignCompletionReason(effect.completionBranchId, this.branchId), effect.reason].filter(Boolean).join("\n") };
-		}
-		const mainState = nodeAt(this.options.ast, effect.actionUid.state);
-		const actorState = actorContextForState(this.options.ast, effect.actionUid.state)?.node;
-		const state = mainState?.kind === "state" ? mainState : actorState?.kind === "state" ? actorState : undefined;
-		if (state === undefined) {
-			this.send({
-				kind: "agent",
-				effectId: effect.id,
-				event: toFailedEvent(`Rejected effect for non-action state ${effect.actionUid.state}`),
-			});
-			return;
-		}
-		if (state.action.kind === "agent") {
-			const artifacts = effect.invocation.kind === "agent" ? effect.invocation.artifacts : undefined;
-			this.options.agentExecutor.reject(effect, (event) => {
-				if (this.quiescing) return;
-				this.track(
-					this.admitCompletion(event, artifacts)
-						.then((admitted) => this.send({ kind: "agent", effectId: effect.id, ...admitted }))
-						.catch((error: unknown) => {
-							this.send({ kind: "agent", effectId: effect.id, event: toFailedEvent(error) });
-						}),
-				);
-			});
-			return;
-		}
-		if (state.action.kind === "script") {
-			const scriptEffect = effect.invocation.kind === "script" ? effect.invocation : undefined;
-			if (scriptEffect === undefined) {
-				this.send({
-					kind: "script",
-					effectId: effect.id,
-					event: toFailedEvent("Cannot retry rejected script: replay-derived script invocation is missing"),
-				});
-				return;
-			}
-			this.track(
-				this.scripts
-					.run(scriptEffect, {
-						n: effect.validationAttempts,
-						...(effect.reason === undefined ? {} : { reason: effect.reason }),
-					})
-					.then((event) => this.quiescing ? undefined : this.admitCompletion(event, scriptEffect.artifacts))
-					.then((admitted) => {
-						if (admitted !== undefined) this.send({ kind: "script", effectId: effect.id, ...admitted });
-					})
-					.catch((error: unknown) => {
-						this.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) });
-					}),
-			);
-			return;
-		}
-		if (state.action.kind === "tsImport") {
-			const functionEffect = effect.invocation.kind === "tsImport" ? effect.invocation : undefined;
-			if (functionEffect === undefined) {
-				this.send({
-					kind: "tsImport",
-					effectId: effect.id,
-					event: toFailedEvent("Cannot retry rejected imported action: replay-derived invocation is missing"),
-				});
-				return;
-			}
-			this.track(
-				this.functions
-					.run(functionEffect, {
-						n: effect.validationAttempts,
-						...(effect.reason === undefined ? {} : { reason: effect.reason }),
-					})
-					.then((event) => event === undefined || this.quiescing ? undefined : this.admitCompletion(event, functionEffect.artifacts))
-					.then((admitted) => {
-						if (admitted !== undefined) this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
-					})
-					.catch((error: unknown) => {
-						this.send({ kind: "tsImport", effectId: effect.id, event: toFailedEvent(error) });
-					}),
-			);
-			return;
-		}
-	}
 }
 
 function toFailedEvent(error: unknown): { type: "FAILED"; error: string } {
@@ -499,5 +421,5 @@ async function matchesHash(path: string, hash: string): Promise<boolean> {
 }
 
 function foreignCompletionReason(sourceBranchId: string, branchId: string): string {
-	return `Completion artifacts from branch '${sourceBranchId}' are provisional and were not inherited by '${branchId}'. Produce a fresh branch-local completion and its declared artifacts before validation; do not reuse the inherited result with older accepted files. The declared onReject policy and retry budget still apply.`;
+	return `Completion artifacts from branch '${sourceBranchId}' are provisional and were not inherited by '${branchId}'. Produce a fresh branch-local completion and its declared artifacts before validation; do not reuse the inherited result with older accepted files. The declared recovery policy and durable budget still apply.`;
 }

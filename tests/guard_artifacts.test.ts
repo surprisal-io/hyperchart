@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,14 +61,15 @@ describe("validation script env", () => {
 			{ type: "DONE", output: { accept: true } },
 		] });
 		const ast = parsed(chart({ kind: "chart", id: "identity", initial: "work", states: {
-			work: { kind: "state", action: agent("worker"), validate: guard, onReject: "resume", transitions: { AGAIN: "work", DONE: "done" } }, done: final(),
+			work: { kind: "state", action: agent("worker", { validation: { guard } }),
+						transitions: { AGAIN: "work", DONE: "done" } }, done: final(),
 		} })).ast;
 		expect((await run(ast, dir, undefined, executor)).projection.activeLeaves).toEqual(["done"]);
-		const seen = (await readFile(join(dir, "identities.jsonl"), "utf8")).trim().split("\n").map(line => JSON.parse(line));
+		const seen = (await readFile(join(dir, "identities.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		expect(seen).toHaveLength(3);
 		expect(seen[0]).toEqual(seen[1]);
-		expect(seen[0]).toEqual({ id: executor.starts[0]!.sessionId, branch: "main", action: executor.starts[0]!.actionUid });
-		expect(seen[2].id).toBe(executor.starts[1]!.sessionId);
+		expect(seen[0]).toEqual({ id: executor.starts[0]?.sessionId, branch: "main", action: executor.starts[0]?.actionUid });
+		expect(seen[2].id).toBe(executor.starts[2]?.sessionId);
 		expect(seen[2].id).not.toBe(seen[0].id);
 	});
 
@@ -85,43 +86,54 @@ describe("validation script env", () => {
 			kind: "chart", id: "guard-template-env", initial: "prepare",
 			states: {
 				prepare: { kind: "state", action: prepare, transitions: { DONE: { target: "work", input: { review: event("value") } } } },
-				work: { kind: "state", input: { review: z.string() }, action: script(node, ["-e", 'console.log(JSON.stringify({type:"DONE"}))']), validate: guard, transitions: { DONE: "done" } },
+				work: { kind: "state", input: { review: z.string() }, action: agent("worker", { validation: { guard } }),
+						transitions: { DONE: "done" } },
 				done: final(), failed: failed(),
 			},
 		}));
-		const state = await run(resultChart.ast, dir, { topic: "from-arg" });
+		const state = await run(resultChart.ast, dir, { topic: "from-arg" },
+			new FakeAgentExecutor({ work: [{ type: "DONE" }] }),
+		);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		const seen = JSON.parse(await readFile(join(dir, "seen-env.json"), "utf8")) as { env: Record<string, string>; event: Record<string, unknown> };
+		const seen = JSON.parse(await readFile(join(dir, "seen-env.json"), "utf8")) as { env: Record<string, string>; event: Record<string, unknown>;
+		};
 		expect(seen.env).toMatchObject({ ARG: "from-arg", RESULT: "from-result", INPUT: "from-result", VISIT: "1" });
 		expect(seen.event).toEqual({ type: "DONE" });
 	});
 
 	it("resolves an unnamed self artifactOf against action artifacts only", async () => {
 		const dir = await tempDir();
-		const action = script(node, ["-e", 'require("node:fs").writeFileSync("action.json", "action"); console.log(JSON.stringify({type:"DONE"}))'], { artifacts: { action: artifact("action.json") } });
-		const guard = script(node, ["-e", 'require("node:fs").writeFileSync("guard.json", "guard"); process.exit(process.env.SELF === "action.json" ? 0 : 1)'], {
+		await writeFile(join(dir, "action.json"), "action");
+		const action = agent("worker", { artifacts: { action: artifact("action.json") },
+			validation: {
+				guard: script(node, ["-e", 'require("node:fs").writeFileSync("guard.json", "guard"); process.exit(process.env.SELF === "action.json" ? 0 : 1)'], {
 			env: { SELF: { kind: "artifactOf", state: "work" } },
 			artifacts: { diagnostic: artifact("guard.json") },
+		}),
+			},
 		});
 		const result = parsed(chart({ kind: "chart", id: "guard-self-unnamed", initial: "work", states: {
-			work: { kind: "state", action, validate: guard, transitions: { DONE: "done" } }, done: final(), failed: failed(),
+			work: { kind: "state", action, transitions: { DONE: "done" } }, done: final(), failed: failed(),
 		} }));
-		expect((await run(result.ast, dir)).projection.activeLeaves).toEqual(["done"]);
+		expect((await run(result.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE" }] }))).projection.activeLeaves).toEqual(["done"]);
 	});
 
 	it("reads the validating action's own artifact with exact shape and selector", async () => {
 		const dir = await tempDir();
-		const action = script(node, ["-e", 'require("node:fs").writeFileSync("report.json", JSON.stringify({ok:true})); console.log(JSON.stringify({type:"DONE"}))'], {
+		await writeFile(join(dir, "report.json"), JSON.stringify({ ok: true }));
+		const action = agent("worker", {
 			artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
-		});
-		const guard = script(node, ["-e", 'process.exit(process.env.SELF === "true" ? 0 : 1)'], {
+			validation: {
+				guard: script(node, ["-e", 'process.exit(process.env.SELF === "true" ? 0 : 1)'], {
 			env: { SELF: { kind: "artifactOf", state: "work", artifact: "report", select: "ok" } },
+		}),
+			},
 		});
 		const resultChart = parsed(chart({
 			kind: "chart", id: "guard-self-artifact", initial: "work",
-			states: { work: { kind: "state", action, validate: guard, transitions: { DONE: "done" } }, done: final(), failed: failed() },
+			states: { work: { kind: "state", action, transitions: { DONE: "done" } }, done: final(), failed: failed() },
 		}));
-		const state = await run(resultChart.ast, dir);
+		const state = await run(resultChart.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE" }] }));
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 	});
 
@@ -129,8 +141,10 @@ describe("validation script env", () => {
 		const dir = await tempDir();
 		if (kind === "invalid") await writeFile(join(dir, "report.json"), "not-json", "utf8");
 		const guard = script(node, ["-e", 'require("node:fs").writeFileSync("called","yes"); process.exit(0)'], { env: { CHECK: { kind: "artifactOf", state: "work", artifact: "report", select: "ok" } } });
-		const action = agent("worker", { artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) } });
-		const resultChart = parsed(chart({ kind: "chart", id: `guard-${kind}-artifact`, initial: "work", states: { work: { kind: "state", action, validate: guard, retries: 0, transitions: { DONE: "done" } }, done: final(), failed: failed() } }));
+		const action = agent("worker", { artifacts: { report: artifact("report.json", z.object({ ok: z.boolean() })) },
+			validation: { guard, onFail: "fail" },
+		});
+		const resultChart = parsed(chart({ kind: "chart", id: `guard-${kind}-artifact`, initial: "work", states: { work: { kind: "state", action, transitions: { DONE: "done" } }, done: final(), failed: failed() } }));
 		const state = await run(resultChart.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE" }] }));
 		expect(state.projection.activeLeaves).toEqual(["work"]);
 		expect(state.projection.failure).toMatchObject({ origin: "work" });
@@ -143,31 +157,42 @@ describe("validation script env", () => {
 		const config = chart({ kind: "chart", id: "guard-output", initial: "work", states: {
 			work: {
 				kind: "state",
-				action: script(node, ["-e", 'console.log(JSON.stringify({type:"DONE",output:{value:1}}))']),
-				validate: script(node, ["-e", 'require("node:fs").writeFileSync("diagnostic.json", JSON.stringify({approved:true})); console.log(JSON.stringify({type:"CHECKED",output:{approved:true}}))'], { artifacts: { diagnostic: artifact("diagnostic.json", shape) }, reply: shape }),
-				transitions: { DONE: "consume" },
+				action: agent("worker", {
+						validation: {
+							guard: script(node, ["-e", 'require("node:fs").writeFileSync("diagnostic.json", JSON.stringify({approved:true})); console.log(JSON.stringify({type:"CHECKED",output:{approved:true}}))'], { artifacts: { diagnostic: artifact("diagnostic.json", shape) }, reply: shape }),
+						},
+					}),
+					transitions: { DONE: "consume" },
 			},
 			consume: { kind: "state", action: script(node, ["-e", 'const fs=require("node:fs"); const v=JSON.parse(fs.readFileSync(process.env.DIAG,"utf8")); console.log(JSON.stringify({type:v.approved?"DONE":"FAILED"}))'], { env: { DIAG: { kind: "artifactOf", state: "work", artifact: "diagnostic" } } }), transitions: { DONE: "done" } },
 			done: final(), failed: failed(),
 		} });
 		const result = parsed(config);
-		const state = await run(result.ast, dir, undefined, new FakeAgentExecutor(), result.schemaRegistry);
+		const state = await run(result.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE", output: { value: 1 } }] }), result.schemaRegistry);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.results.work).toEqual({ value: 1 });
 	});
 
 	it("preserves guard env/artifacts/reply in source and inspect representations", () => {
 		const result = parsed(chart({ kind: "chart", id: "guard-inspect", initial: "work", states: {
-			work: { kind: "state", action: script(node), validate: script(node, [], { env: { CHECK: "yes" }, artifacts: { report: artifact("report.json") }, reply: z.object({ ok: z.boolean() }) }), transitions: { DONE: "done" } }, done: final(),
+			work: { kind: "state", action: agent("worker", {
+							validation: {
+								guard: script(node, [], { env: { CHECK: "yes" }, artifacts: { report: artifact("report.json") }, reply: z.object({ ok: z.boolean() }) }),
+							},
+						}),
+						transitions: { DONE: "done" } }, done: final(),
 		} }));
 		const inspected = inspectChartAst(result.ast).states.find((state) => state.id === "work");
-		expect(inspected?.guard).toMatchObject({ kind: "script", env: [{ name: "CHECK" }], artifacts: [{ name: "report" }], reply: { type: "object" } });
+		expect(inspected?.validation?.guard).toMatchObject({ kind: "script", env: [{ name: "CHECK" }], artifacts: [{ name: "report" }], reply: { type: "object" } });
 		expect(hyperchartSource(result.ast)).toContain("artifacts");
 	});
 
 	it("rejects duplicate action and guard artifact names during normalization", () => {
 		const result = normalizeChartConfig(chart({ kind: "chart", id: "guard-duplicate", initial: "work", states: {
-			work: { kind: "state", action: script(node, [], { artifacts: { report: artifact("action.json") } }), validate: script(node, [], { artifacts: { report: artifact("guard.json") } }), transitions: { DONE: "done" } }, done: final(),
+			work: { kind: "state", action: agent("worker", { artifacts: { report: artifact("action.json") },
+							validation: { guard: script(node, [], { artifacts: { report: artifact("guard.json") } }) },
+						}),
+						transitions: { DONE: "done" } }, done: final(),
 		} }));
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: "DUPLICATE_GUARD_ARTIFACT" })]));
@@ -176,9 +201,15 @@ describe("validation script env", () => {
 	it("fails closed when a guard-produced artifact is missing", async () => {
 		const dir = await tempDir();
 		const result = parsed(chart({ kind: "chart", id: "guard-missing-output", initial: "work", states: {
-			work: { kind: "state", action: script(node, ["-e", 'console.log(JSON.stringify({type:"DONE"}))']), validate: script(node, ["-e", "process.exit(0)"], { artifacts: { report: artifact("missing.json") } }), retries: 0, transitions: { DONE: "done" } }, done: final(), failed: failed(),
+			work: { kind: "state", action: agent("worker", {
+							validation: {
+								guard: script(node, ["-e", "process.exit(0)"], { artifacts: { report: artifact("missing.json") } }),
+								onFail: "fail",
+							},
+						}),
+						transitions: { DONE: "done" } }, done: final(), failed: failed(),
 		} }));
-		const state = await run(result.ast, dir);
+		const state = await run(result.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE" }] }));
 		expect(state.projection.activeLeaves).toEqual(["work"]);
 		expect(state.projection.failure).toMatchObject({ origin: "work" });
 	});
@@ -187,18 +218,24 @@ describe("validation script env", () => {
 		const dir = await tempDir();
 		const reply = contract("guard-reply", "1", z.object({ approved: z.boolean() }).superRefine(async (value, ctx) => { await Promise.resolve(); if (!value.approved) ctx.addIssue({ code: "custom", message: "not approved" }); }));
 		const result = parsed(chart({ kind: "chart", id: "guard-contract-reply", initial: "work", states: {
-			work: { kind: "state", action: script(node, ["-e", 'console.log(JSON.stringify({type:"DONE"}))']), validate: script(node, ["-e", 'console.log(JSON.stringify({type:"CHECKED",output:{approved:true}}))'], { reply }), transitions: { DONE: "done" } }, done: final(), failed: failed(),
+			work: { kind: "state", action: agent("worker", {
+							validation: {
+								guard: script(node, ["-e", 'console.log(JSON.stringify({type:"CHECKED",output:{approved:true}}))'], { reply }),
+							},
+						}),
+						transitions: { DONE: "done" } }, done: final(), failed: failed(),
 		} }));
-		expect((await run(result.ast, dir, undefined, new FakeAgentExecutor(), result.schemaRegistry)).projection.activeLeaves).toEqual(["done"]);
+		expect((await run(result.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE" }] }), result.schemaRegistry)).projection.activeLeaves).toEqual(["done"]);
 	});
 
 	it("keeps ordinary one-argument tsImport guards and plain ChartEvent stdin", async () => {
 		const dir = await tempDir();
 		await writeFile(join(dir, "guard.mjs"), "export function check(event){ return event.type === 'DONE' && !('artifacts' in event); }\n", "utf8");
 		const resultChart = parsed(chart({ kind: "chart", id: "guard-compat", initial: "work", states: {
-			work: { kind: "state", action: script(node, ["-e", 'console.log(JSON.stringify({type:"DONE"}))']), validate: tsImport("./guard.mjs", "check"), transitions: { DONE: "done" } }, done: final(), failed: failed(),
+			work: { kind: "state", action: agent("worker", { validation: { guard: tsImport("./guard.mjs", "check") } }),
+						transitions: { DONE: "done" } }, done: final(), failed: failed(),
 		} }));
-		expect((await run(resultChart.ast, dir)).projection.activeLeaves).toEqual(["done"]);
+		expect((await run(resultChart.ast, dir, undefined, new FakeAgentExecutor({ work: [{ type: "DONE" }] }))).projection.activeLeaves).toEqual(["done"]);
 	});
 
 	it("rejects web URLs while letting declared artifact schemas govern data", async () => {
@@ -231,14 +268,21 @@ describe("joinArtifactOf validation env", () => {
 				kind: "map", over: arg("items"), initial: "produce", onDone: "end",
 				states: {
 					produce: { kind: "state", action: script(node, ["-e", 'require("node:fs").mkdirSync("out",{recursive:true}); require("node:fs").writeFileSync("out/report.txt","x"); console.log(JSON.stringify({type:"DONE"}))'], { artifacts: { report: artifact("out/report.txt") } }), transitions: { DONE: "check" } },
-					check: { kind: "state", action: script(node, ["-e", 'process.exit(JSON.parse(process.env.ALL).length === 2 ? 0 : 1)'], { env: { ALL: joinArtifactOf("items.produce") } }), validate: script(node, ["-e", 'process.exit(JSON.parse(process.env.ALL).length === 2 && (process.env.KEY === "a" || process.env.KEY === "b") && process.env.ITEM === "{}" ? 0 : 1)'], { env: { ALL: joinArtifactOf("items.produce"), KEY: t`${key()}`, ITEM: t`${json(item())}` } }), transitions: { DONE: "finish" } },
+					check: { kind: "state", action: agent("checker", {
+								validation: {
+									guard: script(node, ["-e", 'process.exit(JSON.parse(process.env.ALL).length === 2 && (process.env.KEY === "a" || process.env.KEY === "b") && process.env.ITEM === "{}" ? 0 : 1)'], { env: { ALL: joinArtifactOf("items.produce"), KEY: t`${key()}`, ITEM: t`${json(item())}` } }),
+								},
+							}),
+							transitions: { DONE: "finish" } },
 					finish: final(),
 				},
 			},
 			end: final(),
 		} });
 		const normalized = parsed(chartConfig);
-		const state = await run(normalized.ast, dir, { items: { a: {}, b: {} } });
+		const state = await run(normalized.ast, dir, { items: { a: {}, b: {} } },
+			new FakeAgentExecutor({ "items#a.check": [{ type: "DONE" }], "items#b.check": [{ type: "DONE" }] }),
+		);
 		expect(state.projection.activeLeaves).toEqual(["end"]);
 	});
 });

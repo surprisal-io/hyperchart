@@ -66,7 +66,7 @@ function definition(chartAst: ChartAst, state: StatePath): StateActionAst {
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
-	return { kind: "agent", uid, name: "test-worker" };
+	return { kind: "agent", uid, name: "test-worker", onFail: { nudge: 2, restart: 1 } };
 }
 
 function meta(seqId: number) {
@@ -77,14 +77,14 @@ function args(seqId = 1): DurableLogRecord {
 	return { type: "args", args: {}, parentId: null, seqId, branchId: "main", timestamp: seqId };
 }
 
-function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst = definitionForUid(uid), validation: GuardRefAst | null = null): DurableLogRecord {
+function invoke(uid: ActionUID, seqId: number, actionDefinition: StateActionAst = definitionForUid(uid),
+	_validation: GuardRefAst | null = null): DurableLogRecord {
 	return {
 		type: "state_action",
 		kind: "invoke",
 			sessionId: "session-id",
 		actionUid: uid,
 		definition: actionDefinition,
-		validation,
 		...meta(seqId),
 	};
 }
@@ -99,7 +99,8 @@ function complete(uid: ActionUID, eventType: string, seqId: number, output?: unk
 	};
 }
 
-function validated(uid: ActionUID, eventType: string, seqId: number, guard: GuardRefAst = tsImport("./checks.js", "ok")): DurableLogRecord {
+function validated(uid: ActionUID, eventType: string, seqId: number, guard: GuardRefAst = { kind: "tsImport", module: "./checks.js", export: "ok" },
+): DurableLogRecord {
 	return {
 		type: "state_action",
 		kind: "validated",
@@ -253,12 +254,18 @@ describe("explainReplay", () => {
 
 	it("treats guard env, reply, and artifact provenance as replay-sensitive", () => {
 		const make = (value: string) => ast(chart({ kind: "chart", id: "guard-provenance", initial: "work", states: {
-			work: { kind: "state", action: agent("worker"), validate: script("node", [], { env: { CHECK: value }, artifacts: { report: "report.json" }, reply: z.object({ ok: z.boolean() }) }), transitions: { DONE: "done" } }, done: final(),
+			work: { kind: "state", action: agent("worker", {
+								validation: {
+									guard: script("node", [], { env: { CHECK: value }, artifacts: { report: "report.json" }, reply: z.object({ ok: z.boolean() }) }),
+								},
+							}),
+							transitions: { DONE: "done" } }, done: final(),
 		} }));
 		const original = make("one");
 		const changed = make("two");
 		const uid = actionUid(original, "work");
-		const guard = (original.states.work as Extract<StateAst, { kind: "state" }>).validate;
+		const originalAction = (original.states.work as Extract<StateAst, { kind: "state" }>).action;
+		const guard = originalAction.kind === "agent" ? originalAction.validation?.guard : undefined;
 		if (guard === undefined) throw new Error("expected guard");
 		const log: DurableLogRecord[] = [args(), invoke(uid, 2, definition(original, "work")), complete(uid, "DONE", 3), validated(uid, "DONE", 4, guard)];
 		const explanation = explainReplay(changed, log);
@@ -403,14 +410,15 @@ describe("explainReplay", () => {
 		expect(explanation.broken?.error).toContain("payload.value");
 	});
 
-	it("replays removed validators from recorded positive legacy verdicts", () => {
+	it("reports stale provenance when current validation is removed", () => {
 		const old = ast(
 			chart({
 				kind: "chart",
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), validate: tsImport("./checks.js", "ok"), transitions: { DONE: "done" } },
+					work: { kind: "state", action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
+						transitions: { DONE: "done" } },
 					done: final(),
 				},
 			}),
@@ -427,9 +435,8 @@ describe("explainReplay", () => {
 			}),
 		);
 		const work = actionUid(old, "work");
-		const legacyInvoke = invoke(work, 2);
-		if (legacyInvoke.type === "state_action" && legacyInvoke.kind === "invoke") delete legacyInvoke.validation;
-		const log = [args(), legacyInvoke, complete(work, "DONE", 3), validated(work, "DONE", 4)];
+		const recordedInvoke = invoke(work, 2, definition(old, "work"));
+		const log = [args(), recordedInvoke, complete(work, "DONE", 3), validated(work, "DONE", 4)];
 
 		const explanation = explainReplay(current, log);
 
@@ -437,7 +444,7 @@ describe("explainReplay", () => {
 		expect(explanation.stale).toContainEqual(expect.objectContaining({ reason: "guard_removed" }));
 	});
 
-	it("allows old completions to become pending when a validator is added", () => {
+	it("reports stale action provenance when validation is added", () => {
 		const old = ast(
 			chart({
 				kind: "chart",
@@ -455,7 +462,8 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), validate: tsImport("./checks.js", "ok"), transitions: { DONE: "done" } },
+					work: { kind: "state", action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
+						transitions: { DONE: "done" } },
 					done: final(),
 				},
 			}),
@@ -467,6 +475,9 @@ describe("explainReplay", () => {
 
 		expect(explanation.broken).toBeUndefined();
 		expect(explanation.prefixEnd).toBe(log.length);
+		expect(explanation.stale).toEqual(
+			expect.arrayContaining([expect.objectContaining({ reason: "action_definition_changed" })]),
+		);
 	});
 
 	it("warns about stale action definitions without cutting", () => {
@@ -569,15 +580,16 @@ describe("explainReplay", () => {
 	});
 
 	it("warns about changed guard provenance on validated records", () => {
-		const oldGuard = tsImport("./checks.js", "oldOk");
-		const newGuard = tsImport("./checks.js", "newOk");
+		const oldGuard = { kind: "tsImport", module: "./checks.js", export: "oldOk" } as const;
+		const newGuard = { kind: "tsImport", module: "./checks.js", export: "newOk" } as const;
 		const old = ast(
 			chart({
 				kind: "chart",
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), validate: oldGuard, transitions: { DONE: "done" } },
+					work: { kind: "state", action: agent("worker", { validation: { guard: oldGuard } }),
+						transitions: { DONE: "done" } },
 					done: final(),
 				},
 			}),
@@ -588,7 +600,8 @@ describe("explainReplay", () => {
 				id: "replay-test",
 				initial: "work",
 				states: {
-					work: { kind: "state", action: agent("worker"), validate: newGuard, transitions: { DONE: "done" } },
+					work: { kind: "state", action: agent("worker", { validation: { guard: newGuard } }),
+						transitions: { DONE: "done" } },
 					done: final(),
 				},
 			}),
@@ -599,7 +612,7 @@ describe("explainReplay", () => {
 		const explanation = explainReplay(current, log);
 
 		expect(explanation.broken).toBeUndefined();
-		expect(explanation.stale).toMatchObject([{ seqId: 2, reason: "guard_changed" }, { seqId: 4, state: "work", reason: "guard_changed", invokeSeqId: 2 }]);
+		expect(explanation.stale).toMatchObject([{ seqId: 2, reason: "action_definition_changed" }, { seqId: 4, state: "work", reason: "guard_changed", invokeSeqId: 2 }]);
 	});
 
 	it("replays spawned maps from old facts", () => {
@@ -638,16 +651,15 @@ describe("explainReplay", () => {
 			work: {
 				kind: "state",
 				input: { hypothesisId: z.string().default("current") },
-				action: agent("worker"),
-				validate: tsImport("./checks.js", "ok"),
-				transitions: { DONE: "done" },
+				action: agent("worker", { validation: { guard: tsImport("./checks.js", "ok") } }),
+						transitions: { DONE: "done" },
 			},
 			done: final(),
 		} }));
 		const uid = actionUid(current, "work");
 		const oldJournal = [
 			args(),
-			invoke(uid, 2, definition(current, "work"), tsImport("./checks.js", "ok")),
+			invoke(uid, 2, definition(current, "work")),
 			complete(uid, "DONE", 3),
 			validated(uid, "DONE", 4),
 		];

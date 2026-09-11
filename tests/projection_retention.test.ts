@@ -32,8 +32,7 @@ describe("projection retention", () => {
 			states: {
 				writer: {
 					kind: "state",
-					action: agent("writer"),
-					onReenter: resume("Continue the prior writer session."),
+					action: agent("writer", { reentry: { resume: "Continue the prior writer session." } }),
 					transitions: { DONE: "reader" },
 				},
 				reader: {
@@ -83,7 +82,7 @@ describe("projection retention", () => {
 											initial: "work",
 											onDone: "leftDone",
 											states: {
-												work: { kind: "state", action: agent("mapped"), onReenter: resume("Resume item."), transitions: { DONE: "itemDone" } },
+												work: { kind: "state", action: agent("mapped", { reentry: { resume: "Resume item." } }), transitions: { DONE: "itemDone" } },
 												itemDone: final(),
 											},
 										}),
@@ -126,7 +125,7 @@ describe("projection retention", () => {
 			id: "compact",
 			initial: "resumable",
 			states: {
-				resumable: { kind: "state", action: agent("worker"), onReenter: resume("Resume."), transitions: { DONE: "restart" } },
+				resumable: { kind: "state", action: agent("worker", { reentry: { resume: "Resume." } }), transitions: { DONE: "restart" } },
 				restart: { kind: "state", action: agent("worker"), transitions: { DONE: "done" } },
 				done: final(),
 			},

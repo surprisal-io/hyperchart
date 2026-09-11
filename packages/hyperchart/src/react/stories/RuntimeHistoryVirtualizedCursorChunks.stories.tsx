@@ -59,7 +59,7 @@ class SemanticStoryRuntime implements Runtime {
 				this.push({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "script") this.push({ kind: "script", effectId: effect.id, event: { type: "DONE" } });
 			else if (effect.kind === "tsImport") this.push({ kind: "tsImport", effectId: effect.id, event: { type: "DONE" } });
-			else if (effect.kind === "agent") this.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+			else if (effect.kind === "agent") this.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "DONE" } } });
 			else if (effect.kind === "actor_create" || effect.kind === "actor_enqueue" || effect.kind === "actor_reply") this.push({ kind: "actor_effect", effectId: effect.id, operation: effect.kind === "actor_create" ? "create" : effect.kind === "actor_enqueue" ? "enqueue" : "reply", ok: true });
 			else if (effect.kind !== "cancel") throw new Error(`Unexpected semantic story effect ${effect.kind}`);
 		}
@@ -91,7 +91,8 @@ async function captureRuntime(visits: number): Promise<Fixture> {
 		},
 	});
 	const runtime = await captureSemantic(cst, {}, "state_action", visits * 2);
-	const ascending: Array<{ kind: "state-visit"; state: string; seqId: number; visit: number; invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>; records: DurableLogRecord[] }> = [];
+	const ascending: Array<{ kind: "state-visit"; state: string; seqId: number; visit: number; invoke: Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }>; records: DurableLogRecord[];
+	}> = [];
 	for (const record of runtime.records) {
 		if (record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "work") {
 			ascending.push({ kind: "state-visit", state: "work", seqId: record.seqId, visit: ascending.length + 1, invoke: record, records: [record] });
@@ -152,7 +153,7 @@ async function captureSemanticRows(kind: "map" | "generations" | "messages", cou
 	}
 	const cst = chart({ kind: "chart", id: "history-messages", actors: { worker }, initial: "send", states: { send: send({ to: worker, event: "WORK", input: { index: 1 }, target: "send" }) } });
 	const captured = await captureSemantic(cst, {}, "actor_messages_enqueued", count);
-	const historyItems = captured.records.filter((record): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> => record.type === "actor_messages_enqueued").map((enqueued) => ({ kind: "actor-message-batch", occurrence: enqueued.occurrence, seqId: enqueued.seqId, enqueued, records: [enqueued] } satisfies ActorMessageHistoryItem));
+	const historyItems = captured.records.filter((record): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> => record.type === "actor_messages_enqueued").map((enqueued) => ({ kind: "actor-message-batch", occurrence: enqueued.occurrence, seqId: enqueued.seqId, enqueued, records: [enqueued] }) satisfies ActorMessageHistoryItem);
 	const rows = actorMessageHistoryItemsToHost(historyItems, captured.ast, captured.records).map((value): StoryRow => ({ kind: "messages", id: `${value.occurrencePath}:${value.enqueueSeqId}`, value })).reverse();
 	const occurrence = rows.find((row) => row.kind === "messages")?.value.occurrencePath;
 	return fixtureFromRuntime(captured, rows, (states) => states.find((state) => state.actorOccurrence?.occurrencePath === occurrence || state.actorInternal?.occurrencePath === occurrence));
@@ -215,16 +216,21 @@ function storyChunk(fixture: Fixture, cursor?: HistoryCursor): HistoryChunk<Stor
 
 type Scenario = "state-visits" | "map" | "generations" | "messages";
 
-function ProductionHistoryStory({ fixture, scenario, source }: { fixture: Fixture; scenario: Scenario; source: { load(cursor?: HistoryCursor): Promise<HistoryChunk<StoryRow>> } }) {
+function ProductionHistoryStory({ fixture, scenario, source }: { fixture: Fixture; scenario: Scenario; source: { load(cursor?: HistoryCursor): Promise<HistoryChunk<StoryRow>> };
+}) {
 	const dataSource = useMemo<HyperchartInspectorDataSource>(() => ({
 		listBranches: async () => ({ items: [], totalCount: 0 }),
 		readStateVisits: async (input) => {
 			const chunk = await source.load(input.cursor);
-			return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => row.kind === "visit" ? [row.value] : []) };
+			return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => (row.kind === "visit" ? [row.value] : [])),
+				};
 		},
-		readMapVisits: async (input) => { const chunk = await source.load(input.cursor); return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => row.kind === "map" ? [row.value] : []) }; },
-		readActorGenerations: async (input) => { const chunk = await source.load(input.cursor); return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => row.kind === "generation" ? [row.value] : []) }; },
-		readActorMessages: async (input) => { const chunk = await source.load(input.cursor); return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => row.kind === "messages" ? [row.value] : []) }; },
+		readMapVisits: async (input) => { const chunk = await source.load(input.cursor); return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => (row.kind === "map" ? [row.value] : [])),
+				}; },
+		readActorGenerations: async (input) => { const chunk = await source.load(input.cursor); return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => (row.kind === "generation" ? [row.value] : [])),
+				}; },
+		readActorMessages: async (input) => { const chunk = await source.load(input.cursor); return { ...chunk, snapshot: input.snapshot, items: chunk.items.flatMap((row) => (row.kind === "messages" ? [row.value] : [])),
+				}; },
 		readRecords: async (input) => ({ snapshot: input.snapshot, items: [] }),
 		cursorAt: async () => undefined,
 		readVisitSession: async () => undefined,

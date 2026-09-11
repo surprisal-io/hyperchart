@@ -14,7 +14,7 @@ it("loads actual offline captures synchronously with explicit invocation policie
 	expect(Object.keys(captured.snapshots).length).toBeGreaterThan(50);
 	for (const snapshot of Object.values(captured.snapshots)) {
 		for (const record of snapshot as DurableLogRecord[]) {
-			if (record.type === "state_action" && record.kind === "invoke") expect(record.validation).not.toBeUndefined();
+			if (record.type === "state_action" && record.kind === "invoke") expect(record.definition).toBeDefined();
 		}
 	}
 	const loader = readFileSync(new URL("../packages/hyperchart/src/react/fixtures/capture-story-schedule.ts", import.meta.url), "utf8");

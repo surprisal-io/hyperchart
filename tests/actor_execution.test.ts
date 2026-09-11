@@ -112,7 +112,9 @@ class ActorRuntime implements Runtime {
 				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
 				const reply = this.agentReplies[effect.actionUid.state]?.shift();
-				if (reply !== undefined) this.queue.send({ kind: "agent", effectId: effect.id, event: typeof reply === "string" ? { type: reply } : reply });
+				if (reply !== undefined) this.queue.send({ kind: "agent", effectId: effect.id,
+						outcome: { kind: "completed", event: typeof reply === "string" ? { type: reply } : reply },
+					});
 			} else if (effect.kind === "actor_create") {
 				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "create", ok: this.fail !== "create", ...(this.fail === "create" ? { error: "create validation" } : {}) });
 			} else if (effect.kind === "actor_enqueue") {
@@ -131,9 +133,11 @@ class ActorRuntime implements Runtime {
 }
 
 function isSelfEnqueue(record: DurableLogRecord): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> {
-	return record.type === "actor_messages_enqueued"
+	return (
+		record.type === "actor_messages_enqueued"
 		&& (record.source.definition.kind === "send" || record.source.definition.kind === "sendBatch")
-		&& record.source.definition.self === true;
+		&& record.source.definition.self === true
+	);
 }
 
 function parsed(input: unknown = actorChart()) {
@@ -270,7 +274,7 @@ describe("explicit event-sourced actors", () => {
 				{ type: "LEAF", output: [] },
 			],
 		});
-		const state = await loop(runtime);
+		const _state = await loop(runtime);
 		expect(enqueuedMessages(runtime.records, "@crawler").map((message) => message.input)).toEqual([
 			{ url: "root" },
 			{ url: "a" },
@@ -310,7 +314,7 @@ describe("explicit event-sourced actors", () => {
 			},
 		}));
 		const runtime = new ActorRuntime(ast, undefined, { prepare: [{ type: "OK", output: { items: { a: { id: "a" }, b: { id: "b" } } } }] });
-		const state = await loop(runtime);
+		const _state = await loop(runtime);
 		for (const key of ["a", "b"]) {
 			const occurrence = `projects#${key}.@worker`;
 			expect(enqueuedMessages(runtime.records, occurrence).map((message) => [message.event, message.input])).toEqual([
@@ -446,7 +450,9 @@ describe("explicit event-sourced actors", () => {
 		expect(handlerInvokes).toHaveLength(1);
 		expect(runtime.effectsSeen.filter((effect) => effect.kind === "agent" && effect.actionUid.state === "@worker.handle")).toHaveLength(1);
 
-		runtime.queue.send({ kind: "agent", effectId: handler.id, event: { type: "HANDLED" } });
+		runtime.queue.send({ kind: "agent", effectId: handler.id,
+			outcome: { kind: "completed", event: { type: "HANDLED" } },
+		});
 		const state = await running;
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.actors["@worker"]?.status).toBe("stopped");
@@ -691,18 +697,24 @@ describe("explicit event-sourced actors", () => {
 		const chooseB = await waitFor(() => agentEffect("projects#b.choose"), "item #b chooser was not invoked");
 		await waitFor(() => agentEffect("projects#a.@worker.handle"), "item #a actor handler was not invoked");
 		await waitFor(() => agentEffect("projects#b.@worker.handle"), "item #b actor handler was not invoked");
-		runtime.queue.send({ kind: "agent", effectId: chooseA.id, event: { type: "FINISH" } });
+		runtime.queue.send({ kind: "agent", effectId: chooseA.id,
+			outcome: { kind: "completed", event: { type: "FINISH" } },
+		});
 		await waitFor(
 			() => runtime.records.find((record) => record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "projects#a.@worker"),
 			"item #a actor did not begin draining",
 		);
 		expect(runtime.records.some((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "projects#a.@worker")).toBe(false);
 
-		runtime.queue.send({ kind: "agent", effectId: chooseB.id, event: { type: "CONTINUE" } });
+		runtime.queue.send({ kind: "agent", effectId: chooseB.id,
+			outcome: { kind: "completed", event: { type: "CONTINUE" } },
+		});
 		const continuation = await waitFor(() => agentEffect("projects#b.continue"), "item #b continuation was serialized behind item #a drain");
 		expect(runtime.records.some((record) => record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === "projects#a.@worker")).toBe(false);
 
-		runtime.queue.send({ kind: "agent", effectId: continuation.id, event: { type: "DONE" } });
+		runtime.queue.send({ kind: "agent", effectId: continuation.id,
+			outcome: { kind: "completed", event: { type: "DONE" } },
+		});
 		await waitFor(
 			() => runtime.records.find((record) => record.type === "actor_scope" && record.kind === "closing" && record.occurrence === "projects#b.@worker"),
 			"item #b actor did not begin draining",
@@ -710,7 +722,9 @@ describe("explicit event-sourced actors", () => {
 		for (const statePath of ["projects#a.@worker.handle", "projects#b.@worker.handle"]) {
 			const handler = agentEffect(statePath);
 			assert(handler !== undefined, `missing ${statePath}`);
-			runtime.queue.send({ kind: "agent", effectId: handler.id, event: { type: "DONE" } });
+			runtime.queue.send({ kind: "agent", effectId: handler.id,
+				outcome: { kind: "completed", event: { type: "DONE" } },
+			});
 		}
 		for (const occurrence of ["projects#a.@worker", "projects#b.@worker"]) {
 			await waitFor(

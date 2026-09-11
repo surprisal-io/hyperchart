@@ -6,16 +6,19 @@ import { afterEach, describe, expect, it } from "vitest";
 import { start } from "./helpers/execution.js";
 import { normalizeChartConfig, z } from "../packages/hyperchart/src/index.js";
 import { chart, final, failed, script, tsImport } from "../packages/hyperchart/src/core/dsl.js";
-import type { ChartAst, ChartCst, DurableLogRecord } from "../packages/hyperchart/src/index.js";
+import type { ChartAst, ChartCst, GuardRef, GuardRefAst } from "../packages/hyperchart/src/index.js";
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
-import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
-import { runGuard } from "../packages/hyperchart/src/runtime/generic/guards.js";
+import { runGuard as runGuardAst } from "../packages/hyperchart/src/runtime/generic/guards.js";
 import { ScriptRunner } from "../packages/hyperchart/src/runtime/generic/script_runner.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
 
 const tempDirs: string[] = [];
 const node = process.execPath;
+const runGuard = (
+	guard: GuardRef,
+	...args: Parameters<typeof runGuardAst> extends readonly [unknown, ...infer Rest] ? Rest : never
+) => runGuardAst(guard as unknown as GuardRefAst, ...args);
 
 async function makeTempDir(): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "hyperchart-script-"));
@@ -141,147 +144,6 @@ describe("ScriptRunner via ChartRuntime", () => {
 
 		expect(state.projection.activeLeaves).toEqual(["run"]);
 		expect(state.projection.failure).toBeDefined();
-	});
-
-	it("re-runs a rejected script with validation attempt environment", async () => {
-		const dir = await makeTempDir();
-		const action = script(
-			node,
-			[
-				"-e",
-				`const validationAttempt = Number(process.env.HYPERCHART_VALIDATION_ATTEMPT || 0);
-const ok = validationAttempt > 0;
-console.log(JSON.stringify({type:"DONE", output:{ok, validationAttempt, reason: process.env.HYPERCHART_REJECT_REASON || null}}));`,
-			],
-			{ reply: z.object({ ok: z.boolean(), validationAttempt: z.number(), reason: z.string().nullable() }) },
-		);
-		const guard = script(node, [
-			"-e",
-			`let input="";
-process.stdin.on("data", chunk => input += chunk);
-process.stdin.on("end", () => {
-  const event = JSON.parse(input);
-  if (event.output.ok) process.exit(0);
-  console.error("not ok");
-  process.exit(1);
-});`,
-		]);
-		const ast = make(
-			chart({
-				kind: "chart",
-				id: "script-reject",
-				initial: "run",
-				states: {
-					run: {
-						kind: "state",
-						action,
-						validate: guard,
-						retries: 1,
-						transitions: { DONE: "done" },
-					},
-					done: final(),
-					failed: failed(),
-				},
-			}),
-		);
-
-		const state = await runScriptChart(ast, dir);
-
-		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.results.run).toEqual({ ok: true, validationAttempt: 1, reason: "not ok" });
-	});
-
-	it("retries a rejected script when a fresh runtime resumes the durable log", async () => {
-		const dir = await makeTempDir();
-		const action = script(
-			node,
-			[
-				"-e",
-				`const validationAttempt = Number(process.env.HYPERCHART_VALIDATION_ATTEMPT || 0);
-const ok = validationAttempt > 0;
-console.log(JSON.stringify({type:"DONE", output:{ok, validationAttempt, reason: process.env.HYPERCHART_REJECT_REASON || null}}));`,
-			],
-			{ reply: z.object({ ok: z.boolean(), validationAttempt: z.number(), reason: z.string().nullable() }) },
-		);
-		const guard = script(node, [
-			"-e",
-			`let input="";
-process.stdin.on("data", chunk => input += chunk);
-process.stdin.on("end", () => {
-  const event = JSON.parse(input);
-  if (event.output.ok) process.exit(0);
-  console.error("not ok");
-  process.exit(1);
-});`,
-		]);
-		const ast = make(
-			chart({
-				kind: "chart",
-				id: "script-reject-resume",
-				initial: "run",
-				states: {
-					run: {
-						kind: "state",
-						action,
-						validate: guard,
-						retries: 1,
-						transitions: { DONE: "done" },
-					},
-					done: final(),
-					failed: failed(),
-				},
-			}),
-		);
-		const runState = ast.states.run;
-		if (runState?.kind !== "state") throw new Error("expected run state");
-		const actionUid = runState.action.uid;
-		const rejectedLog: DurableLogRecord[] = [
-			{
-				type: "state_action",
-				kind: "invoke",
-			sessionId: "session-id",
-				actionUid,
-				definition: runState.action,
-				parentId: null,
-				seqId: 1,
-				branchId: "main", timestamp: 1,
-			},
-			{
-				type: "state_action",
-				kind: "complete",
-				actionUid,
-				event: { type: "DONE", output: { ok: false, validationAttempt: 0, reason: null } },
-				parentId: 1,
-				seqId: 2,
-				branchId: "main", timestamp: 2,
-			},
-			{
-				type: "state_action",
-				kind: "validated",
-				actionUid,
-				event: { type: "DONE", output: { ok: false, validationAttempt: 0, reason: null } },
-				guard,
-				outcome: { ok: false, reason: "not ok" },
-				parentId: 2,
-				seqId: 3,
-				branchId: "main", timestamp: 3,
-			},
-		];
-		const logStore = new JsonlLogStore(join(dir, "log.jsonl"));
-		await logStore.initializeRootBranch();
-		await logStore.appendDrafts(rejectedLog.map(({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft }) => draft));
-		const runtime = new ChartRuntime({
-			ast, branchId: "main",
-			logStore,
-			agentExecutor: new FakeAgentExecutor(),
-			workDir: dir,
-			chartDir: dir,
-		});
-
-		const state = await withTimeout(start(runtime));
-
-		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.results.run).toEqual({ ok: true, validationAttempt: 1, reason: "not ok" });
 	});
 });
 

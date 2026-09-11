@@ -82,10 +82,6 @@ export type StateActionInvokeLog = {
 	// Mandatory provenance for replay over a modified chart. Logs without it are structurally
 	// incompatible and must be rewound/restarted instead of silently replayed.
 	definition: StateActionAst;
-	/** Invocation validation policy: null proves no guard; omission is legacy/unknown.
-	 * A recorded guard survives removal from the current chart. Only validated(true)
-	 * accepts a guarded or unknown completion; replay never runs a removed guard. */
-	validation?: GuardRefAst | null;
 } & SessionParams;
 
 /** Immutable content revision of an accepted artifact: sha256 of the full content plus byte size. */
@@ -111,6 +107,28 @@ type StateActionCompleteLog = {
 // Validation verdict for a completion claim. Stored like any other fact: replay reads the
 // outcome instead of re-running the validator. The guard ref is provenance — a later "can this
 // log replay unchanged?" check compares it (docker-cache style) against the current chart.
+export type AgentFailureKind = "incomplete" | "artifacts" | "validation" | "provider" | "runtime" | "explicit";
+export type AgentRecoveryMode = "nudge" | "restart";
+export type AgentRecoveryScope = "general" | "validation";
+
+export type StateActionRetryLog = {
+	type: "state_action";
+	kind: "retry";
+	actionUid: ActionUID;
+	failure: Readonly<{
+		kind: AgentFailureKind;
+		message: string;
+		code?: string;
+	}>;
+	scope: AgentRecoveryScope;
+	mode: AgentRecoveryMode;
+	previousSessionId: string;
+	/** Same as previousSessionId for nudge; a fresh durable identity for restart. */
+	resultingSessionId: string;
+	nudgeAttempt: number;
+	restartAttempt: number;
+} & SessionParams;
+
 type StateActionValidatedLog = {
 	type: "state_action";
 	kind: "validated";
@@ -130,7 +148,12 @@ type StateActionTimerFiredLog = {
 	actionUid: ActionUID;
 } & SessionParams;
 
-type StateAction = StateActionInvokeLog | StateActionCompleteLog | StateActionValidatedLog | StateActionTimerFiredLog;
+type StateAction =
+	| StateActionInvokeLog
+	| StateActionCompleteLog
+	| StateActionValidatedLog
+	| StateActionRetryLog
+	| StateActionTimerFiredLog;
 
 /** Durable, fully-rendered host boundary for one exact user-action phase. */
 export type UserInteractionOpenedLog = {
@@ -148,11 +171,6 @@ export type UserInteractionOpenedLog = {
 	options: readonly string[];
 	events: readonly string[];
 	reply?: SchemaAst;
-	rejection?: Readonly<{
-		attempt: number;
-		onReject: "resume" | "restart";
-		reason?: string;
-	}>;
 } & SessionParams;
 
 /** The sole durable external-input fact; projection applies it as the user completion. */
@@ -261,11 +279,11 @@ export type ActorBatchCallResolvedLog = {
 	messageIds: readonly string[];
 } & SessionParams;
 
-export type ActorScopeLog = ({
+export type ActorScopeLog = {
 	type: "actor_scope";
 	kind: "closing" | "stopped";
 	occurrence: StatePath;
-} & SessionParams);
+} & SessionParams;
 
 export type ActorLogRecord =
 	| ActorCreatedLog

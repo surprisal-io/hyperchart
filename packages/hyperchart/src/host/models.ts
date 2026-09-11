@@ -18,7 +18,8 @@ export interface HyperchartInfo {
 }
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
-export type HyperchartStateStatus = "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale" | "unknown";
+export type HyperchartStateStatus =
+	| "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale" | "unknown";
 export type HyperchartStateType =
 	| "agent"
 	| "user"
@@ -47,10 +48,9 @@ export interface HyperchartUsageInfo {
 	cacheWrite?: number;
 }
 
-export interface HyperchartRetryInfo {
-	max?: number;
-	backoffMs?: number;
-	factor?: number;
+export interface HyperchartRecoveryPolicyInfo {
+	nudge: number;
+	restart: number;
 }
 
 export interface HyperchartTransitionInfo {
@@ -505,6 +505,7 @@ export interface HyperchartStateInfo {
 	transitions?: HyperchartTransitionInfo[];
 	inputs?: HyperchartInputInfo[];
 	onReenter?: HyperchartOnReenterInfo;
+	reentry?: HyperchartOnReenterInfo;
 	refs?: HyperchartRefInfo;
 	join?: "all" | "any";
 	final?: boolean;
@@ -516,8 +517,8 @@ export interface HyperchartStateInfo {
 	artifacts?: HyperchartArtifactInfo[];
 	replySchema?: HyperchartSchemaInfo;
 	env?: HyperchartEnvInfo[];
-	guard?: HyperchartGuardInfo;
-	onReject?: "resume" | "restart";
+	validationPolicy?: { guard: HyperchartGuardInfo; onFail: HyperchartRecoveryPolicyInfo };
+	onFail?: HyperchartRecoveryPolicyInfo;
 	tools?: string[];
 	concurrency?: number;
 	mapConfig?: {
@@ -531,7 +532,6 @@ export interface HyperchartStateInfo {
 	mapItemLabel?: string;
 	parallelConfig?: { branches?: HyperchartBranchInfo[]; count?: number };
 	subProgress?: { done: number; total: number; running: number; failed: number; waiting?: number; stale?: number };
-	retry?: HyperchartRetryInfo;
 	attempts?: number;
 	validationAttempts?: number;
 	validation?: HyperchartValidationInfo;

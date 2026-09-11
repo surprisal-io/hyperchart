@@ -1,12 +1,11 @@
-import type { ActionUID, ChartEvent } from "../../core/types.js";
-import type { AgentEffect, RejectedEffect } from "../../core/machine.js";
+import type { ActionUID } from "../../core/types.js";
+import type { AgentEffect, AgentOutcome } from "../../core/machine.js";
 
-export type EmitCompletion = (event: ChartEvent) => void;
+export type EmitAgentOutcome = (outcome: AgentOutcome) => void;
 
 export interface AgentExecutor {
-	start(effect: AgentEffect, emit: EmitCompletion): void;
-	reject(effect: RejectedEffect, emit: EmitCompletion): void;
-	/** Resolves only after the cancelled action can no longer perform work or emit completion. */
+	start(effect: AgentEffect, emit: EmitAgentOutcome): void;
+	/** Resolves only after the cancelled action can no longer perform work or emit an outcome. */
 	cancel(actionUid: ActionUID): Promise<void>;
 	dispose(): Promise<void>;
 }

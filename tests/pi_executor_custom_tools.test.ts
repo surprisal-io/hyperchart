@@ -17,7 +17,7 @@ function effect(): AgentEffect {
 		kind: "agent",
 		id: "chart:work:worker:1:1",
 		actionUid,
-		action: { kind: "agent", uid: actionUid, name: "worker" },
+		action: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } },
 		events: ["DONE", "FAILED"],
 		sessionId: "session-id",
 		reply: schema(z.object({ value: z.number() })),

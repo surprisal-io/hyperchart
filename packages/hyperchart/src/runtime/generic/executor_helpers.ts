@@ -2,12 +2,11 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { actionUidDirName, sanitizeSegment } from "../../core/action_uid.js";
-import type { ChartEvent } from "../../core/types.js";
-import type { AgentEffect } from "../../core/machine.js";
+import type { AgentEffect, AgentOutcome } from "../../core/machine.js";
 import type { BranchId } from "../../core/durable_events.js";
 import type { SchemaRegistryLike as SchemaRegistry } from "../../core/schema_registry.js";
 import { checkArtifactFile, resolveArtifactValue } from "./artifacts.js";
-import { buildArtifactFeedbackPrompt, buildErrorRetryPrompt, buildNudgePrompt, type ResolvedRead } from "./agent_prompts.js";
+import { buildArtifactFeedbackPrompt, buildNudgePrompt, type ResolvedRead } from "./agent_prompts.js";
 import type { CompletionSink } from "./finish_protocol.js";
 import type { AgentDefinition, ThinkingLevel } from "./agent_definitions.js";
 
@@ -136,59 +135,46 @@ export class GenerationTracker {
 	}
 }
 
-export type AcceptanceLoopOptions = {
+export type EvaluateAgentTurnOptions = {
 	effect: AgentEffect;
 	sink: CompletionSink;
-	maxRetries: number;
 	isCancelled(): boolean;
-	prompt(text: string): Promise<void>;
 	lastAssistantText(): string | undefined;
-	/** Returns the latest assistant turn's provider/runtime error, if that turn failed. */
+	/** Latest provider/runtime error. Unknown provider failures are deliberately fail-fast. */
 	lastAssistantError?(): string | undefined;
 	checkArtifacts(): Promise<string[]>;
-	/** Called at most once with the accepted completion or a FAILED event. */
-	emit(event: ChartEvent): void;
 };
 
-/**
- * Drives a session to an accepted completion: nudge when the agent stopped
- * without calling finish, re-prompt with feedback when deliverables are
- * invalid, and fail once the retry budget is exhausted.
- */
-export async function runAcceptanceLoop(options: AcceptanceLoopOptions): Promise<void> {
-	let remaining = options.maxRetries;
-	let lastError: string | undefined;
-	while (!options.isCancelled()) {
-		if (options.sink.captured === undefined) {
+/** Classify one finished agent turn. Recovery is selected durably by the machine, never here. */
+export async function evaluateAgentTurn(options: EvaluateAgentTurnOptions): Promise<AgentOutcome | undefined> {
+	if (options.isCancelled()) return undefined;
+	if (options.sink.captured === undefined) {
 			const assistantError = options.lastAssistantError?.();
-			if (assistantError !== undefined) lastError = assistantError;
-			if (remaining-- <= 0) {
-				options.emit({ type: "FAILED", error: lastError ?? "agent did not produce a valid completion" });
-				return;
-			}
-			await options.prompt(assistantError === undefined
-				? buildNudgePrompt(options.effect, options.lastAssistantText())
-				: buildErrorRetryPrompt(options.effect, assistantError));
-			continue;
+			if (assistantError !== undefined) {
+			return { kind: "failed", failure: { kind: "provider", retryable: false, message: assistantError } };
 		}
+		return {
+			kind: "failed",
+			failure: {
+				kind: "incomplete",
+				retryable: true,
+				message: buildNudgePrompt(options.effect, options.lastAssistantText()),
+			},
+		};
+	}
 		if (options.sink.captured.type !== "FAILED") {
 			const artifactErrors = await options.checkArtifacts();
 			if (artifactErrors.length > 0) {
-				options.sink.captured = undefined;
-				if (remaining-- <= 0) {
-					options.emit({
-						type: "FAILED",
-						error: `agent did not produce valid deliverables: ${artifactErrors.join("; ")}`,
-					});
-					return;
-				}
-				await options.prompt(buildArtifactFeedbackPrompt(artifactErrors));
-				continue;
-			}
+			return {
+				kind: "failed",
+				failure: {
+					kind: "artifacts",
+					retryable: true,
+					message: buildArtifactFeedbackPrompt(artifactErrors)},
+			};
 		}
-		options.emit(options.sink.captured);
-		return;
 	}
+	return { kind: "completed", event: options.sink.captured };
 }
 
 /** Stable readable filesystem segment that cannot alias another valid branch id. */

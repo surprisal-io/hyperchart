@@ -175,8 +175,9 @@ describe("typed refs (TS-first)", () => {
 			states: {
 				work: {
 					kind: "state",
-					action: script("node"),
-					validate: script("node", [], { artifacts: { review: "review.json" } }),
+					action: agent("worker", {
+						validation: { guard: script("node", [], { artifacts: { review: "review.json" } }) },
+					}),
 					transitions: { DONE: "done" },
 				},
 				done: final(),

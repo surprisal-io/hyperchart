@@ -498,7 +498,7 @@ export default chart({
 		const actionUid = { chart: "simple", state: "work", action: "agent" };
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
-		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" } }]);
+		const [invoke] = await store.appendDrafts([{ type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } } }]);
 		const timestamp = invoke!.timestamp;
 		const transcriptFile = join(sessionsDir, "view-run.jsonl");
 		writeFileSync(transcriptFile, [

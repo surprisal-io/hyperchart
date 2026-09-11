@@ -14,7 +14,6 @@ import type {
 	MessageInput,
 	MessageTypes,
 	ProtocolOf,
-	ReplyEvents,
 	ReplyOutput,
 	ReplyUnion,
 	NonEmptyActorBatch,
@@ -23,7 +22,6 @@ import type {
 	ActorDefinitionCst,
 	ActorPoolDefinitionCst,
 	ActorWorkflowStateCst,
-	CallStateCst,
 	CallBatchStateCst,
 	ChartCst,
 	CompoundStateCst,
@@ -60,18 +58,17 @@ export function chart<const C extends ChartCst>(input: C): C {
 
 export const createChart = chart;
 
-export function message<const I extends SchemaCst>(options: {
-	input: I;
-}): { input: I };
+export function message<const I extends SchemaCst>(options: { input: I }): { input: I };
 export function message<const I extends SchemaCst, const R extends SchemaCst>(options: {
 	input: I;
 	reply: R;
 	replies?: never;
 }): { input: I; reply: R };
-export function message<
-	const I extends SchemaCst,
-	const R extends Record<string, SchemaCst>,
->(options: { input: I; reply?: never; replies: R }): { input: I; replies: R };
+export function message<const I extends SchemaCst, const R extends Record<string, SchemaCst>>(options: {
+	input: I;
+	reply?: never;
+	replies: R;
+}): { input: I; replies: R };
 export function message(options: ProtocolMessageCst): ProtocolMessageCst {
 	return options;
 }
@@ -86,8 +83,16 @@ export function actor<
 	const P extends ProtocolCst,
 	const S extends Record<string, ActorWorkflowStateCst>,
 	const Initial extends keyof S & string,
->(options: { input: I; protocol: P; initial: Initial; states: S } & ActorVerification<I, P, S, Initial>): ActorTemplate<P, InferSchema<I>, S> {
-	const definition: ActorDefinitionCst = { kind: "actorTemplate", input: options.input, protocol: options.protocol, initial: options.initial, states: options.states };
+>(
+	options: { input: I; protocol: P; initial: Initial; states: S } & ActorVerification<I, P, S, Initial>,
+): ActorTemplate<P, InferSchema<I>, S> {
+	const definition: ActorDefinitionCst = {
+		kind: "actorTemplate",
+		input: options.input,
+		protocol: options.protocol,
+		initial: options.initial,
+		states: options.states,
+	};
 	const template = ((input: ActorPlacement<InferSchema<I>>) => ({
 		kind: "actorDeclaration" as const,
 		definition,
@@ -98,11 +103,10 @@ export function actor<
 }
 
 /** Creates one statically placed endpoint with a fixed set of persistent worker actors. */
-export function actorPool<
-	const P extends ProtocolCst,
-	I,
-	Brand,
->(options: { concurrency: number; worker: ActorTemplate<P, I, Brand> }): ActorPoolTemplate<P, I, Brand> {
+export function actorPool<const P extends ProtocolCst, I, Brand>(options: {
+	concurrency: number;
+	worker: ActorTemplate<P, I, Brand>;
+}): ActorPoolTemplate<P, I, Brand> {
 	const definition: ActorPoolDefinitionCst = {
 		kind: "actorPoolTemplate",
 		concurrency: options.concurrency,
@@ -127,45 +131,87 @@ export function self(): ActorSelfTarget {
 }
 
 export function send<
-	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends
+		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
+		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
->(options: { to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> }): { kind: "send"; to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> };
-export function send<const M extends string, const Target extends string, const Input>(options: { to: ActorSelfTarget; event: M; target: Target; input: Input }): { kind: "send"; to: ActorSelfTarget; event: M; target: Target; input: Input };
+>(options: {
+	to: D;
+	event: M;
+	target: Target;
+	input: ActorPlacement<MessageInput<ProtocolOf<D>, M>>;
+}): { kind: "send"; to: D; event: M; target: Target; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> };
+export function send<const M extends string, const Target extends string, const Input>(options: {
+	to: ActorSelfTarget;
+	event: M;
+	target: Target;
+	input: Input;
+}): { kind: "send"; to: ActorSelfTarget; event: M; target: Target; input: Input };
 export function send(options: Omit<SendStateCst, "kind">): SendStateCst {
 	return { kind: "send", ...options };
 }
 
 export function sendBatch<
-	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends
+		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
+		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
->(options: { to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> }): { kind: "sendBatch"; to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> };
-export function sendBatch<const M extends string, const Target extends string, const Inputs>(options: { to: ActorSelfTarget; event: M; target: Target; inputs: Inputs }): { kind: "sendBatch"; to: ActorSelfTarget; event: M; target: Target; inputs: Inputs };
+>(options: {
+	to: D;
+	event: M;
+	target: Target;
+	inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>>;
+}): { kind: "sendBatch"; to: D; event: M; target: Target; inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>> };
+export function sendBatch<const M extends string, const Target extends string, const Inputs>(options: {
+	to: ActorSelfTarget;
+	event: M;
+	target: Target;
+	inputs: Inputs;
+}): { kind: "sendBatch"; to: ActorSelfTarget; event: M; target: Target; inputs: Inputs };
 export function sendBatch(options: Omit<SendBatchStateCst, "kind">): SendBatchStateCst {
 	return { kind: "sendBatch", ...options };
 }
 
-type ExactNamedCallRoutes<P extends ProtocolCst, M extends keyof P, Routing> = P[M] extends { replies: infer Replies extends Record<string, SchemaCst> }
+type ExactNamedCallRoutes<P extends ProtocolCst, M extends keyof P, Routing> = P[M] extends {
+	replies: infer Replies extends Record<string, SchemaCst>;
+}
 	? Routing extends { transitions: infer Routes }
-		? Exclude<keyof Routes, keyof Replies> extends never ? unknown : { readonly "named call routes must exactly match reply events": never }
+		? Exclude<keyof Routes, keyof Replies> extends never
+			? unknown
+			: { readonly "named call routes must exactly match reply events": never }
 		: unknown
 	: unknown;
 
 export function call<
-	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends
+		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
+		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Routing extends CallRouting<ProtocolOf<D>, M>,
->(options: {
-	to: D;
-	event: M;
-	input: ActorPlacement<MessageInput<ProtocolOf<D>, M>>;
-} & Routing & ExactNamedCallRoutes<ProtocolOf<D>, M, Routing>): { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & Routing & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> } {
-	return { kind: "call", ...options } as { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & Routing & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> };
+>(
+	options: {
+		to: D;
+		event: M;
+		input: ActorPlacement<MessageInput<ProtocolOf<D>, M>>;
+	} & Routing &
+		ExactNamedCallRoutes<ProtocolOf<D>, M, Routing>,
+): { kind: "call"; to: D; event: M; input: ActorPlacement<MessageInput<ProtocolOf<D>, M>> } & Routing & {
+		readonly __result?: ReplyUnion<ProtocolOf<D>, M>;
+	} {
+	return { kind: "call", ...options } as {
+		kind: "call";
+		to: D;
+		event: M;
+		input: ActorPlacement<MessageInput<ProtocolOf<D>, M>>;
+	} & Routing & { readonly __result?: ReplyUnion<ProtocolOf<D>, M> };
 }
 
 export function callBatch<
-	const D extends StaticActorDeclaration<ProtocolCst, unknown, unknown> | StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends
+		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
+		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
 	const M extends SingleReplyMessageTypes<ProtocolOf<D>>,
 	const Target extends string,
 >(options: {
@@ -174,7 +220,10 @@ export function callBatch<
 	inputs: NonEmptyActorBatch<MessageInput<ProtocolOf<D>, M>>;
 	target: Target;
 }): CallBatchStateCst & { target: Target; readonly __result?: ReplyOutput<ProtocolOf<D>, M>[] } {
-	return { kind: "callBatch", ...options } as unknown as CallBatchStateCst & { target: Target; readonly __result?: ReplyOutput<ProtocolOf<D>, M>[] };
+	return { kind: "callBatch", ...options } as unknown as CallBatchStateCst & {
+		target: Target;
+		readonly __result?: ReplyOutput<ProtocolOf<D>, M>[];
+	};
 }
 
 export function reply<const O extends Omit<ReplyStateCst, "kind">>(options: O): { kind: "reply" } & O {
@@ -256,8 +305,13 @@ export function event(path?: string): EventBindingCst {
 	return { kind: "event", ...(path === undefined ? {} : { path }) };
 }
 
-export function input<const Name extends string>(name: Name): InputRef<unknown> & ActorStateInputRefMarker<Name, undefined>;
-export function input<const Name extends string, const Path extends string>(name: Name, path: Path): InputRef<unknown> & ActorStateInputRefMarker<Name, Path>;
+export function input<const Name extends string>(
+	name: Name,
+): InputRef<unknown> & ActorStateInputRefMarker<Name, undefined>;
+export function input<const Name extends string, const Path extends string>(
+	name: Name,
+	path: Path,
+): InputRef<unknown> & ActorStateInputRefMarker<Name, Path>;
 export function input(name: string, path?: string): InputRef {
 	return { kind: "input", name, ...(path === undefined ? {} : { path }) };
 }
@@ -270,8 +324,13 @@ export function actorInput(path?: string): InputRef {
 }
 
 /** Input of the current mailbox message; actor() checks message and selector. */
-export function messageInput<const Message extends string>(message: Message): InputRef<unknown> & ActorMessageInputRefMarker<Message, undefined>;
-export function messageInput<const Message extends string, const Path extends string>(message: Message, path: Path): InputRef<unknown> & ActorMessageInputRefMarker<Message, Path>;
+export function messageInput<const Message extends string>(
+	message: Message,
+): InputRef<unknown> & ActorMessageInputRefMarker<Message, undefined>;
+export function messageInput<const Message extends string, const Path extends string>(
+	message: Message,
+	path: Path,
+): InputRef<unknown> & ActorMessageInputRefMarker<Message, Path>;
 export function messageInput(message: string, path?: string): InputRef {
 	return { kind: "messageInput", message, ...(path === undefined ? {} : { path }) };
 }
@@ -294,8 +353,13 @@ export function item(path?: string): InputRef {
 	return { kind: "item", ...(path === undefined ? {} : { path }) };
 }
 
-export function result<const State extends string>(state: State): InputRef<unknown> & ActorResultRefMarker<State, undefined>;
-export function result<const State extends string, const Path extends string>(state: State, path: Path): InputRef<unknown> & ActorResultRefMarker<State, Path>;
+export function result<const State extends string>(
+	state: State,
+): InputRef<unknown> & ActorResultRefMarker<State, undefined>;
+export function result<const State extends string, const Path extends string>(
+	state: State,
+	path: Path,
+): InputRef<unknown> & ActorResultRefMarker<State, Path>;
 export function result(state: string, path?: string): InputRef {
 	return { kind: "result", state, ...(path === undefined ? {} : { path }) };
 }
@@ -313,8 +377,18 @@ export function artifact(path: Templatable, shape?: SchemaCst): ArtifactCst {
 // Read an artifact another state declared: path and content shape come from the producer.
 // `artifact` names which one (omit when the producer declares exactly one); `select` narrows the
 // read to a dot-path field of the file's content.
-export function artifactOf<const State extends string>(state: State): ArtifactOfCst & ActorArtifactRefMarker<State, undefined, undefined>;
-export function artifactOf<const State extends string, const Options extends { artifact?: string; select?: string }>(state: State, opts: Options): ArtifactOfCst & ActorArtifactRefMarker<State, Options extends { artifact: infer Artifact extends string } ? Artifact : undefined, Options extends { select: infer Select extends string } ? Select : undefined>;
+export function artifactOf<const State extends string>(
+	state: State,
+): ArtifactOfCst & ActorArtifactRefMarker<State, undefined, undefined>;
+export function artifactOf<const State extends string, const Options extends { artifact?: string; select?: string }>(
+	state: State,
+	opts: Options,
+): ArtifactOfCst &
+	ActorArtifactRefMarker<
+		State,
+		Options extends { artifact: infer Artifact extends string } ? Artifact : undefined,
+		Options extends { select: infer Select extends string } ? Select : undefined
+	>;
 export function artifactOf(state: string, opts: { artifact?: string; select?: string } = {}): ArtifactOfCst {
 	return {
 		kind: "artifactOf",
@@ -343,7 +417,7 @@ export function tsAction<const O extends Omit<ImportedActionCst, "kind" | "modul
 	return { kind: "tsImport", module, export: exportName, ...opts };
 }
 
-// Doubles as a guard (validate: script(...)) and as a command action (action: script(...)) —
+// Doubles as an agent validation guard and as a command action —
 // the position decides. Parameters flow through env templates; command/args stay static.
 export function script<const O extends Omit<ScriptActionCst, "kind" | "command" | "args">>(
 	command: string,

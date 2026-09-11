@@ -23,7 +23,7 @@ afterEach(async () => { await Promise.all(tempDirs.splice(0).map((dir) => rm(dir
 function argsDraft(args: Readonly<Record<string, unknown>> = { topic: "test" }): DurableRecordDraft { return { type: "args", args }; }
 function invokeDraft(): DurableRecordDraft {
 	const actionUid = { chart: "chart", state: "work", action: "agent" };
-	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker" } };
+	return { type: "state_action", kind: "invoke", sessionId: "session-id", actionUid, definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } } };
 }
 
 async function persistedEntries(file: string): Promise<StorageEntry[]> {
@@ -204,10 +204,11 @@ for (const backend of ["memory", "jsonl"] as const) {
 			const records = await store.appendDrafts([{
 				type: "state_action", kind: "invoke", actionUid, sessionId: "session",
 				input: { hypothesisId: "hypothesis-7", score: 1 },
-				definition: { kind: "agent", uid: actionUid, name: "worker" },
+				definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 },
+			},
 			}]);
 			expect(records[0]).toMatchObject({ input: { hypothesisId: "hypothesis-7", score: 1 } });
-			await expect(store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid, sessionId: "invalid", input: { score: Number.POSITIVE_INFINITY }, definition: { kind: "agent", uid: actionUid, name: "worker" } }])).rejects.toThrow(/finite JSON numbers/);
+			await expect(store.appendDrafts([{ type: "state_action", kind: "invoke", actionUid, sessionId: "invalid", input: { score: Number.POSITIVE_INFINITY }, definition: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 } } }])).rejects.toThrow(/finite JSON numbers/);
 			await expect(store.appendDrafts([{ type: "user_interaction", kind: "opened", actionUid: { ...actionUid, action: "user" }, phaseSeqId: records[0]!.seqId, input: new Date(0) as never, prompt: "Choose?", options: [], events: ["OK"] }])).rejects.toThrow(/plain JSON objects/);
 		});
 

@@ -16,7 +16,7 @@ import { storyScenario, type StoryScenario } from "../fixtures/story-scenario.js
 
 const Decision = z.object({ hypothesisId: z.string() });
 const Candidate = z.object({ decision: Decision });
-const ResolvedInput = z.object({ hypothesisId: z.string() });
+const _ResolvedInput = z.object({ hypothesisId: z.string() });
 const now = Date.UTC(2026, 7, 31, 19, 0, 0);
 
 
@@ -112,9 +112,13 @@ class ResolvedInputCaptureRuntime implements Runtime {
 				if (records.some(this.stopAt)) throw new CaptureFinished();
 				this.push({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
-				this.push({ kind: "agent", effectId: effect.id, event: effect.actionUid.state === "produce"
+				this.push({ kind: "agent", effectId: effect.id,
+					outcome: {
+						kind: "completed",
+						event: effect.actionUid.state === "produce"
 					? { type: "GENERATED", output: { decision: { hypothesisId } } }
-					: { type: "DONE" } });
+					: { type: "DONE" } },
+				});
 			} else if (effect.kind !== "cancel") {
 				throw new Error(`Unexpected resolved-input story effect ${effect.kind}`);
 			}
@@ -210,7 +214,7 @@ function RecordInputBoard() {
 		return () => { current = false; };
 	}, []);
 	const panels: readonly InputPanel[] = [
-		...(captured === undefined ? [] : [
+		...(captured === undefined ? [] : ([
 			{
 				label: "executed capture · user_interaction/opened · input recorded",
 				description: "The production execution loop emitted an opened gate carrying the fully resolved hypothesis input.",
@@ -219,11 +223,12 @@ function RecordInputBoard() {
 			},
 			{
 				label: "executed capture · state_action/invoke · result-ref input recorded",
-				description: "The production execution loop resolved result(\"produce\", \"decision.hypothesisId\") before invoking the target action.",
-				run: captured.stateAction,
+				description:
+							'The production execution loop resolved result("produce", "decision.hypothesisId") before invoking the target action.',
+						run: captured.stateAction,
 				state: "execute",
 			},
-		] satisfies readonly InputPanel[]),
+		] satisfies readonly InputPanel[])),
 		...noInputPanels,
 	];
 	return (
@@ -233,7 +238,9 @@ function RecordInputBoard() {
 				<p className="mt-1 text-xs text-[var(--text-tertiary)]">
 					Executed production-loop captures for input-present records, contrasted with offline captures with no declared state input.
 				</p>
-				{captured === undefined ? <p className="mt-4 text-xs text-[var(--text-tertiary)]">Capturing executed durable records…</p> : null}
+				{captured === undefined ? (
+					<p className="mt-4 text-xs text-[var(--text-tertiary)]">Capturing executed durable records…</p>
+				) : null}
 				<div className="mt-5 grid items-start gap-4 lg:grid-cols-2">
 					{panels.map((panel) => {
 						const state = stateFrom(panel.run, panel.state);

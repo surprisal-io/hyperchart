@@ -17,7 +17,6 @@ import {
 	result,
 	t,
 	tsAction,
-	tsImport,
 	z,
 	type ChartAst,
 	type ChartCst,
@@ -200,50 +199,8 @@ export async function consume(params, ctx) {
 		const summaryPin = summaryComplete.artifacts?.["summary.json"];
 		expect(summaryPin?.hash).toBe(createHash("sha256").update(await readFile(join(workDir, "summary.json"))).digest("hex"));
 		expect(state.projection.artifactPins["summary.json"]).toEqual(summaryPin);
-		expect(await readFile(await new ArtifactStore(runDir).get(summaryPin!.hash), "utf8")).toBe(await readFile(join(workDir, "summary.json"), "utf8"));
-	});
-
-	it("re-invokes a rejected action with one-based validation metadata and the rejection reason", async () => {
-		const root = await tempDir();
-		await writeFile(
-			join(root, "retry.mjs"),
-			`export function act(_params, ctx) {
-  return { type: "DONE", output: { attempt: ctx.validationAttempt?.n ?? 0, reason: ctx.validationAttempt?.reason } };
-}
-export function guard(event) {
-  return event.output?.attempt === 1 ? true : { ok: false, reason: "retry imported action" };
-}
-`,
-		);
-		const parsed = normalizeChartConfig(chart({
-			kind: "chart", id: "function-retry", initial: "work",
-			states: {
-				work: {
-					kind: "state",
-					action: tsAction("./retry.mjs", "act", { reply: z.object({ attempt: z.number(), reason: z.string().optional() }) }),
-					validate: tsImport("./retry.mjs", "guard"),
-					retries: 1,
-					transitions: { DONE: "done" },
-				},
-				done: final(), failed: failed(),
-			},
-		}));
-		expect(parsed.ok).toBe(true);
-		if (!parsed.ok) return;
-		const store = new MemoryLogStore();
-		const runtime = new ChartRuntime({ ast: parsed.ast, branchId: "main", logStore: store, agentExecutor: new FakeAgentExecutor(), chartDir: root, workDir: root, schemaRegistry: parsed.schemaRegistry });
-		const state = await withTimeout(start(runtime));
-		await runtime.dispose();
-
-		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(state.projection.results.work).toEqual({ attempt: 1, reason: "retry imported action" });
-		const records = await collectHistoryRecords(store, "main");
-		expect(records.filter((record) => record.type === "state_action" && record.kind === "invoke")).toHaveLength(1);
-		expect(records.filter((record) => record.type === "state_action" && record.kind === "complete")).toHaveLength(2);
-		expect(records.filter((record) => record.type === "state_action" && record.kind === "validated").map((record) => record.outcome)).toEqual([
-			{ ok: false, reason: "retry imported action" },
-			true,
-		]);
+		if (summaryPin === undefined) throw new Error("missing summary artifact pin");
+		expect(await readFile(await new ArtifactStore(runDir).get(summaryPin.hash), "utf8")).toBe(await readFile(join(workDir, "summary.json"), "utf8"));
 	});
 
 	it("converts imported exceptions into durable FAILED completion", async () => {
@@ -281,7 +238,7 @@ export function run(_params, ctx) {
 				work: {
 					kind: "state",
 					action: tsAction("./abort.mjs", "run", { artifacts: { ready: "ready.txt", aborted: "aborted.txt" } }),
-					after: { delayMs: 30, target: "timeout" },
+					after: { delayMs: 200, target: "timeout" },
 					transitions: { DONE: "done" },
 				},
 				done: final(), timeout: final(),
@@ -328,7 +285,7 @@ export function finish() { release?.({ type: "DONE", output: { late: true } }); 
 		await expect(runner.run(importedEffect)).rejects.toThrow("already running");
 		await withTimeout(runner.cancel(importedEffect.actionUid), 100);
 		await expect(withTimeout(pending, 100)).resolves.toBeUndefined();
-		const module = await import(new URL(`file://${join(root, "late.mjs")}`).href) as { finish(): void };
+		const module = (await import(new URL(`file://${join(root, "late.mjs")}`).href)) as { finish(): void };
 		module.finish();
 		await new Promise((resolve) => setImmediate(resolve));
 

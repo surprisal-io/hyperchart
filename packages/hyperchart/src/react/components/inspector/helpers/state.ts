@@ -241,12 +241,13 @@ export function compactFactClass(fact: string): string {
 }
 
 export function validationRetryLabel(state: HyperchartStateInfo): string | undefined {
-	if (state.retry?.max === undefined && state.validationAttempts === undefined) return undefined;
-	const max = state.retry?.max;
+	const policy = state.validationPolicy?.onFail;
+	if (policy === undefined && state.validationAttempts === undefined) return undefined;
+	const max = policy === undefined ? undefined : policy.restart + policy.nudge * (policy.restart + 1);
 	const attempts = state.validationAttempts;
 	if (attempts !== undefined && max !== undefined) return `validation ×${attempts}/${max}`;
 	if (attempts !== undefined) return `validation ×${attempts}`;
-	return max !== undefined ? `validation retry ≤${max}` : undefined;
+	return max !== undefined ? `validation recovery ≤${max}` : undefined;
 }
 
 export function agentStatesForSelection(

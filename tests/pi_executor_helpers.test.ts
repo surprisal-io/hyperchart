@@ -3,13 +3,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "../packages/hyperchart/src/index.js";
-import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import type { AgentActionAst, ChartEvent, JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/types.js";
 import { createAgentDefaultsResolver, loadAgentDefinition, resolvePiSubagentDefinitionDirs } from "../packages/pi-hyperchart/src/runtime/pi/agent_definitions.js";
 import { createFinishTool, type CompletionSink } from "../packages/pi-hyperchart/src/runtime/pi/finish_tool.js";
-import { buildNudgePrompt, buildRejectPrompt, buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
-import { actionSessionDir, branchSessionSegment, runAcceptanceLoop } from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
+import { buildNudgePrompt,
+	buildRecoveryPrompt,
+	buildTaskPrompt } from "../packages/hyperchart/src/runtime/generic/agent_prompts.js";
+import { actionSessionDir, branchSessionSegment,
+	evaluateAgentTurn,
+} from "../packages/hyperchart/src/runtime/generic/executor_helpers.js";
 import {
 	buildSessionPlan,
 	findCapturedFinish,
@@ -20,6 +24,8 @@ import {
 } from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
 
 const tempDirs: string[] = [];
+const chartEvent = (outcome: AgentOutcome): ChartEvent =>
+	outcome.kind === "completed" ? outcome.event : { type: "FAILED", error: outcome.failure.message };
 
 async function makeTempDir(): Promise<string> {
 	const dir = await mkdtemp(join(tmpdir(), "hyperchart-pi-"));
@@ -41,7 +47,7 @@ function effect(overrides: Partial<AgentEffect> = {}, actionOverrides: Partial<A
 		kind: "agent",
 		id: "chart:work:worker:1:1",
 		actionUid,
-		action: { kind: "agent", uid: actionUid, name: "worker", ...actionOverrides },
+		action: { kind: "agent", uid: actionUid, name: "worker", onFail: { nudge: 2, restart: 1 }, ...actionOverrides },
 		events: ["DONE", "FAILED"],
 		reply: schema(z.object({ value: z.number() })),
 		...overrides,
@@ -166,7 +172,7 @@ describe("PiAgentExecutor cancellation", () => {
 			return lateSession;
 		};
 		const emitted: ChartEvent[] = [];
-		executor.start(effect(), (event) => emitted.push(event));
+		executor.start(effect(), (outcome) => emitted.push(chartEvent(outcome)));
 		await expect.poll(() => constructionStarted).toBe(true);
 
 		const disposal = executor.dispose();
@@ -185,7 +191,7 @@ describe("PiAgentExecutor cancellation", () => {
 		expect(internal.cancellations.size).toBe(0);
 
 		const afterDispose: ChartEvent[] = [];
-		executor.start(effect(), (event) => afterDispose.push(event));
+		executor.start(effect(), (outcome) => afterDispose.push(chartEvent(outcome)));
 		expect(afterDispose).toEqual([{ type: "FAILED", error: "Pi agent executor is disposed" }]);
 	});
 
@@ -200,7 +206,8 @@ describe("PiAgentExecutor cancellation", () => {
 		const executor = new PiAgentExecutor({ workDir: dir, agentDir: dir, definitionDirs: [dir], sessionsDir, branchId: "main", modelRuntime: {} as never });
 		const internal = executor as unknown as {
 			generations: { next(key: string): number };
-			live: Map<string, { session: { extensionRunner: { emit(): Promise<void> }; abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number }>;
+			live: Map<string, { session: { extensionRunner: { emit(): Promise<void> }; abort(): Promise<void>; dispose(): void }; effect: AgentEffect; sink: CompletionSink; generation: number;
+				}>;
 		};
 		const key = actionUidKey(target.actionUid);
 		const generation = internal.generations.next(key);
@@ -518,20 +525,17 @@ describe("pi executor helpers", () => {
 		expect(prompt).not.toContain("invocationId");
 	});
 
-	it("pins the exact declared artifact path in validation correction prompts", () => {
-		const invocation = effect({ artifacts: [{ name: "research", path: "artifacts/research/deep/take/research-3.json" }] });
-		const rejected: RejectedEffect = {
-			kind: "rejected",
-			id: "chart:work:worker:1:2",
-			seqId: 2,
-			actionUid: invocation.actionUid,
-			event: { type: "DONE" },
-			onReject: "resume",
-			validationAttempts: 1,
-			reason: "source cap exceeded",
-			invocation,
-		};
-		const prompt = buildRejectPrompt(rejected);
+	it("pins the exact declared artifact path in validation recovery prompts", () => {
+		const invocation = effect({ artifacts: [{ name: "research", path: "artifacts/research/deep/take/research-3.json" }],
+			recovery: {
+				mode: "nudge",
+				scope: "validation",
+				nudgeAttempt: 1,
+				restartAttempt: 0,
+				failure: { kind: "validation", message: "source cap exceeded" },
+			},
+		});
+		const prompt = `${buildRecoveryPrompt(invocation)}\n${buildTaskPrompt(invocation, [])}`;
 		expect(prompt).toContain("source cap exceeded");
 		expect(prompt).toContain("artifacts/research/deep/take/research-3.json");
 		expect(prompt).toContain("do not increment, rename, or version it yourself");
@@ -570,31 +574,20 @@ describe("pi executor helpers", () => {
 		).toBeUndefined();
 	});
 
-	it("spends the retry budget on provider errors before failing with the latest error", async () => {
-		const sink: CompletionSink = { captured: undefined };
-		const emitted: ChartEvent[] = [];
-		const prompts: string[] = [];
-		const errors = ["429: rate limited", "402: Insufficient Balance", undefined];
-
-		await runAcceptanceLoop({
+	it("classifies unknown provider errors as fail-fast after one turn", async () => {
+		const outcome = await evaluateAgentTurn({
 			effect: effect(),
-			sink,
-			maxRetries: 2,
+			sink: { captured: undefined },
 			isCancelled: () => false,
-			prompt: async (prompt) => {
-				prompts.push(prompt);
-			},
 			lastAssistantText: () => undefined,
-			lastAssistantError: () => errors.shift(),
+			lastAssistantError: () => "402: Insufficient Balance",
 			checkArtifacts: async () => [],
-			emit: (event) => emitted.push(event),
 		});
 
-		expect(prompts).toHaveLength(2);
-		expect(prompts[0]).toContain("previous assistant turn failed");
-		expect(prompts[0]).toContain("429: rate limited");
-		expect(prompts[1]).toContain("402: Insufficient Balance");
-		expect(emitted).toEqual([{ type: "FAILED", error: "402: Insufficient Balance" }]);
+		expect(outcome).toEqual({
+			kind: "failed",
+			failure: { kind: "provider", retryable: false, message: "402: Insufficient Balance" },
+		});
 	});
 
 	it("finds a successful finish call after the last user message in restored messages", async () => {

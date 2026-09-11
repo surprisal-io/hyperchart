@@ -19,8 +19,8 @@ function linearChart(validate = false): ChartAst {
 			states: {
 				work: {
 					kind: "state",
-					action: agent("worker"),
-					...(validate ? { validate: tsImport("./check.js", "ok"), retries: 2 } : {}),
+					action: agent("worker",
+						validate ? { validation: { guard: tsImport("./check.js", "ok"), onFail: { nudge: 2, restart: 0 } } } : {}),
 					transitions: { DONE: "done", ERROR: "failed" },
 				},
 				done: final(),
@@ -57,7 +57,7 @@ function invoke(seqId: number, actionUid: ActionUID, timestamp = seqId * 100): D
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
-	return { kind: "agent", uid, name: "test-worker" };
+	return { kind: "agent", uid, name: "test-worker", onFail: { nudge: 2, restart: 1 } };
 }
 
 describe("buildRunView", () => {
@@ -103,10 +103,24 @@ describe("buildRunView", () => {
 		});
 	});
 
-	it("shows rejected validation reason", () => {
+	it("shows durable validation recovery reason", () => {
 		const uid = { chart: "view-linear", state: "work", action: "agent" };
+		const guard = { kind: "tsImport", module: "./check.js", export: "ok" } as const;
+		const baseDefinition = definitionForUid(uid);
+		if (baseDefinition.kind !== "agent") throw new Error("expected agent");
+		const definition: StateActionAst = { ...baseDefinition, validation: { guard, onFail: { nudge: 2, restart: 1 } } };
 		const log: DurableLogRecord[] = [
-			invoke(1, uid, 100),
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "session-id",
+				actionUid: uid,
+				definition,
+				parentId: null,
+				seqId: 1,
+				branchId: "main",
+				timestamp: 100,
+			},
 			{
 				type: "state_action",
 				kind: "complete",
@@ -121,19 +135,35 @@ describe("buildRunView", () => {
 				kind: "validated",
 				actionUid: uid,
 				event: { type: "DONE" },
-				guard: tsImport("./check.js", "ok"),
+				guard,
 				outcome: { ok: false, reason: "try again" },
 				parentId: 2,
 				seqId: 3,
 				branchId: "main", timestamp: 300,
 			},
+			{
+				type: "state_action",
+				kind: "retry",
+				actionUid: uid,
+				failure: { kind: "validation", message: "try again" },
+				scope: "validation",
+				mode: "nudge",
+				previousSessionId: "session-id",
+				resultingSessionId: "session-id",
+				nudgeAttempt: 1,
+				restartAttempt: 0,
+				parentId: 3,
+				seqId: 4,
+				branchId: "main",
+				timestamp: 400,
+			},
 		];
 
 		const view = buildRunView(linearChart(true), log, 1000);
 
-		expect(view.pending).toEqual([{ path: "work", phase: "rejected", rejections: 1, reason: "try again" }]);
+		expect(view.pending).toEqual([{ path: "work", phase: "running", sinceMs: 900, rejections: 1, reason: "try again" }]);
 		expect(view.graph.find((row) => row.path === "work")).toMatchObject({
-			status: "rejected",
+			status: "running",
 			rejections: 1,
 			reason: "try again",
 			event: "DONE",

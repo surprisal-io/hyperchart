@@ -26,7 +26,7 @@ export function compileProjectionRetention(ast: ChartAst): ProjectionRetentionPl
 	const externallyReadMapScopes = new Set<StatePath>();
 	const resumableActions = new Set<string>();
 	const reenterableStates = new Set<StatePath>([ast.initial]);
-	const mapScopes = Object.entries(ast.states).flatMap(([path, node]) => node.kind === "map" ? [path] : []);
+	const mapScopes = Object.entries(ast.states).flatMap(([path, node]) => (node.kind === "map" ? [path] : []));
 
 	for (const [readerPath, node] of Object.entries(ast.states)) {
 		for (const resultState of resultRefs(node)) {
@@ -67,7 +67,9 @@ export function compileProjectionRetention(ast: ChartAst): ProjectionRetentionPl
 			reenterableStates.add(childPath(readerPath, node.initial));
 			reenterableStates.add(siblingPath(readerPath, node.onDone));
 		}
-		if ((node.kind === "state" || node.kind === "map") && node.onReenter !== undefined) {
+		if ((node.kind === "state" && node.action.kind === "agent" && node.action.reentry !== undefined) ||
+			(node.kind === "map" && node.onReenter !== undefined)
+		) {
 			reenterableStates.add(readerPath);
 		}
 		if (isResumableAction(ast, readerPath, node)) resumableActions.add(actionUidKey(node.action.uid));
@@ -123,7 +125,7 @@ export function compactProjection(
 
 function isResumableAction(ast: ChartAst, path: StatePath, node: unknown): node is ActionStateAst {
 	if (!isActionLike(node) || node.action.kind !== "agent") return false;
-	if (typeof node.onReenter === "object") return true;
+	if (typeof node.action.reentry === "object") return true;
 	let parent = parentPath(path);
 	while (parent !== undefined) {
 		const ancestor = nodeAt(ast, parent);
@@ -134,8 +136,10 @@ function isResumableAction(ast: ChartAst, path: StatePath, node: unknown): node 
 }
 
 function isActionLike(value: unknown): value is ActionStateAst {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "state" &&
-		typeof (value as { action?: unknown }).action === "object" && (value as { action?: unknown }).action !== null;
+	return (
+		typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "state" &&
+		typeof (value as { action?: unknown }).action === "object" && (value as { action?: unknown }).action !== null
+	);
 }
 
 function resultRefs(value: unknown): StatePath[] {

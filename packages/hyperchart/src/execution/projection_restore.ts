@@ -81,7 +81,7 @@ export async function loadBranchProjection(input: {
 	if (!sameContract(input.contract, expectedContract)) {
 		throw new Error("Projection contract does not match the supplied normalized ChartAst");
 	}
-	const snapshot = input.snapshot ?? await input.store.captureSnapshot(input.branchId);
+	const snapshot = input.snapshot ?? (await input.store.captureSnapshot(input.branchId));
 	if (snapshot.branchId !== input.branchId) throw new Error("Projection snapshot branch does not match the selected branch");
 	const lookup: CheckpointQuery = { targetHeadSeqId: snapshot.headSeqId, selectorKey: input.contract.selectorKey };
 	const exact = await input.store.loadExactCheckpoint(lookup);
@@ -123,7 +123,7 @@ export async function loadBranchProjection(input: {
 	let checkpointSaved = false;
 	const replayIsCheckpointable = skipped.length === 0 && stale.length === 0 && unpinned.length === 0;
 	const saveMode = input.saveCheckpoint ?? "rebuild";
-	const saveRequested = saveMode === "always" || saveMode === "rebuild" && decoded === undefined;
+	const saveRequested = saveMode === "always" || (saveMode === "rebuild" && decoded === undefined);
 	if (input.store.canStoreCheckpoints && replayIsCheckpointable && saveRequested && decoded?.headSeqId !== snapshot.headSeqId) {
 		await input.store.storeCheckpoint(prepareProjectionCheckpoint(projection, input.contract, snapshot.headSeqId));
 		checkpointSaved = true;
@@ -189,8 +189,8 @@ async function acceptedCheckpoint(
 	const checkpoint = decodeCheckpoint(stored, ast);
 	if (checkpoint === undefined || checkpoint.projection.seqId !== (checkpoint.headSeqId ?? 0)) return undefined;
 	if (checkpoint.headSeqId === null) return checkpoint;
-	if (await store.getRecord(checkpoint.headSeqId) === undefined) return undefined;
-	if (!await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: checkpoint.headSeqId })) return undefined;
+	if ((await store.getRecord(checkpoint.headSeqId)) === undefined) return undefined;
+	if (!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: checkpoint.headSeqId }))) return undefined;
 	return checkpoint;
 }
 
@@ -207,131 +207,204 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 
 function isPendingActions(value: unknown): boolean { return Array.isArray(value) && value.every(isPendingAction); }
 function isPendingAction(value: unknown): boolean {
-	if (isRecord(value) && value.validation !== undefined && value.validation !== null && (!isRecord(value.validation) || !isJsonValue(value.validation) || !isOneOf(value.validation.kind, ["script", "tsImport"]))) return false;
-	if (!isRecord(value) || !isActionUid(value.actionUid) || !isPositiveInteger(value.visitId) || !isPositiveInteger(value.seqId)
-		|| !isPositiveInteger(value.invokeSeqId) || !isNonEmptyString(value.sessionId) || !(value.gateSeqId === undefined || isPositiveInteger(value.gateSeqId))) return false;
-	if (value.phase === "running") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "timestamp", "phase"], ["gateSeqId", "validation"])
-		&& isNonNegativeFinite(value.timestamp);
+	if (
+		!isRecord(value) ||
+		!isActionUid(value.actionUid) || !isPositiveInteger(value.visitId) || !isPositiveInteger(value.seqId) ||
+		!isPositiveInteger(value.invokeSeqId) || !isNonEmptyString(value.sessionId) || !isRecord(value.definition) || !isRecoveryCounters(value.recovery)
+		|| !(value.gateSeqId === undefined || isPositiveInteger(value.gateSeqId)) || !(value.lastRetry === undefined || isLastRetry(value.lastRetry)) ||
+		!isNonNegativeFinite(value.timestamp)
+	)
+		return false;
+	const optional = ["gateSeqId", "lastRetry"];
+	if (value.phase === "running") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "definition", "timestamp", "recovery", "phase"],
+			optional,
+		);
 	if (value.completionArtifacts !== undefined && (!isExactRecord(value.completionArtifacts, ["branchId", "pins"], []) || !isNonEmptyString(value.completionArtifacts.branchId) || !isArtifactPins(value.completionArtifacts.pins))) return false;
-	if (value.phase === "validating") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "completionArtifacts", "validation"])
-		&& isChartEvent(value.event) && isNonNegativeInteger(value.validationAttempts);
-	if (value.phase === "rejected") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "reason", "completionArtifacts", "validation"])
-		&& isChartEvent(value.event) && isNonNegativeInteger(value.validationAttempts) && (value.reason === undefined || typeof value.reason === "string");
+	if (value.phase === "validating") return (
+			isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId",
+					"definition",
+					"timestamp",
+					"recovery",
+					"phase", "event",
+				], [...optional, "completionArtifacts"])
+		&& isChartEvent(value.event)
+		);
 	return false;
 }
+function isRecoveryCounters(value: unknown): boolean {
+	if (!isExactRecord(value, ["general", "validation"], [])) return false;
+	return [value.general, value.validation].every(
+		(counter) =>
+			isExactRecord(counter, ["nudges", "restarts"], []) && isNonNegativeInteger(counter.nudges) &&
+			isNonNegativeInteger(counter.restarts),
+	);
+}
+function isLastRetry(value: unknown): boolean {
+	return (
+		isExactRecord(value, ["mode", "scope", "nudgeAttempt", "restartAttempt", "failure"], []) &&
+		isOneOf(value.mode, ["nudge", "restart"]) &&
+		isOneOf(value.scope, ["general", "validation"])
+		&&
+		isNonNegativeInteger(value.nudgeAttempt) && isNonNegativeInteger(value.restartAttempt) &&
+		isRecord(value.failure) &&
+		isOneOf(value.failure.kind, ["incomplete", "artifacts", "validation", "provider", "runtime", "explicit"]) &&
+		typeof value.failure.message === "string" &&
+		(value.failure.code === undefined || typeof value.failure.code === "string")
+	);
+}
 function isOpenInteractions(value: unknown): boolean {
-	return isRecord(value) && Object.entries(value).every(([key, entry]) => {
+	return (
+		isRecord(value) && Object.entries(value).every(([key, entry]) => {
 		if (!/^(0|[1-9][0-9]*)$/.test(key) || !isExactRecord(entry, ["opened", "status"], []) || entry.status !== "open") return false;
 		const opened = entry.opened;
 		return isOpenedInteraction(opened) && Number(key) === opened.seqId;
-	});
+	})
+	);
 }
 function isOpenedInteraction(value: unknown): value is Record<string, unknown> {
-	return isExactRecord(value, ["type", "kind", "actionUid", "phaseSeqId", "prompt", "options", "events", "seqId", "parentId", "branchId", "timestamp"], ["input", "reply", "rejection"])
+	return (
+		isExactRecord(value, ["type", "kind", "actionUid", "phaseSeqId", "prompt", "options", "events", "seqId", "parentId", "branchId", "timestamp"], ["input", "reply"])
 		&& value.type === "user_interaction" && value.kind === "opened" && isActionUid(value.actionUid) && isPositiveInteger(value.phaseSeqId)
 		&& typeof value.prompt === "string" && isStringArray(value.options) && isStringArray(value.events) && isCoordinates(value)
 		&& (value.input === undefined || isJsonRecord(value.input))
-		&& (value.reply === undefined || isSchemaAst(value.reply)) && (value.rejection === undefined || isRejection(value.rejection));
-}
-function isRejection(value: unknown): boolean {
-	return isExactRecord(value, ["attempt", "onReject"], ["reason"]) && isPositiveInteger(value.attempt)
-		&& (value.onReject === "resume" || value.onReject === "restart") && (value.reason === undefined || typeof value.reason === "string");
+		&& (value.reply === undefined || isSchemaAst(value.reply))
+	);
 }
 function isArtifactPins(value: unknown): boolean {
-	return isRecord(value) && Object.values(value).every((pin) => isExactRecord(pin, ["hash", "size"], []) && /^[a-f0-9]{64}$/.test(String(pin.hash)) && isNonNegativeInteger(pin.size));
+	return (
+		isRecord(value) && Object.values(value).every((pin) => isExactRecord(pin, ["hash", "size"], []) && /^[a-f0-9]{64}$/.test(String(pin.hash)) && isNonNegativeInteger(pin.size))
+	);
 }
 function isFailure(value: unknown): boolean {
-	return isExactRecord(value, ["origin", "error", "seqId"], []) && isNonEmptyString(value.origin) && isPositiveInteger(value.seqId) && isJsonValue(value.error);
+	return (
+		isExactRecord(value, ["origin", "error", "seqId"], []) && isNonEmptyString(value.origin) && isPositiveInteger(value.seqId) && isJsonValue(value.error)
+	);
 }
 function isActors(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isActor); }
 function isActor(value: unknown): boolean {
-	return isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "currentState", "mailbox", "status"], ["owner", "currentMessageId"])
+	return (
+		isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "currentState", "mailbox", "status"], ["owner", "currentMessageId"])
 		&& isPath(value.declaration) && isPath(value.logicalOccurrence) && isPath(value.occurrence) && isPositiveInteger(value.generation)
 		&& (value.owner === undefined || isPath(value.owner)) && isJsonValue(value.input) && isActorDefinition(value.definition, "actor") && isPath(value.currentState)
 		&& isStringArray(value.mailbox) && (value.currentMessageId === undefined || isNonEmptyString(value.currentMessageId))
-		&& isOneOf(value.status, ["idle", "busy", "closing", "draining", "stopped", "failed", "cancelled"]);
+		&& isOneOf(value.status, ["idle", "busy", "closing", "draining", "stopped", "failed", "cancelled"])
+	);
 }
 function isActorPools(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isActorPool); }
 function isActorPool(value: unknown): boolean {
-	return isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "mailbox", "workers", "status"], ["owner"])
+	return (
+		isExactRecord(value, ["declaration", "logicalOccurrence", "occurrence", "generation", "input", "definition", "mailbox", "workers", "status"], ["owner"])
 		&& isPath(value.declaration) && isPath(value.logicalOccurrence) && isPath(value.occurrence) && isPositiveInteger(value.generation)
 		&& (value.owner === undefined || isPath(value.owner)) && isJsonValue(value.input) && isActorDefinition(value.definition, "actorPool")
 		&& isStringArray(value.mailbox) && Array.isArray(value.workers) && value.workers.every(isWorker)
-		&& isOneOf(value.status, ["idle", "busy", "closing", "draining", "stopped", "failed", "cancelled"]);
+		&& isOneOf(value.status, ["idle", "busy", "closing", "draining", "stopped", "failed", "cancelled"])
+	);
 }
 function isWorker(value: unknown): boolean {
-	return isExactRecord(value, ["index", "occurrence", "currentState", "status"], ["currentMessageId"])
+	return (
+		isExactRecord(value, ["index", "occurrence", "currentState", "status"], ["currentMessageId"])
 		&& isNonNegativeInteger(value.index) && isPath(value.occurrence) && isPath(value.currentState)
 		&& (value.currentMessageId === undefined || isNonEmptyString(value.currentMessageId))
-		&& isOneOf(value.status, ["idle", "busy", "draining", "stopped", "failed", "cancelled"]);
+		&& isOneOf(value.status, ["idle", "busy", "draining", "stopped", "failed", "cancelled"])
+	);
 }
 function isLiveActorMessages(value: unknown): boolean {
-	return isRecord(value) && Object.entries(value).every(([messageId, message]) => messageId === (message as Record<string, unknown>)?.messageId && isProjectedMessage(message));
+	return (
+		isRecord(value) && Object.entries(value).every(([messageId, message]) => messageId === (message as Record<string, unknown>)?.messageId && isProjectedMessage(message))
+	);
 }
 function isProjectedMessage(value: unknown): boolean {
-	return isExactRecord(value, ["messageId", "event", "input", "producerState", "producerVisit", "batchIndex", "status"], ["callId", "receiveState", "replyEvent", "replyOutput", "workerIndex"])
+	return (
+		isExactRecord(value, ["messageId", "event", "input", "producerState", "producerVisit", "batchIndex", "status"], ["callId", "receiveState", "replyEvent", "replyOutput", "workerIndex"])
 		&& isNonEmptyString(value.messageId) && isNonEmptyString(value.event) && isJsonValue(value.input) && isPath(value.producerState)
 		&& isPositiveInteger(value.producerVisit) && (value.callId === undefined || isNonEmptyString(value.callId)) && isNonNegativeInteger(value.batchIndex)
 		&& isOneOf(value.status, ["queued", "accepted", "replied", "settled", "failed", "cancelled"])
 		&& (value.receiveState === undefined || isPath(value.receiveState)) && (value.replyEvent === undefined || isNonEmptyString(value.replyEvent))
-		&& (value.replyOutput === undefined || isJsonValue(value.replyOutput)) && (value.workerIndex === undefined || isNonNegativeInteger(value.workerIndex));
+		&& (value.replyOutput === undefined || isJsonValue(value.replyOutput)) && (value.workerIndex === undefined || isNonNegativeInteger(value.workerIndex))
+	);
 }
 function isPendingActorCalls(value: unknown): boolean { return isRecord(value) && Object.values(value).every(isPendingActorCall); }
 function isPendingActorCall(value: unknown): boolean {
 	if (!isRecord(value) || !isNonEmptyString(value.callId) || !isPath(value.callerState) || !isPath(value.occurrence)
 		|| !isOneOf(value.status, ["enqueued", "accepted", "partial"])) return false;
-	if (value.kind === "singleton") return isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageId", "status"], []) && isNonEmptyString(value.messageId);
-	if (value.kind === "batch") return isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageIds", "status"], [])
+	if (value.kind === "singleton") return (
+			isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageId", "status"], []) && isNonEmptyString(value.messageId)
+		);
+	if (value.kind === "batch") return (
+			isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageIds", "status"], [])
 		&& isStringArray(value.messageIds) && value.messageIds.length > 0 && value.messageIds.every(isNonEmptyString)
-		&& new Set(value.messageIds).size === value.messageIds.length;
+		&& new Set(value.messageIds).size === value.messageIds.length
+		);
 	return false;
 }
 function isActorDefinition(value: unknown, kind: "actor" | "actorPool"): boolean {
 	if (!isRecord(value) || value.kind !== kind || !isNonEmptyString(value.name) || !isPath(value.path) || !(value.owner === undefined || isPath(value.owner))
 		|| !isSchemaAst(value.input) || !isJsonValue(value.inputValue) || !isProtocol(value.protocol)) return false;
-	if (kind === "actor") return isExactRecord(value, ["kind", "name", "path", "input", "inputValue", "protocol", "initial", "states"], ["owner"])
-		&& isNonEmptyString(value.initial) && isStateRecord(value.states);
-	return isExactRecord(value, ["kind", "name", "path", "input", "inputValue", "protocol", "concurrency", "worker"], ["owner"])
-		&& isPositiveInteger(value.concurrency) && isWorkerDefinition(value.worker);
+	if (kind === "actor") return (
+			isExactRecord(value, ["kind", "name", "path", "input", "inputValue", "protocol", "initial", "states"], ["owner"])
+		&& isNonEmptyString(value.initial) && isStateRecord(value.states)
+		);
+	return (
+		isExactRecord(value, ["kind", "name", "path", "input", "inputValue", "protocol", "concurrency", "worker"], ["owner"])
+		&& isPositiveInteger(value.concurrency) && isWorkerDefinition(value.worker)
+	);
 }
 function isWorkerDefinition(value: unknown): boolean {
-	return isExactRecord(value, ["input", "protocol", "initial", "states"], []) && isSchemaAst(value.input) && isProtocol(value.protocol)
-		&& isNonEmptyString(value.initial) && isStateRecord(value.states);
+	return (
+		isExactRecord(value, ["input", "protocol", "initial", "states"], []) && isSchemaAst(value.input) && isProtocol(value.protocol)
+		&& isNonEmptyString(value.initial) && isStateRecord(value.states)
+	);
 }
 function isProtocol(value: unknown): boolean { return isRecord(value) && Object.values(value).every((entry) => isRecord(entry) && isJsonValue(entry)); }
 function isStateRecord(value: unknown): boolean {
-	return isRecord(value) && Object.values(value).every((state) => isRecord(state) && isOneOf(state.kind, ["state", "receive", "send", "sendBatch", "call", "callBatch", "reply"]) && isJsonValue(state));
+	return (
+		isRecord(value) && Object.values(value).every((state) => isRecord(state) && isOneOf(state.kind, ["state", "receive", "send", "sendBatch", "call", "callBatch", "reply"]) && isJsonValue(state))
+	);
 }
-function isSchemaAst(value: unknown): boolean { return isExactRecord(value, ["kind", "schema"], ["runtimeContract"]) && value.kind === "jsonSchema" && isJsonValue(value.schema) && (value.runtimeContract === undefined || isJsonValue(value.runtimeContract)); }
-function isChartEvent(value: unknown): boolean { return isExactRecord(value, ["type"], ["output", "error"]) && isNonEmptyString(value.type) && (value.output === undefined || isJsonValue(value.output)) && (value.error === undefined || isJsonValue(value.error)); }
-function isActionUid(value: unknown): boolean { return isExactRecord(value, ["chart", "state", "action"], []) && isNonEmptyString(value.chart) && isPath(value.state) && isNonEmptyString(value.action); }
-function isCoordinates(value: Record<string, unknown>): boolean { return isPositiveInteger(value.seqId) && (value.parentId === null || isPositiveInteger(value.parentId)) && isNonEmptyString(value.branchId) && isNonNegativeFinite(value.timestamp); }
+function isSchemaAst(value: unknown): boolean { return (
+		isExactRecord(value, ["kind", "schema"], ["runtimeContract"]) && value.kind === "jsonSchema" && isJsonValue(value.schema) && (value.runtimeContract === undefined || isJsonValue(value.runtimeContract))
+	); }
+function isChartEvent(value: unknown): boolean { return (
+		isExactRecord(value, ["type"], ["output", "error"]) && isNonEmptyString(value.type) && (value.output === undefined || isJsonValue(value.output)) && (value.error === undefined || isJsonValue(value.error))
+	); }
+function isActionUid(value: unknown): boolean { return (
+		isExactRecord(value, ["chart", "state", "action"], []) && isNonEmptyString(value.chart) && isPath(value.state) && isNonEmptyString(value.action)
+	); }
+function isCoordinates(value: Record<string, unknown>): boolean { return (
+		isPositiveInteger(value.seqId) && (value.parentId === null || isPositiveInteger(value.parentId)) && isNonEmptyString(value.branchId) && isNonNegativeFinite(value.timestamp)
+	); }
 function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): boolean {
 	if (!projection.activeLeaves.every((path) => isMainLeaf(ast, projection, path))) return false;
 	if (!Object.keys(projection.spawns).every((path) => nodeAt(ast, path)?.kind === "map" && concreteMapPathValid(ast, projection, path))) return false;
 	if (![...Object.keys(projection.inputs), ...Object.keys(projection.results)].every((path) => semanticStateExists(ast, projection, path))) return false;
 	if (!projection.pendingActions.every((pending) => {
 		const state = actionStateFor(ast, projection, pending.actionUid.state);
-		return state !== undefined && matchesDeclaredUid(pending.actionUid, state.action.uid)
+		return (
+				state !== undefined && matchesDeclaredUid(pending.actionUid, state.action.uid)
 			&& pending.invokeSeqId <= pending.seqId && pending.seqId <= projection.seqId
 			&& (pending.gateSeqId === undefined || pending.gateSeqId <= projection.seqId)
-			&& projection.stateVisits[actionUidKey(pending.actionUid)] === pending.visitId;
+			&& projection.stateVisits[actionUidKey(pending.actionUid)] === pending.visitId
+			);
 	})) return false;
 	if (!Object.values(projection.openUserInteractions).every((interaction) => {
 		const state = actionStateFor(ast, projection, interaction.opened.actionUid.state);
-		return state?.action.kind === "user" && matchesDeclaredUid(interaction.opened.actionUid, state.action.uid)
-			&& interaction.opened.seqId <= projection.seqId && interaction.opened.phaseSeqId <= interaction.opened.seqId;
+		return (
+				state?.action.kind === "user" && matchesDeclaredUid(interaction.opened.actionUid, state.action.uid)
+			&& interaction.opened.seqId <= projection.seqId && interaction.opened.phaseSeqId <= interaction.opened.seqId
+			);
 	})) return false;
 	if (!Object.entries(projection.actors).every(([key, endpoint]) => key === endpoint.occurrence && endpointMatchesAst(ast, projection, endpoint))) return false;
 	if (!Object.entries(projection.actorPools).every(([key, endpoint]) => key === endpoint.occurrence && poolMatchesAst(ast, projection, endpoint))) return false;
 	if (!Object.values(projection.pendingActorCalls).every((call) => {
 		const node = producerStateFor(ast, projection, call.callerState);
 		const messageIds = call.kind === "singleton" ? [call.messageId] : call.messageIds;
-		return (node?.kind === "call" || node?.kind === "callBatch") && projectedEndpoint(projection, call.occurrence) !== undefined
+		return (
+				(node?.kind === "call" || node?.kind === "callBatch") && projectedEndpoint(projection, call.occurrence) !== undefined
 			&& messageIds.every((messageId) => {
 				const message = projection.liveActorMessages[messageId];
 				return message?.callId === call.callId && messageCoordinatesMatchAst(ast, projection, message);
-			});
+			})
+			);
 	})) return false;
 	const referencedMessageIds = new Set<string>();
 	const operationalMessageIds: string[] = [];
@@ -369,7 +442,9 @@ function isMainLeaf(ast: ChartAst, projection: BranchProjection, path: string): 
 	return node.kind !== "compound" && node.kind !== "region" && node.kind !== "parallel";
 }
 function semanticStateExists(ast: ChartAst, projection: BranchProjection, path: string): boolean {
-	return (nodeAt(ast, path) !== undefined || actorContextForState(ast, path) !== undefined) && concreteMapPathValid(ast, projection, path);
+	return (
+		(nodeAt(ast, path) !== undefined || actorContextForState(ast, path) !== undefined) && concreteMapPathValid(ast, projection, path)
+	);
 }
 function actionStateFor(ast: ChartAst, projection: BranchProjection, path: string) {
 	if (!concreteMapPathValid(ast, projection, path)) return undefined;
@@ -387,14 +462,16 @@ function endpointMatchesAst(ast: ChartAst, projection: BranchProjection, endpoin
 	if (!endpointIdentityMatches(ast, declaration, endpoint, projection)) return false;
 	const context = actorContextForState(ast, actorStatePath(endpoint.occurrence, endpoint.currentState));
 	const current = endpoint.currentMessageId === undefined ? undefined : projection.liveActorMessages[endpoint.currentMessageId];
-	return context !== undefined && context.declaration.path === declaration.path && context.occurrence === endpoint.occurrence
+	return (
+		context !== undefined && context.declaration.path === declaration.path && context.occurrence === endpoint.occurrence
 		&& new Set(endpoint.mailbox).size === endpoint.mailbox.length
 		&& endpoint.mailbox.every((messageId) => {
 			const message = projection.liveActorMessages[messageId];
 			return message?.status === "queued" && messageCoordinatesMatchAst(ast, projection, message);
 		})
 		&& (endpoint.currentMessageId === undefined || (!endpoint.mailbox.includes(endpoint.currentMessageId)
-			&& current !== undefined && current.status !== "queued" && current.status !== "settled" && messageCoordinatesMatchAst(ast, projection, current)));
+			&& current !== undefined && current.status !== "queued" && current.status !== "settled" && messageCoordinatesMatchAst(ast, projection, current)))
+	);
 }
 function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: ProjectedActorPoolOccurrence): boolean {
 	const declaration = ast.actors[endpoint.declaration];
@@ -416,11 +493,13 @@ function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: P
 			workerMessages.add(worker.currentMessageId);
 		}
 	}
-	return new Set(endpoint.mailbox).size === endpoint.mailbox.length
+	return (
+		new Set(endpoint.mailbox).size === endpoint.mailbox.length
 		&& endpoint.mailbox.every((messageId) => {
 			const message = projection.liveActorMessages[messageId];
 			return message?.status === "queued" && messageCoordinatesMatchAst(ast, projection, message);
-		});
+		})
+	);
 }
 function endpointIdentityMatches(ast: ChartAst, declaration: ChartAst["actors"][string], endpoint: ProjectedActorEndpointOccurrence, projection: BranchProjection): boolean {
 	if (declaration.owner === undefined) {
@@ -434,8 +513,10 @@ function endpointIdentityMatches(ast: ChartAst, declaration: ChartAst["actors"][
 		} else if (!concreteMapPathValid(ast, projection, endpoint.owner)) return false;
 	}
 	const logical = actorOccurrencePath(declaration, endpoint.owner);
-	return endpoint.logicalOccurrence === logical && actorLogicalOccurrencePath(endpoint.occurrence, endpoint.generation) === logical
-		&& endpoint.occurrence === actorGenerationPath(logical, endpoint.generation);
+	return (
+		endpoint.logicalOccurrence === logical && actorLogicalOccurrencePath(endpoint.occurrence, endpoint.generation) === logical
+		&& endpoint.occurrence === actorGenerationPath(logical, endpoint.generation)
+	);
 }
 function concreteMapPathValidForOwner(projection: BranchProjection, owner: string, declarationOwner: string): boolean {
 	if (templatePath(owner) !== declarationOwner || lastSegmentKey(owner) === undefined) return false;
@@ -505,14 +586,16 @@ function isExactRecord(value: unknown, required: readonly string[], optional: re
 }
 function isOneOf(value: unknown, values: readonly string[]): value is string { return typeof value === "string" && values.includes(value); }
 function sameContract(left: ProjectionContract, right: ProjectionContract): boolean {
-	return left.projectorVersion === right.projectorVersion && left.astDigest === right.astDigest && left.selectorKey === right.selectorKey;
+	return (
+		left.projectorVersion === right.projectorVersion && left.astDigest === right.astDigest && left.selectorKey === right.selectorKey
+	);
 }
 
 function canonicalJson(value: unknown): string {
 	if (value === null) return "null";
 	if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
 	if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : "null";
-	if (Array.isArray(value)) return `[${value.map((entry) => entry === undefined ? "null" : canonicalJson(entry)).join(",")}]`;
+	if (Array.isArray(value)) return `[${value.map((entry) => (entry === undefined ? "null" : canonicalJson(entry))).join(",")}]`;
 	if (isRecord(value)) {
 		return `{${Object.keys(value).sort().filter((key) => value[key] !== undefined).map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
 	}

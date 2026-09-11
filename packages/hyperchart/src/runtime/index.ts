@@ -1,5 +1,5 @@
 export type { Runtime } from "./runtime.js";
-export type { AgentExecutor, EmitCompletion } from "./generic/agent_executor.js";
+export type { AgentExecutor, EmitAgentOutcome } from "./generic/agent_executor.js";
 export { checkArtifactFile, resolveArtifactValue, serializeEnvValue } from "./generic/artifacts.js";
 export { materializeWorkspaceFromPins } from "./generic/artifact_workspace.js";
 export type { RenderedArtifact } from "../core/machine.js";
@@ -73,7 +73,7 @@ export type { CompletionSink, FinishParams } from "./generic/finish_protocol.js"
 export {
 	buildArtifactFeedbackPrompt,
 	buildNudgePrompt,
-	buildRejectPrompt,
+	buildRecoveryPrompt,
 	buildResumePrompt,
 	buildTaskPrompt,
 	formatCompletion,
@@ -115,10 +115,10 @@ export {
 	effectInvokeSeqId,
 	previewText,
 	resolveReads,
-	runAcceptanceLoop,
+	evaluateAgentTurn,
 	sessionKey,
 	shouldRecoverRestoredFinish,
 	stringifyToolArgs,
 	validateDeclaredReadPaths,
 } from "./generic/executor_helpers.js";
-export type { AcceptanceLoopOptions, SessionPlan } from "./generic/executor_helpers.js";
+export type { EvaluateAgentTurnOptions, SessionPlan } from "./generic/executor_helpers.js";

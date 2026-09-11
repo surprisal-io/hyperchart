@@ -24,7 +24,6 @@ import type {
 	DurableRecordDraft,
 	Effect,
 	GuardOutcome,
-	GuardRefAst,
 	MachineEvent,
 	StateActionAst,
 	StateCst,
@@ -109,17 +108,16 @@ function semanticDownstreamAst(): ChartAst {
 	return result.ast;
 }
 
-function userAst(validate = false): ChartAst {
+function userAst(): ChartAst {
 	const result = normalizeChartConfig(
 		chart({
 			kind: "chart",
-			id: validate ? "validated-user-chart" : "user-chart",
+			id: "user-chart",
 			initial: "ask",
 			states: {
 				ask: {
 					kind: "state",
 					action: user({ prompt: "Approve?", options: ["APPROVED"] }),
-					...(validate ? { validate: tsImport("./checks.js", "approved") } : {}),
 					transitions: { APPROVED: "done" },
 				},
 				done: final(),
@@ -171,8 +169,7 @@ function transitionRefAst(): ChartAst {
 				score: {
 					kind: "state",
 					input: { hypothesisId: z.string() },
-					action: agent("scorer"),
-					validate: tsImport("./checks.js", "ok"),
+					action: agent("scorer", { validation: { guard: tsImport("./checks.js", "ok") } }),
 					transitions: { DONE: "done" },
 				},
 				done: final(),
@@ -183,7 +180,7 @@ function transitionRefAst(): ChartAst {
 	return parsed.ast;
 }
 
-function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartAst {
+function validatedAst(mode?: "nudge" | "restart", budget?: number): ChartAst {
 	const result = normalizeChartConfig(
 		chart({
 			kind: "chart",
@@ -192,10 +189,12 @@ function validatedAst(onReject?: "resume" | "restart", retries?: number): ChartA
 			states: {
 				work: {
 					kind: "state",
-					action: agent("coder"),
-					validate: tsImport("./checks.js", "testsPass"),
-					...(onReject === undefined ? {} : { onReject }),
-					...(retries === undefined ? {} : { retries }),
+					action: agent("coder", {
+						validation: {
+							guard: tsImport("./checks.js", "testsPass"),
+					...(budget === undefined ? {} : { onFail: mode === "restart" ? { nudge: 0, restart: budget } : { nudge: budget, restart: 0 } }),
+						},
+					}),
 					transitions: { DONE: "done" },
 				},
 				done: final(),
@@ -324,11 +323,11 @@ function mapAst(concurrency?: number): ChartAst {
 
 const PLAN_OUTPUT = { chapters: { intro: { title: "Intro" }, body: { title: "Body" } } };
 
-const validationPolicies = new Map<string, GuardRefAst | null>();
+const actionDefinitions = new Map<string, StateActionAst>();
 function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 	const state = ast.states[stateId];
 	if (state?.kind !== "state") throw new Error(`state ${stateId} should be actionable`);
-	validationPolicies.set(`${state.action.uid.chart}:${stateId}`, state.validate ?? null);
+	actionDefinitions.set(`${state.action.uid.chart}:${stateId.replace(/#[^.]+/g, "")}`, state.action);
 	return state.action.uid;
 }
 
@@ -341,13 +340,20 @@ function complete(uid: ActionUID, eventType: string, seqId = 1): DurableLogRecor
 }
 
 function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
-	return { type: "state_action", kind: "invoke", validation: validationPolicies.get(`${uid.chart}:${uid.state.replace(/#[^.]+/g, "")}`) ?? null, sessionId: "session-id", actionUid: uid, definition: definitionForUid(uid), ...meta(seqId) };
+	return { type: "state_action", kind: "invoke",
+		sessionId: "session-id",
+		actionUid: uid,
+		definition: definitionForUid(uid),
+		...meta(seqId),
+	};
 }
 
 function definitionForUid(uid: ActionUID): StateActionAst {
+	const recorded = actionDefinitions.get(`${uid.chart}:${uid.state.replace(/#[^.]+/g, "")}`);
+	if (recorded !== undefined) return { ...recorded, uid };
 	if (uid.action === "script") return { kind: "script", uid, command: "test", args: [] };
 	if (uid.action === "user") return { kind: "user", uid, prompt: { kind: "template", strings: [""], refs: [] }, options: [] };
-	return { kind: "agent", uid, name: "test-worker" };
+	return { kind: "agent", uid, name: "test-worker", onFail: { nudge: 2, restart: 1 } };
 }
 
 function timerFired(uid: ActionUID, seqId = 1): DurableLogRecord {
@@ -452,7 +458,7 @@ describe("execution loop", () => {
 								actionUid: uid,
 							}),
 						);
-						events.push({ kind: "agent", effectId: effect.id, event: doneEvent });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: doneEvent } });
 						break;
 					case "durable_records":
 						expect(effect.records).toEqual([
@@ -520,7 +526,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "READY", output: { batch: ["alpha", "beta"] } } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "READY", output: { batch: ["alpha", "beta"] } } },
+						});
 					} else if (effect.kind === "durable_records") {
 						const ack = durableRecordsAdded(effect.records, effect.id);
 						if (ack.kind !== "durable_records_added") throw new Error("expected durable ack");
@@ -551,8 +559,13 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						events.push(effect.actionUid.state === "select"
-							? { kind: "agent", effectId: effect.id, event: { type: "SELECTED", output: { decision: { hypothesisId: "hypothesis-7" } } } }
-							: { kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+							? { kind: "agent", effectId: effect.id,
+										outcome: {
+											kind: "completed",
+											event: { type: "SELECTED", output: { decision: { hypothesisId: "hypothesis-7" } } } },
+									}
+								: { kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "DONE" } } },
+						);
 					} else if (effect.kind === "validate") {
 						events.push({ kind: "validated", effectId: effect.id, outcome: true });
 					} else if (effect.kind === "durable_records") {
@@ -579,7 +592,9 @@ describe("execution loop", () => {
 			events,
 			onRunEffects(effects) {
 				for (const effect of effects) {
-					if (effect.kind === "agent") events.push({ kind: "agent", effectId: effect.id, event: { type: "SELECTED" } });
+					if (effect.kind === "agent") events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "SELECTED" } },
+						});
 					else if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
 				}
 			},
@@ -605,36 +620,6 @@ describe("execution loop", () => {
 		await expect(loop(runtime)).rejects.toThrow("Event 'NOPE' is not allowed");
 	});
 
-	it("gives each validation-retry user phase a fresh opened-fact gate seqId", async () => {
-		const ast = userAst(true);
-		const uid = actionUid(ast, "ask");
-		const events: MachineEvent[] = [];
-		const gateSeqIds: number[] = [];
-		let validationRound = 0;
-		const runtime = new MockRuntime({
-			ast, logs: [invoke(uid)], events,
-			onRunEffects(effects) {
-				for (const effect of effects) {
-					if (effect.kind === "validate") {
-						validationRound++;
-						events.push({ kind: "validated", effectId: effect.id, outcome: validationRound === 1 ? { ok: false, reason: "not yet" } : true });
-					} else if (effect.kind === "durable_records") {
-						const ack = durableRecordsAdded(effect.records, effect.id); if (ack.kind !== "durable_records_added") throw new Error("expected durable ack"); events.push(ack);
-						const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
-						if (opened?.type === "user_interaction" && opened.kind === "opened") {
-							gateSeqIds.push(opened.seqId);
-							events.push(durableRecordsAdded([{ type: "user_interaction", kind: "resolved", gateSeqId: opened.seqId, actionUid: opened.actionUid, event: { type: "APPROVED" } }], `external:${opened.seqId}`));
-						}
-					}
-				}
-			},
-		});
-		const state = await loop(runtime);
-		expect(gateSeqIds).toHaveLength(2);
-		expect(gateSeqIds[1]).toBeGreaterThan(gateSeqIds[0]!);
-		expect(state.projection.activeLeaves).toEqual(["done"]);
-	});
-
 	it("runs two agent states in sequence, machine invoking each action itself", async () => {
 		const ast = twoStepAst();
 		const events: MachineEvent[] = [];
@@ -650,7 +635,9 @@ describe("execution loop", () => {
 					case "agent": {
 						sequence.push(`agent:${effect.actionUid.state}`);
 						const eventType = effect.actionUid.state === "first" ? "FIRST_DONE" : "SECOND_DONE";
-						events.push({ kind: "agent", effectId: effect.id, event: { type: eventType } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: eventType } },
+						});
 						break;
 					}
 					case "durable_records": {
@@ -684,13 +671,13 @@ describe("execution loop", () => {
 
 	function runValidatedChart(
 		outcomes: GuardOutcome[],
-		options: { onReject?: "resume" | "restart"; claim?: string; retries?: number } = {},
+		options: { mode?: "nudge" | "restart"; claim?: string; budget?: number } = {},
 	) {
-		const ast = validatedAst(options.onReject, options.retries);
+		const ast = validatedAst(options.mode, options.budget);
 		const uid = actionUid(ast, "work");
 		const events: MachineEvent[] = [];
 		const validations: Extract<Effect, { kind: "validate" }>[] = [];
-		const rejections: Extract<Effect, { kind: "rejected" }>[] = [];
+		const retries: Extract<Effect, { kind: "agent" }>[] = [];
 		const runtime = new MockRuntime({
 			ast,
 			logs: [invoke(uid)],
@@ -698,7 +685,10 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: options.claim ?? "DONE" } });
+						if (effect.recovery !== undefined) retries.push(effect);
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: options.claim ?? "DONE" } },
+						});
 					}
 					if (effect.kind === "validate") {
 						validations.push(effect);
@@ -706,27 +696,22 @@ describe("execution loop", () => {
 						if (outcome === undefined) throw new Error("unexpected validate effect");
 						events.push({ kind: "validated", effectId: effect.id, outcome });
 					}
-					if (effect.kind === "rejected") {
-						rejections.push(effect);
-						// The action is still in the same visit, but the rejected phase has its own seqId.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
-					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
 					}
 				}
 			},
 		});
-		return { runtime, validations, rejections, run: loop(runtime) };
+		return { runtime, validations, retries, run: loop(runtime) };
 	}
 
 	it("accepts a completion claim when validation passes", async () => {
-		const { validations, rejections, run } = runValidatedChart([true]);
+		const { validations, retries, run } = runValidatedChart([true]);
 
 		const state = await run;
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(rejections).toEqual([]);
+		expect(retries).toEqual([]);
 		expect(validations).toHaveLength(1);
 		expect(validations[0]).toEqual(
 			expect.objectContaining({
@@ -738,20 +723,20 @@ describe("execution loop", () => {
 	});
 
 	it("rejects a failed claim with feedback and accepts the retry", async () => {
-		const { runtime, rejections, run } = runValidatedChart([{ ok: false, reason: "tests are failing" }, true]);
+		const { runtime, retries, run } = runValidatedChart([{ ok: false, reason: "tests are failing" }, true]);
 
 		const state = await run;
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(rejections).toHaveLength(1);
-		expect(rejections[0]).toEqual(
+		expect(retries).toHaveLength(1);
+		expect(retries[0]).toEqual(
 			expect.objectContaining({
-				kind: "rejected",
-				id: "validated-chart:work:agent:1:3",
-				onReject: "resume",
-				reason: "tests are failing",
-				validationAttempts: 1,
-				invocation: expect.objectContaining({ kind: "agent", id: "validated-chart:work:agent:1:1" }),
+				kind: "agent",
+				recovery: expect.objectContaining({
+					mode: "nudge",
+					scope: "validation",
+					failure: expect.objectContaining({ message: "tests are failing" }),
+			}),
 			}),
 		);
 		// The whole validation history is durable: claim, verdict, retry, verdict.
@@ -761,45 +746,112 @@ describe("execution loop", () => {
 		expect(records.map((record) => (record.type === "state_action" ? record.kind : record.type))).toEqual([
 			"complete",
 			"validated",
+			"retry",
 			"complete",
 			"validated",
 		]);
 	});
 
-	it("carries the chart-declared restart mode in the rejected effect", async () => {
-		const { rejections, run } = runValidatedChart([false, true], { onReject: "restart" });
+	it("carries the chart-declared restart mode in the retry effect", async () => {
+		const { retries, run } = runValidatedChart([false, true], { mode: "restart", budget: 1 });
 
 		await run;
 
-		expect(rejections).toHaveLength(1);
-		expect(rejections[0]).toEqual(expect.objectContaining({ kind: "rejected", onReject: "restart" }));
-		expect(rejections[0]?.reason).toBeUndefined();
+		expect(retries).toHaveLength(1);
+		expect(retries[0]?.recovery).toMatchObject({ mode: "restart", scope: "validation" });
+	});
+
+	it("uses the default nudge → restart → nudge order with durable sessions and counters", async () => {
+		const { runtime, retries, run } = runValidatedChart([false, false, false, false, false, false]);
+
+		const state = await run;
+
+		expect(state.projection.failure).toMatchObject({ origin: "work" });
+		expect(retries.map((effect) => effect.recovery?.mode)).toEqual(["nudge", "nudge", "restart", "nudge", "nudge"]);
+		expect(
+			retries.map((effect) => effect.recovery && [effect.recovery.nudgeAttempt, effect.recovery.restartAttempt]),
+		).toEqual([
+			[1, 0],
+			[2, 0],
+			[0, 1],
+			[1, 1],
+			[2, 1],
+		]);
+		expect(retries[0]?.sessionId).toBe(retries[1]?.sessionId);
+		expect(retries[2]?.sessionId).not.toBe(retries[1]?.sessionId);
+		expect(retries[3]?.sessionId).toBe(retries[2]?.sessionId);
+		const retryRecords = runtime.effectBatches
+			.flat()
+			.flatMap((effect) =>
+				effect.kind === "durable_records"
+					? effect.records.filter((record) => record.type === "state_action" && record.kind === "retry")
+					: [],
+			);
+		expect(retryRecords).toHaveLength(5);
 	});
 
 	it("exhausts the retry budget into global failure and cancels the agent", async () => {
-		// retries: 1 — one rejected round may be retried; the second rejection is terminal.
-		const { runtime, rejections, run } = runValidatedChart([{ ok: false, reason: "no" }, false], { retries: 1 });
+		// A one-nudge budget retries one rejected round; the second rejection is terminal.
+		const { runtime, retries, run } = runValidatedChart([{ ok: false, reason: "no" }, false], { budget: 1 });
 
 		const state = await run;
 
 		expect(state.projection.activeLeaves).toEqual(["work"]);
-		expect(state.projection.failure).toMatchObject({ origin: "work", error: "Validation retry budget exhausted" });
-		// only the first rejection produced feedback; the terminal one wrote failure intent
-		expect(rejections).toHaveLength(1);
-		expect(rejections[0]).toMatchObject({ validationAttempts: 1 });
+		expect(state.projection.failure).toMatchObject({ origin: "work", error: "Agent completion was rejected by validation",
+		});
+		expect(retries).toHaveLength(1);
+		expect(retries[0]?.recovery).toMatchObject({ nudgeAttempt: 1 });
 		// failure terminalizes immediately and emits only a best-effort runtime cancellation
 		expect(runtime.effectBatches.flat().filter((effect) => effect.kind === "cancel")).toHaveLength(1);
 	});
 
 	it("lets reserved FAILED bypass validation and enter global fail-fast", async () => {
-		const { validations, rejections, run } = runValidatedChart([], { claim: "FAILED" });
+		const { validations, retries, run } = runValidatedChart([], { claim: "FAILED" });
 
 		const state = await run;
 
 		expect(state.projection.activeLeaves).toEqual(["work"]);
-		expect(state.projection.failure).toMatchObject({ origin: "work", error: "Action emitted FAILED" });
-		expect(rejections).toEqual([]);
+		expect(state.projection.failure).toMatchObject({ origin: "work", error: "Agent emitted FAILED" });
+		expect(retries).toEqual([]);
 		expect(validations).toEqual([]);
+	});
+
+	it("recovers a retryable agent failure through a durable general-scope nudge", async () => {
+		const ast = validatedAst();
+		const uid = actionUid(ast, "work");
+		const events: MachineEvent[] = [];
+		let turns = 0;
+		const runtime = new MockRuntime({
+			ast,
+			logs: [invoke(uid)],
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						turns += 1;
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							outcome:
+								turns === 1
+									? { kind: "failed", failure: { kind: "incomplete", retryable: true, message: "missing finish" } }
+									: { kind: "completed", event: { type: "FAILED", error: "stop after proving recovery" } },
+						});
+					}
+					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+		expect(state.projection.failure).toMatchObject({ error: "stop after proving recovery" });
+		const recovery = runtime.effectBatches
+			.flat()
+			.find((effect) => effect.kind === "agent" && effect.recovery !== undefined);
+		expect(recovery).toMatchObject({
+			kind: "agent",
+			recovery: { mode: "nudge", scope: "general", failure: { kind: "incomplete" } },
+		});
 	});
 
 	it("resumes a durable semantic gate run by invoking only the unresolved downstream action", async () => {
@@ -816,7 +868,9 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						agentStates.push(effect.actionUid.state);
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DOWNSTREAM_DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DOWNSTREAM_DONE" } },
+						});
 					}
 					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
 				}
@@ -880,7 +934,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -972,7 +1028,7 @@ describe("execution loop", () => {
 							effect.actionUid.state === "plan"
 								? { type: "PLAN_READY", output: { steps: ["a", "b"] } }
 								: { type: "BUILT" };
-						events.push({ kind: "agent", effectId: effect.id, event: reply });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: reply } });
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1045,7 +1101,9 @@ describe("execution loop", () => {
 					if (effect.kind === "agent") {
 						outputs[effect.actionUid.state] = effect.artifacts;
 						readsSeen[effect.actionUid.state] = effect.reads;
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1108,16 +1166,20 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "writer") {
 						writerPaths.push(effect.artifacts?.[0]?.path ?? "");
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
 						const eventType = gateEvents.shift();
 						if (eventType === undefined) throw new Error("unexpected gate run");
-						events.push({ kind: "agent", effectId: effect.id, event: { type: eventType } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: eventType } },
+						});
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "reader") {
 						readerPath = effect.reads?.[0]?.path;
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1143,8 +1205,7 @@ describe("execution loop", () => {
 					work: {
 						kind: "state",
 						input: { feedback: z.string().default("none") },
-						onReenter: resume(t`Apply feedback: ${input("feedback")}`),
-						action: agent("worker"),
+						action: agent("worker", { reentry: { resume: t`Apply feedback: ${input("feedback")}` } }),
 						transitions: { DONE: "gate" },
 					},
 					gate: {
@@ -1167,14 +1228,19 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "work") {
 						workEffects.push(effect);
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
 						gateRuns += 1;
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
-							event: gateRuns === 1 ? { type: "AGAIN", output: { feedback: "tighten" } } : { type: "PASS" },
+							outcome: {
+								kind: "completed",
+								event: gateRuns === 1 ? { type: "AGAIN", output: { feedback: "tighten" } } : { type: "PASS" },
+						},
 						});
 					}
 					if (effect.kind === "durable_records") {
@@ -1232,14 +1298,17 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state.endsWith(".work")) {
 						workerEffects.push(effect);
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
 						gateRuns += 1;
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
-							event: gateRuns === 1 ? { type: "AGAIN", output: { items: { a: 2, b: 3 } } } : { type: "PASS" },
+							outcome: {
+								kind: "completed",
+								event: gateRuns === 1 ? { type: "AGAIN", output: { items: { a: 2, b: 3 } } } : { type: "PASS" },
+						},
 						});
 					}
 					if (effect.kind === "durable_records") {
@@ -1268,8 +1337,7 @@ describe("execution loop", () => {
 				states: {
 					work: {
 						kind: "state",
-						onReenter: resume("Continue from prior context."),
-						action: agent("worker"),
+						action: agent("worker", { reentry: { resume: "Continue from prior context." } }),
 						transitions: { DONE: "gate" },
 					},
 					gate: { kind: "state", action: agent("gate"), transitions: { AGAIN: "work" } },
@@ -1310,10 +1378,9 @@ describe("execution loop", () => {
 				states: {
 					writer: {
 						kind: "state",
-						action: agent("writer", { artifacts: { out: artifact(t`out/${visit()}.json`) } }),
-						validate: tsImport("./checks.js", "testsPass"),
-						onReject: "restart",
-						retries: 1,
+						action: agent("writer", { artifacts: { out: artifact(t`out/${visit()}.json`) },
+							validation: { guard: tsImport("./checks.js", "testsPass"), onFail: { nudge: 0, restart: 1 } },
+						}),
 						transitions: { DONE: "done" },
 					},
 					done: final(),
@@ -1332,11 +1399,9 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "writer") {
 						writerPaths.push(effect.artifacts?.[0]?.path ?? "");
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
-					}
-					if (effect.kind === "rejected") {
-						writerPaths.push(effect.invocation.kind === "agent" ? (effect.invocation.artifacts?.[0]?.path ?? "") : "");
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "validate") {
 						const outcome = verdicts.shift();
@@ -1409,7 +1474,7 @@ describe("execution loop", () => {
 							effect.actionUid.state === "plan"
 								? { type: "PLAN_READY", output: { dir: "artifacts" } }
 								: { type: "DONE" };
-						events.push({ kind: "agent", effectId: effect.id, event: reply });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: reply } });
 					}
 					if (effect.kind === "script") {
 						if (effect.actionUid.state === "normalize") scriptEffect = effect;
@@ -1483,7 +1548,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "PLAN_READY", output: { steps: [] } } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "PLAN_READY", output: { steps: [] } } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1507,7 +1574,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1570,7 +1639,9 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						buildTask = effect.task;
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "BUILT" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "BUILT" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1587,7 +1658,10 @@ describe("execution loop", () => {
 
 	it("throws when the machine reports an error output", async () => {
 		const ast = linearAst();
-		const events: MachineEvent[] = [{ kind: "agent", effectId: "test-chart:start:agent:1:1", event: { type: "NOPE" } }];
+		const events: MachineEvent[] = [{ kind: "agent", effectId: "test-chart:start:agent:1:1",
+				outcome: { kind: "completed", event: { type: "NOPE" } },
+			},
+		];
 		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast))], events });
 
 		await expect(loop(runtime)).rejects.toThrow("No transition found for event type NOPE");
@@ -1596,7 +1670,10 @@ describe("execution loop", () => {
 	it("ignores a completion for an action that is not pending", async () => {
 		const ast = linearAst();
 		// A parseable effect id that matches no pending action: a completion that lost a race.
-		const events: MachineEvent[] = [{ kind: "agent", effectId: "test-chart:other:agent:1:7", event: { type: "DONE" } }];
+		const events: MachineEvent[] = [{ kind: "agent", effectId: "test-chart:other:agent:1:7",
+				outcome: { kind: "completed", event: { type: "DONE" } },
+			},
+		];
 		const runtime = new MockRuntime({ ast, logs: [invoke(actionUid(ast))], events });
 
 		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
@@ -1671,7 +1748,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1702,14 +1781,18 @@ describe("execution loop", () => {
 						workEffectId = effect.id;
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "escalated") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "HANDLED" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "HANDLED" } },
+						});
 					}
 					if (effect.kind === "timer") {
 						events.push({ kind: "timer", effectId: effect.id });
 					}
 					if (effect.kind === "cancel") {
 						// The killed worker manages to report a completion after losing the race.
-						events.push({ kind: "agent", effectId: workEffectId, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: workEffectId,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1759,7 +1842,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "escalated") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "HANDLED" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "HANDLED" } },
+						});
 					}
 					if (effect.kind === "timer") events.push({ kind: "timer", effectId: effect.id });
 					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1802,7 +1887,7 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						sequence.push(`agent:${effect.actionUid.state}`);
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "durable_records") {
 						for (const record of effect.records) {
@@ -1850,7 +1935,9 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						// analyze has no local route; the compound catches this domain event.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "ESCALATE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "ESCALATE" } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1891,7 +1978,7 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						invoked.push(effect.actionUid.state);
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -1918,7 +2005,9 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "audit.security.scan") {
 						// security raises a domain abort; perf's agent keeps hanging and must be killed.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "ESCALATE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "ESCALATE" } },
+						});
 					}
 					if (effect.kind === "cancel") {
 						cancels.push(effect);
@@ -1964,9 +2053,8 @@ describe("execution loop", () => {
 				states: {
 					work: {
 						kind: "state",
-						action: agent("coder"),
+						action: agent("coder", { validation: { guard: tsImport("./checks.js", "testsPass") } }),
 						after: { delayMs: 500, target: "escalated" },
-						validate: tsImport("./checks.js", "testsPass"),
 						transitions: { DONE: "done" },
 					},
 					done: final(),
@@ -1985,7 +2073,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "DONE" } },
+						});
 					}
 					if (effect.kind === "validate") {
 						events.push({ kind: "validated", effectId: effect.id, outcome: true });
@@ -2014,11 +2104,13 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "plan") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", output: PLAN_OUTPUT } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "OK", output: PLAN_OUTPUT } },
+						});
 					}
 					if (effect.kind === "agent" && effect.actionUid.state !== "plan") {
 						tasks.push(effect.task ?? "");
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -2052,7 +2144,9 @@ describe("execution loop", () => {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						const output = effect.actionUid.state === "plan" ? { output: PLAN_OUTPUT } : {};
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", ...output } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "OK", ...output } },
+						});
 					}
 					if (effect.kind === "durable_records") {
 						events.push(durableRecordsAdded(effect.records, effect.id));
@@ -2079,11 +2173,15 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent" && effect.actionUid.state === "plan") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK", output: PLAN_OUTPUT } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "OK", output: PLAN_OUTPUT } },
+						});
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "chapters#intro.author") {
 						// intro raises a domain abort; body's agent keeps hanging and must be killed.
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "ESCALATE" } });
+						events.push({ kind: "agent", effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "ESCALATE" } },
+						});
 					}
 					if (effect.kind === "cancel" && effect.actionUid !== undefined) {
 						cancels.push(effect.actionUid.state);
@@ -2156,11 +2254,12 @@ describe("execution loop", () => {
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
-							event: { type: "OK", output: { chapters: PLAN_OUTPUT.chapters } },
+							outcome: { kind: "completed", event: { type: "OK", output: { chapters: PLAN_OUTPUT.chapters } },
+						},
 						});
 					} else if (effect.kind === "agent") {
 						if (effect.actionUid.state === "gather") reads = effect.reads ?? [];
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "script") {
 						files = typeof effect.env?.FILES === "string" ? effect.env.FILES : "";
@@ -2242,7 +2341,9 @@ describe("execution loop", () => {
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
-							event: {
+							outcome: {
+								kind: "completed",
+								event: {
 								type: "OK",
 								output: {
 									sections: {
@@ -2251,9 +2352,10 @@ describe("execution loop", () => {
 									},
 								},
 							},
+						},
 						});
 					} else if (effect.kind === "agent") {
-						events.push({ kind: "agent", effectId: effect.id, event: { type: "OK" } });
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "script") {
 						joined.set(effect.actionUid.state, typeof effect.env?.FILES === "string" ? effect.env.FILES : "");

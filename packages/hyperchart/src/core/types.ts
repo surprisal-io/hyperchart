@@ -70,20 +70,21 @@ export type ReplyOutput<
 	P extends ProtocolCst,
 	M extends keyof P,
 	R extends string = ReplyEvents<P, M>,
-> = P[M] extends { replies: infer Replies extends Record<string, SchemaCst> }
+> = P[M] extends { replies: infer Replies extends Record<string, SchemaCst>;
+}
 	? R extends keyof Replies
 		? InferSchema<Replies[R]>
 		: never
 	: P[M] extends { reply: infer S }
 		? InferSchema<S>
-		: void;
+		: undefined;
 export type ReplyUnion<P extends ProtocolCst, M extends keyof P> = P[M] extends {
 	replies: infer Replies extends Record<string, SchemaCst>;
 }
 	? { [R in keyof Replies]: InferSchema<Replies[R]> }[keyof Replies]
 	: P[M] extends { reply: infer S }
 		? InferSchema<S>
-		: void;
+		: undefined;
 
 export type ActorPlacement<T> = T extends string | number | boolean | null
 	? T | InputRef<T>
@@ -114,16 +115,21 @@ type ActorValueAt<T, Path extends string> = Path extends `${infer Head}.${infer 
 type RefSelected<T, Path> = Path extends string ? ActorValueAt<T, Path> : T;
 
 export type ActorInputRefMarker<Path extends string | undefined> = { readonly __actorInputPath: Path };
-export type ActorMessageInputRefMarker<Message extends string, Path extends string | undefined> = { readonly __actorMessage: Message; readonly __actorMessagePath: Path };
-export type ActorResultRefMarker<State extends string, Path extends string | undefined> = { readonly __actorResultState: State; readonly __actorResultPath: Path };
-export type ActorStateInputRefMarker<Name extends string, Path extends string | undefined> = { readonly __actorStateInput: Name; readonly __actorStateInputPath: Path };
-export type ActorArtifactRefMarker<State extends string, Artifact extends string | undefined, Select extends string | undefined> = { readonly __actorArtifactState: State; readonly __actorArtifactName: Artifact; readonly __actorArtifactSelect: Select };
+export type ActorMessageInputRefMarker<Message extends string, Path extends string | undefined> = { readonly __actorMessage: Message; readonly __actorMessagePath: Path;
+};
+export type ActorResultRefMarker<State extends string, Path extends string | undefined> = { readonly __actorResultState: State; readonly __actorResultPath: Path;
+};
+export type ActorStateInputRefMarker<Name extends string, Path extends string | undefined> = { readonly __actorStateInput: Name; readonly __actorStateInputPath: Path;
+};
+export type ActorArtifactRefMarker<State extends string, Artifact extends string | undefined, Select extends string | undefined> = { readonly __actorArtifactState: State; readonly __actorArtifactName: Artifact; readonly __actorArtifactSelect: Select;
+};
 
 /** Authoring-only symbolic capability resolved to the current actor endpoint at placement normalization. */
 export type ActorSelfTarget = Readonly<{ kind: "actorSelf" }>;
 
 type StateSuccessors<Node> = Node extends { kind: "state"; transitions: infer T; after?: infer A }
-	? (T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never) | (A extends { target: infer Target extends string } ? Target : never)
+	?
+			| (T extends Record<string, infer V> ? V extends string ? V : V extends { target: infer Target extends string } ? Target : never : never) | (A extends { target: infer Target extends string } ? Target : never)
 	: Node extends { kind: "send" | "sendBatch"; target: infer Target extends string }
 		? Target
 		: Node extends { kind: "call" | "callBatch"; target: infer Target extends string }
@@ -200,7 +206,8 @@ type SelfSendNodeValid<Node, P extends ProtocolCst, I, S> = Node extends { to: A
 			: false
 	: true;
 
-type ReplyIsValid<Node, Contract, P extends ProtocolCst, I, S> = Contract extends { input: unknown; replies: infer Replies extends Record<string, SchemaCst> }
+type ReplyIsValid<Node, Contract, P extends ProtocolCst, I, S> = Contract extends { input: unknown; replies: infer Replies extends Record<string, SchemaCst>;
+}
 	? Node extends { event: infer Event extends keyof Replies; output: infer Output }
 		? SameShape<ResolveActorValue<Output, P, I, S>, InferSchema<Replies[Event]>>
 		: false
@@ -229,7 +236,8 @@ type AllPathsReachReply<S, Current, Seen extends string = never> = [Current] ext
 		? false
 		: true;
 type MessageAllPathsReply<S, Message extends string> = AllPathsReachReply<S, ReceiveTargets<S, Message>>;
-type ReceiveNodeValid<P extends ProtocolCst, S, Id extends keyof S & string> = S[Id] extends { kind: "receive"; on: infer On }
+type ReceiveNodeValid<P extends ProtocolCst, S, Id extends keyof S & string> = S[Id] extends { kind: "receive"; on: infer On;
+}
 	? Exclude<keyof On, keyof P> extends never
 		? false extends { [Message in keyof On & string]: MessageAllPathsReply<S, Message> }[keyof On & string] ? false : true
 		: false
@@ -258,11 +266,13 @@ type ArtifactPathValues<Artifacts> = Artifacts extends Record<string, infer Arti
 	? Artifact extends { path: infer Path } ? TemplateValues<Path> : TemplateValues<Artifact>
 	: never;
 type ActionValues<Action> = Action extends { kind: "agent" }
-	? TemplateValues<Action extends { task: infer Task } ? Task : never>
+	?
+			| TemplateValues<Action extends { task: infer Task } ? Task : never>
 		| (Action extends { reads: infer Reads } ? Reads : never)
 		| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
 	: Action extends { kind: "script" | "tsImport" }
-		? (Action extends { env: infer Env } ? Env[keyof Env] : never)
+		?
+				| (Action extends { env: infer Env } ? Env[keyof Env] : never)
 			| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
 		: Action extends { kind: "user" }
 			? TemplateValues<Action extends { prompt: infer Prompt } ? Prompt : never>
@@ -305,8 +315,7 @@ export type ProtocolOf<D> = D extends StaticActorDeclaration<infer P, unknown, u
 	? P
 	: D extends StaticActorPoolDeclaration<infer P, unknown, unknown> ? P : never;
 
-export type NonEmptyActorBatch<I> =
-	| readonly [ActorPlacement<I>, ...ActorPlacement<I>[]]
+export type NonEmptyActorBatch<I> = readonly [ActorPlacement<I>, ...ActorPlacement<I>[]]
 	| InputRef<readonly I[] | I[]>;
 
 export type SingleReplyMessageTypes<P extends ProtocolCst> = {
@@ -373,6 +382,23 @@ export type JoinArtifactOfCst = {
 // the definition (markdown file: identity, description, system prompt — not overridable);
 // everything else parameterizes this call. The engine treats model/thinking/tools as opaque
 // overrides of the definition's frontmatter.
+export type RecoveryPolicyCst =
+	| "fail"
+	| Readonly<{
+			/** Additional prompts delivered to the current persisted session. */
+			nudge?: number;
+			/** Fresh durable sessions created after the current session's nudges are exhausted. */
+			restart?: number;
+	  }>;
+
+export type AgentValidationCst = Readonly<{
+	guard: GuardRef;
+	/** Overrides the agent-wide policy only when this guard rejects a completion. */
+	onFail?: RecoveryPolicyCst;
+}>;
+
+export type AgentReentryCst = "restart" | Readonly<{ resume: Templatable }>;
+
 export type AgentActionCst = {
 	kind: "agent";
 	name: string;
@@ -390,6 +416,12 @@ export type AgentActionCst = {
 	// The step's RESULT: the shape of the completion event's payload. Small routing data only —
 	// deliverables go through artifacts.
 	reply?: SchemaCst;
+	/** Default handling for recoverable failures. Omitted resolves to nudge twice, then restart once. */
+	onFail?: RecoveryPolicyCst;
+	/** Optional machine-owned acceptance guard for this agent's completion. */
+	validation?: AgentValidationCst;
+	/** Session behavior when the containing state is entered again. */
+	reentry?: AgentReentryCst;
 };
 
 export type UserActionCst = {
@@ -450,7 +482,11 @@ export type GuardRef =
 
 /** Normalized, replayable guard definition (the runtime normalizer converts templates to AST values). */
 export type GuardRefAst =
-	| GuardRef
+	| {
+			kind: "tsImport";
+			module: string;
+			export: string;
+	  }
 	| {
 			kind: "script";
 			command: string;
@@ -463,11 +499,6 @@ export type GuardRefAst =
 export type GuardOutcome = boolean | { ok: false; reason: string };
 
 // What to do when validation rejects a completion claim: feed the reason back into the still
-// running action ("resume") or discard that validation attempt and start the action fresh ("restart").
-// Either way the action stays pending and nothing is logged — the choice lives in the chart,
-// the runtime just executes it.
-export type OnReject = "resume" | "restart";
-
 export type EventBindingCst = {
 	kind: "event";
 	path?: string;
@@ -568,7 +599,9 @@ const INPUT_REF_KINDS: ReadonlySet<string> = new Set([
 ]);
 
 export function isInputRef(value: unknown): value is InputRef {
-	return typeof value === "object" && value !== null && "kind" in value && typeof value.kind === "string" && INPUT_REF_KINDS.has(value.kind);
+	return (
+		typeof value === "object" && value !== null && "kind" in value && typeof value.kind === "string" && INPUT_REF_KINDS.has(value.kind)
+	);
 }
 
 // A string with interpolated refs, authored as a tagged template:
@@ -595,8 +628,7 @@ export type ValueExpr<T = unknown> =
 	| { readonly [key: string]: ValueExpr }
 	| readonly ValueExpr[];
 
-export type ValueAst =
-	| JsonPrimitive
+export type ValueAst = JsonPrimitive
 	| InputRef
 	| Readonly<{ readonly [key: string]: ValueAst }>
 	| readonly ValueAst[];
@@ -616,13 +648,6 @@ export type ActionStateCst = {
 	input?: Record<string, SchemaCst>;
 	transitions?: TransitionMapCst;
 	after?: AfterCst;
-	validate?: GuardRef;
-	onReject?: OnReject;
-	onReenter?: OnReenterCst;
-	// Rejection budget: how many rejected rounds may be retried. The (retries+1)-th rejection
-	// records global failure intent and terminalizes the run. Requires validate;
-	// omitted = unbounded.
-	retries?: number;
 };
 
 export type TerminalNotificationCst = {
@@ -814,6 +839,15 @@ export type ArtifactOfAst = Readonly<ArtifactOfCst>;
 
 export type JoinArtifactOfAst = Readonly<JoinArtifactOfCst>;
 
+export type RecoveryPolicyAst = Readonly<{ nudge: number; restart: number }>;
+
+export type AgentValidationAst = Readonly<{
+	guard: GuardRefAst;
+	onFail: RecoveryPolicyAst;
+}>;
+
+export type AgentReentryAst = "restart" | Readonly<{ resume: TemplateAst }>;
+
 export type AgentActionAst = Readonly<{
 	kind: "agent";
 	uid: ActionUID;
@@ -825,6 +859,9 @@ export type AgentActionAst = Readonly<{
 	thinking?: string;
 	tools?: readonly string[];
 	reply?: SchemaAst;
+	onFail: RecoveryPolicyAst;
+	validation?: AgentValidationAst;
+	reentry?: AgentReentryAst;
 }>;
 export type UserActionAst = Readonly<{
 	kind: "user";
@@ -866,11 +903,6 @@ export type ActionStateAst = Readonly<{
 	input?: Readonly<Record<string, SchemaAst>>;
 	transitions: Readonly<Record<EventType, TransitionAst>>;
 	after?: Readonly<AfterCst>;
-	validate?: GuardRefAst;
-	// Present only when validate is set; defaults to "resume".
-	onReject?: OnReject;
-	onReenter?: OnReenterAst;
-	retries?: number;
 }>;
 
 export type TerminalNotificationAst = Readonly<{

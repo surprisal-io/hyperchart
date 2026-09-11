@@ -16,7 +16,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as hostPiCodingAgent from "@earendil-works/pi-coding-agent";
 import {
@@ -34,7 +34,6 @@ import {
 	parseChartModuleSync,
 	type ChartAst,
 	type DurableLogRecord,
-	type StatePath,
 } from "@surprisal/hyperchart";
 import {
 	assertChartPreflight,
@@ -63,7 +62,6 @@ import {
 	forkHyperchartRun,
 	listHyperchartBranchPage,
 	markUserInteractionReceipt,
-	readRunnerConfig,
 	rewindHyperchartRun,
 	scanOwnedOpenUserInteractions,
 	validateAndPersistUserInteractionResponse,
@@ -485,9 +483,9 @@ class PiUserInteractionCoordinator {
 					`Question preview: ${details.promptPreview.text}`,
 					`Allowed events: ${details.allowedEvents.join(", ")}`,
 					details.outputRequired ? `Structured output is required. Bounded shape hint: ${JSON.stringify(details.outputHint)}.` : undefined,
-					"The extension does not answer automatically; the model calls hyperchart action=\"respond\" only when the user's just-submitted prompt actually answers the displayed gate.",
-					"If the prompt is unrelated, continue that request and leave the gate open; do not call action=\"respond\".",
-					`If it answers the gate, translate it into one allowed event and optional output, then call hyperchart with action=\"respond\", runId=${JSON.stringify(details.runId)}, branchId=${JSON.stringify(details.branchId)}, seqId=${details.seqId}, event, and output when required.`,
+					'The extension does not answer automatically; the model calls hyperchart action="respond" only when the user\'s just-submitted prompt actually answers the displayed gate.',
+					'If the prompt is unrelated, continue that request and leave the gate open; do not call action="respond".',
+					`If it answers the gate, translate it into one allowed event and optional output, then call hyperchart with action="respond", runId=${JSON.stringify(details.runId)}, branchId=${JSON.stringify(details.branchId)}, seqId=${details.seqId}, event, and output when required.`,
 					"Do not answer the gate yourself or infer consent without real user input.",
 				].filter((line): line is string => line !== undefined).join("\n"),
 				display: false,
@@ -541,7 +539,7 @@ class PiUserInteractionCoordinator {
 				"pi",
 				ctx.sessionManager.getSessionId(),
 			)) return;
-			if (!await this.isStillActive(ctx, key)) return;
+			if (!(await this.isStillActive(ctx, key))) return;
 			this.pi.sendMessage(boundedPiMessage({
 				customType: "hyperchart-yield",
 				content: `Hyperchart reached user interaction (${active.request.runId}, ${active.request.seqId}). Finish the current safe action/tool batch, do not answer it yourself, and yield so the real user can respond.`,
@@ -559,7 +557,7 @@ class PiUserInteractionCoordinator {
 			"pi",
 			ctx.sessionManager.getSessionId(),
 		)) return;
-		if (!await this.isStillActive(ctx, key)) return;
+		if (!(await this.isStillActive(ctx, key))) return;
 		this.pi.sendMessage(boundedPiMessage({
 			customType: "hyperchart-user-request",
 			content: formatCompactUserInteraction(active),
@@ -595,8 +593,10 @@ function canonicalHostPath(path: string): string {
 }
 
 function interactionOwner(ctx: HyperchartContext): UserInteractionOwner {
+	const storage = currentRunLogStorage();
+	if (storage?.kind !== "jsonl") throw new Error("User interaction ownership requires JSONL run storage");
 	return {
-		runsRoot: currentRunLogStorage()!.rootDir,
+		runsRoot: storage.rootDir,
 		host: "pi",
 		sessionId: ctx.sessionManager.getSessionId(),
 		workDir: ctx.cwd,
@@ -629,7 +629,6 @@ function interactionDetails(active: OwnedUserInteraction) {
 		options: active.request.options,
 		allowedEvents: active.request.events.filter((event) => event !== "FAILED"),
 		...(active.request.reply === undefined ? {} : { reply: active.request.reply }),
-		...(active.request.rejection === undefined ? {} : { rejection: active.request.rejection }),
 	};
 }
 
@@ -829,7 +828,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 		if (params.action === "run_inspect") {
 			if (params.verbose === true) throw new Error("verbose=true is no longer supported in tool responses; use hyperchart view for full browser inspection");
 			const runId = actionRunCoordinate(params, "run_inspect");
-			const branchId = params.branchId ?? await unambiguousRunBranch("run_inspect", runId, ctx);
+			const branchId = params.branchId ?? (await unambiguousRunBranch("run_inspect", runId, ctx));
 			return hyperchartRunInspectTool.execute(toolCallId, { runId, branchId, verbose: params.verbose }, signal, onUpdate, ctx);
 		}
 		if (params.action === "view") {
@@ -837,7 +836,7 @@ function createHyperchartTool(delivery: PiTerminalDelivery) {
 			if ((runId === undefined) === (params.chartPath === undefined)) {
 				throw new Error("hyperchart action=view requires exactly one of chartPath or runId");
 			}
-			const branchId = runId === undefined ? undefined : params.branchId ?? await unambiguousRunBranch("view", runId, ctx);
+			const branchId = runId === undefined ? undefined : (params.branchId ?? (await unambiguousRunBranch("view", runId, ctx)));
 			return createHyperchartViewTool(delivery).execute(
 				toolCallId,
 				{ runId, branchId, chartPath: params.chartPath, open: params.open },
@@ -919,7 +918,7 @@ async function ownedRunId(action: string, runSpec: string, ctx: HyperchartContex
 async function unambiguousRunBranch(action: string, runSpec: string, ctx: HyperchartContext): Promise<string> {
 	const runId = await ownedRunId(action, runSpec, ctx);
 	const page = await listHyperchartBranchPage(runId);
-	if (page.totalCount === 1) return page.items[0]!.branchId;
+	if (page.totalCount === 1 && page.items[0] !== undefined) return page.items[0].branchId;
 	const available = page.items.map((branch) => branch.branchId).join(", ") || "none";
 	const suffix = page.next === undefined ? "" : ", …";
 	throw new Error(`hyperchart action=${action} requires branchId because run '${runId}' has ${page.totalCount} durable branches (${available}${suffix})`);
@@ -1661,7 +1660,7 @@ async function deliverPendingPiTerminalNotification(pi: ExtensionAPI, ctx: Hyper
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return false;
 	// A visible or queued owned gate is the current conversational boundary. Leave the
 	// terminal outbox unclaimed so it remains recoverable after the gate is resolved.
-	if (await acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return false;
+	if ((await acquireActiveUserInteraction(interactionOwner(ctx))) !== undefined) return false;
 	recoverStaleRunTerminalNotification(runId);
 	const request = readDeliverableTerminalNotificationRequest(runId);
 	if (request === undefined) return false;
@@ -1772,16 +1771,16 @@ async function receiptWaitedPiTerminalNotification(runId: string, ctx: Hyperchar
 	const meta = await loadRunMetaIfPresent(runId);
 	const sessionId = ctx.sessionManager.getSessionId();
 	if (meta === undefined || meta.originSessionId !== sessionId || resolve(meta.workDir) !== resolve(ctx.cwd)) return undefined;
-	if (await acquireActiveUserInteraction(interactionOwner(ctx)) !== undefined) return undefined;
+	if ((await acquireActiveUserInteraction(interactionOwner(ctx))) !== undefined) return undefined;
 	const request = readDeliverableTerminalNotificationRequest(runId);
 	if (request === undefined || !claimTerminalNotificationReceipt(runId, request.requestId, "pi", sessionId)) return undefined;
 	return request;
 }
 
 async function recoverPiTerminalNotifications(pi: ExtensionAPI, ctx: HyperchartContext): Promise<void> {
-	const root = currentRunLogStorage()!.rootDir;
-	if (!existsSync(root)) return;
-	for (const runId of (await listRunIds())) {
+	const root = currentRunLogStorage()?.rootDir;
+	if (root === undefined || !existsSync(root)) return;
+	for (const runId of await listRunIds()) {
 		try {
 			await deliverPendingPiTerminalNotification(pi, ctx, runId);
 		} catch {
@@ -1914,8 +1913,6 @@ async function stopHyperchartRuns(
 }
 
 async function activeRunIdsForWorkDir(cwd: string): Promise<string[]> {
-	const root = currentRunLogStorage()!.rootDir;
-
 	const candidates = await Promise.all((await listRunIds()).map(async (runId) => {
 		const meta = await loadRunMetaIfPresent(runId);
 		if (meta === undefined || resolve(meta.workDir) !== resolve(cwd)) return undefined;
@@ -2075,9 +2072,7 @@ async function resolveRunForView(runId: string | undefined, cwd: string): Promis
 }
 
 async function recentRunSnapshots(limit = 5, cwd?: string, originSessionId?: string): Promise<RunSnapshot[]> {
-	const root = currentRunLogStorage()!.rootDir;
-
-	const dirs = (await listRunIds());
+	const dirs = await listRunIds();
 	const snapshots: RunSnapshot[] = [];
 	for (const dir of dirs) {
 		try {
@@ -2097,10 +2092,8 @@ async function recentRunSnapshots(limit = 5, cwd?: string, originSessionId?: str
 }
 
 async function loadRunHistory(options: { cwd: string; limit: number }): Promise<RunHistoryEntry[]> {
-	const root = currentRunLogStorage()!.rootDir;
-
 	const entries: RunHistoryEntry[] = [];
-	for (const dir of (await listRunIds())) {
+	for (const dir of await listRunIds()) {
 		const entry = await loadRunHistoryEntry(dir, options.cwd).catch(() => undefined);
 		if (entry === undefined) continue;
 		entries.push(entry);
@@ -2161,7 +2154,7 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 async function loadRunSnapshot(runId: string, suppliedMeta?: RunMeta): Promise<RunSnapshot> {
-	const meta = suppliedMeta ?? await loadRunMeta(runId);
+	const meta = suppliedMeta ?? (await loadRunMeta(runId));
 	const parsed = parseChartModuleSync(
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
@@ -2235,7 +2228,7 @@ async function readRunView(runId: string, ast: ChartAst) {
 		let snapshot: { branchId: string; headSeqId: number | null };
 		try { snapshot = await store.captureSnapshot(store.branchId); }
 		catch (error) {
-			if (await store.countRecords() !== 0) throw error;
+			if ((await store.countRecords()) !== 0) throw error;
 			snapshot = { branchId: store.branchId, headSeqId: null };
 			syntheticEmptyBranch = true;
 		}

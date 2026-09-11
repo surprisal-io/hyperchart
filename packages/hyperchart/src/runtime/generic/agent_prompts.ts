@@ -1,4 +1,4 @@
-import type { AgentEffect, RenderedArtifact, RejectedEffect } from "../../core/machine.js";
+import type { AgentEffect, RenderedArtifact } from "../../core/machine.js";
 import { finishableEvents } from "./finish_protocol.js";
 
 export type ResolvedRead = {
@@ -16,6 +16,17 @@ export function buildTaskPrompt(effect: AgentEffect, resolvedReads: ResolvedRead
 	}
 	sections.push(formatCompletion(effect));
 	return sections.join("\n\n");
+}
+
+export function buildRecoveryPrompt(effect: AgentEffect, lastAssistantText?: string): string {
+	const recovery = effect.recovery;
+	if (recovery === undefined) return buildResumePrompt(effect);
+	if (recovery.failure.kind === "incomplete") return buildNudgePrompt(effect, lastAssistantText);
+	const artifactReminder =
+		(effect.artifacts?.length ?? 0) === 0
+			? ""
+			: `\nKeep each declared artifact at its exact path (${effect.artifacts!.map((artifact) => artifact.path).join(", ")}); do not increment, rename, or version it yourself.`;
+	return `The previous attempt failed (${recovery.failure.kind}): ${recovery.failure.message}${artifactReminder}\nFix the problem and call \`finish\` again.\n\n${formatCompletion(effect)}`;
 }
 
 export function buildNudgePrompt(effect: AgentEffect, lastAssistantText?: string): string {
@@ -37,32 +48,13 @@ export function buildNudgePrompt(effect: AgentEffect, lastAssistantText?: string
 }
 
 function looksLikeTextualToolCall(text: string): boolean {
-	return /<\/?(?:tool_call|arg_key|arg_value)>/.test(text) || /\b(?:read|write|bash|browser|finish)<arg_key>/.test(text);
+	return (
+		/<\/?(?:tool_call|arg_key|arg_value)>/.test(text) || /\b(?:read|write|bash|browser|finish)<arg_key>/.test(text)
+	);
 }
 
 export function buildErrorRetryPrompt(effect: AgentEffect, error: string): string {
 	return `The previous assistant turn failed with this provider/runtime error:\n${error}\n\nRetry the turn now. Preserve valid work from earlier turns and call \`finish\` when the step is complete.\n\n${formatCompletion(effect)}`;
-}
-
-export function buildRejectPrompt(effect: RejectedEffect): string {
-	if (effect.invocation.kind !== "agent") {
-		return `Your result was rejected by the validator (validation attempt ${effect.validationAttempts}). Reason: ${
-			effect.reason ?? "No reason provided."
-		}. Fix the issues and call \`finish\` again.`;
-	}
-	const deliverables =
-		(effect.invocation.artifacts?.length ?? 0) === 0
-			? ""
-			: `\n\nOverwrite the exact declared deliverable path below; do not increment, rename, or version it yourself:\n${(
-				effect.invocation.artifacts ?? []
-			)
-				.map((artifact) => `- \`${artifact.path}\``)
-				.join("\n")}`;
-	return `Your result was rejected by the validator (validation attempt ${effect.validationAttempts}). Reason: ${
-		effect.reason ?? "No reason provided."
-	}. Preserve valid work, fix only the rejected issue, overwrite the declared deliverable, and call \`finish\` again.${deliverables}\n\n${formatCompletion(
-		{ ...effect.invocation, id: effect.id },
-	)}`;
 }
 
 export function buildArtifactFeedbackPrompt(errors: string[]): string {

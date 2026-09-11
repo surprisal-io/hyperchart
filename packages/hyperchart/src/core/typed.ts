@@ -68,11 +68,12 @@ export type FilesOf<C> = C extends { states: infer S }
 	? Simplify2<
 			UnionToIntersection<
 				FlattenStates<S> extends infer E
-					? E extends [infer P extends string, { action: { artifacts: infer A }; validate?: { kind: "script"; artifacts?: infer G } }]
+					? E extends [infer P extends string, { action: { artifacts: infer A; validation?: { guard: { kind: "script"; artifacts?: infer G } } } },
+						]
 						? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<A, G>> }
 						: E extends [infer P extends string, { action: { artifacts: infer A } }]
 							? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<A, never>> }
-							: E extends [infer P extends string, { validate: infer V }]
+							: E extends [infer P extends string, { action: { validation: { guard: infer V } } }]
 								? V extends { artifacts: infer G }
 									? { [K in P]: ArtifactShapes<ActionAndGuardArtifacts<never, G>> }
 									: never
@@ -140,7 +141,9 @@ type VerifyArguments<C, Args> = C extends { args: infer Actual }
 		? Exclude<keyof Actual, keyof Args> extends never
 			? unknown
 			: { "chart argument metadata names an unknown Args key": { chartDeclares: Actual; registryDeclares: Args } }
-		: { "chart argument metadata is out of sync with the Args registry": { chartDeclares: Actual; registryDeclares: Args } }
+		: { "chart argument metadata is out of sync with the Args registry": { chartDeclares: Actual; registryDeclares: Args;
+				};
+			}
 	: unknown;
 
 type VerifyDecl<C, Args, Results, Files, Maps, Inputs> = VerifyArguments<C, Args> & Mutual<

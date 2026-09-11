@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
 import type { ChartEvent } from "../packages/hyperchart/src/core/types.js";
 import { PiAgentExecutor, type PiExtensionPolicy, type PiSessionService } from "../packages/pi-hyperchart/src/runtime/pi/pi_agent_executor.js";
 
@@ -16,7 +16,9 @@ afterEach(async () => {
 function effect(visit = 1): AgentEffect {
 	const actionUid = { chart: "resources", state: "work", action: "worker" };
 	return { kind: "agent", id: `resources:work:worker:${visit}:${visit}`, actionUid,
-		action: { kind: "agent", uid: actionUid, name: "worker", tools: ["read", "grep", "finish"] },
+		action: { kind: "agent", uid: actionUid, name: "worker",
+			onFail: { nudge: 2, restart: 1 },
+			tools: ["read", "grep", "finish"] },
 		events: ["DONE", "FAILED"], sessionId: `resource-session-${visit}` };
 }
 
@@ -93,7 +95,9 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 }
 
 function complete(executor: PiAgentExecutor, invocation: AgentEffect): Promise<ChartEvent> {
-	return new Promise((resolve) => executor.start(invocation, resolve));
+	return new Promise((resolve) => executor.start(invocation, (outcome: AgentOutcome) =>
+			resolve(outcome.kind === "completed" ? outcome.event : { type: "FAILED", error: outcome.failure.message })),
+	);
 }
 
 const internal = (executor: PiAgentExecutor) => executor as unknown as {
@@ -119,34 +123,62 @@ describe("PiAgentExecutor session resources", () => {
 		} finally { await f.executor.dispose(); }
 	}, 30_000);
 
-	it("keeps the same session through finish/artifact retries and tears down only after acceptance", async () => {
+	it("reports artifact failure after cleanup and accepts a durable nudge on the same session", async () => {
 		const f = await fixture();
 		const prompt = f.prompt.getMockImplementation()!;
 		let turns = 0;
 		f.prompt.mockImplementation(async function (this: AgentSession, text, options) {
-			expect(f.counts.disposed).toBe(0);
 			if (++turns === 2) await writeFile(join(f.root, "result.txt"), "accepted");
 			return prompt.call(this, text, options);
 		});
 		try {
-			expect(await complete(f.executor, { ...effect(), artifacts: [{ path: "result.txt" }] })).toEqual({ type: "DONE" });
+			const invocation = { ...effect(), artifacts: [{ path: "result.txt" }] };
+			expect((await complete(f.executor, invocation)).type).toBe("FAILED");
+			expect(
+				await complete(f.executor, {
+					...invocation,
+					id: "resources:work:worker:1:2",
+					recovery: {
+						mode: "nudge",
+						scope: "general",
+						nudgeAttempt: 1,
+						restartAttempt: 0,
+						failure: { kind: "artifacts", message: "missing result" },
+					},
+				}),
+			).toEqual({ type: "DONE" });
 			expect(turns).toBe(2);
-			expect(f.opened).toEqual(["resource-session-1"]);
-			expect(f.counts).toEqual({ created: 1, disposed: 1, shutdown: 1, handles: 0, subscriptions: 0 });
+			expect(f.opened).toEqual(["resource-session-1", "resource-session-1"]);
+			expect(f.counts).toEqual({ created: 2, disposed: 2, shutdown: 2, handles: 0, subscriptions: 0 });
 		} finally { await f.executor.dispose(); }
 	});
 
-	it.each(["resume", "restart"] as const)("reopens the correct transcript on guard rejection (%s)", async (onReject) => {
+	it.each(["nudge", "restart"] as const)("reopens the correct transcript for durable recovery (%s)", async (mode) => {
 		const f = await fixture();
 		try {
 			const invocation = effect();
 			expect(await complete(f.executor, invocation)).toEqual({ type: "DONE" });
-			const rejected: RejectedEffect = { kind: "rejected", seqId: 2, event: { type: "DONE" }, id: "resources:work:worker:2:2", actionUid: invocation.actionUid,
-				invocation, onReject, validationAttempts: 1, reason: "fix output" };
-			expect(await new Promise((resolve) => f.executor.reject(rejected, resolve))).toEqual({ type: "DONE" });
-			expect(f.opened[1]).toBe(onReject === "resume" ? invocation.sessionId : `${invocation.sessionId}:attempt:1`);
-			expect(f.prompts[1]!.text).toContain("fix output");
-			if (onReject === "resume") expect(f.prompts[1]!.entries).toBeGreaterThan(f.prompts[0]!.entries);
+			const retry: AgentEffect = {
+				...invocation,
+				id: "resources:work:worker:1:2",
+				sessionId: mode === "nudge" ? invocation.sessionId : "fresh-session-id",
+				recovery: {
+					mode,
+					scope: "validation",
+					nudgeAttempt: mode === "nudge" ? 1 : 0,
+					restartAttempt: mode === "restart" ? 1 : 0,
+					failure: { kind: "validation", message: "fix output" },
+				},
+			};
+			expect(await complete(f.executor, retry)).toEqual({ type: "DONE" });
+			expect(f.opened[1]).toBe(mode === "nudge" ? invocation.sessionId : "fresh-session-id");
+			expect(f.prompts[1]?.text).toContain("fix output");
+			if (mode === "nudge") {
+				const firstEntries = f.prompts[0]?.entries;
+				const secondEntries = f.prompts[1]?.entries;
+				if (firstEntries === undefined || secondEntries === undefined) throw new Error("missing prompt entries");
+			expect(secondEntries).toBeGreaterThan(firstEntries);
+			}
 			expect(f.counts.handles).toBe(0);
 			expect(f.counts.disposed).toBe(2);
 		} finally { await f.executor.dispose(); }

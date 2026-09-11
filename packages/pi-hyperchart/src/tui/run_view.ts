@@ -60,7 +60,8 @@ export function buildRunView(
 	ast: ChartAst,
 	log: readonly DurableLogRecord[],
 	now: number,
-	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; branchCount?: number; recordCount?: number; execution?: BranchExecutionOverview } = {},
+	branch: { branchId?: string; runnerBranchIds?: string[]; branches?: Array<{ branchId: string; headSeqId: number | null }>; branchCount?: number; recordCount?: number; execution?: BranchExecutionOverview;
+	} = {},
 ): RunView {
 	const projection = branch.execution ?? projectBranch(createBranchProjection(ast), ast, log);
 	const final = "final" in projection ? projection.final : isFinalState(projection, ast);
@@ -249,10 +250,10 @@ function graphRow(
 		...(timeline?.invokedAt !== undefined && timeline.completedAt !== undefined
 			? { durationMs: Math.max(0, timeline.completedAt - timeline.invokedAt) }
 			: {}),
-		...(pending?.phase === "validating" || pending?.phase === "rejected"
-			? { rejections: pending.validationAttempts }
+		...(pending !== undefined && pending.recovery.validation.nudges + pending.recovery.validation.restarts > 0
+			? { rejections: pending.recovery.validation.nudges + pending.recovery.validation.restarts }
 			: {}),
-		...(pending?.phase === "rejected" && pending.reason !== undefined ? { reason: pending.reason } : {}),
+		...(pending?.lastRetry?.scope === "validation" ? { reason: pending.lastRetry.failure.message } : {}),
 		...(instanceOf === undefined ? {} : { instanceOf }),
 	};
 }
@@ -265,7 +266,6 @@ function graphStatus(
 	timeline: ActionTimeline | undefined,
 	results: Readonly<Record<string, unknown>>,
 ): GraphNodeStatus {
-	if (pending?.phase === "rejected") return "rejected";
 	if (pending?.phase === "validating") return "validating";
 	if (pending?.phase === "running") return "running";
 	if (state.kind === "final" && active) return "final";
@@ -313,10 +313,10 @@ function pendingView(pending: PendingAction, now: number): PendingView {
 		path: pending.actionUid.state,
 		phase: pending.phase,
 		...(pending.phase === "running" ? { sinceMs: Math.max(0, now - pending.timestamp) } : {}),
-		...(pending.phase === "validating" || pending.phase === "rejected"
-			? { rejections: pending.validationAttempts }
+		...(pending.recovery.validation.nudges + pending.recovery.validation.restarts > 0
+			? { rejections: pending.recovery.validation.nudges + pending.recovery.validation.restarts }
 			: {}),
-		...(pending.phase === "rejected" && pending.reason !== undefined ? { reason: pending.reason } : {}),
+		...(pending.lastRetry?.scope === "validation" ? { reason: pending.lastRetry.failure.message } : {}),
 	};
 }
 
@@ -354,6 +354,8 @@ function recordText(record: DurableLogRecord): string {
 					return `complete ${record.actionUid.state} → ${record.event.type}`;
 				case "validated":
 					return `validated ${record.actionUid.state} → ${record.outcome === true ? "ok" : "reject"}`;
+				case "retry":
+					return `retry ${record.actionUid.state} → ${record.mode} (${record.failure.kind})`;
 				case "timer_fired":
 					return `timer ${record.actionUid.state}`;
 			}

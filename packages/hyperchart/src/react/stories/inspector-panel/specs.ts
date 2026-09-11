@@ -16,7 +16,6 @@ import {
 	map,
 	parallel,
 	result,
-	resume,
 	script,
 	t,
 	tsAction,
@@ -51,7 +50,8 @@ export type InspectorPanelRuntime = {
 	sessionProgress?: (ast: ChartAst) => HyperchartRuntimeSessionProgressFile;
 };
 
-export type InspectorPanelGroupId = "overview" | "agent" | "actorDefinitions" | "actorMessaging" | "actorRuntime" | "user" | "script" | "tsImport" | "map" | "parallel" | "compound" | "final";
+export type InspectorPanelGroupId =
+	| "overview" | "agent" | "actorDefinitions" | "actorMessaging" | "actorRuntime" | "user" | "script" | "tsImport" | "map" | "parallel" | "compound" | "final";
 
 export type InspectorPanelSpecInput = {
 	group: InspectorPanelGroupId;
@@ -65,7 +65,8 @@ export type InspectorPanelSpecInput = {
 
 export type InspectorPanelSpec = InspectorPanelSpecInput;
 
-export const inspectorPanelGroups: Array<{ id: InspectorPanelGroupId; title: string; description: string; storyId: string }> =
+export const inspectorPanelGroups: Array<{ id: InspectorPanelGroupId; title: string; description: string; storyId: string;
+}> =
 	[
 		{
 			id: "overview",
@@ -314,14 +315,14 @@ function pushValidated(
 	reason: string,
 ): void {
 	const state = ast.states[templatePath(statePath)];
-	if (state?.kind !== "state" || state.validate === undefined)
+	if (state?.kind !== "state" || state.action.kind !== "agent" || state.action.validation === undefined)
 		throw new Error(`Story state ${statePath} has no validation guard`);
 	builder.records.push({
 		type: "state_action",
 		kind: "validated",
 		actionUid: storyActionUid(ast, statePath),
 		event,
-		guard: state.validate,
+		guard: state.action.validation.guard,
 		outcome: { ok: false, reason },
 		parentId: builder.seq,
 		seqId: ++builder.seq,
@@ -708,10 +709,10 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				input: { feedback: z.string(), mode: z.enum(["fast", "strict"]).default("strict") },
 				action: agent("reader", {
 					task: t`Use ${input("feedback")} in ${input("mode")} mode with prior ${result("rich-agent", "output")}. Visit ${visit("inputs-and-refs")}.`,
+					reentry: {
+						resume: t`Resume with the latest ${input("feedback")} and preserve ${result("rich-agent", "output")}.`,
+					},
 				}),
-				onReenter: resume(
-					t`Resume with the latest ${input("feedback")} and preserve ${result("rich-agent", "output")}.`,
-				),
 				transitions: { SUBMIT: "script-contracts" },
 			},
 			"script-contracts": {
@@ -1058,9 +1059,9 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		chart: panelChart("inspector-validation-rejected", "validation-rejected", {
 			"validation-rejected": {
 				kind: "state",
-				action: agent("reviewer", { tools: [] }),
-				validate: script("node", ["scripts/validate-review.mjs"]),
-				retries: 2,
+				action: agent("reviewer", { tools: [],
+					validation: { guard: script("node", ["scripts/validate-review.mjs"]), onFail: { nudge: 2, restart: 0 } },
+				}),
 				transitions: { PASS: "done", ERROR: "failed" },
 			},
 			done: final(),
@@ -1091,10 +1092,9 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		chart: panelChart("inspector-imported-guard", "coverage-review", {
 			"coverage-review": {
 				kind: "state",
-				action: agent("coverage-reviewer", { task: "Review source coverage before rendering." }),
-				validate: tsImport("./guards/coverage.ts", "coverageGuard"),
-				onReject: "restart",
-				retries: 1,
+				action: agent("coverage-reviewer", { task: "Review source coverage before rendering.",
+					validation: { guard: tsImport("./guards/coverage.ts", "coverageGuard"), onFail: { nudge: 0, restart: 1 } },
+				}),
 				transitions: { PASS: "done", ERROR: "failed" },
 			},
 			done: final(),

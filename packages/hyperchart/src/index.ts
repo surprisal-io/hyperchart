@@ -89,7 +89,6 @@ export type {
 	GuardOutcome,
 	GuardRef,
 	GuardRefAst,
-	OnReject,
 	OnReenterAst,
 	OnReenterCst,
 	TransitionAst,
@@ -100,9 +99,7 @@ export type {
 	UserActionAst,
 	UserActionCst,
 } from "./core/types.js";
-export type {
-	TerminalOptions,
-} from "./core/dsl.js";
+export type { TerminalOptions } from "./core/dsl.js";
 export type {
 	ActorTemplate,
 	ActorPoolTemplate,
@@ -197,7 +194,9 @@ export type {
 	DurableRecordsEffect,
 	Effect,
 	RecordAppend,
-	RejectedEffect,
+	AgentFailure,
+	AgentOutcome,
+	AgentRecoveryRequest,
 	ResumeRequest,
 	ScriptEffect,
 	ScriptMachineEvent,
@@ -233,6 +232,10 @@ export type {
 	DurableRecordDraft,
 	SelectedBranchHandle,
 	StateActionInvokeLog,
+	StateActionRetryLog,
+	AgentFailureKind,
+	AgentRecoveryMode,
+	AgentRecoveryScope,
 	FailureIntentLog,
 	StorageEntry,
 	UserInteractionLog,
@@ -240,7 +243,12 @@ export type {
 	UserInteractionResolvedLog,
 } from "./core/durable_events.js";
 export { explainReplay } from "./core/replay_check.js";
-export type { ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord, ReplayStaleRecord } from "./core/replay_check.js";
+export type {
+	ReplayBrokenRecord,
+	ReplayExplanation,
+	ReplaySkippedRecord,
+	ReplayStaleRecord,
+} from "./core/replay_check.js";
 export { createBranchProjection, isFinalState, projectBranch } from "./core/projection.js";
 export type {
 	BranchProjection,

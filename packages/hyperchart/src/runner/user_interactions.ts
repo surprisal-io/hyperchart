@@ -1,8 +1,8 @@
 import { assertRunId, currentRunStorage, resolveRunPaths } from "../runtime/generic/run_paths.js";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { parseChartModuleSync } from "../core/inspect.js";
 import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../core/durable_events.js";
 import type { ActionUID, ChartEvent, SchemaAst } from "../core/types.js";
@@ -50,7 +50,6 @@ export type UserInteractionRequest = Readonly<{
 	options: readonly string[];
 	events: readonly string[];
 	reply?: SchemaAst;
-	rejection?: Readonly<{ attempt: number; onReject: "resume" | "restart"; reason?: string }>;
 	createdAt: string;
 }>;
 export type UserInteractionResponse = Readonly<{
@@ -166,7 +165,9 @@ export function hasUserInteractionReceipt(runId: string, branchId: BranchId, seq
 	return readConfirmedReceipt(runId, branchId, seqId, host, sessionId) !== undefined;
 }
 export function readUserInteractionReceipt(runId: string, branchId: BranchId, seqId: number, host: string, sessionId: string): UserInteractionReceipt | undefined {
-	return readConfirmedReceipt(runId, branchId, seqId, host, sessionId) ?? readReceipt(userInteractionReceiptPath(runId, branchId, seqId, host, sessionId));
+	return (
+		readConfirmedReceipt(runId, branchId, seqId, host, sessionId) ?? readReceipt(userInteractionReceiptPath(runId, branchId, seqId, host, sessionId))
+	);
 }
 export function removeUserInteractionReceipt(runId: string, branchId: BranchId, seqId: number, host: string, sessionId: string): void {
 	for (const path of [userInteractionReceiptPath(runId, branchId, seqId, host, sessionId), confirmationPath(runId, branchId, seqId, host, sessionId)]) {
@@ -282,7 +283,9 @@ async function commitOfflineUserInteractionResponse(options: PersistUserInteract
 				return { response: responseFromResolved(options.runId, options.branchId, existing), idempotent: true };
 			}
 			const gate = await store.getRecord(options.seqId);
-			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId })) throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
+			if (gate?.type !== "user_interaction" || gate.kind !== "opened" || !(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId }))
+			)
+				throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
 			const semantic = await BranchExecution.restore({ ast: parsed.ast, branchId: options.branchId, store, saveCheckpoint: "never", snapshot });
 			const draft = await semantic.prepareUserInteraction(gate, options.event, parsed.schemaRegistry);
 			try {
@@ -290,7 +293,8 @@ async function commitOfflineUserInteractionResponse(options: PersistUserInteract
 				const record = records[0] as UserInteractionResolvedLog;
 				return { response: responseFromResolved(options.runId, options.branchId, record), idempotent: false };
 			} catch (error) {
-				const retryable = error instanceof BranchHeadMovedError || error instanceof Error && error.message.includes("Stale Hyperchart journal writer");
+				const retryable = error instanceof BranchHeadMovedError ||
+					(error instanceof Error && error.message.includes("Stale Hyperchart journal writer"));
 				if (!retryable || attempt === 2) throw error;
 				if (error.message.includes("Stale Hyperchart journal writer")) {
 					await store.close();
@@ -321,7 +325,7 @@ function requestFromOpened(runId: string, branchId: BranchId, opened: UserIntera
 	return {
 		version: 2, runId, branchId, seqId: opened.seqId, actionUid: opened.actionUid, prompt: opened.prompt,
 		options: opened.options, events: opened.events, ...(opened.reply === undefined ? {} : { reply: opened.reply }),
-		...(opened.rejection === undefined ? {} : { rejection: opened.rejection }), createdAt: new Date(opened.timestamp).toISOString(),
+		createdAt: new Date(opened.timestamp).toISOString(),
 	};
 }
 function responseFromResolved(runId: string, branchId: BranchId, resolved: UserInteractionResolvedLog): UserInteractionResponse {
@@ -342,7 +346,9 @@ function comparePresentationOrder(left: OwnedUserInteraction, right: OwnedUserIn
 	return compareCoordinates(left.request, right.request);
 }
 function compareCoordinates(left: UserInteractionCoordinate, right: UserInteractionCoordinate): number {
-	return left.runId.localeCompare(right.runId) || left.branchId.localeCompare(right.branchId) || left.seqId - right.seqId;
+	return (
+		left.runId.localeCompare(right.runId) || left.branchId.localeCompare(right.branchId) || left.seqId - right.seqId
+	);
 }
 function receiptState(runId: string, request: UserInteractionRequest, host: string, sessionId: string): { presentation: OwnedUserInteraction["presentation"]; order?: bigint } {
 	const confirmed = confirmationPath(runId, request.branchId, request.seqId, host, sessionId);
@@ -385,7 +391,7 @@ async function assertUserInteractionOwner(
 ): Promise<void> {
 	const owner = normalizeOwner(ownerInput);
 	if (canonicalPath(resolveRunPaths(runId).storage.rootDir) !== canonicalPath(owner.runsRoot)) throw new Error(`Run '${runId}' is outside the configured runs root`);
-	const meta = knownMeta ?? await loadRunMeta(runId);
+	const meta = knownMeta ?? (await loadRunMeta(runId));
 	if (meta.originSessionId !== owner.sessionId) throw new Error(`Run '${runId}' is not owned by this session`);
 	if (canonicalPath(meta.workDir) !== owner.workDir) throw new Error(`Run '${runId}' belongs to another working directory`);
 }

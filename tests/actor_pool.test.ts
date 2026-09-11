@@ -106,7 +106,7 @@ function completePoolWork(runtime: PoolRuntime, effect: Extract<Effect, { kind: 
 		record.type === "actor_message" && record.kind === "accepted" && record.workerIndex === workerIndex && !settled.has(record.messageId));
 	assert(accepted?.type === "actor_message" && accepted.kind === "accepted", `worker ${workerIndex} has no accepted message`);
 	const id = Number(accepted.messageId.split(":").at(-1));
-	runtime.queue.send({ kind: "agent", effectId: effect.id, event: { type: "DONE", output: { id } } });
+	runtime.queue.send({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "DONE", output: { id } } } });
 }
 
 describe("static actor pools", () => {

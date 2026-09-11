@@ -4,6 +4,7 @@ import { z } from "zod";
 import { describe, expect, it } from "vitest";
 import { actor, chart, final, message, protocol, receive, reply, send } from "../packages/hyperchart/src/core/dsl.js";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
+import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
 import { HyperchartInspectorSidePanel } from "../packages/hyperchart/src/react/components/inspector/HyperchartInspectorSidePanel.js";
 import { ActorMailboxCard } from "../packages/hyperchart/src/react/components/inspector/details/ActorMailboxCard.js";
 import { ActorInternalMessageHistory } from "../packages/hyperchart/src/react/components/inspector/details/RuntimeSection.js";
@@ -138,13 +139,15 @@ describe("React actor inspector structure", () => {
 			messageId: `forward:${producerVisit}:0`,
 			producerVisit,
 			batchIndex: 0,
+			enqueueSeqId: producerVisit,
+			enqueuedAt: producerVisit,
 			input: { value: producerVisit },
 			status: "queued" as const,
 			targetOccurrencePath: targetGeneration === 1 ? "@sink" : `@sink~${targetGeneration}`,
 			targetLogicalPath: "@sink",
 			targetGeneration,
 		});
-		const state = {
+		const state: HyperchartStateInfo = {
 			id: "@worker.forward",
 			type: "send" as const,
 			status: "done" as const,
@@ -280,12 +283,15 @@ describe("React actor inspector structure", () => {
 			},
 		}), "test:actor-history-isolation");
 		const ast = scenario.ast;
-		const declaration = ast.actors["@worker"]!;
-		const sendA = ast.states.sendA!;
-		const sendB = ast.states.sendB!;
-		const replyAContract = declaration.protocol.A!.reply;
-		const replyBContract = declaration.protocol.B!.reply;
-		if (sendA.kind !== "send" || sendB.kind !== "send" || replyAContract.kind !== "named" || replyBContract.kind !== "named") throw new Error("expected send states and named replies");
+		const declaration = ast.actors["@worker"];
+		const sendA = ast.states.sendA;
+		const sendB = ast.states.sendB;
+		if (declaration === undefined || sendA === undefined || sendB === undefined) throw new Error("missing actor fixture");
+		const replyAContract = declaration.protocol.A?.reply;
+		const replyBContract = declaration.protocol.B?.reply;
+		if (sendA.kind !== "send" || sendB.kind !== "send" || replyAContract === undefined ||
+			replyBContract === undefined ||
+			replyAContract.kind !== "named" || replyBContract.kind !== "named") throw new Error("expected send states and named replies");
 		const source = (definition: typeof sendA, event: "A" | "B") => ({ producerState: definition.id, kind: "send" as const, definition, targetDeclaration: "@worker", event, inputSchema: declaration.protocol[event]!.input });
 		const envelope = (producerState: string, event: "A" | "B", value: string) => ({ messageId: `${producerState}:message:1:0`, event, input: { value }, producerState, producerVisit: 1, batchIndex: 0 });
 		const stamp = (seqId: number) => ({ parentId: seqId === 1 ? null : seqId - 1, seqId, branchId: "main", timestamp: 1_700_100_000_000 + seqId });
@@ -326,7 +332,7 @@ describe("React actor inspector structure", () => {
 			messages: state("@worker.replyA").actorMessageHistory ?? [],
 		}));
 		expect(replyHistoryMarkup).toContain("A → A_OK");
-		expect(replyHistoryMarkup).not.toContain('result');
+		expect(replyHistoryMarkup).not.toContain("result");
 	});
 
 	it("builds actor messaging without declaration-to-instance presentation edges", () => {
@@ -394,7 +400,7 @@ describe("React actor inspector structure", () => {
 		expect(completedVisitsMarkup).toContain("journal");
 		expect(completedVisitsMarkup).toContain("retentionDays");
 		expect(completedVisitsMarkup).not.toContain("configured value / expression");
-		expect(completedVisitsMarkup).not.toContain("<details open=\"\"");
+		expect(completedVisitsMarkup).not.toContain('<details open=""');
 		const actorOccurrence = actorRuntimeAdapterRun.states.find((state) => state.id === "@editor")?.actorOccurrence;
 		expect(actorOccurrence).toBeDefined();
 		if (actorOccurrence !== undefined) {

@@ -94,8 +94,8 @@ describe("Storybook information architecture", () => {
 			["TenThousandActorMessageBatches", "messages", "readActorMessages", "Load actor message history"],
 		] as const) {
 			expect(source).toContain(`export const ${storyName} = loadTestStory("${scenario}")`);
-			expect(source).toMatch(new RegExp(`${method}: async \\(input\\) => \\{ const chunk = await source\\.load\\(input\\.cursor\\)`));
-			expect(source).toContain(`case "${scenario}": disclosure = "${disclosure}"`);
+			expect(source).toMatch(new RegExp(`${method}: async \\(input\\) => \\{\\s+const chunk = await source\\.load\\(input\\.cursor\\)`));
+			expect(source).toMatch(new RegExp(`case "${scenario}":\\s+disclosure = "${disclosure}"`));
 		}
 		expect(source).not.toContain("<VirtualizedHistoryList");
 		expect(source).not.toContain("viewport.scrollTop");

@@ -6,13 +6,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin } from "vite";
 // Import only the theme module. The package root eagerly loads the full Pi CLI and couples
 // Storybook startup to pi-tui exports that the preview renderer never uses.
-import { Theme, initTheme } from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
-import type { Component, TUI } from "@earendil-works/pi-tui";
 import {
-	RunHistoryOverlay,
-	RunWidget,
-	type RunHistoryAction,
-} from "../packages/pi-hyperchart/src/tui/components.js";
+	Theme,
+	initTheme,
+} from "../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js";
+import type { Component, TUI } from "@earendil-works/pi-tui";
+import { RunHistoryOverlay, RunWidget, type RunHistoryAction } from "../packages/pi-hyperchart/src/tui/components.js";
 import {
 	cleanupProductionTuiFixture,
 	materializeProductionTuiFixture,
@@ -53,7 +52,9 @@ const bgKeys = new Set([
 ]);
 
 function loadPiTheme(name: ThemeName): Theme {
-	const themeModule = fileURLToPath(new URL("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js", import.meta.url));
+	const themeModule = fileURLToPath(
+		new URL("../node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.js", import.meta.url),
+	);
 	const jsonPath = resolve(dirname(themeModule), `${name}.json`);
 	const source = JSON.parse(readFileSync(jsonPath, "utf8")) as ThemeJson;
 	const resolved = Object.fromEntries(
@@ -97,14 +98,19 @@ async function waitForData(component: PreviewComponent, width: number): Promise<
 	}
 }
 
-async function createComponent(kind: ComponentKind, themeName: ThemeName, width: number, preset: string): Promise<PreviewSession> {
+async function createComponent(
+	kind: ComponentKind,
+	themeName: ThemeName,
+	width: number,
+	preset: string,
+): Promise<PreviewSession> {
 	initTheme(themeName, false);
 	const theme = loadPiTheme(themeName);
 	const tui = fakeTui(width);
 	const data = fixture();
 	const session: PreviewSession = { component: undefined as unknown as PreviewComponent };
 	if (kind === "history") {
-		session.component = new RunHistoryOverlay(tui, theme, {
+		session.component = new RunHistoryOverlay(tui, theme as never, {
 			cwd: data.primary.cwd ?? "/Users/demo/Work/pi-hyperchart",
 			items: data.history,
 			done: (action) => {
@@ -112,7 +118,10 @@ async function createComponent(kind: ComponentKind, themeName: ThemeName, width:
 			},
 		});
 	} else {
-		session.component = withRunStorage(data.storage, () => new RunWidget(tui, theme, preset === "manyRunning" ? data.manyRunning : data.primary));
+		session.component = withRunStorage(
+			data.storage,
+			() => new RunWidget(tui, theme as never, preset === "manyRunning" ? data.manyRunning : data.primary),
+		);
 	}
 	await waitForData(session.component, width);
 	return session;

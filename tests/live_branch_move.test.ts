@@ -1,11 +1,11 @@
-import { basename as fixtureRunId, dirname as fixtureRoot } from "node:path";
-import { withRunStorage, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
+import { dirname as fixtureRoot } from "node:path";
+import { type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
-import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/core/types.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
+import type { ActionUID } from "../packages/hyperchart/src/core/types.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import {
 	BranchSealedError,
@@ -54,15 +54,14 @@ function storageEntries(runDir: string): StorageEntry[] {
 }
 
 class PausingExecutor implements SteerableAgentExecutor {
-	emit?: (event: ChartEvent) => void;
+	emit?: (outcome: AgentOutcome) => void;
 	readonly disposalStarted = deferred();
 	constructor(readonly branchId: string, private readonly disposeGate?: Promise<void>) {}
-	start(_effect: AgentEffect, emit: (event: ChartEvent) => void): void { this.emit = emit; }
-	reject(_effect: RejectedEffect, emit: (event: ChartEvent) => void): void { this.emit = emit; }
+	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void { this.emit = emit; }
 	async cancel(_actionUid: ActionUID): Promise<void> {}
 	async dispose(): Promise<void> { this.disposalStarted.resolve(); await this.disposeGate; }
 	async steer(): Promise<boolean> { return false; }
-	complete(): void { this.emit?.({ type: "DONE" }); }
+	complete(): void { this.emit?.({ kind: "completed", event: { type: "DONE" } }); }
 }
 
 async function fixture(
@@ -88,10 +87,12 @@ async function fixture(
     done: { kind: "final" }
   }
 };\n`);
-	writeFileSync(join(runDir, "log.jsonl"), branchIds.map((branchId, index) => JSON.stringify({
+	writeFileSync(join(runDir, "log.jsonl"),
+		`${branchIds.map((branchId, index) => JSON.stringify({
 		kind: "branch", op: "create", seqId: index + 1, branchId, headSeqId: null,
 		metadata: { name: branchId }, committedAt: index + 1,
-	})).join("\n") + "\n");
+	})).join("\n")}\n`,
+	);
 	const executors = new Map<string, PausingExecutor[]>();
 	const controller = await createHyperchartRunnerController({
 		runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "live-move", workDir, branchIds: [...branchIds],
@@ -171,7 +172,8 @@ describe("live branch sealing and move", () => {
 	it("keeps a successfully drained branch sealed until replay-gated readmission from its current head", async () => {
 		const releaseDispose = deferred();
 		const f = await fixture(["main"], new Map([["main", releaseDispose.promise]]));
-		const first = f.executors.get("main")![0]!;
+		const first = f.executors.get("main")?.[0];
+		if (first === undefined) throw new Error("missing main executor");
 		const before = await branchView(f.runDir, "main");
 		const drainedHeadSeqId = before.branch.headSeqId!;
 
@@ -200,7 +202,7 @@ describe("live branch sealing and move", () => {
 		const resumed = f.controller.startBranch("main");
 		await waitFor(() => f.executors.get("main")?.length === 2 && f.executors.get("main")?.[1]?.emit !== undefined);
 		expect((await branchView(f.runDir, "main")).branch.headSeqId).toBe(drainedHeadSeqId);
-		f.executors.get("main")![1]!.complete();
+		f.executors.get("main")?.[1]?.complete();
 		await expect(resumed).resolves.toMatchObject({ branchId: "main", outcome: "complete" });
 		const ancestry = (await branchView(f.runDir, "main")).records;
 		expect(ancestry.find((record) => record.seqId > drainedHeadSeqId)?.parentId).toBe(drainedHeadSeqId);
@@ -218,7 +220,8 @@ describe("live branch sealing and move", () => {
 		]));
 		const initial = await branchView(f.runDir, "main");
 		const siblingInitial = await branchView(f.runDir, "sibling");
-		const mainTargetSeqId = initial.records[0]!.seqId;
+		const mainTargetSeqId = initial.records[0]?.seqId;
+		if (mainTargetSeqId === undefined) throw new Error("missing main target record");
 		const mainHeadSeqId = initial.branch.headSeqId!;
 		await expect(f.controller.forkBranch({
 			branchId: "malformed-child", sourceBranchId: "main", fromSeqId: siblingInitial.branch.headSeqId!,
@@ -226,8 +229,9 @@ describe("live branch sealing and move", () => {
 		await f.controller.forkBranch({ branchId: "child", sourceBranchId: "main", fromSeqId: mainHeadSeqId });
 		const childOutcome = f.controller.startBranch("child");
 		await waitFor(() => f.executors.get("child")?.[0]?.emit !== undefined);
-		const oldMain = f.executors.get("main")![0]!;
-		const oldChild = f.executors.get("child")![0]!;
+		const oldMain = f.executors.get("main")?.[0]!;
+		const oldChild = f.executors.get("child")?.[0];
+		if (oldMain === undefined || oldChild === undefined) throw new Error("missing executors before branch move");
 
 		let moved = false;
 		const moving = f.controller.moveBranch("main", mainTargetSeqId).then((moveSeqId) => {
@@ -260,7 +264,7 @@ describe("live branch sealing and move", () => {
 
 		const resumed = f.controller.startBranch("main");
 		await waitFor(() => f.executors.get("main")?.length === 2 && f.executors.get("main")?.[1]?.emit !== undefined);
-		f.executors.get("main")![1]!.complete();
+		f.executors.get("main")?.[1]?.complete();
 		await expect(resumed).resolves.toMatchObject({ branchId: "main", outcome: "complete" });
 		const resumedSnapshot = await branchView(f.runDir, "main");
 		expect(resumedSnapshot.records.find((record) => record.seqId > moveSeqId)?.parentId).toBe(mainTargetSeqId);

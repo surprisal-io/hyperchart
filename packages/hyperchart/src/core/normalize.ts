@@ -28,16 +28,15 @@ import type {
 	GuardRefAst,
 	InputRef,
 	MapStateAst,
-	OnReject,
+	AgentReentryAst,
+	RecoveryPolicyAst,
 	OnReenterAst,
 	SchemaAst,
 	ParallelStateAst,
 	ParsedChart,
 	ProtocolAst,
 	ProtocolMessageAst,
-	ReceiveStateAst,
 	RegionStateAst,
-	ReplyStateAst,
 	ScriptActionAst,
 	ImportedActionAst,
 	SendStateAst,
@@ -117,7 +116,8 @@ function toChartAst(
 	const states: Record<StatePath, StateAst> = {};
 	const actors: Record<StatePath, ActorEndpointDeclarationAst> = {};
 	const actorTargets = new Map<object, StatePath>();
-	const rawActors: Array<{ declaration: Record<string, unknown>; name: string; path: StatePath; owner?: StatePath; pointer: string }> = [];
+	const rawActors: Array<{ declaration: Record<string, unknown>; name: string; path: StatePath; owner?: StatePath; pointer: string;
+	}> = [];
 	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
 	for (const placement of rawActors) {
 		const declaration = toActorDeclarationAst(
@@ -441,14 +441,22 @@ function toActorDeclarationAst(
 			if ("FAILED" in transitions) diagnostics.push(diagnostic("RESERVED_FAILED_TRANSITION", "FAILED is globally fail-fast and cannot be routed inside an actor.", `${pointer}/transitions/FAILED`, source));
 			const stateInput = toInputDeclarations(raw.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
-			const validate = toGuardRef(raw.validate, `${pointer}/validate`, diagnostics, source, schemaRegistry);
+			for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
+				if (raw[legacy] !== undefined)
+					diagnostics.push(
+						diagnostic(
+							"LEGACY_AGENT_POLICY",
+							`${legacy} moved from the action state into agent() options.`,
+							`${pointer}/${legacy}`,
+							source,
+						),
+					);
+			}
 			states[id] = {
 				kind: "state", id, parent, action,
 				transitions,
 				...(stateInput === undefined ? {} : { input: stateInput }),
 				...(after === undefined ? {} : { after }),
-				...(validate === undefined ? {} : { validate, onReject: raw.onReject === "restart" ? "restart" : "resume" }),
-				...(typeof raw.retries === "number" ? { retries: raw.retries } : {}),
 			};
 			continue;
 		}
@@ -1183,8 +1191,9 @@ function collectState(
 			if (target.length === 0) diagnostics.push(diagnostic("INVALID_TRANSITION_TARGET", `${input.kind} target must be a non-empty state id.`, `${pointer}/target`, source));
 			const value = toValueAst(input[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
 			states[path] = deepFreeze(batch
-				? { kind: "sendBatch", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, inputs: value } satisfies SendBatchStateAst
-				: { kind: "send", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, input: value } satisfies SendStateAst);
+				? ({ kind: "sendBatch", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, inputs: value } satisfies SendBatchStateAst)
+					: ({ kind: "send", id: localId, ...parent, to: targetActor ?? "", event: eventType ?? "", target, transitions: {}, input: value } satisfies SendStateAst),
+			);
 			return;
 		}
 		if (input.kind === "callBatch") {
@@ -1226,48 +1235,26 @@ function collectState(
 		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
-		const validate = toGuardRef(input.validate, `${pointer}/validate`, diagnostics, source, schemaRegistry);
-		let onReject: OnReject | undefined;
-		if (input.onReject !== undefined) {
-			if (input.onReject !== "resume" && input.onReject !== "restart") {
-				diagnostics.push(
-					diagnostic("INVALID_ON_REJECT", "onReject must be 'resume' or 'restart'.", `${pointer}/onReject`, source),
+		for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
+			if (input[legacy] !== undefined) {
+				diagnostics.push(diagnostic(
+						"LEGACY_AGENT_POLICY",
+						`${legacy} moved from the action state into agent() options.`,
+						`${pointer}/${legacy}`, source),
 				);
-			} else if (input.validate === undefined) {
-				diagnostics.push(diagnostic("INVALID_ON_REJECT", "onReject requires validate.", `${pointer}/onReject`, source));
-			} else {
-				onReject = input.onReject;
-			}
-		}
-		const onReenter = toOnReenter(
-			input.onReenter,
-			`${pointer}/onReenter`,
-			diagnostics,
-			source,
-			action?.kind === "agent",
-		);
-		let retries: number | undefined;
-		if (input.retries !== undefined) {
-			if (typeof input.retries !== "number" || !Number.isInteger(input.retries) || input.retries < 0) {
-				diagnostics.push(
-					diagnostic("INVALID_RETRIES", "retries must be a non-negative integer.", `${pointer}/retries`, source),
-				);
-			} else if (input.validate === undefined) {
-				diagnostics.push(diagnostic("INVALID_RETRIES", "retries requires validate.", `${pointer}/retries`, source));
-			} else {
-				retries = input.retries;
 			}
 		}
 		if (action === undefined) return;
-		if (validate?.kind === "script") {
-			const actionArtifacts = action.kind === "user" ? {} : action.artifacts ?? {};
-			for (const name of Object.keys(validate.artifacts ?? {})) {
+		const validation = action.kind === "agent" ? action.validation : undefined;
+		if (validation?.guard.kind === "script") {
+			const actionArtifacts = action.kind === "agent" ? (action.artifacts ?? {}) : {};
+			for (const name of Object.keys(validation.guard.artifacts ?? {})) {
 				if (Object.prototype.hasOwnProperty.call(actionArtifacts, name)) {
 					diagnostics.push(
 						diagnostic(
 							"DUPLICATE_GUARD_ARTIFACT",
 							`Validation script artifact '${name}' duplicates an artifact declared by action state '${path}'.`,
-							`${pointer}/validate/artifacts/${escapePointer(name)}`,
+							`${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`,
 							source,
 						),
 					);
@@ -1282,9 +1269,6 @@ function collectState(
 			...(inputs === undefined ? {} : { input: inputs }),
 			transitions: transitions ?? {},
 			...(after === undefined ? {} : { after }),
-			...(validate === undefined ? {} : { validate, onReject: onReject ?? "resume" }),
-			...(onReenter === undefined ? {} : { onReenter }),
-			...(retries === undefined ? {} : { retries }),
 		} satisfies ActionStateAst);
 		return;
 	}
@@ -1297,15 +1281,16 @@ function collectState(
 export function declaredArtifactsForState(
 	state: Extract<StateAst, { kind: "state" }>,
 ): Readonly<Record<string, ArtifactAst>> | undefined {
-	if (state.action.kind === "user" && state.validate?.kind !== "script") return undefined;
+	if (state.action.kind === "user") return undefined;
 	const merged: Record<string, ArtifactAst> = {};
 	const add = (artifacts: Readonly<Record<string, ArtifactAst>> | undefined) => {
 		for (const [name, artifact] of Object.entries(artifacts ?? {})) {
 			Object.defineProperty(merged, name, { configurable: true, enumerable: true, value: artifact, writable: true });
 		}
 	};
-	if (state.action.kind !== "user") add(state.action.artifacts);
-	if (state.validate?.kind === "script") add((state.validate as GuardRefAst & { artifacts?: Readonly<Record<string, ArtifactAst>> }).artifacts);
+	if ("artifacts" in state.action) add(state.action.artifacts as Readonly<Record<string, ArtifactAst>> | undefined);
+	const guard = state.action.kind === "agent" ? state.action.validation?.guard : undefined;
+	if (guard?.kind === "script") add(guard.artifacts);
 	return Object.keys(merged).length === 0 ? undefined : merged;
 }
 
@@ -1403,12 +1388,13 @@ function validateTargets(
 				);
 			}
 			// An artifactOf reference must resolve to exactly one declared artifact.
-			if (node.action.kind !== "user" || node.validate?.kind === "script") {
+			if (node.action.kind !== "user") {
+				const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 				const actionArtifactRefs = [
 					...(node.action.kind === "agent" ? (node.action.reads ?? []) : []),
 					...(node.action.kind === "script" || node.action.kind === "tsImport" ? Object.values(node.action.env ?? {}) : []),
 				];
-				const guardArtifactRefs = node.validate?.kind === "script" ? Object.values(node.validate.env ?? {}) : [];
+				const guardArtifactRefs = guard?.kind === "script" ? Object.values(guard.env ?? {}) : [];
 				const artifactRefs = [...actionArtifactRefs, ...guardArtifactRefs].filter(
 					(item): item is ArtifactOfAst | JoinArtifactOfAst =>
 						typeof item !== "string" && (item.kind === "artifactOf" || item.kind === "joinArtifactOf"),
@@ -1425,7 +1411,7 @@ function validateTargets(
 						);
 					}
 					const producer = states[read.state];
-					const selfGuardRef = node.validate?.kind === "script" && read.kind === "artifactOf" && read.state === path;
+					const selfGuardRef = guard?.kind === "script" && read.kind === "artifactOf" && read.state === path;
 					const artifacts = producer?.kind === "state"
 						? selfGuardRef && producer.action.kind !== "user"
 							? producer.action.artifacts
@@ -1468,16 +1454,18 @@ function validateTargets(
 			for (const template of actionTemplates(node.action)) {
 				validateTemplateRefs(states, path, template, `${pointer}/action`, diagnostics, source);
 			}
-			if (node.validate?.kind === "script") {
-				for (const value of Object.values(node.validate.env ?? {})) {
-					if (typeof value !== "string" && value.kind === "template") validateTemplateRefs(states, path, value, `${pointer}/validate/env`, diagnostics, source);
+			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
+			if (guard?.kind === "script") {
+				for (const value of Object.values(guard.env ?? {})) {
+					if (typeof value !== "string" && value.kind === "template") validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
 				}
-				for (const declared of Object.values(node.validate.artifacts ?? {})) {
-					validateTemplateRefs(states, path, declared.path, `${pointer}/validate/artifacts`, diagnostics, source);
+				for (const declared of Object.values(guard.artifacts ?? {})) {
+					validateTemplateRefs(states, path, declared.path, `${pointer}/action/validation/guard/artifacts`, diagnostics, source);
 				}
 			}
-			if (typeof node.onReenter === "object") {
-				validateTemplateRefs(states, path, node.onReenter.message, `${pointer}/onReenter/message`, diagnostics, source);
+			if (node.action.kind === "agent" && typeof node.action.reentry === "object") {
+				validateTemplateRefs(states, path, node.action.reentry.resume,
+					`${pointer}/action/reentry/resume`, diagnostics, source);
 			}
 			continue;
 		}
@@ -1796,23 +1784,24 @@ function validateDominatedRefs(
 					if (ref.kind === "result") check(ref.state, path, `${pointer}/action`, "result()");
 				}
 			}
-			if (typeof node.onReenter === "object") {
-				for (const ref of node.onReenter.message.refs) {
-					if (ref.kind === "result") check(ref.state, path, `${pointer}/onReenter/message`, "result()");
+			if (node.action.kind === "agent" && typeof node.action.reentry === "object") {
+				for (const ref of node.action.reentry.resume.refs) {
+					if (ref.kind === "result") check(ref.state, path, `${pointer}/action/reentry/resume`, "result()");
 				}
 			}
 			const reads = artifactReads(node.action, pointer);
-			if (node.validate?.kind === "script") {
-				for (const [name, value] of Object.entries(node.validate.env ?? {})) {
+			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
+			if (guard?.kind === "script") {
+				for (const [name, value] of Object.entries(guard.env ?? {})) {
 					if (typeof value !== "string" && (value.kind === "artifactOf" || value.kind === "joinArtifactOf")) {
-						reads.push({ state: value.state, pointer: `${pointer}/validate/env/${escapePointer(name)}`, allowSelf: value.kind === "artifactOf" && value.state === path });
+						reads.push({ state: value.state, pointer: `${pointer}/action/validation/guard/env/${escapePointer(name)}`, allowSelf: value.kind === "artifactOf" && value.state === path });
 					}
 					if (typeof value !== "string" && value.kind === "template") {
-						for (const ref of value.refs) if (ref.kind === "result") check(ref.state, path, `${pointer}/validate/env/${escapePointer(name)}`, "result()");
+						for (const ref of value.refs) if (ref.kind === "result") check(ref.state, path, `${pointer}/action/validation/guard/env/${escapePointer(name)}`, "result()");
 					}
 				}
-				for (const [name, declared] of Object.entries(node.validate.artifacts ?? {})) {
-					for (const ref of declared.path.refs) if (ref.kind === "result") check(ref.state, path, `${pointer}/validate/artifacts/${escapePointer(name)}`, "result()");
+				for (const [name, declared] of Object.entries(guard.artifacts ?? {})) {
+					for (const ref of declared.path.refs) if (ref.kind === "result") check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
 				}
 			}
 			for (const read of reads) {
@@ -1945,7 +1934,9 @@ function dominatesForDataRef(
 	consumer: StatePath,
 ): boolean {
 	if (strictlyDominates(dominators, producer, consumer)) return true;
-	return parallelJoinDominates(states, dominators, producer, consumer) || mapJoinDominates(states, dominators, producer, consumer);
+	return (
+		parallelJoinDominates(states, dominators, producer, consumer) || mapJoinDominates(states, dominators, producer, consumer)
+	);
 }
 
 function parallelJoinDominates(
@@ -2668,6 +2659,78 @@ function toScriptOptions(
 	};
 }
 
+function toRecoveryPolicy(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	fallback: RecoveryPolicyAst,
+): RecoveryPolicyAst {
+	if (input === undefined) return fallback;
+	if (input === "fail") return { nudge: 0, restart: 0 };
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_RECOVERY_POLICY",
+				"onFail must be 'fail' or an object with nudge/restart counts.",
+				path,
+				source,
+			),
+		);
+		return fallback;
+	}
+	const count = (key: "nudge" | "restart"): number => {
+		const value = input[key];
+		if (value === undefined) return 0;
+		if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+			diagnostics.push(
+				diagnostic("INVALID_RECOVERY_POLICY", `${key} must be a non-negative safe integer.`, `${path}/${key}`, source),
+			);
+			return 0;
+		}
+		return value;
+	};
+	return { nudge: count("nudge"), restart: count("restart") };
+}
+
+function toAgentValidation(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	schemaRegistry: SchemaRegistry,
+	fallback: RecoveryPolicyAst,
+): AgentActionAst["validation"] {
+	if (input === undefined) return undefined;
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic("INVALID_AGENT_VALIDATION", "validation must be an object with a guard.", path, source),
+		);
+		return undefined;
+	}
+	const guard = toGuardRef(input.guard, `${path}/guard`, diagnostics, source, schemaRegistry);
+	if (guard === undefined) return undefined;
+	return { guard, onFail: toRecoveryPolicy(input.onFail, `${path}/onFail`, diagnostics, source, fallback) };
+}
+
+function toAgentReentry(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): AgentReentryAst | undefined {
+	if (input === undefined) return undefined;
+	if (input === "restart") return "restart";
+	if (!isRecord(input) || !("resume" in input)) {
+		diagnostics.push(
+			diagnostic("INVALID_AGENT_REENTRY", "reentry must be 'restart' or { resume: message }.", path, source),
+		);
+		return undefined;
+	}
+	const resume = toTemplate(input.resume, `${path}/resume`, diagnostics, source);
+	return resume === undefined ? undefined : { resume };
+}
+
 function toStateActionAst(
 	input: unknown,
 	chartId: string,
@@ -2693,6 +2756,16 @@ function toStateActionAst(
 			const reads = toReads(input.reads, `${path}/reads`, diagnostics, source);
 			const overrides = toAgentOverrides(input, path, diagnostics, source);
 			const reply = toSchemaAst(input.reply, `${path}/reply`, diagnostics, source, schemaRegistry);
+			const onFail = toRecoveryPolicy(input.onFail, `${path}/onFail`, diagnostics, source, { nudge: 2, restart: 1 });
+			const validation = toAgentValidation(
+				input.validation,
+				`${path}/validation`,
+				diagnostics,
+				source,
+				schemaRegistry,
+				onFail,
+			);
+			const reentry = toAgentReentry(input.reentry, `${path}/reentry`, diagnostics, source);
 			const uid: ActionUID = {
 				chart: chartId,
 				state: statePath,
@@ -2707,6 +2780,9 @@ function toStateActionAst(
 				...(reads === undefined ? {} : { reads }),
 				...overrides,
 				...(reply === undefined ? {} : { reply }),
+				onFail,
+				...(validation === undefined ? {} : { validation }),
+				...(reentry === undefined ? {} : { reentry }),
 			} satisfies AgentActionAst);
 		}
 		case "script": {

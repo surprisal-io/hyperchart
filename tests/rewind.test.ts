@@ -5,8 +5,8 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
-import type { AgentEffect, RejectedEffect } from "../packages/hyperchart/src/core/machine.js";
-import type { ActionUID, ChartEvent } from "../packages/hyperchart/src/core/types.js";
+import type { AgentEffect, AgentOutcome } from "../packages/hyperchart/src/core/machine.js";
+import type { ActionUID } from "../packages/hyperchart/src/core/types.js";
 import { forkHyperchartRun, listHyperchartBranchPage } from "../packages/hyperchart/src/runner/branches.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
@@ -27,9 +27,8 @@ afterEach(async () => {
 });
 
 class LiveExecutor implements SteerableAgentExecutor {
-	emit?: (event: ChartEvent) => void;
-	start(_effect: AgentEffect, emit: (event: ChartEvent) => void): void { this.emit = emit; }
-	reject(_effect: RejectedEffect, emit: (event: ChartEvent) => void): void { this.emit = emit; }
+	emit?: (outcome: AgentOutcome) => void;
+	start(_effect: AgentEffect, emit: (outcome: AgentOutcome) => void): void { this.emit = emit; }
 	async cancel(_actionUid: ActionUID): Promise<void> {}
 	async dispose(): Promise<void> {}
 	async steer(): Promise<boolean> { return false; }

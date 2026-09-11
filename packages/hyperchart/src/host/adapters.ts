@@ -72,7 +72,9 @@ export function actorTargetForInspectorState(
 		.filter((occurrence) => {
 			if (occurrence.declarationPath !== declarationPath) return false;
 			const owner = occurrence.ownerPath;
-			return owner === undefined || stateId === owner || stateId.startsWith(`${owner}.`) || stateId.startsWith(`${owner}#`);
+			return (
+				owner === undefined || stateId === owner || stateId.startsWith(`${owner}.`) || stateId.startsWith(`${owner}#`)
+			);
 		})
 		.sort((left, right) => (right.ownerPath?.length ?? 0) - (left.ownerPath?.length ?? 0))[0];
 	return target?.logicalPath ?? target?.occurrencePath;
@@ -325,11 +327,11 @@ export function hyperchartRunFromRuntime(
 	const actorOccurrences: HyperchartActorOccurrenceInfo[] = latestProjectedActors.map((actor) => {
 		const pending = Object.values(projection.pendingActorCalls).find((call) => call.occurrence === actor.occurrence);
 		const messagesFor = (candidate: typeof actor) => messagesByOccurrence.get(candidate.occurrence) ?? [];
-		const pool = actor.definition.kind === "actorPool" ? actor as ProjectedActorPoolOccurrence : undefined;
-		const ordinary = pool === undefined ? actor as ProjectedActorOccurrence : undefined;
+		const pool = actor.definition.kind === "actorPool" ? (actor as ProjectedActorPoolOccurrence) : undefined;
+		const ordinary = pool === undefined ? (actor as ProjectedActorOccurrence) : undefined;
 		const currentMessages = pool === undefined
-			? (ordinary === undefined ? [] : [projectedActorCurrentMessage(projection, ordinary)].filter((message): message is ProjectedActorMessage => message !== undefined))
-			: pool.workers.flatMap((worker) => {
+			? ordinary === undefined ? [] : [projectedActorCurrentMessage(projection, ordinary)].filter((message): message is ProjectedActorMessage => message !== undefined)
+				: pool.workers.flatMap((worker) => {
 				const message = projectedActorCurrentMessage(projection, pool, worker);
 				return message === undefined ? [] : [message];
 			});
@@ -391,12 +393,12 @@ export function hyperchartRunFromRuntime(
 				const stopped = [...records].reverse().find((record): record is Extract<DurableLogRecord, { type: "actor_scope" }> =>
 					record.type === "actor_scope" && record.kind === "stopped" && record.occurrence === candidate.occurrence);
 				const visitStatus = candidate.status === "stopped"
-					? "done" as const
+					? ("done" as const)
 					: candidate.status === "failed"
-						? "failed" as const
+						? ("failed" as const)
 						: candidate.status === "cancelled"
-							? "cancelled" as const
-							: "running" as const;
+							? ("cancelled" as const)
+							: ("running" as const);
 				return {
 					visit: candidate.generation,
 					invokeSeqId: created?.seqId ?? candidate.generation,
@@ -411,7 +413,8 @@ export function hyperchartRunFromRuntime(
 		const workers = pool?.workers.map((worker) => {
 			const workerFacts = [...runtime.byState.entries()].filter(([statePath]) => statePath.startsWith(`${worker.occurrence}.`));
 			const visitHistory = workerFacts.flatMap(([, facts]) => facts.visitHistory ?? []).sort((left, right) => left.startedAt - right.startedAt);
-			const sessions = workerFacts.flatMap(([, facts]) => facts.session === undefined ? [] : [facts.session]).sort((left, right) => sessionActivity(left) - sessionActivity(right));
+			const sessions = workerFacts.flatMap(([, facts]) => (facts.session === undefined ? [] : [facts.session]))
+				.sort((left, right) => sessionActivity(left) - sessionActivity(right));
 			const latestSession = sessions.at(-1);
 			const results = Object.entries(projection.results).flatMap(([statePath, value]) => statePath.startsWith(`${worker.occurrence}.`) ? [{ state: statePath.slice(worker.occurrence.length + 1), value }] : []);
 			const workerCurrent = projectedActorCurrentMessage(projection, pool!, worker);
@@ -470,7 +473,8 @@ export function hyperchartRunFromRuntime(
 			mailboxInstances,
 			...(messageHistory.length === 0 ? {} : { messageHistory }),
 			...(currentMessage === undefined ? {} : { currentMessage: messageInfo(actor, currentMessage) }),
-			...(pending === undefined || projection.failure !== undefined ? {} : { pendingCaller: { callId: pending.callId, state: pending.callerState, waitReason: pending.status === "enqueued" ? "accept" as const : "reply" as const } }),
+			...(pending === undefined || projection.failure !== undefined ? {} : { pendingCaller: { callId: pending.callId, state: pending.callerState, waitReason: pending.status === "enqueued" ? ("accept" as const) : ("reply" as const),
+						} }),
 			...(actor.status === "closing" || actor.status === "draining" ? { drain: { queued: actor.mailbox.length, current: currentMessages.length, settled: messagesFor(actor).filter((message) => message.status === "settled").length } } : {}),
 		};
 	});
@@ -486,21 +490,24 @@ export function hyperchartRunFromRuntime(
 			actorOccurrence: occurrence,
 		};
 	});
-	const actorOwnerStates: HyperchartStateInfo[] = [...new Set(actorOccurrences.flatMap((occurrence) => occurrence.ownerPath === undefined ? [] : [occurrence.ownerPath]))]
+	const actorOwnerStates: HyperchartStateInfo[] = [...new Set(actorOccurrences.flatMap((occurrence) => (occurrence.ownerPath === undefined ? [] : [occurrence.ownerPath])),
+		),
+	]
 		.filter((owner) => !runtimeStates.some((state) => state.id === owner))
 		.map((owner) => ({
 			id: owner,
 			scopeParentId: stripLastKey(owner),
 			type: "compound" as const,
 			status: [...Object.values(projection.actors), ...Object.values(projection.actorPools)]
-				.some((actor) => actor.owner === owner && actor.status !== "stopped") ? "running" as const : "done" as const,
+				.some((actor) => actor.owner === owner && actor.status !== "stopped") ? ("running" as const)
+				: ("done" as const),
 		}));
 	const actorInternalStates = actorOccurrences.flatMap((occurrence) => {
 		const templateStates = staticRun.states.filter((state) => state.actorInternal?.declarationPath === occurrence.declarationPath && state.actorInternal.occurrencePath === undefined);
 		const occurrenceId = actorOccurrenceInspectorId(occurrence.logicalPath ?? occurrence.occurrencePath);
 		const actorGenerations = actorGenerationsByLogicalOccurrence.get(occurrence.logicalPath ?? occurrence.occurrencePath) ?? [];
 		return templateStates.map((templateState) => {
-			const localState = templateState.actorInternal!.localState;
+			const localState = templateState.actorInternal?.localState;
 			const internalLocalPath = occurrence.kind === "actorPool" ? `$worker.${localState}` : localState;
 			const materializeTarget = (target: string) => {
 				const prefix = `${occurrence.declarationPath}.`;
@@ -659,6 +666,20 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 									...(refsInfo(state.onReenter.refs) === undefined ? {} : { refs: refsInfo(state.onReenter.refs) }),
 								},
 				}),
+		...(state.reentry === undefined
+			? {}
+			: {
+					reentry:
+						state.reentry.mode === "restart"
+							? { mode: "restart" as const }
+							: {
+									mode: "resume" as const,
+									...(state.reentry.message === undefined
+										? {}
+										: { messagePreview: previewText(state.reentry.message) }),
+									...(refsInfo(state.reentry.refs) === undefined ? {} : { refs: refsInfo(state.reentry.refs) }),
+								},
+				}),
 		...(state.artifacts === undefined
 			? {}
 			: {
@@ -669,8 +690,8 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 					})),
 				}),
 		...(state.reply === undefined ? {} : { replySchema: { schema: state.reply } }),
-		...(state.guard === undefined ? {} : { guard: guardInfo(state.guard) }),
-		...(state.onReject === undefined ? {} : { onReject: state.onReject }),
+		...(state.validation === undefined ? {} : { validationPolicy: { guard: guardInfo(state.validation.guard), onFail: state.validation.onFail } }),
+		...(state.onFail === undefined ? {} : { onFail: state.onFail }),
 		...(state.over === undefined && state.overSchema === undefined
 			? {}
 			: {
@@ -683,7 +704,6 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 		...(state.regions === undefined && state.branches === undefined
 			? {}
 			: { parallelConfig: inspectParallelConfig(state) }),
-		...(state.retries === undefined ? {} : { retry: { max: state.retries } }),
 		...(state.actorMessageDefinition === undefined
 			? {}
 			: {
@@ -919,9 +939,11 @@ function markStaleRuntimeStates(
 }
 
 function latestStateVisitSeqId(state: HyperchartStateInfo, runtime: RuntimeFacts): number | undefined {
-	return state.visitHistory?.at(-1)?.invokeSeqId
+	return (
+		state.visitHistory?.at(-1)?.invokeSeqId
 		?? state.mapConfig?.visitHistory?.at(-1)?.spawnSeqId
-		?? runtime.actorOwnerVisits.get(state.id)?.at(-1)?.seqId;
+		?? runtime.actorOwnerVisits.get(state.id)?.at(-1)?.seqId
+	);
 }
 
 function latestReentrySeqId(state: HyperchartStateInfo, runtime: RuntimeFacts): number | undefined {
@@ -1114,7 +1136,7 @@ function runtimeFacts(
 	const issuesByState = new Map<StatePath, HyperchartIssueInfo[]>();
 	const actorOwnerVisits = new Map<StatePath, Array<{ generation: number; seqId: number }>>();
 	const skippedRecords = new Set(skipped.map((entry) => entry.record));
-	const validationPolicies = new Map<string, import("../core/types.js").GuardRefAst | null | undefined>();
+	const validationPolicies = new Map<string, import("../core/types.js").GuardRefAst | undefined>();
 	const completeReplayPrefix = records[0]?.parentId === null;
 	const actorHistories = completeReplayPrefix
 		? actorInternalMessageHistories(ast, records, messagesByOccurrence, skippedRecords)
@@ -1185,7 +1207,8 @@ function runtimeFacts(
 		const stateId = record.actionUid.state;
 		const facts = byState.get(stateId) ?? {};
 		if (record.kind === "invoke") {
-			validationPolicies.set(actionUidKey(record.actionUid), record.validation);
+			validationPolicies.set(actionUidKey(record.actionUid), record.definition.kind === "agent" ? record.definition.validation?.guard : undefined,
+			);
 			facts.invokedAt = record.timestamp;
 			facts.attempts = (facts.attempts ?? 0) + 1;
 			delete facts.completedAt;
@@ -1196,8 +1219,10 @@ function runtimeFacts(
 		}
 		if (record.kind === "complete") {
 			const state = nodeAt(ast, stateId);
+			const currentGuard =
+				state?.kind === "state" && state.action.kind === "agent" ? state.action.validation?.guard : undefined;
 			const requiresValidation =
-				(state?.kind === "state" && state.validate !== undefined || validationPolicies.get(actionUidKey(record.actionUid)) !== null) && record.event.type !== "FAILED";
+				(currentGuard !== undefined || validationPolicies.get(actionUidKey(record.actionUid)) !== undefined) && record.event.type !== "FAILED";
 			if (!requiresValidation) {
 				facts.completedAt = record.timestamp;
 				facts.completedEvent = record.event;
@@ -1294,7 +1319,7 @@ function actorInternalMessageHistories(
 		if (record.type === "actor_message" && record.kind === "replied") {
 			const actor = projectedActorEndpoint(replay, record.occurrence);
 			const worker = actor?.definition.kind === "actorPool" && record.workerIndex !== undefined ? (actor as ProjectedActorPoolOccurrence).workers[record.workerIndex] : undefined;
-			const ordinary = actor?.definition.kind === "actor" ? actor as ProjectedActorOccurrence : undefined;
+			const ordinary = actor?.definition.kind === "actor" ? (actor as ProjectedActorOccurrence) : undefined;
 			const envelope = actor === undefined ? undefined : projectedActorCurrentMessage(replay, actor, worker);
 			const currentState = worker?.currentState ?? ordinary?.currentState;
 			const declaration = actor === undefined ? undefined : ast.actors[actor.declaration];
@@ -1452,7 +1477,6 @@ function runtimeVisitHistories(
 				const pending = pendingBefore.find((entry) => actionUidKey(entry.actionUid) === actionUidKey(record.actionUid));
 				if (pending?.phase === "validating" && pending.completionArtifacts !== undefined) visit.artifactPins = Object.entries(pending.completionArtifacts.pins).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size }));
 				completeVisit(visit, record.event, record.timestamp);
-				continue;
 			}
 		}
 	}
@@ -1904,11 +1928,7 @@ function runtimeValidationAttempts(
 	pending: PendingAction | undefined,
 ): number | undefined {
 	if (facts?.validationAttempts !== undefined) return facts.validationAttempts;
-	return pending?.phase === "validating" || pending?.phase === "rejected" ? pending.validationAttempts : undefined;
-}
-
-function pendingRejectedReason(pending: PendingAction | undefined): string | undefined {
-	return pending?.phase === "rejected" ? pending.reason : undefined;
+	return pending === undefined ? undefined : pending.recovery.validation.nudges + pending.recovery.validation.restarts;
 }
 
 function runtimeMapItemInfo(
@@ -1936,7 +1956,7 @@ function overlayRuntimeState(
 	const validationAttempts = runtimeValidationAttempts(facts, pending);
 	const mapItem = runtimeMapItemInfo(runtimeStatePath, projection);
 	const issues = runtime.issuesByState.get(runtimeStatePath);
-	const latestRejectedReason = facts?.latestRejectedReason ?? pendingRejectedReason(pending);
+	const latestRejectedReason = facts?.latestRejectedReason;
 	const failedCompletion = facts?.completedEvent?.type === "FAILED";
 	const acceptedCompletion = pending === undefined || failedCompletion ? facts?.completedEvent : undefined;
 	const acceptedCompletionAt = pending === undefined || failedCompletion ? facts?.completedAt : undefined;
@@ -2086,8 +2106,8 @@ function overlayMapRuntime(
 ): HyperchartStateInfo {
 	const rawItems = mapItems(state, ast, projection, runtime);
 	const items = state.status === "done" || closedByCompletedAncestor(state.id, ast, projection, runtime)
-		? rawItems.map((item) => item.status === "stale" ? { ...item, status: "done" as const } : item)
-		: rawItems;
+		? rawItems.map((item) => (item.status === "stale" ? { ...item, status: "done" as const } : item))
+			: rawItems;
 	const visitHistory = runtime.mapVisitHistoryByState.get(state.id);
 	if (items.length === 0 && projection.spawns[state.id] === undefined && visitHistory === undefined) return state;
 	const progressItems = currentMapItems(state.id, items, projection);
@@ -2411,7 +2431,8 @@ function inspectStateKindToStateType(kind: HyperchartInspectState["kind"]): Hype
 	return kind;
 }
 
-function guardInfo(guard: NonNullable<HyperchartInspectState["guard"]>): NonNullable<HyperchartStateInfo["guard"]> {
+function guardInfo(guard: NonNullable<HyperchartInspectState["validation"]>["guard"],
+): NonNullable<HyperchartStateInfo["validationPolicy"]>["guard"] {
 	if (guard.kind === "script") {
 		return {
 			kind: "script",

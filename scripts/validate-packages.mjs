@@ -214,7 +214,7 @@ if (typeof host.hyperchartRunFromInspectResult !== "function" || "hyperchartRunF
 if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !== "function" || typeof runtime.materializeWorkspaceFromPins !== "function") throw new Error("runtime exports missing");
 if (typeof runner.listHyperchartBranchPage !== "function" || typeof runner.createHyperchartRunnerController !== "function") throw new Error("runner exports missing");
 if ("listHyperchartBranchPage" in runtime || "loadBranchProjection" in runtime || "PROJECTOR_VERSION" in runtime || "listHyperchartBranches" in runtime || "latestPinsByPath" in runtime || "materializeWorkspace" in runtime || "finalMachineFailureMessage" in runtime) throw new Error("runtime compatibility/projection exports remain");
-if (typeof inspect.hyperchartRunFromRunDir !== "function" || typeof inspect.openRunInspector !== "function") throw new Error("inspect exports missing");
+if (typeof inspect.hyperchartRunFromRunId !== "function" || typeof inspect.openRunInspector !== "function" || "hyperchartRunFromRunDir" in inspect) throw new Error("inspect exports invalid");
 if (typeof sessions.updateSessionProgress !== "function" || typeof sessions.queueSessionSteering !== "function") throw new Error("sessions exports missing");
 if (typeof command.requestHyperchartCommand !== "function") throw new Error("command exports missing");
 if (typeof piHost.createPiHyperchartHost !== "function" || typeof piHost.piHyperchartHost?.readChartSnapshot !== "function" || typeof piHost.piHyperchartHost?.readRunOverview !== "function" || "readRunSnapshot" in piHost.piHyperchartHost) throw new Error("Pi host exports invalid");

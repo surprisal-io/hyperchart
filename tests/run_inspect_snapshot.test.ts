@@ -79,7 +79,7 @@ it("restores an unanswered gate without future action state, transcripts or movi
 						break;
 					}
 					case "agent":
-						push({ kind: "agent", effectId: effect.id, event: { type: "DONE" } });
+						push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "DONE" } } });
 						break;
 					case "cancel":
 						break;
