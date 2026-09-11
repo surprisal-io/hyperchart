@@ -114,10 +114,18 @@ function arrayDsl(values: string[]): string {
 	return `[\n${values.map((value) => `${DSL_INDENT}${indentDslValue(value)},`).join("\n")}\n]`;
 }
 
+function recoveryPolicyDsl(policy: { nudge: number; restart: number }): string {
+	return objectDsl([
+		["nudge", String(policy.nudge)],
+		["restart", String(policy.restart)],
+	]);
+}
+
 function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>): string {
 	return objectDsl([
 		["kind", stringDsl("chart")],
 		["id", stringDsl(ast.id)],
+		["recovery", recoveryPolicyDsl(ast.recovery)],
 		[
 			"args",
 			ast.args === undefined
@@ -418,26 +426,14 @@ function actionDsl(action: StateActionAst): string {
 			["thinking", action.thinking === undefined ? undefined : stringDsl(action.thinking)],
 			["tools", action.tools === undefined ? undefined : arrayDsl(action.tools.map(stringDsl))],
 			["reply", action.reply === undefined ? undefined : schemaDsl(action.reply)],
-			[
-				"onFail",
-				objectDsl([
-					["nudge", String(action.onFail.nudge)],
-					["restart", String(action.onFail.restart)],
-				]),
-			],
+			["onFail", recoveryPolicyDsl(action.onFail)],
 			[
 				"validation",
 				action.validation === undefined
 					? undefined
 					: objectDsl([
 							["guard", guardDsl(action.validation.guard)],
-							[
-								"onFail",
-								objectDsl([
-									["nudge", String(action.validation.onFail.nudge)],
-									["restart", String(action.validation.onFail.restart)],
-								]),
-							],
+							["onFail", recoveryPolicyDsl(action.validation.onFail)],
 						]),
 			],
 			[

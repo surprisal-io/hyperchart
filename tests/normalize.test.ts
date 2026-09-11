@@ -321,6 +321,43 @@ describe("normalizeChartConfig", () => {
 		});
 	});
 
+	it("applies chart recovery defaults unless an agent overrides them", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "chart-recovery",
+				recovery: { nudge: 4, restart: 2 },
+				initial: "inherited",
+				states: {
+					inherited: {
+						kind: "state",
+						action: agent("inherited", {
+							validation: { guard: tsImport("./checks.js", "testsPass") },
+						}),
+						transitions: { DONE: "overridden" },
+					},
+					overridden: {
+						kind: "state",
+						action: agent("overridden", { onFail: { nudge: 1, restart: 0 } }),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		assert(result.ok);
+		expect(result.ast.recovery).toEqual({ nudge: 4, restart: 2 });
+		const inherited = result.ast.states.inherited;
+		const overridden = result.ast.states.overridden;
+		assert(inherited?.kind === "state" && inherited.action.kind === "agent");
+		assert(overridden?.kind === "state" && overridden.action.kind === "agent");
+		expect(inherited.action.onFail).toEqual({ nudge: 4, restart: 2 });
+		expect(inherited.action.validation?.onFail).toEqual({ nudge: 4, restart: 2 });
+		expect(overridden.action.onFail).toEqual({ nudge: 1, restart: 0 });
+	});
+
 	it("normalizes compounds into a flat path-keyed AST", () => {
 		const result = normalizeChartConfig(
 			chart({

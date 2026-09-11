@@ -201,6 +201,7 @@ export type HyperchartInspectActorDeclaration = {
 
 export type HyperchartInspectResult = {
 	chartId: string;
+	recovery: HyperchartInspectRecoveryPolicy;
 	args?: Readonly<Record<string, ChartArgumentAst>>;
 	chartPath?: string;
 	exportName?: string;
@@ -220,6 +221,7 @@ export function inspectChartAst(
 ): HyperchartInspectResult {
 	return {
 		chartId: ast.id,
+		recovery: ast.recovery,
 		...(ast.args === undefined ? {} : { args: ast.args }),
 		...(options.chartPath === undefined ? {} : { chartPath: options.chartPath }),
 		...(options.exportName === undefined ? {} : { exportName: options.exportName }),

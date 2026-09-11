@@ -18,6 +18,7 @@ describe("model-facing tool payload boundary", () => {
 	it("keeps realistic large chart and run digests below 64 KiB without full-only fields", () => {
 		const chart: HyperchartInspectResult = {
 			chartId: "large-chart",
+			recovery: { nudge: 2, restart: 1 },
 			chartPath: "/tmp/large-chart.chart.ts",
 			mode: "static",
 			definitionSource: LARGE_TEXT,

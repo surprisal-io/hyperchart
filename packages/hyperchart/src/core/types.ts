@@ -520,7 +520,7 @@ export type AgentActionCst = {
 	// The step's RESULT: the shape of the completion event's payload. Small routing data only —
 	// deliverables go through artifacts.
 	reply?: SchemaCst;
-	/** Default handling for recoverable failures. Omitted resolves to nudge twice, then restart once. */
+	/** Overrides the chart recovery policy for this agent. */
 	onFail?: RecoveryPolicyCst;
 	/** Optional machine-owned acceptance guard for this agent's completion. */
 	validation?: AgentValidationCst;
@@ -921,6 +921,8 @@ export type StateCst =
 export type ChartCst = ActorOwnerCst & {
 	kind: "chart";
 	id: string;
+	/** Default policy for agents that do not declare their own onFail policy. */
+	recovery?: RecoveryPolicyCst;
 	/** Optional serializable metadata for host launch forms; not runtime validation. */
 	args?: Record<string, ChartArgumentCst>;
 	initial: StateId;
@@ -1186,6 +1188,8 @@ export type StateAst =
 export type ChartAst = Readonly<{
 	kind: "chart";
 	id: string;
+	/** Resolved chart-wide fallback pinned into every agent action during normalization. */
+	recovery: RecoveryPolicyAst;
 	args?: Readonly<Record<string, ChartArgumentAst>>;
 	initial: StateId;
 	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).

@@ -6,6 +6,10 @@ exports[`parseChartModule > loads a trusted local TS chart module and returns a 
   "id": "review-and-fix",
   "initial": "research",
   "kind": "chart",
+  "recovery": {
+    "nudge": 2,
+    "restart": 1,
+  },
   "states": {
     "approval": {
       "action": {

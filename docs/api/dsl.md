@@ -76,9 +76,15 @@ type ChartArgumentCst = {
   default?: JsonValue;
 };
 
+type RecoveryPolicyCst = "fail" | {
+  nudge?: number;
+  restart?: number;
+};
+
 type ChartCst = {
   kind: "chart";
   id: string;
+  recovery?: RecoveryPolicyCst;
   args?: Record<string, ChartArgumentCst>;
   initial: string;
   states: Record<string, StateCst>;
@@ -89,11 +95,23 @@ type ChartCst = {
 |---|---:|---|
 | `kind` | yes | Must be `"chart"`. |
 | `id` | yes | Non-empty durable chart identifier. |
+| `recovery` | no | Default recoverable-failure policy for agents in this chart. Defaults to `{ nudge: 2, restart: 1 }`. |
 | `args` | no | Serializable metadata for host launch forms, keyed by run argument name. |
 | `initial` | yes | Local id of the first top-level state. |
 | `states` | yes | Top-level state table. |
 
 State ids use letters, digits, `_`, and `-`. `.`, `#`, and `:` are reserved for paths, map instances, and effect identities.
+
+The chart-level `recovery` policy applies to every agent without its own `onFail`. An agent-level policy overrides it, and `validation.onFail` overrides both for validation rejection only. Use `"fail"` to disable automatic recovery. During normalization, the resolved policy is pinned into every agent action so durable replay does not depend on later chart defaults.
+
+```ts
+chart({
+  kind: "chart",
+  id: "research",
+  recovery: { nudge: 2, restart: 1 },
+  // ...
+});
+```
 
 `args` is an explicit display contract, not an executable schema or an implicit module export. `description` is a host-visible hint and `default` is a suggested launch value. Defaults must be finite JSON data; functions, Zod schemas, class instances, `undefined`, circular values, and non-finite numbers are rejected during normalization. Hyperchart does not inject these defaults into a run: the host shows or submits them, and the concrete values supplied at launch become the durable `args` fact.
 
@@ -412,6 +430,12 @@ function agent(name: string, options?: {
   thinking?: string;
   tools?: readonly string[];
   reply?: z.ZodType;
+  onFail?: RecoveryPolicyCst;
+  validation?: {
+    guard: GuardRef;
+    onFail?: RecoveryPolicyCst;
+  };
+  reentry?: "restart" | { resume: Templatable };
 }): AgentActionCst;
 ```
 

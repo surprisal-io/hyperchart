@@ -54,6 +54,7 @@ import type {
 } from "./types.js";
 
 const RESERVED_SYSTEM_EVENTS = new Set(["FAILED"]);
+const DEFAULT_RECOVERY_POLICY: RecoveryPolicyAst = deepFreeze({ nudge: 2, restart: 1 });
 
 // "." separates path segments, ":" separates effect id segments, "#" separates a map instance
 // key from its state id.
@@ -112,6 +113,7 @@ function toChartAst(
 	}
 
 	const chartId = typeof id === "string" ? id : "";
+	const recovery = toRecoveryPolicy(input.recovery, "/recovery", diagnostics, source, DEFAULT_RECOVERY_POLICY);
 	const args = toChartArguments(input.args, diagnostics, source);
 	const states: Record<StatePath, StateAst> = {};
 	const actors: Record<StatePath, ActorEndpointDeclarationAst> = {};
@@ -125,7 +127,15 @@ function toChartAst(
 	}> = [];
 	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
 	for (const placement of rawActors) {
-		const declaration = toActorDeclarationAst(placement, chartId, actorTargets, diagnostics, source, schemaRegistry);
+		const declaration = toActorDeclarationAst(
+			placement,
+			chartId,
+			actorTargets,
+			diagnostics,
+			source,
+			schemaRegistry,
+			recovery,
+		);
 		if (declaration !== undefined) {
 			actors[placement.path] = declaration;
 		}
@@ -144,6 +154,7 @@ function toChartAst(
 			"state",
 			actorTargets,
 			actors,
+			recovery,
 		);
 	}
 
@@ -172,6 +183,7 @@ function toChartAst(
 	return deepFreeze({
 		kind: "chart",
 		id: chartId,
+		recovery,
 		...(args === undefined ? {} : { args }),
 		initial: typeof initial === "string" ? initial : "",
 		states,
@@ -435,6 +447,7 @@ function toActorDeclarationAst(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
+	recovery: RecoveryPolicyAst,
 ): ActorEndpointDeclarationAst | undefined {
 	const authoredDefinition = placement.declaration.definition;
 	const isPool = placement.declaration.kind === "actorPoolDeclaration";
@@ -661,6 +674,7 @@ function toActorDeclarationAst(
 				diagnostics,
 				source,
 				schemaRegistry,
+				recovery,
 			);
 			if (action === undefined) {
 				continue;
@@ -1650,6 +1664,7 @@ function collectState(
 	role: "state" | "region" = "state",
 	actorTargets: ReadonlyMap<object, StatePath> = new Map(),
 	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>> = {},
+	recovery: RecoveryPolicyAst = DEFAULT_RECOVERY_POLICY,
 ): void {
 	if (!STATE_ID_PATTERN.test(localId)) {
 		diagnostics.push(
@@ -1730,6 +1745,7 @@ function collectState(
 				"region",
 				actorTargets,
 				actors,
+				recovery,
 			);
 		}
 		states[path] = deepFreeze({
@@ -1795,6 +1811,7 @@ function collectState(
 				"state",
 				actorTargets,
 				actors,
+				recovery,
 			);
 		}
 		// An instance completes by reaching a direct final child — same rule as a compound.
@@ -1846,6 +1863,7 @@ function collectState(
 				"state",
 				actorTargets,
 				actors,
+				recovery,
 			);
 		}
 		// Every compound (and region) must be completable: a direct final child is its exit.
@@ -2044,6 +2062,7 @@ function collectState(
 			diagnostics,
 			source,
 			schemaRegistry,
+			recovery,
 		);
 		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
@@ -3876,6 +3895,7 @@ function toStateActionAst(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
+	recovery: RecoveryPolicyAst,
 ): StateActionAst | undefined {
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_ACTION", "State action must be an object.", path, source));
@@ -3893,7 +3913,7 @@ function toStateActionAst(
 			const reads = toReads(input.reads, `${path}/reads`, diagnostics, source);
 			const overrides = toAgentOverrides(input, path, diagnostics, source);
 			const reply = toSchemaAst(input.reply, `${path}/reply`, diagnostics, source, schemaRegistry);
-			const onFail = toRecoveryPolicy(input.onFail, `${path}/onFail`, diagnostics, source, { nudge: 2, restart: 1 });
+			const onFail = toRecoveryPolicy(input.onFail, `${path}/onFail`, diagnostics, source, recovery);
 			const validation = toAgentValidation(
 				input.validation,
 				`${path}/validation`,

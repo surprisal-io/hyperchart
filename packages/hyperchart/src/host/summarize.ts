@@ -109,6 +109,7 @@ const MODEL_ENVELOPE_FIELDS = new Set([
 	"model",
 	"multipleOf",
 	"name",
+	"nudge",
 	"not",
 	"nullable",
 	"omittedAllowedEventCount",
@@ -157,6 +158,7 @@ const MODEL_ENVELOPE_FIELDS = new Set([
 	"queuedCount",
 	"reads",
 	"records",
+	"recovery",
 	"regions",
 	"label",
 	"removedByState",
@@ -165,6 +167,7 @@ const MODEL_ENVELOPE_FIELDS = new Set([
 	"required",
 	"resolvedModel",
 	"resolvedTools",
+	"restart",
 	"role",
 	"runId",
 	"runnerBranchIds",
@@ -961,6 +964,7 @@ export type ChartInspectStateSummary = {
 
 export type ChartInspectSummary = {
 	chartId: string;
+	recovery: { nudge: number; restart: number };
 	chartPath?: string;
 	exportName?: string;
 	mode: "static";
@@ -983,6 +987,7 @@ export function summarizeChartInspect(result: HyperchartInspectResult): ChartIns
 	const stateDigests = result.states.slice(0, MAX_SUMMARY_STATES).map(summarizeInspectState);
 	const summary: ChartInspectSummary = {
 		chartId: truncate(result.chartId),
+		recovery: result.recovery,
 		...(result.chartPath === undefined ? {} : { chartPath: truncate(result.chartPath, 1000) }),
 		...(result.exportName === undefined ? {} : { exportName: truncate(result.exportName) }),
 		mode: result.mode,
