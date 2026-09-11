@@ -57,6 +57,7 @@ export function StateDetails({
 	onSteerSession,
 	history,
 	selectedInvokeSeqId,
+	definitionOnly = false,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -77,6 +78,8 @@ export function StateDetails({
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	history?: { runId: string; snapshot: HistorySnapshot; dataSource: HyperchartInspectorDataSource; targetSeqId?: number };
 	selectedInvokeSeqId?: number;
+	/** The state is current-definition metadata, not a replayed runtime state. */
+	definitionOnly?: boolean;
 }) {
 	const kind = stateKindMeta(state);
 	const DetailKindIcon = kind.Icon;
@@ -154,7 +157,7 @@ export function StateDetails({
 							</div>
 						)}
 						<div className="mt-1 flex flex-wrap items-center gap-1.5">
-							<StatusPill status={state.status} />
+							{definitionOnly ? <span className="text-[10px] text-[var(--hc-amber-text)]">Current definition only · Runtime status unavailable</span> : <StatusPill status={state.status} />}
 							{state.initial === true && (
 								<span
 									className="inline-flex rounded border border-violet-500/35 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--hc-purple-text)]"
@@ -395,6 +398,7 @@ export function StateDetails({
 			{state.actorDeclaration !== undefined && state.actorInternal === undefined && (
 				<>
 					<RuntimeSection
+						recordOnly={definitionOnly}
 						state={state}
 						allStates={allStates}
 						{...(history === undefined ? {} : { history })}
@@ -415,6 +419,7 @@ export function StateDetails({
 
 			{(state.actorDeclaration === undefined || state.actorInternal !== undefined) && (
 				<RuntimeSection
+						recordOnly={definitionOnly}
 					state={state}
 					allStates={allStates}
 					{...(history === undefined ? {} : { history })}

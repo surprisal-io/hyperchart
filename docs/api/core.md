@@ -434,6 +434,8 @@ type MachineState = {
 };
 ```
 
+The machine returns `MachineOutputError` when unfinished historical validation prevents execution on the current chart. There is no separate resume check for callers to invoke.
+
 ### `MachineOutput`
 
 ```ts

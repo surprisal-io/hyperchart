@@ -18,10 +18,9 @@ export function RunOverview({ run, definitionSource }: { run: HyperchartRunInfo;
 	return (
 		<div className="space-y-3">
 			{run.mode === "static" ? (
-				<Section title="Static graph" icon={InformationCircleIcon}>
+				<Section title={run.replayIncompatibility === undefined ? "Static graph" : "Current definition only"} icon={InformationCircleIcon}>
 					<div className="text-[var(--text-muted)]">
-						This is a static chart inspect. Runtime arguments, process metadata, timings, and resolved fan-out data are
-						available only for run inspect.
+						{run.replayIncompatibility?.message ?? "This is a static chart inspect. Runtime arguments, process metadata, timings, and resolved fan-out data are available only for run inspect."}
 					</div>
 				</Section>
 			) : (

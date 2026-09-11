@@ -36,6 +36,7 @@ export type ReplayStaleRecord = Readonly<{
 	reason:
 		| "action_definition_changed"
 		| "guard_changed"
+		| "guard_removed"
 		| "actor_definition_changed"
 		| "actor_placement_changed"
 		| "actor_message_source_changed"
@@ -80,6 +81,11 @@ export function replayRecordDiagnostics(ast: ChartAst, projection: BranchProject
 		stale: staleRecordsFor(ast, projection, index, record),
 		unpinned: unpinned === undefined ? [] : [unpinned],
 	};
+}
+
+/** Removed-guard verdicts are informational; every other compatibility gate remains. */
+export function hasBlockingReplayWarnings(explanation: { skipped: readonly ProjectionSkippedRecord[]; stale: readonly ReplayStaleRecord[] }): boolean {
+	return explanation.skipped.length > 0 || explanation.stale.some((entry) => entry.reason !== "guard_removed");
 }
 
 export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): ReplayExplanation {
@@ -209,9 +215,17 @@ function staleRecordsFor(
 	const node = actorContextForState(ast, state)?.node ?? nodeAt(ast, state);
 	if (node?.kind !== "state") return [];
 	if (record.kind === "invoke") {
-		if (!isRecord(record.definition)) return [];
-		if (stableStringify(record.definition) === stableStringify(node.action)) return [];
+		const policyIssues: ReplayStaleRecord[] = record.validation !== undefined && stableStringify(record.validation) !== stableStringify(node.validate ?? null) ? [{
+			index, seqId: record.seqId, record, state, invokeSeqId: record.seqId,
+			reason: node.validate === undefined && record.validation !== null ? "guard_removed" : "guard_changed",
+			message: node.validate === undefined && record.validation !== null
+				? `Validator removed from state ${state}; historical invocation still requires recorded positive validation`
+				: `Validation policy for state ${state} changed since invoke seqId ${record.seqId}`,
+		}] : [];
+		if (!isRecord(record.definition)) return policyIssues;
+		if (stableStringify(record.definition) === stableStringify(node.action)) return policyIssues;
 		return [
+			...policyIssues,
 			{
 				index,
 				seqId: record.seqId,
@@ -225,7 +239,20 @@ function staleRecordsFor(
 	}
 	if (record.kind === "validated") {
 		const pending = projection.pendingActions.find((entry) => sameActionUid(entry.actionUid, record.actionUid));
-		if (node.validate === undefined || stableStringify(record.guard) === stableStringify(node.validate)) return [];
+		if (node.validate === undefined) {
+			const issues: ReplayStaleRecord[] = [{
+				index, seqId: record.seqId, record, state, reason: "guard_removed",
+				message: `Validator removed from state ${state}; replay uses the recorded ${record.outcome === true ? "positive" : "rejected"} verdict, not the removed validator`,
+				...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
+			}];
+			// Removing the current guard must not hide a different historical guard change.
+			if (pending?.validation != null && stableStringify(pending.validation) !== stableStringify(record.guard)) issues.push({
+				index, seqId: record.seqId, record, state, reason: "guard_changed", invokeSeqId: pending.invokeSeqId,
+				message: `Recorded guard for state ${state} differs from its invocation validation policy`,
+			});
+			return issues;
+		}
+		if (stableStringify(record.guard) === stableStringify(node.validate)) return [];
 		return [
 			{
 				index,

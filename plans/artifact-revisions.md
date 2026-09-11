@@ -104,8 +104,8 @@ Nothing imports it yet. Pure, safe, reviewable in isolation.
 - `durable_events.ts`: the `artifacts` field as above.
 - `replay_check`: pins are provenance, replay does not re-hash; absence of the
   field → pre-versioning diagnostic. Tests for both.
-- `tla/trace/record-sample.mjs` / export: carry the new field; run
-  `tla/check.sh` for all MC* models and `validate.sh` — expect no spec change,
+- `tla/tests/trace/record-sample.mjs` / export: carry the new field; run
+  `tla/tools/check.sh` for all MC* models and `validate.sh` — expect no spec change,
   verify it.
 
 ### Phase 3 — materialize pinned reads at action entry

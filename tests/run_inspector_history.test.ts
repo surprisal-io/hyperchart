@@ -107,7 +107,7 @@ describe("run inspector stateless history source", () => {
 			originBranchId: "main",
 			invocation: { kind: "script", env: { TOPIC: "topic=cursor chunks" } },
 		});
-		await expect(source.readVisitSession({ runId: "render-run", snapshot, invokeSeqId })).resolves.toMatchObject({ actionKey: "render:work:script", status: "running" });
+		await expect(source.readVisitSession({ runId: "render-run", snapshot, invokeSeqId })).resolves.toBeUndefined();
 	});
 
 	it("uses full replay semantics for a timed-out lazy visit", async () => {

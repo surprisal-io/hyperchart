@@ -157,7 +157,7 @@ Tests/formal/docs:
 - `tests/log_store.test.ts`, `tests/rewind.test.ts`, `tests/replay_check.test.ts`, `tests/hyperchart_runner_replay.test.ts`.
 - `tests/user_interactions.test.ts`, `tests/hyperchart_extension.test.ts`, Claude MCP tests, run inspection/host adapter tests.
 - Storybook fixtures/stories, которые предполагают `parentId = seqId - 1`.
-- `tla/Hyperchart.tla`, `tla/HyperchartTrace.tla`, `tla/trace/export-trace.mjs`, `tla/trace/validate.sh` и model-check fixtures.
+- `tla/spec/Hyperchart.tla`, `tla/spec/HyperchartTrace.tla`, `tla/tools/export-trace.mjs`, `tla/tools/validate.sh` и model-check fixtures.
 - `docs/safety.md`, `docs/reference.md`, `docs/api/{core,runtime,host,pi}.md`, `docs/pi.md`, `README.md`, package READMEs и `skills/pi/SKILL.md`.
 - `autodiscovery-storage-notes.md` и canonical `/Users/vyacheslavshebanov/Work/surprisal/autodiscovery/AUTODISCOVERY-DESIGN.md`.
 
@@ -198,7 +198,7 @@ Tests/formal/docs:
 - Sessions/gates: sibling transcripts видимы, но gate response принимается только с точным `(runId, branchId, seqId)` и branch живого runner.
 - Artifacts: runtime не меняет authored paths; документация явно предупреждает, что sibling invocations могут перезаписывать файлы до реализации полноценного artifact versioning.
 - UI/Storybook: отображаются дерево и несколько named heads; fork не переключает selection; checkout не пишет; rewind явно двигает только выбранный branch head.
-- Formal: `tla/check.sh` и `tla/trace/validate.sh` проходят для branch creation/move, append-from-head и fork-without-activation; structural references проверяются нормализатором один раз при чтении.
+- Formal: `tla/tools/check.sh` и `tla/tools/validate.sh` проходят для branch creation/move, append-from-head и fork-without-activation; structural references проверяются нормализатором один раз при чтении.
 - Full repository: `npm run check` и `npm run build-storybook`.
 
 ## Design boundaries

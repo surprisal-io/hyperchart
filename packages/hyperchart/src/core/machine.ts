@@ -383,6 +383,10 @@ export type MachineOutputEffect = Readonly<{
 }>;
 
 export function createMachineOutput(state: MachineState, responses: readonly (Effect | RecordAppend)[]): MachineOutput {
+	const executionError = pendingValidationExecutionError(state.ast, state.projection);
+	if (executionError !== undefined) {
+		return { kind: "error", state, error: executionError };
+	}
 	if (state.projection.failure !== undefined) {
 		// Failure terminalizes immediately. Runtime cancellation is best-effort, just like
 		// timeout/scope-exit cancellation; it is not part of the durable log contract.
@@ -601,7 +605,7 @@ export function renderPendingActionInvocation(
 		throw new Error(`Pending action does not match the chart in state ${pending.actionUid.state}`);
 	}
 	return actionInvocationForAction(
-		{ ast, projection, dispatched: new Set(), poolAdmissionReservations: new Map() },
+		createMachine(ast, projection),
 		pending.actionUid,
 		node.action,
 		actionEffectId(pending.actionUid, pending.visitId, pending.invokeSeqId),
@@ -1637,6 +1641,7 @@ function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 				sessionId: randomUUID(),
 				...resolvedStateInput(state, actionUid),
 				definition: node.action,
+				validation: node.validate ?? null,
 			},
 		],
 	};
@@ -1668,6 +1673,50 @@ function removePoolAdmissionReservations(state: MachineState, effectId: EffectId
 	}
 }
 
+/** Restoring durable facts does not imply that their unfinished work can run on this chart. */
+function pendingValidationExecutionError(ast: ChartAst, projection: BranchProjection): string | undefined {
+	// Failure cleanup must still cancel outstanding work, even if its validator is gone.
+	if (projection.failure !== undefined) {
+		return undefined;
+	}
+
+	for (const pending of projection.pendingActions) {
+		const statePath = pending.actionUid.state;
+		const currentState = actionStateAtMachine(ast, statePath);
+		if (currentState?.validate !== undefined) {
+			// The current chart can validate/retry this invocation. Guard identity mismatches
+			// are handled separately by replay compatibility diagnostics.
+			continue;
+		}
+
+		const wasExplicitlyUnguarded = pending.validation === null;
+		if (pending.phase === "running" && wasExplicitlyUnguarded) {
+			// Only explicit null proves that this invocation never required a validator.
+			// Missing legacy provenance is not equivalent to an unguarded invocation.
+			continue;
+		}
+
+		let reason: string;
+		if (pending.validation === undefined) {
+			reason = "legacy invocation lacks validation provenance";
+		} else {
+			reason = "historical validator was removed";
+		}
+
+		return `Cannot resume state ${statePath} (invoke seqId ${pending.invokeSeqId}): ${reason}; `
+			+ "no recorded positive validation accepts this invocation. "
+			+ "Restore the original validator, rewind before the invocation, or restart. "
+			+ "Replay warning overrides cannot accept this claim.";
+	}
+
+	return undefined;
+}
+
 export function createMachine(ast: ChartAst, projection: BranchProjection): MachineState {
-	return { ast, projection, dispatched: new Set(), poolAdmissionReservations: new Map() };
+	return {
+		ast,
+		projection,
+		dispatched: new Set(),
+		poolAdmissionReservations: new Map(),
+	};
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, send, t, tsImport, user } from "../packages/hyperchart/src/core/dsl.js";
+import { agent, actor, arg, chart, compound, event, final, failed, input, item, map, message, parallel, protocol, receive, reply, script, send, t, tsImport, user } from "../packages/hyperchart/src/core/dsl.js";
 import { z } from "zod";
 import { actionUidKey } from "../packages/hyperchart/src/core/action_uid.js";
 import { normalizeChartConfig } from "../packages/hyperchart/src/core/normalize.js";
@@ -547,6 +547,40 @@ describe("React runtime adapter", () => {
 			},
 		]);
 		expect(work?.session).toMatchObject({ status: "running", model: "provider/second-model" });
+	});
+
+	it("ignores non-agent entries in session progress", () => {
+		const chartAst = ast(chart({
+			kind: "chart",
+			id: "script-session-progress",
+			initial: "work",
+			states: {
+				work: { kind: "state", action: script("true"), transitions: { DONE: "done" } },
+				done: final(),
+			},
+		}));
+		const uid = actionUid(chartAst, "work");
+		const definition = (chartAst.states.work as Extract<ChartAst["states"][string], { kind: "state" }>).action;
+		const records: DurableLogRecord[] = [
+			{ type: "args", args: {}, ...baseRecord(1) },
+			{ type: "state_action", kind: "invoke", validation: null, sessionId: "script-invocation", actionUid: uid, definition, ...baseRecord(2) },
+		];
+		const run = hyperchartRunFromRuntime(inspectChartAst(chartAst), chartAst, records, {
+			sessionProgress: {
+				sessions: {
+					malformed: {
+						actionUid: uid,
+						actionKey: actionUidKey(uid),
+						status: "failed",
+						error: "not an agent session",
+					},
+				},
+			},
+		});
+		const work = run.states.find((state) => state.id === "work");
+		expect(work?.session).toBeUndefined();
+		expect(work?.visitHistory?.[0]?.session).toBeUndefined();
+		expect(work?.issues?.some((issue) => issue.kind === "session_failed") ?? false).toBe(false);
 	});
 
 	it("surfaces durable state-action and opened inputs while preserving the replay fallback", () => {

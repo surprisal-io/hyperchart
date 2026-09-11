@@ -1,3 +1,5 @@
+import { explainReplay, type ReplayBrokenRecord } from "../core/replay_check.js";
+import { collectSnapshotRecordsForMapping } from "./run_history.js";
 import { resolveRunPaths } from "../runtime/generic/run_paths.js";
 import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
@@ -11,7 +13,7 @@ import {
 import type { ActionUID, ChartAst } from "../core/types.js";
 import type { BranchProjection } from "../core/projection.js";
 import type { BranchId, DurableLogRecord } from "../core/durable_events.js";
-import { hyperchartRunFromRuntime } from "../host/adapters.js";
+import { hyperchartRunFromReplayIncompatibility, hyperchartRunFromRuntime } from "../host/adapters.js";
 import type { HyperchartRunInfo, HyperchartRunOverview, HyperchartSessionMessageInfo } from "../host/index.js";
 import { resolveAgentDefaults } from "../runtime/generic/agent_definitions.js";
 import type { BranchHead } from "../core/durable_events.js";
@@ -87,6 +89,8 @@ export async function hyperchartRunFromRunId(
 	let initialBranches: BranchListChunk | undefined;
 	let snapshot: HistorySnapshot | undefined;
 	let projection: BranchProjection | undefined;
+	let broken: ReplayBrokenRecord | undefined;
+	const replayWarnings: string[] = [];
 	const store = await openRunLogStore(runId, {
 		access: "read",
 		branchId,
@@ -100,8 +104,18 @@ export async function hyperchartRunFromRunId(
 			snapshot = { branchId, headSeqId: null };
 			syntheticEmptyBranch = true;
 		}
-		const semantic = await BranchExecution.restore({ ast, branchId, store, snapshot, saveCheckpoint: "never" });
-		projection = semantic.inspectionProjection();
+		try {
+			const semantic = await BranchExecution.restore({ ast, branchId, store, snapshot, saveCheckpoint: "never" });
+			projection = semantic.inspectionProjection();
+			replayWarnings.push(...semantic.replay.stale.map((entry) => entry.message));
+		} catch (error) {
+			// Do not recover storage/checkpoint failures or unrelated exceptions. Confirm the
+			// same structural failure independently against this exact captured ancestry.
+			if (!(error instanceof Error)) throw error;
+			const ancestry = await collectSnapshotRecordsForMapping(store, snapshot);
+			broken = explainReplay(ast, ancestry).broken;
+			if (broken === undefined || broken.error !== error.message) throw error;
+		}
 		const [recordChunk, branchChunk] = await Promise.all([
 			syntheticEmptyBranch ? Promise.resolve({ snapshot, items: [] as readonly DurableLogRecord[] }) : store.readRecords({ snapshot }),
 			store.listBranches(),
@@ -128,7 +142,7 @@ export async function hyperchartRunFromRunId(
 	const historicalTranscriptRecords = options.snapshot === undefined ? runtimeRecords
 		: runtimeRecords.filter((record) => !pending.has(record.seqId));
 	const snapshotTime = options.snapshot === undefined ? undefined : records.at(-1)?.timestamp;
-	const sessionProgress = options.includeTranscripts === true
+	const sessionProgress = broken === undefined && options.includeTranscripts === true
 		? await sessionProgressWithVisitTranscripts(
 				historicalTranscriptRecords,
 				branchSessionProgress,
@@ -139,15 +153,19 @@ export async function hyperchartRunFromRunId(
 			)
 		: overviewSessionProgress;
 	const createdAt = Date.parse(meta.createdAt);
-	const run = hyperchartRunFromRuntime(inspect, ast, runtimeRecords, {
+	const run = broken === undefined ? hyperchartRunFromRuntime(inspect, ast, runtimeRecords, {
 		runId,
-		...(status === undefined ? {} : { status }),
+		status: { ...status, replayWarnings: [...(status?.replayWarnings ?? []), ...replayWarnings] },
 		sessionProgress,
 		cwd: meta.workDir,
 		branchWorkspace: join(absoluteRunDir, "workspaces", branchId),
 		...(Number.isNaN(createdAt) ? {} : { createdAt }),
 		...(options.now === undefined ? {} : { now: options.now }),
 		...(projection === undefined ? {} : { projection }),
+	}) : hyperchartRunFromReplayIncompatibility(inspect, broken, {
+		runId, cwd: meta.workDir,
+		...(Number.isNaN(createdAt) ? {} : { createdAt }),
+		...(records.at(-1) === undefined ? {} : { updatedAt: records.at(-1)!.timestamp }),
 	});
 	const selected = projection !== undefined && options.includeTranscripts !== true ? overviewOnly(run, projection) : run;
 	return {

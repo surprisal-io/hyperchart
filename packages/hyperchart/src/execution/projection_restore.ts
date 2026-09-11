@@ -16,7 +16,7 @@ import {
 } from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
-export const PROJECTOR_VERSION = 4;
+export const PROJECTOR_VERSION = 5;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
 export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
@@ -207,14 +207,15 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 
 function isPendingActions(value: unknown): boolean { return Array.isArray(value) && value.every(isPendingAction); }
 function isPendingAction(value: unknown): boolean {
+	if (isRecord(value) && value.validation !== undefined && value.validation !== null && (!isRecord(value.validation) || !isJsonValue(value.validation) || !isOneOf(value.validation.kind, ["script", "tsImport"]))) return false;
 	if (!isRecord(value) || !isActionUid(value.actionUid) || !isPositiveInteger(value.visitId) || !isPositiveInteger(value.seqId)
 		|| !isPositiveInteger(value.invokeSeqId) || !isNonEmptyString(value.sessionId) || !(value.gateSeqId === undefined || isPositiveInteger(value.gateSeqId))) return false;
-	if (value.phase === "running") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "timestamp", "phase"], ["gateSeqId"])
+	if (value.phase === "running") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "timestamp", "phase"], ["gateSeqId", "validation"])
 		&& isNonNegativeFinite(value.timestamp);
 	if (value.completionArtifacts !== undefined && (!isExactRecord(value.completionArtifacts, ["branchId", "pins"], []) || !isNonEmptyString(value.completionArtifacts.branchId) || !isArtifactPins(value.completionArtifacts.pins))) return false;
-	if (value.phase === "validating") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "completionArtifacts"])
+	if (value.phase === "validating") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "completionArtifacts", "validation"])
 		&& isChartEvent(value.event) && isNonNegativeInteger(value.validationAttempts);
-	if (value.phase === "rejected") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "reason", "completionArtifacts"])
+	if (value.phase === "rejected") return isExactRecord(value, ["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "phase", "event", "validationAttempts"], ["gateSeqId", "reason", "completionArtifacts", "validation"])
 		&& isChartEvent(value.event) && isNonNegativeInteger(value.validationAttempts) && (value.reason === undefined || typeof value.reason === "string");
 	return false;
 }

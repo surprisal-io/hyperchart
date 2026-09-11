@@ -18,7 +18,7 @@ export interface HyperchartInfo {
 }
 
 export type HyperchartRunStatus = "running" | "completed" | "failed" | "paused" | "blocked";
-export type HyperchartStateStatus = "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale";
+export type HyperchartStateStatus = "pending" | "waiting" | "running" | "done" | "failed" | "skipped" | "stale" | "unknown";
 export type HyperchartStateType =
 	| "agent"
 	| "user"
@@ -385,7 +385,9 @@ export interface HyperchartVisitInfo {
 	originBranchId?: string;
 	startedAt: number;
 	endedAt?: number;
-	status: "running" | "done" | "failed" | "cancelled";
+	status: "running" | "done" | "failed" | "cancelled" | "unknown";
+	/** Record-only recovery: invocation is recorded, not rendered; runtime derivations are unavailable. */
+	replayWarning?: string;
 	completedEvent?: string;
 	endedReason?: "timed_out" | "scope_exit";
 	validationAttempts?: number;
@@ -579,6 +581,8 @@ export interface HyperchartRunInfo {
 	runnerBranchIds?: string[];
 	originSessionId?: string;
 	mode?: HyperchartInspectMode;
+	/** Current definition only: this snapshot cannot be projected with the supplied chart. */
+	replayIncompatibility?: { seqId: number; stateId?: string; message: string };
 	definitionSource?: string;
 	description?: string;
 	status: HyperchartRunStatus;

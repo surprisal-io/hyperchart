@@ -678,9 +678,9 @@ Do not overwrite unrelated dirty changes in:
 - `packages/hyperchart/src/react/stories/InspectorGraph.stories.tsx`
 - `packages/hyperchart/src/react/stories/HyperchartInspectorStress.visual.stories.tsx`
 - focused actor inspector stories/fixtures
-- `tla/Hyperchart.tla`
+- `tla/spec/Hyperchart.tla`
 - new bounded actor/mailbox MC models
-- `tla/HyperchartTrace.tla`
+- `tla/spec/HyperchartTrace.tla`
 - trace export/record/sample files
 - `docs/core-authoring.md`
 - `docs/composition.md`

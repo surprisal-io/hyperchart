@@ -3,8 +3,8 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { createMachine, createMachineOutput } from "../packages/hyperchart/src/core/machine.js";
-import { createBranchProjection, projectBranch, replayResumeError } from "../packages/hyperchart/src/core/projection.js";
+import { createMachine, createMachineOutput, stepMachine } from "../packages/hyperchart/src/core/machine.js";
+import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
 import { explainReplay, hasBlockingReplayWarnings } from "../packages/hyperchart/src/core/replay_check.js";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
 import { BranchExecution } from "../packages/hyperchart/src/execution/branch_execution.js";
@@ -23,6 +23,10 @@ const previousExit = process.exitCode;
 afterEach(() => { process.chdir(previousCwd); process.exitCode = previousExit; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 const ast = removedValidationScenario.ast;
 const project = (records: readonly DurableLogRecord[]) => projectBranch(createBranchProjection(ast), ast, records);
+function executionError(machine: ReturnType<typeof createMachine>): string | undefined {
+	const output = stepMachine(machine, { kind: "start" });
+	return output.kind === "error" ? output.error : undefined;
+}
 async function fixture() {
 	const root = mkdtempSync(join(tmpdir(), "removed-validator-")); roots.push(root);
 	const runDir = join(root, "run"); mkdirSync(runDir);
@@ -70,7 +74,7 @@ it("holds first claims and rejected prefixes without results, published pins or 
 			const prefix = f.records.slice(0, end);
 			const projection = project(prefix);
 			expect(projection.results).toEqual({}); expect(projection.artifactPins).toEqual({});
-			expect(replayResumeError(projection, ast)).toContain("no recorded positive validation");
+			expect(executionError(createMachine(ast, projection))).toContain("no recorded positive validation");
 			expect(createMachineOutput(createMachine(ast, projection), []).kind).toBe("error");
 			const semantic = await BranchExecution.restore({ ast, branchId: "main", store: f.store, snapshot: { branchId: "main", headSeqId: prefix.at(-1)!.seqId } });
 			expect(semantic.artifactPins()).toEqual({}); expect(semantic.inspectionOverview().final).toBe(false);
@@ -78,6 +82,78 @@ it("holds first claims and rejected prefixes without results, published pins or 
 			expect(visit?.status).not.toBe("done"); expect(visit?.artifactPins).toBeUndefined(); expect(visit?.endedAt).toBeUndefined();
 		}
 	} finally { await f.store.close(); }
+});
+
+it("machine blocks guarded and unknown running invocations, but permits explicit unguarded ones", async () => {
+	const f = await fixture();
+	try {
+		const firstInvoke = f.records.findIndex((record) => record.type === "state_action" && record.kind === "invoke");
+		const guardedPrefix = f.records.slice(0, firstInvoke + 1);
+		const unknownPrefix = guardedPrefix.map((record) => {
+			if (record.type !== "state_action" || record.kind !== "invoke") return record;
+			const { validation: _validation, ...legacy } = record;
+			return legacy;
+		});
+
+		for (const prefix of [guardedPrefix, unknownPrefix]) {
+			const projection = project(prefix);
+			const machine = createMachine(ast, projection);
+			expect(machine.projection.pendingActions[0]?.phase).toBe("running");
+			expect(executionError(machine)).toContain("no recorded positive validation");
+			expect(machine.dispatched.size).toBe(0);
+			expect(machine.poolAdmissionReservations.size).toBe(0);
+			expect(stepMachine(machine, { kind: "start" })).toMatchObject({
+				kind: "error", error: expect.stringContaining("no recorded positive validation"),
+			});
+			expect(machine.dispatched.size).toBe(0);
+			expect(machine.projection).toEqual(projection);
+
+			const originalAst = guardedValidationScenario.ast;
+			const originalProjection = projectBranch(createBranchProjection(originalAst), originalAst, prefix);
+			expect(executionError(createMachine(originalAst, originalProjection))).toBeUndefined();
+		}
+
+		await f.store.createBranch("unguarded", f.records[firstInvoke - 1]!.seqId);
+		const unguardedStore = f.store.forBranch("unguarded");
+		const captured = await captureRemovedValidatorHistory((drafts) => unguardedStore.appendDrafts(drafts), {
+			unguarded: true,
+			branchId: "unguarded",
+			projection: project(f.records.slice(0, firstInvoke)),
+		});
+		const unguardedInvoke = captured.records.findIndex((record) => record.type === "state_action" && record.kind === "invoke");
+		const unguarded = createMachine(ast, project(captured.records.slice(0, unguardedInvoke + 1)));
+		expect(unguarded.projection.pendingActions[0]).toMatchObject({ phase: "running", validation: null });
+		expect(executionError(unguarded)).toBeUndefined();
+		expect(stepMachine(unguarded, { kind: "start" }).kind).toBe("effect");
+
+	} finally {
+		await f.store.close();
+	}
+});
+
+it("machine stops returning the validation error after a recorded positive verdict", async () => {
+	const f = await fixture();
+	try {
+		const firstVerdict = f.records.findIndex(verdict);
+		const accepted = f.records.findIndex((record) => record.type === "state_action" && record.kind === "validated" && record.outcome === true);
+		const machine = createMachine(ast, project(f.records.slice(0, firstVerdict)));
+		const beforeRead = structuredClone(machine.projection);
+		expect(executionError(machine)).toContain("no recorded positive validation");
+		expect(executionError(machine)).toContain("no recorded positive validation");
+		expect(machine.projection).toEqual(beforeRead);
+		expect(machine.dispatched.size).toBe(0);
+
+		const output = stepMachine(machine, {
+			kind: "durable_records_added",
+			effectId: "replayed-verdicts",
+			records: f.records.slice(firstVerdict, accepted + 1),
+		});
+		expect(output.kind).toBe("effect");
+		expect(executionError(machine)).toBeUndefined();
+		expect(machine.projection.results.work).toEqual({ attempt: 2 });
+	} finally {
+		await f.store.close();
+	}
 });
 
 it("legacy unknown completions remain provisional, even if genuinely unguarded; recorded legacy verdicts still replay", async () => {
@@ -91,12 +167,12 @@ it("legacy unknown completions remain provisional, even if genuinely unguarded; 
 		expect(project(legacy).results.work).toEqual({ attempt: 3 });
 		const prefix = legacy.slice(0, legacy.findIndex(verdict));
 		expect(project(prefix).artifactPins).toEqual({});
-		expect(replayResumeError(project(prefix), ast)).toContain("legacy invocation lacks validation provenance");
+		expect(executionError(createMachine(ast, project(prefix)))).toContain("legacy invocation lacks validation provenance");
 		let seqId = 0;
 		const unguarded = await captureRemovedValidatorHistory(async (drafts) => drafts.map((draft) => ({ ...draft, parentId: seqId || null, seqId: ++seqId, branchId: "main", timestamp: seqId }) as DurableLogRecord), { unguarded: true });
 		const oldUnguarded = unguarded.records.map((record) => { if (record.type !== "state_action" || record.kind !== "invoke") return record; const { validation: _validation, ...old } = record; return old; });
 		expect(project(unguarded.records).activeLeaves).toEqual(["done"]);
-		expect(project(oldUnguarded).results).toEqual({}); expect(replayResumeError(project(oldUnguarded), ast)).toContain("legacy invocation");
+		expect(project(oldUnguarded).results).toEqual({}); expect(executionError(createMachine(ast, project(oldUnguarded)))).toContain("legacy invocation");
 	} finally { await f.store.close(); }
 });
 
@@ -197,6 +273,6 @@ it("retains pending invoke policy in compatible checkpoints and rejects old-char
 		const changed = await loadBranchProjection({ ast, branchId: "main", store: f.store, snapshot, contract: projectionContractForAst(ast) });
 		expect(changed.checkpointHeadSeqId).toBeNull();
 		expect(changed.projection.artifactPins).toEqual({});
-		expect(replayResumeError(changed.projection, ast)).toContain("no recorded positive validation");
+		expect(executionError(createMachine(ast, changed.projection))).toContain("no recorded positive validation");
 	} finally { await f.store.close(); }
 });

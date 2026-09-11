@@ -277,6 +277,33 @@ describe("interactive bounded history", () => {
 		expect(rendered.getByText("completed event")).toBeTruthy();
 	});
 
+	it("does not request an agent session for a selected script invocation", async () => {
+		const readVisitSession = vi.fn().mockResolvedValue({ actionKey: "chart:work:script", status: "completed" });
+		const state: HyperchartStateInfo = {
+			id: "work",
+			type: "script",
+			status: "done",
+			visitHistory: [{
+				visit: 1,
+				invokeSeqId: 7,
+				startedAt: 1,
+				endedAt: 2,
+				status: "done",
+				invocation: { kind: "script", command: "true", args: [] },
+			}],
+		};
+		const history = {
+			runId: "run",
+			snapshot: { branchId: "main", headSeqId: 8 } as const,
+			dataSource: { readVisitSession } as unknown as HyperchartInspectorDataSource,
+		};
+		const rendered = render(createElement(RuntimeSection, { state, history, selectedInvokeSeqId: 7 }));
+		await act(async () => Promise.resolve());
+		expect(readVisitSession).not.toHaveBeenCalled();
+		expect(rendered.queryByText("Agent session")).toBeNull();
+		expect(rendered.queryByText("View session")).toBeNull();
+	});
+
 	it("loads a visit transcript only when its session is opened", async () => {
 		const readVisitSession = vi.fn().mockResolvedValue({ actionKey: "chart:work:agent", status: "completed", messages: [{ role: "assistant", text: "on demand transcript" }] });
 		const visit = { visit: 1, invokeSeqId: 7, originBranchId: "main", startedAt: 1, status: "done" as const, invocation: { kind: "agent" as const } };

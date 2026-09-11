@@ -5,12 +5,12 @@ import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
 import { JsonBlock } from "../ui/JsonBlock.js";
 import { ArtifactRow } from "./ArtifactRow.js";
 
-export function VisitInvocationDetails({ invocation, state, allStates, onHighlightArtifact }: { invocation: HyperchartVisitInvocationInfo; state: HyperchartStateInfo; allStates: HyperchartStateInfo[]; onHighlightArtifact?: (stateId: string, artifactName: string) => void }) {
+export function VisitInvocationDetails({ invocation, state, allStates, onHighlightArtifact, recordOnly = false }: { recordOnly?: boolean; invocation: HyperchartVisitInvocationInfo; state: HyperchartStateInfo; allStates: HyperchartStateInfo[]; onHighlightArtifact?: (stateId: string, artifactName: string) => void }) {
 	if (invocation.kind === "actor") return null;
 	if (invocation.kind === "user") {
 		return (
 			<div>
-				<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved prompt</div>
+				<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{recordOnly ? "Recorded prompt template" : "resolved prompt"}</div>
 				<ExpandablePre collapsedLines={9}>{invocation.prompt}</ExpandablePre>
 			</div>
 		);
@@ -19,7 +19,7 @@ export function VisitInvocationDetails({ invocation, state, allStates, onHighlig
 		return (
 			<div className="space-y-2">
 				<div>
-					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved function</div>
+					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{recordOnly ? "Recorded function" : "resolved function"}</div>
 					<ExpandablePre collapsedLines={3}>{`${invocation.module}#${invocation.export}`}</ExpandablePre>
 				</div>
 				{invocation.params !== undefined && Object.keys(invocation.params).length > 0 && (
@@ -41,7 +41,7 @@ export function VisitInvocationDetails({ invocation, state, allStates, onHighlig
 		return (
 			<div className="space-y-2">
 				<div>
-					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved command</div>
+					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{recordOnly ? "Recorded command" : "resolved command"}</div>
 					<ExpandablePre collapsedLines={5} language="bash">
 						{[invocation.command, ...invocation.args].join(" ")}
 					</ExpandablePre>
@@ -71,7 +71,7 @@ export function VisitInvocationDetails({ invocation, state, allStates, onHighlig
 		<div className="space-y-2">
 			{invocation.task !== undefined && (
 				<div>
-					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">resolved prompt</div>
+					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{recordOnly ? "Recorded prompt template" : "resolved prompt"}</div>
 					<TemplateTextBlock text={invocation.task} state={state} allStates={allStates} cssCollapse />
 				</div>
 			)}

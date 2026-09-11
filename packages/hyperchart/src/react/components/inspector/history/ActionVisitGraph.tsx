@@ -305,6 +305,7 @@ function workerLanes(entries: readonly VisitEntry[]): Array<{ laneScopeId: strin
 }
 
 function actionNode(entry: VisitEntry, position: { x: number; y: number }): StateNode {
+	const state = visitState(entry.template, entry.row);
 	return {
 		id: nodeId(entry.row),
 		type: "hyperchartState",
@@ -314,8 +315,8 @@ function actionNode(entry: VisitEntry, position: { x: number; y: number }): Stat
 		handles: ACTION_HANDLES,
 		style: { width: ACTION_WIDTH, height: ACTION_HEIGHT },
 		data: {
-			state: visitState(entry.template, entry.row),
-			...(entry.template?.type === undefined ? {} : { displayType: entry.template.type }),
+			state,
+			...(state.type === undefined ? {} : { displayType: state.type }),
 		},
 	};
 }
@@ -383,7 +384,7 @@ function WorkerLaneNode({ data }: NodeProps<WorkerLaneNode>) {
 
 function visitState(template: HyperchartStateInfo | undefined, row: ActionVisitRow): HyperchartStateInfo {
 	const visit = row.visit;
-	const status: HyperchartStateInfo["status"] = visit?.status === "running"
+	const status: HyperchartStateInfo["status"] = visit?.status === "unknown" ? "unknown" : visit?.status === "running"
 		? "running"
 		: visit?.status === "failed"
 			? "failed"
@@ -392,6 +393,7 @@ function visitState(template: HyperchartStateInfo | undefined, row: ActionVisitR
 				: "done";
 	return {
 		...(template ?? {}),
+		...(visit === undefined || visit.invocation.kind === "actor" ? {} : { type: visit.invocation.kind }),
 		id: `${row.statePath} · cycle ${visit?.visit ?? "?"}`,
 		status,
 		...(visit?.startedAt === undefined ? {} : { startedAt: visit.startedAt }),

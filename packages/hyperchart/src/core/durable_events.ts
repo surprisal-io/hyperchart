@@ -82,6 +82,10 @@ export type StateActionInvokeLog = {
 	// Mandatory provenance for replay over a modified chart. Logs without it are structurally
 	// incompatible and must be rewound/restarted instead of silently replayed.
 	definition: StateActionAst;
+	/** Invocation validation policy: null proves no guard; omission is legacy/unknown.
+	 * A recorded guard survives removal from the current chart. Only validated(true)
+	 * accepts a guarded or unknown completion; replay never runs a removed guard. */
+	validation?: GuardRefAst | null;
 } & SessionParams;
 
 /** Immutable content revision of an accepted artifact: sha256 of the full content plus byte size. */

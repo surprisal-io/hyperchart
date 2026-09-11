@@ -939,7 +939,7 @@ Critical production seams:
 - `.storybook/**` / inspector story files — dedicated Runtime History virtualization board and interaction fixtures.
 - `packages/pi-hyperchart/src/runtime/pi/host_adapter.ts`, `src/tui/**`, and `extensions/hyperchart.ts` — consume overview/pages.
 - `packages/claude-hyperchart/**` — adapt affected run inspection/tool surfaces.
-- `tla/Hyperchart.tla`, `tla/HyperchartTrace.tla`, and trace export when projection semantics change.
+- `tla/spec/Hyperchart.tla`, `tla/spec/HyperchartTrace.tla`, and trace export when projection semantics change.
 - canonical runtime/API/safety/development docs and relevant package READMEs.
 
 Tests to update/add include `tests/log_store.test.ts`, `tests/postgres_log_store.test.ts`, runtime/replay/rewind/branch/user-interaction tests, host/inspector/TUI tests, Storybook structural tests, and large-history boundedness fixtures.

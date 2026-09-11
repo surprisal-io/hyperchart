@@ -72,7 +72,7 @@ export function VisitHistory({
 				<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Visit history</div>
 				{visits.map((visit, index) => {
 					const sessionRead = sessionReads[visit.invokeSeqId];
-					const canReadSession = visit.session !== undefined || onReadSession !== undefined && visit.invocation.kind === "agent";
+					const canReadSession = visit.invocation.kind === "agent" && (visit.session !== undefined || onReadSession !== undefined);
 					const selected = visit.invokeSeqId === selectedInvokeSeqId;
 					const expanded = selected || (expandedVisits[visit.invokeSeqId] ?? (!lazyDetails && index === visits.length - 1 && visit.status === "running"));
 					return <details
@@ -116,6 +116,7 @@ export function VisitHistory({
 							<span className="hidden basis-full text-right text-[10px] text-[var(--text-muted)] group-open:inline">hide</span>
 						</summary>
 						{(!lazyDetails || expanded) && <div className="space-y-3 border-t border-[var(--border-primary)] px-2.5 py-2.5">
+							{visit.replayWarning !== undefined && <div role="note" className="text-[11px] text-[var(--hc-amber-text)]">{visit.replayWarning}</div>}
 							{visit.completedEvent !== undefined && (
 								<div className="text-[10px] text-[var(--text-muted)]">
 									completed event <code className="ml-1 rounded bg-[var(--bg-code)] px-1 py-0.5 font-mono text-[var(--text-secondary)]">{visit.completedEvent}</code>
@@ -172,7 +173,7 @@ export function VisitHistory({
 									<JsonBlock value={visit.mapItem.value} previewLines={9} />
 								</div>
 							)}
-							<VisitInvocationDetails invocation={visit.invocation} state={state} allStates={allStates} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
+							<VisitInvocationDetails recordOnly={visit.replayWarning !== undefined} invocation={visit.invocation} state={state} allStates={allStates} {...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })} />
 						</div>}
 					</details>;
 				})}

@@ -82,9 +82,9 @@ A gate is open only when its opened fact is in the selected branch ancestry, has
 
 ### Semantics, tests, and documentation
 
-- `tla/Hyperchart.tla`
-- `tla/HyperchartTrace.tla`
-- `tla/trace/record-sample.mjs`
+- `tla/spec/Hyperchart.tla`
+- `tla/spec/HyperchartTrace.tla`
+- `tla/tests/trace/record-sample.mjs`
 - user-interaction, runtime, replay, rewind, branch, JSONL, PostgreSQL, Pi, and Claude test suites under `tests/`
 - `docs/api/runtime.md`
 - `docs/runtime-and-durability.md`
@@ -139,12 +139,12 @@ A gate is open only when its opened fact is in the selected branch ancestry, has
 - Run all TLA+ models:
 
   ```bash
-  for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do tla/check.sh $M; done
+  for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do tla/tools/check.sh $M; done
   ```
 
 - Re-record and validate the real trace:
 
   ```bash
-  node tla/trace/record-sample.mjs
-  tla/trace/validate.sh sample_chart.ts sample-run.jsonl main
+  node tla/tests/trace/record-sample.mjs
+  tla/tools/validate.sh tla/tests/trace/sample_chart.ts tla/.cache/trace/sample-run.jsonl main
   ```

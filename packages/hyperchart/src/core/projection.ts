@@ -1,5 +1,5 @@
 import assert from "./assert.js";
-import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, InputRef, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
+import type { ActionStateAst, ActionUID, ActorDefinitionAst, ActorEndpointDeclarationAst, ActorDeclarationAst, ActorPoolDeclarationAst, ChartAst, ChartEvent, GuardRefAst, InputRef, SchemaAst, StateAst, StatePath, TransitionAst } from "./types.js";
 import type { ActorMessageEnvelope, ArtifactPin, DurableLogRecord, UserInteractionOpenedLog } from "./durable_events.js";
 import { actorContextForState, actorDefinitionForEndpoint, actorGenerationPath, actorLogicalOccurrencePath, actorOccurrencePath, actorPoolWorkerOccurrencePath, actorStatePath } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
@@ -30,7 +30,7 @@ export type ProjectionSkippedRecord = Readonly<{
 	activeLeaves: readonly StatePath[];
 }>;
 
-export type PendingAction =
+export type PendingAction = { validation?: GuardRefAst | null } & (
 	// timestamp of the invoke fact is the state's entry time — the anchor for its after-deadline.
 	// validationAttempts counts the rejected rounds of this invoke cycle — derived from validated(false)
 	// facts, it decides when the retry budget (state.retries) is exhausted.
@@ -61,7 +61,7 @@ export type PendingAction =
 			/** Provisional completion bytes: recover only on their originating branch. */
 			completionArtifacts?: { branchId: string; pins: Readonly<Record<string, ArtifactPin>> };
 			reason?: string;
-	  };
+	  });
 
 export type ProjectedActorMessage = ActorMessageEnvelope & {
 	status: "queued" | "accepted" | "replied" | "settled" | "failed" | "cancelled";
@@ -443,6 +443,7 @@ export function projectBranch(
 						}
 						if (isActionActive(projection, ast, record.actionUid.state)) {
 							assertActiveActionUid(ast, record.actionUid.state, record.actionUid, "invoke");
+							if (projection.pendingActions.some((pending) => sameActionUid(pending.actionUid, record.actionUid))) throw new Error(`Invocation before pending action settled in ${record.actionUid.state}`);
 							const key = actionUidKey(record.actionUid);
 							const visitId = (projection.stateVisits[key] ?? 0) + 1;
 							projection.stateVisits[key] = visitId;
@@ -454,6 +455,7 @@ export function projectBranch(
 								sessionId: record.sessionId,
 								timestamp: record.timestamp,
 								phase: "running",
+								...(record.validation === undefined ? {} : { validation: record.validation }),
 							});
 						} else {
 							recordSkipped(skipped, projection, record, record.actionUid.state);
@@ -481,9 +483,12 @@ export function projectBranch(
 						if (!validating) {
 							throw new Error(`No pending validation for action in state ${record.actionUid.state}`);
 						}
+						if (record.outcome === true && validating.completionArtifacts !== undefined && validating.completionArtifacts.branchId !== record.branchId)
+							throw new Error(`Cannot accept provisional artifacts from branch '${validating.completionArtifacts.branchId}' on '${record.branchId}'; a branch-local completion is required`);
+						if (!sameRecordedValue(record.event, validating.event)) {
+							throw new Error(`Validation event does not match pending completion in state ${record.actionUid.state}`);
+						}
 						if (record.outcome === true) {
-							if (validating.completionArtifacts !== undefined && validating.completionArtifacts.branchId !== record.branchId)
-								throw new Error(`Cannot accept provisional artifacts from branch '${validating.completionArtifacts.branchId}' on '${record.branchId}'; a branch-local completion is required`);
 							if (validating.completionArtifacts !== undefined) Object.assign(projection.artifactPins, validating.completionArtifacts.pins);
 							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
@@ -505,6 +510,7 @@ export function projectBranch(
 							invokeSeqId: validating.invokeSeqId,
 							sessionId: validating.sessionId,
 							phase: "rejected",
+							validation: record.guard,
 							event: validating.event,
 							validationAttempts,
 							...(validating.completionArtifacts === undefined ? {} : { completionArtifacts: validating.completionArtifacts }),
@@ -644,9 +650,10 @@ function applyActionCompletion(
 	const completionArtifacts = record?.type === "state_action" && record.kind === "complete" && record.artifacts !== undefined
 		? { branchId: record.branchId, pins: record.artifacts } : undefined;
 	const state = actionStateAt(ast, actionUid.state);
-	if (state?.kind === "state" && state.validate !== undefined && event.type !== "FAILED") {
-		const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
-		if (previous === undefined) throw new Error(`No pending invocation for completion in ${actionUid.state}`);
+	const previous = projection.pendingActions.find((pending) => sameActionUid(pending.actionUid, actionUid));
+	if (previous === undefined) throw new Error(`No pending invocation for completion in ${actionUid.state}`);
+	if (previous.phase === "validating") throw new Error(`Completion before validation verdict in ${actionUid.state}`);
+	if ((state?.validate !== undefined || previous.validation !== null) && event.type !== "FAILED") {
 		const validationAttempts = previous.phase === "rejected" ? previous.validationAttempts : 0;
 		removePendingAction(projection, actionUid);
 		projection.pendingActions.push({
@@ -656,6 +663,7 @@ function applyActionCompletion(
 			invokeSeqId: previous.invokeSeqId,
 			sessionId: previous.sessionId,
 			phase: "validating",
+			...(previous.validation === undefined ? {} : { validation: previous.validation }),
 			...(completionArtifacts === undefined ? {} : { completionArtifacts }),
 			event,
 			validationAttempts,
@@ -1540,6 +1548,18 @@ function assertActiveActionUid(ast: ChartAst, stateId: StatePath, actual: Action
 	const state = actionStateAt(ast, stateId);
 	assert(state !== undefined, `Cannot ${operation} action for non-action state ${stateId}`);
 	assert(matchesDeclaredUid(actual, state.action.uid), `Invalid action ${operation} for state ${stateId}`);
+}
+
+/** Durable JSON objects have no meaningful property order (including PostgreSQL JSONB). */
+function sameRecordedValue(left: unknown, right: unknown): boolean {
+	if (left === right) return true;
+	if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
+	if (Array.isArray(left) || Array.isArray(right)) return Array.isArray(left) && Array.isArray(right)
+		&& left.length === right.length && left.every((value, index) => sameRecordedValue(value, right[index]));
+	const a = left as Record<string, unknown>;
+	const b = right as Record<string, unknown>;
+	const keys = Object.keys(a);
+	return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && sameRecordedValue(a[key], b[key]));
 }
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {

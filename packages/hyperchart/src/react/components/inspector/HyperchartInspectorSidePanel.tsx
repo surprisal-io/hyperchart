@@ -99,6 +99,7 @@ export function HyperchartInspectorSidePanel({
 					<StateDetails
 						key={`${run.runId}:${selectedState.id}`}
 						state={selectedState}
+						definitionOnly={run.replayIncompatibility !== undefined}
 						allStates={run.states}
 						{...(effectiveDefinitionSource === undefined ? {} : { definitionSource: effectiveDefinitionSource })}
 						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
@@ -139,7 +140,7 @@ export function HyperchartInspectorSidePanel({
 						{...scopeProps}
 						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
 						{...(historyDataSource === undefined || run.historySnapshot === undefined ? {} : { history: { runId: run.runId, snapshot: run.historySnapshot, dataSource: historyDataSource, ...((selectedInvokeSeqId ?? historyTargetSeqId) === undefined ? {} : { targetSeqId: selectedInvokeSeqId ?? historyTargetSeqId }) } })}
-						{...(onSteerSession === undefined ? {} : { onSteerSession })}
+						{...(onSteerSession === undefined || run.replayIncompatibility !== undefined ? {} : { onSteerSession })}
 					/>
 				</>
 			) : (

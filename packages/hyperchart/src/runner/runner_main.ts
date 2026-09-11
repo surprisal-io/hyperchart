@@ -1,3 +1,4 @@
+import { hasBlockingReplayWarnings } from "../core/replay_check.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolveRunPaths, withRunStorage } from "../runtime/generic/run_paths.js";
 import { randomUUID } from "node:crypto";
@@ -824,7 +825,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 				unpinned: semantic.replay.unpinned,
 			};
 			const warnings = formatReplayWarnings(explanation).map((warning) => `[branch ${entry.branchId}] ${warning}`);
-			if (warnings.length > 0 && this.config.ignoreReplayWarnings !== true) {
+			if (hasBlockingReplayWarnings(explanation) && this.config.ignoreReplayWarnings !== true) {
 				return { warnings: [], error: formatReplayWarningsError(this.config.runId, warnings) };
 			}
 			return { warnings, semantic };
@@ -1267,9 +1268,11 @@ function formatReplayWarnings(explanation: ReplayExplanation): string[] {
 		const states = [...new Set(explanation.skipped.map((entry) => entry.state))].slice(0, 8).join(", ");
 		warnings.push(`Replay warning: ${explanation.skipped.length} durable record(s) were skipped because their states were inactive under the current chart${states.length === 0 ? "" : ` (${states})`}.`);
 	}
-	if (explanation.stale.length > 0) {
-		const states = [...new Set(explanation.stale.map((entry) => entry.state))].slice(0, 8).join(", ");
-		warnings.push(`Replay warning: ${explanation.stale.length} durable record(s) have stale provenance under the current chart${states.length === 0 ? "" : ` (${states})`}.`);
+	for (const entry of explanation.stale.filter((entry) => entry.reason === "guard_removed")) warnings.push(`Replay warning: ${entry.message}`);
+	const stale = explanation.stale.filter((entry) => entry.reason !== "guard_removed");
+	if (stale.length > 0) {
+		const states = [...new Set(stale.map((entry) => entry.state))].slice(0, 8).join(", ");
+		warnings.push(`Replay warning: ${stale.length} durable record(s) have stale provenance under the current chart${states.length === 0 ? "" : ` (${states})`}.`);
 	}
 	return warnings;
 }

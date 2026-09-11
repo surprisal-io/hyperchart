@@ -43,7 +43,12 @@ docs/                 canonical user documentation
 examples/             checked-in chart examples
 tests/                cross-package tests
 assets/readme/         README and documentation visuals
-tla/                   independent semantics and trace model
+tla/
+├── spec/              independent semantic models
+├── tests/models/      bounded MC scenarios and TLC configurations
+├── tests/trace/       executed chart fixtures, recorders, regression harness
+├── tools/             trace exporter and TLC launch scripts
+└── .cache/            downloaded tools and generated trace/log artifacts
 scripts/               build and package validation
 ```
 
@@ -124,25 +129,46 @@ A change to `machine.ts`, `projection.ts`, `execution_loop.ts`, durable records,
 Keep three articulations in sync:
 
 1. implementation and durable log/replay contract;
-2. `tla/Hyperchart.tla` and model-check configurations;
-3. a real trace exported from the TypeScript engine and checked by `tla/HyperchartTrace.tla`.
+2. `tla/spec/Hyperchart.tla` and model-check configurations;
+3. a real trace exported from the TypeScript engine and checked by `tla/spec/HyperchartTrace.tla`.
 
-Run all models:
+Run all 13 execution/actor models (and the storage models if storage semantics changed):
 
 ```sh
-for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do
-  tla/check.sh "$M"
+for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested \
+  MCActorCall MCActorCompound MCActorDrain MCActorMailbox MCActorPool \
+  MCActorScope MCUnsupportedHead; do
+  tla/tools/check.sh "$M"
 done
 ```
 
-Record and validate the sample trace:
+Record and validate fresh traces without overwriting checked-in/local samples:
 
 ```sh
-node tla/trace/record-sample.mjs
-tla/trace/validate.sh sample_chart.ts sample-run.jsonl
+OUT=$(mktemp -d)
+node tla/tests/trace/record-sample.mjs "$OUT/sample.jsonl"
+tla/tools/validate.sh tla/tests/trace/sample_chart.ts "$OUT/sample.jsonl" main Sample
+node tla/tests/trace/record-removed-validator.mjs "$OUT/removed.jsonl"
+tla/tools/validate.sh tla/tests/trace/removed-validator-chart.ts "$OUT/removed.jsonl" removed RemovedValidator
+node tla/tests/trace/regression.mjs "$OUT/regressions"
+npx vitest run tests/tla_trace_export.test.ts tests/actor_execution.test.ts tests/actor_pool.test.ts
 ```
 
-Read the header of `tla/Hyperchart.tla` before editing either implementation or model. A divergence is a finding to investigate, not permission to change the model until it passes.
+The `tla/` tooling remains intentionally local and ignored. The focused `tla_trace_export.test.ts` suite explicitly skips when `tla/tests/trace/regression.mjs` is absent, so default tests in a clean checkout do not require these local files.
+
+The local file map in `tla/README.md` separates reusable semantics (`spec/`), test cases (`tests/models/` and `tests/trace/`), and tooling (`tools/`). Chart/journal and explicit output arguments resolve relative to the caller's working directory. Named model checks load `tla/tests/models/<name>.tla/.cfg` together with `tla/spec/`. Default recorder/manual-export outputs live under `tla/.cache/trace/`, not beside source files. A branch ID is mandatory. Java and `tla/.cache/tla2tools.jar` are required. The validator generates models and TLC state directories in an isolated temporary directory, then removes them. Exit 0 means `TRACE ACCEPTED`, exit 1 means semantic `DIVERGENCE`, and exit 2 means an export/TLC tool error—not evidence of divergence. `check.sh` also isolates its TLC state directory.
+
+### Formal coverage and limits
+
+Read the entire header of `tla/spec/Hyperchart.tla` before editing either implementation or model. A divergence is a finding to investigate, not permission to change production behavior just to satisfy a model.
+
+The regression harness normalizes real Chart DSL modules, captures durable records through `execution_loop`, `BranchExecution`, and `JsonlLogStore`, and asserts `explainReplay()` is clean against the original, fixed chart. Scripted effect responses control scheduling; no positive semantic records are hand-authored. Production-created branches select meaningful prefixes, including pool creation before any message, pending claims, negative verdicts, internal messaging, deadlines, and drain boundaries. Pass `--all-prefixes` to check every durable prefix instead. `--capture-only` performs replay/capture/export checks without claiming TLC acceptance. The output directory retains journals, generated models, TLC output, and `summary.json` for independent review; use a fresh directory per run.
+
+Coverage includes terminal rejection before failure intent; guarded/retried pool actions; repeated callBatch occurrences; changing ordinary-actor receives; multi-event receive/action function serialization and escaped action events; worker FAILED and unsupported FIFO heads; direct-owner compound drain versus descendant drain; singleton and batch self-send; and ordinary/pool internal send, sendBatch, call, callBatch, and timeout progression. Negative mutations change exported facts while retaining their independent chart constants, and must be rejected by real TLC, not merely by production replay. Exported actor facts preserve concrete worker/source identity, declaration/validation provenance, receive state, call ID, ordered membership, and batch indices. Handler transitions are recomputed in TLA; neither exporter nor validator delegates step validation to the production projector. Additional ordinary/pool scenarios hold both endpoints busy through closing and then perform a non-self internal enqueue during drain; stopped targets remain inadmissible. Internal producers must address the compatible concrete map-owner context and cannot issue another call from the same concrete worker/state while its preceding call is unresolved. Re-exported negative journal prefixes redirect an internal enqueue to an existing sibling map endpoint or move a later singleton/batch call ahead of its first resolution; TLC must reject them even when export-time provenance checks pass.
+
+`TRACE ACCEPTED` is **existential finite-trace acceptance**: TLC found some model micro-step interleaving consuming all exported entries. It does not certify termination, every provider invocation/data field, every runtime schedule, or every fixed chart. The bounded MC safety/liveness checks use the fairness doctrine in the model header; they are not a universal implementation-refinement proof. The core model abstracts handler workflows and pool receive choices; the trace companion refines authored ordinary/pool workflows independently. Worker capacity is an explicit model bound, not inferred from future messages. Concrete call occurrence correlation is separate from producer templates. Compound completion waits only for directly owned occurrences; parallel/map joins retain their subtree drain gate.
+
+Arguments, artifact/payload values, rendering-only user-gate openings, provider/session internals, and full invocation identity are not modeled as control transitions. Export-time structural/provenance comparisons are additional gates, not a replacement for TLC. Generation sequencing and data-schema failures remain replay/runtime obligations. Reserved action failure and unsupported FIFO-head failure are modeled; arbitrary actor effect/schema or closing-admission failure paths and general in-flight effects after failure are not complete conformance guarantees. An already-dispatched owner-closing receipt may follow a failure in the same machine output batch; that narrow path is modeled without enabling normal post-failure progress. Passing these regressions does not establish universal inclusion.
 
 ## Documentation ownership
 
@@ -271,6 +297,6 @@ Schedules are simulation inputs and snapshot selectors, not durable logs. A sele
 Replay-model verification additionally includes:
 
 ```bash
-node tla/trace/record-removed-validator.mjs
-tla/trace/validate.sh removed-validator-chart.ts removed-validator-run.jsonl removed RemovedValidator
+node tla/tests/trace/record-removed-validator.mjs
+tla/tools/validate.sh tla/tests/trace/removed-validator-chart.ts tla/.cache/trace/removed-validator-run.jsonl removed RemovedValidator
 ```

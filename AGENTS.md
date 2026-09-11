@@ -19,23 +19,23 @@ the semantic rules in normalize.ts) is not done until all three agree:
    as stale/broken by explainReplay — never silently reinterpreted. Extend
    replay_check tests when the contract moves.
 
-2. **The TLA+ model** (tla/Hyperchart.tla).
+2. **The TLA+ model** (tla/spec/Hyperchart.tla).
    The spec is an independent second articulation of the semantics — a
    divergence from machine.ts is a finding, not a spec bug. Mirror the change
    in the spec (and in MC* models/cfgs if constants change), then re-check
    every model:
 
    ```bash
-   for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do tla/check.sh $M; done
+   for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do tla/tools/check.sh $M; done
    ```
 
-3. **Trace validation** (tla/HyperchartTrace.tla, tla/trace/).
+3. **Trace validation** (tla/spec/HyperchartTrace.tla, tla/tests/trace/).
    Re-record the sample run against the real machine and check the log is
    still a behavior of the spec:
 
    ```bash
-   node tla/trace/record-sample.mjs
-   tla/trace/validate.sh sample_chart.ts sample-run.jsonl
+   node tla/tests/trace/record-sample.mjs
+   tla/tools/validate.sh tla/tests/trace/sample_chart.ts tla/.cache/trace/sample-run.jsonl main
    ```
 
    "TRACE ACCEPTED" means engine and spec agree on a real run; DIVERGENCE
@@ -44,7 +44,7 @@ the semantic rules in normalize.ts) is not done until all three agree:
    the sample run exercises it.
 
 Key spec decisions (fairness doctrine, micro-steps, what is deliberately not
-modeled) are documented in the header of tla/Hyperchart.tla — read it before
+modeled) are documented in the header of tla/spec/Hyperchart.tla — read it before
 editing either side.
 
 ## Adding a new chart element means adding the whole vertical slice

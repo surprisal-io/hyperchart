@@ -151,13 +151,13 @@ Adapters produce canonical models. React components do not parse raw logs or red
 
 ## Formal model
 
-`tla/Hyperchart.tla` is an independent articulation of machine semantics. It is not generated from TypeScript and should not be changed merely to make an implementation test pass.
+`tla/spec/Hyperchart.tla` is an independent articulation of machine semantics. It is not generated from TypeScript and should not be changed merely to make an implementation test pass.
 
 Model-check scenarios cover review/fix, pipeline, validation gate, fan-out, map, and nesting:
 
 ```sh
 for M in MCReviewFix MCPipeline MCGate MCFanout MCMap MCNested; do
-  tla/check.sh "$M"
+  tla/tools/check.sh "$M"
 done
 ```
 
@@ -165,11 +165,11 @@ The spec header documents fairness, micro-steps, and deliberately unmodeled host
 
 ## Real trace validation
 
-The trace exporter records a sample run from the TypeScript engine. `tla/HyperchartTrace.tla` checks that the exported trace is admitted by the formal spec.
+The trace exporter records a sample run from the TypeScript engine. `tla/spec/HyperchartTrace.tla` checks that the exported trace is admitted by the formal spec.
 
 ```sh
-node tla/trace/record-sample.mjs
-tla/trace/validate.sh sample_chart.ts sample-run.jsonl
+node tla/tests/trace/record-sample.mjs
+tla/tools/validate.sh tla/tests/trace/sample_chart.ts tla/.cache/trace/sample-run.jsonl main
 ```
 
 `TRACE ACCEPTED` means the sampled engine behavior and spec agree. `DIVERGENCE` means the implementation, exporter, or model disagrees and must be investigated.

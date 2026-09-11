@@ -139,6 +139,29 @@ describe("Runtime inspector section", () => {
 		expect(agentMarkup).not.toContain("View session");
 	});
 
+	it("does not render agent-session controls for a script even if malformed runtime data includes a session", () => {
+		const session = { actionKey: "chart:work:script", status: "completed" };
+		const state: HyperchartStateInfo = {
+			id: "work",
+			type: "script",
+			status: "done",
+			session,
+			visitHistory: [{
+				visit: 1,
+				invokeSeqId: 2,
+				startedAt: 1000,
+				endedAt: 1100,
+				status: "done",
+				invocation: { kind: "script", command: "true", args: [] },
+				session,
+			}],
+		};
+
+		const markup = renderToStaticMarkup(createElement(RuntimeSection, { state }));
+		expect(markup).not.toContain("Agent session");
+		expect(markup).not.toContain("View session");
+	});
+
 	it("renders a session control for every durable visit while keeping the latest-session card", () => {
 		const firstSession = {
 			actionKey: "chart:work:agent",

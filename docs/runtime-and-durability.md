@@ -28,6 +28,8 @@ The machine returns one of:
 
 Effect interpreters live in the runtime. This boundary keeps transition semantics testable without Pi.
 
+The machine alone owns the pending-validation execution gate. It returns `MachineOutputError` before emitting obsolete effects. Runner and inspector do not repeat this check; projection restores facts and history remains inspectable.
+
 ## Append-only branch storage
 
 `log.jsonl` is a flat v2 journal. Every line is either one branch create/move entry or one immutable `DurableLogRecord`, and every entry shares one positive per-run `seqId` namespace: the root `branch/create` owns `1`, then each record or branch operation consumes exactly the next id. Records also carry ancestry `parentId`, mandatory durable provenance `branchId`, and `timestamp`; gaps in record ids therefore identify intervening branch operations rather than missing records. Branch entries never enter chart projection.
@@ -240,11 +242,11 @@ The runtime can show the pending invocation and associated session/process infor
 
 ## Formal trace validation
 
-The repository records a sample run from the TypeScript engine and checks that its exported trace is a behavior accepted by `tla/HyperchartTrace.tla`.
+The repository records a sample run from the TypeScript engine and checks that its exported trace is a behavior accepted by `tla/spec/HyperchartTrace.tla`.
 
 ```sh
-node tla/trace/record-sample.mjs
-tla/trace/validate.sh sample_chart.ts sample-run.jsonl
+node tla/tests/trace/record-sample.mjs
+tla/tools/validate.sh tla/tests/trace/sample_chart.ts tla/.cache/trace/sample-run.jsonl main
 ```
 
 `TRACE ACCEPTED` means the sampled engine and formal spec agree. It does not prove external agent or script side effects are transactional.

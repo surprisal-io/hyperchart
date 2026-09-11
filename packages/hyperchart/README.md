@@ -53,7 +53,7 @@ The host runtime overlay distinguishes map actions held behind a `concurrency` g
 
 Run inspectors load a projection-backed overview first, then request snapshot-pinned state/map/actor/record chunks through `HyperchartInspectorDataSource`. The dialog keeps a bounded, chronological **Action visit history** beside the graph: repeated invocations remain separate and are ordered by durable sequence, while pending, waiting, skipped, and unvisited states stay in a distinct state-context disclosure. Record pages request batched semantic action-visit enrichment, avoiding one full-prefix scan per visible state; inherited invocations retain their origin branch for transcript lookup. Live overview updates keep open history and Execution viewport stable; **Refresh history** adopts latest received snapshot. Older/newer controls make partial windows explicit, and selecting a row opens that exact invocation when its state is represented in the current graph. Runtime lists use `@tanstack/react-virtual`, retain at most 1,000 rows, and load transcripts only when a visit is opened. Actor messages remain grouped by durable enqueue transaction.
 
-Removing a validator replays recorded verdicts with a warning; missing positive validation never becomes an accepted result. Unknown legacy invoke policies block ambiguous completions. See [Recovery and safety](../../docs/safety.md#a-validator-was-removed).
+Removing a validator replays recorded verdicts with a warning; missing positive validation never becomes an accepted result. Unknown legacy invoke policies block unfinished invocations, including those still running. The machine enforces this execution gate by returning an error; history remains inspectable. See [Recovery and safety](../../docs/safety.md#a-validator-was-removed).
 
 If an edited chart cannot replay historical facts, the inspector labels its graph **Current definition only** and keeps durable history/transcripts readable without relaxing execution replay. See [incompatible historical run inspection](https://github.com/surprisal-io/hyperchart/blob/main/docs/integration.md#inspecting-an-incompatible-historical-run) for diagnostics and record-only limitations.
 
@@ -74,6 +74,8 @@ The core package includes statically placed, event-sourced actors with explicit 
 MIT · experimental `0.6.0`
 
 Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; actor templates may target their current endpoint with send-only `self()`. See the canonical [explicit actors guide](../../docs/explicit-actors.md).
+
+Formal checks and their bounded/existential guarantees are documented in the [development guide](../../docs/development.md#formal-coverage-and-limits).
 
 ## Branch storage
 

@@ -1,3 +1,5 @@
+import { explainReplay, type ReplayBrokenRecord } from "../core/replay_check.js";
+import { historyItemsForSubject } from "../runtime/generic/log_store.js";
 import { resolveRunPaths, withRunStorage } from "../runtime/generic/run_paths.js";
 import { actionUidKey } from "../core/action_uid.js";
 import { basename, resolve } from "node:path";
@@ -69,6 +71,8 @@ export async function createRunInspectorDataSource(
 			return withStore(async (store) => {
 				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readStateVisits({ snapshot, state: stateId, ...(cursor === undefined ? {} : { cursor }) }));
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
+				const broken = explainReplay(parsed.ast, records).broken;
+				if (broken !== undefined) return mapChunk(chunk, (item) => incompatibleStateVisitToHost(item, broken));
 				const semanticVisits = runtimeVisitHistoriesForInspector(parsed.ast, records).get(stateId) ?? [];
 				return mapChunkAsync(chunk, (item) => stateVisitWithProjection(store, parsed.ast, snapshot.branchId, item, semanticVisits.find((visit) => visit.invokeSeqId === item.seqId)));
 			});
@@ -92,7 +96,9 @@ export async function createRunInspectorDataSource(
 			return withStore(async (store) => {
 				const chunk = await readChunkOrEmpty(store, snapshot, () => store.readActorMessages({ snapshot, occurrence, ...(cursor === undefined ? {} : { cursor }) }));
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
-				const items = actorMessageHistoryItemsToHost(chunk.items, parsed.ast, records);
+				const items = explainReplay(parsed.ast, records).broken === undefined
+					? actorMessageHistoryItemsToHost(chunk.items, parsed.ast, records)
+					: chunk.items.map((item) => actorMessageHistoryItemToHost(item));
 				return { ...chunk, items };
 			});
 		},
@@ -125,13 +131,19 @@ export async function createRunInspectorDataSource(
 				if (snapshot.headSeqId !== null && !await store.containsInHistory({ headSeqId: live.headSeqId, seqId: snapshot.headSeqId })) return undefined;
 				if (!await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: invokeSeqId })) return undefined;
 				const record = await store.getRecord(invokeSeqId);
-				if (!isActionInvoke(record)) return undefined;
+				if (!isActionInvoke(record) || record.definition.kind !== "agent") return undefined;
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
-				const visit = runtimeVisitHistoriesForInspector(parsed.ast, records).get(record.actionUid.state)?.find((item) => item.invokeSeqId === invokeSeqId);
+				const broken = explainReplay(parsed.ast, records).broken;
+				const visits = broken === undefined ? runtimeVisitHistoriesForInspector(parsed.ast, records)
+					: incompatibleVisitHistories(records, broken);
+				const visit = visits.get(record.actionUid.state)?.find((item) => item.invokeSeqId === invokeSeqId);
 				if (visit === undefined) return undefined;
 				const liveBoundary = live.headSeqId === snapshot.headSeqId;
 				const boundary = records.at(-1)?.timestamp;
-				const end = visit.endedAt ?? (liveBoundary ? Date.now() : boundary);
+				const end = visit.endedAt ?? (broken === undefined && liveBoundary ? Date.now() : boundary);
+				// A reused session can contain later invocations. Never leak them into an
+				// unresolved record-only visit whose semantic exit could not be derived.
+				const nextInvoke = records.find((candidate) => isActionInvoke(candidate) && candidate.seqId > invokeSeqId && candidate.sessionId === record.sessionId);
 				const progress = readSessionProgress(resolve(absoluteRunDir, "sessions"));
 				const match = Object.values(progress.sessions).filter((session) =>
 					session.sessionId === record.sessionId && session.branchId === record.branchId
@@ -139,12 +151,12 @@ export async function createRunInspectorDataSource(
 				).sort((a, b) => b.invokeSeqId - a.invokeSeqId)[0];
 				const messages = await options.readTranscript?.({ sessionId: record.sessionId });
 				return {
-					...(match === undefined ? {} : sessionFromProgress(match)),
+					...(match === undefined || broken !== undefined ? {} : sessionFromProgress(match)),
 					actionKey: actionUidKey(record.actionUid),
 					status: visit.status === "done" ? "completed" : visit.status,
 					startedAt: visit.startedAt,
 					...(end === undefined ? {} : { lastActivityAt: end }),
-					...(messages === undefined ? {} : { messages: messages.filter((message) => message.timestamp !== undefined && message.timestamp >= visit.startedAt && end !== undefined && message.timestamp <= end) }),
+					...(messages === undefined ? {} : { messages: messages.filter((message) => message.timestamp !== undefined && message.timestamp >= visit.startedAt && end !== undefined && message.timestamp <= end && (broken === undefined || nextInvoke === undefined || message.timestamp < nextInvoke.timestamp)) }),
 				};
 			});
 		},
@@ -166,7 +178,8 @@ export function actionVisitRecordsToHost(
 ): HyperchartRecordInfo[] {
 	const requested = new Set(pageRecords.filter(isActionInvoke).map((record) => record.seqId));
 	const visitsBySeqId = new Map<number, HyperchartVisitInfo>();
-	const semantic = runtimeVisitHistoriesForInspector(ast, ancestry);
+	const broken = explainReplay(ast, ancestry).broken;
+	const semantic = broken === undefined ? runtimeVisitHistoriesForInspector(ast, ancestry) : incompatibleVisitHistories(ancestry, broken);
 	for (const visits of semantic.values()) {
 		for (const visit of visits) if (requested.has(visit.invokeSeqId)) visitsBySeqId.set(visit.invokeSeqId, visit);
 		if (visitsBySeqId.size === requested.size) break;
@@ -176,6 +189,42 @@ export function actionVisitRecordsToHost(
 		const actionVisit = isActionInvoke(record) ? visitsBySeqId.get(record.seqId) : undefined;
 		return actionVisit === undefined ? base : { ...base, actionVisit };
 	});
+}
+
+/** Durable catalog mapping only: no current-AST invocation rendering or scope-exit inference. */
+function incompatibleStateVisitToHost(item: StateVisitHistoryItem, broken: ReplayBrokenRecord): HyperchartVisitInfo {
+	const base = stateVisitHistoryItemToHost(item);
+	const { artifactPins: _pins, endedAt: _end, completedEvent: _event, status: _status, ...recorded } = base;
+	// Without the historical guard contract, a completion is only a claim, even
+	// when no validation has been recorded yet. Never infer acceptance from its absence.
+	const terminal = [...item.records].reverse().find((record) =>
+		record.type === "failure_intent"
+		|| record.type === "state_action" && (record.kind === "timer_fired"
+			|| record.kind === "complete" && record.event.type === "FAILED"
+			|| record.kind === "validated" && record.outcome === true));
+	const event = terminal?.type === "failure_intent" ? "FAILED"
+		: terminal?.type === "state_action" && (terminal.kind === "complete" || terminal.kind === "validated") ? terminal.event.type : undefined;
+	const acceptedCompletion = terminal?.type === "state_action" && terminal.kind === "validated" && event !== "FAILED"
+		? [...item.records].reverse().find((record) => record.type === "state_action" && record.kind === "complete" && record.seqId < terminal.seqId)
+		: undefined;
+	const recordedInputs = [...item.records].reverse().find((record) => (record.type === "state_action" || record.type === "user_interaction") && "input" in record && record.input !== undefined);
+	return {
+		...recorded,
+		status: terminal === undefined ? "unknown" : event === "FAILED" ? "failed" : terminal.type === "state_action" && terminal.kind === "timer_fired" ? "cancelled" : "done",
+		...(terminal === undefined ? {} : { endedAt: terminal.timestamp }),
+		...(event === undefined ? {} : { completedEvent: event }),
+		replayWarning: `Replay incompatible at seqId ${broken.seqId}: ${broken.error}. Recorded facts only; invocation templates are not rendered, runtime status and scope exits cannot be derived. Completion claims without explicit acceptance remain unknown.`,
+		...(recordedInputs !== undefined && (recordedInputs.type === "state_action" || recordedInputs.type === "user_interaction") && "input" in recordedInputs ? { inputs: { ...recordedInputs.input } } : {}),
+		...(acceptedCompletion?.type === "state_action" && acceptedCompletion.kind === "complete" && acceptedCompletion.artifacts !== undefined
+			? { artifactPins: Object.entries(acceptedCompletion.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size })) } : {}),
+	};
+}
+
+function incompatibleVisitHistories(records: readonly DurableLogRecord[], broken: ReplayBrokenRecord): ReadonlyMap<string, readonly HyperchartVisitInfo[]> {
+	const states = new Set(records.filter(isActionInvoke).map((record) => record.actionUid.state));
+	return new Map([...states].map((state) => [state, historyItemsForSubject(records, { kind: "state-visits", state })
+		.filter((item): item is StateVisitHistoryItem => "kind" in item && item.kind === "state-visit")
+		.map((item) => incompatibleStateVisitToHost(item, broken)).reverse()]));
 }
 
 function isActionInvoke(record: DurableLogRecord | undefined): record is Extract<DurableLogRecord, { type: "state_action"; kind: "invoke" }> {
@@ -238,7 +287,7 @@ async function stateVisitWithProjection(
  * captured prefix. It drains only bounded public pages and never exposes this array. Replace
  * it with predecessor-catalog-backed targeted mapping after that catalog passes its benchmark.
  */
-async function collectSnapshotRecordsForMapping(
+export async function collectSnapshotRecordsForMapping(
 	store: Awaited<ReturnType<typeof openRunLogStore>>,
 	snapshot: { branchId: string; headSeqId: number | null },
 ): Promise<readonly import("../core/durable_events.js").DurableLogRecord[]> {

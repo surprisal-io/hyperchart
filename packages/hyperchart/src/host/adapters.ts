@@ -1,3 +1,5 @@
+import { replayRecordDiagnostics } from "../core/replay_check.js";
+import type { ReplayBrokenRecord } from "../core/replay_check.js";
 import { actionUidKey } from "../core/action_uid.js";
 import type { DurableLogRecord } from "../core/durable_events.js";
 import type { HyperchartInspectResult, HyperchartInspectState } from "../core/inspect.js";
@@ -168,6 +170,20 @@ export function hyperchartRunFromInspectResult(
 	};
 }
 
+/** Inspector-only recovery. Never represents a valid runtime projection or a repaired log. */
+export function hyperchartRunFromReplayIncompatibility(
+	inspect: HyperchartInspectResult,
+	broken: ReplayBrokenRecord,
+	options: HyperchartRunFromInspectOptions = {},
+): HyperchartRunInfo {
+	const message = `Replay incompatible at seqId ${broken.seqId}${broken.state === undefined ? "" : ` in state ${broken.state}`}: ${broken.error}. Current definition only; runtime derivation unavailable. Full durable history, including records after this point, remains available.`;
+	return {
+		...hyperchartRunFromInspectResult(inspect, { ...options, status: "blocked" }),
+		replayIncompatibility: { seqId: broken.seqId, ...(broken.state === undefined ? {} : { stateId: broken.state }), message },
+		issues: [{ severity: "warning", kind: "replay_warning", source: "durable_log", seqId: broken.seqId, ...(broken.state === undefined ? {} : { stateId: broken.state }), message }],
+	};
+}
+
 export function hyperchartRunFromToolDetails(
 	details: unknown,
 	options: HyperchartRunFromInspectOptions = {},
@@ -246,7 +262,12 @@ export function hyperchartRunFromRuntime(
 	options: HyperchartRunFromRuntimeOptions = {},
 ): HyperchartRunInfo {
 	const skipped: ProjectionSkippedRecord[] = [];
-	const projection = options.projection ?? projectBranch(createBranchProjection(ast), ast, records, [], skipped);
+	const projection = options.projection ?? createBranchProjection(ast);
+	const replayWarnings: string[] = [];
+	if (options.projection === undefined) for (const [index, record] of records.entries()) {
+		replayWarnings.push(...replayRecordDiagnostics(ast, projection, index, record).stale.map((entry) => entry.message));
+		projectBranch(projection, ast, [record], [], skipped);
+	}
 	const staticRun = hyperchartRunFromInspectResult(inspect, {
 		runId: options.runId ?? options.status?.runId ?? `run:${ast.id}`,
 		status: runtimeRunStatus(options.status?.state),
@@ -542,7 +563,7 @@ export function hyperchartRunFromRuntime(
 		...actorOccurrenceStates,
 		...actorInternalById.values(),
 	], ast, projection, runtime);
-	const statusIssues = runIssues(options.status);
+	const statusIssues = runIssues({ ...options.status, replayWarnings: [...new Set([...(options.status?.replayWarnings ?? []), ...replayWarnings])] });
 	const issues = [
 		...statusIssues,
 		...(projection.failure === undefined || statusIssues.some((issue) => issue.kind === "run_failed")
@@ -1093,6 +1114,7 @@ function runtimeFacts(
 	const issuesByState = new Map<StatePath, HyperchartIssueInfo[]>();
 	const actorOwnerVisits = new Map<StatePath, Array<{ generation: number; seqId: number }>>();
 	const skippedRecords = new Set(skipped.map((entry) => entry.record));
+	const validationPolicies = new Map<string, import("../core/types.js").GuardRefAst | null | undefined>();
 	const completeReplayPrefix = records[0]?.parentId === null;
 	const actorHistories = completeReplayPrefix
 		? actorInternalMessageHistories(ast, records, messagesByOccurrence, skippedRecords)
@@ -1163,6 +1185,7 @@ function runtimeFacts(
 		const stateId = record.actionUid.state;
 		const facts = byState.get(stateId) ?? {};
 		if (record.kind === "invoke") {
+			validationPolicies.set(actionUidKey(record.actionUid), record.validation);
 			facts.invokedAt = record.timestamp;
 			facts.attempts = (facts.attempts ?? 0) + 1;
 			delete facts.completedAt;
@@ -1174,7 +1197,7 @@ function runtimeFacts(
 		if (record.kind === "complete") {
 			const state = nodeAt(ast, stateId);
 			const requiresValidation =
-				state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED";
+				(state?.kind === "state" && state.validate !== undefined || validationPolicies.get(actionUidKey(record.actionUid)) !== null) && record.event.type !== "FAILED";
 			if (!requiresValidation) {
 				facts.completedAt = record.timestamp;
 				facts.completedEvent = record.event;
@@ -1415,19 +1438,19 @@ function runtimeVisitHistories(
 			visit.inputs = { ...record.input };
 		}
 		if (record.kind === "complete") {
-			if (record.artifacts !== undefined) {
-				visit.artifactPins = Object.entries(record.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size }));
+			const requiresValidation = replay.pendingActions.some((pending) => actionUidKey(pending.actionUid) === actionUidKey(record.actionUid));
+			if (!requiresValidation) {
+				if (record.artifacts !== undefined) visit.artifactPins = Object.entries(record.artifacts).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size }));
+				completeVisit(visit, record.event, record.timestamp);
 			}
-			const state = nodeAt(ast, stateId);
-			const requiresValidation =
-				state?.kind === "state" && state.validate !== undefined && record.event.type !== "FAILED";
-			if (!requiresValidation) completeVisit(visit, record.event, record.timestamp);
 			continue;
 		}
 		if (record.kind === "validated") {
 			visit.validationAttempts = (visit.validationAttempts ?? 0) + 1;
 			const rejectionReason = validationRejectionReason(record.outcome);
 			if (rejectionReason === undefined) {
+				const pending = pendingBefore.find((entry) => actionUidKey(entry.actionUid) === actionUidKey(record.actionUid));
+				if (pending?.phase === "validating" && pending.completionArtifacts !== undefined) visit.artifactPins = Object.entries(pending.completionArtifacts.pins).map(([path, pin]) => ({ path, hash: pin.hash, size: pin.size }));
 				completeVisit(visit, record.event, record.timestamp);
 				continue;
 			}
@@ -1591,6 +1614,7 @@ function appendSessionFacts(
 	if (progress === undefined) return;
 	const sessionsByState = new Map<StatePath, HyperchartAgentSessionInfo[]>();
 	for (const session of Object.values(progress.sessions)) {
+		if (session.actionUid.action !== "agent") continue;
 		const stateId = session.actionUid.state;
 		const facts = map.get(stateId) ?? {};
 		const info = runtimeSessionInfo(session);
@@ -1726,6 +1750,7 @@ function appendSessionIssues(
 ): void {
 	if (progress === undefined) return;
 	for (const session of Object.values(progress.sessions)) {
+		if (session.actionUid.action !== "agent") continue;
 		if (session.error === undefined && session.status !== "failed") continue;
 		const stateId = session.actionUid.state;
 		const timestamp = session.completedAt ?? session.lastActivityAt ?? session.startedAt;

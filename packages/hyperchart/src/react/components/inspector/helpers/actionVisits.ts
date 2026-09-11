@@ -88,6 +88,7 @@ export function actorMessageVisitForState(
 
 export function actionVisitStatusLabel(visit: HyperchartVisitInfo): string {
 	switch (visit.status) {
+		case "unknown": return "Unknown · Replay incompatible";
 		case "running":
 			return "In progress";
 		case "done":

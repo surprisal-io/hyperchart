@@ -333,6 +333,7 @@ export function RuntimeSection({
 	onNavigateToState,
 	history,
 	selectedInvokeSeqId,
+	recordOnly = false,
 }: {
 	state: HyperchartStateInfo;
 	allStates?: HyperchartStateInfo[];
@@ -341,6 +342,8 @@ export function RuntimeSection({
 	onNavigateToState?: (stateId: string) => void;
 	history?: RuntimeHistoryContext;
 	selectedInvokeSeqId?: number;
+	/** Durable history remains readable even when no current runtime projection exists. */
+	recordOnly?: boolean;
 }) {
 	const [openSessionIdentity, setOpenSessionIdentity] = useState<string>();
 	const readSession = useVisitSessionReader(history);
@@ -348,7 +351,7 @@ export function RuntimeSection({
 	const sessionScope = `${history?.runId ?? "embedded"}:${history?.snapshot.branchId ?? ""}:${history?.snapshot.headSeqId ?? "root"}:${targetInvoke ?? "none"}`;
 	const [resolvedSession, setResolvedSession] = useState<{ key: string; value?: HyperchartVisitInfo["session"]; error?: string }>();
 	useEffect(() => {
-		if (readSession === undefined || targetInvoke === undefined) return;
+		if (state.type !== "agent" || readSession === undefined || targetInvoke === undefined) return;
 		let current = true;
 		void readSession(targetInvoke).then((value) => {
 			if (current) setResolvedSession({ key: sessionScope, value });
@@ -356,11 +359,12 @@ export function RuntimeSection({
 			if (current) setResolvedSession({ key: sessionScope, error: error instanceof Error ? error.message : String(error) });
 		});
 		return () => { current = false; };
-	}, [readSession, targetInvoke, sessionScope]);
-	const session = readSession === undefined ? state.session
-		: resolvedSession?.key === sessionScope ? resolvedSession.value : undefined;
+	}, [state.type, readSession, targetInvoke, sessionScope]);
+	const session = state.type !== "agent" ? undefined
+		: readSession === undefined ? state.session
+			: resolvedSession?.key === sessionScope ? resolvedSession.value : undefined;
 	const sessionIdentity = `${sessionScope}:${state.id}:${session?.actionKey ?? "none"}:${session?.startedAt ?? "unknown"}`;
-	if (!stateHasRuntimeDetails(state)) return null;
+	if (!stateHasRuntimeDetails(state) && !(recordOnly && history !== undefined)) return null;
 	const sessionIsLive = session?.status === "running" || session?.status === "starting";
 	const actorOccurrence = state.actorOccurrence;
 	const actorMessage = state.type === "send" || state.type === "sendBatch" || state.type === "call" || state.type === "callBatch"
@@ -375,9 +379,9 @@ export function RuntimeSection({
 		<>
 			<Section
 				key={`runtime:${state.id}:${targetInvoke ?? "state"}`}
-				title="Runtime"
+				title={recordOnly ? "Recorded history" : "Runtime"}
 				icon={BoltIcon}
-				defaultOpen={sessionIsLive || actorOccurrence !== undefined || actorInternalGenerations !== undefined || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
+				defaultOpen={recordOnly || sessionIsLive || actorOccurrence !== undefined || actorInternalGenerations !== undefined || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
 				forceOpen={sessionIsLive || selectedInvokeSeqId !== undefined || history?.targetSeqId !== undefined}
 			>
 				{resolvedSession?.key === sessionScope && resolvedSession.error !== undefined && <div role="alert">Could not load session: {resolvedSession.error}</div>}
