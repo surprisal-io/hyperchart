@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within } from "storybook/test";
 import { HyperchartInspectorDialog } from "../HyperchartInspectorDialog.js";
 import { allRuns, failedRun, inspectRun, runningRun } from "../fixtures/hyperchart-fixtures.js";
+import { actorReentryRun } from "../fixtures/actor-fixtures.js";
 import { InteractiveInspector } from "./harnesses/InteractiveInspector.js";
 
 const meta = {
@@ -79,5 +80,16 @@ export const FailedValidation: Story = {
 	},
 	parameters: {
 		docs: { description: { story: "A failed durable run opened directly in its resumable state." } },
+	},
+};
+
+export const ActionVisitReentry: Story = {
+	name: "Action Visit History · Re-entry",
+	args: {
+		runs: [actorReentryRun],
+		selectedRunId: actorReentryRun.runId,
+	},
+	parameters: {
+		docs: { description: { story: "Three separate visits to the same action, projected from an execution-loop capture. Completed visits remain distinct from the current invocation." } },
 	},
 };

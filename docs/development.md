@@ -76,6 +76,10 @@ Run tests:
 npm test
 ```
 
+PostgreSQL integration tests are opt-in via `HYPERCHART_PG_DSN`; without it, JSONL coverage still runs and PostgreSQL cases are reported as skipped. The Pi semantic-ID test additionally requires an isolated database named `autodiscovery_labnotes_test_<digits>` or `autodiscovery_msagl_labnotes_test_<digits>` and rejects an explicitly configured database outside that allowlist.
+
+Boundary tests scan owned TypeScript sources, not generated `dist` declarations or linked `node_modules` trees. UI behavior tests should exercise reference navigation and production-projected graph/visit data rather than assert arbitrary CSS colors or implementation strings. The Inspector dialog's re-entry story uses a real captured actor run and checks that repeated action invocations remain separate execution nodes. A reply snapshot includes the entire atomic reply/settlement/call-resolution transaction; it must not claim a still-pending caller after that transaction.
+
 Run the standard gate:
 
 ```sh

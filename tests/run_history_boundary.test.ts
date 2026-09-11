@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, it } from "vitest";
@@ -22,12 +22,18 @@ const reactIndex = fileURLToPath(new URL("../packages/hyperchart/src/react/index
 const inspectIndex = fileURLToPath(new URL("../packages/hyperchart/src/inspect/index.ts", import.meta.url));
 const inspectRun = fileURLToPath(new URL("../packages/hyperchart/src/inspect/run_inspect.ts", import.meta.url));
 
+function sourceFilesUnder(path: string): string[] {
+	return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
+		if (entry.isSymbolicLink()) return [];
+		if (entry.name === "node_modules" || entry.name === "dist") return [];
+		const child = join(path, entry.name);
+		if (entry.isDirectory()) return sourceFilesUnder(child);
+		return /\.(?:ts|tsx)$/.test(entry.name) && !entry.name.endsWith(".d.ts") ? [child] : [];
+	});
+}
+
 function sourcesUnder(path: string): string {
-	return readdirSync(path).flatMap((name) => {
-		const child = join(path, name);
-		if (statSync(child).isDirectory()) return sourcesUnder(child);
-		return /\.(?:ts|tsx)$/.test(name) ? [readFileSync(child, "utf8")] : [];
-	}).join("\n");
+	return sourceFilesUnder(path).map((file) => readFileSync(file, "utf8")).join("\n");
 }
 
 describe("bounded run-history API boundary", () => {
@@ -76,9 +82,12 @@ describe("bounded run-history API boundary", () => {
 			join(packageRoot, "hyperchart/src/inspect"),
 			join(packageRoot, "pi-hyperchart"),
 			join(packageRoot, "claude-hyperchart"),
-		].map(sourcesUnder).join("\n");
-		expect(consumers).not.toContain("openExecutionReplay");
-		expect(consumers).not.toContain("listHyperchartBranches");
+		].flatMap(sourceFilesUnder);
+		for (const file of consumers) {
+			const source = readFileSync(file, "utf8");
+			expect(source, file).not.toContain("openExecutionReplay");
+			expect(source, file).not.toContain("listHyperchartBranches");
+		}
 	});
 
 	it("keeps runtime and storage independent from projection and execution internals", () => {

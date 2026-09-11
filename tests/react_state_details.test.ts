@@ -1,11 +1,18 @@
+/** @vitest-environment jsdom */
+import { z } from "zod";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { agent, chart, final, script } from "../packages/hyperchart/src/core/dsl.js";
+import { storyScenario } from "../packages/hyperchart/src/react/fixtures/story-scenario.js";
 import { RunOverview } from "../packages/hyperchart/src/react/components/inspector/details/RunOverview.js";
 import { StateDetails } from "../packages/hyperchart/src/react/components/inspector/details/StateDetails.js";
 import { TemplateTextBlock } from "../packages/hyperchart/src/react/components/inspector/prompt/TemplateTextBlock.js";
 import { runningRun } from "../packages/hyperchart/src/react/fixtures/hyperchart-fixtures.js";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
+
+afterEach(cleanup);
 
 describe("StateDetails", () => {
 	it("keeps Overview focused on arguments and metadata without duplicating graph activity", () => {
@@ -133,24 +140,26 @@ describe("StateDetails", () => {
 	});
 
 	it("renders script template refs with the shared interpolation renderer", () => {
-		const producer: HyperchartStateInfo = {
-			id: "prepare-data",
-			type: "agent",
-			status: "done",
-			replySchema: { schema: { type: "object", properties: { title: { type: "string" } } } },
-		};
-		const scriptState: HyperchartStateInfo = { id: "render", type: "script", status: "pending" };
-		const markup = renderToStaticMarkup(createElement(TemplateTextBlock, {
+		const run = storyScenario(chart({
+			kind: "chart", id: "script-result-link", initial: "prepare-data",
+			states: {
+				"prepare-data": { kind: "state", action: agent("producer", { reply: z.object({ title: z.string() }) }), transitions: { DONE: "render" } },
+				render: { kind: "state", action: script("node", []), transitions: { DONE: "done" } },
+				done: final(),
+			},
+		})).staticRun();
+		const scriptState = run.states.find((state) => state.id === "render")!;
+		const onHighlightReply = vi.fn();
+		render(createElement(TemplateTextBlock, {
 			text: '{json(result("prepare-data"))}',
 			state: scriptState,
-			allStates: [producer, scriptState],
+			allStates: run.states,
 			compact: true,
-			onHighlightReply: () => undefined,
+			onHighlightReply,
 		}));
-		expect(markup).toContain('json(result(&quot;');
-		expect(markup).toContain("prepare-data");
-		expect(markup).toContain("text-[var(--hc-cyan-text)]");
-		expect(markup).toContain("${json(result(");
+		const link = screen.getByRole("button", { name: '${json(result("prepare-data"))}' });
+		fireEvent.click(link);
+		expect(onHighlightReply).toHaveBeenCalledExactlyOnceWith("prepare-data", "");
 	});
 
 	it("renders transition target inputs as one object type", () => {

@@ -9,7 +9,7 @@ import {
 } from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
 import { edgeMotionPoints } from "../packages/hyperchart/src/react/components/inspector/graph/edgeRouting.js";
 import { scopeStackForState, visibleStateIdsForScope } from "../packages/hyperchart/src/react/components/inspector/helpers/scope.js";
-import { actorMapLocalRun, actorMapPartialRun, actorNamedReplyRun, actorSendVoidRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
+import { actorMapLocalRun, actorMapPartialRun, actorNamedReplyRun, actorPendingCallRun, actorSendVoidRun } from "../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 
 function run(status: "pending" | "running" | "done", target = "done"): HyperchartRunInfo {
 	return {
@@ -109,7 +109,7 @@ describe("graph nodes", () => {
 });
 
 describe("explicit actor graph contract", () => {
-	it("renders send transitions, real call/reply edges, and map-local actor scopes", () => {
+	it("renders send transitions, pending reply edges, and map-local actor scopes", () => {
 		const sendState = actorSendVoidRun.states.find((state) => state.id === "record");
 		expect(sendState?.transitions).toEqual([expect.objectContaining({ event: "ENQUEUED", target: "done" })]);
 		const sendGraph = buildGraph(actorSendVoidRun, new Set(actorSendVoidRun.states.map((state) => state.id)));
@@ -121,7 +121,14 @@ describe("explicit actor graph contract", () => {
 		const messageGraph = buildGraph(actorNamedReplyRun, messageIds);
 		expect(messageGraph.edges).toEqual(expect.arrayContaining([
 			expect.objectContaining({ source: "apply", target: "@editor", label: "call · APPLY" }),
-			expect.objectContaining({ source: "@editor", target: "apply", label: "reply · APPLIED" }),
+		]));
+
+		// The reply transaction already resolved this call. Do not draw a phantom wait edge.
+		expect(messageGraph.edges.some((edge) => edge.source === "@editor" && edge.target === "apply")).toBe(false);
+		const pendingGraph = buildGraph(actorPendingCallRun, new Set(actorPendingCallRun.states.map((state) => state.id)));
+		expect(pendingGraph.edges).toEqual(expect.arrayContaining([
+			expect.objectContaining({ source: "apply", target: "@editor", label: "call · APPLY" }),
+			expect.objectContaining({ source: "@editor", target: "apply" }),
 		]));
 
 		const ids = new Set(actorMapLocalRun.states.map((state) => state.id));

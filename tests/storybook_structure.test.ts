@@ -304,7 +304,15 @@ describe("Storybook information architecture", () => {
 		expect(reentryReplyGenerations?.map((generation) => generation.actorMessageHistory?.length ?? 0)).toEqual([1, 1, 1]);
 		expect(actorPendingCallRun.actorOccurrences?.[0]?.pendingCaller).toBeDefined();
 		expect(actorSendVoidRun.actorOccurrences?.[0]?.status).toBe("stopped");
-		expect(actorNamedReplyRun.actorOccurrences?.[0]?.pendingCaller?.waitReason).toBe("reply");
+		expect(actorNamedReplyRecords).toEqual(expect.arrayContaining([
+			expect.objectContaining({ type: "actor_message", kind: "replied", replyEvent: "APPLIED" }),
+			expect.objectContaining({ type: "actor_message", kind: "settled" }),
+			expect.objectContaining({ type: "actor_call_resolved" }),
+		]));
+		expect(actorNamedReplyRun.actorOccurrences?.[0]?.pendingCaller).toBeUndefined();
+		expect(actorNamedReplyRun.actorOccurrences?.[0]?.messageHistory).toEqual(expect.arrayContaining([
+			expect.objectContaining({ status: "settled", replyEvent: "APPLIED" }),
+		]));
 		expect(actorDrainingRun.states.find((state) => state.id === "phase.dispatch")).toMatchObject({ type: "sendBatch", status: "done" });
 		expect(actorDrainingRun.states.find((state) => state.id === "phase.finished")).toMatchObject({ type: "final", status: "waiting" });
 		expect(actorDrainingRun.status).toBe("running");
@@ -456,12 +464,6 @@ describe("Storybook information architecture", () => {
 		expect(atlasSource).toMatch(/Pool Worker History · persistent reuse/);
 	});
 
-	it("keeps repeated action visits on the production Inspector dialog surface", () => {
-		const source = readFileSync(join(storyDirectory, "InspectorDialog.stories.tsx"), "utf8");
-		expect(source).toContain("export const ActionVisitReentry");
-		expect(source).toContain("reentryScenario.runtimeRun(reentryRecords");
-		expect(source).toContain('name: "Action Visit History · Re-entry"');
-	});
 
 	it("does not restore mechanism-named story files", () => {
 		const names = storyFiles(storyDirectory).map((file) => file.slice(storyDirectory.length + 1));
