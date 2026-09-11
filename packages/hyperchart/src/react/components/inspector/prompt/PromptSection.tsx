@@ -16,7 +16,9 @@ export function PromptSection({
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
 }) {
-	if (!state.taskPrompt) return null;
+	if (!state.taskPrompt) {
+		return null;
+	}
 	return (
 		<Section title="Prompt" icon={CommandLineIcon}>
 			<TemplateTextBlock

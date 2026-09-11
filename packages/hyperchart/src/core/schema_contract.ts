@@ -19,7 +19,9 @@ type ContractedSchema = object & { readonly [RUNTIME_CONTRACT]?: RuntimeContract
  * registry.
  */
 export function contract<S extends ZodType>(id: string, version: string, schema: S): S {
-	if (typeof id !== "string" || id.length === 0) throw new TypeError("contract id must be a non-empty string");
+	if (typeof id !== "string" || id.length === 0) {
+		throw new TypeError("contract id must be a non-empty string");
+	}
 	if (typeof version !== "string" || version.length === 0) {
 		throw new TypeError("contract version must be a non-empty string");
 	}

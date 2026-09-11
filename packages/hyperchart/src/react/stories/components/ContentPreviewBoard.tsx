@@ -18,7 +18,9 @@ function requiredScenarioState(group: "agent" | "map", title: string) {
 		scenario?.selectedStateId === null
 			? undefined
 			: scenario?.run.states.find((candidate) => candidate.id === scenario?.selectedStateId);
-	if (state === undefined) throw new Error(`adapter-derived content preview state is unavailable: ${title}`);
+	if (state === undefined) {
+		throw new Error(`adapter-derived content preview state is unavailable: ${title}`);
+	}
 	return state;
 }
 const promptState = requiredScenarioState("agent", "Rich agent");
@@ -78,7 +80,9 @@ const clippedDefinition = [
 const fittingMapState = requiredScenarioState("map", "Map parent");
 
 function required<T>(value: T | undefined, name: string): T {
-	if (value === undefined) throw new Error(`adapter-derived actor preview fixture is missing ${name}`);
+	if (value === undefined) {
+		throw new Error(`adapter-derived actor preview fixture is missing ${name}`);
+	}
 	return value;
 }
 const fittingActorContract = required(actorNamedReplyRun.actorDeclarations?.[0]?.protocol[0], "fitting protocol");

@@ -66,9 +66,13 @@ export function defaultFailedTerminalNotificationPayload(input: {
 /** A request becomes deliverable only after status.json records the same terminal outcome. */
 export function readDeliverableTerminalNotificationRequest(runId: string): TerminalNotificationRequest | undefined {
 	const request = readTerminalNotificationRequest(runId);
-	if (request === undefined) return undefined;
+	if (request === undefined) {
+		return undefined;
+	}
 	const status = readRunStatus(runId);
-	if (status?.state !== request.payload.outcome) return undefined;
+	if (status?.state !== request.payload.outcome) {
+		return undefined;
+	}
 	// Current runners close with an empty live set, so attempt identity is the
 	// authoritative generation match. Branch identity remains legacy fallback.
 	if (status.attemptId !== undefined && request.attemptId !== undefined) {
@@ -104,7 +108,9 @@ export function recoverStaleRunTerminalNotification(
 	if (!belongsToCurrentAttempt) {
 		// The host may have durably opened this attempt before the runner got far
 		// enough to archive the previous outbox. Never let that older outcome win.
-		if (request !== undefined) archiveTerminalNotificationGeneration(runId);
+		if (request !== undefined) {
+			archiveTerminalNotificationGeneration(runId);
+		}
 		const error = status.error ?? "runner exited before recording a terminal status";
 		request = persistTerminalNotificationRequest(
 			runId,
@@ -116,7 +122,9 @@ export function recoverStaleRunTerminalNotification(
 			}),
 		);
 	}
-	if (request === undefined) throw new Error(`Failed to recover terminal notification request for ${runId}`);
+	if (request === undefined) {
+		throw new Error(`Failed to recover terminal notification request for ${runId}`);
+	}
 	patchRunStatus(runId, {
 		state: request.payload.outcome,
 		branchIds: [],
@@ -138,7 +146,9 @@ export function recoverStaleRunTerminalNotification(
  */
 export function archiveTerminalNotificationGeneration(runId: string): string | undefined {
 	const request = readTerminalNotificationRequest(runId);
-	if (request === undefined) return undefined;
+	if (request === undefined) {
+		return undefined;
+	}
 	const historyDir = join(resolveRunPaths(runId).runDir, TERMINAL_NOTIFICATION_HISTORY_DIR);
 	mkdirSync(historyDir, { recursive: true });
 	const createdAt = request.createdAt.replace(/[^\dA-Za-z.-]/g, "-");
@@ -179,7 +189,9 @@ export function persistTerminalNotificationRequest(
 
 export function readTerminalNotificationRequest(runId: string): TerminalNotificationRequest | undefined {
 	const path = terminalNotificationRequestPath(runId);
-	if (!existsSync(path)) return undefined;
+	if (!existsSync(path)) {
+		return undefined;
+	}
 	const value = JSON.parse(readFileSync(path, "utf8")) as TerminalNotificationRequest;
 	if (
 		value.version !== 2 ||
@@ -210,7 +222,9 @@ function legacyTerminalNotificationReceiptPath(runId: string, host: string, sess
 
 export function hasTerminalNotificationReceipt(runId: string, host: string, sessionId: string): boolean {
 	const request = readTerminalNotificationRequest(runId);
-	if (request === undefined) return false;
+	if (request === undefined) {
+		return false;
+	}
 	const receipt =
 		readReceipt(terminalNotificationReceiptPath(runId, request.requestId, host, sessionId)) ??
 		readReceipt(legacyTerminalNotificationReceiptPath(runId, host, sessionId));
@@ -238,15 +252,18 @@ export function claimTerminalNotificationReceipt(
 	options: { now?: number; leaseMs?: number } = {},
 ): boolean {
 	const request = readTerminalNotificationRequest(runId);
-	if (request === undefined || request.requestId !== requestId) return false;
+	if (request === undefined || request.requestId !== requestId) {
+		return false;
+	}
 	const legacy = readReceipt(legacyTerminalNotificationReceiptPath(runId, host, sessionId));
 	if (
 		legacy?.requestId === requestId &&
 		legacy.host === host &&
 		legacy.sessionId === sessionId &&
 		(legacy.state === "confirmed" || (legacy.state === undefined && typeof legacy.deliveredAt === "string"))
-	)
+	) {
 		return false;
+	}
 	const path = terminalNotificationReceiptPath(runId, requestId, host, sessionId);
 	const now = options.now ?? Date.now();
 	const leaseMs = options.leaseMs ?? TERMINAL_NOTIFICATION_CLAIM_LEASE_MS;
@@ -264,7 +281,9 @@ export function claimTerminalNotificationReceipt(
 			writeFileSync(path, `${JSON.stringify(claim, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
 			return true;
 		} catch (error) {
-			if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+			if (!isNodeError(error) || error.code !== "EEXIST") {
+				throw error;
+			}
 		}
 		const existing = readReceipt(path);
 		if (
@@ -273,16 +292,24 @@ export function claimTerminalNotificationReceipt(
 			existing.host === host &&
 			existing.sessionId === sessionId
 		) {
-			if (existing.state === "confirmed" || (existing.state === undefined && typeof existing.deliveredAt === "string"))
+			if (
+				existing.state === "confirmed" ||
+				(existing.state === undefined && typeof existing.deliveredAt === "string")
+			) {
 				return false;
+			}
 			const claimedAt = existing.claimedAt === undefined ? Number.NaN : Date.parse(existing.claimedAt);
-			if (Number.isFinite(claimedAt) && now - claimedAt < leaseMs) return false;
+			if (Number.isFinite(claimedAt) && now - claimedAt < leaseMs) {
+				return false;
+			}
 		}
 		const displaced = `${path}.${process.pid}.${randomUUID()}.stale`;
 		try {
 			renameSync(path, displaced);
 		} catch (error) {
-			if (isNodeError(error) && error.code === "ENOENT") continue;
+			if (isNodeError(error) && error.code === "ENOENT") {
+				continue;
+			}
 			throw error;
 		}
 		const displacedReceipt = readReceipt(displaced);
@@ -292,7 +319,9 @@ export function claimTerminalNotificationReceipt(
 			try {
 				linkSync(displaced, path);
 			} catch (error) {
-				if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+				if (!isNodeError(error) || error.code !== "EEXIST") {
+					throw error;
+				}
 			} finally {
 				rmSync(displaced, { force: true });
 			}
@@ -302,7 +331,9 @@ export function claimTerminalNotificationReceipt(
 			writeFileSync(path, `${JSON.stringify(claim, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
 			return true;
 		} catch (error) {
-			if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+			if (!isNodeError(error) || error.code !== "EEXIST") {
+				throw error;
+			}
 			return false;
 		} finally {
 			rmSync(displaced, { force: true });
@@ -380,11 +411,14 @@ function readReceipt(
 ):
 	| (Partial<TerminalNotificationReceipt> & Pick<TerminalNotificationReceipt, "requestId" | "host" | "sessionId">)
 	| undefined {
-	if (!existsSync(path)) return undefined;
+	if (!existsSync(path)) {
+		return undefined;
+	}
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-		if (typeof value.requestId !== "string" || typeof value.host !== "string" || typeof value.sessionId !== "string")
+		if (typeof value.requestId !== "string" || typeof value.host !== "string" || typeof value.sessionId !== "string") {
 			return undefined;
+		}
 		return value as Partial<TerminalNotificationReceipt> &
 			Pick<TerminalNotificationReceipt, "requestId" | "host" | "sessionId">;
 	} catch {
@@ -393,7 +427,9 @@ function readReceipt(
 }
 
 function stableJson(value: unknown): string {
-	if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+	if (Array.isArray(value)) {
+		return `[${value.map(stableJson).join(",")}]`;
+	}
 	if (value !== null && typeof value === "object") {
 		return `{${Object.entries(value as Record<string, unknown>)
 			.sort(([a], [b]) => a.localeCompare(b))

@@ -60,8 +60,11 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 			// The workspace SDK predates arbitrary external IDs; the service still
 			// receives/asserts the exact durable ID, while its test manager uses a legal local ID.
 			const manager = SessionManager.inMemory(root, { id: id.replaceAll(":", "-") });
-			for (const entry of saved?.entries ?? [])
-				if (entry.type === "message" && entry.message.role === "user") manager.appendMessage(entry.message);
+			for (const entry of saved?.entries ?? []) {
+				if (entry.type === "message" && entry.message.role === "user") {
+					manager.appendMessage(entry.message);
+				}
+			}
 			counts.handles++;
 			return {
 				manager,
@@ -183,7 +186,9 @@ describe("PiAgentExecutor session resources", () => {
 		const prompt = f.prompt.getMockImplementation()!;
 		let turns = 0;
 		f.prompt.mockImplementation(async function (this: AgentSession, text, options) {
-			if (++turns === 2) await writeFile(join(f.root, "result.txt"), "accepted");
+			if (++turns === 2) {
+				await writeFile(join(f.root, "result.txt"), "accepted");
+			}
 			return prompt.call(this, text, options);
 		});
 		try {
@@ -233,7 +238,9 @@ describe("PiAgentExecutor session resources", () => {
 			if (mode === "nudge") {
 				const firstEntries = f.prompts[0]?.entries;
 				const secondEntries = f.prompts[1]?.entries;
-				if (firstEntries === undefined || secondEntries === undefined) throw new Error("missing prompt entries");
+				if (firstEntries === undefined || secondEntries === undefined) {
+					throw new Error("missing prompt entries");
+				}
 				expect(secondEntries).toBeGreaterThan(firstEntries);
 			}
 			expect(f.counts.handles).toBe(0);
@@ -476,8 +483,11 @@ export default function(pi) {
 		try {
 			expect(await complete(f.executor, effect())).toEqual({ type: "DONE" });
 			const { readFile } = await import("node:fs/promises");
-			if (policy === "ambient") expect(await readFile(marker, "utf8")).toBe("factory\nshutdown:resource-session-1\n");
-			else await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+			if (policy === "ambient") {
+				expect(await readFile(marker, "utf8")).toBe("factory\nshutdown:resource-session-1\n");
+			} else {
+				await expect(readFile(marker)).rejects.toMatchObject({ code: "ENOENT" });
+			}
 		} finally {
 			await f.executor.dispose();
 		}

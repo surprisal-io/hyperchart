@@ -73,7 +73,9 @@ try {
 		const report = JSON.parse(output)[0];
 		const names = new Set(report.files.map((file) => file.path));
 		for (const expected of item.expected) {
-			if (!names.has(expected)) throw new Error(`${item.dir} tarball missing ${expected}`);
+			if (!names.has(expected)) {
+				throw new Error(`${item.dir} tarball missing ${expected}`);
+			}
 		}
 		for (const forbidden of ["tests/", "node_modules/", "storybook-static/", ".pi/", "tla/"]) {
 			if ([...names].some((name) => name.startsWith(forbidden))) {
@@ -97,8 +99,12 @@ function validateManifests() {
 	const pi = JSON.parse(readFileSync(resolve(root, "packages/pi-hyperchart/package.json"), "utf8"));
 	const claude = JSON.parse(readFileSync(resolve(root, "packages/claude-hyperchart/package.json"), "utf8"));
 	for (const pkg of [core, pi, claude]) {
-		if (pkg.private === true) throw new Error("publishable packages must not be private");
-		if (pkg.version !== core.version) throw new Error("package versions must stay in lockstep");
+		if (pkg.private === true) {
+			throw new Error("publishable packages must not be private");
+		}
+		if (pkg.version !== core.version) {
+			throw new Error("package versions must stay in lockstep");
+		}
 	}
 	for (const pkg of [pi, claude]) {
 		if (pkg.dependencies?.[core.name] !== core.version) {
@@ -108,13 +114,18 @@ function validateManifests() {
 	const plugin = JSON.parse(
 		readFileSync(resolve(root, "packages/claude-hyperchart/.claude-plugin/plugin.json"), "utf8"),
 	);
-	if (plugin.version !== claude.version)
+	if (plugin.version !== claude.version) {
 		throw new Error("Claude plugin manifest version must match the package version");
-	if (!pi.keywords?.includes("pi-package")) throw new Error("Pi package must include the pi-package keyword");
+	}
+	if (!pi.keywords?.includes("pi-package")) {
+		throw new Error("Pi package must include the pi-package keyword");
+	}
 	if (!Array.isArray(pi.pi?.extensions) || !Array.isArray(pi.pi?.skills)) {
 		throw new Error("Pi package must declare pi.extensions and pi.skills");
 	}
-	if (pi["pi-package"] !== undefined) throw new Error("pi-package is a keyword, not a manifest object");
+	if (pi["pi-package"] !== undefined) {
+		throw new Error("pi-package is a keyword, not a manifest object");
+	}
 }
 
 function validateCrossPackageImports() {
@@ -141,14 +152,19 @@ function validateMarkdownLinks() {
 		"packages/claude-hyperchart/README.md",
 	]) {
 		const path = resolve(root, base);
-		if (statSync(path).isDirectory()) walkMarkdown(path, markdown);
-		else markdown.push(path);
+		if (statSync(path).isDirectory()) {
+			walkMarkdown(path, markdown);
+		} else {
+			markdown.push(path);
+		}
 	}
 	for (const file of markdown) {
 		const text = readFileSync(file, "utf8");
 		for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
 			const target = match[1].split("#")[0];
-			if (!target || /^(?:https?:|mailto:)/.test(target)) continue;
+			if (!target || /^(?:https?:|mailto:)/.test(target)) {
+				continue;
+			}
 			if (!existsSync(resolve(dirname(file), decodeURIComponent(target)))) {
 				throw new Error(`broken link in ${file}: ${match[1]}`);
 			}
@@ -332,7 +348,9 @@ export type SmokeTypes =
 		"docs/safety.md",
 		"examples/quickstart.chart.ts",
 	]) {
-		if (!existsSync(resolve(piRoot, resource))) throw new Error(`clean Pi install missing ${resource}`);
+		if (!existsSync(resolve(piRoot, resource))) {
+			throw new Error(`clean Pi install missing ${resource}`);
+		}
 	}
 	console.log("Clean tarball runtime and type imports passed.");
 }

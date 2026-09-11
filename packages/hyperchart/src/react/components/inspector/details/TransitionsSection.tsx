@@ -14,7 +14,9 @@ export function TransitionsSection({
 	allStates: HyperchartStateInfo[];
 	onReplyFieldClick?: (path: string) => void;
 }) {
-	if (!state.transitions?.length) return null;
+	if (!state.transitions?.length) {
+		return null;
+	}
 	return (
 		<Section title="Transitions" icon={ArrowsRightLeftIcon}>
 			<div className="grid gap-2">

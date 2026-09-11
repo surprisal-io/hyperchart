@@ -21,7 +21,9 @@ export type GraphInput = {
 function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): StateTransitionEdge[] {
 	const grouped = new Map<string, StateTransitionEdge>();
 	for (const state of run.states) {
-		if (!visibleIds.has(state.id)) continue;
+		if (!visibleIds.has(state.id)) {
+			continue;
+		}
 		const link = state.actorMessageLink;
 		if (link !== undefined && visibleIds.has(link.to) && link.to !== state.id) {
 			const key = `${state.id}\u0000${link.to}\u0000${link.kind}${link.self === true ? "\u0000self" : ""}`;
@@ -45,11 +47,15 @@ function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): 
 			});
 		}
 		for (const transition of state.transitions ?? []) {
-			if (transition.target === state.id || !visibleIds.has(transition.target)) continue;
+			if (transition.target === state.id || !visibleIds.has(transition.target)) {
+				continue;
+			}
 			const key = `${state.id}\u0000${transition.target}`;
 			const existing = grouped.get(key);
 			if (existing) {
-				if (!existing.labels.includes(transition.event)) existing.labels.push(transition.event);
+				if (!existing.labels.includes(transition.event)) {
+					existing.labels.push(transition.event);
+				}
 			} else {
 				grouped.set(key, { source: state.id, target: transition.target, labels: [transition.event] });
 			}

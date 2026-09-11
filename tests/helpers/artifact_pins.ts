@@ -4,8 +4,12 @@ import type { ArtifactPin, DurableLogRecord } from "../../packages/hyperchart/sr
 export function latestArtifactPins(records: readonly DurableLogRecord[]): ReadonlyMap<string, ArtifactPin> {
 	const pins = new Map<string, ArtifactPin>();
 	for (const record of records) {
-		if (record.type !== "state_action" || record.kind !== "complete" || record.artifacts === undefined) continue;
-		for (const [path, pin] of Object.entries(record.artifacts)) pins.set(path, pin);
+		if (record.type !== "state_action" || record.kind !== "complete" || record.artifacts === undefined) {
+			continue;
+		}
+		for (const [path, pin] of Object.entries(record.artifacts)) {
+			pins.set(path, pin);
+		}
 	}
 	return pins;
 }

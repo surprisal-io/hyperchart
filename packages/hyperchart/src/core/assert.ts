@@ -10,30 +10,45 @@ function fail(message = "Assertion failed"): never {
 }
 
 function deepEqual(actual: unknown, expected: unknown): boolean {
-	if (Object.is(actual, expected)) return true;
-	if (typeof actual !== "object" || actual === null || typeof expected !== "object" || expected === null) return false;
-	if (Array.isArray(actual) !== Array.isArray(expected)) return false;
+	if (Object.is(actual, expected)) {
+		return true;
+	}
+	if (typeof actual !== "object" || actual === null || typeof expected !== "object" || expected === null) {
+		return false;
+	}
+	if (Array.isArray(actual) !== Array.isArray(expected)) {
+		return false;
+	}
 	const actualKeys = Object.keys(actual);
 	const expectedKeys = Object.keys(expected);
-	if (actualKeys.length !== expectedKeys.length || actualKeys.some((key) => !Object.hasOwn(expected, key)))
+	if (actualKeys.length !== expectedKeys.length || actualKeys.some((key) => !Object.hasOwn(expected, key))) {
 		return false;
+	}
 	return actualKeys.every((key) =>
 		deepEqual((actual as Record<string, unknown>)[key], (expected as Record<string, unknown>)[key]),
 	);
 }
 
 const assert: Assertion = (condition: unknown, message?: string): asserts condition => {
-	if (!condition) fail(message);
+	if (!condition) {
+		fail(message);
+	}
 };
 
 assert.equal = (actual, expected, message) => {
-	if (!Object.is(actual, expected)) fail(message);
+	if (!Object.is(actual, expected)) {
+		fail(message);
+	}
 };
 assert.notEqual = (actual, expected, message) => {
-	if (Object.is(actual, expected)) fail(message);
+	if (Object.is(actual, expected)) {
+		fail(message);
+	}
 };
 assert.deepStrictEqual = (actual, expected, message) => {
-	if (!deepEqual(actual, expected)) fail(message);
+	if (!deepEqual(actual, expected)) {
+		fail(message);
+	}
 };
 
 export default assert;

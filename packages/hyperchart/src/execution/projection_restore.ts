@@ -101,8 +101,9 @@ export async function loadBranchProjection(input: {
 		throw new Error("Projection contract does not match the supplied normalized ChartAst");
 	}
 	const snapshot = input.snapshot ?? (await input.store.captureSnapshot(input.branchId));
-	if (snapshot.branchId !== input.branchId)
+	if (snapshot.branchId !== input.branchId) {
 		throw new Error("Projection snapshot branch does not match the selected branch");
+	}
 	const lookup: CheckpointQuery = { targetHeadSeqId: snapshot.headSeqId, selectorKey: input.contract.selectorKey };
 	const exact = await input.store.loadExactCheckpoint(lookup);
 	const nearest = exact === undefined ? await input.store.findNearestCheckpoint(lookup) : undefined;
@@ -124,8 +125,9 @@ export async function loadBranchProjection(input: {
 		targetHeadSeqId: snapshot.headSeqId,
 		afterSeqId: checkpointHeadSeqId,
 	})) {
-		if (batch.length > EXECUTION_REPLAY_BATCH_RECORDS)
+		if (batch.length > EXECUTION_REPLAY_BATCH_RECORDS) {
 			throw new Error("Projection replay source exceeded its fixed batch bound");
+		}
 		replayBatches++;
 		for (const record of batch) {
 			const diagnostics = replayRecordDiagnostics(input.ast, projection, replayedRecords, record);
@@ -191,24 +193,36 @@ export function encodeCheckpoint(checkpoint: ProjectionCheckpoint): OpaqueCheckp
 }
 
 export function decodeCheckpoint(stored: OpaqueCheckpointEnvelope, ast?: ChartAst): ProjectionCheckpoint | undefined {
-	if (!isNonEmptyString(stored.checkpointId) || !isHead(stored.headSeqId) || !isNonNegativeInteger(stored.createdAt))
+	if (!isNonEmptyString(stored.checkpointId) || !isHead(stored.headSeqId) || !isNonNegativeInteger(stored.createdAt)) {
 		return undefined;
+	}
 	if (
 		!isRecord(stored.blob) ||
 		stored.blob.schemaVersion !== PROJECTION_CHECKPOINT_SCHEMA_VERSION ||
 		!isPositiveInteger(stored.blob.projectorVersion) ||
 		typeof stored.blob.astDigest !== "string" ||
 		!/^[a-f0-9]{64}$/.test(stored.blob.astDigest)
-	)
+	) {
 		return undefined;
+	}
 	const projection = decodeBranchProjection(stored.blob.projection);
-	if (projection === undefined) return undefined;
-	if (ast !== undefined && !projectionMatchesAst(projection, ast)) return undefined;
-	if (ast === undefined && (Object.keys(projection.actors).length > 0 || Object.keys(projection.actorPools).length > 0))
+	if (projection === undefined) {
 		return undefined;
+	}
+	if (ast !== undefined && !projectionMatchesAst(projection, ast)) {
+		return undefined;
+	}
+	if (
+		ast === undefined &&
+		(Object.keys(projection.actors).length > 0 || Object.keys(projection.actorPools).length > 0)
+	) {
+		return undefined;
+	}
 	const selectorKey = `hyperchart-projection:${stored.blob.projectorVersion}:${stored.blob.astDigest}`;
 	const contract = { projectorVersion: stored.blob.projectorVersion, astDigest: stored.blob.astDigest, selectorKey };
-	if (stored.selectorKey !== selectorKey) return undefined;
+	if (stored.selectorKey !== selectorKey) {
+		return undefined;
+	}
 	return {
 		checkpointId: stored.checkpointId,
 		headSeqId: stored.headSeqId,
@@ -225,13 +239,22 @@ async function acceptedCheckpoint(
 	ast: ChartAst,
 	stored: OpaqueCheckpointEnvelope | undefined,
 ): Promise<ProjectionCheckpoint | undefined> {
-	if (stored === undefined || stored.selectorKey !== contract.selectorKey) return undefined;
-	const checkpoint = decodeCheckpoint(stored, ast);
-	if (checkpoint === undefined || checkpoint.projection.seqId !== (checkpoint.headSeqId ?? 0)) return undefined;
-	if (checkpoint.headSeqId === null) return checkpoint;
-	if ((await store.getRecord(checkpoint.headSeqId)) === undefined) return undefined;
-	if (!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: checkpoint.headSeqId })))
+	if (stored === undefined || stored.selectorKey !== contract.selectorKey) {
 		return undefined;
+	}
+	const checkpoint = decodeCheckpoint(stored, ast);
+	if (checkpoint === undefined || checkpoint.projection.seqId !== (checkpoint.headSeqId ?? 0)) {
+		return undefined;
+	}
+	if (checkpoint.headSeqId === null) {
+		return checkpoint;
+	}
+	if ((await store.getRecord(checkpoint.headSeqId)) === undefined) {
+		return undefined;
+	}
+	if (!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: checkpoint.headSeqId }))) {
+		return undefined;
+	}
 	return checkpoint;
 }
 
@@ -258,8 +281,9 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 			],
 			["args", "failure"],
 		)
-	)
+	) {
 		return undefined;
+	}
 	if (
 		!isStringArray(value.activeLeaves) ||
 		!isNonNegativeInteger(value.seqId) ||
@@ -278,8 +302,9 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 		!isLiveActorMessages(value.liveActorMessages) ||
 		!isPendingActorCalls(value.pendingActorCalls) ||
 		!isRecordOfPositiveIntegers(value.actorProducerVisits)
-	)
+	) {
 		return undefined;
+	}
 	return structuredClone(value) as BranchProjection;
 }
 
@@ -299,23 +324,26 @@ function isPendingAction(value: unknown): boolean {
 		!(value.gateSeqId === undefined || isPositiveInteger(value.gateSeqId)) ||
 		!(value.lastRetry === undefined || isLastRetry(value.lastRetry)) ||
 		!isNonNegativeFinite(value.timestamp)
-	)
+	) {
 		return false;
+	}
 	const optional = ["gateSeqId", "lastRetry"];
-	if (value.phase === "running")
+	if (value.phase === "running") {
 		return isExactRecord(
 			value,
 			["actionUid", "visitId", "seqId", "invokeSeqId", "sessionId", "definition", "timestamp", "recovery", "phase"],
 			optional,
 		);
+	}
 	if (
 		value.completionArtifacts !== undefined &&
 		(!isExactRecord(value.completionArtifacts, ["branchId", "pins"], []) ||
 			!isNonEmptyString(value.completionArtifacts.branchId) ||
 			!isArtifactPins(value.completionArtifacts.pins))
-	)
+	) {
 		return false;
-	if (value.phase === "validating")
+	}
+	if (value.phase === "validating") {
 		return (
 			isExactRecord(
 				value,
@@ -334,10 +362,13 @@ function isPendingAction(value: unknown): boolean {
 				[...optional, "completionArtifacts"],
 			) && isChartEvent(value.event)
 		);
+	}
 	return false;
 }
 function isRecoveryCounters(value: unknown): boolean {
-	if (!isExactRecord(value, ["general", "validation"], [])) return false;
+	if (!isExactRecord(value, ["general", "validation"], [])) {
+		return false;
+	}
 	return [value.general, value.validation].every(
 		(counter) =>
 			isExactRecord(counter, ["nudges", "restarts"], []) &&
@@ -362,8 +393,13 @@ function isOpenInteractions(value: unknown): boolean {
 	return (
 		isRecord(value) &&
 		Object.entries(value).every(([key, entry]) => {
-			if (!/^(0|[1-9][0-9]*)$/.test(key) || !isExactRecord(entry, ["opened", "status"], []) || entry.status !== "open")
+			if (
+				!/^(0|[1-9][0-9]*)$/.test(key) ||
+				!isExactRecord(entry, ["opened", "status"], []) ||
+				entry.status !== "open"
+			) {
 				return false;
+			}
 			const opened = entry.opened;
 			return isOpenedInteraction(opened) && Number(key) === opened.seqId;
 		})
@@ -535,14 +571,16 @@ function isPendingActorCall(value: unknown): boolean {
 		!isPath(value.callerState) ||
 		!isPath(value.occurrence) ||
 		!isOneOf(value.status, ["enqueued", "accepted", "partial"])
-	)
+	) {
 		return false;
-	if (value.kind === "singleton")
+	}
+	if (value.kind === "singleton") {
 		return (
 			isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageId", "status"], []) &&
 			isNonEmptyString(value.messageId)
 		);
-	if (value.kind === "batch")
+	}
+	if (value.kind === "batch") {
 		return (
 			isExactRecord(value, ["kind", "callId", "callerState", "occurrence", "messageIds", "status"], []) &&
 			isStringArray(value.messageIds) &&
@@ -550,6 +588,7 @@ function isPendingActorCall(value: unknown): boolean {
 			value.messageIds.every(isNonEmptyString) &&
 			new Set(value.messageIds).size === value.messageIds.length
 		);
+	}
 	return false;
 }
 function isActorDefinition(value: unknown, kind: "actor" | "actorPool"): boolean {
@@ -562,9 +601,10 @@ function isActorDefinition(value: unknown, kind: "actor" | "actorPool"): boolean
 		!isSchemaAst(value.input) ||
 		!isJsonValue(value.inputValue) ||
 		!isProtocol(value.protocol)
-	)
+	) {
 		return false;
-	if (kind === "actor")
+	}
+	if (kind === "actor") {
 		return (
 			isExactRecord(
 				value,
@@ -574,6 +614,7 @@ function isActorDefinition(value: unknown, kind: "actor" | "actorPool"): boolean
 			isNonEmptyString(value.initial) &&
 			isStateRecord(value.states)
 		);
+	}
 	return (
 		isExactRecord(
 			value,
@@ -640,19 +681,23 @@ function isCoordinates(value: Record<string, unknown>): boolean {
 	);
 }
 function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): boolean {
-	if (!projection.activeLeaves.every((path) => isMainLeaf(ast, projection, path))) return false;
+	if (!projection.activeLeaves.every((path) => isMainLeaf(ast, projection, path))) {
+		return false;
+	}
 	if (
 		!Object.keys(projection.spawns).every(
 			(path) => nodeAt(ast, path)?.kind === "map" && concreteMapPathValid(ast, projection, path),
 		)
-	)
+	) {
 		return false;
+	}
 	if (
 		![...Object.keys(projection.inputs), ...Object.keys(projection.results)].every((path) =>
 			semanticStateExists(ast, projection, path),
 		)
-	)
+	) {
 		return false;
+	}
 	if (
 		!projection.pendingActions.every((pending) => {
 			const state = actionStateFor(ast, projection, pending.actionUid.state);
@@ -665,8 +710,9 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 				projection.stateVisits[actionUidKey(pending.actionUid)] === pending.visitId
 			);
 		})
-	)
+	) {
 		return false;
+	}
 	if (
 		!Object.values(projection.openUserInteractions).every((interaction) => {
 			const state = actionStateFor(ast, projection, interaction.opened.actionUid.state);
@@ -677,20 +723,23 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 				interaction.opened.phaseSeqId <= interaction.opened.seqId
 			);
 		})
-	)
+	) {
 		return false;
+	}
 	if (
 		!Object.entries(projection.actors).every(
 			([key, endpoint]) => key === endpoint.occurrence && endpointMatchesAst(ast, projection, endpoint),
 		)
-	)
+	) {
 		return false;
+	}
 	if (
 		!Object.entries(projection.actorPools).every(
 			([key, endpoint]) => key === endpoint.occurrence && poolMatchesAst(ast, projection, endpoint),
 		)
-	)
+	) {
 		return false;
+	}
 	if (
 		!Object.values(projection.pendingActorCalls).every((call) => {
 			const node = producerStateFor(ast, projection, call.callerState);
@@ -704,8 +753,9 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 				})
 			);
 		})
-	)
+	) {
 		return false;
+	}
 	const referencedMessageIds = new Set<string>();
 	const operationalMessageIds: string[] = [];
 	for (const endpoint of [...Object.values(projection.actors), ...Object.values(projection.actorPools)]) {
@@ -714,26 +764,35 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 			operationalMessageIds.push(messageId);
 		}
 		if ("workers" in endpoint) {
-			for (const worker of endpoint.workers)
+			for (const worker of endpoint.workers) {
 				if (worker.currentMessageId !== undefined) {
 					referencedMessageIds.add(worker.currentMessageId);
 					operationalMessageIds.push(worker.currentMessageId);
 				}
+			}
 		} else if (endpoint.currentMessageId !== undefined) {
 			referencedMessageIds.add(endpoint.currentMessageId);
 			operationalMessageIds.push(endpoint.currentMessageId);
 		}
 	}
-	if (new Set(operationalMessageIds).size !== operationalMessageIds.length) return false;
+	if (new Set(operationalMessageIds).size !== operationalMessageIds.length) {
+		return false;
+	}
 	for (const call of Object.values(projection.pendingActorCalls)) {
-		if (call.kind === "singleton") referencedMessageIds.add(call.messageId);
-		else for (const messageId of call.messageIds) referencedMessageIds.add(messageId);
+		if (call.kind === "singleton") {
+			referencedMessageIds.add(call.messageId);
+		} else {
+			for (const messageId of call.messageIds) {
+				referencedMessageIds.add(messageId);
+			}
+		}
 	}
 	if (
 		referencedMessageIds.size !== Object.keys(projection.liveActorMessages).length ||
 		![...referencedMessageIds].every((messageId) => projection.liveActorMessages[messageId] !== undefined)
-	)
+	) {
 		return false;
+	}
 	return Object.keys(projection.actorProducerVisits).every((path) => {
 		const node = producerStateFor(ast, projection, path);
 		return node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch";
@@ -741,8 +800,12 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 }
 function isMainLeaf(ast: ChartAst, projection: BranchProjection, path: string): boolean {
 	const node = nodeAt(ast, path);
-	if (node === undefined || !concreteMapPathValid(ast, projection, path)) return false;
-	if (node.kind === "map") return lastSegmentKey(path) === undefined;
+	if (node === undefined || !concreteMapPathValid(ast, projection, path)) {
+		return false;
+	}
+	if (node.kind === "map") {
+		return lastSegmentKey(path) === undefined;
+	}
 	return node.kind !== "compound" && node.kind !== "region" && node.kind !== "parallel";
 }
 function semanticStateExists(ast: ChartAst, projection: BranchProjection, path: string): boolean {
@@ -752,19 +815,29 @@ function semanticStateExists(ast: ChartAst, projection: BranchProjection, path: 
 	);
 }
 function actionStateFor(ast: ChartAst, projection: BranchProjection, path: string) {
-	if (!concreteMapPathValid(ast, projection, path)) return undefined;
+	if (!concreteMapPathValid(ast, projection, path)) {
+		return undefined;
+	}
 	const node = actorContextForState(ast, path)?.node ?? nodeAt(ast, path);
 	return node?.kind === "state" ? node : undefined;
 }
 function producerStateFor(ast: ChartAst, projection: BranchProjection, path: string) {
-	if (!concreteMapPathValid(ast, projection, path)) return undefined;
+	if (!concreteMapPathValid(ast, projection, path)) {
+		return undefined;
+	}
 	return actorContextForState(ast, path)?.node ?? nodeAt(ast, path);
 }
 function endpointMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: ProjectedActorOccurrence): boolean {
 	const declaration = ast.actors[endpoint.declaration];
-	if (declaration === undefined || declaration.kind !== "actor") return false;
-	if (canonicalJson(endpoint.definition) !== canonicalJson(declaration)) return false;
-	if (!endpointIdentityMatches(ast, declaration, endpoint, projection)) return false;
+	if (declaration === undefined || declaration.kind !== "actor") {
+		return false;
+	}
+	if (canonicalJson(endpoint.definition) !== canonicalJson(declaration)) {
+		return false;
+	}
+	if (!endpointIdentityMatches(ast, declaration, endpoint, projection)) {
+		return false;
+	}
 	const context = actorContextForState(ast, actorStatePath(endpoint.occurrence, endpoint.currentState));
 	const current =
 		endpoint.currentMessageId === undefined ? undefined : projection.liveActorMessages[endpoint.currentMessageId];
@@ -787,13 +860,18 @@ function endpointMatchesAst(ast: ChartAst, projection: BranchProjection, endpoin
 }
 function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: ProjectedActorPoolOccurrence): boolean {
 	const declaration = ast.actors[endpoint.declaration];
-	if (declaration === undefined || declaration.kind !== "actorPool") return false;
+	if (declaration === undefined || declaration.kind !== "actorPool") {
+		return false;
+	}
 	if (
 		canonicalJson(endpoint.definition) !== canonicalJson(declaration) ||
 		!endpointIdentityMatches(ast, declaration, endpoint, projection)
-	)
+	) {
 		return false;
-	if (endpoint.workers.length !== declaration.concurrency) return false;
+	}
+	if (endpoint.workers.length !== declaration.concurrency) {
+		return false;
+	}
 	const indexes = new Set<number>();
 	const workerMessages = new Set<string>();
 	for (const worker of endpoint.workers) {
@@ -801,8 +879,9 @@ function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: P
 			worker.index >= declaration.concurrency ||
 			indexes.has(worker.index) ||
 			worker.occurrence !== actorPoolWorkerOccurrencePath(endpoint.occurrence, worker.index)
-		)
+		) {
 			return false;
+		}
 		indexes.add(worker.index);
 		const context = actorContextForState(ast, actorStatePath(worker.occurrence, worker.currentState));
 		if (
@@ -810,8 +889,9 @@ function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: P
 			context.declaration.path !== declaration.path ||
 			context.endpointOccurrence !== endpoint.occurrence ||
 			context.workerIndex !== worker.index
-		)
+		) {
 			return false;
+		}
 		if (worker.currentMessageId !== undefined) {
 			const current = projection.liveActorMessages[worker.currentMessageId];
 			if (
@@ -821,8 +901,9 @@ function poolMatchesAst(ast: ChartAst, projection: BranchProjection, endpoint: P
 				current.status === "queued" ||
 				current.status === "settled" ||
 				!messageCoordinatesMatchAst(ast, projection, current)
-			)
+			) {
 				return false;
+			}
 			workerMessages.add(worker.currentMessageId);
 		}
 	}
@@ -841,14 +922,24 @@ function endpointIdentityMatches(
 	projection: BranchProjection,
 ): boolean {
 	if (declaration.owner === undefined) {
-		if (endpoint.owner !== undefined) return false;
+		if (endpoint.owner !== undefined) {
+			return false;
+		}
 	} else {
-		if (endpoint.owner === undefined || templatePath(endpoint.owner) !== declaration.owner) return false;
+		if (endpoint.owner === undefined || templatePath(endpoint.owner) !== declaration.owner) {
+			return false;
+		}
 		const ownerNode = nodeAt(ast, declaration.owner);
-		if (ownerNode === undefined) return false;
+		if (ownerNode === undefined) {
+			return false;
+		}
 		if (ownerNode.kind === "map") {
-			if (!concreteMapPathValidForOwner(projection, endpoint.owner, declaration.owner)) return false;
-		} else if (!concreteMapPathValid(ast, projection, endpoint.owner)) return false;
+			if (!concreteMapPathValidForOwner(projection, endpoint.owner, declaration.owner)) {
+				return false;
+			}
+		} else if (!concreteMapPathValid(ast, projection, endpoint.owner)) {
+			return false;
+		}
 	}
 	const logical = actorOccurrencePath(declaration, endpoint.owner);
 	return (
@@ -858,7 +949,9 @@ function endpointIdentityMatches(
 	);
 }
 function concreteMapPathValidForOwner(projection: BranchProjection, owner: string, declarationOwner: string): boolean {
-	if (templatePath(owner) !== declarationOwner || lastSegmentKey(owner) === undefined) return false;
+	if (templatePath(owner) !== declarationOwner || lastSegmentKey(owner) === undefined) {
+		return false;
+	}
 	const hash = owner.lastIndexOf("#");
 	const container = owner.slice(0, hash);
 	const key = owner.slice(hash + 1);
@@ -875,7 +968,9 @@ function messageCoordinatesMatchAst(
 	projection: BranchProjection,
 	message: { producerState: string } | undefined,
 ): boolean {
-	if (message === undefined) return false;
+	if (message === undefined) {
+		return false;
+	}
 	const node = producerStateFor(ast, projection, message.producerState);
 	return node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch";
 }
@@ -890,9 +985,13 @@ function concreteMapPathValid(ast: ChartAst, projection: BranchProjection, path:
 		}
 		const base = segment.slice(0, hash);
 		const key = segment.slice(hash + 1);
-		if (base.length === 0 || key.length === 0) return false;
+		if (base.length === 0 || key.length === 0) {
+			return false;
+		}
 		const container = [...prefix, base].join(".");
-		if (nodeAt(ast, container)?.kind !== "map" || !Object.hasOwn(projection.spawns[container] ?? {}, key)) return false;
+		if (nodeAt(ast, container)?.kind !== "map" || !Object.hasOwn(projection.spawns[container] ?? {}, key)) {
+			return false;
+		}
 		prefix.push(segment);
 	}
 	return templatePath(path).length > 0;
@@ -913,20 +1012,32 @@ function isJsonRecord(value: unknown): value is Record<string, unknown> {
 	return isPlainRecord(value) && isJsonValue(value);
 }
 function isJsonValue(value: unknown, ancestors = new Set<object>()): boolean {
-	if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-	if (typeof value === "number") return Number.isFinite(value);
-	if (typeof value !== "object") return false;
-	if (ancestors.has(value)) return false;
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
+		return true;
+	}
+	if (typeof value === "number") {
+		return Number.isFinite(value);
+	}
+	if (typeof value !== "object") {
+		return false;
+	}
+	if (ancestors.has(value)) {
+		return false;
+	}
 	ancestors.add(value);
 	try {
-		if (Array.isArray(value)) return value.every((entry) => isJsonValue(entry, ancestors));
+		if (Array.isArray(value)) {
+			return value.every((entry) => isJsonValue(entry, ancestors));
+		}
 		return isPlainRecord(value) && Object.values(value).every((entry) => isJsonValue(entry, ancestors));
 	} finally {
 		ancestors.delete(value);
 	}
 }
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
-	if (!isRecord(value)) return false;
+	if (!isRecord(value)) {
+		return false;
+	}
 	const prototype = Object.getPrototypeOf(value);
 	return prototype === Object.prototype || prototype === null;
 }
@@ -959,7 +1070,9 @@ function isExactRecord(
 	required: readonly string[],
 	optional: readonly string[],
 ): value is Record<string, unknown> {
-	if (!isRecord(value) || required.some((key) => !(key in value))) return false;
+	if (!isRecord(value) || required.some((key) => !(key in value))) {
+		return false;
+	}
 	const allowed = new Set([...required, ...optional]);
 	return Object.keys(value).every((key) => allowed.has(key));
 }
@@ -975,11 +1088,18 @@ function sameContract(left: ProjectionContract, right: ProjectionContract): bool
 }
 
 function canonicalJson(value: unknown): string {
-	if (value === null) return "null";
-	if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
-	if (typeof value === "number") return Number.isFinite(value) ? JSON.stringify(value) : "null";
-	if (Array.isArray(value))
+	if (value === null) {
+		return "null";
+	}
+	if (typeof value === "string" || typeof value === "boolean") {
+		return JSON.stringify(value);
+	}
+	if (typeof value === "number") {
+		return Number.isFinite(value) ? JSON.stringify(value) : "null";
+	}
+	if (Array.isArray(value)) {
 		return `[${value.map((entry) => (entry === undefined ? "null" : canonicalJson(entry))).join(",")}]`;
+	}
 	if (isRecord(value)) {
 		return `{${Object.keys(value)
 			.sort()

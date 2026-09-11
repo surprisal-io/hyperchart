@@ -16,7 +16,9 @@ type ChartValidationResult = { ok: true; ast: ChartAst } | { ok: false; message:
 function validateChartForStory(cst: ChartCst): ChartValidationResult {
 	try {
 		const parsed = normalizeChartConfig(cst, { path: `storybook:${cst.id}` });
-		if (parsed.ok) return { ok: true, ast: parsed.ast };
+		if (parsed.ok) {
+			return { ok: true, ast: parsed.ast };
+		}
 		return {
 			ok: false,
 			message: parsed.diagnostics
@@ -99,9 +101,15 @@ function storyRunStatus(
 }
 
 function storyRuntimeStatus(status: HyperchartRunStatus | undefined): string {
-	if (status === "completed") return "complete";
-	if (status === "failed") return "failed";
-	if (status === "paused") return "stopped";
+	if (status === "completed") {
+		return "complete";
+	}
+	if (status === "failed") {
+		return "failed";
+	}
+	if (status === "paused") {
+		return "stopped";
+	}
 	return "running";
 }
 
@@ -113,7 +121,9 @@ export function inspectorPanelScenario(
 	spec: InspectorPanelSpec,
 ): { run: HyperchartRunInfo; selectedStateId: string | null } | undefined {
 	const validation = validateChartForStory(spec.chart);
-	if (!validation.ok) return undefined;
+	if (!validation.ok) {
+		return undefined;
+	}
 	const key = spec.title
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
@@ -124,7 +134,9 @@ export function inspectorPanelScenario(
 export function inspectorPanelTileProps(spec: InspectorPanelSpec): InspectorPanelTileProps {
 	const { title, description, runtime, chart } = spec;
 	const validation = validateChartForStory(chart);
-	if (!validation.ok) return { variant: "validation-error", title, message: validation.message };
+	if (!validation.ok) {
+		return { variant: "validation-error", title, message: validation.message };
+	}
 	const { ast } = validation;
 	const key = title
 		.toLowerCase()

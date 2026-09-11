@@ -67,11 +67,15 @@ const MemoizedHyperchartRunStrip = memo(function MemoizedHyperchartRunStrip({
 	const hasChartActions = hypercharts.length > 0;
 	const canOpenMore = moreCount > 0 || hasChartActions;
 	const run = useMemo(() => {
-		if (selectedRunId) return runs.find((candidate) => candidate.runId === selectedRunId) ?? sortedRuns[0];
+		if (selectedRunId) {
+			return runs.find((candidate) => candidate.runId === selectedRunId) ?? sortedRuns[0];
+		}
 		return runs.find((candidate) => candidate.status === "running") ?? sortedRuns[0];
 	}, [runs, selectedRunId, sortedRuns]);
 
-	if (!run) return null;
+	if (!run) {
+		return null;
+	}
 
 	const progress =
 		"states" in run

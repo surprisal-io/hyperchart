@@ -73,8 +73,12 @@ function edgePortSides(
 ): { source: PortSide; target: PortSide } {
 	const sourceIndex = input.stateOrder.get(edge.source) ?? 0;
 	const targetIndex = input.stateOrder.get(edge.target) ?? 0;
-	if (targetIndex > sourceIndex) return { source: "bottom", target: "top" };
-	if (targetIndex < sourceIndex) return { source: "left", target: "left" };
+	if (targetIndex > sourceIndex) {
+		return { source: "bottom", target: "top" };
+	}
+	if (targetIndex < sourceIndex) {
+		return { source: "left", target: "left" };
+	}
 	return { source: "right", target: "left" };
 }
 
@@ -265,7 +269,9 @@ async function buildElkGraph(run: HyperchartRunInfo, visibleIds: Set<string>): P
 	const routes: ElkEdgeRoute = new Map();
 	for (const edge of laidOut.edges ?? []) {
 		const section = edge.sections?.[0];
-		if (!edge.id || !section) continue;
+		if (!edge.id || !section) {
+			continue;
+		}
 		routes.set(edge.id, [section.startPoint, ...(section.bendPoints ?? []), section.endPoint]);
 	}
 	return buildGraph(run, visibleIds, positions, routes);
@@ -279,7 +285,9 @@ function routesFromGraph(graph: GraphLayout): ElkEdgeRoute {
 	const routes: ElkEdgeRoute = new Map();
 	for (const edge of graph.edges) {
 		const points = routedEdgePoints(edge.data);
-		if (points) routes.set(edge.id, points);
+		if (points) {
+			routes.set(edge.id, points);
+		}
 	}
 	return routes;
 }
@@ -287,7 +295,9 @@ function routesFromGraph(graph: GraphLayout): ElkEdgeRoute {
 function positionsForUpdatedGraph(previous: GraphLayout, fallback: GraphLayout): Map<string, NodePosition> {
 	const positions = positionsFromGraph(fallback);
 	for (const node of previous.nodes) {
-		if (positions.has(node.id)) positions.set(node.id, node.position);
+		if (positions.has(node.id)) {
+			positions.set(node.id, node.position);
+		}
 	}
 	return positions;
 }
@@ -331,7 +341,9 @@ export function reconcileGraphElements(previous: GraphLayout, next: GraphLayout)
 	const nodes = next.nodes.map((node, index) => {
 		const candidate = previousNodes.get(node.id);
 		const reconciled = candidate !== undefined && sameNode(candidate, node) ? candidate : node;
-		if (previous.nodes[index] !== reconciled) nodesChanged = true;
+		if (previous.nodes[index] !== reconciled) {
+			nodesChanged = true;
+		}
 		return reconciled;
 	});
 
@@ -340,11 +352,15 @@ export function reconcileGraphElements(previous: GraphLayout, next: GraphLayout)
 	const edges = next.edges.map((edge, index) => {
 		const candidate = previousEdges.get(edge.id);
 		const reconciled = candidate !== undefined && JSON.stringify(candidate) === JSON.stringify(edge) ? candidate : edge;
-		if (previous.edges[index] !== reconciled) edgesChanged = true;
+		if (previous.edges[index] !== reconciled) {
+			edgesChanged = true;
+		}
 		return reconciled;
 	});
 
-	if (!nodesChanged && !edgesChanged) return previous;
+	if (!nodesChanged && !edgesChanged) {
+		return previous;
+	}
 	return {
 		nodes: nodesChanged ? nodes : previous.nodes,
 		edges: edgesChanged ? edges : previous.edges,
@@ -385,7 +401,9 @@ export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibl
 			previous,
 			buildGraph(run, visibleIds, positionsForUpdatedGraph(previous, fallback), routesFromGraph(previous)),
 		);
-		if (next === previous) return;
+		if (next === previous) {
+			return;
+		}
 		graphRef.current = next;
 		setGraph(next);
 	}, [fallback, run, visibleIds]);
@@ -393,26 +411,35 @@ export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibl
 	useEffect(() => {
 		let cancelled = false;
 		const requested = layoutInputRef.current;
-		if (!requested.run)
+		if (!requested.run) {
 			return () => {
 				cancelled = true;
 			};
+		}
 		buildElkGraph(requested.run, requested.visibleIds)
 			.then((layoutGraph) => {
-				if (cancelled) return;
+				if (cancelled) {
+					return;
+				}
 				const latest = layoutInputRef.current;
-				if (!latest.run || graphLayoutSignature(latest.run, latest.visibleIds) !== signature) return;
+				if (!latest.run || graphLayoutSignature(latest.run, latest.visibleIds) !== signature) {
+					return;
+				}
 				const previous = graphRef.current;
 				const next = reconcileGraphElements(
 					previous,
 					buildGraph(latest.run, latest.visibleIds, positionsFromGraph(layoutGraph), routesFromGraph(layoutGraph)),
 				);
-				if (next === previous) return;
+				if (next === previous) {
+					return;
+				}
 				graphRef.current = next;
 				setGraph(next);
 			})
 			.catch(() => {
-				if (!cancelled && graphRef.current.nodes.length === 0) setGraph(fallbackRef.current);
+				if (!cancelled && graphRef.current.nodes.length === 0) {
+					setGraph(fallbackRef.current);
+				}
 			});
 		return () => {
 			cancelled = true;
@@ -423,7 +450,9 @@ export function useGraphLayout(run: HyperchartRunInfo | null | undefined, visibl
 
 export function nodeMiniMapColor(node: Node): string {
 	const state = (node.data as Partial<StateNode["data"]>).state;
-	if (!state) return EDGE_NEUTRAL_COLOR;
+	if (!state) {
+		return EDGE_NEUTRAL_COLOR;
+	}
 	switch (state.status) {
 		case "running":
 			return EDGE_RUNNING_COLOR;

@@ -40,17 +40,23 @@ export type RewindResult = {
  */
 export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindResult> {
 	const targetCount = [opts.state, opts.seqId, opts.to].filter((target) => target !== undefined).length;
-	if (targetCount !== 1) throw new Error("rewind requires exactly one of state, seqId, or to=compatible");
+	if (targetCount !== 1) {
+		throw new Error("rewind requires exactly one of state, seqId, or to=compatible");
+	}
 	const status = readRunStatus(opts.runId);
 	const live = isRunLive(status);
-	if (!live) assertStoppedRun(opts.runId, "rewinding");
+	if (!live) {
+		assertStoppedRun(opts.runId, "rewinding");
+	}
 	await assertRunOwnership(opts.runId, opts.cwd);
 	const meta = await loadRunMeta(opts.runId);
 	const parsed = parseChartModuleSync(
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
 	);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 
 	const store = await openRunLogStore(opts.runId, { branchId: opts.branchId, access: live ? "read" : "writer" });
 	let match: RewindMatch;
@@ -85,7 +91,9 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 		await store.close();
 	}
 	if (live) {
-		if (status?.attemptId === undefined) throw new Error(`Live run '${opts.runId}' has no runner attempt identity`);
+		if (status?.attemptId === undefined) {
+			throw new Error(`Live run '${opts.runId}' has no runner attempt identity`);
+		}
 		moveCommit = await requestLiveRunnerBranchMove(opts.runId, {
 			attemptId: status.attemptId,
 			branchId: opts.branchId,
@@ -102,7 +110,9 @@ export async function rewindHyperchartRun(opts: RewindOptions): Promise<RewindRe
 			error: undefined,
 		});
 	}
-	if (moveCommit === undefined) throw new Error("Branch move completed without commit metadata");
+	if (moveCommit === undefined) {
+		throw new Error("Branch move completed without commit metadata");
+	}
 	return {
 		runId: opts.runId,
 		chartId: parsed.ast.id,

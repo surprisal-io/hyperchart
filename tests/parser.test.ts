@@ -29,7 +29,9 @@ describe("parseChartModule", () => {
 			);
 			const result = parseChartModuleSync(path);
 			expect(result.ok).toBe(true);
-			if (result.ok) expect(result.ast.id).toBe("bundled");
+			if (result.ok) {
+				expect(result.ast.id).toBe("bundled");
+			}
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -51,10 +53,13 @@ describe("parseChartModule", () => {
 			const asyncResult = await parseChartModule(path);
 			for (const result of [sync, asyncResult]) {
 				expect(result.ok).toBe(true);
-				if (!result.ok) continue;
+				if (!result.ok) {
+					continue;
+				}
 				const state = result.ast.states.run;
-				if (state?.kind !== "state" || state.action.kind !== "script" || state.action.reply === undefined)
+				if (state?.kind !== "state" || state.action.kind !== "script" || state.action.reply === undefined) {
 					throw new Error("missing reply");
+				}
 				expect(result.schemaRegistry.get(state.action.reply.runtimeContract!)).toBeDefined();
 			}
 		} finally {
@@ -66,7 +71,9 @@ describe("parseChartModule", () => {
 		const result = await parseChartModule(examplePath);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected parser success");
+		if (!result.ok) {
+			throw new Error("expected parser success");
+		}
 		expect(result.source.path).toBe(examplePath);
 		expect(result.ast.id).toBe("review-and-fix");
 		expect(result.ast.states.research?.kind).toBe("state");

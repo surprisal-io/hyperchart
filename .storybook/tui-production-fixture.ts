@@ -39,7 +39,9 @@ const MANY_RUNNING_KEYS = [
 
 function normalizeDeckDirector(): ChartAst {
 	const parsed = normalizeChartConfig(deckDirectorChart, { path: "storybook:deck-director.chart.ts" });
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((item) => item.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((item) => item.message).join("\n"));
+	}
 	return parsed.ast;
 }
 
@@ -53,7 +55,9 @@ function action(
 ): { uid: ActionUID; definition: Extract<StateAst, { kind: "state" }>["action"] } {
 	const templatePath = templatePathFor(statePath);
 	const state = ast.states[templatePath];
-	if (state?.kind !== "state") throw new Error(`Missing action state ${templatePath}`);
+	if (state?.kind !== "state") {
+		throw new Error(`Missing action state ${templatePath}`);
+	}
 	return { uid: { ...state.action.uid, state: statePath }, definition: state.action };
 }
 
@@ -482,5 +486,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 }
 
 export function cleanupProductionTuiFixture(fixture: ProductionTuiFixture | undefined): void {
-	if (fixture !== undefined) rmSync(fixture.root, { recursive: true, force: true });
+	if (fixture !== undefined) {
+		rmSync(fixture.root, { recursive: true, force: true });
+	}
 }

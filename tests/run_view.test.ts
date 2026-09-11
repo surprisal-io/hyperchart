@@ -12,7 +12,9 @@ import { buildRunView } from "../packages/pi-hyperchart/src/tui/run_view.js";
 
 function make(config: ChartCst): ChartAst {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -114,7 +116,9 @@ describe("buildRunView", () => {
 			}),
 		);
 		const state = ast.states.score;
-		if (state?.kind !== "state") throw new Error("expected score state");
+		if (state?.kind !== "state") {
+			throw new Error("expected score state");
+		}
 		const log: DurableLogRecord[] = [
 			{
 				type: "state_action",
@@ -140,7 +144,9 @@ describe("buildRunView", () => {
 		const uid = { chart: "view-linear", state: "work", action: "agent" };
 		const guard = { kind: "tsImport", module: "./check.js", export: "ok" } as const;
 		const baseDefinition = definitionForUid(uid);
-		if (baseDefinition.kind !== "agent") throw new Error("expected agent");
+		if (baseDefinition.kind !== "agent") {
+			throw new Error("expected agent");
+		}
 		const definition: StateActionAst = { ...baseDefinition, validation: { guard, onFail: { nudge: 2, restart: 1 } } };
 		const log: DurableLogRecord[] = [
 			{

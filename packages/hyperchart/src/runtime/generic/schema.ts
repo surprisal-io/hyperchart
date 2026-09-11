@@ -28,7 +28,9 @@ export async function checkSchemaAsync(
 ): Promise<SchemaCheck> {
 	if (schema.runtimeContract !== undefined) {
 		const original = registry?.get(schema.runtimeContract);
-		if (original === undefined) return missingRuntimeContract(schema.runtimeContract);
+		if (original === undefined) {
+			return missingRuntimeContract(schema.runtimeContract);
+		}
 		try {
 			const result = await original.safeParseAsync(value);
 			return result.success ? { ok: true } : zodIssues(result.error.issues);
@@ -48,7 +50,9 @@ function checkRuntimeSchemaSync(
 	registry: SchemaRegistry | undefined,
 ): SchemaCheck {
 	const original = registry?.get(contract);
-	if (original === undefined) return missingRuntimeContract(contract);
+	if (original === undefined) {
+		return missingRuntimeContract(contract);
+	}
 	try {
 		const result = original.safeParse(value);
 		return result.success ? { ok: true } : zodIssues(result.error.issues);
@@ -69,7 +73,9 @@ function missingRuntimeContract(contract: RuntimeContractMetadata): SchemaCheck 
 
 function checkJsonSchema(schema: SchemaAst, value: unknown): SchemaCheck {
 	try {
-		if (Value.Check(schema.schema, value)) return { ok: true };
+		if (Value.Check(schema.schema, value)) {
+			return { ok: true };
+		}
 		const errors = [...Value.Errors(schema.schema, value)]
 			.slice(0, MAX_ERRORS)
 			.map((error) => `${error.instancePath || "/"}: ${error.message}`);
@@ -88,7 +94,9 @@ function zodIssues(issues: readonly { path: PropertyKey[]; message: string }[]):
 }
 
 function formatIssuePath(path: readonly PropertyKey[]): string {
-	if (path.length === 0) return "/";
+	if (path.length === 0) {
+		return "/";
+	}
 	return `/${path.map((segment) => String(segment).replaceAll("~", "~0").replaceAll("/", "~1")).join("/")}`;
 }
 

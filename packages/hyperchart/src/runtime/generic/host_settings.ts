@@ -46,11 +46,15 @@ function readSettingsFile(path: string, host?: string): HyperchartHostSettings {
 			`Invalid hypercharts settings at ${path}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
-	if (!isRecord(parsed)) throw new Error(`Invalid hypercharts settings at ${path}: expected a JSON object`);
+	if (!isRecord(parsed)) {
+		throw new Error(`Invalid hypercharts settings at ${path}: expected a JSON object`);
+	}
 	const settings = { modelRoles: parseRoles(parsed.roles, path), toolsets: parseToolsets(parsed.toolsets, path) };
 	const section = host === undefined ? undefined : parsed[host];
 	if (section !== undefined) {
-		if (!isRecord(section)) throw new Error(`Invalid hypercharts settings at ${path}: '${host}' must be an object`);
+		if (!isRecord(section)) {
+			throw new Error(`Invalid hypercharts settings at ${path}: '${host}' must be an object`);
+		}
 		Object.assign(settings.modelRoles, parseRoles(section.roles, path));
 		Object.assign(settings.toolsets, parseToolsets(section.toolsets, path));
 	}
@@ -58,8 +62,12 @@ function readSettingsFile(path: string, host?: string): HyperchartHostSettings {
 }
 
 function parseRoles(value: unknown, path: string): Record<string, string> {
-	if (value === undefined) return {};
-	if (!isRecord(value)) throw new Error(`Invalid hypercharts settings at ${path}: 'roles' must be an object`);
+	if (value === undefined) {
+		return {};
+	}
+	if (!isRecord(value)) {
+		throw new Error(`Invalid hypercharts settings at ${path}: 'roles' must be an object`);
+	}
 	for (const [role, model] of Object.entries(value)) {
 		if (typeof model !== "string" || model.trim() === "") {
 			throw new Error(`Invalid hypercharts settings at ${path}: role '${role}' must map to a model string`);
@@ -69,8 +77,12 @@ function parseRoles(value: unknown, path: string): Record<string, string> {
 }
 
 function parseToolsets(value: unknown, path: string): Record<string, string[]> {
-	if (value === undefined) return {};
-	if (!isRecord(value)) throw new Error(`Invalid hypercharts settings at ${path}: 'toolsets' must be an object`);
+	if (value === undefined) {
+		return {};
+	}
+	if (!isRecord(value)) {
+		throw new Error(`Invalid hypercharts settings at ${path}: 'toolsets' must be an object`);
+	}
 	for (const [name, tools] of Object.entries(value)) {
 		if (!Array.isArray(tools) || tools.some((tool) => typeof tool !== "string" || tool.trim() === "")) {
 			throw new Error(`Invalid hypercharts settings at ${path}: toolset '${name}' must map to an array of tool names`);

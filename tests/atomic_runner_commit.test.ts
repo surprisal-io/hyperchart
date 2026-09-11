@@ -50,14 +50,20 @@ class DrainingExecutor extends NoopExecutor {
 async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!check()) {
-		if (Date.now() > deadline) throw new Error("Timed out waiting for runner state");
+		if (Date.now() > deadline) {
+			throw new Error("Timed out waiting for runner state");
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
 
 afterEach(async () => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-	if (dsn === undefined || runIds.length === 0) return;
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
+	if (dsn === undefined || runIds.length === 0) {
+		return;
+	}
 	const { Client } = await import("pg");
 	const client = new Client({ connectionString: dsn });
 	await client.connect();
@@ -87,9 +93,13 @@ async function fixture(cadenceBoundary = false, continueAfterGate = false) {
      } });`,
 	);
 	const parsed = parseChartModuleSync(chartPath);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	const state = parsed.ast.states.ask;
-	if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("invalid fixture chart");
+	if (state?.kind !== "state" || state.action.kind !== "user") {
+		throw new Error("invalid fixture chart");
+	}
 
 	const store = await PostgresLogStore.open({
 		dsn: dsn as string,

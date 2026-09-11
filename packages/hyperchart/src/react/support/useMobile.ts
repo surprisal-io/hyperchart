@@ -5,7 +5,9 @@ export function useMobile(breakpointPx = 768): boolean {
 		typeof window === "undefined" ? false : window.innerWidth < breakpointPx,
 	);
 	useEffect(() => {
-		if (typeof window === "undefined") return undefined;
+		if (typeof window === "undefined") {
+			return undefined;
+		}
 		const onResize = () => setMobile(window.innerWidth < breakpointPx);
 		onResize();
 		window.addEventListener("resize", onResize);

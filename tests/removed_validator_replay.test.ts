@@ -20,7 +20,9 @@ function ast(validated: boolean): ChartAst {
 			},
 		}),
 	);
-	if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+	if (!parsed.ok) {
+		throw new Error(JSON.stringify(parsed.diagnostics));
+	}
 	return parsed.ast;
 }
 
@@ -28,8 +30,9 @@ it("pins agent validation and recovery policy in the invoke definition", () => {
 	const original = ast(true);
 	const current = ast(false);
 	const state = original.states.work;
-	if (state?.kind !== "state" || state.action.kind !== "agent" || state.action.validation === undefined)
+	if (state?.kind !== "state" || state.action.kind !== "agent" || state.action.validation === undefined) {
 		throw new Error("expected validated agent");
+	}
 	const uid = state.action.uid;
 	const records: DurableLogRecord[] = [
 		{ type: "args", args: {}, parentId: null, seqId: 1, branchId: "main", timestamp: 1 },

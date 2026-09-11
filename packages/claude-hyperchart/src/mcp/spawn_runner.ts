@@ -16,7 +16,9 @@ function runnerEntry(): string {
 		resolve(moduleDir, "../../src/claude/hyperchart_runner.mjs"),
 	];
 	const found = candidates.find((candidate) => existsSync(candidate));
-	if (found === undefined) throw new Error(`Claude hyperchart runner shim not found near ${moduleDir}`);
+	if (found === undefined) {
+		throw new Error(`Claude hyperchart runner shim not found near ${moduleDir}`);
+	}
 	return found;
 }
 
@@ -34,7 +36,9 @@ export function spawnDetachedRunner(config: HyperchartRunnerConfig): number {
 			env: process.env,
 		});
 		child.unref();
-		if (child.pid === undefined) throw new Error("hyperchart runner did not produce a pid");
+		if (child.pid === undefined) {
+			throw new Error("hyperchart runner did not produce a pid");
+		}
 		return child.pid;
 	} finally {
 		closeSync(stdoutFd);
@@ -47,7 +51,9 @@ export function watchRun(runId: string): Promise<HyperchartRunStatus> {
 	return new Promise((resolveDone) => {
 		const timer = setInterval(() => {
 			const status = readRunStatus(runId);
-			if (status === undefined) return;
+			if (status === undefined) {
+				return;
+			}
 			if (isTerminalRunState(status.state)) {
 				clearInterval(timer);
 				resolveDone(status);

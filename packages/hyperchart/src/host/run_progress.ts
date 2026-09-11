@@ -7,22 +7,30 @@ import type { HyperchartRunInfo, HyperchartStateInfo } from "./models.js";
  * the latest active state across enclosing compound boundaries.
  */
 export function summarizeHyperchartProgress(run?: HyperchartRunInfo): { done: number; total: number; pct: number } {
-	if (run === undefined) return { done: 0, total: 0, pct: 0 };
+	if (run === undefined) {
+		return { done: 0, total: 0, pct: 0 };
+	}
 	if (run.status === "completed" || run.status === "failed") {
 		return { done: 1, total: 1, pct: 100 };
 	}
 	const current = currentProgressState(run.states);
-	if (current === undefined) return { done: 0, total: 0, pct: 0 };
+	if (current === undefined) {
+		return { done: 0, total: 0, pct: 0 };
+	}
 	const done = completedVisitCount(run.states);
 	const remaining = shortestDistanceToChartFinal(current.id, run.states);
-	if (remaining === undefined) return { done, total: done, pct: 0 };
+	if (remaining === undefined) {
+		return { done, total: done, pct: 0 };
+	}
 	const total = done + remaining;
 	return { done, total, pct: total === 0 ? 0 : Math.round((done / total) * 100) };
 }
 
 function currentProgressState(states: HyperchartStateInfo[]): HyperchartStateInfo | undefined {
 	const active = states.filter((state) => state.status === "running");
-	if (active.length > 0) return latestState(active);
+	if (active.length > 0) {
+		return latestState(active);
+	}
 	return latestState(states.filter((state) => state.status === "done" || state.status === "failed"));
 }
 
@@ -63,11 +71,15 @@ function shortestDistanceToChartFinal(startId: string, states: HyperchartStateIn
 	const visited = new Set<string>();
 	while (queue.length > 0) {
 		const current = queue.shift();
-		if (current === undefined || visited.has(current.id)) continue;
+		if (current === undefined || visited.has(current.id)) {
+			continue;
+		}
 		visited.add(current.id);
 		const state = byId.get(current.id);
 		const container = state?.final === true ? enclosingContainer(state.id, byId) : undefined;
-		if (state?.final === true && container === undefined) return current.distance;
+		if (state?.final === true && container === undefined) {
+			return current.distance;
+		}
 		for (const transition of state?.transitions ?? []) {
 			enqueueTransitionTarget(queue, visited, transition.target, current.distance + 1, byId);
 		}
@@ -97,12 +109,16 @@ function enqueueTransitionTarget(
 		);
 		if (initialChildren.length > 0) {
 			for (const child of initialChildren) {
-				if (!visited.has(child.id)) queue.push({ id: child.id, distance });
+				if (!visited.has(child.id)) {
+					queue.push({ id: child.id, distance });
+				}
 			}
 			return;
 		}
 	}
-	if (!visited.has(target)) queue.push({ id: target, distance });
+	if (!visited.has(target)) {
+		queue.push({ id: target, distance });
+	}
 }
 
 function enclosingCompletionTarget(
@@ -112,7 +128,9 @@ function enclosingCompletionTarget(
 	let current: HyperchartStateInfo | undefined = container;
 	while (current !== undefined) {
 		const target = current.transitions?.find((transition) => transition.event === "onDone")?.target;
-		if (target !== undefined) return target;
+		if (target !== undefined) {
+			return target;
+		}
 		current = enclosingContainer(current.id, byId);
 	}
 	return undefined;
@@ -122,9 +140,13 @@ function enclosingContainer(stateId: string, byId: Map<string, HyperchartStateIn
 	let parent = parentPath(stateId);
 	while (parent !== undefined) {
 		const direct = byId.get(parent);
-		if (direct !== undefined) return direct;
+		if (direct !== undefined) {
+			return direct;
+		}
 		const templateContainer = byId.get(stripLastInstanceKey(parent));
-		if (templateContainer !== undefined) return templateContainer;
+		if (templateContainer !== undefined) {
+			return templateContainer;
+		}
 		parent = parentPath(parent);
 	}
 	return undefined;

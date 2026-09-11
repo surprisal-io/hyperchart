@@ -35,7 +35,9 @@ afterEach(async () => {
 
 function parsed(config: ChartCst) {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(result.diagnostics.map((entry) => entry.message).join("\n"));
+	if (!result.ok) {
+		throw new Error(result.diagnostics.map((entry) => entry.message).join("\n"));
+	}
 	return result;
 }
 
@@ -65,8 +67,9 @@ function scriptState(result: ReturnType<typeof parsed>): {
 	action: ScriptActionAst;
 } {
 	const state = result.ast.states.run;
-	if (state === undefined || state.kind !== "state" || state.action.kind !== "script")
+	if (state === undefined || state.kind !== "state" || state.action.kind !== "script") {
 		throw new Error("missing script state");
+	}
 	return { state, action: state.action };
 }
 
@@ -75,7 +78,9 @@ describe("runtime Zod contracts", () => {
 		const shape = z.string().refine((value) => value === "ok");
 		const result = parsed(scriptConfig(shape));
 		const { action } = scriptState(result);
-		if (action.reply === undefined) throw new Error("missing reply");
+		if (action.reply === undefined) {
+			throw new Error("missing reply");
+		}
 		expect(action.reply.runtimeContract).toBeUndefined();
 		expect(await checkSchemaAsync(action.reply, "ok")).toEqual({ ok: true });
 	});
@@ -90,7 +95,9 @@ describe("runtime Zod contracts", () => {
 			"super",
 			"1",
 			z.string().superRefine((value, ctx) => {
-				if (value !== "ok") ctx.addIssue({ code: "custom", message: "super says no" });
+				if (value !== "ok") {
+					ctx.addIssue({ code: "custom", message: "super says no" });
+				}
 			}),
 		);
 		const asyncShape = contract(
@@ -105,7 +112,9 @@ describe("runtime Zod contracts", () => {
 		] as const) {
 			const result = parsed(scriptConfig(shape));
 			const { action } = scriptState(result);
-			if (action.reply === undefined) throw new Error("missing reply");
+			if (action.reply === undefined) {
+				throw new Error("missing reply");
+			}
 			expect(action.reply.runtimeContract).toEqual({
 				id: shape === sync ? "reply" : shape === superSync ? "super" : "async",
 				version: "1",
@@ -113,17 +122,23 @@ describe("runtime Zod contracts", () => {
 			expect(await checkSchemaAsync(action.reply, valid, result.schemaRegistry)).toEqual({ ok: true });
 			const invalidResult = await checkSchemaAsync(action.reply, invalid, result.schemaRegistry);
 			expect(invalidResult.ok).toBe(false);
-			if (!invalidResult.ok) expect(invalidResult.errors.join("\n")).toContain("/");
+			if (!invalidResult.ok) {
+				expect(invalidResult.errors.join("\n")).toContain("/");
+			}
 		}
 	});
 
 	it("fails closed when a runtime registry is missing", async () => {
 		const result = parsed(scriptConfig(contract("missing", "1", z.object({ value: z.string() }))));
 		const { action } = scriptState(result);
-		if (action.reply === undefined) throw new Error("missing reply");
+		if (action.reply === undefined) {
+			throw new Error("missing reply");
+		}
 		const check = await checkSchemaAsync(action.reply, { value: "ok" });
 		expect(check.ok).toBe(false);
-		if (!check.ok) expect(check.errors[0]).toContain("refusing JSON Schema fallback");
+		if (!check.ok) {
+			expect(check.errors[0]).toContain("refusing JSON Schema fallback");
+		}
 	});
 
 	it("rejects conflicting duplicate identities", () => {
@@ -154,10 +169,11 @@ describe("runtime Zod contracts", () => {
 		const duplicate = normalizeChartConfig(config);
 		expect(result.ok).toBe(true);
 		expect(duplicate.ok).toBe(false);
-		if (!duplicate.ok)
+		if (!duplicate.ok) {
 			expect(duplicate.diagnostics.map((entry) => entry.message).join("\n")).toContain(
 				"Conflicting runtime contract same@1",
 			);
+		}
 	});
 
 	it("keeps ids containing delimiters distinct", () => {
@@ -207,16 +223,19 @@ describe("runtime Zod contracts", () => {
 			}),
 		);
 		expect(result.ok).toBe(false);
-		if (!result.ok)
+		if (!result.ok) {
 			expect(result.diagnostics.map((entry) => entry.message).join("\n")).toContain(
 				"not supported for state or map inputs",
 			);
+		}
 	});
 
 	it("retains input-side JSON Schema metadata for transform contracts", () => {
 		const result = parsed(scriptConfig(contract("transform", "1", z.string().default("2").transform(Number))));
 		const { action } = scriptState(result);
-		if (action.reply === undefined) throw new Error("missing reply");
+		if (action.reply === undefined) {
+			throw new Error("missing reply");
+		}
 		expect(action.reply.schema).toMatchObject({ type: "string", default: "2" });
 	});
 
@@ -225,10 +244,14 @@ describe("runtime Zod contracts", () => {
 		const shape = contract("artifact", "1", z.object({ value: z.number() }));
 		const result = parsed(scriptConfig(shape, { output: artifact("output.json", shape) }));
 		const { state, action } = scriptState(result);
-		if (action.reply === undefined) throw new Error("missing script reply");
+		if (action.reply === undefined) {
+			throw new Error("missing script reply");
+		}
 		await writeFile(join(dir, "output.json"), JSON.stringify({ value: "bad" }), "utf8");
 		const artifactShape = action.artifacts?.output?.shape;
-		if (artifactShape === undefined) throw new Error("missing artifact shape");
+		if (artifactShape === undefined) {
+			throw new Error("missing artifact shape");
+		}
 		const artifactValue: RenderedArtifact = {
 			path: "output.json",
 			shape: artifactShape,
@@ -258,7 +281,9 @@ describe("runtime Zod contracts", () => {
 	it("rejects invalid Pi finish-tool replies with actionable Zod paths", async () => {
 		const result = parsed(scriptConfig(contract("finish", "1", z.object({ nested: z.object({ ok: z.boolean() }) }))));
 		const { action } = scriptState(result);
-		if (action.reply === undefined) throw new Error("missing script reply");
+		if (action.reply === undefined) {
+			throw new Error("missing script reply");
+		}
 		const effect = {
 			kind: "agent" as const,
 			id: "finish-invocation",
@@ -285,7 +310,9 @@ describe("runtime Zod contracts", () => {
 			result.schemaRegistry,
 		);
 		expect(checked.ok).toBe(false);
-		if (!checked.ok) expect(checked.errors.join("\n")).toContain("/nested/ok");
+		if (!checked.ok) {
+			expect(checked.errors.join("\n")).toContain("/nested/ok");
+		}
 	});
 
 	it("changes normalized provenance when contract version changes", () => {
@@ -296,7 +323,9 @@ describe("runtime Zod contracts", () => {
 		expect(serialized).toContain('"runtimeContract":{"id":"versioned","version":"1"}');
 		expect(serialized).not.toEqual(JSON.stringify(two.ast));
 		const oneState = one.ast.states.run;
-		if (oneState?.kind !== "state") throw new Error("missing state");
+		if (oneState?.kind !== "state") {
+			throw new Error("missing state");
+		}
 		const explanation = explainReplay(two.ast, [
 			{
 				type: "args",

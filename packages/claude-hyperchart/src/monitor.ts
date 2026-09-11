@@ -42,20 +42,26 @@ export function claudeInteractionOwner(options: ClaudeMonitorOptions & { session
 export async function pendingOwnedClaudeTerminalRequests(
 	options: ClaudeMonitorOptions,
 ): Promise<OwnedClaudeTerminalRequest[]> {
-	if (!hasMonitorStorageScope(options))
+	if (!hasMonitorStorageScope(options)) {
 		return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () =>
 			pendingOwnedClaudeTerminalRequests(options),
 		);
-	if (options.sessionId === undefined) return [];
+	}
+	if (options.sessionId === undefined) {
+		return [];
+	}
 	const pending: OwnedClaudeTerminalRequest[] = [];
 	for (const runId of await listRunIds()) {
 		try {
 			const meta = await loadRunMeta(runId);
-			if (canonicalPath(meta.workDir) !== canonicalPath(options.cwd) || meta.originSessionId !== options.sessionId)
+			if (canonicalPath(meta.workDir) !== canonicalPath(options.cwd) || meta.originSessionId !== options.sessionId) {
 				continue;
+			}
 			recoverStaleRunTerminalNotification(runId);
 			const request = readDeliverableTerminalNotificationRequest(runId);
-			if (request === undefined || hasTerminalNotificationReceipt(runId, "claude", options.sessionId)) continue;
+			if (request === undefined || hasTerminalNotificationReceipt(runId, "claude", options.sessionId)) {
+				continue;
+			}
 			pending.push({ runId, request });
 		} catch {
 			// A concurrently-created or unrelated malformed run must not break monitor routing.
@@ -67,11 +73,14 @@ export async function pendingOwnedClaudeTerminalRequests(
 export async function activeOwnedClaudeUserInteraction(
 	options: ClaudeMonitorOptions,
 ): Promise<OwnedUserInteraction | undefined> {
-	if (!hasMonitorStorageScope(options))
+	if (!hasMonitorStorageScope(options)) {
 		return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () =>
 			activeOwnedClaudeUserInteraction(options),
 		);
-	if (options.sessionId === undefined) return undefined;
+	}
+	if (options.sessionId === undefined) {
+		return undefined;
+	}
 	return acquireActiveUserInteraction(claudeInteractionOwner({ ...options, sessionId: options.sessionId }));
 }
 
@@ -81,11 +90,14 @@ export async function ownedClaudeUserInteractionSummary(options: ClaudeMonitorOp
 		ReturnType<typeof claudeUserInteractionDetails> & { presentation: OwnedUserInteraction["presentation"] }
 	>;
 }> {
-	if (!hasMonitorStorageScope(options))
+	if (!hasMonitorStorageScope(options)) {
 		return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () =>
 			ownedClaudeUserInteractionSummary(options),
 		);
-	if (options.sessionId === undefined) return { queued: [] };
+	}
+	if (options.sessionId === undefined) {
+		return { queued: [] };
+	}
 	const owner = claudeInteractionOwner({ ...options, sessionId: options.sessionId });
 	const interactions = await scanOwnedOpenUserInteractions(owner);
 	const active = await acquireActiveUserInteraction(owner);
@@ -139,11 +151,14 @@ export function claudeUserInteractionNotification(interaction: OwnedUserInteract
 
 /** Emit each prompt as JSON so embedded newlines remain one physical stdout line, then receipt it. */
 export async function emitPendingClaudeTerminalNotifications(options: ClaudeMonitorOptions): Promise<number> {
-	if (!hasMonitorStorageScope(options))
+	if (!hasMonitorStorageScope(options)) {
 		return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () =>
 			emitPendingClaudeTerminalNotifications(options),
 		);
-	if (options.sessionId === undefined) return 0;
+	}
+	if (options.sessionId === undefined) {
+		return 0;
+	}
 	const writeLine =
 		options.writeLine ??
 		((line: string) => {
@@ -151,9 +166,12 @@ export async function emitPendingClaudeTerminalNotifications(options: ClaudeMoni
 		});
 	let delivered = 0;
 	for (const pending of await pendingOwnedClaudeTerminalRequests(options)) {
-		if (!claimTerminalNotificationReceipt(pending.runId, pending.request.requestId, "claude", options.sessionId))
+		if (!claimTerminalNotificationReceipt(pending.runId, pending.request.requestId, "claude", options.sessionId)) {
 			continue;
-		if (readDeliverableTerminalNotificationRequest(pending.runId)?.requestId !== pending.request.requestId) continue;
+		}
+		if (readDeliverableTerminalNotificationRequest(pending.runId)?.requestId !== pending.request.requestId) {
+			continue;
+		}
 		// Confirm only after stdout accepts the line. A crash between write and confirmation
 		// intentionally permits at-least-once redelivery.
 		writeLine(
@@ -177,13 +195,18 @@ export async function emitPendingClaudeTerminalNotifications(options: ClaudeMoni
 
 /** Emit at most the arbiter's one pinned user gate, never a queued branch request. */
 export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOptions): Promise<number> {
-	if (!hasMonitorStorageScope(options))
+	if (!hasMonitorStorageScope(options)) {
 		return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () =>
 			emitPendingClaudeUserInteraction(options),
 		);
-	if (options.sessionId === undefined) return 0;
+	}
+	if (options.sessionId === undefined) {
+		return 0;
+	}
 	const active = await activeOwnedClaudeUserInteraction(options);
-	if (active === undefined || active.presentation === "confirmed") return 0;
+	if (active === undefined || active.presentation === "confirmed") {
+		return 0;
+	}
 	const existingClaim = readUserInteractionReceipt(
 		active.runId,
 		active.request.branchId,
@@ -203,13 +226,15 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 		if (
 			(Number.isFinite(leaseUntil) && Date.now() < leaseUntil) ||
 			(!Number.isFinite(leaseUntil) && Number.isFinite(fallbackUntil) && Date.now() < fallbackUntil)
-		)
+		) {
 			return 0;
+		}
 	}
 	// Defense in depth around the shared owner's canonical/session checks.
 	const meta = await loadRunMeta(active.runId);
-	if (meta.originSessionId !== options.sessionId || canonicalPath(meta.workDir) !== canonicalPath(options.cwd))
+	if (meta.originSessionId !== options.sessionId || canonicalPath(meta.workDir) !== canonicalPath(options.cwd)) {
 		return 0;
+	}
 	if (
 		!claimUserInteractionReceipt(
 			active.runId,
@@ -219,12 +244,15 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 			options.sessionId,
 			{ source: "monitor" },
 		)
-	)
+	) {
 		return 0;
+	}
 	// Claim and selection are separate filesystem operations. Re-arbitrate after the
 	// exclusive claim so a concurrently-created lower coordinate cannot be presented too.
 	const current = await activeOwnedClaudeUserInteraction(options);
-	if (current === undefined || interactionKey(current) !== interactionKey(active)) return 0;
+	if (current === undefined || interactionKey(current) !== interactionKey(active)) {
+		return 0;
+	}
 	const writeLine =
 		options.writeLine ??
 		((line: string) => {
@@ -254,10 +282,11 @@ export async function emitPendingClaudeUserInteraction(options: ClaudeMonitorOpt
 
 /** Combined persistent-monitor scan for terminal notifications and the one active user gate. */
 export async function emitPendingClaudeNotifications(options: ClaudeMonitorOptions): Promise<number> {
-	if (!hasMonitorStorageScope(options))
+	if (!hasMonitorStorageScope(options)) {
 		return withRunStorage(options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" }, () =>
 			emitPendingClaudeNotifications(options),
 		);
+	}
 	return (await emitPendingClaudeTerminalNotifications(options)) + (await emitPendingClaudeUserInteraction(options));
 }
 
@@ -307,7 +336,9 @@ function canonicalPath(path: string): string {
 
 function hasMonitorStorageScope(options: ClaudeMonitorOptions): boolean {
 	const active = currentRunStorage();
-	if (active === undefined) return false;
+	if (active === undefined) {
+		return false;
+	}
 	const configured: RunStorage = options.storage ?? { kind: "jsonl", rootDir: options.runsRoot, layout: "run-id" };
 	return (
 		active.kind === configured.kind &&

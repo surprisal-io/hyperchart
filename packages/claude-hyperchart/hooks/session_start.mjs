@@ -38,9 +38,15 @@ function isPidAlive(pid) {
 }
 
 function isLive(status, now) {
-	if (status === undefined) return false;
-	if (["complete", "failed", "stopped", "stopping"].includes(status.state)) return false;
-	if (typeof status.pid === "number" && isPidAlive(status.pid)) return true;
+	if (status === undefined) {
+		return false;
+	}
+	if (["complete", "failed", "stopped", "stopping"].includes(status.state)) {
+		return false;
+	}
+	if (typeof status.pid === "number" && isPidAlive(status.pid)) {
+		return true;
+	}
 	return typeof status.heartbeatAt === "number" && now - status.heartbeatAt < 15_000;
 }
 
@@ -71,7 +77,9 @@ async function writeStdout(line) {
 
 async function main() {
 	const chunks = [];
-	for await (const chunk of process.stdin) chunks.push(chunk);
+	for await (const chunk of process.stdin) {
+		chunks.push(chunk);
+	}
 	const input = (() => {
 		try {
 			return JSON.parse(Buffer.concat(chunks).toString("utf8"));
@@ -84,7 +92,9 @@ async function main() {
 	const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
 	const runsRoot = process.env.HYPERCHART_RUNS_ROOT ?? join(configDir, "hypercharts", "runs");
 	return withRunStorage({ kind: "jsonl", rootDir: runsRoot, layout: "run-id" }, async () => {
-		if (!existsSync(runsRoot)) return;
+		if (!existsSync(runsRoot)) {
+			return;
+		}
 		const now = Date.now();
 		const lines = [];
 		let active;
@@ -99,7 +109,9 @@ async function main() {
 			// Re-arbitrate after claiming so a concurrent lower coordinate cannot also be
 			// presented by the monitor/wait path.
 			active = await acquireActiveUserInteraction(owner);
-			if (active !== undefined) lines.push(gateContext(active));
+			if (active !== undefined) {
+				lines.push(gateContext(active));
+			}
 		}
 		const liveLines = [];
 		for (const runId of await listRunIds()) {
@@ -110,10 +122,13 @@ async function main() {
 				canonicalPath(meta.workDir) !== canonicalPath(cwd) ||
 				sessionId === undefined ||
 				meta.originSessionId !== sessionId
-			)
+			) {
 				continue;
+			}
 			const status = readRunStatus(runId);
-			if (!isLive(status, now)) continue;
+			if (!isLive(status, now)) {
+				continue;
+			}
 			liveLines.push(`- ${runId} (chart ${status.chartId ?? meta.chartId}, ${status.state})`);
 		}
 		if (liveLines.length > 0) {
@@ -124,7 +139,9 @@ async function main() {
 				].join("\n"),
 			);
 		}
-		if (lines.length === 0) return;
+		if (lines.length === 0) {
+			return;
+		}
 		const context = lines.join("\n\n");
 		await writeStdout(
 			`${JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } })}\n`,

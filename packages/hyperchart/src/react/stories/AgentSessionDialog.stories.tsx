@@ -27,8 +27,9 @@ const sessionScenario = storyScenario(
 	}),
 );
 const draftAction = actionAt(sessionScenario.ast, "draft");
-if (draftAction.kind !== "agent" || draftAction.model === undefined || draftAction.thinking === undefined)
+if (draftAction.kind !== "agent" || draftAction.model === undefined || draftAction.thinking === undefined) {
 	throw new Error("expected concrete draft agent metadata");
+}
 const draftUid = draftAction.uid;
 const draftActionKey = `${draftUid.chart}:${draftUid.state}:${draftUid.action}`;
 const draftInvokedAt = 1_700_000_001_000;
@@ -52,7 +53,9 @@ function projectedSession(
 		updatedAt: progress.updatedAt ?? 1_700_000_060_000,
 	});
 	const session = run.states.find((state) => state.id === "draft")?.session;
-	if (session === undefined) throw new Error("adapter-derived agent session is unavailable");
+	if (session === undefined) {
+		throw new Error("adapter-derived agent session is unavailable");
+	}
 	return session;
 }
 
@@ -227,7 +230,9 @@ export const CollapsedToolAndReasoning: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement.ownerDocument.body);
 		const expand = canvas.getAllByRole("button", { name: "Expand" })[0];
-		if (expand === undefined) throw new Error("Expected an expandable reasoning block");
+		if (expand === undefined) {
+			throw new Error("Expected an expandable reasoning block");
+		}
 		await userEvent.click(expand);
 		const collapse = canvas.getByRole("button", { name: "Collapse" });
 		await expect(collapse).toBeVisible();

@@ -51,7 +51,9 @@ async function tempDir(): Promise<string> {
 
 function make(config: ChartCst): ChartAst {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(result.diagnostics.map((entry) => entry.message).join("\n"));
+	if (!result.ok) {
+		throw new Error(result.diagnostics.map((entry) => entry.message).join("\n"));
+	}
 	return result.ast;
 }
 
@@ -129,7 +131,9 @@ async function run(ast: ChartAst, workDir: string, options: Options = {}) {
 
 function completeRecord(log: readonly DurableLogRecord[]) {
 	const record = log.find((entry) => entry.type === "state_action" && entry.kind === "complete");
-	if (record?.type !== "state_action" || record.kind !== "complete") throw new Error("no complete record");
+	if (record?.type !== "state_action" || record.kind !== "complete") {
+		throw new Error("no complete record");
+	}
 	return record;
 }
 
@@ -202,8 +206,9 @@ describe("artifact pins", () => {
 		const parentPin = completions[0]?.artifacts?.["notes.md"]!;
 		const rejectedPin = completions[1]?.artifacts?.["notes.md"]!;
 		const acceptedPin = completions[2]?.artifacts?.["notes.md"];
-		if (parentPin === undefined || rejectedPin === undefined || acceptedPin === undefined)
+		if (parentPin === undefined || rejectedPin === undefined || acceptedPin === undefined) {
 			throw new Error("missing artifact pins");
+		}
 		const rejection = log.findIndex(
 			(entry) => entry.type === "state_action" && entry.kind === "validated" && entry.outcome !== true,
 		);

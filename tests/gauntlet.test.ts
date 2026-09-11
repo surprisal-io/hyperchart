@@ -39,7 +39,9 @@ import { failOnPullEvents, MockRuntime } from "./mock_runtime.js";
 
 function make(config: ChartCst): ChartAst {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(`gauntlet chart should be valid: ${JSON.stringify(result.diagnostics)}`);
+	if (!result.ok) {
+		throw new Error(`gauntlet chart should be valid: ${JSON.stringify(result.diagnostics)}`);
+	}
 	return result.ast;
 }
 
@@ -83,7 +85,9 @@ async function runLive(ast: ChartAst, options: LiveOptions = {}) {
 					}
 					case "validate": {
 						const outcome = verdicts.shift();
-						if (outcome === undefined) throw new Error("unexpected validate effect");
+						if (outcome === undefined) {
+							throw new Error("unexpected validate effect");
+						}
 						events.push({ kind: "validated", effectId: effect.id, outcome });
 						break;
 					}

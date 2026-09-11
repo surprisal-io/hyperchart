@@ -70,7 +70,9 @@ export function actorTargetForInspectorState(
 ): string | undefined {
 	const target = occurrences
 		.filter((occurrence) => {
-			if (occurrence.declarationPath !== declarationPath) return false;
+			if (occurrence.declarationPath !== declarationPath) {
+				return false;
+			}
 			const owner = occurrence.ownerPath;
 			return (
 				owner === undefined || stateId === owner || stateId.startsWith(`${owner}.`) || stateId.startsWith(`${owner}#`)
@@ -94,7 +96,9 @@ export function hyperchartRunFromInfo(
 	info: import("./models.js").HyperchartInfo,
 	options: Pick<HyperchartRunFromInspectOptions, "cwd"> = {},
 ): HyperchartRunInfo | undefined {
-	if (!info.states) return undefined;
+	if (!info.states) {
+		return undefined;
+	}
 	const updatedAt = info.updatedAt ?? Date.now();
 	return {
 		runId: `chart:${info.name}`,
@@ -213,10 +217,16 @@ export function hyperchartRunFromToolDetails(
 	details: unknown,
 	options: HyperchartRunFromInspectOptions = {},
 ): HyperchartRunInfo | undefined {
-	if (isRunInfo(details)) return details;
+	if (isRunInfo(details)) {
+		return details;
+	}
 	const inspector = isRecord(details) ? details.inspector : undefined;
-	if (isRunInfo(inspector)) return inspector;
-	if (!isInspectResult(details)) return undefined;
+	if (isRunInfo(inspector)) {
+		return inspector;
+	}
+	if (!isInspectResult(details)) {
+		return undefined;
+	}
 	return hyperchartRunFromInspectResult(details, options);
 }
 
@@ -289,13 +299,14 @@ export function hyperchartRunFromRuntime(
 	const skipped: ProjectionSkippedRecord[] = [];
 	const projection = options.projection ?? createBranchProjection(ast);
 	const replayWarnings: string[] = [];
-	if (options.projection === undefined)
+	if (options.projection === undefined) {
 		for (const [index, record] of records.entries()) {
 			replayWarnings.push(
 				...replayRecordDiagnostics(ast, projection, index, record).stale.map((entry) => entry.message),
 			);
 			projectBranch(projection, ast, [record], [], skipped);
 		}
+	}
 	const staticRun = hyperchartRunFromInspectResult(inspect, {
 		runId: options.runId ?? options.status?.runId ?? `run:${ast.id}`,
 		status: runtimeRunStatus(options.status?.state),
@@ -339,21 +350,28 @@ export function hyperchartRunFromRuntime(
 					state.type === "actor-declaration" ||
 					state.actorInternal !== undefined
 				)
-			)
+			) {
 				return false;
+			}
 			if (state.type === "actor-declaration") {
-				if (projectedLogicalOccurrences.has(state.id)) return false;
+				if (projectedLogicalOccurrences.has(state.id)) {
+					return false;
+				}
 				if (
 					!state.id.includes("#") &&
 					projectedActorDeclarations.has(state.actorDeclaration?.declarationPath ?? state.id)
-				)
+				) {
 					return false;
+				}
 			}
 			if (state.actorInternal !== undefined && state.actorInternal.occurrencePath === undefined) {
 				const placement = actorPlacementForInternalState(state);
-				if (placement !== undefined && projectedLogicalOccurrences.has(placement)) return false;
-				if (!state.id.includes("#") && projectedActorDeclarations.has(state.actorInternal.declarationPath))
+				if (placement !== undefined && projectedLogicalOccurrences.has(placement)) {
 					return false;
+				}
+				if (!state.id.includes("#") && projectedActorDeclarations.has(state.actorInternal.declarationPath)) {
+					return false;
+				}
 			}
 			return true;
 		},
@@ -510,7 +528,9 @@ export function hyperchartRunFromRuntime(
 			};
 		});
 		const batchCalls = Object.values(projection.pendingActorCalls).flatMap((call) => {
-			if (call.kind !== "batch" || call.occurrence !== actor.occurrence) return [];
+			if (call.kind !== "batch" || call.occurrence !== actor.occurrence) {
+				return [];
+			}
 			const items = call.messageIds.flatMap((messageId) => {
 				const message = projectedActorMessage(projection, messageId);
 				return message === undefined ? [] : [messageInfo(actor, message)];
@@ -669,7 +689,9 @@ export function hyperchartRunFromRuntime(
 				state: materializeGeneration(candidate),
 			}));
 			const latest = generationStates.at(-1);
-			if (latest === undefined) return templateState;
+			if (latest === undefined) {
+				return templateState;
+			}
 			return {
 				...latest.state,
 				actorInternal: {
@@ -696,7 +718,9 @@ export function hyperchartRunFromRuntime(
 	});
 	const actorLinkedRuntimeStates = runtimeStates.map((state) => {
 		const link = state.actorMessageLink;
-		if (link === undefined) return state;
+		if (link === undefined) {
+			return state;
+		}
 		const logicalTarget = actorTargetForInspectorState(state.id, link.to, actorOccurrences);
 		return logicalTarget === undefined ? state : { ...state, actorMessageLink: { ...link, to: logicalTarget } };
 	});
@@ -972,23 +996,33 @@ function markStaleRuntimeStates(
 	const staleIds = new Set<string>();
 	for (const source of states) {
 		const sourceSeqId = latestReentrySeqId(source, runtime);
-		if (sourceSeqId === undefined) continue;
+		if (sourceSeqId === undefined) {
+			continue;
+		}
 		const queue = [...(controlEdges.get(source.id) ?? [])];
 		const visited = new Set<string>([source.id]);
 		while (queue.length > 0) {
 			const stateId = queue.shift();
-			if (stateId === undefined || visited.has(stateId)) continue;
+			if (stateId === undefined || visited.has(stateId)) {
+				continue;
+			}
 			visited.add(stateId);
 			const candidate = byId.get(stateId);
-			if (candidate === undefined) continue;
+			if (candidate === undefined) {
+				continue;
+			}
 			// A feedback cycle may reach an earlier dominator again. Stop at that loop header instead
 			// of walking into a new conceptual iteration and invalidating predecessors or sibling fan-out work.
-			if (dominators.get(source.id)?.has(candidate.id)) continue;
+			if (dominators.get(source.id)?.has(candidate.id)) {
+				continue;
+			}
 			const candidateSeqId = latestStateVisitSeqId(candidate, runtime);
 			if (candidate.status === "done" && candidateSeqId !== undefined && candidateSeqId < sourceSeqId) {
 				staleIds.add(candidate.id);
 			}
-			for (const target of controlEdges.get(candidate.id) ?? []) queue.push(target);
+			for (const target of controlEdges.get(candidate.id) ?? []) {
+				queue.push(target);
+			}
 		}
 	}
 	// A repeatedly entered actor-owning scope is historical once execution has
@@ -996,21 +1030,33 @@ function markStaleRuntimeStates(
 	// action invocation of their own, so actor creation facts provide their
 	// durable visit coordinates for the normal stale presentation.
 	for (const [ownerPath, visits] of runtime.actorOwnerVisits) {
-		if (visits.length < 2) continue;
+		if (visits.length < 2) {
+			continue;
+		}
 		const owner = byId.get(ownerPath);
 		const latestOwnerSeqId = visits.at(-1)?.seqId;
-		if (owner?.status !== "done" || latestOwnerSeqId === undefined) continue;
+		if (owner?.status !== "done" || latestOwnerSeqId === undefined) {
+			continue;
+		}
 		const advancedOutside = states.some((candidate) => {
-			if (candidate.status !== "running" && candidate.status !== "waiting") return false;
-			if (candidate.id === ownerPath || underScope(candidate.id, ownerPath)) return false;
+			if (candidate.status !== "running" && candidate.status !== "waiting") {
+				return false;
+			}
+			if (candidate.id === ownerPath || underScope(candidate.id, ownerPath)) {
+				return false;
+			}
 			const candidateSeqId = latestStateVisitSeqId(candidate, runtime);
 			return candidateSeqId !== undefined && candidateSeqId > latestOwnerSeqId;
 		});
-		if (advancedOutside) staleIds.add(ownerPath);
+		if (advancedOutside) {
+			staleIds.add(ownerPath);
+		}
 	}
 	for (const mapState of states) {
 		const currentVisit = mapState.mapConfig?.visitHistory?.at(-1);
-		if (currentVisit === undefined) continue;
+		if (currentVisit === undefined) {
+			continue;
+		}
 		for (const key of Object.keys(currentVisit.instances)) {
 			const instanceScope = `${mapState.id}#${key}`;
 			for (const candidate of states) {
@@ -1026,23 +1072,34 @@ function markStaleRuntimeStates(
 		}
 	}
 	for (const predecessor of states) {
-		if (!staleIds.has(predecessor.id) || predecessor.completedEvent === undefined) continue;
+		if (!staleIds.has(predecessor.id) || predecessor.completedEvent === undefined) {
+			continue;
+		}
 		const target = predecessor.transitions?.find(
 			(transition) => transition.event === predecessor.completedEvent,
 		)?.target;
-		if (target !== undefined && byId.get(target)?.type === "final") staleIds.add(target);
+		if (target !== undefined && byId.get(target)?.type === "final") {
+			staleIds.add(target);
+		}
 	}
 	for (const stateId of [...staleIds]) {
-		if (closedByCompletedAncestor(stateId, ast, projection, runtime)) staleIds.delete(stateId);
+		if (closedByCompletedAncestor(stateId, ast, projection, runtime)) {
+			staleIds.delete(stateId);
+		}
 	}
 	let addedContainer = true;
 	while (addedContainer) {
 		addedContainer = false;
 		for (const state of states) {
-			if (state.status !== "done" || staleIds.has(state.id)) continue;
-			if (state.type !== "map" && state.type !== "parallel" && state.type !== "compound" && state.type !== "region")
+			if (state.status !== "done" || staleIds.has(state.id)) {
 				continue;
-			if (completedScopeIsClosed(state.id, ast, projection, runtime)) continue;
+			}
+			if (state.type !== "map" && state.type !== "parallel" && state.type !== "compound" && state.type !== "region") {
+				continue;
+			}
+			if (completedScopeIsClosed(state.id, ast, projection, runtime)) {
+				continue;
+			}
 			if ([...staleIds].some((stateId) => stateId.startsWith(`${state.id}.`) || stateId.startsWith(`${state.id}#`))) {
 				staleIds.add(state.id);
 				addedContainer = true;
@@ -1058,10 +1115,13 @@ function markStaleRuntimeStates(
 			staleState?.type !== "parallel" &&
 			staleState?.type !== "compound" &&
 			staleState?.type !== "region"
-		)
+		) {
 			continue;
+		}
 		for (const candidate of states) {
-			if (candidate.status === "done" && underScope(candidate.id, staleId)) staleIds.add(candidate.id);
+			if (candidate.status === "done" && underScope(candidate.id, staleId)) {
+				staleIds.add(candidate.id);
+			}
 		}
 	}
 	return states.map((state) => {
@@ -1071,8 +1131,9 @@ function markStaleRuntimeStates(
 				item.status !== "done" ||
 				item.state === undefined ||
 				![...staleIds].some((stateId) => stateId === item.state || stateId.startsWith(`${item.state}.`))
-			)
+			) {
 				return item;
+			}
 			return { ...item, status: "stale" as const };
 		});
 		let subProgress = state.subProgress;
@@ -1094,7 +1155,9 @@ function markStaleRuntimeStates(
 		} else if (state.type === "parallel" && state.subProgress !== undefined) {
 			const stale =
 				state.parallelConfig?.branches?.filter((branch) => {
-					if (branch.id === undefined) return false;
+					if (branch.id === undefined) {
+						return false;
+					}
 					const branchStates = states.filter(
 						(candidate) => candidate.id === branch.id || candidate.id.startsWith(`${branch.id}.`),
 					);
@@ -1135,10 +1198,16 @@ function latestStateVisitSeqId(state: HyperchartStateInfo, runtime: RuntimeFacts
 }
 
 function latestReentrySeqId(state: HyperchartStateInfo, runtime: RuntimeFacts): number | undefined {
-	if ((state.visitHistory?.length ?? 0) >= 2) return state.visitHistory?.at(-1)?.invokeSeqId;
-	if ((state.mapConfig?.visitHistory?.length ?? 0) >= 2) return state.mapConfig?.visitHistory?.at(-1)?.spawnSeqId;
+	if ((state.visitHistory?.length ?? 0) >= 2) {
+		return state.visitHistory?.at(-1)?.invokeSeqId;
+	}
+	if ((state.mapConfig?.visitHistory?.length ?? 0) >= 2) {
+		return state.mapConfig?.visitHistory?.at(-1)?.spawnSeqId;
+	}
 	const actorVisits = runtime.actorOwnerVisits.get(state.id);
-	if ((actorVisits?.length ?? 0) >= 2) return actorVisits?.at(-1)?.seqId;
+	if ((actorVisits?.length ?? 0) >= 2) {
+		return actorVisits?.at(-1)?.seqId;
+	}
 	return undefined;
 }
 
@@ -1147,13 +1216,17 @@ function runtimeControlEdges(states: readonly HyperchartStateInfo[], ast: ChartA
 	const byId = new Set(runtimeStates.map((state) => state.id));
 	const edges = new Map<string, Set<string>>();
 	const add = (source: string, target: string) => {
-		if (source === target || !byId.has(target)) return;
+		if (source === target || !byId.has(target)) {
+			return;
+		}
 		const targets = edges.get(source) ?? new Set<string>();
 		targets.add(target);
 		edges.set(source, targets);
 	};
 	for (const state of runtimeStates) {
-		for (const transition of state.transitions ?? []) add(state.id, transition.target);
+		for (const transition of state.transitions ?? []) {
+			add(state.id, transition.target);
+		}
 		const node = nodeAt(ast, state.id);
 		if (node?.kind === "compound" || node?.kind === "region") {
 			add(state.id, `${state.id}.${node.initial}`);
@@ -1167,7 +1240,9 @@ function runtimeControlEdges(states: readonly HyperchartStateInfo[], ast: ChartA
 				}
 			}
 		} else if (node?.kind === "parallel") {
-			for (const region of node.regions) add(state.id, `${state.id}.${region}`);
+			for (const region of node.regions) {
+				add(state.id, `${state.id}.${region}`);
+			}
 		}
 		if (state.type === "final") {
 			const containerPath = parentPath(state.id);
@@ -1187,10 +1262,14 @@ function runtimeControlEdges(states: readonly HyperchartStateInfo[], ast: ChartA
 }
 
 function isUnmaterializedMapTemplateState(ast: ChartAst, statePath: StatePath): boolean {
-	if (statePath.includes("#")) return false;
+	if (statePath.includes("#")) {
+		return false;
+	}
 	let scope = parentPath(statePath);
 	while (scope !== undefined) {
-		if (nodeAt(ast, scope)?.kind === "map") return true;
+		if (nodeAt(ast, scope)?.kind === "map") {
+			return true;
+		}
 		scope = parentPath(scope);
 	}
 	return false;
@@ -1208,9 +1287,13 @@ function runtimeDominators(
 	const queue = nodeSet.has(initial) ? [initial] : [];
 	while (queue.length > 0) {
 		const current = queue.shift();
-		if (current === undefined || reachable.has(current)) continue;
+		if (current === undefined || reachable.has(current)) {
+			continue;
+		}
 		reachable.add(current);
-		for (const target of edges.get(current) ?? []) queue.push(target);
+		for (const target of edges.get(current) ?? []) {
+			queue.push(target);
+		}
 	}
 	const entryTargets = new Set<string>([
 		...(nodeSet.has(initial) ? [initial] : []),
@@ -1218,12 +1301,18 @@ function runtimeDominators(
 	]);
 	const predecessors = new Map<string, Set<string>>(nodes.map((node) => [node, new Set()]));
 	for (const [source, targets] of edges) {
-		for (const target of targets) predecessors.get(target)?.add(source);
+		for (const target of targets) {
+			predecessors.get(target)?.add(source);
+		}
 	}
-	for (const target of entryTargets) predecessors.get(target)?.add(start);
+	for (const target of entryTargets) {
+		predecessors.get(target)?.add(start);
+	}
 	const universe = new Set([start, ...nodes]);
 	const dominators = new Map<string, Set<string>>([[start, new Set([start])]]);
-	for (const node of nodes) dominators.set(node, new Set(universe));
+	for (const node of nodes) {
+		dominators.set(node, new Set(universe));
+	}
 	let changed = true;
 	while (changed) {
 		changed = false;
@@ -1234,7 +1323,9 @@ function runtimeDominators(
 				const intersection = new Set(dominators.get(preds[0] ?? start) ?? []);
 				for (const pred of preds.slice(1)) {
 					for (const candidate of intersection) {
-						if (!dominators.get(pred)?.has(candidate)) intersection.delete(candidate);
+						if (!dominators.get(pred)?.has(candidate)) {
+							intersection.delete(candidate);
+						}
 					}
 				}
 				next = new Set([node, ...intersection]);
@@ -1250,18 +1341,33 @@ function runtimeDominators(
 }
 
 function runtimeRunStatus(value: string | undefined, states: readonly HyperchartStateInfo[] = []): HyperchartRunStatus {
-	if (value === "complete") return "completed";
-	if (value === "failed") return "failed";
-	if (value === "stopped" || value === "stopping") return "paused";
+	if (value === "complete") {
+		return "completed";
+	}
+	if (value === "failed") {
+		return "failed";
+	}
+	if (value === "stopped" || value === "stopping") {
+		return "paused";
+	}
 	if (value === "running" || value === "starting") {
-		if (states.some((state) => state.status === "running")) return "running";
-		if (states.some((state) => state.status === "waiting")) return "blocked";
+		if (states.some((state) => state.status === "running")) {
+			return "running";
+		}
+		if (states.some((state) => state.status === "waiting")) {
+			return "blocked";
+		}
 		return "running";
 	}
-	if (states.some((state) => state.status === "failed")) return "failed";
-	if (states.some((state) => state.status === "running")) return "running";
-	if (states.length > 0 && states.every((state) => state.status === "done" || state.status === "skipped"))
+	if (states.some((state) => state.status === "failed")) {
+		return "failed";
+	}
+	if (states.some((state) => state.status === "running")) {
+		return "running";
+	}
+	if (states.length > 0 && states.every((state) => state.status === "done" || state.status === "skipped")) {
 		return "completed";
+	}
 	return "paused";
 }
 
@@ -1271,25 +1377,38 @@ function projectedMessagesByOccurrence(
 ): ReadonlyMap<StatePath, ProjectedActorMessage[]> {
 	const messages = new Map<StatePath, Map<string, ProjectedActorMessage>>();
 	for (const record of records) {
-		if (skippedRecords.has(record)) continue;
+		if (skippedRecords.has(record)) {
+			continue;
+		}
 		if (record.type === "actor_messages_enqueued") {
 			const occurrenceMessages = messages.get(record.occurrence) ?? new Map<string, ProjectedActorMessage>();
-			for (const envelope of record.messages)
+			for (const envelope of record.messages) {
 				occurrenceMessages.set(envelope.messageId, { ...envelope, status: "queued" });
+			}
 			messages.set(record.occurrence, occurrenceMessages);
 			continue;
 		}
-		if (record.type !== "actor_message") continue;
+		if (record.type !== "actor_message") {
+			continue;
+		}
 		const message = messages.get(record.occurrence)?.get(record.messageId);
-		if (message === undefined) continue;
+		if (message === undefined) {
+			continue;
+		}
 		if (record.kind === "accepted") {
 			message.status = "accepted";
 			message.receiveState = record.receiveState;
-			if (record.workerIndex !== undefined) message.workerIndex = record.workerIndex;
+			if (record.workerIndex !== undefined) {
+				message.workerIndex = record.workerIndex;
+			}
 		} else if (record.kind === "replied") {
 			message.status = "replied";
-			if (record.replyEvent !== undefined) message.replyEvent = record.replyEvent;
-			if (Object.hasOwn(record, "output")) message.replyOutput = record.output;
+			if (record.replyEvent !== undefined) {
+				message.replyEvent = record.replyEvent;
+			}
+			if (Object.hasOwn(record, "output")) {
+				message.replyOutput = record.output;
+			}
 		} else {
 			message.status = "settled";
 		}
@@ -1306,7 +1425,9 @@ function firstTimestamp(records: readonly DurableLogRecord[]): number | undefine
 function lastTimestamp(records: readonly DurableLogRecord[]): number | undefined {
 	for (let index = records.length - 1; index >= 0; index--) {
 		const record = records[index];
-		if (record !== undefined && typeof record.timestamp === "number") return record.timestamp;
+		if (record !== undefined && typeof record.timestamp === "number") {
+			return record.timestamp;
+		}
 	}
 	return undefined;
 }
@@ -1334,13 +1455,18 @@ function runtimeFacts(
 		facts.actorMessageHistory = history;
 		byState.set(stateId, facts);
 	}
-	for (const pending of projection.pendingActions) pendingByState.set(pending.actionUid.state, pending);
+	for (const pending of projection.pendingActions) {
+		pendingByState.set(pending.actionUid.state, pending);
+	}
 	for (const record of records) {
 		if (record.type === "actor_created" && record.owner !== undefined && !skippedRecords.has(record)) {
 			const visits = actorOwnerVisits.get(record.owner) ?? [];
 			const existing = visits.find((visit) => visit.generation === record.generation);
-			if (existing === undefined) visits.push({ generation: record.generation, seqId: record.seqId });
-			else existing.seqId = Math.max(existing.seqId, record.seqId);
+			if (existing === undefined) {
+				visits.push({ generation: record.generation, seqId: record.seqId });
+			} else {
+				existing.seqId = Math.max(existing.seqId, record.seqId);
+			}
 			actorOwnerVisits.set(record.owner, visits);
 			continue;
 		}
@@ -1399,7 +1525,9 @@ function runtimeFacts(
 			byState.set(stateId, facts);
 			continue;
 		}
-		if (record.type !== "state_action" || skippedRecords.has(record)) continue;
+		if (record.type !== "state_action" || skippedRecords.has(record)) {
+			continue;
+		}
 		const stateId = record.actionUid.state;
 		const facts = byState.get(stateId) ?? {};
 		if (record.kind === "invoke") {
@@ -1454,21 +1582,26 @@ function runtimeFacts(
 		byState.set(stateId, facts);
 	}
 	for (const [path, state] of Object.entries(ast.states)) {
-		if (state.kind !== "state") continue;
+		if (state.kind !== "state") {
+			continue;
+		}
 		const key = actionUidKey({ ...state.action.uid, state: path });
 		const visits = projection.stateVisits[key];
-		if (visits === undefined) continue;
+		if (visits === undefined) {
+			continue;
+		}
 		const facts = byState.get(path) ?? {};
 		facts.visits = visits;
 		byState.set(path, facts);
 	}
-	if (completeReplayPrefix)
+	if (completeReplayPrefix) {
 		for (const [stateId, visitHistory] of runtimeVisitHistories(ast, records, skippedRecords)) {
 			const facts = byState.get(stateId) ?? {};
 			facts.visitHistory = visitHistory;
 			facts.visits = visitHistory.length;
 			byState.set(stateId, facts);
 		}
+	}
 	const mapVisitHistoryByState = runtimeMapVisitHistories(records, skippedRecords);
 	const waitingLeaves = concurrencyBlockedActionLeaves(ast, projection);
 	appendSessionFacts(byState, sessionProgress);
@@ -1483,7 +1616,9 @@ function actorInternalMessageHistories(
 	skippedRecords: ReadonlySet<DurableLogRecord>,
 ): Map<StatePath, HyperchartActorMessageInfo[]> {
 	const histories = new Map<StatePath, HyperchartActorMessageInfo[]>();
-	if (Object.keys(ast.actors).length === 0) return histories;
+	if (Object.keys(ast.actors).length === 0) {
+		return histories;
+	}
 	const replay = createBranchProjection(ast);
 	const acceptedAt = new Map<string, number>();
 	const keyFor = (occurrence: string, messageId: string) => `${occurrence}\u0000${messageId}`;
@@ -1491,7 +1626,9 @@ function actorInternalMessageHistories(
 		histories.set(statePath, [...(histories.get(statePath) ?? []), message]);
 	};
 	for (const record of records) {
-		if (skippedRecords.has(record)) continue;
+		if (skippedRecords.has(record)) {
+			continue;
+		}
 		if (record.type === "actor_message" && record.kind === "accepted") {
 			const actor = projectedActorEndpoint(replay, record.occurrence);
 			const envelope = actor === undefined ? undefined : projectedActorMessage(replay, actor.mailbox[0]);
@@ -1586,7 +1723,9 @@ function actorInternalMessageHistories(
 					: messagesByOccurrence
 							.get(entry.actorOccurrencePath)
 							?.find((message) => message.messageId === entry.messageId);
-			if (final !== undefined) entry.status = final.status;
+			if (final !== undefined) {
+				entry.status = final.status;
+			}
 		}
 	}
 	return histories;
@@ -1598,7 +1737,9 @@ function runtimeMapVisitHistories(
 ): Map<StatePath, HyperchartMapVisitInfo[]> {
 	const histories = new Map<StatePath, HyperchartMapVisitInfo[]>();
 	for (const record of records) {
-		if (record.type !== "spawned" || skippedRecords.has(record)) continue;
+		if (record.type !== "spawned" || skippedRecords.has(record)) {
+			continue;
+		}
 		const history = histories.get(record.path) ?? [];
 		history.push({
 			visit: history.length + 1,
@@ -1633,7 +1774,9 @@ function runtimeVisitHistories(
 		if (record.type === "failure_intent") {
 			for (const [state, visits] of histories) {
 				const visit = visits.at(-1);
-				if (visit === undefined || visit.status !== "running") continue;
+				if (visit === undefined || visit.status !== "running") {
+					continue;
+				}
 				if (state === record.origin) {
 					completeVisit(visit, { type: "FAILED", error: record.error }, record.timestamp);
 				} else {
@@ -1644,13 +1787,19 @@ function runtimeVisitHistories(
 			}
 			continue;
 		}
-		if (skippedRecords.has(record)) continue;
-		if (record.type === "user_interaction" && record.kind === "opened") {
-			const visit = histories.get(record.actionUid.state)?.at(-1);
-			if (visit !== undefined && record.input !== undefined) visit.inputs = { ...record.input };
+		if (skippedRecords.has(record)) {
 			continue;
 		}
-		if (record.type !== "state_action") continue;
+		if (record.type === "user_interaction" && record.kind === "opened") {
+			const visit = histories.get(record.actionUid.state)?.at(-1);
+			if (visit !== undefined && record.input !== undefined) {
+				visit.inputs = { ...record.input };
+			}
+			continue;
+		}
+		if (record.type !== "state_action") {
+			continue;
+		}
 		const stateId = record.actionUid.state;
 		if (record.kind === "invoke") {
 			const pending = replay.pendingActions.find(
@@ -1659,7 +1808,9 @@ function runtimeVisitHistories(
 					candidate.invokeSeqId === record.seqId &&
 					actionUidKey(candidate.actionUid) === actionUidKey(record.actionUid),
 			);
-			if (pending === undefined) continue;
+			if (pending === undefined) {
+				continue;
+			}
 			// Prefer the self-contained durable copy. Replay-derived inputs keep old journals and
 			// hand-authored host fixtures visually compatible when that informational field is absent.
 			const inputs = record.input ?? replay.inputs[stateId];
@@ -1689,7 +1840,9 @@ function runtimeVisitHistories(
 			continue;
 		}
 		const visit = histories.get(stateId)?.at(-1);
-		if (visit === undefined) continue;
+		if (visit === undefined) {
+			continue;
+		}
 		if ((record.kind === "complete" || record.kind === "validated") && record.input !== undefined) {
 			visit.inputs = { ...record.input };
 		}
@@ -1698,12 +1851,13 @@ function runtimeVisitHistories(
 				(pending) => actionUidKey(pending.actionUid) === actionUidKey(record.actionUid),
 			);
 			if (!requiresValidation) {
-				if (record.artifacts !== undefined)
+				if (record.artifacts !== undefined) {
 					visit.artifactPins = Object.entries(record.artifacts).map(([path, pin]) => ({
 						path,
 						hash: pin.hash,
 						size: pin.size,
 					}));
+				}
 				completeVisit(visit, record.event, record.timestamp);
 			}
 			continue;
@@ -1713,12 +1867,13 @@ function runtimeVisitHistories(
 			const rejectionReason = validationRejectionReason(record.outcome);
 			if (rejectionReason === undefined) {
 				const pending = pendingBefore.find((entry) => actionUidKey(entry.actionUid) === actionUidKey(record.actionUid));
-				if (pending?.phase === "validating" && pending.completionArtifacts !== undefined)
+				if (pending?.phase === "validating" && pending.completionArtifacts !== undefined) {
 					visit.artifactPins = Object.entries(pending.completionArtifacts.pins).map(([path, pin]) => ({
 						path,
 						hash: pin.hash,
 						size: pin.size,
 					}));
+				}
 				completeVisit(visit, record.event, record.timestamp);
 			}
 		}
@@ -1734,9 +1889,13 @@ function closeExitedVisits(
 ): void {
 	const remaining = new Set(after.map(pendingVisitKey));
 	for (const pending of before) {
-		if (remaining.has(pendingVisitKey(pending))) continue;
+		if (remaining.has(pendingVisitKey(pending))) {
+			continue;
+		}
 		const visit = histories.get(pending.actionUid.state)?.find((entry) => entry.visit === pending.visitId);
-		if (visit === undefined || visit.status !== "running") continue;
+		if (visit === undefined || visit.status !== "running") {
+			continue;
+		}
 		const timedOut =
 			record.type === "state_action" &&
 			record.kind === "timer_fired" &&
@@ -1867,10 +2026,15 @@ function failedActionIssue(
 }
 
 function validationRejectionReason(outcome: unknown): string | undefined {
-	if (outcome === true) return undefined;
-	if (typeof outcome === "object" && outcome !== null && typeof (outcome as { reason?: unknown }).reason === "string")
+	if (outcome === true) {
+		return undefined;
+	}
+	if (typeof outcome === "object" && outcome !== null && typeof (outcome as { reason?: unknown }).reason === "string") {
 		return (outcome as { reason: string }).reason;
-	if (outcome === false) return "Validation rejected the completion.";
+	}
+	if (outcome === false) {
+		return "Validation rejected the completion.";
+	}
 	return undefined;
 }
 
@@ -1878,10 +2042,14 @@ function appendSessionFacts(
 	map: Map<StatePath, StateRuntimeFacts>,
 	progress: HyperchartRuntimeSessionProgressFile | undefined,
 ): void {
-	if (progress === undefined) return;
+	if (progress === undefined) {
+		return;
+	}
 	const sessionsByState = new Map<StatePath, HyperchartAgentSessionInfo[]>();
 	for (const session of Object.values(progress.sessions)) {
-		if (session.actionUid.action !== "agent") continue;
+		if (session.actionUid.action !== "agent") {
+			continue;
+		}
 		const stateId = session.actionUid.state;
 		const facts = map.get(stateId) ?? {};
 		const info = runtimeSessionInfo(session);
@@ -1906,7 +2074,9 @@ function appendSessionFacts(
 	for (const [stateId, candidates] of sessionsByState) {
 		const facts = map.get(stateId);
 		const visits = facts?.visitHistory;
-		if (visits === undefined) continue;
+		if (visits === undefined) {
+			continue;
+		}
 		visits.forEach((visit, index) => {
 			const nextVisitStartedAt = visits[index + 1]?.startedAt;
 			const exact = visit.session;
@@ -2008,7 +2178,9 @@ function visitMessages(
 	const timestamped = messages.filter(
 		(message): message is HyperchartSessionMessageInfo & { timestamp: number } => typeof message.timestamp === "number",
 	);
-	if (timestamped.length === 0) return [];
+	if (timestamped.length === 0) {
+		return [];
+	}
 	const end = nextVisitStartedAt ?? visit.endedAt ?? Number.POSITIVE_INFINITY;
 	return timestamped.filter(
 		(message) =>
@@ -2021,10 +2193,16 @@ function appendSessionIssues(
 	map: Map<StatePath, HyperchartIssueInfo[]>,
 	progress: HyperchartRuntimeSessionProgressFile | undefined,
 ): void {
-	if (progress === undefined) return;
+	if (progress === undefined) {
+		return;
+	}
 	for (const session of Object.values(progress.sessions)) {
-		if (session.actionUid.action !== "agent") continue;
-		if (session.error === undefined && session.status !== "failed") continue;
+		if (session.actionUid.action !== "agent") {
+			continue;
+		}
+		if (session.error === undefined && session.status !== "failed") {
+			continue;
+		}
 		const stateId = session.actionUid.state;
 		const timestamp = session.completedAt ?? session.lastActivityAt ?? session.startedAt;
 		appendIssue(map, stateId, {
@@ -2057,11 +2235,17 @@ function compactSessionPayload(session: HyperchartRuntimeSessionProgressInfo): R
 }
 
 function issueMessageFromPayload(payload: unknown, fallback: string): string {
-	if (payload === undefined || payload === null) return fallback;
-	if (typeof payload === "string") return payload;
+	if (payload === undefined || payload === null) {
+		return fallback;
+	}
+	if (typeof payload === "string") {
+		return payload;
+	}
 	if (typeof payload === "object") {
 		const record = payload as Record<string, unknown>;
-		if (typeof record.message === "string") return record.message;
+		if (typeof record.message === "string") {
+			return record.message;
+		}
 		if (typeof record.stderr === "string" && record.stderr.trim().length > 0) {
 			const prefix = typeof record.code === "number" ? `Script exited with code ${record.code}` : "Script failed";
 			return `${prefix}: ${oneLine(record.stderr)}`;
@@ -2072,7 +2256,9 @@ function issueMessageFromPayload(payload: unknown, fallback: string): string {
 		]
 			.filter(Boolean)
 			.join(" · ");
-		if (details.length > 0) return `Action failed (${details})`;
+		if (details.length > 0) {
+			return `Action failed (${details})`;
+		}
 	}
 	try {
 		return previewText(JSON.stringify(payload)) ?? fallback;
@@ -2104,7 +2290,9 @@ function materializedMapStates(
 	for (const [concreteMapPath, instances] of Object.entries(projection.spawns)) {
 		const templateMapPath = templatePath(concreteMapPath);
 		const mapState = mapTemplates.find((state) => state.id === templateMapPath);
-		if (mapState === undefined) continue;
+		if (mapState === undefined) {
+			continue;
+		}
 		const descendants = staticStates.filter(
 			(candidate) =>
 				candidate.id.startsWith(`${templateMapPath}.`) &&
@@ -2169,8 +2357,12 @@ function materializeMapPath(
 	key: string,
 ): StatePath {
 	const instanceRoot = `${concreteMapPath}#${key}`;
-	if (path === templateMapPath) return instanceRoot;
-	if (path.startsWith(`${templateMapPath}.`)) return `${instanceRoot}${path.slice(templateMapPath.length)}`;
+	if (path === templateMapPath) {
+		return instanceRoot;
+	}
+	if (path.startsWith(`${templateMapPath}.`)) {
+		return `${instanceRoot}${path.slice(templateMapPath.length)}`;
+	}
 	return instancePathFor(path, concreteMapPath);
 }
 
@@ -2178,7 +2370,9 @@ function runtimeValidationAttempts(
 	facts: StateRuntimeFacts | undefined,
 	pending: PendingAction | undefined,
 ): number | undefined {
-	if (facts?.validationAttempts !== undefined) return facts.validationAttempts;
+	if (facts?.validationAttempts !== undefined) {
+		return facts.validationAttempts;
+	}
 	return pending === undefined ? undefined : pending.recovery.validation.nudges + pending.recovery.validation.restarts;
 }
 
@@ -2187,7 +2381,9 @@ function runtimeMapItemInfo(
 	projection: ReturnType<typeof createBranchProjection>,
 ): Pick<HyperchartStateInfo, "mapKey" | "mapItemLabel"> | undefined {
 	const instance = nearestInstance(stateId);
-	if (instance === undefined) return undefined;
+	if (instance === undefined) {
+		return undefined;
+	}
 	const value = projection.spawns[instance.container]?.[instance.key];
 	return {
 		mapKey: instance.key,
@@ -2236,8 +2432,12 @@ function overlayRuntimeState(
 			...(transition.event === next.completedEvent ? { taken: true } : {}),
 		}));
 	}
-	if (state.type === "map") return overlayMapRuntime(next, ast, projection, runtime);
-	if (state.type === "parallel") return overlayParallelRuntime(next, ast, projection, runtime);
+	if (state.type === "map") {
+		return overlayMapRuntime(next, ast, projection, runtime);
+	}
+	if (state.type === "parallel") {
+		return overlayParallelRuntime(next, ast, projection, runtime);
+	}
 	return next;
 }
 
@@ -2247,12 +2447,16 @@ function activeLeavesStatus(
 	runtime: RuntimeFacts,
 	finalLeavesAreDone = false,
 ): "running" | "waiting" | "done" | undefined {
-	if (activeLeaves.length === 0) return undefined;
+	if (activeLeaves.length === 0) {
+		return undefined;
+	}
 	if (activeLeaves.every((leaf) => nodeAt(ast, leaf)?.kind === "final")) {
 		return finalLeavesAreDone ? "done" : "running";
 	}
 	const actionLeaves = activeLeaves.filter((leaf) => nodeAt(ast, leaf)?.kind === "state");
-	if (actionLeaves.length > 0 && actionLeaves.every((leaf) => runtime.waitingLeaves.has(leaf))) return "waiting";
+	if (actionLeaves.length > 0 && actionLeaves.every((leaf) => runtime.waitingLeaves.has(leaf))) {
+		return "waiting";
+	}
 	return "running";
 }
 
@@ -2266,7 +2470,9 @@ function runtimeStateStatus(
 	const facts = runtime.byState.get(runtimeStatePath);
 	const pending = runtime.pendingByState.get(runtimeStatePath);
 	if (state.actorInternal?.occurrencePath !== undefined) {
-		if (projection.failure?.origin === runtimeStatePath) return "failed";
+		if (projection.failure?.origin === runtimeStatePath) {
+			return "failed";
+		}
 		const actor = projectedActorEndpoint(projection, state.actorInternal.occurrencePath);
 		const actorIsLive =
 			actor !== undefined && actor.status !== "stopped" && actor.status !== "failed" && actor.status !== "cancelled";
@@ -2276,18 +2482,28 @@ function runtimeStateStatus(
 						(worker) => worker.currentState === state.actorInternal?.localState,
 					)
 				: (actor as ProjectedActorOccurrence | undefined)?.currentState === state.actorInternal.localState;
-		if (actorIsLive && isCurrent) return state.type === "receive" ? "waiting" : "running";
-		if (facts?.completedAt !== undefined || (facts?.attempts ?? 0) > 0 || (facts?.actorMessageHistory?.length ?? 0) > 0)
+		if (actorIsLive && isCurrent) {
+			return state.type === "receive" ? "waiting" : "running";
+		}
+		if (
+			facts?.completedAt !== undefined ||
+			(facts?.attempts ?? 0) > 0 ||
+			(facts?.actorMessageHistory?.length ?? 0) > 0
+		) {
 			return "done";
+		}
 		return "pending";
 	}
-	if (facts?.completedEvent?.type === "FAILED") return "failed";
+	if (facts?.completedEvent?.type === "FAILED") {
+		return "failed";
+	}
 	// Global actor failure terminalizes pending callers without a reply fact.
 	if (
 		projection.failure !== undefined &&
 		Object.values(projection.pendingActorCalls).some((call) => call.callerState === runtimeStatePath)
-	)
+	) {
 		return "failed";
+	}
 	if (pending !== undefined) {
 		const node = nodeAt(ast, runtimeStatePath);
 		return node?.kind === "state" && node.action.kind === "user" ? "waiting" : "running";
@@ -2317,17 +2533,31 @@ function runtimeStateStatus(
 		ast,
 		runtime,
 	);
-	if (activeStatus !== undefined) return activeStatus;
-	if (facts?.completedAt !== undefined) return "done";
-	if (closedByCompletedAncestor(state.id, ast, projection, runtime)) return "done";
+	if (activeStatus !== undefined) {
+		return activeStatus;
+	}
+	if (facts?.completedAt !== undefined) {
+		return "done";
+	}
+	if (closedByCompletedAncestor(state.id, ast, projection, runtime)) {
+		return "done";
+	}
 	if (state.type === "map") {
 		const spawned = projection.spawns[state.id];
 		if (spawned !== undefined) {
 			const items = currentMapItems(state.id, mapItems(state, ast, projection, runtime), projection);
-			if (items.every((item) => item.status === "done")) return "done";
-			if (items.some((item) => item.status === "failed")) return "failed";
-			if (items.some((item) => item.status === "running")) return "running";
-			if (items.some((item) => item.status === "waiting")) return "waiting";
+			if (items.every((item) => item.status === "done")) {
+				return "done";
+			}
+			if (items.some((item) => item.status === "failed")) {
+				return "failed";
+			}
+			if (items.some((item) => item.status === "running")) {
+				return "running";
+			}
+			if (items.some((item) => item.status === "waiting")) {
+				return "waiting";
+			}
 		}
 	}
 	if (state.type === "parallel") {
@@ -2338,18 +2568,27 @@ function runtimeStateStatus(
 			runtime,
 			state.parallelConfig?.branches?.map((branch) => branch.id).filter((id): id is string => id !== undefined) ?? [],
 		);
-		if (progress.failed > 0) return "failed";
-		if (progress.running > 0) return "running";
-		if ((progress.waiting ?? 0) > 0) return "waiting";
-		if (progress.total > 0 && progress.done === progress.total) return "done";
+		if (progress.failed > 0) {
+			return "failed";
+		}
+		if (progress.running > 0) {
+			return "running";
+		}
+		if ((progress.waiting ?? 0) > 0) {
+			return "waiting";
+		}
+		if (progress.total > 0 && progress.done === progress.total) {
+			return "done";
+		}
 	}
 	const node = ast.states[state.id];
 	if (
 		node !== undefined &&
 		(node.kind === "compound" || node.kind === "region") &&
 		projection.activeLeaves.some((leaf) => underScope(leaf, state.id))
-	)
+	) {
 		return "running";
+	}
 	return state.status;
 }
 
@@ -2365,7 +2604,9 @@ function overlayMapRuntime(
 			? rawItems.map((item) => (item.status === "stale" ? { ...item, status: "done" as const } : item))
 			: rawItems;
 	const visitHistory = runtime.mapVisitHistoryByState.get(state.id);
-	if (items.length === 0 && projection.spawns[state.id] === undefined && visitHistory === undefined) return state;
+	if (items.length === 0 && projection.spawns[state.id] === undefined && visitHistory === undefined) {
+		return state;
+	}
 	const progressItems = currentMapItems(state.id, items, projection);
 	const done = progressItems.filter((item) => item.status === "done").length;
 	const waiting = progressItems.filter((item) => item.status === "waiting").length;
@@ -2397,7 +2638,9 @@ function currentMapItems(
 	projection: ReturnType<typeof createBranchProjection>,
 ): NonNullable<NonNullable<HyperchartStateInfo["mapConfig"]>["items"]> {
 	const currentInstances = projection.spawns[stateId];
-	if (currentInstances === undefined) return items;
+	if (currentInstances === undefined) {
+		return items;
+	}
 	return items.filter((item) => Object.hasOwn(currentInstances, item.key));
 }
 
@@ -2410,8 +2653,12 @@ function mapItems(
 	const visitHistory = runtime.mapVisitHistoryByState.get(state.id) ?? [];
 	const currentInstances = projection.spawns[state.id];
 	const instances = Object.create(null) as Record<string, unknown>;
-	for (const visit of visitHistory) Object.assign(instances, visit.instances);
-	if (currentInstances !== undefined) Object.assign(instances, currentInstances);
+	for (const visit of visitHistory) {
+		Object.assign(instances, visit.instances);
+	}
+	if (currentInstances !== undefined) {
+		Object.assign(instances, currentInstances);
+	}
 	return Object.entries(instances).map(([key, value]) => {
 		const instancePath = `${state.id}#${key}`;
 		const summary = mapItemSummary(value);
@@ -2434,14 +2681,20 @@ function mapItems(
 function mapItemLabel(key: string, value: unknown): string {
 	if (typeof value === "object" && value !== null) {
 		const record = value as Record<string, unknown>;
-		if (typeof record.title === "string") return record.title;
-		if (typeof record.label === "string") return record.label;
+		if (typeof record.title === "string") {
+			return record.title;
+		}
+		if (typeof record.label === "string") {
+			return record.label;
+		}
 	}
 	return key;
 }
 
 function mapItemSummary(value: unknown): string | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
+	if (typeof value !== "object" || value === null) {
+		return undefined;
+	}
 	const record = value as Record<string, unknown>;
 	return typeof record.summary === "string" ? record.summary : undefined;
 }
@@ -2454,7 +2707,9 @@ function closedByCompletedAncestor(
 ): boolean {
 	let scope = parentPath(statePath);
 	while (scope !== undefined) {
-		if (completedScopeIsClosed(scope, ast, projection, runtime)) return true;
+		if (completedScopeIsClosed(scope, ast, projection, runtime)) {
+			return true;
+		}
 		scope = parentPath(scope);
 	}
 	return false;
@@ -2480,7 +2735,9 @@ function scopeReachedFinal(
 ): boolean {
 	const templateScope = templatePath(scopePath);
 	return Object.values(ast.states).some((candidate) => {
-		if (candidate.kind !== "final" || candidate.parent !== templateScope) return false;
+		if (candidate.kind !== "final" || candidate.parent !== templateScope) {
+			return false;
+		}
 		const finalPath = `${scopePath}.${candidate.id}`;
 		return (
 			projection.activeLeaves.includes(finalPath) ||
@@ -2493,15 +2750,23 @@ function scopeReachedFinal(
 function finalReached(finalPath: StatePath, ast: ChartAst, runtime: RuntimeFacts): boolean {
 	for (const [statePath, facts] of runtime.byState) {
 		const eventType = facts.completedEvent?.type;
-		if (eventType === undefined || runtime.pendingByState.has(statePath)) continue;
-		const state = nodeAt(ast, statePath);
-		if ((state?.kind === "send" || state?.kind === "sendBatch") && eventType === "ENQUEUED") {
-			if (siblingPath(statePath, state.target) === finalPath) return true;
+		if (eventType === undefined || runtime.pendingByState.has(statePath)) {
 			continue;
 		}
-		if (state?.kind !== "state") continue;
+		const state = nodeAt(ast, statePath);
+		if ((state?.kind === "send" || state?.kind === "sendBatch") && eventType === "ENQUEUED") {
+			if (siblingPath(statePath, state.target) === finalPath) {
+				return true;
+			}
+			continue;
+		}
+		if (state?.kind !== "state") {
+			continue;
+		}
 		const transition = state.transitions[eventType];
-		if (transition !== undefined && siblingPath(statePath, transition.target) === finalPath) return true;
+		if (transition !== undefined && siblingPath(statePath, transition.target) === finalPath) {
+			return true;
+		}
 	}
 	return false;
 }
@@ -2515,13 +2780,21 @@ function finalReachedViaOnDone(
 	runtime: RuntimeFacts,
 ): boolean {
 	const scope = parentPath(finalPath);
-	if (scope === undefined) return false;
+	if (scope === undefined) {
+		return false;
+	}
 	const finalId = finalPath.slice(scope.length + 1);
 	const templateScope = templatePath(scope);
 	return Object.values(ast.states).some((candidate) => {
-		if (candidate.parent !== templateScope) return false;
-		if (candidate.kind !== "compound" && candidate.kind !== "map" && candidate.kind !== "parallel") return false;
-		if (candidate.onDone !== finalId) return false;
+		if (candidate.parent !== templateScope) {
+			return false;
+		}
+		if (candidate.kind !== "compound" && candidate.kind !== "map" && candidate.kind !== "parallel") {
+			return false;
+		}
+		if (candidate.onDone !== finalId) {
+			return false;
+		}
 		const containerPath = `${scope}.${candidate.id}`;
 		if (candidate.kind === "compound") {
 			const waitingForActorDrain = [...Object.values(projection.actors), ...Object.values(projection.actorPools)].some(
@@ -2537,7 +2810,9 @@ function finalReachedViaOnDone(
 			);
 		}
 		const spawned = projection.spawns[containerPath];
-		if (spawned === undefined) return false;
+		if (spawned === undefined) {
+			return false;
+		}
 		const keys = Object.keys(spawned);
 		return (
 			keys.length > 0 &&
@@ -2553,7 +2828,9 @@ function mapItemStatus(
 	ast: ChartAst | undefined,
 ): HyperchartStateStatus {
 	const childFacts = [...runtime.byState.entries()].filter(([path]) => underScope(path, instancePath));
-	if (childFacts.some(([, facts]) => facts.completedEvent?.type === "FAILED")) return "failed";
+	if (childFacts.some(([, facts]) => facts.completedEvent?.type === "FAILED")) {
+		return "failed";
+	}
 	const activeLeaves = projection.activeLeaves.filter((leaf) => underScope(leaf, instancePath));
 	const waitingForActorDrain = [...Object.values(projection.actors), ...Object.values(projection.actorPools)].some(
 		(actor) =>
@@ -2561,14 +2838,20 @@ function mapItemStatus(
 			actor.owner !== undefined &&
 			(actor.owner === instancePath || underScope(actor.owner, instancePath)),
 	);
-	if (waitingForActorDrain) return "waiting";
+	if (waitingForActorDrain) {
+		return "waiting";
+	}
 	if (ast !== undefined) {
 		const activeStatus = activeLeavesStatus(activeLeaves, ast, runtime, true);
-		if (activeStatus !== undefined) return activeStatus;
+		if (activeStatus !== undefined) {
+			return activeStatus;
+		}
 	} else if (activeLeaves.length > 0) {
 		return "running";
 	}
-	if (childFacts.some(([, facts]) => facts.completedAt !== undefined)) return "done";
+	if (childFacts.some(([, facts]) => facts.completedAt !== undefined)) {
+		return "done";
+	}
 	return "pending";
 }
 
@@ -2621,16 +2904,23 @@ function fanoutProgressForScope(
 	let failed = 0;
 	for (const childScope of scopes) {
 		const status = scopeStatus(childScope, projection, runtime, ast);
-		if (status === "done") done++;
-		else if (status === "failed") failed++;
-		else if (status === "waiting") waiting++;
-		else if (status === "running") running++;
+		if (status === "done") {
+			done++;
+		} else if (status === "failed") {
+			failed++;
+		} else if (status === "waiting") {
+			waiting++;
+		} else if (status === "running") {
+			running++;
+		}
 	}
 	return { done, running, failed, total: scopes.length, ...(waiting === 0 ? {} : { waiting }) };
 }
 
 function directChildScope(scope: StatePath, leaf: StatePath): string | undefined {
-	if (!underScope(leaf, scope) || leaf === scope) return undefined;
+	if (!underScope(leaf, scope) || leaf === scope) {
+		return undefined;
+	}
 	const rest = leaf.startsWith(`${scope}.`)
 		? leaf.slice(scope.length + 1)
 		: leaf.startsWith(`${scope}#`)
@@ -2647,22 +2937,30 @@ function scopeStatus(
 	ast: ChartAst | undefined,
 ): HyperchartStateStatus {
 	const facts = [...runtime.byState.entries()].filter(([path]) => underScope(path, scope));
-	if (facts.some(([, fact]) => fact.completedEvent?.type === "FAILED")) return "failed";
+	if (facts.some(([, fact]) => fact.completedEvent?.type === "FAILED")) {
+		return "failed";
+	}
 	const activeLeaves = projection.activeLeaves.filter((leaf) => underScope(leaf, scope));
 	if (ast !== undefined) {
 		const activeStatus = activeLeavesStatus(activeLeaves, ast, runtime, true);
-		if (activeStatus !== undefined) return activeStatus;
+		if (activeStatus !== undefined) {
+			return activeStatus;
+		}
 	} else if (activeLeaves.length > 0) {
 		return "running";
 	}
-	if (facts.some(([, fact]) => fact.completedAt !== undefined)) return "done";
+	if (facts.some(([, fact]) => fact.completedAt !== undefined)) {
+		return "done";
+	}
 	return "pending";
 }
 
 function scopeIssueCount(scope: StatePath, runtime: RuntimeFacts): number {
 	let count = 0;
 	for (const [path, issues] of runtime.issuesByState) {
-		if (underScope(path, scope)) count += issues.length;
+		if (underScope(path, scope)) {
+			count += issues.length;
+		}
 	}
 	return count;
 }
@@ -2717,7 +3015,9 @@ function guardInfo(
 }
 
 function refsInfo(refs: HyperchartInspectState["refs"]): HyperchartRefInfo | undefined {
-	if (!refs || refs.length === 0) return undefined;
+	if (!refs || refs.length === 0) {
+		return undefined;
+	}
 	const grouped: HyperchartRefInfo = {};
 	for (const ref of refs) {
 		appendRef(grouped, ref.kind === "artifactOf" || ref.kind === "joinArtifactOf" ? "artifact" : ref.kind, ref.preview);
@@ -2730,17 +3030,23 @@ function appendRef(grouped: HyperchartRefInfo, kind: keyof HyperchartRefInfo, pr
 }
 
 function previewText(text: string | undefined): string | undefined {
-	if (!text) return undefined;
+	if (!text) {
+		return undefined;
+	}
 	return text.length > 220 ? `${text.slice(0, 219)}…` : text;
 }
 
 function isInspectResult(value: unknown): value is HyperchartInspectResult {
-	if (!isRecord(value)) return false;
+	if (!isRecord(value)) {
+		return false;
+	}
 	return typeof value.chartId === "string" && Array.isArray(value.states);
 }
 
 function isRunInfo(value: unknown): value is HyperchartRunInfo {
-	if (!isRecord(value)) return false;
+	if (!isRecord(value)) {
+		return false;
+	}
 	return typeof value.runId === "string" && typeof value.chartName === "string" && Array.isArray(value.states);
 }
 

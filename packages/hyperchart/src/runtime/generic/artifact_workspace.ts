@@ -15,7 +15,9 @@ export async function materializeWorkspaceFromPins(
 	const entries = pins instanceof Map ? pins : Object.entries(pins);
 	for (const [authoredPath, pin] of entries) {
 		const targetPath = renderedArtifactPath({ path: authoredPath } satisfies RenderedArtifact, targetDir);
-		if (await matchesHash(targetPath, pin.hash)) continue;
+		if (await matchesHash(targetPath, pin.hash)) {
+			continue;
+		}
 		let sourcePath: string;
 		try {
 			sourcePath = await artifactStore.get(pin.hash);

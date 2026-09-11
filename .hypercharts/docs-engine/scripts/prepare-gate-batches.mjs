@@ -4,7 +4,9 @@ import { emit, readJson, rejectAll } from "./doc-checks.mjs";
 
 const batchCount = Number.parseInt(process.env.BATCH_COUNT ?? "3", 10);
 const gateRound = Number.parseInt(process.env.GATE_ROUND ?? "1", 10);
-if (!Number.isInteger(batchCount) || batchCount < 1) rejectAll(["BATCH_COUNT must be a positive integer"]);
+if (!Number.isInteger(batchCount) || batchCount < 1) {
+	rejectAll(["BATCH_COUNT must be a positive integer"]);
+}
 
 let findingFiles;
 try {
@@ -20,8 +22,12 @@ const units = readJson(process.env.UNITS_FILE ?? "").items ?? {};
 const groups = findingFiles.map((path) => {
 	const artifact = readJson(path);
 	const unit = units[artifact.unitId];
-	if (!unit) rejectAll([`Unknown unitId '${artifact.unitId}' in ${path}`]);
-	if (!Array.isArray(artifact.findings)) rejectAll([`${path} findings must be an array`]);
+	if (!unit) {
+		rejectAll([`Unknown unitId '${artifact.unitId}' in ${path}`]);
+	}
+	if (!Array.isArray(artifact.findings)) {
+		rejectAll([`${path} findings must be an array`]);
+	}
 	return {
 		unitId: artifact.unitId,
 		entries: artifact.findings.map((finding, findingIndex) => ({

@@ -26,7 +26,9 @@ type Tool = {
 const roots: string[] = [];
 afterEach(async () => {
 	await closeRunInspectorServer();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 	vi.unstubAllEnvs();
 });
 
@@ -40,8 +42,9 @@ for (const kind of ["jsonl", "postgres"] as const) {
 			if (
 				kind === "postgres" &&
 				(dsn === undefined || !/^autodiscovery_(?:msagl_)?labnotes_test_\d+$/.test(new URL(dsn).pathname.slice(1)))
-			)
+			) {
 				throw new Error("Approved isolated labnotes database required");
+			}
 			const storage: RunStorage =
 				kind === "jsonl"
 					? { kind, rootDir: join(root, "runs"), layout: "sha256" }

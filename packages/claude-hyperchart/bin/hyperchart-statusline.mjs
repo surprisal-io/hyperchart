@@ -37,7 +37,9 @@ function readJson(path) {
 }
 
 function pidAlive(pid) {
-	if (typeof pid !== "number") return false;
+	if (typeof pid !== "number") {
+		return false;
+	}
 	try {
 		process.kill(pid, 0);
 		return true;
@@ -87,7 +89,9 @@ for (const runId of entries) {
 	const dir = resolveRunPaths(runId, storage).runDir;
 	const statusPath = join(dir, "status.json");
 	const status = readJson(statusPath);
-	if (status === undefined || typeof status.chartId !== "string") continue;
+	if (status === undefined || typeof status.chartId !== "string") {
+		continue;
+	}
 	const isLiveState = status.state === "starting" || status.state === "running" || status.state === "stopping";
 	if (isLiveState && pidAlive(status.pid)) {
 		live.push(liveLabel(dir, status));
@@ -96,7 +100,9 @@ for (const runId of entries) {
 		try {
 			mtime = statSync(statusPath).mtimeMs;
 		} catch {}
-		if (Date.now() - mtime < RECENT_TERMINAL_MS) recent.push(terminalLabel(status));
+		if (Date.now() - mtime < RECENT_TERMINAL_MS) {
+			recent.push(terminalLabel(status));
+		}
 	}
 }
 

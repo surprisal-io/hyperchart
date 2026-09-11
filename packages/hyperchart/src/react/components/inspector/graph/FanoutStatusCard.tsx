@@ -4,7 +4,9 @@ import { fanoutStatusSummary, mapItemDotClass } from "../helpers/fanout.js";
 
 export function FanoutStatusCard({ state, compact = false }: { state: HyperchartStateInfo; compact?: boolean }) {
 	const summary = fanoutStatusSummary(state);
-	if (!summary) return null;
+	if (!summary) {
+		return null;
+	}
 	const isMap = summary.kind === "map";
 	const Icon = isMap ? MapIcon : ArrowsRightLeftIcon;
 	const colorClass = isMap ? "text-[var(--hc-cyan-text)]" : "text-[var(--hc-blue-text)]";

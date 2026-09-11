@@ -3,18 +3,26 @@ import type { EventBindingDisplay, StateInput, StateTransition } from "../types.
 import { schemaAtPath, schemaTypeText } from "./schema.js";
 
 export function transitionBindingDisplay(binding: string): EventBindingDisplay {
-	if (binding === "event()") return { kind: "event" };
-	if (binding.startsWith("event:")) return { kind: "event", path: binding.slice("event:".length) };
+	if (binding === "event()") {
+		return { kind: "event" };
+	}
+	if (binding.startsWith("event:")) {
+		return { kind: "event", path: binding.slice("event:".length) };
+	}
 	return { kind: "unknown", preview: binding };
 }
 
 export function transitionBindingLabel(binding: EventBindingDisplay): string {
-	if (binding.kind === "unknown") return binding.preview;
+	if (binding.kind === "unknown") {
+		return binding.preview;
+	}
 	return binding.path === undefined ? "event()" : `event().${binding.path}`;
 }
 
 export function transitionBindingTitle(state: HyperchartStateInfo, binding: EventBindingDisplay): string {
-	if (binding.kind === "unknown") return "unknown";
+	if (binding.kind === "unknown") {
+		return "unknown";
+	}
 	const sourceSchema = schemaAtPath(state.replySchema, binding.path);
 	return sourceSchema ? schemaTypeText(sourceSchema) : "unknown";
 }
@@ -27,7 +35,9 @@ export function transitionTargetInput(
 	const direct = allStates
 		.find((candidate) => candidate.id === transition.target)
 		?.inputs?.find((candidate) => candidate.name === inputName);
-	if (direct) return direct;
+	if (direct) {
+		return direct;
+	}
 	const prefix = `${transition.target}.`;
 	return allStates
 		.find((candidate) => candidate.id.startsWith(prefix) && candidate.inputs?.some((input) => input.name === inputName))

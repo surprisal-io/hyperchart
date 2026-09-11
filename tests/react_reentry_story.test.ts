@@ -7,7 +7,9 @@ import { executionGraph } from "../packages/hyperchart/src/react/components/insp
 it("keeps each completed and current invocation distinct in the dialog story's execution graph", () => {
 	const args = ActionVisitReentry.args;
 	const run = args?.runs?.[0];
-	if (args === undefined || run === undefined) throw new Error("Re-entry story must supply a captured run");
+	if (args === undefined || run === undefined) {
+		throw new Error("Re-entry story must supply a captured run");
+	}
 	expect(run).toBe(actorReentryRun);
 	expect(args.selectedRunId).toBe(run.runId);
 	const rows = embeddedActionVisitRows(run);

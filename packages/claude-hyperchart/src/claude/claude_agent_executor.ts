@@ -143,20 +143,30 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 	}
 
 	async steer(actionKey: string, invokeSeqId: number, message: string): Promise<boolean> {
-		if (this.disposed) return false;
+		if (this.disposed) {
+			return false;
+		}
 		const live = this.live.get(actionKey);
-		if (live === undefined || effectInvokeSeqId(live.effect.id) !== invokeSeqId) return false;
+		if (live === undefined || effectInvokeSeqId(live.effect.id) !== invokeSeqId) {
+			return false;
+		}
 		live.session.steer(message);
 		return true;
 	}
 
 	cancel(actionUid: ActionUID): Promise<void> {
-		if (this.disposed) return this.disposal ?? Promise.resolve();
+		if (this.disposed) {
+			return this.disposal ?? Promise.resolve();
+		}
 		const key = actionUidKey(actionUid);
 		const existing = this.cancellations.get(key);
-		if (existing !== undefined) return existing;
+		if (existing !== undefined) {
+			return existing;
+		}
 		const generation = this.generations.current(key);
-		if (generation === undefined) return Promise.resolve();
+		if (generation === undefined) {
+			return Promise.resolve();
+		}
 		this.generations.markCancelled(key, generation);
 		const live = this.live.get(key);
 		if (live !== undefined) {
@@ -165,23 +175,31 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		}
 		const run = this.runs.get(key)?.get(generation);
 		const cancellation = (async () => {
-			if (live !== undefined) await this.cleanupSession(live.session);
+			if (live !== undefined) {
+				await this.cleanupSession(live.session);
+			}
 			await run;
 		})();
 		this.cancellations.set(key, cancellation);
 		void cancellation.then(
 			() => {
-				if (this.cancellations.get(key) === cancellation) this.cancellations.delete(key);
+				if (this.cancellations.get(key) === cancellation) {
+					this.cancellations.delete(key);
+				}
 			},
 			() => {
-				if (this.cancellations.get(key) === cancellation) this.cancellations.delete(key);
+				if (this.cancellations.get(key) === cancellation) {
+					this.cancellations.delete(key);
+				}
 			},
 		);
 		return cancellation;
 	}
 
 	dispose(): Promise<void> {
-		if (this.disposal !== undefined) return this.disposal;
+		if (this.disposal !== undefined) {
+			return this.disposal;
+		}
 		this.disposed = true;
 		this.disposal = this.disposeTrackedWork();
 		return this.disposal;
@@ -189,7 +207,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 
 	private async disposeTrackedWork(): Promise<void> {
 		for (const [key, runs] of this.runs) {
-			for (const generation of runs.keys()) this.generations.markCancelled(key, generation);
+			for (const generation of runs.keys()) {
+				this.generations.markCancelled(key, generation);
+			}
 		}
 		const cleanup = [...this.live.entries()].map(([key, live]) => {
 			this.generations.markCancelled(key, live.generation);
@@ -218,7 +238,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		this.cancellations.clear();
 		this.cleanupTasks.clear();
 		this.cleanupFailures.length = 0;
-		if (failures.length > 0) throw new AggregateError(failures, "Failed to dispose Claude agent executor cleanly");
+		if (failures.length > 0) {
+			throw new AggregateError(failures, "Failed to dispose Claude agent executor cleanly");
+		}
 	}
 
 	private launch(key: string, generation: number, run: Promise<void>): void {
@@ -229,9 +251,13 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		}
 		const tracked = run.finally(() => {
 			const current = this.runs.get(key);
-			if (current?.get(generation) !== tracked) return;
+			if (current?.get(generation) !== tracked) {
+				return;
+			}
 			current.delete(generation);
-			if (current.size === 0) this.runs.delete(key);
+			if (current.size === 0) {
+				this.runs.delete(key);
+			}
 		});
 		runs.set(generation, tracked);
 		void tracked;
@@ -245,7 +271,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		terminal: TerminalEmitState,
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		const previousProgress = readSessionProgress(this.options.sessionsDir).sessions[
 			sessionProgressKey(effect.actionUid, effect.id, this.options.branchId)
 		];
@@ -264,11 +292,15 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			error: undefined,
 		});
 		const definition = loadAgentDefinition(effect.action.name, this.definitionDirs);
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		// Validate every declared read before considering any restored session. A resumed session
 		// must not bypass the local-artifact/URL boundary that a fresh run enforces.
 		const reads = await resolveReads(effect, this.options.workDir, this.options.schemaRegistry);
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		const dir = actionSessionDir(this.options.sessionsDir, this.options.branchId, effect);
 		const restored = restoredTranscript(this.options.sessionsDir, this.options.branchId, dir, effect, runOptions);
 		const plan = buildSessionPlan(definition, effect, {
@@ -286,7 +318,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 				this.options.schemaRegistry,
 			);
 			const validated = await captured;
-			if (this.isStopped(key, generation)) return;
+			if (this.isStopped(key, generation)) {
+				return;
+			}
 			if (validated !== undefined) {
 				sink.captured = validated;
 				this.updateProgress(effect, {
@@ -318,7 +352,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 					lastAssistantText: () => undefined,
 					checkArtifacts: () => checkEffectArtifacts(effect, this.options.workDir, this.options.schemaRegistry),
 				});
-				if (outcome !== undefined) this.safeEmit(key, generation, emit, outcome, terminal);
+				if (outcome !== undefined) {
+					this.safeEmit(key, generation, emit, outcome, terminal);
+				}
 				return;
 			}
 		}
@@ -360,9 +396,13 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 						.filter((part): part is string => part !== undefined)
 						.join("\n\n");
 		try {
-			if (this.isStopped(key, generation)) return;
+			if (this.isStopped(key, generation)) {
+				return;
+			}
 			await session.prompt(initialPrompt);
-			if (this.isStopped(key, generation)) return;
+			if (this.isStopped(key, generation)) {
+				return;
+			}
 			const outcome = await evaluateAgentTurn({
 				effect,
 				sink,
@@ -370,9 +410,13 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 				lastAssistantText: () => session.lastAssistantText(),
 				checkArtifacts: () => checkEffectArtifacts(effect, this.options.workDir, this.options.schemaRegistry),
 			});
-			if (outcome !== undefined) this.safeEmit(key, generation, emit, outcome, terminal);
+			if (outcome !== undefined) {
+				this.safeEmit(key, generation, emit, outcome, terminal);
+			}
 		} finally {
-			if (this.live.get(key) === live) this.live.delete(key);
+			if (this.live.get(key) === live) {
+				this.live.delete(key);
+			}
 			session.end();
 			try {
 				await session.settled();
@@ -420,8 +464,12 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 			this.cleanupFailures.push(error);
 			return;
 		}
-		if (this.disposed && error instanceof SessionCleanupError) this.cleanupFailures.push(error);
-		if (!this.isStopped(key, generation)) this.markProgressFailed(effect, errorMessage(error));
+		if (this.disposed && error instanceof SessionCleanupError) {
+			this.cleanupFailures.push(error);
+		}
+		if (!this.isStopped(key, generation)) {
+			this.markProgressFailed(effect, errorMessage(error));
+		}
 		this.safeEmit(
 			key,
 			generation,
@@ -443,7 +491,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		} catch (error) {
 			failures.push(error);
 		}
-		if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to clean up Claude agent session");
+		if (failures.length > 0) {
+			throw new SessionCleanupError(failures, "Failed to clean up Claude agent session");
+		}
 	}
 
 	private safeEmit(
@@ -453,7 +503,9 @@ export class ClaudeAgentExecutor implements AgentExecutor {
 		outcome: AgentOutcome,
 		terminal: TerminalEmitState,
 	): void {
-		if (terminal.emitted || this.isStopped(key, generation)) return;
+		if (terminal.emitted || this.isStopped(key, generation)) {
+			return;
+		}
 		terminal.emitted = true;
 		emit(outcome);
 	}
@@ -509,14 +561,18 @@ class ClaudeSession {
 		const messages = this.options.queryFn({ prompt: this.input.iterable, options: this.buildOptions() });
 		this.consumeLoop = this.consume(messages).catch((error: unknown) => {
 			this.streamError = error;
-			for (const waiter of this.turnWaiters.splice(0)) waiter.reject(error);
+			for (const waiter of this.turnWaiters.splice(0)) {
+				waiter.reject(error);
+			}
 			throw error;
 		});
 		this.consumeLoop.catch(() => undefined);
 	}
 
 	async prompt(text: string): Promise<void> {
-		if (this.streamError !== undefined) throw this.streamError;
+		if (this.streamError !== undefined) {
+			throw this.streamError;
+		}
 		this.recordUserMessage(text);
 		const done = new Promise<void>((resolve, reject) => {
 			this.turnWaiters.push({ resolve, reject });
@@ -620,10 +676,14 @@ class ClaudeSession {
 					const reparsed = reparseStringOutput(args as FinishParams);
 					if (reparsed !== undefined) {
 						const retry = await validateFinishParams(effect, reparsed, schemaRegistry);
-						if (retry.ok) result = retry;
+						if (retry.ok) {
+							result = retry;
+						}
 					}
 				}
-				if (!result.ok) return { content: [{ type: "text" as const, text: result.errors.join("\n") }], isError: true };
+				if (!result.ok) {
+					return { content: [{ type: "text" as const, text: result.errors.join("\n") }], isError: true };
+				}
 				if (sink.captured !== undefined) {
 					return {
 						content: [{ type: "text" as const, text: "finish has already been called for this assignment" }],
@@ -647,12 +707,18 @@ class ClaudeSession {
 				this.onResult(message.usage as unknown, message.is_error ? collectResultErrors(message) : undefined);
 				continue;
 			}
-			if (this.muted) continue;
+			if (this.muted) {
+				continue;
+			}
 			if (message.type === "stream_event") {
 				const event = message.event;
 				if (event.type === "content_block_delta") {
-					if (event.delta.type === "text_delta") this.stream.appendText(event.delta.text);
-					if (event.delta.type === "thinking_delta") this.stream.appendReasoning(event.delta.thinking);
+					if (event.delta.type === "text_delta") {
+						this.stream.appendText(event.delta.text);
+					}
+					if (event.delta.type === "thinking_delta") {
+						this.stream.appendReasoning(event.delta.thinking);
+					}
 				}
 				continue;
 			}
@@ -666,15 +732,20 @@ class ClaudeSession {
 		}
 		// Stream ended (input closed or aborted); fail any prompt still waiting.
 		const remaining = this.turnWaiters.splice(0);
-		for (const waiter of remaining)
+		for (const waiter of remaining) {
 			waiter.reject(this.streamError ?? new Error("Claude session ended before the turn completed"));
+		}
 	}
 
 	private onInit(sessionId: string, model: string): void {
-		if (this.muted) return;
+		if (this.muted) {
+			return;
+		}
 		if (this.writer === undefined) {
 			this.writer = createNeutralTranscriptWriter(join(this.options.sessionDir, `${sessionId}.jsonl`), sessionId);
-			for (const record of this.pendingRecords.splice(0)) this.writer.append(record);
+			for (const record of this.pendingRecords.splice(0)) {
+				this.writer.append(record);
+			}
 		}
 		this.updateProgress({
 			actionName: this.options.definition.name,
@@ -692,7 +763,9 @@ class ClaudeSession {
 	private onAssistant(message: { content?: unknown; usage?: unknown }): void {
 		const blocks = Array.isArray(message.content) ? message.content : [];
 		for (const block of blocks) {
-			if (!isRecord(block)) continue;
+			if (!isRecord(block)) {
+				continue;
+			}
 			if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) {
 				this.appendRecord({ role: "reasoning", text: block.thinking });
 			}
@@ -737,9 +810,13 @@ class ClaudeSession {
 		let sawToolResult = false;
 		let toolError = false;
 		for (const block of blocks) {
-			if (!isRecord(block) || block.type !== "tool_result") continue;
+			if (!isRecord(block) || block.type !== "tool_result") {
+				continue;
+			}
 			sawToolResult = true;
-			if (block.is_error === true) toolError = true;
+			if (block.is_error === true) {
+				toolError = true;
+			}
 			this.appendRecord({
 				role: "tool",
 				toolName: "tool",
@@ -782,7 +859,9 @@ class ClaudeSession {
 	}
 
 	private updateProgress(patch: Parameters<typeof updateSessionProgress>[2]): void {
-		if (this.muted) return;
+		if (this.muted) {
+			return;
+		}
 		updateSessionProgress(
 			this.options.sessionsDir,
 			this.options.effect.actionUid,
@@ -795,8 +874,11 @@ class ClaudeSession {
 	private resolveTurn(error: string | undefined): void {
 		const waiter = this.turnWaiters.shift();
 		if (waiter !== undefined) {
-			if (error !== undefined) waiter.reject(new Error(error));
-			else waiter.resolve();
+			if (error !== undefined) {
+				waiter.reject(new Error(error));
+			} else {
+				waiter.resolve();
+			}
 		}
 	}
 
@@ -823,15 +905,23 @@ export async function findCapturedFinishInTranscript(
 	registry?: SchemaRegistry,
 ): Promise<ChartEvent | undefined> {
 	const messages = readNeutralSessionTranscript(sessionsDir, transcriptPath);
-	if (messages === undefined) return undefined;
+	if (messages === undefined) {
+		return undefined;
+	}
 	let lastUser = -1;
 	messages.forEach((message, index) => {
-		if (message.role === "user") lastUser = index;
+		if (message.role === "user") {
+			lastUser = index;
+		}
 	});
 	let captured: ChartEvent | undefined;
 	for (const message of messages.slice(lastUser + 1)) {
-		if (message.role !== "tool" || message.toolName !== "finish") continue;
-		if (message.toolStatus !== "completed" || message.isError === true) continue;
+		if (message.role !== "tool" || message.toolName !== "finish") {
+			continue;
+		}
+		if (message.toolStatus !== "completed" || message.isError === true) {
+			continue;
+		}
 		let params: FinishParams;
 		try {
 			params = JSON.parse(message.toolInput ?? "") as FinishParams;
@@ -839,7 +929,9 @@ export async function findCapturedFinishInTranscript(
 			continue;
 		}
 		const result = await validateFinishParams(effect, params, registry);
-		if (result.ok) captured = result.event;
+		if (result.ok) {
+			captured = result.event;
+		}
 	}
 	return captured;
 }
@@ -852,7 +944,9 @@ function restoredTranscript(
 	runOptions: RunOptions,
 ): { path: string; sessionId: string } | undefined {
 	const candidate = restoredTranscriptPath(sessionsDir, branchId, dir, effect, runOptions);
-	if (candidate === undefined) return undefined;
+	if (candidate === undefined) {
+		return undefined;
+	}
 	const sessionId = transcriptSessionId(candidate);
 	return sessionId === undefined ? undefined : { path: candidate, sessionId };
 }
@@ -864,7 +958,9 @@ function restoredTranscriptPath(
 	effect: AgentEffect,
 	runOptions: RunOptions,
 ): string | undefined {
-	if (runOptions.forceNewSession) return undefined;
+	if (runOptions.forceNewSession) {
+		return undefined;
+	}
 	if (runOptions.resumeSessionFile !== undefined && existsSync(runOptions.resumeSessionFile)) {
 		return runOptions.resumeSessionFile;
 	}
@@ -877,9 +973,13 @@ function restoredTranscriptPath(
 function transcriptSessionId(path: string): string | undefined {
 	try {
 		const firstLine = readFileSync(path, "utf8").split("\n", 1)[0];
-		if (firstLine === undefined) return undefined;
+		if (firstLine === undefined) {
+			return undefined;
+		}
 		const parsed = JSON.parse(firstLine) as { hyperchartTranscript?: unknown; sessionId?: unknown };
-		if (parsed.hyperchartTranscript !== 1 || typeof parsed.sessionId !== "string") return undefined;
+		if (parsed.hyperchartTranscript !== 1 || typeof parsed.sessionId !== "string") {
+			return undefined;
+		}
 		return parsed.sessionId;
 	} catch {
 		return undefined;
@@ -887,7 +987,9 @@ function transcriptSessionId(path: string): string | undefined {
 }
 
 function latestTranscript(dir: string): string | undefined {
-	if (!existsSync(dir)) return undefined;
+	if (!existsSync(dir)) {
+		return undefined;
+	}
 	return readdirSync(dir)
 		.filter((file) => file.endsWith(".jsonl"))
 		.map((file) => join(dir, file))
@@ -900,14 +1002,20 @@ function latestTranscriptForPreviousActionSession(
 	effect: AgentEffect,
 ): string | undefined {
 	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid));
-	if (!existsSync(root)) return undefined;
+	if (!existsSync(root)) {
+		return undefined;
+	}
 	const currentKey = sanitizeSegment(sessionKey(effect.id));
 	const candidates: string[] = [];
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		if (!entry.isDirectory() || entry.name === currentKey) continue;
+		if (!entry.isDirectory() || entry.name === currentKey) {
+			continue;
+		}
 		const dir = join(root, entry.name);
 		for (const file of readdirSync(dir)) {
-			if (file.endsWith(".jsonl")) candidates.push(join(dir, file));
+			if (file.endsWith(".jsonl")) {
+				candidates.push(join(dir, file));
+			}
 		}
 	}
 	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
@@ -917,7 +1025,9 @@ function latestTranscriptForPreviousActionSession(
 // model as a string, so structured replies arrive JSON-encoded. When raw validation
 // fails, retry with the parsed value; genuine string replies pass raw validation first.
 function reparseStringOutput(params: FinishParams): FinishParams | undefined {
-	if (typeof params.output !== "string") return undefined;
+	if (typeof params.output !== "string") {
+		return undefined;
+	}
 	try {
 		return { ...params, output: JSON.parse(params.output) };
 	} catch {
@@ -926,8 +1036,12 @@ function reparseStringOutput(params: FinishParams): FinishParams | undefined {
 }
 
 function thinkingOptions(level: ThinkingLevel | undefined): Pick<Options, "thinking" | "effort"> {
-	if (level === undefined) return {};
-	if (level === "off") return { thinking: { type: "disabled" } };
+	if (level === undefined) {
+		return {};
+	}
+	if (level === "off") {
+		return { thinking: { type: "disabled" } };
+	}
 	return { thinking: { type: "adaptive" }, effort: level === "minimal" ? "low" : level };
 }
 
@@ -944,8 +1058,12 @@ function createInputQueue(): {
 			return {
 				next(): Promise<IteratorResult<SDKUserMessage>> {
 					const value = buffer.shift();
-					if (value !== undefined) return Promise.resolve({ done: false, value });
-					if (closed) return Promise.resolve({ done: true, value: undefined });
+					if (value !== undefined) {
+						return Promise.resolve({ done: false, value });
+					}
+					if (closed) {
+						return Promise.resolve({ done: true, value: undefined });
+					}
 					return new Promise((resolve) => {
 						waiting = resolve;
 					});
@@ -956,7 +1074,9 @@ function createInputQueue(): {
 	return {
 		iterable,
 		push(message) {
-			if (closed) return;
+			if (closed) {
+				return;
+			}
 			if (waiting !== undefined) {
 				const resolve = waiting;
 				waiting = undefined;
@@ -966,7 +1086,9 @@ function createInputQueue(): {
 			buffer.push(message);
 		},
 		close() {
-			if (closed) return;
+			if (closed) {
+				return;
+			}
 			closed = true;
 			if (waiting !== undefined) {
 				const resolve = waiting;
@@ -983,7 +1105,9 @@ function collectResultErrors(message: { subtype: string; errors?: unknown }): st
 }
 
 function usageTokens(usage: unknown): number {
-	if (!isRecord(usage)) return 0;
+	if (!isRecord(usage)) {
+		return 0;
+	}
 	const total = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]
 		.map((key) => (typeof usage[key] === "number" ? (usage[key] as number) : 0))
 		.reduce((sum, value) => sum + value, 0);
@@ -999,8 +1123,12 @@ function stringifyToolInput(input: unknown): string {
 }
 
 function toolResultText(content: unknown): string | undefined {
-	if (typeof content === "string") return content.length === 0 ? undefined : content;
-	if (!Array.isArray(content)) return undefined;
+	if (typeof content === "string") {
+		return content.length === 0 ? undefined : content;
+	}
+	if (!Array.isArray(content)) {
+		return undefined;
+	}
 	const parts = content.flatMap((block) =>
 		isRecord(block) && block.type === "text" && typeof block.text === "string" ? [block.text] : [],
 	);

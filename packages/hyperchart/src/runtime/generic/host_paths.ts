@@ -52,7 +52,9 @@ export function createHostPaths(config: HostPathsConfig): HostPaths {
 				config.userChartsDir,
 			);
 			const found = candidates.find((candidate) => isFile(candidate));
-			if (found !== undefined) return found;
+			if (found !== undefined) {
+				return found;
+			}
 			throw new Error(
 				`Hyperchart '${spec}' was not found. Looked in project, user, and cwd locations. Tried: ${candidates.join(", ")}`,
 			);
@@ -66,7 +68,9 @@ export function createHostPaths(config: HostPathsConfig): HostPaths {
 }
 
 export function listHyperchartFiles(root: string): string[] {
-	if (!isDirectory(root)) return [];
+	if (!isDirectory(root)) {
+		return [];
+	}
 	const files: string[] = [];
 	walk(root, files, root, new Set());
 	return files.filter((file) => file.endsWith(".chart.ts") || file.endsWith(".ts")).sort();
@@ -82,19 +86,29 @@ function chartPathCandidates(
 	const candidates: string[] = [];
 	if (!isAbsolute(spec) && !spec.startsWith(".")) {
 		for (const projectChartsDir of projectChartsDirs) {
-			for (const variant of variants) candidates.push(resolve(projectChartsDir, variant));
+			for (const variant of variants) {
+				candidates.push(resolve(projectChartsDir, variant));
+			}
 		}
 		if (userChartsDir !== undefined) {
-			for (const variant of variants) candidates.push(resolve(userChartsDir, variant));
+			for (const variant of variants) {
+				candidates.push(resolve(userChartsDir, variant));
+			}
 		}
 	}
-	for (const variant of variants) candidates.push(resolve(cwd, variant));
+	for (const variant of variants) {
+		candidates.push(resolve(cwd, variant));
+	}
 	return [...new Set(candidates)];
 }
 
 function chartNameVariants(spec: string): string[] {
-	if (hasKnownModuleExtension(spec)) return [spec];
-	if (extname(spec) !== "") return [spec];
+	if (hasKnownModuleExtension(spec)) {
+		return [spec];
+	}
+	if (extname(spec) !== "") {
+		return [spec];
+	}
 	return [`${spec}/chart.ts`, spec, `${spec}.chart.ts`, `${spec}.ts`];
 }
 
@@ -105,9 +119,13 @@ function hasKnownModuleExtension(spec: string): boolean {
 function findNearestProjectRoot(cwd: string, markers: readonly string[]): string | undefined {
 	let current = resolve(cwd);
 	while (true) {
-		if (markers.some((marker) => isDirectory(join(current, marker)))) return current;
+		if (markers.some((marker) => isDirectory(join(current, marker)))) {
+			return current;
+		}
 		const parent = resolve(current, "..");
-		if (parent === current) return undefined;
+		if (parent === current) {
+			return undefined;
+		}
 		current = parent;
 	}
 }
@@ -119,7 +137,9 @@ function walk(dir: string, files: string[], root: string, visitedDirectories: Se
 	} catch {
 		return;
 	}
-	if (visitedDirectories.has(realDirectory)) return;
+	if (visitedDirectories.has(realDirectory)) {
+		return;
+	}
 	visitedDirectories.add(realDirectory);
 	const bundleEntry = join(dir, "chart.ts");
 	if (dir !== root && isFile(bundleEntry)) {
@@ -127,7 +147,9 @@ function walk(dir: string, files: string[], root: string, visitedDirectories: Se
 		return;
 	}
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
-		if (entry.name === RUNS_DIR_NAME || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+		if (entry.name === RUNS_DIR_NAME || entry.name === "node_modules" || entry.name.startsWith(".")) {
+			continue;
+		}
 		const path = join(dir, entry.name);
 		if (entry.isDirectory() || (entry.isSymbolicLink() && isDirectory(path))) {
 			walk(path, files, root, visitedDirectories);

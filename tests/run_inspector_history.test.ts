@@ -26,7 +26,9 @@ import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_st
 
 const roots: string[] = [];
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 async function fixture() {
@@ -92,9 +94,13 @@ describe("run inspector stateless history source", () => {
 			`import { arg, chart, final, script, t } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "render", initial: "work", states: { work: { kind: "state", action: script("echo", [], { env: { TOPIC: t\`topic=\${arg("topic")}\` } }), transitions: { DONE: "done" } }, done: final() } });\n`,
 		);
 		const parsed = parseChartModuleSync(chartPath);
-		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		if (!parsed.ok) {
+			throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		}
 		const action = parsed.ast.states.work;
-		if (action?.kind !== "state") throw new Error("work action missing");
+		if (action?.kind !== "state") {
+			throw new Error("work action missing");
+		}
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.writeRunMeta({
 			runId,
@@ -116,7 +122,9 @@ describe("run inspector stateless history source", () => {
 			},
 		]);
 		const invokeSeqId = appended.find((record) => record.type === "state_action" && record.kind === "invoke")?.seqId;
-		if (invokeSeqId === undefined) throw new Error("visit invoke missing");
+		if (invokeSeqId === undefined) {
+			throw new Error("visit invoke missing");
+		}
 		writeFileSync(
 			join(runDir, "sessions", "progress.json"),
 			JSON.stringify({
@@ -169,9 +177,13 @@ describe("run inspector stateless history source", () => {
 			`import { chart, final, script } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "timeout", initial: "work", states: { work: { kind: "state", action: script("true"), after: { delayMs: 10, target: "timed" }, transitions: { DONE: "done" } }, timed: final(), done: final() } });`,
 		);
 		const parsed = parseChartModuleSync(chartPath);
-		if (!parsed.ok) throw new Error("timeout fixture invalid");
+		if (!parsed.ok) {
+			throw new Error("timeout fixture invalid");
+		}
 		const action = parsed.ast.states.work;
-		if (action?.kind !== "state") throw new Error("timeout action missing");
+		if (action?.kind !== "state") {
+			throw new Error("timeout action missing");
+		}
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.writeRunMeta({
 			runId,
@@ -283,7 +295,9 @@ describe("run inspector stateless history source", () => {
 			(record): record is Extract<DurableLogRecord, { type: "actor_messages_enqueued" }> =>
 				record.type === "actor_messages_enqueued",
 		);
-		if (enqueued === undefined) throw new Error("pool enqueue fixture missing");
+		if (enqueued === undefined) {
+			throw new Error("pool enqueue fixture missing");
+		}
 		const records = actorPoolCompleteRecords.filter(
 			(record) =>
 				record.seqId >= enqueued.seqId &&
@@ -300,8 +314,9 @@ describe("run inspector stateless history source", () => {
 			) ?? [];
 		for (const message of batch.messages) {
 			const parity = expected.find((candidate) => candidate.messageId === message.messageId);
-			if (parity === undefined || parity.workerIndex === undefined)
+			if (parity === undefined || parity.workerIndex === undefined) {
 				throw new Error("host actor message parity fixture missing");
+			}
 			expect(message).toMatchObject({
 				actorOccurrencePath: "@workers",
 				actorLogicalPath: "@workers",
@@ -325,9 +340,13 @@ describe("run inspector stateless history source", () => {
 			`import { agent, chart } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "loop", initial: "work", states: { work: { kind: "state", action: agent("worker"), transitions: { LOOP: "work" } } } });`,
 		);
 		const parsed = parseChartModuleSync(chartPath);
-		if (!parsed.ok) throw new Error("loop fixture invalid");
+		if (!parsed.ok) {
+			throw new Error("loop fixture invalid");
+		}
 		const state = parsed.ast.states.work;
-		if (state?.kind !== "state") throw new Error("loop action missing");
+		if (state?.kind !== "state") {
+			throw new Error("loop action missing");
+		}
 		const ancestry: DurableLogRecord[] = [
 			{ type: "args", args: {}, seqId: 1, parentId: null, branchId: "main", timestamp: 1 },
 		];
@@ -375,9 +394,13 @@ describe("run inspector stateless history source", () => {
 			`import { agent, chart } from "@surprisal/hyperchart"; export default chart({ kind: "chart", id: "branch-history", initial: "work", states: { work: { kind: "state", action: agent("worker"), transitions: { LOOP: "work" } } } });`,
 		);
 		const parsed = parseChartModuleSync(chartPath);
-		if (!parsed.ok) throw new Error("branch fixture invalid");
+		if (!parsed.ok) {
+			throw new Error("branch fixture invalid");
+		}
 		const state = parsed.ast.states.work;
-		if (state?.kind !== "state") throw new Error("branch action missing");
+		if (state?.kind !== "state") {
+			throw new Error("branch action missing");
+		}
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.writeRunMeta({
 			runId,

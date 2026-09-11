@@ -241,7 +241,9 @@ export function boundedModelEnvelope<T>(
 ): T {
 	const json = inspectModelEnvelope(payload);
 	const originalBytes = payloadBytes(json);
-	if (originalBytes <= MAX_TOOL_PAYLOAD_BYTES) return payload;
+	if (originalBytes <= MAX_TOOL_PAYLOAD_BYTES) {
+		return payload;
+	}
 	const replacement = fallback({ digest: digestText(json), originalBytes, maxBytes: MAX_TOOL_PAYLOAD_BYTES });
 	assertToolPayloadSafe(replacement);
 	return replacement;
@@ -264,30 +266,45 @@ export function serializeToolPayload<T>(payload: T): string {
 function inspectModelEnvelope(payload: unknown): string {
 	visitPayload(payload, new Set(), "$", false);
 	const json = JSON.stringify(payload);
-	if (json === undefined) throw new Error("Hyperchart model envelope is not JSON serializable");
+	if (json === undefined) {
+		throw new Error("Hyperchart model envelope is not JSON serializable");
+	}
 	return json;
 }
 
 function visitPayload(value: unknown, seen: Set<object>, path: string, inArray: boolean): void {
-	if (value === undefined && !inArray) return; // JSON object serialization omits undefined fields.
-	if (value === null || typeof value === "string" || typeof value === "boolean") return;
-	if (typeof value === "number") {
-		if (!Number.isFinite(value)) throw new Error(`Hyperchart model envelope contains a non-finite number at ${path}`);
+	if (value === undefined && !inArray) {
+		return; // JSON object serialization omits undefined fields.
+	}
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
 		return;
 	}
-	if (typeof value !== "object")
+	if (typeof value === "number") {
+		if (!Number.isFinite(value)) {
+			throw new Error(`Hyperchart model envelope contains a non-finite number at ${path}`);
+		}
+		return;
+	}
+	if (typeof value !== "object") {
 		throw new Error(`Hyperchart model envelope contains unsupported ${typeof value} at ${path}`);
-	if (seen.has(value)) throw new Error(`Hyperchart model envelope contains a circular value at ${path}`);
+	}
+	if (seen.has(value)) {
+		throw new Error(`Hyperchart model envelope contains a circular value at ${path}`);
+	}
 	seen.add(value);
 	if (Array.isArray(value)) {
-		for (let index = 0; index < value.length; index++) visitPayload(value[index], seen, `${path}[${index}]`, true);
+		for (let index = 0; index < value.length; index++) {
+			visitPayload(value[index], seen, `${path}[${index}]`, true);
+		}
 	} else {
 		const prototype = Object.getPrototypeOf(value);
-		if (prototype !== Object.prototype && prototype !== null)
+		if (prototype !== Object.prototype && prototype !== null) {
 			throw new Error(`Hyperchart model envelope contains a non-plain object at ${path}`);
+		}
 		for (const [key, child] of Object.entries(value)) {
-			if (!MODEL_ENVELOPE_FIELDS.has(key))
+			if (!MODEL_ENVELOPE_FIELDS.has(key)) {
 				throw new Error(`Hyperchart model envelope field '${key}' is not allowlisted at ${path}`);
+			}
 			visitPayload(child, seen, `${path}.${key}`, false);
 		}
 	}
@@ -342,8 +359,12 @@ export function summarizeUserGate(request: {
 	checkGateCollection(request.options, "$/options", "options");
 	const allowedEvents = request.events.filter((event) => event !== "FAILED");
 	checkGateCollection(allowedEvents, "$/allowedEvents", "allowedEvents");
-	for (const [index, event] of allowedEvents.entries()) assertGateIdentity(event, `$/allowedEvents/${index}`);
-	for (const [index, option] of request.options.entries()) assertGateIdentity(option, `$/options/${index}/value`);
+	for (const [index, event] of allowedEvents.entries()) {
+		assertGateIdentity(event, `$/allowedEvents/${index}`);
+	}
+	for (const [index, option] of request.options.entries()) {
+		assertGateIdentity(option, `$/options/${index}/value`);
+	}
 
 	const contract = summarizeReplyContract(request.reply);
 	const summary: UserGateSummary = {
@@ -441,7 +462,9 @@ export class ReplyContractSummaryError extends Error {
 
 /** Non-executable, recursively bounded guidance sufficient to construct a schema-valid JSON value. */
 export function summarizeReplyContract(reply: SchemaAst | undefined): ReplyContractSummary | undefined {
-	if (reply === undefined) return undefined;
+	if (reply === undefined) {
+		return undefined;
+	}
 	if (reply.runtimeContract !== undefined) {
 		throw summaryError(
 			"Exact runtime validation can contain constraints that are not serializable",
@@ -531,9 +554,15 @@ function summarizeReplySchema(
 			omittedCount: 1,
 		});
 	}
-	if (value === true) return { types: ["any"] };
-	if (value === false) throw summaryError("Reply contract contains an unsatisfiable false schema", path, "unsupported");
-	if (!isRecord(value)) throw summaryError("Reply contract contains a malformed schema node", path, "unsupported");
+	if (value === true) {
+		return { types: ["any"] };
+	}
+	if (value === false) {
+		throw summaryError("Reply contract contains an unsatisfiable false schema", path, "unsupported");
+	}
+	if (!isRecord(value)) {
+		throw summaryError("Reply contract contains a malformed schema node", path, "unsupported");
+	}
 	if (value.$ref !== undefined) {
 		const { ref, target } = resolveReplyRef(value, path, context);
 		// The ref stays open while its target is summarized so a self-referencing
@@ -547,7 +576,9 @@ function summarizeReplySchema(
 	}
 	const schema = value;
 	for (const key of Object.keys(schema)) {
-		if (!JSON_SCHEMA_KEYS.has(key)) throw summaryError(`Unsupported validation keyword '${key}'`, path, "unsupported");
+		if (!JSON_SCHEMA_KEYS.has(key)) {
+			throw summaryError(`Unsupported validation keyword '${key}'`, path, "unsupported");
+		}
 	}
 	const types = replySchemaTypes(schema, path);
 	const result: ReplySchemaSummary = {
@@ -555,11 +586,16 @@ function summarizeReplySchema(
 		...(types.includes("null") ? { nullable: true as const } : {}),
 	};
 
-	if ("const" in schema) result.literalJson = exactJson(schema.const, `${path}/const`, MAX_REPLY_SCHEMA_STRING_CHARS);
+	if ("const" in schema) {
+		result.literalJson = exactJson(schema.const, `${path}/const`, MAX_REPLY_SCHEMA_STRING_CHARS);
+	}
 	if (schema.enum !== undefined) {
-		if (!Array.isArray(schema.enum)) throw summaryError("Schema enum must be an array", `${path}/enum`, "unsupported");
-		if (schema.enum.length === 0)
+		if (!Array.isArray(schema.enum)) {
+			throw summaryError("Schema enum must be an array", `${path}/enum`, "unsupported");
+		}
+		if (schema.enum.length === 0) {
 			throw summaryError("An empty enum has no constructible value", `${path}/enum`, "unsupported");
+		}
 		checkCollection(schema.enum, `${path}/enum`, "allowedValueJson");
 		result.allowedValueJson = schema.enum.map((entry, index) =>
 			exactJson(entry, `${path}/enum/${index}`, MAX_REPLY_SCHEMA_STRING_CHARS),
@@ -572,8 +608,9 @@ function summarizeReplySchema(
 
 	const properties = schema.properties;
 	if (properties !== undefined) {
-		if (!isRecord(properties))
+		if (!isRecord(properties)) {
 			throw summaryError("Schema properties must be an object", `${path}/properties`, "unsupported");
+		}
 		const entries = Object.entries(properties);
 		checkCollection(entries, `${path}/properties`, "fields");
 		const requiredValues = schema.required === undefined ? [] : schema.required;
@@ -583,12 +620,13 @@ function summarizeReplySchema(
 		checkCollection(requiredValues, `${path}/required`, "required");
 		const names = new Set(entries.map(([name]) => name));
 		for (const requiredName of requiredValues as string[]) {
-			if (!names.has(requiredName))
+			if (!names.has(requiredName)) {
 				throw summaryError(
 					`Required property '${requiredName}' has no constructible property schema`,
 					`${path}/required`,
 					"unsupported",
 				);
+			}
 		}
 		const required = new Set(requiredValues as string[]);
 		result.fields = entries.map(([name, field]) => {
@@ -603,10 +641,11 @@ function summarizeReplySchema(
 		});
 	}
 	if (types.includes("object") || properties !== undefined || schema.additionalProperties !== undefined) {
-		if (schema.additionalProperties === false) result.additionalProperties = "forbidden";
-		else if (schema.additionalProperties === undefined || schema.additionalProperties === true)
+		if (schema.additionalProperties === false) {
+			result.additionalProperties = "forbidden";
+		} else if (schema.additionalProperties === undefined || schema.additionalProperties === true) {
 			result.additionalProperties = "allowed";
-		else {
+		} else {
 			result.additionalProperties = "schema";
 			result.additionalValue = summarizeReplySchema(
 				schema.additionalProperties,
@@ -616,30 +655,39 @@ function summarizeReplySchema(
 			);
 		}
 	}
-	if (schema.propertyNames !== undefined)
+	if (schema.propertyNames !== undefined) {
 		result.propertyNames = summarizeReplySchema(schema.propertyNames, `${path}/propertyNames`, depth + 1, context);
-	if (schema.items !== undefined)
+	}
+	if (schema.items !== undefined) {
 		result.element = summarizeReplySchema(schema.items, `${path}/items`, depth + 1, context);
+	}
 	if (schema.prefixItems !== undefined) {
-		if (!Array.isArray(schema.prefixItems))
+		if (!Array.isArray(schema.prefixItems)) {
 			throw summaryError("Schema prefixItems must be an array", `${path}/prefixItems`, "unsupported");
+		}
 		checkCollection(schema.prefixItems, `${path}/prefixItems`, "tupleItems");
 		result.tupleItems = schema.prefixItems.map((entry, index) =>
 			summarizeReplySchema(entry, `${path}/prefixItems/${index}`, depth + 1, context),
 		);
 	}
-	if (schema.contains !== undefined)
+	if (schema.contains !== undefined) {
 		result.contains = summarizeReplySchema(schema.contains, `${path}/contains`, depth + 1, context);
+	}
 
 	for (const mode of ["anyOf", "oneOf", "allOf"] as const) {
-		if (schema[mode] === undefined) continue;
-		if (result.alternatives !== undefined)
+		if (schema[mode] === undefined) {
+			continue;
+		}
+		if (result.alternatives !== undefined) {
 			throw summaryError("Multiple alternative combinators on one schema node are not supported", path, "unsupported");
+		}
 		const alternatives = schema[mode];
-		if (!Array.isArray(alternatives))
+		if (!Array.isArray(alternatives)) {
 			throw summaryError(`Schema ${mode} must be an array`, `${path}/${mode}`, "unsupported");
-		if (alternatives.length === 0 && mode !== "allOf")
+		}
+		if (alternatives.length === 0 && mode !== "allOf") {
 			throw summaryError(`An empty ${mode} has no constructible value`, `${path}/${mode}`, "unsupported");
+		}
 		checkCollection(alternatives, `${path}/${mode}`, "alternatives");
 		result.alternativeMode = mode;
 		result.alternatives = alternatives.map((entry, index) =>
@@ -648,12 +696,19 @@ function summarizeReplySchema(
 		if (types.length === 1 && types[0] === "any") {
 			result.types = [...new Set(result.alternatives.flatMap((alternative) => alternative.types))];
 		}
-		if (result.alternatives.some((alternative) => alternative.nullable === true || alternative.types.includes("null")))
+		if (
+			result.alternatives.some((alternative) => alternative.nullable === true || alternative.types.includes("null"))
+		) {
 			result.nullable = true;
+		}
 	}
-	if (schema.not !== undefined) result.not = summarizeReplySchema(schema.not, `${path}/not`, depth + 1, context);
+	if (schema.not !== undefined) {
+		result.not = summarizeReplySchema(schema.not, `${path}/not`, depth + 1, context);
+	}
 	const constraints = replySchemaConstraints(schema, path);
-	if (Object.keys(constraints).length > 0) result.constraints = constraints;
+	if (Object.keys(constraints).length > 0) {
+		result.constraints = constraints;
+	}
 	return result;
 }
 
@@ -665,52 +720,65 @@ function resolveReplyRef(
 	path: string,
 	context: ReplySummaryContext,
 ): { ref: string; target: Record<string, unknown> } {
-	if (typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/"))
+	if (typeof schema.$ref !== "string" || !schema.$ref.startsWith("#/")) {
 		throw summaryError("Only local JSON Schema references are supported", `${path}/$ref`, "unsupported");
+	}
 	if (Object.keys(schema).some((key) => key !== "$ref" && !REF_SIBLING_KEYS.has(key))) {
 		throw summaryError("A referenced schema with sibling validation keywords is not supported", path, "unsupported");
 	}
 	const ref = schema.$ref;
-	if (context.refs.has(ref))
+	if (context.refs.has(ref)) {
 		throw summaryError(
 			`Recursive schema reference '${ref}' cannot be represented within a finite gate contract`,
 			`${path}/$ref`,
 			"unsupported",
 		);
+	}
 	let target: unknown = context.root;
 	for (const rawSegment of ref.slice(2).split("/")) {
 		const segment = rawSegment.replaceAll("~1", "/").replaceAll("~0", "~");
-		if (!isRecord(target) || !(segment in target))
+		if (!isRecord(target) || !(segment in target)) {
 			throw summaryError(`Unresolved schema reference '${ref}'`, `${path}/$ref`, "unsupported");
+		}
 		target = target[segment];
 	}
-	if (!isRecord(target))
+	if (!isRecord(target)) {
 		throw summaryError(`Schema reference '${ref}' does not resolve to an object`, `${path}/$ref`, "unsupported");
+	}
 	return { ref, target: { ...target } };
 }
 
 function replySchemaTypes(schema: Record<string, unknown>, path: string): string[] {
 	const raw = schema.type;
 	let types: string[];
-	if (typeof raw === "string") types = [raw];
-	else if (Array.isArray(raw) && raw.every((entry) => typeof entry === "string")) types = [...new Set(raw as string[])];
-	else if (raw !== undefined)
+	if (typeof raw === "string") {
+		types = [raw];
+	} else if (Array.isArray(raw) && raw.every((entry) => typeof entry === "string")) {
+		types = [...new Set(raw as string[])];
+	} else if (raw !== undefined) {
 		throw summaryError("Schema type must be a string or string array", `${path}/type`, "unsupported");
-	else if (
+	} else if (
 		schema.properties !== undefined ||
 		schema.additionalProperties !== undefined ||
 		schema.propertyNames !== undefined
-	)
+	) {
 		types = ["object"];
-	else if (schema.items !== undefined || schema.prefixItems !== undefined || schema.contains !== undefined)
+	} else if (schema.items !== undefined || schema.prefixItems !== undefined || schema.contains !== undefined) {
 		types = ["array"];
-	else if ("const" in schema) types = [jsonValueType(schema.const)];
-	else if (Array.isArray(schema.enum)) types = [...new Set(schema.enum.map(jsonValueType))];
-	else types = ["any"];
+	} else if ("const" in schema) {
+		types = [jsonValueType(schema.const)];
+	} else if (Array.isArray(schema.enum)) {
+		types = [...new Set(schema.enum.map(jsonValueType))];
+	} else {
+		types = ["any"];
+	}
 	for (const type of types) {
-		if (type === "any" && raw === undefined) continue;
-		if (!JSON_SCHEMA_TYPES.has(type))
+		if (type === "any" && raw === undefined) {
+			continue;
+		}
+		if (!JSON_SCHEMA_TYPES.has(type)) {
 			throw summaryError(`Unsupported JSON Schema type '${type}'`, `${path}/type`, "unsupported");
+		}
 	}
 	return types;
 }
@@ -733,29 +801,40 @@ function replySchemaConstraints(schema: Record<string, unknown>, path: string): 
 		"maxContains",
 	] as const) {
 		const value = schema[key];
-		if (value === undefined) continue;
-		if (typeof value !== "number" || !Number.isFinite(value))
+		if (value === undefined) {
+			continue;
+		}
+		if (typeof value !== "number" || !Number.isFinite(value)) {
 			throw summaryError(`Schema ${key} must be a finite number`, `${path}/${key}`, "unsupported");
+		}
 		constraints[key] = value;
 	}
 	for (const key of ["pattern", "format"] as const) {
 		const value = schema[key];
-		if (value === undefined) continue;
-		if (typeof value !== "string")
+		if (value === undefined) {
+			continue;
+		}
+		if (typeof value !== "string") {
 			throw summaryError(`Schema ${key} must be a string`, `${path}/${key}`, "unsupported");
+		}
 		assertExactString(value, `${path}/${key}`);
 		constraints[key] = value;
 	}
 	if (schema.uniqueItems !== undefined) {
-		if (schema.uniqueItems !== true && schema.uniqueItems !== false)
+		if (schema.uniqueItems !== true && schema.uniqueItems !== false) {
 			throw summaryError("Schema uniqueItems must be boolean", `${path}/uniqueItems`, "unsupported");
-		if (schema.uniqueItems) constraints.uniqueItems = true;
+		}
+		if (schema.uniqueItems) {
+			constraints.uniqueItems = true;
+		}
 	}
 	return constraints;
 }
 
 function checkCollection(values: readonly unknown[], path: string, collection: string): void {
-	if (values.length <= MAX_REPLY_SCHEMA_COLLECTION_ITEMS) return;
+	if (values.length <= MAX_REPLY_SCHEMA_COLLECTION_ITEMS) {
+		return;
+	}
 	throw new ReplyContractSummaryError(
 		`Reply-contract collection '${collection}' at ${path} exceeds ${MAX_REPLY_SCHEMA_COLLECTION_ITEMS} entries; ${values.length - MAX_REPLY_SCHEMA_COLLECTION_ITEMS} entries would be omitted.`,
 		{ path, limit: "collection", collection, omittedCount: values.length - MAX_REPLY_SCHEMA_COLLECTION_ITEMS },
@@ -769,7 +848,9 @@ function exactJson(value: unknown, path: string, cap: number, bytes = false): st
 	} catch {
 		throw summaryError("Schema value is not JSON serializable", path, "unsupported");
 	}
-	if (json === undefined) throw summaryError("Schema value is not JSON serializable", path, "unsupported");
+	if (json === undefined) {
+		throw summaryError("Schema value is not JSON serializable", path, "unsupported");
+	}
 	const size = bytes ? payloadBytes(json) : json.length;
 	if (size > cap) {
 		throw new ReplyContractSummaryError(
@@ -790,9 +871,15 @@ function assertExactString(value: string, path: string): void {
 }
 
 function jsonValueType(value: unknown): string {
-	if (value === null) return "null";
-	if (Array.isArray(value)) return "array";
-	if (isRecord(value)) return "object";
+	if (value === null) {
+		return "null";
+	}
+	if (Array.isArray(value)) {
+		return "array";
+	}
+	if (isRecord(value)) {
+		return "object";
+	}
 	return typeof value === "number" ? (Number.isInteger(value) ? "integer" : "number") : typeof value;
 }
 
@@ -817,7 +904,9 @@ function displayString(value: string, max = PREVIEW_CHARS): DisplayStringSummary
 }
 
 function assertGateIdentity(value: string, path: string): void {
-	if (value.length <= MAX_USER_GATE_IDENTITY_CHARS) return;
+	if (value.length <= MAX_USER_GATE_IDENTITY_CHARS) {
+		return;
+	}
 	throw new ReplyContractSummaryError(
 		`Required gate identity at ${path} exceeds ${MAX_USER_GATE_IDENTITY_CHARS} characters; it cannot be truncated because respond requires the exact value.`,
 		{ path, limit: "identity", omittedCount: value.length - MAX_USER_GATE_IDENTITY_CHARS },
@@ -825,7 +914,9 @@ function assertGateIdentity(value: string, path: string): void {
 }
 
 function checkGateCollection(values: readonly unknown[], path: string, collection: string): void {
-	if (values.length <= MAX_USER_GATE_COLLECTION_ITEMS) return;
+	if (values.length <= MAX_USER_GATE_COLLECTION_ITEMS) {
+		return;
+	}
 	throw new ReplyContractSummaryError(
 		`Required gate collection '${collection}' at ${path} exceeds ${MAX_USER_GATE_COLLECTION_ITEMS} entries; dropping ${values.length - MAX_USER_GATE_COLLECTION_ITEMS} entries would make the interaction incomplete.`,
 		{ path, limit: "collection", collection, omittedCount: values.length - MAX_USER_GATE_COLLECTION_ITEMS },
@@ -1018,10 +1109,16 @@ export function summarizeRunInspect(run: HyperchartRunInfo): RunInspectSummary {
 	let omittedPending = 0;
 	for (const state of run.states) {
 		if (state.status === "pending" && state.session === undefined && (state.issues?.length ?? 0) === 0) {
-			if (pendingStateIds.length < MAX_SUMMARY_STATES) pendingStateIds.push(truncate(state.id));
-			else omittedPending++;
-		} else if (stateDigests.length < MAX_SUMMARY_STATES) stateDigests.push(summarizeRunState(state));
-		else omittedActive++;
+			if (pendingStateIds.length < MAX_SUMMARY_STATES) {
+				pendingStateIds.push(truncate(state.id));
+			} else {
+				omittedPending++;
+			}
+		} else if (stateDigests.length < MAX_SUMMARY_STATES) {
+			stateDigests.push(summarizeRunState(state));
+		} else {
+			omittedActive++;
+		}
 	}
 	const issues = run.issues?.slice(0, MAX_NESTED_ITEMS).map(summarizeIssue);
 	const summary: RunInspectSummary = {
@@ -1131,14 +1228,18 @@ function cappedStrings(
 	values: readonly string[] | undefined,
 	maxChars = PREVIEW_CHARS,
 ): { values?: string[]; omitted: number } {
-	if (values === undefined) return { omitted: 0 };
+	if (values === undefined) {
+		return { omitted: 0 };
+	}
 	return { values: capStrings(values, maxChars), omitted: Math.max(0, values.length - MAX_NESTED_ITEMS) };
 }
 function cappedArtifactPaths(
 	values: readonly { path?: string }[] | undefined,
 	maxChars: number,
 ): { values?: string[]; omitted: number } {
-	if (values === undefined) return { omitted: 0 };
+	if (values === undefined) {
+		return { omitted: 0 };
+	}
 	const paths = values.flatMap((artifact) => (artifact.path === undefined ? [] : [artifact.path]));
 	const capped = capStrings(paths, maxChars);
 	return { values: capped, omitted: values.length - capped.length };

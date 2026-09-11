@@ -22,7 +22,9 @@ export function resolveContainedSessionFile(sessionsDir: string, sessionFile: st
 		const realRoot = realpathSync(root);
 		const realFile = realpathSync(file);
 		const fromRoot = relative(realRoot, realFile);
-		if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) return undefined;
+		if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+			return undefined;
+		}
 		return file;
 	} catch {
 		return undefined;
@@ -52,7 +54,9 @@ export function combineToolLifecycle(messages: HyperchartSessionMessageInfo[]): 
 			continue;
 		}
 		const call = combined[callIndex];
-		if (call === undefined) continue;
+		if (call === undefined) {
+			continue;
+		}
 		combined[callIndex] = {
 			...call,
 			toolStatus: message.toolStatus ?? (message.isError === true ? "error" : "completed"),
@@ -85,15 +89,23 @@ export function readNeutralSessionTranscript(
 	sessionFile: string | undefined,
 	options: SessionTranscriptReadOptions = {},
 ): HyperchartSessionMessageInfo[] | undefined {
-	if (sessionFile === undefined) return undefined;
+	if (sessionFile === undefined) {
+		return undefined;
+	}
 	const file = resolveContainedSessionFile(sessionsDir, sessionFile);
-	if (file === undefined) return undefined;
+	if (file === undefined) {
+		return undefined;
+	}
 	try {
 		const lines = readFileSync(file, "utf8").split("\n");
-		if (!isNeutralHeaderLine(lines[0])) return undefined;
+		if (!isNeutralHeaderLine(lines[0])) {
+			return undefined;
+		}
 		const messages: HyperchartSessionMessageInfo[] = [];
 		for (const line of lines.slice(1)) {
-			if (line.trim().length === 0) continue;
+			if (line.trim().length === 0) {
+				continue;
+			}
 			let entry: unknown;
 			try {
 				entry = JSON.parse(line);
@@ -102,7 +114,9 @@ export function readNeutralSessionTranscript(
 				continue;
 			}
 			const message = normalizeNeutralRecord(entry);
-			if (message !== undefined) messages.push(message);
+			if (message !== undefined) {
+				messages.push(message);
+			}
 		}
 		return limitTranscriptMessages(combineToolLifecycle(messages), options);
 	} catch {
@@ -115,15 +129,20 @@ export function limitTranscriptMessages(
 	options: SessionTranscriptReadOptions = {},
 ): HyperchartSessionMessageInfo[] {
 	const limit = options.limit === undefined ? MAX_TRANSCRIPT_MESSAGES : options.limit;
-	if (limit === false) return messages;
-	if (!Number.isFinite(limit) || limit < 0)
+	if (limit === false) {
+		return messages;
+	}
+	if (!Number.isFinite(limit) || limit < 0) {
 		throw new RangeError("Transcript message limit must be a finite non-negative number or false");
+	}
 	const count = Math.floor(limit);
 	return count === 0 ? [] : messages.slice(-count);
 }
 
 function isNeutralHeaderLine(line: string | undefined): boolean {
-	if (line === undefined) return false;
+	if (line === undefined) {
+		return false;
+	}
 	try {
 		const parsed = JSON.parse(line) as unknown;
 		return isRecord(parsed) && parsed.hyperchartTranscript === 1;
@@ -133,7 +152,9 @@ function isNeutralHeaderLine(line: string | undefined): boolean {
 }
 
 function normalizeNeutralRecord(value: unknown): HyperchartSessionMessageInfo | undefined {
-	if (!isRecord(value) || typeof value.id !== "string") return undefined;
+	if (!isRecord(value) || typeof value.id !== "string") {
+		return undefined;
+	}
 	const role = value.role;
 	if (role !== "user" && role !== "assistant" && role !== "reasoning" && role !== "tool" && role !== "system") {
 		return undefined;

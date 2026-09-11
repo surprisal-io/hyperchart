@@ -156,7 +156,9 @@ describe("remote-friendly inspector options", () => {
 			server.once("error", reject);
 			server.listen(0, "127.0.0.1", () => {
 				const address = server.address();
-				if (address === null || typeof address === "string") return reject(new Error("no port"));
+				if (address === null || typeof address === "string") {
+					return reject(new Error("no port"));
+				}
 				server.close(() => resolve(address.port));
 			});
 		});
@@ -176,7 +178,9 @@ describe("remote-friendly inspector options", () => {
 			blocker.once("error", reject);
 			blocker.listen(0, "127.0.0.1", () => {
 				const address = blocker.address();
-				if (address === null || typeof address === "string") return reject(new Error("no port"));
+				if (address === null || typeof address === "string") {
+					return reject(new Error("no port"));
+				}
 				resolve(address.port);
 			});
 		});

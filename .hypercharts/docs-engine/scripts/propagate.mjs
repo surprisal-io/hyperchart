@@ -6,6 +6,8 @@ import { checkUnit, emit, readJson, rejectAll } from "./doc-checks.mjs";
 const units = readJson(process.env.UNITS_FILE ?? "").items;
 const registry = readJson(process.env.REGISTRY_FILE ?? "");
 const violations = Object.values(units).flatMap((unit) => checkUnit(unit, registry));
-if (violations.length > 0) rejectAll(violations);
+if (violations.length > 0) {
+	rejectAll(violations);
+}
 
 emit("DOCS_SYNCED", { unitCount: Object.keys(units).length });

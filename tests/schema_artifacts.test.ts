@@ -46,7 +46,9 @@ describe("checkSchema", () => {
 			expect(checkSchema(item.shape, item.valid), JSON.stringify(item.shape.schema)).toEqual({ ok: true });
 			const invalid = checkSchema(item.shape, item.invalid);
 			expect(invalid.ok).toBe(false);
-			if (!invalid.ok) expect(invalid.errors.length).toBeGreaterThan(0);
+			if (!invalid.ok) {
+				expect(invalid.errors.length).toBeGreaterThan(0);
+			}
 		}
 	});
 
@@ -64,7 +66,9 @@ describe("checkSchema", () => {
 		});
 		const invalid = checkSchema(categorySchema, { name: "root", children: [{ name: 1, children: [] }] });
 		expect(invalid.ok).toBe(false);
-		if (!invalid.ok) expect(invalid.errors.join("\n")).toContain("/children/0/name");
+		if (!invalid.ok) {
+			expect(invalid.errors.join("\n")).toContain("/children/0/name");
+		}
 	});
 });
 

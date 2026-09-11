@@ -73,13 +73,17 @@ export function createPiHyperchartHost(options: PiHyperchartHostOptions = {}): H
 			const chart = (await discoverHypercharts(resolvedCwd, agentDir)).find(
 				(candidate) => candidate.name === chartName,
 			);
-			if (chart === undefined) return undefined;
+			if (chart === undefined) {
+				return undefined;
+			}
 			return readChart(chart.source, chart.root, chart.scope, resolvedCwd, agentDir, options.agentDefaults);
 		},
 		readRunOverview: async (cwd, runId, branchId) => {
 			assertRunId(runId);
 			const meta = await loadRunMeta(runId);
-			if (resolve(meta.workDir) !== resolve(cwd)) return undefined;
+			if (resolve(meta.workDir) !== resolve(cwd)) {
+				return undefined;
+			}
 			return hyperchartRunOverviewFromRunId(runId, {
 				...(branchId === undefined ? {} : { branchId }),
 				agentDefaults: options.agentDefaults ?? createAgentDefaultsResolver(resolve(cwd), agentDir, meta.chartPath),
@@ -150,7 +154,9 @@ async function discoverHypercharts(cwd: string, agentDir: string): Promise<Disco
 	] as const) {
 		for (const source of files) {
 			const summary = await discoverChart(source, root, scope);
-			if (summary !== undefined) byName.set(summary.name, summary);
+			if (summary !== undefined) {
+				byName.set(summary.name, summary);
+			}
 		}
 	}
 
@@ -184,9 +190,13 @@ function inspectLiteralChartModule(text: string, source: string): { name?: strin
 	const exported = sourceFile.statements.find(
 		(statement): statement is ts.ExportAssignment => ts.isExportAssignment(statement) && !statement.isExportEquals,
 	);
-	if (exported === undefined) return undefined;
+	if (exported === undefined) {
+		return undefined;
+	}
 	const definition = literalObject(exported.expression, sourceFile);
-	if (definition === undefined) return undefined;
+	if (definition === undefined) {
+		return undefined;
+	}
 	const id = propertyInitializer(definition, "id");
 	const states = propertyInitializer(definition, "states");
 	const name =
@@ -200,14 +210,18 @@ function inspectLiteralChartModule(text: string, source: string): { name?: strin
 
 function literalObject(expression: ts.Expression, sourceFile: ts.SourceFile): ts.ObjectLiteralExpression | undefined {
 	const unwrapped = unwrapExpression(expression);
-	if (ts.isObjectLiteralExpression(unwrapped)) return unwrapped;
+	if (ts.isObjectLiteralExpression(unwrapped)) {
+		return unwrapped;
+	}
 	if (ts.isCallExpression(unwrapped)) {
 		const argument = unwrapped.arguments[0];
 		return argument === undefined ? undefined : literalObject(argument, sourceFile);
 	}
 	if (ts.isIdentifier(unwrapped)) {
 		for (const statement of sourceFile.statements) {
-			if (!ts.isVariableStatement(statement)) continue;
+			if (!ts.isVariableStatement(statement)) {
+				continue;
+			}
 			for (const declaration of statement.declarationList.declarations) {
 				if (
 					ts.isIdentifier(declaration.name) &&
@@ -243,30 +257,42 @@ function propertyInitializer(object: ts.ObjectLiteralExpression, name: string): 
 			initializer = undefined;
 			continue;
 		}
-		if (!ts.isPropertyAssignment(property)) continue;
+		if (!ts.isPropertyAssignment(property)) {
+			continue;
+		}
 		const propertyName = property.name;
 		if (
 			(ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName) || ts.isNumericLiteral(propertyName)) &&
 			propertyName.text === name
-		)
+		) {
 			initializer = unwrapExpression(property.initializer);
+		}
 	}
 	return initializer;
 }
 
 function countLiteralStates(expression: ts.Expression, sourceFile: ts.SourceFile): number | undefined {
 	const states = literalObject(expression, sourceFile);
-	if (states === undefined || states.properties.some((property) => !ts.isPropertyAssignment(property)))
+	if (states === undefined || states.properties.some((property) => !ts.isPropertyAssignment(property))) {
 		return undefined;
+	}
 	let count = states.properties.length;
 	for (const property of states.properties) {
-		if (!ts.isPropertyAssignment(property)) return undefined;
+		if (!ts.isPropertyAssignment(property)) {
+			return undefined;
+		}
 		const state = literalObject(property.initializer, sourceFile);
-		if (state === undefined) continue;
+		if (state === undefined) {
+			continue;
+		}
 		const children = propertyInitializer(state, "states");
-		if (children === undefined) continue;
+		if (children === undefined) {
+			continue;
+		}
 		const childCount = countLiteralStates(children, sourceFile);
-		if (childCount === undefined) return undefined;
+		if (childCount === undefined) {
+			return undefined;
+		}
 		count += childCount;
 	}
 	return count;
@@ -274,7 +300,9 @@ function countLiteralStates(expression: ts.Expression, sourceFile: ts.SourceFile
 
 function chartNameFor(source: string, root: string): string {
 	const rel = relative(root, source).replaceAll("\\", "/");
-	if (rel !== "chart.ts" && rel.endsWith("/chart.ts")) return rel.slice(0, -"/chart.ts".length);
+	if (rel !== "chart.ts" && rel.endsWith("/chart.ts")) {
+		return rel.slice(0, -"/chart.ts".length);
+	}
 	return rel.replace(/(?:\.chart)?\.ts$/, "");
 }
 
@@ -332,17 +360,23 @@ async function readRunSummary(
 	readRunMeta: AsyncMemo<string, RunMeta>,
 ): Promise<HyperchartRunSummaryInfo | undefined> {
 	const metaFingerprint = await fileFingerprint(join(resolveRunPaths(runId).runDir, "meta.json"));
-	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runId) === metaFingerprint) return undefined;
+	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runId) === metaFingerprint) {
+		return undefined;
+	}
 	let meta;
 	try {
 		meta = await readRunMeta(runId);
 		failedRunMetaFingerprints.delete(runId);
 	} catch (error) {
-		if (metaFingerprint !== undefined) failedRunMetaFingerprints.set(runId, metaFingerprint);
+		if (metaFingerprint !== undefined) {
+			failedRunMetaFingerprints.set(runId, metaFingerprint);
+		}
 		console.warn(`[pi-hyperchart] Failed to inspect run ${runId}:`, error);
 		return undefined;
 	}
-	if (resolve(meta.workDir) !== cwd) return undefined;
+	if (resolve(meta.workDir) !== cwd) {
+		return undefined;
+	}
 	const persistedStatus = readRunStatus(runId);
 	const metaCreatedAt = Date.parse(meta.createdAt);
 	const createdAt = persistedStatus?.startedAt ?? (Number.isFinite(metaCreatedAt) ? metaCreatedAt : 0);
@@ -422,7 +456,9 @@ async function walk(dir: string, files: string[], root: string): Promise<void> {
 		entries.map(async (entry) => {
 			const path = join(dir, entry.name);
 			if (entry.isDirectory()) {
-				if (entry.name === "runs" || entry.name === "node_modules" || entry.name.startsWith(".")) return;
+				if (entry.name === "runs" || entry.name === "node_modules" || entry.name.startsWith(".")) {
+					return;
+				}
 				await walk(path, files, root);
 			} else if (
 				entry.isFile() &&

@@ -11,9 +11,13 @@ describe("examples", () => {
 	it("runs the portable quickstart and produces its documented artifact", async () => {
 		const parsed = normalizeChartConfig(quickstart);
 		expect(parsed.diagnostics).toEqual([]);
-		if (!parsed.ok) throw new Error("expected valid quickstart chart");
+		if (!parsed.ok) {
+			throw new Error("expected valid quickstart chart");
+		}
 		const write = parsed.ast.states.write;
-		if (write?.kind !== "state" || write.action.kind !== "script") throw new Error("expected script state");
+		if (write?.kind !== "state" || write.action.kind !== "script") {
+			throw new Error("expected script state");
+		}
 
 		const workDir = await mkdtemp(join(tmpdir(), "hyperchart-quickstart-"));
 		const runner = new ScriptRunner({ workDir });
@@ -41,7 +45,9 @@ describe("examples", () => {
 
 		expect(result.diagnostics).toEqual([]);
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		// The bucket regions materialized under the parallel with absolute paths.
 		expect(result.ast.states.research?.kind).toBe("map");
 		expect(result.ast.states["research.scout"]?.kind).toBe("state");
@@ -56,15 +62,21 @@ describe("examples", () => {
 		// Authored as zod values (z re-exported by the library), stored as serializable data: the
 		// runtime hands this JSON Schema to the agent and validates the reply/file against it.
 		const parsed = normalizeChartConfig(deckDirector);
-		if (!parsed.ok) throw new Error("expected valid chart");
+		if (!parsed.ok) {
+			throw new Error("expected valid chart");
+		}
 		const plan = parsed.ast.states.plan;
-		if (plan?.kind !== "state" || plan.action.kind !== "agent") throw new Error("expected agent state");
+		if (plan?.kind !== "state" || plan.action.kind !== "agent") {
+			throw new Error("expected agent state");
+		}
 		expect(plan.action.reply).toMatchObject({
 			kind: "jsonSchema",
 			schema: { type: "object", required: ["artifacts_dir", "buckets", "coverage_thresholds"] },
 		});
 		const normalize = parsed.ast.states.normalize;
-		if (normalize?.kind !== "state" || normalize.action.kind !== "script") throw new Error("expected agent state");
+		if (normalize?.kind !== "state" || normalize.action.kind !== "script") {
+			throw new Error("expected agent state");
+		}
 		expect(normalize.action.artifacts?.evidence?.shape).toMatchObject({
 			kind: "jsonSchema",
 			schema: { type: "object", required: ["facts"] },

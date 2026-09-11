@@ -6,7 +6,9 @@ export type { HyperchartRunnerConfig } from "@surprisal/hyperchart/runner";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
 	const configPath = argv[0];
-	if (configPath === undefined) throw new Error("hyperchart runner requires a config path");
+	if (configPath === undefined) {
+		throw new Error("hyperchart runner requires a config path");
+	}
 	const config = readRunnerConfig(configPath);
 	await runHyperchartRunner(config, ({ config: runnerConfig, schemaRegistry, sessionsDir }) => {
 		return new ClaudeAgentExecutor({

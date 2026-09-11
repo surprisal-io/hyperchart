@@ -37,20 +37,32 @@ export async function captureStorySchedule(
 					: record.kind;
 			return `${kind}:${record.actionUid.state}`;
 		}
-		if (record.type === "user_interaction") return `${record.kind}:${record.actionUid.state}`;
-		if (record.type === "actor_created" || record.type === "actor_scope")
+		if (record.type === "user_interaction") {
+			return `${record.kind}:${record.actionUid.state}`;
+		}
+		if (record.type === "actor_created" || record.type === "actor_scope") {
 			return `${record.type}:${"kind" in record ? record.kind : ""}:${record.occurrence}`;
-		if (record.type === "actor_message") return `${record.kind}:${record.occurrence}:${record.messageId}`;
-		if (record.type === "actor_messages_enqueued")
+		}
+		if (record.type === "actor_message") {
+			return `${record.kind}:${record.occurrence}:${record.messageId}`;
+		}
+		if (record.type === "actor_messages_enqueued") {
 			return `enqueued:${record.source.producerState}:${record.messages[0]?.producerVisit}`;
-		if (record.type === "spawned") return `spawned:${record.path}`;
+		}
+		if (record.type === "spawned") {
+			return `spawned:${record.path}`;
+		}
 		return record.type;
 	};
 	const target = schedule.at(-1);
-	if (target === undefined) return records;
+	if (target === undefined) {
+		return records;
+	}
 	const targetKey = key(target);
 	const required = new Map<string, number>();
-	for (const record of schedule) required.set(key(record), (required.get(key(record)) ?? 0) + 1);
+	for (const record of schedule) {
+		required.set(key(record), (required.get(key(record)) ?? 0) + 1);
+	}
 	const observed = new Map<string, number>();
 	const reached = () => [...required].every(([kind, count]) => (observed.get(kind) ?? 0) >= count);
 	const responses = schedule.filter(
@@ -83,7 +95,9 @@ export async function captureStorySchedule(
 		// A selector inside an atomic append rounds up to that append's committed
 		// end. Stop before its acknowledgement (and any later effects), never in
 		// the middle of persisted reply/settlement/resolution facts.
-		if (reached()) throw boundary;
+		if (reached()) {
+			throw boundary;
+		}
 	};
 	const initialArgs = schedule.find((record) => record.type === "args");
 	try {
@@ -99,7 +113,9 @@ export async function captureStorySchedule(
 							const added = append(effect.records);
 							retain(added);
 							queue.push({ kind: "durable_records_added", effectId: effect.id, records: added });
-						} else if (effect.kind !== "cancel") effects.push(effect);
+						} else if (effect.kind !== "cancel") {
+							effects.push(effect);
+						}
 					}
 				},
 				async *eventsQueue() {
@@ -132,26 +148,31 @@ export async function captureStorySchedule(
 								}
 							}
 							const effectIndex = effects.findIndex((effect) => {
-								if (response.type === "failure_intent")
+								if (response.type === "failure_intent") {
 									return (
 										"actionUid" in effect &&
 										effect.actionUid.state === response.origin &&
 										["agent", "script", "tsImport"].includes(effect.kind)
 									);
+								}
 								if (response.type === "state_action") {
-									if (!("actionUid" in effect) || effect.actionUid.state !== response.actionUid.state) return false;
+									if (!("actionUid" in effect) || effect.actionUid.state !== response.actionUid.state) {
+										return false;
+									}
 									return response.kind === "complete"
 										? ["agent", "script", "tsImport"].includes(effect.kind)
 										: response.kind === "validated"
 											? effect.kind === "validate"
 											: effect.kind === "timer";
 								}
-								if (response.type === "actor_created")
+								if (response.type === "actor_created") {
 									return effect.kind === "actor_create" && effect.occurrence === response.occurrence;
-								if (response.type === "actor_messages_enqueued")
+								}
+								if (response.type === "actor_messages_enqueued") {
 									return (
 										effect.kind === "actor_enqueue" && effect.source.producerState === response.source.producerState
 									);
+								}
 								return (
 									response.type === "actor_message" &&
 									effect.kind === "actor_reply" &&
@@ -159,11 +180,13 @@ export async function captureStorySchedule(
 									effect.messageId === response.messageId
 								);
 							});
-							if (effectIndex < 0) continue;
+							if (effectIndex < 0) {
+								continue;
+							}
 							const effect = effects.splice(effectIndex, 1)[0]!;
 							responses.splice(index, 1);
 							if (response.type === "failure_intent") {
-								if (effect.kind === "agent")
+								if (effect.kind === "agent") {
 									yield {
 										kind: "agent",
 										effectId: effect.id,
@@ -172,15 +195,16 @@ export async function captureStorySchedule(
 											failure: { kind: "explicit", retryable: false, message: String(response.error) },
 										},
 									};
-								else if (effect.kind === "script" || effect.kind === "tsImport")
+								} else if (effect.kind === "script" || effect.kind === "tsImport") {
 									yield {
 										kind: effect.kind,
 										effectId: effect.id,
 										event: { type: "FAILED", error: String(response.error) },
 									};
+								}
 							} else if (response.type === "state_action") {
 								if (response.kind === "complete") {
-									if (effect.kind === "agent")
+									if (effect.kind === "agent") {
 										yield {
 											kind: "agent",
 											effectId: effect.id,
@@ -190,17 +214,20 @@ export async function captureStorySchedule(
 												...(response.artifacts === undefined ? {} : { artifacts: response.artifacts }),
 											},
 										};
-									else if (effect.kind === "script" || effect.kind === "tsImport")
+									} else if (effect.kind === "script" || effect.kind === "tsImport") {
 										yield {
 											kind: effect.kind,
 											effectId: effect.id,
 											event: response.event,
 											...(response.artifacts === undefined ? {} : { artifacts: response.artifacts }),
 										};
-								} else if (response.kind === "validated")
+									}
+								} else if (response.kind === "validated") {
 									yield { kind: "validated", effectId: effect.id, outcome: response.outcome };
-								else if (response.kind === "timer_fired") yield { kind: "timer", effectId: effect.id };
-							} else
+								} else if (response.kind === "timer_fired") {
+									yield { kind: "timer", effectId: effect.id };
+								}
+							} else {
 								yield {
 									kind: "actor_effect",
 									effectId: effect.id,
@@ -208,29 +235,37 @@ export async function captureStorySchedule(
 										effect.kind === "actor_create" ? "create" : effect.kind === "actor_enqueue" ? "enqueue" : "reply",
 									ok: true,
 								};
+							}
 							emitted = true;
 							break;
 						}
-						if (!emitted)
+						if (!emitted) {
 							throw new Error(
 								`Story ${ast.id} cannot execute scheduled snapshot ${targetKey}; awaiting ${effects.map((effect) => effect.kind + ("actionUid" in effect ? `:${effect.actionUid.state}` : "")).join(", ")}; remaining responses ${responses.map(key).join(", ")}; captured ${records.map(key).join(", ")}`,
 							);
+						}
 					}
 				},
 			},
 			{ machineState: () => createMachine(ast, projection) },
 		);
 	} catch (error) {
-		if (error !== boundary) throw error;
+		if (error !== boundary) {
+			throw error;
+		}
 	}
-	if (!reached()) throw new Error(`Story ${ast.id} terminated before snapshot ${targetKey}`);
+	if (!reached()) {
+		throw new Error(`Story ${ast.id} terminated before snapshot ${targetKey}`);
+	}
 	const replay = explainReplay(ast, records);
-	if (replay.broken !== undefined || replay.skipped.length > 0 || replay.stale.length > 0)
+	if (replay.broken !== undefined || replay.skipped.length > 0 || replay.stale.length > 0) {
 		throw new Error(`Captured story ${ast.id} does not replay: ${JSON.stringify(replay)}`);
+	}
 	const captureKey = storyCaptureKey(ast, schedule);
 	const identity = storyCaptureIdentity(ast, schedule);
-	if (identities.has(captureKey) && identities.get(captureKey) !== identity)
+	if (identities.has(captureKey) && identities.get(captureKey) !== identity) {
 		throw new Error(`Story capture key collision: ${captureKey}`);
+	}
 	identities.set(captureKey, identity);
 	captures.set(captureKey, records);
 	return records;

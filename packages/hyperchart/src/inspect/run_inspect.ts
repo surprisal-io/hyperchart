@@ -83,8 +83,9 @@ export async function hyperchartRunFromRunId(
 	});
 	const status = options.snapshot === undefined ? readRunStatus(runId) : undefined;
 	const branchId = options.branchId ?? options.snapshot?.branchId ?? "main";
-	if (options.snapshot !== undefined && options.snapshot.branchId !== branchId)
+	if (options.snapshot !== undefined && options.snapshot.branchId !== branchId) {
 		throw new Error("Inspector snapshot branch does not match selected branch");
+	}
 	let records: readonly DurableLogRecord[] = [];
 	let branches: readonly BranchHead[] | undefined;
 	let initialBranches: BranchListChunk | undefined;
@@ -101,7 +102,9 @@ export async function hyperchartRunFromRunId(
 		try {
 			snapshot = options.snapshot ?? (await store.captureSnapshot(branchId));
 		} catch (error) {
-			if ((await store.countRecords()) !== 0) throw error;
+			if ((await store.countRecords()) !== 0) {
+				throw error;
+			}
 			snapshot = { branchId, headSeqId: null };
 			syntheticEmptyBranch = true;
 		}
@@ -112,10 +115,14 @@ export async function hyperchartRunFromRunId(
 		} catch (error) {
 			// Do not recover storage/checkpoint failures or unrelated exceptions. Confirm the
 			// same structural failure independently against this exact captured ancestry.
-			if (!(error instanceof Error)) throw error;
+			if (!(error instanceof Error)) {
+				throw error;
+			}
 			const ancestry = await collectSnapshotRecordsForMapping(store, snapshot);
 			broken = explainReplay(ast, ancestry).broken;
-			if (broken === undefined || broken.error !== error.message) throw error;
+			if (broken === undefined || broken.error !== error.message) {
+				throw error;
+			}
 		}
 		const [recordChunk, branchChunk] = await Promise.all([
 			syntheticEmptyBranch
@@ -217,7 +224,9 @@ export async function hyperchartRunOverviewFromRunId(
 	options: Omit<HyperchartRunFromRunIdOptions, "includeTranscripts" | "readTranscript"> = {},
 ): Promise<HyperchartRunOverview> {
 	const run = await hyperchartRunFromRunId(runId, { ...options, includeTranscripts: false });
-	if (run.historySnapshot === undefined) throw new Error("Bounded run overview did not capture a history snapshot");
+	if (run.historySnapshot === undefined) {
+		throw new Error("Bounded run overview did not capture a history snapshot");
+	}
 	const store = await openRunLogStore(runId, {
 		access: "read",
 		branchId: run.historySnapshot.branchId,
@@ -239,11 +248,12 @@ function currentSessionProgress(
 	const latestByAction = new Map<string, number>();
 	const summaryKey = (session: (typeof progress.sessions)[string]) =>
 		`${templatePath(session.actionUid.state)}:${session.actionUid.action}`;
-	for (const session of Object.values(progress.sessions))
+	for (const session of Object.values(progress.sessions)) {
 		latestByAction.set(
 			summaryKey(session),
 			Math.max(latestByAction.get(summaryKey(session)) ?? 0, session.invokeSeqId),
 		);
+	}
 	return {
 		...progress,
 		sessions: Object.fromEntries(
@@ -402,9 +412,13 @@ async function sessionProgressWithVisitTranscripts(
 	);
 	for (const visits of invocations.values()) {
 		for (const invocation of visits) {
-			if (knownVisits.has(`${invocation.actionKey}:${invocation.visit}`)) continue;
+			if (knownVisits.has(`${invocation.actionKey}:${invocation.visit}`)) {
+				continue;
+			}
 			const messages = await readTranscript({ sessionId: invocation.sessionId });
-			if (messages === undefined) continue;
+			if (messages === undefined) {
+				continue;
+			}
 			const progressKey = sessionProgressKey(
 				invocation.actionUid,
 				`${invocation.actionKey}:${invocation.visit}:${invocation.invokeSeqId}`,
@@ -431,8 +445,9 @@ async function sessionProgressWithVisitTranscripts(
 					candidate.actionKey === invocation.actionKey &&
 					candidate.visit === invocation.visit &&
 					candidate.messages === undefined
-				)
+				) {
 					delete sessions[key];
+				}
 			}
 			knownVisits.add(`${invocation.actionKey}:${invocation.visit}`);
 		}
@@ -454,7 +469,9 @@ type AgentInvocationVisit = {
 function agentInvocationsByAction(records: readonly DurableLogRecord[]): Map<string, AgentInvocationVisit[]> {
 	const byAction = new Map<string, AgentInvocationVisit[]>();
 	for (const record of records) {
-		if (record.type !== "state_action" || record.kind !== "invoke" || record.definition.kind !== "agent") continue;
+		if (record.type !== "state_action" || record.kind !== "invoke" || record.definition.kind !== "agent") {
+			continue;
+		}
 		const actionKey = actionUidKey(record.actionUid);
 		const visits = byAction.get(actionKey) ?? [];
 		visits.push({
@@ -476,9 +493,13 @@ function runAgentDefaults(
 	runDir: string,
 	resolver: HyperchartRunFromRunIdOptions["agentDefaults"],
 ): HyperchartRunFromRunIdOptions["agentDefaults"] {
-	if (resolver === undefined) return undefined;
+	if (resolver === undefined) {
+		return undefined;
+	}
 	const configPath = resolve(runDir, "runner.config.json");
-	if (!existsSync(configPath)) return resolver;
+	if (!existsSync(configPath)) {
+		return resolver;
+	}
 	try {
 		const config = readRunnerConfig(configPath);
 		return (agentName) => {
@@ -494,7 +515,9 @@ function runAgentDefaults(
 	} catch {
 		return (agentName) => {
 			const defaults = resolver(agentName);
-			if (defaults === undefined) return undefined;
+			if (defaults === undefined) {
+				return undefined;
+			}
 			const declared = { ...defaults };
 			delete declared.resolvedModel;
 			delete declared.resolvedTools;
@@ -508,6 +531,8 @@ function parsedRunAst(meta: RunMeta): ChartAst {
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
 	);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	return parsed.ast;
 }

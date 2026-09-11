@@ -121,8 +121,12 @@ class ResolvedInputCaptureRuntime implements Runtime {
 						}) as DurableLogRecord,
 				);
 				this.records.push(...records);
-				if (effect.id === "args") projectBranch(this.projection, this.ast, records);
-				if (records.some(this.stopAt)) throw new CaptureFinished();
+				if (effect.id === "args") {
+					projectBranch(this.projection, this.ast, records);
+				}
+				if (records.some(this.stopAt)) {
+					throw new CaptureFinished();
+				}
 				this.push({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
 				this.push({
@@ -143,9 +147,13 @@ class ResolvedInputCaptureRuntime implements Runtime {
 	}
 	async *eventsQueue(): AsyncIterable<MachineEvent> {
 		while (true) {
-			if (this.queued.length === 0) await new Promise<void>((resolve) => this.waiters.push(resolve));
+			if (this.queued.length === 0) {
+				await new Promise<void>((resolve) => this.waiters.push(resolve));
+			}
 			const event = this.queued.shift();
-			if (event !== undefined) yield event;
+			if (event !== undefined) {
+				yield event;
+			}
 		}
 	}
 	private push(event: MachineEvent) {
@@ -164,7 +172,9 @@ async function captureExecutedRun(
 	try {
 		await loop(runtime, { machineState: () => createMachine(scenario.ast, structuredClone(runtime.projection)) });
 	} catch (error) {
-		if (!(error instanceof CaptureFinished)) throw error;
+		if (!(error instanceof CaptureFinished)) {
+			throw error;
+		}
 	}
 	return scenario.runtimeRun(runtime.records, options);
 }
@@ -200,7 +210,9 @@ const plainStateRun = plainScenario.runtimeRun(plainStateRecords, {
 
 function stateFrom(run: HyperchartRunInfo, stateId: string): HyperchartStateInfo {
 	const state = run.states.find((candidate) => candidate.id === stateId);
-	if (state === undefined) throw new Error(`story state is unavailable: ${stateId}`);
+	if (state === undefined) {
+		throw new Error(`story state is unavailable: ${stateId}`);
+	}
 	return state;
 }
 
@@ -233,7 +245,9 @@ function RecordInputBoard() {
 	useEffect(() => {
 		let current = true;
 		void executedRuns().then((runs) => {
-			if (current) setCaptured(runs);
+			if (current) {
+				setCaptured(runs);
+			}
 		});
 		return () => {
 			current = false;

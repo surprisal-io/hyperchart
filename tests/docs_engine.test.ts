@@ -8,7 +8,9 @@ import docsEngineChart from "../.hypercharts/docs-engine/chart.js";
 const roots: string[] = [];
 
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function runDocsScript(name: string, cwd: string, env: Record<string, string>): SpawnSyncReturns<string> {

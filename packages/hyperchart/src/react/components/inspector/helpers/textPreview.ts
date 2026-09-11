@@ -5,11 +5,15 @@ export type TextPreview = {
 
 export function createBufferedTextPreview(text: string, maxCharacters = 1_000): TextPreview {
 	const characterLimit = Math.max(1, Math.floor(maxCharacters));
-	if (text.length <= characterLimit) return { text, truncated: false };
+	if (text.length <= characterLimit) {
+		return { text, truncated: false };
+	}
 	let end = characterLimit;
 	const open = text.lastIndexOf("{", end);
 	const close = text.lastIndexOf("}", end);
-	if (open > close) end = open;
+	if (open > close) {
+		end = open;
+	}
 	return { text: `${text.slice(0, end).trimEnd()}\n…`, truncated: true };
 }
 
@@ -20,14 +24,20 @@ export function createTextPreview(text: string, maxLines: number, maxCharacters 
 	let lineBreaks = 0;
 
 	for (let index = 0; index < end; index += 1) {
-		if (text.charCodeAt(index) !== 10) continue;
+		if (text.charCodeAt(index) !== 10) {
+			continue;
+		}
 		lineBreaks += 1;
-		if (lineBreaks < lineLimit) continue;
+		if (lineBreaks < lineLimit) {
+			continue;
+		}
 		end = index;
 		break;
 	}
 
-	if (end >= text.length) return { text, truncated: false };
+	if (end >= text.length) {
+		return { text, truncated: false };
+	}
 	return {
 		text: `${text.slice(0, end).trimEnd()}\n…`,
 		truncated: true,

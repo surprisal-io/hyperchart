@@ -6,7 +6,9 @@ import { inspectorPanelScenario } from "./inspector-panel/runtime.js";
 const richAgentSpec = inspectorPanelSpecs.find((spec) => spec.group === "agent" && spec.title === "Rich agent");
 const scenario = richAgentSpec === undefined ? undefined : inspectorPanelScenario(richAgentSpec);
 const state = scenario?.run.states.find((candidate) => candidate.id === scenario.selectedStateId);
-if (scenario === undefined || state === undefined) throw new Error("adapter-derived rich agent fixture is unavailable");
+if (scenario === undefined || state === undefined) {
+	throw new Error("adapter-derived rich agent fixture is unavailable");
+}
 
 const meta = {
 	title: "Hyperchart/Inspector/State Details/Agent Info",

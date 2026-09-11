@@ -9,7 +9,9 @@ import type { ActionUID, ChartAst, StateAst, StateId, StatePath } from "./types.
 // The template path of a possibly-instanced path: map "#key" and actor "~generation"
 // suffixes are stripped per segment. Generation 1 deliberately has no suffix for stable paths.
 export function templatePath(path: StatePath): StatePath {
-	if (!path.includes("#") && !path.includes("~") && !path.includes("$worker-")) return path;
+	if (!path.includes("#") && !path.includes("~") && !path.includes("$worker-")) {
+		return path;
+	}
 	return path
 		.split(".")
 		.map((segment) => {
@@ -99,7 +101,9 @@ export function nearestInstance(
 	for (let index = segments.length - 1; index >= 0; index--) {
 		const segment = segments[index] ?? "";
 		const hash = segment.indexOf("#");
-		if (hash === -1) continue;
+		if (hash === -1) {
+			continue;
+		}
 		const instance = [...segments.slice(0, index), segment.slice(0, hash)].join(".");
 		if (container === undefined || templatePath(instance) === container) {
 			return { container: instance, key: segment.slice(hash + 1) };

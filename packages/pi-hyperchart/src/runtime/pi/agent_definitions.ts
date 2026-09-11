@@ -62,7 +62,9 @@ export function createAgentDefaultsResolver(
 
 function projectAgentDirs(cwd: string): string[] {
 	const root = findNearestProjectRoot(cwd);
-	if (root === undefined) return [];
+	if (root === undefined) {
+		return [];
+	}
 	return [join(root, CONFIG_DIR_NAME, "agents"), join(root, ".agents")];
 }
 
@@ -72,9 +74,13 @@ function packageAgentDirs(cwd: string, agentDir: string): string[] {
 		const settings = readJsonObject(settingsPath);
 		const packages = Array.isArray(settings?.packages) ? settings.packages : [];
 		for (const source of packages) {
-			if (typeof source !== "string") continue;
+			if (typeof source !== "string") {
+				continue;
+			}
 			const root = resolvePackageRoot(source, baseDir);
-			if (root === undefined) continue;
+			if (root === undefined) {
+				continue;
+			}
 			dirs.push(...agentDirsFromPackageRoot(root));
 		}
 	}
@@ -93,23 +99,35 @@ function settingsFiles(cwd: string, agentDir: string): [settingsPath: string, ba
 
 function resolvePackageRoot(source: string, baseDir: string): string | undefined {
 	const trimmed = source.trim();
-	if (trimmed.length === 0) return undefined;
+	if (trimmed.length === 0) {
+		return undefined;
+	}
 	if (trimmed.startsWith("npm:")) {
 		const packageName = parseNpmPackageName(trimmed.slice(4));
 		return packageName === undefined ? undefined : join(baseDir, "npm", "node_modules", packageName);
 	}
 	const normalized = trimmed.startsWith("file:") ? trimmed.slice(5) : trimmed;
-	if (normalized === "~") return homedir();
-	if (normalized.startsWith("~/")) return join(homedir(), normalized.slice(2));
-	if (resolve(normalized) === normalized) return normalized;
-	if (normalized.startsWith(".") || normalized.startsWith("..")) return resolve(baseDir, normalized);
+	if (normalized === "~") {
+		return homedir();
+	}
+	if (normalized.startsWith("~/")) {
+		return join(homedir(), normalized.slice(2));
+	}
+	if (resolve(normalized) === normalized) {
+		return normalized;
+	}
+	if (normalized.startsWith(".") || normalized.startsWith("..")) {
+		return resolve(baseDir, normalized);
+	}
 	return undefined;
 }
 
 function parseNpmPackageName(spec: string): string | undefined {
 	const match = spec.trim().match(/^(@?[^@]+(?:\/[^@]+)?)(?:@.+)?$/);
 	const packageName = match?.[1];
-	if (packageName === undefined || packageName.includes("..")) return undefined;
+	if (packageName === undefined || packageName.includes("..")) {
+		return undefined;
+	}
 	return packageName;
 }
 
@@ -119,7 +137,9 @@ function agentDirsFromPackageRoot(root: string): string[] {
 	for (const config of packageSubagentConfigs(pkg)) {
 		if (Array.isArray(config.agents)) {
 			for (const entry of config.agents) {
-				if (typeof entry === "string" && isSafeRelativePath(entry)) dirs.push(resolve(root, entry));
+				if (typeof entry === "string" && isSafeRelativePath(entry)) {
+					dirs.push(resolve(root, entry));
+				}
 			}
 		}
 	}
@@ -129,12 +149,18 @@ function agentDirsFromPackageRoot(root: string): string[] {
 }
 
 function packageSubagentConfigs(pkg: Record<string, unknown> | undefined): Record<string, unknown>[] {
-	if (pkg === undefined) return [];
+	if (pkg === undefined) {
+		return [];
+	}
 	const configs: Record<string, unknown>[] = [];
 	const direct = pkg["pi-subagents"];
-	if (isRecord(direct)) configs.push(direct);
+	if (isRecord(direct)) {
+		configs.push(direct);
+	}
 	const pi = pkg.pi;
-	if (isRecord(pi) && isRecord(pi.subagents)) configs.push(pi.subagents);
+	if (isRecord(pi) && isRecord(pi.subagents)) {
+		configs.push(pi.subagents);
+	}
 	return configs;
 }
 
@@ -158,9 +184,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function findNearestProjectRoot(cwd: string): string | undefined {
 	let current = resolve(cwd);
 	while (true) {
-		if (isDirectory(join(current, CONFIG_DIR_NAME)) || isDirectory(join(current, ".agents"))) return current;
+		if (isDirectory(join(current, CONFIG_DIR_NAME)) || isDirectory(join(current, ".agents"))) {
+			return current;
+		}
 		const parent = resolve(current, "..");
-		if (parent === current) return undefined;
+		if (parent === current) {
+			return undefined;
+		}
 		current = parent;
 	}
 }

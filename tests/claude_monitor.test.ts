@@ -33,7 +33,9 @@ import {
 const roots: string[] = [];
 afterEach(() => {
 	vi.useRealTimers();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function world(layout: RunStorage["layout"] = "run-id") {
@@ -78,8 +80,9 @@ function createRequest(
 			artifacts: [],
 		}),
 	);
-	if (status !== "running")
+	if (status !== "running") {
 		withRunStorage(storage, () => patchRunStatus(runId, { state: status, heartbeatAt: undefined }));
+	}
 	return runId;
 }
 
@@ -282,7 +285,9 @@ describe("Claude terminal monitor", () => {
 				child.stdout.on("data", (chunk: string) => {
 					buffer += chunk;
 					const newline = buffer.indexOf("\n");
-					if (newline === -1) return;
+					if (newline === -1) {
+						return;
+					}
 					clearTimeout(timeout);
 					resolve(buffer.slice(0, newline));
 				});

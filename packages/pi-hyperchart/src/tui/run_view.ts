@@ -160,7 +160,9 @@ function buildRows(
 }
 
 function statusFor(path: string, state: StateAst, activeLeaves: readonly string[]): "idle" | "active" | "final" {
-	if (state.kind === "final" && activeLeaves.includes(path)) return "final";
+	if (state.kind === "final" && activeLeaves.includes(path)) {
+		return "final";
+	}
 	return activeLeaves.some((leaf) => leaf === path || underScope(leaf, path)) ? "active" : "idle";
 }
 
@@ -236,7 +238,9 @@ function childMap(ast: ChartAst): Map<string | undefined, Array<[string, StateAs
 		list.push([path, state]);
 		children.set(state.parent, list);
 	}
-	for (const list of children.values()) list.sort(([left], [right]) => left.localeCompare(right));
+	for (const list of children.values()) {
+		list.sort(([left], [right]) => left.localeCompare(right));
+	}
 	return children;
 }
 
@@ -283,20 +287,36 @@ function graphStatus(
 	timeline: ActionTimeline | undefined,
 	results: Readonly<Record<string, unknown>>,
 ): GraphNodeStatus {
-	if (pending?.phase === "validating") return "validating";
-	if (pending?.phase === "running") return "running";
-	if (state.kind === "final" && active) return "final";
-	if (timeline?.failed) return "failed";
-	if (timeline?.completedAt !== undefined) return "completed";
-	if (active) return "running";
-	if (Object.keys(results).some((statePath) => statePath === path || underScope(statePath, path))) return "completed";
+	if (pending?.phase === "validating") {
+		return "validating";
+	}
+	if (pending?.phase === "running") {
+		return "running";
+	}
+	if (state.kind === "final" && active) {
+		return "final";
+	}
+	if (timeline?.failed) {
+		return "failed";
+	}
+	if (timeline?.completedAt !== undefined) {
+		return "completed";
+	}
+	if (active) {
+		return "running";
+	}
+	if (Object.keys(results).some((statePath) => statePath === path || underScope(statePath, path))) {
+		return "completed";
+	}
 	return "pending";
 }
 
 function actionTimelines(log: readonly DurableLogRecord[]): Map<string, ActionTimeline> {
 	const timelines = new Map<string, ActionTimeline>();
 	for (const record of log) {
-		if (record.type !== "state_action") continue;
+		if (record.type !== "state_action") {
+			continue;
+		}
 		const path = record.actionUid.state;
 		const timeline = timelines.get(path) ?? {};
 		if (record.kind === "invoke") {
@@ -313,15 +333,25 @@ function actionTimelines(log: readonly DurableLogRecord[]): Map<string, ActionTi
 
 function actionLabel(state: Extract<StateAst, { kind: "state" }>): string {
 	const action = state.action;
-	if (action.kind === "agent") return `agent:${action.name}`;
-	if (action.kind === "script") return `script:${[action.command, ...action.args].join(" ")}`;
-	if (action.kind === "tsImport") return `tsAction:${action.module}#${action.export}`;
+	if (action.kind === "agent") {
+		return `agent:${action.name}`;
+	}
+	if (action.kind === "script") {
+		return `script:${[action.command, ...action.args].join(" ")}`;
+	}
+	if (action.kind === "tsImport") {
+		return `tsAction:${action.module}#${action.export}`;
+	}
 	return "user";
 }
 
 function materializePath(path: string, templateParent: string, actualParent: string): string {
-	if (templateParent === actualParent) return path;
-	if (path === templateParent) return actualParent;
+	if (templateParent === actualParent) {
+		return path;
+	}
+	if (path === templateParent) {
+		return actualParent;
+	}
 	return path.replace(`${templateParent}.`, `${actualParent}.`);
 }
 

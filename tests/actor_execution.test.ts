@@ -118,12 +118,13 @@ class ActorRuntime implements Runtime {
 				this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
 			} else if (effect.kind === "agent") {
 				const reply = this.agentReplies[effect.actionUid.state]?.shift();
-				if (reply !== undefined)
+				if (reply !== undefined) {
 					this.queue.send({
 						kind: "agent",
 						effectId: effect.id,
 						outcome: { kind: "completed", event: typeof reply === "string" ? { type: reply } : reply },
 					});
+				}
 			} else if (effect.kind === "actor_create") {
 				this.queue.send({
 					kind: "actor_effect",
@@ -200,7 +201,9 @@ function settledMessageIds(records: readonly DurableLogRecord[], occurrence: str
 async function waitFor<T>(read: () => T | undefined, message: string): Promise<T> {
 	for (let turn = 0; turn < 100; turn++) {
 		const value = read();
-		if (value !== undefined) return value;
+		if (value !== undefined) {
+			return value;
+		}
 		await new Promise<void>((resolve) => setImmediate(resolve));
 	}
 	throw new Error(message);
@@ -277,7 +280,9 @@ describe("explicit event-sourced actors", () => {
 		};
 
 		const valid = normalizeChartConfig(clientChart(result("produce", "id")));
-		if (!valid.ok) throw new Error(JSON.stringify(valid.diagnostics));
+		if (!valid.ok) {
+			throw new Error(JSON.stringify(valid.diagnostics));
+		}
 		const isolated = normalizeChartConfig(clientChart(arg("global")));
 		expect(isolated.ok ? [] : isolated.diagnostics).toEqual(
 			expect.arrayContaining([expect.objectContaining({ code: "ACTOR_ISOLATION_VIOLATION" })]),
@@ -451,7 +456,9 @@ describe("explicit event-sourced actors", () => {
 			(record) =>
 				record.type === "actor_messages_enqueued" && record.source.producerState === "projects#a.@worker.queue",
 		);
-		if (fromA?.type !== "actor_messages_enqueued") throw new Error("missing map self enqueue");
+		if (fromA?.type !== "actor_messages_enqueued") {
+			throw new Error("missing map self enqueue");
+		}
 		(fromA as { occurrence: string }).occurrence = "projects#b.@worker";
 		const redirectedReplay = explainReplay(ast, redirected);
 		expect(redirectedReplay.stale.map((entry) => entry.message)).toContain(
@@ -1097,9 +1104,16 @@ describe("explicit event-sourced actors", () => {
 		expect(state.projection.actors["projects#b.@worker"]).toMatchObject({ status: "stopped" });
 
 		const mapItemSeqIds = runtime.records.flatMap((record) => {
-			if (record.type === "state_action" && record.actionUid.state.startsWith("projects#")) return [record.seqId];
-			if ("occurrence" in record && typeof record.occurrence === "string" && record.occurrence.startsWith("projects#"))
+			if (record.type === "state_action" && record.actionUid.state.startsWith("projects#")) {
 				return [record.seqId];
+			}
+			if (
+				"occurrence" in record &&
+				typeof record.occurrence === "string" &&
+				record.occurrence.startsWith("projects#")
+			) {
+				return [record.seqId];
+			}
 			return [];
 		});
 		expect(mapItemSeqIds.length).toBeGreaterThan(0);
@@ -1586,7 +1600,9 @@ describe("explicit event-sourced actors", () => {
 			}),
 		);
 		expect(outside.ok).toBe(false);
-		if (!outside.ok) expect(outside.diagnostics.map((entry) => entry.code)).toContain("SELF_OUTSIDE_ACTOR");
+		if (!outside.ok) {
+			expect(outside.diagnostics.map((entry) => entry.code)).toContain("SELF_OUTSIDE_ACTOR");
+		}
 
 		const Recursive = (actor as (options: unknown) => (input: unknown) => ReturnType<typeof Auditor>)({
 			input: z.object({}).strict(),
@@ -1612,8 +1628,9 @@ describe("explicit event-sourced actors", () => {
 			}),
 		);
 		expect(recursiveCall.ok).toBe(false);
-		if (!recursiveCall.ok)
+		if (!recursiveCall.ok) {
 			expect(recursiveCall.diagnostics.map((entry) => entry.code)).toContain("SELF_CALL_FORBIDDEN");
+		}
 	});
 
 	it("rejects declarations in runtime data, duplicate or unused placement, illegal owners, and unavailable placement refs", () => {
@@ -1628,7 +1645,9 @@ describe("explicit event-sourced actors", () => {
 			}),
 		);
 		expect(duplicate.ok).toBe(false);
-		if (!duplicate.ok) expect(duplicate.diagnostics.map((entry) => entry.code)).toContain("DUPLICATE_ACTOR_PLACEMENT");
+		if (!duplicate.ok) {
+			expect(duplicate.diagnostics.map((entry) => entry.code)).toContain("DUPLICATE_ACTOR_PLACEMENT");
+		}
 
 		const unused = normalizeChartConfig(
 			chart({
@@ -1640,7 +1659,9 @@ describe("explicit event-sourced actors", () => {
 			}),
 		);
 		expect(unused.ok).toBe(false);
-		if (!unused.ok) expect(unused.diagnostics.map((entry) => entry.code)).toContain("UNUSED_ACTOR");
+		if (!unused.ok) {
+			expect(unused.diagnostics.map((entry) => entry.code)).toContain("UNUSED_ACTOR");
+		}
 
 		const embedded = normalizeChartConfig({
 			kind: "chart",
@@ -1653,7 +1674,9 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		expect(embedded.ok).toBe(false);
-		if (!embedded.ok) expect(embedded.diagnostics.map((entry) => entry.code)).toContain("ACTOR_DECLARATION_IN_DATA");
+		if (!embedded.ok) {
+			expect(embedded.diagnostics.map((entry) => entry.code)).toContain("ACTOR_DECLARATION_IN_DATA");
+		}
 
 		const illegalOwner = normalizeChartConfig({
 			kind: "chart",
@@ -1670,7 +1693,9 @@ describe("explicit event-sourced actors", () => {
 			},
 		});
 		expect(illegalOwner.ok).toBe(false);
-		if (!illegalOwner.ok) expect(illegalOwner.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_OWNER");
+		if (!illegalOwner.ok) {
+			expect(illegalOwner.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_OWNER");
+		}
 
 		const lateEditor = Editor({ file: result("prepare", "file") });
 		const latePlacement = normalizeChartConfig(
@@ -1686,7 +1711,8 @@ describe("explicit event-sourced actors", () => {
 			}),
 		);
 		expect(latePlacement.ok).toBe(false);
-		if (!latePlacement.ok)
+		if (!latePlacement.ok) {
 			expect(latePlacement.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_PLACEMENT_REF");
+		}
 	});
 });

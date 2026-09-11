@@ -108,7 +108,9 @@ export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): 
 	const unpinned: ReplayUnpinnedRecord[] = [];
 	for (let index = 0; index < log.length; index++) {
 		const record = log[index];
-		if (record === undefined) continue;
+		if (record === undefined) {
+			continue;
+		}
 		const diagnostics = replayRecordDiagnostics(ast, projection, index, record);
 		stale.push(...diagnostics.stale);
 		unpinned.push(...diagnostics.unpinned);
@@ -141,11 +143,17 @@ export function explainReplay(ast: ChartAst, log: readonly DurableLogRecord[]): 
 }
 
 function unpinnedRecordFor(ast: ChartAst, index: number, record: DurableLogRecord): ReplayUnpinnedRecord | undefined {
-	if (record.type !== "state_action" || record.kind !== "complete") return undefined;
-	if (record.artifacts !== undefined || record.event.type === "FAILED") return undefined;
+	if (record.type !== "state_action" || record.kind !== "complete") {
+		return undefined;
+	}
+	if (record.artifacts !== undefined || record.event.type === "FAILED") {
+		return undefined;
+	}
 	const state = record.actionUid.state;
 	const node = actorContextForState(ast, state)?.node ?? nodeAt(ast, state);
-	if (node?.kind !== "state" || declaredArtifactsForState(node) === undefined) return undefined;
+	if (node?.kind !== "state" || declaredArtifactsForState(node) === undefined) {
+		return undefined;
+	}
 	return {
 		index,
 		seqId: record.seqId,
@@ -168,15 +176,18 @@ function staleRecordsFor(
 				entry.seqId === record.phaseSeqId &&
 				entry.phase === "running",
 		);
-		if (pending === undefined) return [];
+		if (pending === undefined) {
+			return [];
+		}
 		const expected = userInteractionOpenedDraft({ ast, projection }, pending);
 		// Resolved gate input is durable informational provenance for consumers, not replay identity.
 		// Omitting it preserves old opened records, while all pre-existing rendered-contract checks remain exact.
 		if (
 			expected !== undefined &&
 			stableStringify(openedComparable(expected)) === stableStringify(openedComparable(record))
-		)
+		) {
 			return [];
+		}
 		return [
 			{
 				index,
@@ -191,7 +202,7 @@ function staleRecordsFor(
 	}
 	if (record.type === "actor_created") {
 		const actor = ast.actors[record.declaration];
-		if (actor === undefined)
+		if (actor === undefined) {
 			return [
 				{
 					index,
@@ -202,6 +213,7 @@ function staleRecordsFor(
 					message: `Actor declaration ${record.declaration} was removed or moved`,
 				},
 			];
+		}
 		const ownerMatches =
 			(actor.owner === undefined) === (record.owner === undefined) &&
 			(actor.owner === undefined || (record.owner !== undefined && templatePath(record.owner) === actor.owner));
@@ -223,7 +235,9 @@ function staleRecordsFor(
 				},
 			];
 		}
-		if (stableStringify(actor) === stableStringify(record.definition)) return [];
+		if (stableStringify(actor) === stableStringify(record.definition)) {
+			return [];
+		}
 		return [
 			{
 				index,
@@ -268,7 +282,9 @@ function staleRecordsFor(
 			current.to === record.source.targetDeclaration &&
 			current.event === record.source.event &&
 			stableStringify(schema) === stableStringify(record.source.inputSchema);
-		if (matches) return [];
+		if (matches) {
+			return [];
+		}
 		return [
 			{
 				index,
@@ -289,7 +305,9 @@ function staleRecordsFor(
 				: contract?.kind === "named" && record.replyEvent !== undefined
 					? contract.schemas[record.replyEvent]
 					: undefined;
-		if (stableStringify(schema) === stableStringify(record.schema)) return [];
+		if (stableStringify(schema) === stableStringify(record.schema)) {
+			return [];
+		}
 		return [
 			{
 				index,
@@ -301,16 +319,26 @@ function staleRecordsFor(
 			},
 		];
 	}
-	if (record.type !== "state_action") return [];
+	if (record.type !== "state_action") {
+		return [];
+	}
 	// Resolved state-action input is informational provenance. Replay identity remains the
 	// pre-existing explicit action-definition / guard checks, so old records may omit input.
 	const state = record.actionUid.state;
-	if (!projection.activeLeaves.includes(state) && record.kind !== "validated") return [];
+	if (!projection.activeLeaves.includes(state) && record.kind !== "validated") {
+		return [];
+	}
 	const node = actorContextForState(ast, state)?.node ?? nodeAt(ast, state);
-	if (node?.kind !== "state") return [];
+	if (node?.kind !== "state") {
+		return [];
+	}
 	if (record.kind === "invoke") {
-		if (!isRecord(record.definition)) return [];
-		if (stableStringify(record.definition) === stableStringify(node.action)) return [];
+		if (!isRecord(record.definition)) {
+			return [];
+		}
+		if (stableStringify(record.definition) === stableStringify(node.action)) {
+			return [];
+		}
 		return [
 			{
 				index,
@@ -340,7 +368,7 @@ function staleRecordsFor(
 				},
 			];
 			// Removing the current guard must not hide a different historical guard change.
-			if (invokedGuard !== undefined && stableStringify(invokedGuard) !== stableStringify(record.guard))
+			if (invokedGuard !== undefined && stableStringify(invokedGuard) !== stableStringify(record.guard)) {
 				issues.push({
 					index,
 					seqId: record.seqId,
@@ -350,9 +378,12 @@ function staleRecordsFor(
 					...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
 					message: `Recorded guard for state ${state} differs from its invocation validation policy`,
 				});
+			}
 			return issues;
 		}
-		if (stableStringify(record.guard) === stableStringify(currentGuard)) return [];
+		if (stableStringify(record.guard) === stableStringify(currentGuard)) {
+			return [];
+		}
 		return [
 			{
 				index,
@@ -390,13 +421,21 @@ function brokenRecordFor(
 				...(pending === undefined ? {} : { invokeSeqId: pending.invokeSeqId }),
 			};
 		}
-		if (record.type === "spawned") return { ...base, state: record.path };
-		if (record.type === "actor_created") return { ...base, state: record.occurrence };
-		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope")
+		if (record.type === "spawned") {
+			return { ...base, state: record.path };
+		}
+		if (record.type === "actor_created") {
 			return { ...base, state: record.occurrence };
-		if (record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved")
+		}
+		if (record.type === "actor_messages_enqueued" || record.type === "actor_message" || record.type === "actor_scope") {
+			return { ...base, state: record.occurrence };
+		}
+		if (record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") {
 			return { ...base, state: record.callerState };
-		if (record.type === "failure_intent") return { ...base, state: record.origin };
+		}
+		if (record.type === "failure_intent") {
+			return { ...base, state: record.origin };
+		}
 		return base;
 	}
 	const pending = projection.pendingActions.find((entry) => sameActionUid(entry.actionUid, record.actionUid));
@@ -439,7 +478,9 @@ function openedComparable(
 	record: Extract<DurableLogRecord | DurableRecordDraft, { type: "user_interaction"; kind: "opened" }>,
 ) {
 	const { input: _input, ...withoutInput } = record;
-	if (!("seqId" in withoutInput)) return withoutInput;
+	if (!("seqId" in withoutInput)) {
+		return withoutInput;
+	}
 	const { seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...draft } = withoutInput;
 	return draft;
 }
@@ -449,8 +490,12 @@ function stableStringify(value: unknown): string {
 }
 
 function stableValue(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(stableValue);
-	if (typeof value !== "object" || value === null) return value;
+	if (Array.isArray(value)) {
+		return value.map(stableValue);
+	}
+	if (typeof value !== "object" || value === null) {
+		return value;
+	}
 	return Object.fromEntries(
 		Object.entries(value)
 			.filter(([, entry]) => entry !== undefined)

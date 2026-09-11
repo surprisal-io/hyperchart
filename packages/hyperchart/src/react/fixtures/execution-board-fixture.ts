@@ -185,14 +185,17 @@ class ExecutionBoardRuntime implements Runtime {
 							}) as DurableLogRecord,
 					);
 					this.records.push(...records);
-					if (effect.id === "args") projectBranch(this.projection, this.ast, records);
+					if (effect.id === "args") {
+						projectBranch(this.projection, this.ast, records);
+					}
 					if (
 						records.some(
 							(record) =>
 								record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "publish",
 						)
-					)
+					) {
 						throw new CaptureComplete();
+					}
 					this.push({ kind: "durable_records_added", effectId: effect.id, records });
 					break;
 				}
@@ -226,9 +229,13 @@ class ExecutionBoardRuntime implements Runtime {
 
 	async *eventsQueue(): AsyncIterable<MachineEvent> {
 		while (true) {
-			if (this.queued.length === 0) await new Promise<void>((resolve) => this.waiters.push(resolve));
+			if (this.queued.length === 0) {
+				await new Promise<void>((resolve) => this.waiters.push(resolve));
+			}
 			const event = this.queued.shift();
-			if (event !== undefined) yield event;
+			if (event !== undefined) {
+				yield event;
+			}
 		}
 	}
 
@@ -247,7 +254,9 @@ export function captureExecutionBoardRun(): Promise<HyperchartRunInfo> {
 
 async function capture(): Promise<HyperchartRunInfo> {
 	const normalized = normalizeChartConfig(cst, { path: "storybook:complete-execution" });
-	if (!normalized.ok) throw new Error(normalized.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!normalized.ok) {
+		throw new Error(normalized.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	const runtime = new ExecutionBoardRuntime(normalized.ast);
 	await runtime.runEffects([
 		{
@@ -265,7 +274,9 @@ async function capture(): Promise<HyperchartRunInfo> {
 	try {
 		await loop(runtime, semantic);
 	} catch (error) {
-		if (!(error instanceof CaptureComplete)) throw error;
+		if (!(error instanceof CaptureComplete)) {
+			throw error;
+		}
 	}
 	const replay = explainReplay(normalized.ast, runtime.records);
 	if (

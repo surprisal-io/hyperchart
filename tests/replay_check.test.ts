@@ -34,7 +34,9 @@ import {
 
 function ast(input: unknown): ChartAst {
 	const parsed = normalizeChartConfig(input);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	return parsed.ast;
 }
 
@@ -55,13 +57,17 @@ function twoStep(firstTarget = "second"): ChartAst {
 
 function actionUid(chartAst: ChartAst, state: StatePath): ActionUID {
 	const node = chartAst.states[state];
-	if (node?.kind !== "state") throw new Error(`Expected action state ${state}`);
+	if (node?.kind !== "state") {
+		throw new Error(`Expected action state ${state}`);
+	}
 	return { ...node.action.uid, state };
 }
 
 function definition(chartAst: ChartAst, state: StatePath): StateActionAst {
 	const node = chartAst.states[state];
-	if (node?.kind !== "state") throw new Error(`Expected action state ${state}`);
+	if (node?.kind !== "state") {
+		throw new Error(`Expected action state ${state}`);
+	}
 	return node.action;
 }
 
@@ -391,7 +397,9 @@ describe("explainReplay", () => {
 		const uid = actionUid(original, "work");
 		const originalAction = (original.states.work as Extract<StateAst, { kind: "state" }>).action;
 		const guard = originalAction.kind === "agent" ? originalAction.validation?.guard : undefined;
-		if (guard === undefined) throw new Error("expected guard");
+		if (guard === undefined) {
+			throw new Error("expected guard");
+		}
 		const log: DurableLogRecord[] = [
 			args(),
 			invoke(uid, 2, definition(original, "work")),

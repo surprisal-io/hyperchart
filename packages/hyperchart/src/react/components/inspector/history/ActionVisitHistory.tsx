@@ -30,7 +30,9 @@ export function ActionVisitHistory({
 	const initialScroll = useRef<string | undefined>(undefined);
 	const snapshotKey = `${run.runId}:${history.snapshot.branchId}:${history.snapshot.headSeqId ?? "root"}`;
 	useEffect(() => {
-		if (history.rows.length === 0 || initialScroll.current === snapshotKey) return;
+		if (history.rows.length === 0 || initialScroll.current === snapshotKey) {
+			return;
+		}
 		initialScroll.current = snapshotKey;
 		listRef.current?.scrollTo?.({ top: listRef.current.scrollHeight });
 	}, [history.rows.length, snapshotKey]);
@@ -248,11 +250,17 @@ function invocationIcon(visit: HyperchartVisitInfo): HeroIcon {
 }
 
 function formatDuration(visit: HyperchartVisitInfo): string | undefined {
-	if (visit.endedAt === undefined) return undefined;
+	if (visit.endedAt === undefined) {
+		return undefined;
+	}
 	const milliseconds = Math.max(0, visit.endedAt - visit.startedAt);
-	if (milliseconds < 1_000) return `${milliseconds}ms`;
+	if (milliseconds < 1_000) {
+		return `${milliseconds}ms`;
+	}
 	const seconds = Math.round(milliseconds / 1_000);
-	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 60) {
+		return `${seconds}s`;
+	}
 	return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 

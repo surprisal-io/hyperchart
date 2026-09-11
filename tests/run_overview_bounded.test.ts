@@ -20,11 +20,15 @@ describe("bounded run overview", () => {
 		const source = structuredClone(mailboxReentryRun);
 		const actor = source.actorOccurrences?.[0];
 		const seed = actor?.mailbox.head;
-		if (actor === undefined || seed === undefined) throw new Error("mailbox fixture is incomplete");
+		if (actor === undefined || seed === undefined) {
+			throw new Error("mailbox fixture is incomplete");
+		}
 		actor.mailbox.entries = Array.from({ length: 20_000 }, (_, index) => ({ ...seed, messageId: `queued-${index}` }));
 		actor.mailbox.totalCount = actor.mailbox.entries.length;
 		const latestInstance = actor.mailboxInstances.at(-1);
-		if (latestInstance === undefined) throw new Error("mailbox instance fixture is incomplete");
+		if (latestInstance === undefined) {
+			throw new Error("mailbox instance fixture is incomplete");
+		}
 		latestInstance.mailbox = { totalCount: 20_000, head: seed, entries: actor.mailbox.entries };
 		actor.mailboxInstances[0]!.messageHistory = Array.from({ length: 20_000 }, (_, index) => ({
 			...seed,
@@ -55,10 +59,14 @@ describe("bounded run overview", () => {
 	it("recursively strips pool worker visit and message histories", () => {
 		const source = structuredClone(actorPoolBusyRun);
 		const pool = source.actorOccurrences?.find((actor) => actor.kind === "actorPool");
-		if (pool?.workers?.[0] === undefined) throw new Error("pool fixture is incomplete");
+		if (pool?.workers?.[0] === undefined) {
+			throw new Error("pool fixture is incomplete");
+		}
 		const worker = pool.workers[0];
 		const seed = worker.currentMessage ?? pool.mailbox.head;
-		if (seed === undefined) throw new Error("pool message fixture is incomplete");
+		if (seed === undefined) {
+			throw new Error("pool message fixture is incomplete");
+		}
 		worker.messageHistory = Array.from({ length: 10_000 }, (_, index) => ({ ...seed, messageId: `worker-${index}` }));
 		worker.visitHistory = Array.from({ length: 10_000 }, (_, index) => ({
 			visit: index + 1,
@@ -71,16 +79,18 @@ describe("bounded run overview", () => {
 		const projection = projectBranch(createBranchProjection(actorPoolAst), actorPoolAst, records);
 
 		const overview = overviewOnly(source, projection);
-		for (const occurrence of overview.actorOccurrences ?? [])
+		for (const occurrence of overview.actorOccurrences ?? []) {
 			for (const summary of occurrence.workers ?? []) {
 				expect(summary).not.toHaveProperty("messageHistory");
 				expect(summary).not.toHaveProperty("visitHistory");
 				expect(summary.session).not.toHaveProperty("messages");
 			}
-		for (const state of overview.states)
+		}
+		for (const state of overview.states) {
 			for (const summary of state.actorOccurrence?.workers ?? []) {
 				expect(summary).not.toHaveProperty("messageHistory");
 				expect(summary).not.toHaveProperty("visitHistory");
 			}
+		}
 	});
 });

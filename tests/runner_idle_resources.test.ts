@@ -57,7 +57,9 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
 		const opened = [...records]
 			.reverse()
 			.find((record) => record.type === "user_interaction" && record.kind === "opened");
-		if (opened === undefined) throw new Error("gate missing");
+		if (opened === undefined) {
+			throw new Error("gate missing");
+		}
 		return opened.seqId;
 	};
 	try {
@@ -74,7 +76,9 @@ it("unloads and readmits real journal-native gates repeatedly, preserving active
 		for (let cycle = 0; cycle < 10; cycle++) {
 			const branchId = cycle === 0 ? "fork" : "main";
 			const seq = await gate(branchId);
-			if (controller.liveBranchIds.includes(branchId)) await controller.unloadBranch(branchId);
+			if (controller.liveBranchIds.includes(branchId)) {
+				await controller.unloadBranch(branchId);
+			}
 			await controller.respondToUserInteraction(branchId, seq, { type: "SELECTED" });
 			const outcome = controller.startBranch(branchId);
 			await vi.waitFor(() => expect(emissions.has(branchId)).toBe(true));

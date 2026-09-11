@@ -5,14 +5,20 @@ import { schemaAtPath, schemaTypeText } from "./schema.js";
 function parseDslCallArgs(token: string, name: string): string[] | undefined {
 	const trimmed = token.trim();
 	const prefix = `${name}(`;
-	if (!trimmed.startsWith(prefix) || !trimmed.endsWith(")")) return undefined;
+	if (!trimmed.startsWith(prefix) || !trimmed.endsWith(")")) {
+		return undefined;
+	}
 	const body = trimmed.slice(prefix.length, -1).trim();
-	if (body.length === 0) return [];
+	if (body.length === 0) {
+		return [];
+	}
 	const args: string[] = [];
 	let rest = body;
 	while (rest.length > 0) {
 		const match = /^"((?:\\.|[^"\\])*)"\s*(?:,\s*|$)/.exec(rest);
-		if (!match) return undefined;
+		if (!match) {
+			return undefined;
+		}
 		args.push(JSON.parse(`"${match[1] ?? ""}"`) as string);
 		rest = rest.slice(match[0].length);
 	}
@@ -22,7 +28,9 @@ function parseDslCallArgs(token: string, name: string): string[] | undefined {
 function unwrapDslCall(token: string, name: string): string | undefined {
 	const trimmed = token.trim();
 	const prefix = `${name}(`;
-	if (!trimmed.startsWith(prefix) || !trimmed.endsWith(")")) return undefined;
+	if (!trimmed.startsWith(prefix) || !trimmed.endsWith(")")) {
+		return undefined;
+	}
 	const inner = trimmed.slice(prefix.length, -1).trim();
 	return inner.length === 0 ? undefined : inner;
 }
@@ -30,25 +38,33 @@ function unwrapDslCall(token: string, name: string): string | undefined {
 function parsePromptInterpolationRef(token: string): PromptInterpolationRef {
 	const sourceToken = unwrapDslCall(token, "json") ?? token;
 	const inputArgs = parseDslCallArgs(sourceToken, "input");
-	if (inputArgs?.[0])
+	if (inputArgs?.[0]) {
 		return { kind: "input", name: inputArgs[0], ...(inputArgs[1] === undefined ? {} : { path: inputArgs[1] }) };
+	}
 	const actorInputArgs = parseDslCallArgs(sourceToken, "actorInput");
-	if (actorInputArgs)
+	if (actorInputArgs) {
 		return { kind: "actorInput", ...(actorInputArgs[0] === undefined ? {} : { path: actorInputArgs[0] }) };
+	}
 	const messageInputArgs = parseDslCallArgs(sourceToken, "messageInput");
-	if (messageInputArgs?.[0])
+	if (messageInputArgs?.[0]) {
 		return {
 			kind: "messageInput",
 			message: messageInputArgs[0],
 			...(messageInputArgs[1] === undefined ? {} : { path: messageInputArgs[1] }),
 		};
+	}
 	const resultArgs = parseDslCallArgs(sourceToken, "result");
-	if (resultArgs?.[0])
+	if (resultArgs?.[0]) {
 		return { kind: "result", state: resultArgs[0], ...(resultArgs[1] === undefined ? {} : { path: resultArgs[1] }) };
+	}
 	const visitArgs = parseDslCallArgs(sourceToken, "visit");
-	if (visitArgs) return { kind: "visit", ...(visitArgs[0] === undefined ? {} : { state: visitArgs[0] }) };
+	if (visitArgs) {
+		return { kind: "visit", ...(visitArgs[0] === undefined ? {} : { state: visitArgs[0] }) };
+	}
 	const keyArgs = parseDslCallArgs(sourceToken, "key");
-	if (keyArgs) return { kind: "key", ...(keyArgs[0] === undefined ? {} : { state: keyArgs[0] }) };
+	if (keyArgs) {
+		return { kind: "key", ...(keyArgs[0] === undefined ? {} : { state: keyArgs[0] }) };
+	}
 	return { kind: "unknown" };
 }
 
@@ -57,7 +73,9 @@ function resultRefTarget(
 	state: HyperchartStateInfo,
 	allStates: HyperchartStateInfo[],
 ): { state: HyperchartStateInfo; path?: string } | undefined {
-	if (ref.kind !== "result") return undefined;
+	if (ref.kind !== "result") {
+		return undefined;
+	}
 	const direct = allStates.find((candidate) => candidate.id === ref.state && candidate.replySchema !== undefined);
 	const actorInternal = state.actorInternal;
 	const actorLocal =
@@ -69,15 +87,18 @@ function resultRefTarget(
 						target?.declarationPath !== actorInternal.declarationPath ||
 						target.localState !== ref.state ||
 						candidate.replySchema === undefined
-					)
+					) {
 						return false;
-					if (actorInternal.occurrencePath !== undefined && target.occurrencePath !== actorInternal.occurrencePath)
+					}
+					if (actorInternal.occurrencePath !== undefined && target.occurrencePath !== actorInternal.occurrencePath) {
 						return false;
+					}
 					if (
 						actorInternal.logicalOccurrencePath !== undefined &&
 						target.logicalOccurrencePath !== actorInternal.logicalOccurrencePath
-					)
+					) {
 						return false;
+					}
 					return actorInternal.generation === undefined || target.generation === actorInternal.generation;
 				}) ??
 				allStates.find(
@@ -94,9 +115,13 @@ function inputRefTypeInfo(
 	state: HyperchartStateInfo,
 	ref: PromptInterpolationRef,
 ): { name: string; schema?: HyperchartStateInfo["replySchema"] } | undefined {
-	if (ref.kind !== "input") return undefined;
+	if (ref.kind !== "input") {
+		return undefined;
+	}
 	const input = state.inputs?.find((candidate) => candidate.name === ref.name);
-	if (!input?.schema) return { name: ref.name };
+	if (!input?.schema) {
+		return { name: ref.name };
+	}
 	return { name: ref.name, schema: schemaAtPath(input.schema, ref.path) ?? input.schema };
 }
 
@@ -105,7 +130,9 @@ function actorDeclarationForState(
 	allStates: HyperchartStateInfo[],
 ): NonNullable<HyperchartStateInfo["actorDeclaration"]> | undefined {
 	const declarationPath = state.actorInternal?.declarationPath;
-	if (declarationPath === undefined) return undefined;
+	if (declarationPath === undefined) {
+		return undefined;
+	}
 	return allStates.find((candidate) => candidate.actorDeclaration?.declarationPath === declarationPath)
 		?.actorDeclaration;
 }
@@ -163,7 +190,9 @@ export function interpolationAction(
 			...(actions.onHighlightInput === undefined ? {} : { onClick: () => actions.onHighlightInput?.(inputInfo.name) }),
 		};
 	}
-	if (ref.kind === "visit") return { title: "number", tone: "visit" };
+	if (ref.kind === "visit") {
+		return { title: "number", tone: "visit" };
+	}
 	const resultTarget = resultRefTarget(ref, state, allStates);
 	if (resultTarget) {
 		const schema = schemaAtPath(resultTarget.state.replySchema, resultTarget.path);
@@ -175,7 +204,9 @@ export function interpolationAction(
 				: { onClick: () => actions.onHighlightReply?.(resultTarget.state.id, resultTarget.path ?? "") }),
 		};
 	}
-	if (ref.kind === "key") return { title: "string", tone: "plain" };
+	if (ref.kind === "key") {
+		return { title: "string", tone: "plain" };
+	}
 	return { title: token, tone: "plain" };
 }
 
@@ -201,7 +232,9 @@ export function interpolationTokenClass(tone: PromptInterpolationTone, clickable
 
 export function hasInterpolation(text: string): boolean {
 	for (const match of text.matchAll(/\{([^{}]+)\}/g)) {
-		if (isPromptInterpolationToken(match[1] ?? "")) return true;
+		if (isPromptInterpolationToken(match[1] ?? "")) {
+			return true;
+		}
 	}
 	return false;
 }

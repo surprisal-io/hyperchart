@@ -33,18 +33,25 @@ export type ActionStateContext = Readonly<{
 export function actionVisitIndexes(records: readonly HyperchartRecordInfo[]): ActionVisitIndex[] {
 	const byInvocation = new Map<number, ActionVisitIndex>();
 	for (const item of records) {
-		if (!isRecord(item.record)) continue;
+		if (!isRecord(item.record)) {
+			continue;
+		}
 		if (item.type === "state_action") {
-			if (item.record.kind !== "invoke" || !isRecord(item.record.actionUid)) continue;
+			if (item.record.kind !== "invoke" || !isRecord(item.record.actionUid)) {
+				continue;
+			}
 			const state = item.record.actionUid.state;
-			if (typeof state !== "string") continue;
+			if (typeof state !== "string") {
+				continue;
+			}
 			byInvocation.set(item.seqId, { invokeSeqId: item.seqId, statePath: state, originBranchId: item.branchId });
 			continue;
 		}
 		if (item.type === "actor_messages_enqueued" && isRecord(item.record.source)) {
 			const state = item.record.source.producerState;
-			if (typeof state === "string")
+			if (typeof state === "string") {
 				byInvocation.set(item.seqId, { invokeSeqId: item.seqId, statePath: state, originBranchId: item.branchId });
+			}
 		}
 	}
 	return [...byInvocation.values()].sort((left, right) => left.invokeSeqId - right.invokeSeqId);
@@ -73,7 +80,9 @@ export function actorMessageVisitForState(
 	originBranchId: string,
 ): HyperchartVisitInfo | undefined {
 	const messages = state.actorMessageLink?.messages?.filter((message) => message.enqueueSeqId === invokeSeqId);
-	if (messages === undefined || messages.length === 0) return undefined;
+	if (messages === undefined || messages.length === 0) {
+		return undefined;
+	}
 	const first = messages[0]!;
 	const done =
 		state.actorMessageLink?.kind === "send" ||
@@ -101,8 +110,12 @@ export function actionVisitStatusLabel(visit: HyperchartVisitInfo): string {
 		case "failed":
 			return "Failed";
 		case "cancelled":
-			if (visit.endedReason === "timed_out") return "Cancelled · Timed out";
-			if (visit.endedReason === "scope_exit") return "Cancelled · Scope exited";
+			if (visit.endedReason === "timed_out") {
+				return "Cancelled · Timed out";
+			}
+			if (visit.endedReason === "scope_exit") {
+				return "Cancelled · Scope exited";
+			}
 			return "Cancelled";
 	}
 }
@@ -111,7 +124,9 @@ export function embeddedActionVisitRows(run: HyperchartRunInfo): ActionVisitRow[
 	const rows = new Map<number, ActionVisitRow>();
 	const append = (statePath: string, visits: readonly HyperchartVisitInfo[] | undefined, graphStateId?: string) => {
 		for (const visit of visits ?? []) {
-			if (visit.invocation.kind === "actor") continue;
+			if (visit.invocation.kind === "actor") {
+				continue;
+			}
 			rows.set(visit.invokeSeqId, {
 				invokeSeqId: visit.invokeSeqId,
 				statePath,
@@ -128,7 +143,7 @@ export function embeddedActionVisitRows(run: HyperchartRunInfo): ActionVisitRow[
 		for (const enqueueSeqId of enqueueSeqIds) {
 			const originBranchId = run.branchId ?? "main";
 			const visit = actorMessageVisitForState(state, enqueueSeqId, originBranchId);
-			if (visit !== undefined)
+			if (visit !== undefined) {
 				rows.set(enqueueSeqId, {
 					invokeSeqId: enqueueSeqId,
 					statePath: runtimePath,
@@ -136,15 +151,18 @@ export function embeddedActionVisitRows(run: HyperchartRunInfo): ActionVisitRow[
 					graphStateId: state.id,
 					visit,
 				});
+			}
 		}
-		for (const generation of state.actorInternal?.generations ?? [])
+		for (const generation of state.actorInternal?.generations ?? []) {
 			append(
 				`${generation.occurrencePath}.${state.actorInternal?.localState ?? state.id}`,
 				generation.visitHistory,
 				state.id,
 			);
-		for (const worker of state.actorOccurrence?.workers ?? [])
+		}
+		for (const worker of state.actorOccurrence?.workers ?? []) {
 			append(`${worker.occurrencePath}.${worker.currentState}`, worker.visitHistory, worker.currentStateId);
+		}
 	}
 	return [...rows.values()].sort((left, right) => left.invokeSeqId - right.invokeSeqId);
 }
@@ -152,16 +170,24 @@ export function embeddedActionVisitRows(run: HyperchartRunInfo): ActionVisitRow[
 export function actionStateContexts(states: readonly HyperchartStateInfo[]): ActionStateContext[] {
 	const contexts: ActionStateContext[] = [];
 	for (const state of states) {
-		if (!isActionState(state)) continue;
-		if (state.status === "running") contexts.push({ stateId: state.id, label: "Active" });
-		else if (state.status === "waiting") contexts.push({ stateId: state.id, label: "Waiting" });
-		else if (state.status === "pending")
+		if (!isActionState(state)) {
+			continue;
+		}
+		if (state.status === "running") {
+			contexts.push({ stateId: state.id, label: "Active" });
+		} else if (state.status === "waiting") {
+			contexts.push({ stateId: state.id, label: "Waiting" });
+		} else if (state.status === "pending") {
 			contexts.push({ stateId: state.id, label: "Pending—not guaranteed to execute" });
-		else if (state.status === "skipped") contexts.push({ stateId: state.id, label: "Skipped" });
-		else {
+		} else if (state.status === "skipped") {
+			contexts.push({ stateId: state.id, label: "Skipped" });
+		} else {
 			const count = state.runtimeSummary?.visitCount ?? state.visitHistory?.length;
-			if (count === 0) contexts.push({ stateId: state.id, label: "Not yet visited" });
-			else if (count === undefined) contexts.push({ stateId: state.id, label: "Visit history unavailable" });
+			if (count === 0) {
+				contexts.push({ stateId: state.id, label: "Not yet visited" });
+			} else if (count === undefined) {
+				contexts.push({ stateId: state.id, label: "Visit history unavailable" });
+			}
 		}
 	}
 	return contexts;

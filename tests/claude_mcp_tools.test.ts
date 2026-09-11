@@ -39,9 +39,14 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-	if (previousClaudeConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-	else process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	if (previousClaudeConfigDir === undefined) {
+		delete process.env.CLAUDE_CONFIG_DIR;
+	} else {
+		process.env.CLAUDE_CONFIG_DIR = previousClaudeConfigDir;
+	}
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 	await closeRunInspectorServer();
 });
 
@@ -135,8 +140,9 @@ describe("hyperchart MCP tools", () => {
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
-		for (let index = 0; index < 105; index++)
+		for (let index = 0; index < 105; index++) {
 			await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		}
 		const firstResult = await tools.get("hyperchart_branches")!.handler({ runId, cwd });
 		const first = JSON.parse(text(firstResult)) as {
 			branches: Array<{ branchId: string }>;
@@ -267,7 +273,9 @@ describe("hyperchart MCP tools", () => {
 		const first = await tools.get("hyperchart_run")!.handler({ branchId: "main", chartPath: "simple", wait: true });
 		expect(JSON.parse(text(first))).toMatchObject({ boundary: "terminal", final: true, status: { state: "complete" } });
 		const [runId] = readdirSync(runsRoot);
-		if (runId === undefined) throw new Error("expected run");
+		if (runId === undefined) {
+			throw new Error("expected run");
+		}
 		const runDir = resolveRunPaths(runId, storage).runDir;
 		expect((await withRunStorage(storage, () => loadRunMeta(runId))).originSessionId).toBe("session-a");
 		expect(withRunStorage(storage, () => hasTerminalNotificationReceipt(runId, "claude", "session-a"))).toBe(false);
@@ -704,7 +712,9 @@ describe("session start hook", () => {
 		const liveDir = join(runsRoot, "live-run");
 		const deadDir = join(runsRoot, "dead-run");
 		const foreignDir = join(runsRoot, "foreign-run");
-		for (const dir of [liveDir, deadDir, foreignDir]) mkdirSync(dir, { recursive: true });
+		for (const dir of [liveDir, deadDir, foreignDir]) {
+			mkdirSync(dir, { recursive: true });
+		}
 		writeFileSync(
 			join(liveDir, "meta.json"),
 			JSON.stringify({

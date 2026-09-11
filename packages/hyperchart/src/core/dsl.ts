@@ -432,7 +432,9 @@ export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 		return value;
 	}
 	const object = value as object;
-	if (seen.has(object)) return value;
+	if (seen.has(object)) {
+		return value;
+	}
 	seen.add(object);
 	for (const property of Reflect.ownKeys(object)) {
 		const child = (object as Record<PropertyKey, unknown>)[property];

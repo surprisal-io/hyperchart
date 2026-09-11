@@ -21,7 +21,9 @@ export function TypeSyntaxBlock({ lines }: { lines: TypeTreeLine[] }) {
 					lineNumberContainerStyle={{ display: "none" }}
 					lineProps={(lineNumber) => {
 						const line = typeof lineNumber === "number" ? lines[lineNumber - 1] : undefined;
-						if (!line?.highlight) return {};
+						if (!line?.highlight) {
+							return {};
+						}
 						return {
 							...(line.id === undefined ? {} : { id: line.id }),
 							style: {

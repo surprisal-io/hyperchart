@@ -21,10 +21,14 @@ export type HyperchartRunnerConfig = GenericRunnerConfig & {
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
 	const configPath = argv[0];
-	if (configPath === undefined) throw new Error("hyperchart runner requires a config path");
+	if (configPath === undefined) {
+		throw new Error("hyperchart runner requires a config path");
+	}
 	const config = readRunnerConfig(configPath);
 	const agentDir = config.agentDir;
-	if (agentDir === undefined) throw new Error(`Invalid hyperchart runner config: ${configPath} (agentDir is required)`);
+	if (agentDir === undefined) {
+		throw new Error(`Invalid hyperchart runner config: ${configPath} (agentDir is required)`);
+	}
 	await runHyperchartRunner(config, async ({ config: runnerConfig, schemaRegistry, sessionsDir }) => {
 		const modelRuntime = await createModelRuntime(agentDir);
 		return new PiAgentExecutor({

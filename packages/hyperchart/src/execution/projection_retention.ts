@@ -58,13 +58,17 @@ export function compileProjectionRetention(ast: ChartAst): ProjectionRetentionPl
 				const regionPath = childPath(readerPath, region);
 				reenterableStates.add(regionPath);
 				const regionNode = ast.states[regionPath];
-				if (regionNode?.kind === "region") reenterableStates.add(childPath(regionPath, regionNode.initial));
+				if (regionNode?.kind === "region") {
+					reenterableStates.add(childPath(regionPath, regionNode.initial));
+				}
 			}
 			reenterableStates.add(siblingPath(readerPath, node.onDone));
 		}
 		if (node.kind === "compound" || node.kind === "region") {
 			reenterableStates.add(childPath(readerPath, node.initial));
-			if (node.kind === "compound") reenterableStates.add(siblingPath(readerPath, node.onDone));
+			if (node.kind === "compound") {
+				reenterableStates.add(siblingPath(readerPath, node.onDone));
+			}
 		}
 		if (node.kind === "map") {
 			reenterableStates.add(childPath(readerPath, node.initial));
@@ -76,14 +80,18 @@ export function compileProjectionRetention(ast: ChartAst): ProjectionRetentionPl
 		) {
 			reenterableStates.add(readerPath);
 		}
-		if (isResumableAction(ast, readerPath, node)) resumableActions.add(actionUidKey(node.action.uid));
+		if (isResumableAction(ast, readerPath, node)) {
+			resumableActions.add(actionUidKey(node.action.uid));
+		}
 	}
 
 	// Actor workflow reachability is occurrence-relative and may include nested map
 	// scopes. Retain their sessions until that analysis is modeled explicitly.
 	for (const declaration of Object.values(ast.actors)) {
 		walkValues(declaration, (value) => {
-			if (isActionLike(value) && value.action.kind === "agent") resumableActions.add(actionUidKey(value.action.uid));
+			if (isActionLike(value) && value.action.kind === "agent") {
+				resumableActions.add(actionUidKey(value.action.uid));
+			}
 		});
 	}
 
@@ -107,34 +115,56 @@ export function compactProjection(
 ): void {
 	for (const key of Object.keys(projection.sessions)) {
 		const templateKey = templateActionKey(key);
-		if (templateKey === undefined || retention.resumableActions.has(templateKey)) continue;
+		if (templateKey === undefined || retention.resumableActions.has(templateKey)) {
+			continue;
+		}
 		delete projection.sessions[key];
 	}
 	const retainedMessageIds = new Set<string>();
 	for (const endpoint of [...Object.values(projection.actors), ...Object.values(projection.actorPools)]) {
-		for (const messageId of endpoint.mailbox) retainedMessageIds.add(messageId);
+		for (const messageId of endpoint.mailbox) {
+			retainedMessageIds.add(messageId);
+		}
 		if ("workers" in endpoint) {
-			for (const worker of endpoint.workers)
-				if (worker.currentMessageId !== undefined) retainedMessageIds.add(worker.currentMessageId);
-		} else if (endpoint.currentMessageId !== undefined) retainedMessageIds.add(endpoint.currentMessageId);
+			for (const worker of endpoint.workers) {
+				if (worker.currentMessageId !== undefined) {
+					retainedMessageIds.add(worker.currentMessageId);
+				}
+			}
+		} else if (endpoint.currentMessageId !== undefined) {
+			retainedMessageIds.add(endpoint.currentMessageId);
+		}
 	}
 	for (const call of Object.values(projection.pendingActorCalls)) {
-		if (call.kind === "singleton") retainedMessageIds.add(call.messageId);
-		else for (const messageId of call.messageIds) retainedMessageIds.add(messageId);
+		if (call.kind === "singleton") {
+			retainedMessageIds.add(call.messageId);
+		} else {
+			for (const messageId of call.messageIds) {
+				retainedMessageIds.add(messageId);
+			}
+		}
 	}
 	for (const messageId of Object.keys(projection.liveActorMessages)) {
-		if (!retainedMessageIds.has(messageId)) delete projection.liveActorMessages[messageId];
+		if (!retainedMessageIds.has(messageId)) {
+			delete projection.liveActorMessages[messageId];
+		}
 	}
 	void ast;
 }
 
 function isResumableAction(ast: ChartAst, path: StatePath, node: unknown): node is ActionStateAst {
-	if (!isActionLike(node) || node.action.kind !== "agent") return false;
-	if (typeof node.action.reentry === "object") return true;
+	if (!isActionLike(node) || node.action.kind !== "agent") {
+		return false;
+	}
+	if (typeof node.action.reentry === "object") {
+		return true;
+	}
 	let parent = parentPath(path);
 	while (parent !== undefined) {
 		const ancestor = nodeAt(ast, parent);
-		if (ancestor?.kind === "map" && typeof ancestor.onReenter === "object") return true;
+		if (ancestor?.kind === "map" && typeof ancestor.onReenter === "object") {
+			return true;
+		}
 		parent = parentPath(parent);
 	}
 	return false;
@@ -153,25 +183,35 @@ function isActionLike(value: unknown): value is ActionStateAst {
 function resultRefs(value: unknown): StatePath[] {
 	const refs = new Set<StatePath>();
 	walkValues(value, (candidate) => {
-		if (candidate.kind === "result" && typeof candidate.state === "string") refs.add(candidate.state);
+		if (candidate.kind === "result" && typeof candidate.state === "string") {
+			refs.add(candidate.state);
+		}
 	});
 	return [...refs];
 }
 
 function walkValues(value: unknown, visit: (value: Record<string, unknown>) => void): void {
 	if (Array.isArray(value)) {
-		for (const entry of value) walkValues(entry, visit);
+		for (const entry of value) {
+			walkValues(entry, visit);
+		}
 		return;
 	}
-	if (typeof value !== "object" || value === null) return;
+	if (typeof value !== "object" || value === null) {
+		return;
+	}
 	const record = value as Record<string, unknown>;
 	visit(record);
-	for (const child of Object.values(record)) walkValues(child, visit);
+	for (const child of Object.values(record)) {
+		walkValues(child, visit);
+	}
 }
 
 function templateActionKey(key: string): string | undefined {
 	const first = key.indexOf(":");
 	const last = key.lastIndexOf(":");
-	if (first <= 0 || last <= first) return undefined;
+	if (first <= 0 || last <= first) {
+		return undefined;
+	}
 	return `${key.slice(0, first)}:${templatePath(key.slice(first + 1, last))}:${key.slice(last + 1)}`;
 }

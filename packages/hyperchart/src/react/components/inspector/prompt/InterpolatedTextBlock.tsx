@@ -20,7 +20,9 @@ function interpolatedParts(
 	let lastIndex = 0;
 	let match = pattern.exec(text);
 	while (match !== null) {
-		if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+		if (match.index > lastIndex) {
+			parts.push(text.slice(lastIndex, match.index));
+		}
 		const token = match[1] ?? "";
 		if (isPromptInterpolationToken(token)) {
 			const action = interpolationAction(token, state, allStates, {
@@ -44,7 +46,9 @@ function interpolatedParts(
 		lastIndex = match.index + match[0].length;
 		match = pattern.exec(text);
 	}
-	if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+	if (lastIndex < text.length) {
+		parts.push(text.slice(lastIndex));
+	}
 	return parts;
 }
 

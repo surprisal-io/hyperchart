@@ -16,7 +16,9 @@ describe("randomUUID", () => {
 		const uuid = randomUUID({
 			getRandomValues(array) {
 				const bytes = array as unknown as Uint8Array;
-				for (let index = 0; index < bytes.length; index += 1) bytes[index] = index;
+				for (let index = 0; index < bytes.length; index += 1) {
+					bytes[index] = index;
+				}
 				return array;
 			},
 		});

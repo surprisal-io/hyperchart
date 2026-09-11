@@ -98,7 +98,9 @@ export function StateDetails({
 				)
 			: [];
 	useEffect(() => {
-		if (!highlightedReply) return;
+		if (!highlightedReply) {
+			return;
+		}
 		let outerFrame = 0;
 		let innerFrame = 0;
 		outerFrame = requestAnimationFrame(() => {
@@ -115,7 +117,9 @@ export function StateDetails({
 		};
 	}, [highlightedReply]);
 	useEffect(() => {
-		if (!highlightedArtifact) return;
+		if (!highlightedArtifact) {
+			return;
+		}
 		let outerFrame = 0;
 		let innerFrame = 0;
 		outerFrame = requestAnimationFrame(() => {
@@ -131,7 +135,9 @@ export function StateDetails({
 		};
 	}, [highlightedArtifact]);
 	useEffect(() => {
-		if (!highlightedInputName) return;
+		if (!highlightedInputName) {
+			return;
+		}
 		let outerFrame = 0;
 		let innerFrame = 0;
 		outerFrame = requestAnimationFrame(() => {

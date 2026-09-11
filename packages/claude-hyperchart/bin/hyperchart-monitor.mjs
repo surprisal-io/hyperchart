@@ -13,7 +13,9 @@ const intervalMs = positiveInteger(process.env.HYPERCHART_MONITOR_INTERVAL_MS) ?
 
 let scanning = false;
 async function scan() {
-	if (scanning) return;
+	if (scanning) {
+		return;
+	}
 	scanning = true;
 	try {
 		await emitPendingClaudeNotifications(options);
@@ -31,7 +33,9 @@ void scan();
 setInterval(() => void scan(), intervalMs);
 
 function positiveInteger(value) {
-	if (value === undefined) return undefined;
+	if (value === undefined) {
+		return undefined;
+	}
 	const parsed = Number(value);
 	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }

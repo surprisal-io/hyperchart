@@ -187,8 +187,11 @@ describe("Inspector action visit chronology", () => {
 			readRecords: vi.fn(
 				({ snapshot: requested }: { snapshot: typeof oldSnapshot | typeof newSnapshot }) =>
 					new Promise((resolve) => {
-						if (requested.branchId === "main") resolveOld = resolve;
-						else resolveNew = resolve;
+						if (requested.branchId === "main") {
+							resolveOld = resolve;
+						} else {
+							resolveNew = resolve;
+						}
 					}),
 			),
 		} as unknown as HyperchartInspectorDataSource;

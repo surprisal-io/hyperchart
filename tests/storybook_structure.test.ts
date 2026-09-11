@@ -48,7 +48,9 @@ const forbiddenTitleSegments = ["Components", "Features", "Examples", "Visual Te
 function sourceFiles(directory: string, include: (name: string) => boolean): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
 		const path = join(directory, entry.name);
-		if (entry.isDirectory()) return sourceFiles(path, include);
+		if (entry.isDirectory()) {
+			return sourceFiles(path, include);
+		}
 		return include(entry.name) ? [path] : [];
 	});
 }
@@ -78,8 +80,9 @@ describe("Storybook information architecture", () => {
 			"TenThousandMapLaunches",
 			"TenThousandActorGenerations",
 			"TenThousandActorMessageBatches",
-		])
+		]) {
 			expect(source).toContain(`export const ${story}`);
+		}
 		for (const removedUseCase of [
 			"DeepLinkedMiddleChunk",
 			"OppositeEdgeEvictionAndReload",
@@ -90,8 +93,9 @@ describe("Storybook information architecture", () => {
 			"BranchSnapshotSwitchCancelsInflight",
 			"RefreshToLatestWithOlderWindow",
 			"TranscriptOnDemand",
-		])
+		]) {
 			expect(source).not.toContain(`export const ${removedUseCase}`);
+		}
 		expect(source).toContain("captureRuntime(1).then((fixture) => scaleFixture(fixture))");
 		expect(source).toContain("captureSemanticRows(kind, 1).then((fixture) => scaleFixture(fixture))");
 		expect(source).toContain("rowCount: LOAD_TEST_VISITS");
@@ -130,7 +134,9 @@ describe("Storybook information architecture", () => {
 			expect(title, file).toBeDefined();
 			expect(title, file).toMatch(/^Hyperchart\/(Inspector|Launch|TUI)(?:\/|$)/);
 			const titleSegments = title?.split("/") ?? [];
-			for (const segment of forbiddenTitleSegments) expect(titleSegments, file).not.toContain(segment);
+			for (const segment of forbiddenTitleSegments) {
+				expect(titleSegments, file).not.toContain(segment);
+			}
 			expect(source, file).not.toMatch(/export const Playground\b|\bname:\s*["`]Playground["`]/i);
 		}
 	});
@@ -145,7 +151,9 @@ describe("Storybook information architecture", () => {
 			"Parallel branch scope",
 		]);
 		for (const spec of inspectorPanelSpecs) {
-			if (hiddenTitles.has(spec.title)) expect(spec.graphAtlas, spec.title).toBe(false);
+			if (hiddenTitles.has(spec.title)) {
+				expect(spec.graphAtlas, spec.title).toBe(false);
+			}
 		}
 		expect(inspectorPanelSpecs.find((spec) => spec.title === "Rich agent")?.graphAtlas).not.toBe(false);
 		expect(inspectorPanelSpecs.find((spec) => spec.title === "Validation failure")?.graphAtlas).not.toBe(false);
@@ -289,7 +297,9 @@ describe("Storybook information architecture", () => {
 		}
 
 		for (const record of runningRunRecords) {
-			if (record.type === "state_action" && record.kind === "complete") expect(record).not.toHaveProperty("definition");
+			if (record.type === "state_action" && record.kind === "complete") {
+				expect(record).not.toHaveProperty("definition");
+			}
 		}
 		expect(failedRunRecords.at(-1)?.type).toBe("failure_intent");
 		expect(failedRun.mode).toBe("run");
@@ -482,8 +492,9 @@ describe("Storybook information architecture", () => {
 		const editorActor = actorCallAst.actors["@editor"];
 		const settle = editorActor?.kind === "actor" ? editorActor.states.settle : undefined;
 		expect(settle?.kind).toBe("reply");
-		if (replyFact?.type !== "actor_message" || replyFact.kind !== "replied" || settle?.kind !== "reply")
+		if (replyFact?.type !== "actor_message" || replyFact.kind !== "replied" || settle?.kind !== "reply") {
 			throw new Error("expected named reply fixture facts");
+		}
 		expect(replyFact).toMatchObject({ message: settle.message, replyEvent: settle.event, output: settle.output });
 	});
 

@@ -3,7 +3,9 @@ import { isImplicitFailedFinal, localStateId } from "./state.js";
 
 export function immediateMapScopeId(stateId: string): string | undefined {
 	const idx = stateId.lastIndexOf("#");
-	if (idx !== -1) return stateId.slice(0, idx);
+	if (idx !== -1) {
+		return stateId.slice(0, idx);
+	}
 	const dot = stateId.lastIndexOf(".");
 	return dot === -1 ? undefined : stateId.slice(0, dot);
 }
@@ -20,10 +22,14 @@ export function scopeStackForState(states: readonly HyperchartStateInfo[], state
 	const seen = new Set<string>();
 	while (cursor !== undefined) {
 		const parentId = stateScopeParentId(cursor);
-		if (parentId === undefined || seen.has(parentId)) break;
+		if (parentId === undefined || seen.has(parentId)) {
+			break;
+		}
 		seen.add(parentId);
 		const parent = byId.get(parentId) ?? byId.get(immediateMapScopeId(parentId) ?? "");
-		if (parent === undefined) break;
+		if (parent === undefined) {
+			break;
+		}
 		stack.unshift(parent.id);
 		cursor = parent;
 	}
@@ -38,11 +44,15 @@ export function visibleStateIdsForScope(
 	const scopeId = options.scopeId ?? null;
 	const scopeHasDirectChildren = scopeId !== null && states.some((state) => stateScopeParentId(state) === scopeId);
 	for (const state of states) {
-		if (isImplicitFailedFinal(state)) continue;
+		if (isImplicitFailedFinal(state)) {
+			continue;
+		}
 		const directScope = stateScopeParentId(state);
 		if (scopeId) {
 			const insideUnmaterializedMapWorker = !scopeHasDirectChildren && directScope?.startsWith(`${scopeId}#`) === true;
-			if (directScope !== scopeId && !insideUnmaterializedMapWorker) continue;
+			if (directScope !== scopeId && !insideUnmaterializedMapWorker) {
+				continue;
+			}
 		} else if (directScope !== undefined) {
 			continue;
 		}
@@ -57,7 +67,9 @@ export function effectiveDisplayType(
 ): HyperchartStateType | undefined {
 	const parent = stateScopeParentId(state);
 	const parentState = parent ? stateById.get(parent) : undefined;
-	if (state.type === "compound" && parentState?.type === "parallel") return "region";
+	if (state.type === "compound" && parentState?.type === "parallel") {
+		return "region";
+	}
 	return state.type;
 }
 
@@ -71,11 +83,15 @@ export function childPreviewForState(
 	stateById: Map<string, HyperchartStateInfo>,
 ): string | undefined {
 	const displayType = effectiveDisplayType(state, stateById);
-	if (displayType !== "region" && displayType !== "compound") return undefined;
+	if (displayType !== "region" && displayType !== "compound") {
+		return undefined;
+	}
 	const children = directChildrenOf(state, states);
 	const activeChildren = children.filter((child) => !child.final);
 	const finalChildren = children.filter((child) => child.final).map((child) => localStateId(child.id));
-	if (activeChildren.length === 0 && finalChildren.length === 0) return undefined;
+	if (activeChildren.length === 0 && finalChildren.length === 0) {
+		return undefined;
+	}
 	const active = activeChildren.map((child) => localStateId(child.id)).join(" + ");
 	const done = finalChildren.length > 0 ? finalChildren.join(" / ") : "final";
 	return active ? `${active} → ${done}` : `→ ${done}`;

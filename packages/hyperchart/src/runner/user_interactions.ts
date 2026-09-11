@@ -30,11 +30,15 @@ const scanRunMetaCache = new Map<string, Promise<RunMeta>>();
 function loadRunMetaForOwnedScan(runId: string): Promise<RunMeta> {
 	const key = JSON.stringify([currentRunStorage(), runId]);
 	const cached = scanRunMetaCache.get(key);
-	if (cached !== undefined) return cached;
+	if (cached !== undefined) {
+		return cached;
+	}
 	const pending = loadRunMeta(runId);
 	scanRunMetaCache.set(key, pending);
 	void pending.catch(() => {
-		if (scanRunMetaCache.get(key) === pending) scanRunMetaCache.delete(key);
+		if (scanRunMetaCache.get(key) === pending) {
+			scanRunMetaCache.delete(key);
+		}
 	});
 	return pending;
 }
@@ -164,7 +168,9 @@ export function claimUserInteractionReceipt(
 		writePublicationMarker(path);
 		return true;
 	} catch (error) {
-		if (isNodeError(error) && error.code === "EEXIST") return false;
+		if (isNodeError(error) && error.code === "EEXIST") {
+			return false;
+		}
 		throw error;
 	}
 }
@@ -177,7 +183,9 @@ export function markUserInteractionReceipt(
 	sessionId: string,
 ): UserInteractionReceipt {
 	const existing = readConfirmedReceipt(runId, branchId, seqId, host, sessionId);
-	if (existing !== undefined) return existing;
+	if (existing !== undefined) {
+		return existing;
+	}
 	const receipt: UserInteractionReceipt = {
 		version: 2,
 		runId: runId,
@@ -193,9 +201,13 @@ export function markUserInteractionReceipt(
 	try {
 		writeJsonExclusive(path, receipt);
 	} catch (error) {
-		if (!isNodeError(error) || error.code !== "EEXIST") throw error;
+		if (!isNodeError(error) || error.code !== "EEXIST") {
+			throw error;
+		}
 		const raced = readConfirmedReceipt(runId, branchId, seqId, host, sessionId);
-		if (raced === undefined) throw error;
+		if (raced === undefined) {
+			throw error;
+		}
 		return raced;
 	}
 	writePublicationMarker(path);
@@ -257,10 +269,14 @@ function parseChartForInteractionScan(chartPath: string, exportName?: string): P
 		return cached.parsed;
 	}
 	const parsed = parseChartModuleSync(absolutePath, exportName === undefined ? {} : { exportName });
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	if (!scanChartCache.has(cacheKey) && scanChartCache.size >= MAX_SCAN_CHART_CACHE_ENTRIES) {
 		const oldest = scanChartCache.keys().next().value;
-		if (oldest !== undefined) scanChartCache.delete(oldest);
+		if (oldest !== undefined) {
+			scanChartCache.delete(oldest);
+		}
 	}
 	scanChartCache.set(cacheKey, { sourceHash, parsed });
 	return parsed;
@@ -282,14 +298,18 @@ async function scanOpenUserInteractionsWithMeta(
 		const branchIds = branchId === undefined ? branches.map((branch) => branch.branchId) : [branchId];
 		const result: UserInteractionRequest[] = [];
 		for (const selected of branchIds) {
-			if (!branches.some((branch) => branch.branchId === selected)) continue;
+			if (!branches.some((branch) => branch.branchId === selected)) {
+				continue;
+			}
 			const semantic = await BranchExecution.restore({
 				ast: parsed.ast,
 				branchId: selected,
 				store: store.forBranch(selected),
 				saveCheckpoint: "never",
 			});
-			for (const gate of semantic.openUserInteractions()) result.push(requestFromOpened(runId, selected, gate));
+			for (const gate of semantic.openUserInteractions()) {
+				result.push(requestFromOpened(runId, selected, gate));
+			}
 		}
 		return result.sort(compareCoordinates);
 	} finally {
@@ -330,10 +350,14 @@ export async function validateAndPersistUserInteractionResponse(
 	options: PersistUserInteractionResponseOptions,
 ): Promise<{ response: UserInteractionResponse; idempotent: boolean }> {
 	assertRunCoordinate(options.runId, options.branchId, options.seqId);
-	if (options.owner !== undefined) await assertUserInteractionOwner(options.owner, options.runId);
+	if (options.owner !== undefined) {
+		await assertUserInteractionOwner(options.owner, options.runId);
+	}
 	const status = readRunStatus(options.runId);
 	if (isRunLive(status)) {
-		if (status?.attemptId === undefined) throw new Error(`Live run '${options.runId}' has no runner attempt identity`);
+		if (status?.attemptId === undefined) {
+			throw new Error(`Live run '${options.runId}' has no runner attempt identity`);
+		}
 		try {
 			const committed = await requestLiveRunnerUserResponse(options.runId, {
 				attemptId: status.attemptId,
@@ -348,7 +372,9 @@ export async function validateAndPersistUserInteractionResponse(
 		} catch (error) {
 			// A runner may die after the liveness check. Only then may this API become the
 			// temporary sole writer and retry the same idempotent journal operation offline.
-			if (!(error instanceof RunnerControlUnavailableError) || isRunLive(readRunStatus(options.runId))) throw error;
+			if (!(error instanceof RunnerControlUnavailableError) || isRunLive(readRunStatus(options.runId))) {
+				throw error;
+			}
 		}
 	}
 	return commitOfflineUserInteractionResponse(options);
@@ -362,7 +388,9 @@ async function commitOfflineUserInteractionResponse(
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
 	);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	let store = await openRunLogStore(options.runId, { access: "writer", branchId: options.branchId });
 	try {
 		for (let attempt = 0; attempt < 3; attempt++) {
@@ -372,8 +400,9 @@ async function commitOfflineUserInteractionResponse(
 				gateSeqId: options.seqId,
 			});
 			if (existing !== undefined) {
-				if (!isDeepStrictEqual(existing.event, options.event))
+				if (!isDeepStrictEqual(existing.event, options.event)) {
 					throw new Error(`Conflicting response for user interaction ${options.seqId}`);
+				}
 				return { response: responseFromResolved(options.runId, options.branchId, existing), idempotent: true };
 			}
 			const gate = await store.getRecord(options.seqId);
@@ -381,8 +410,9 @@ async function commitOfflineUserInteractionResponse(
 				gate?.type !== "user_interaction" ||
 				gate.kind !== "opened" ||
 				!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId }))
-			)
+			) {
 				throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
+			}
 			const semantic = await BranchExecution.restore({
 				ast: parsed.ast,
 				branchId: options.branchId,
@@ -402,7 +432,9 @@ async function commitOfflineUserInteractionResponse(
 				const retryable =
 					error instanceof BranchHeadMovedError ||
 					(error instanceof Error && error.message.includes("Stale Hyperchart journal writer"));
-				if (!retryable || attempt === 2) throw error;
+				if (!retryable || attempt === 2) {
+					throw error;
+				}
 				if (error.message.includes("Stale Hyperchart journal writer")) {
 					await store.close();
 					store = await openRunLogStore(options.runId, { access: "writer", branchId: options.branchId });
@@ -475,14 +507,20 @@ function selectActiveUserInteraction(candidates: OwnedUserInteraction[]): OwnedU
 		const selected = candidates
 			.filter((candidate) => candidate.presentation === presentation)
 			.sort(comparePresentationOrder)[0];
-		if (selected !== undefined) return selected;
+		if (selected !== undefined) {
+			return selected;
+		}
 	}
 	return candidates[0];
 }
 function comparePresentationOrder(left: OwnedUserInteraction, right: OwnedUserInteraction): number {
 	if (left.presentationOrder !== undefined && right.presentationOrder !== undefined) {
-		if (left.presentationOrder < right.presentationOrder) return -1;
-		if (left.presentationOrder > right.presentationOrder) return 1;
+		if (left.presentationOrder < right.presentationOrder) {
+			return -1;
+		}
+		if (left.presentationOrder > right.presentationOrder) {
+			return 1;
+		}
 	}
 	return compareCoordinates(left.request, right.request);
 }
@@ -520,7 +558,9 @@ function readConfirmedReceipt(
 	return value?.state === "confirmed" ? value : undefined;
 }
 function readReceipt(path: string): UserInteractionReceipt | undefined {
-	if (!existsSync(path)) return undefined;
+	if (!existsSync(path)) {
+		return undefined;
+	}
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as UserInteractionReceipt;
 		return value.version === 2 && (value.state === "claimed" || value.state === "confirmed") ? value : undefined;
@@ -556,12 +596,16 @@ async function assertUserInteractionOwner(
 	knownMeta?: RunMeta,
 ): Promise<void> {
 	const owner = normalizeOwner(ownerInput);
-	if (canonicalPath(resolveRunPaths(runId).storage.rootDir) !== canonicalPath(owner.runsRoot))
+	if (canonicalPath(resolveRunPaths(runId).storage.rootDir) !== canonicalPath(owner.runsRoot)) {
 		throw new Error(`Run '${runId}' is outside the configured runs root`);
+	}
 	const meta = knownMeta ?? (await loadRunMeta(runId));
-	if (meta.originSessionId !== owner.sessionId) throw new Error(`Run '${runId}' is not owned by this session`);
-	if (canonicalPath(meta.workDir) !== owner.workDir)
+	if (meta.originSessionId !== owner.sessionId) {
+		throw new Error(`Run '${runId}' is not owned by this session`);
+	}
+	if (canonicalPath(meta.workDir) !== owner.workDir) {
 		throw new Error(`Run '${runId}' belongs to another working directory`);
+	}
 }
 function normalizeOwner(owner: UserInteractionOwner) {
 	return {
@@ -585,10 +629,14 @@ function assertRunCoordinate(runId: string, branchId: BranchId, seqId: number): 
 	assertRunId(runId);
 }
 function assertBranchId(value: string): void {
-	if (value.length === 0 || value.length > 128 || /[\0/\\]/.test(value)) throw new Error("branchId is invalid");
+	if (value.length === 0 || value.length > 128 || /[\0/\\]/.test(value)) {
+		throw new Error("branchId is invalid");
+	}
 }
 function assertSeqId(value: number): void {
-	if (!Number.isSafeInteger(value) || value <= 0) throw new Error("seqId must be a positive safe integer");
+	if (!Number.isSafeInteger(value) || value <= 0) {
+		throw new Error("seqId must be a positive safe integer");
+	}
 }
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error;

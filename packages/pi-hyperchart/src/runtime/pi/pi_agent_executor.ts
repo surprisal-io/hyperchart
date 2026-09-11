@@ -116,12 +116,13 @@ export function sessionIdForAttempt(sessionId: string, attempt: number): string 
 }
 
 function workspaceContextNote(projectDir: string, branchWorkspace: string): string {
-	if (projectDir === branchWorkspace)
+	if (projectDir === branchWorkspace) {
 		return [
 			`Project/repository directory: ${projectDir}`,
 			`Branch workspace (current working directory): ${branchWorkspace}`,
 			`Working directory: ${branchWorkspace}`,
 		].join("\n");
+	}
 	return [
 		`Project/repository directory: ${projectDir}`,
 		`Branch workspace (current working directory): ${branchWorkspace}`,
@@ -202,9 +203,13 @@ export class PiAgentExecutor implements AgentExecutor {
 	}
 
 	async steer(actionKey: string, invokeSeqId: number, message: string): Promise<boolean> {
-		if (this.disposed) return false;
+		if (this.disposed) {
+			return false;
+		}
 		const live = this.live.get(actionKey);
-		if (live === undefined || effectInvokeSeqId(live.effect.id) !== invokeSeqId) return false;
+		if (live === undefined || effectInvokeSeqId(live.effect.id) !== invokeSeqId) {
+			return false;
+		}
 		await live.session.steer(message);
 		return true;
 	}
@@ -214,15 +219,23 @@ export class PiAgentExecutor implements AgentExecutor {
 	}
 
 	private cancelAction(actionUid: ActionUID, superseded: boolean): Promise<void> {
-		if (this.disposed) return this.disposal ?? Promise.resolve();
+		if (this.disposed) {
+			return this.disposal ?? Promise.resolve();
+		}
 		const key = actionUidKey(actionUid);
 		const generation = this.generations.current(key);
-		if (generation === undefined) return Promise.resolve();
+		if (generation === undefined) {
+			return Promise.resolve();
+		}
 		const existing = this.cancellations.get(key);
-		if (existing?.generation === generation) return existing.promise;
+		if (existing?.generation === generation) {
+			return existing.promise;
+		}
 		// Replacement immediately advances the generation; do not accumulate a
 		// cancelled-generation tombstone for every normally completed visit.
-		if (!superseded) this.generations.markCancelled(key, generation);
+		if (!superseded) {
+			this.generations.markCancelled(key, generation);
+		}
 		const failures: unknown[] = [];
 		const live = this.live.get(key);
 		if (live !== undefined) {
@@ -245,18 +258,24 @@ export class PiAgentExecutor implements AgentExecutor {
 				...(run === undefined ? [] : [run]),
 			]);
 			failures.push(...results.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])));
-			if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to cancel Pi agent action");
+			if (failures.length > 0) {
+				throw new SessionCleanupError(failures, "Failed to cancel Pi agent action");
+			}
 		})();
 		this.cancellations.set(key, { generation, promise: cancellation });
 		const clearCancellation = () => {
-			if (this.cancellations.get(key)?.promise === cancellation) this.cancellations.delete(key);
+			if (this.cancellations.get(key)?.promise === cancellation) {
+				this.cancellations.delete(key);
+			}
 		};
 		void cancellation.then(clearCancellation, clearCancellation);
 		return cancellation;
 	}
 
 	dispose(): Promise<void> {
-		if (this.disposal !== undefined) return this.disposal;
+		if (this.disposal !== undefined) {
+			return this.disposal;
+		}
 		this.disposed = true;
 		this.disposal = this.disposeTrackedWork();
 		return this.disposal;
@@ -264,7 +283,9 @@ export class PiAgentExecutor implements AgentExecutor {
 
 	private async disposeTrackedWork(): Promise<void> {
 		for (const [key, runs] of this.runs) {
-			for (const generation of runs.keys()) this.generations.markCancelled(key, generation);
+			for (const generation of runs.keys()) {
+				this.generations.markCancelled(key, generation);
+			}
 		}
 		const cleanup = [...this.live.entries()].map(([key, live]) => {
 			this.generations.markCancelled(key, live.generation);
@@ -301,7 +322,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		this.runs.clear();
 		this.cancellations.clear();
 		this.cleanupFailures.length = 0;
-		if (failures.length > 0) throw new AggregateError(failures, "Failed to dispose Pi agent executor cleanly");
+		if (failures.length > 0) {
+			throw new AggregateError(failures, "Failed to dispose Pi agent executor cleanly");
+		}
 	}
 
 	private launch(key: string, generation: number, run: Promise<void>): void {
@@ -312,9 +335,13 @@ export class PiAgentExecutor implements AgentExecutor {
 		}
 		const tracked = run.finally(() => {
 			const current = this.runs.get(key);
-			if (current?.get(generation) !== tracked) return;
+			if (current?.get(generation) !== tracked) {
+				return;
+			}
 			current.delete(generation);
-			if (current.size === 0) this.runs.delete(key);
+			if (current.size === 0) {
+				this.runs.delete(key);
+			}
 		});
 		runs.set(generation, tracked);
 		void tracked.catch(() => undefined);
@@ -338,7 +365,9 @@ export class PiAgentExecutor implements AgentExecutor {
 			generation,
 		);
 		// Deliver only after the physical session and recorder have fully closed.
-		if (outcome !== undefined) this.safeEmit(actionUidKey(effect.actionUid), generation, emit, outcome);
+		if (outcome !== undefined) {
+			this.safeEmit(actionUidKey(effect.actionUid), generation, emit, outcome);
+		}
 	}
 
 	private async runSession(
@@ -348,7 +377,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		generation: number,
 	): Promise<void> {
 		const key = actionUidKey(effect.actionUid);
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		this.updateProgress(effect, {
 			actionName: effect.action.name,
 			status: "starting",
@@ -364,11 +395,15 @@ export class PiAgentExecutor implements AgentExecutor {
 			error: undefined,
 		});
 		const definition = loadAgentDefinition(effect.action.name, this.definitionDirs);
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		// Validate every declared read before selecting or opening any restored session. A resumed
 		// session must not bypass the local-artifact/URL boundary that a fresh run enforces.
 		const reads = await resolveReads(effect, this.options.workDir, this.options.schemaRegistry);
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		const dir = actionSessionDir(this.options.sessionsDir, this.options.branchId, effect);
 		const latest =
 			this.options.sessionService === undefined
@@ -378,7 +413,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		const session = await this.createSession(effect, definition, dir, latest, runOptions, sink, () =>
 			this.isStopped(key, generation),
 		);
-		if (session === undefined) return;
+		if (session === undefined) {
+			return;
+		}
 		if (this.isStopped(key, generation)) {
 			await this.cleanupSession(session);
 			return;
@@ -387,12 +424,16 @@ export class PiAgentExecutor implements AgentExecutor {
 		this.live.set(key, live);
 		try {
 			live.unsubscribeProgress = this.attachProgress(session, effect, definition);
-			if (this.isStopped(key, generation)) return;
+			if (this.isStopped(key, generation)) {
+				return;
+			}
 
 			const restored = this.sessionHandles.get(session)?.restored ?? latest !== undefined;
 			if (restored && shouldRecoverRestoredFinish(runOptions)) {
 				const captured = await findCapturedFinish(session.messages, effect, this.options.schemaRegistry);
-				if (this.isStopped(key, generation)) return;
+				if (this.isStopped(key, generation)) {
+					return;
+				}
 				if (captured !== undefined) {
 					sink.captured = captured;
 					await this.acceptanceLoop(key, generation, emit, live);
@@ -409,7 +450,9 @@ export class PiAgentExecutor implements AgentExecutor {
 				.join("\n\n");
 			await this.promptAndAccept(key, generation, emit, live, taskPrompt);
 		} finally {
-			if (this.live.get(key) === live) this.live.delete(key);
+			if (this.live.get(key) === live) {
+				this.live.delete(key);
+			}
 			try {
 				this.detachProgress(live);
 			} finally {
@@ -440,7 +483,9 @@ export class PiAgentExecutor implements AgentExecutor {
 			...(definition.role === undefined ? {} : { declaredRole: definition.role }),
 			...(definition.toolset === undefined ? {} : { declaredToolset: definition.toolset }),
 		});
-		if (isStopped()) return undefined;
+		if (isStopped()) {
+			return undefined;
+		}
 		const modelRef = overrides?.model ?? plan.modelRef;
 		const requestedTools = overrides?.tools ?? plan.tools;
 		const tools = requestedTools === undefined ? undefined : [...new Set([...requestedTools, "finish"])];
@@ -464,11 +509,15 @@ export class PiAgentExecutor implements AgentExecutor {
 					}),
 		});
 		await resourceLoader.reload();
-		if (isStopped()) return undefined;
+		if (isStopped()) {
+			return undefined;
+		}
 		const invokeSeqId = effectInvokeSeqId(effect.id);
 		let sessionHandle: PiSessionHandle | undefined;
 		if (this.options.sessionService !== undefined) {
-			if (invokeSeqId === undefined) throw new Error(`Agent effect ${effect.id} has no durable invoke sequence`);
+			if (invokeSeqId === undefined) {
+				throw new Error(`Agent effect ${effect.id} has no durable invoke sequence`);
+			}
 			sessionHandle = await this.options.sessionService.openOrCreate(effect.sessionId);
 		}
 		if (isStopped()) {
@@ -499,7 +548,9 @@ export class PiAgentExecutor implements AgentExecutor {
 			await this.closeSessionHandle(sessionHandle);
 			throw error;
 		}
-		if (sessionHandle !== undefined) this.sessionHandles.set(session, sessionHandle);
+		if (sessionHandle !== undefined) {
+			this.sessionHandles.set(session, sessionHandle);
+		}
 		if (isStopped()) {
 			await this.cleanupSession(session);
 			return undefined;
@@ -532,10 +583,14 @@ export class PiAgentExecutor implements AgentExecutor {
 		live: LiveAgent,
 		prompt: string,
 	): Promise<void> {
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		await this.promptSession(live.session, prompt);
 		await this.sessionHandles.get(live.session)?.drain();
-		if (this.isStopped(key, generation)) return;
+		if (this.isStopped(key, generation)) {
+			return;
+		}
 		await this.acceptanceLoop(key, generation, emit, live);
 	}
 
@@ -546,7 +601,9 @@ export class PiAgentExecutor implements AgentExecutor {
 		try {
 			await prompt;
 		} finally {
-			if (this.sessionPrompts.get(session) === prompt) this.sessionPrompts.delete(session);
+			if (this.sessionPrompts.get(session) === prompt) {
+				this.sessionPrompts.delete(session);
+			}
 		}
 	}
 
@@ -564,7 +621,9 @@ export class PiAgentExecutor implements AgentExecutor {
 			lastAssistantError: () => lastAssistantError(live.session.messages),
 			checkArtifacts: () => checkEffectArtifacts(live.effect, this.options.workDir, this.options.schemaRegistry),
 		});
-		if (outcome !== undefined) this.safeEmit(key, generation, emit, outcome);
+		if (outcome !== undefined) {
+			this.safeEmit(key, generation, emit, outcome);
+		}
 	}
 
 	private attachProgress(session: AgentSession, effect: AgentEffect, definition: AgentDefinition): () => void {
@@ -592,7 +651,9 @@ export class PiAgentExecutor implements AgentExecutor {
 				return;
 			}
 			if (event.type === "message_update") {
-				if (event.assistantMessageEvent.type === "text_delta") stream.appendText(event.assistantMessageEvent.delta);
+				if (event.assistantMessageEvent.type === "text_delta") {
+					stream.appendText(event.assistantMessageEvent.delta);
+				}
 				if (event.assistantMessageEvent.type === "thinking_delta") {
 					stream.appendReasoning(event.assistantMessageEvent.delta);
 				}
@@ -672,8 +733,12 @@ export class PiAgentExecutor implements AgentExecutor {
 		emit: EmitAgentOutcome,
 		error: unknown,
 	): void {
-		if (this.isStopped(key, generation) && error instanceof SessionCleanupError) throw error;
-		if (!this.isStopped(key, generation)) this.markProgressFailed(effect, errorMessage(error));
+		if (this.isStopped(key, generation) && error instanceof SessionCleanupError) {
+			throw error;
+		}
+		if (!this.isStopped(key, generation)) {
+			this.markProgressFailed(effect, errorMessage(error));
+		}
 		this.safeEmit(key, generation, emit, {
 			kind: "failed",
 			failure: { kind: "runtime", retryable: false, message: errorMessage(error) },
@@ -696,7 +761,9 @@ export class PiAgentExecutor implements AgentExecutor {
 
 	private cleanupSession(session: AgentSession): Promise<void> {
 		const existing = this.sessionCleanups.get(session);
-		if (existing !== undefined) return existing;
+		if (existing !== undefined) {
+			return existing;
+		}
 		const cleanup = Promise.resolve().then(() => this.closeSession(session));
 		this.sessionCleanups.set(session, cleanup);
 		return cleanup;
@@ -734,11 +801,15 @@ export class PiAgentExecutor implements AgentExecutor {
 		} finally {
 			this.sessionHandles.delete(session);
 		}
-		if (failures.length > 0) throw new SessionCleanupError(failures, "Failed to clean up Pi agent session");
+		if (failures.length > 0) {
+			throw new SessionCleanupError(failures, "Failed to clean up Pi agent session");
+		}
 	}
 
 	private safeEmit(key: string, generation: number, emit: EmitAgentOutcome, outcome: AgentOutcome): void {
-		if (!this.isStopped(key, generation)) emit(outcome);
+		if (!this.isStopped(key, generation)) {
+			emit(outcome);
+		}
 	}
 }
 
@@ -749,12 +820,16 @@ export async function findCapturedFinish(
 ): Promise<ChartEvent | undefined> {
 	let lastUser = -1;
 	messages.forEach((message, index) => {
-		if (isRecord(message) && message.role === "user") lastUser = index;
+		if (isRecord(message) && message.role === "user") {
+			lastUser = index;
+		}
 	});
 	const calls = new Map<string, unknown>();
 	let captured: ChartEvent | undefined;
 	for (const message of messages.slice(lastUser + 1)) {
-		if (!isRecord(message)) continue;
+		if (!isRecord(message)) {
+			continue;
+		}
 		if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const item of message.content) {
 				if (isRecord(item) && item.type === "toolCall" && item.name === "finish" && typeof item.id === "string") {
@@ -771,7 +846,9 @@ export async function findCapturedFinish(
 		) {
 			const params = calls.get(message.toolCallId) as { event?: unknown; output?: unknown };
 			const result = await validateFinishParams(effect, params, registry);
-			if (result.ok) captured = result.event;
+			if (result.ok) {
+				captured = result.event;
+			}
 		}
 	}
 	return captured;
@@ -797,7 +874,9 @@ function latestSessionForRunOptions(
 	effect: AgentEffect,
 	runOptions: RunOptions,
 ): string | undefined {
-	if (runOptions.forceNewSession) return undefined;
+	if (runOptions.forceNewSession) {
+		return undefined;
+	}
 	if (runOptions.resumeSessionFile !== undefined && existsSync(runOptions.resumeSessionFile)) {
 		return runOptions.resumeSessionFile;
 	}
@@ -808,7 +887,9 @@ function latestSessionForRunOptions(
 }
 
 function latestJsonl(dir: string): string | undefined {
-	if (!existsSync(dir)) return undefined;
+	if (!existsSync(dir)) {
+		return undefined;
+	}
 	return readdirSync(dir)
 		.filter((file) => file.endsWith(".jsonl"))
 		.map((file) => join(dir, file))
@@ -821,14 +902,20 @@ function latestJsonlForPreviousActionSession(
 	effect: AgentEffect,
 ): string | undefined {
 	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid));
-	if (!existsSync(root)) return undefined;
+	if (!existsSync(root)) {
+		return undefined;
+	}
 	const currentKey = sanitizeSegment(sessionKey(effect.id));
 	const candidates: string[] = [];
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		if (!entry.isDirectory() || entry.name === currentKey) continue;
+		if (!entry.isDirectory() || entry.name === currentKey) {
+			continue;
+		}
 		const dir = join(root, entry.name);
 		for (const file of readdirSync(dir)) {
-			if (file.endsWith(".jsonl")) candidates.push(join(dir, file));
+			if (file.endsWith(".jsonl")) {
+				candidates.push(join(dir, file));
+			}
 		}
 	}
 	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
@@ -839,9 +926,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function usageTokens(message: unknown): number {
-	if (!isRecord(message) || !isRecord(message.usage)) return 0;
+	if (!isRecord(message) || !isRecord(message.usage)) {
+		return 0;
+	}
 	const usage = message.usage;
-	if (typeof usage.totalTokens === "number") return usage.totalTokens;
+	if (typeof usage.totalTokens === "number") {
+		return usage.totalTokens;
+	}
 	const input =
 		typeof usage.input === "number" ? usage.input : typeof usage.inputTokens === "number" ? usage.inputTokens : 0;
 	const output =
@@ -854,8 +945,12 @@ function usageTokens(message: unknown): number {
 export function lastAssistantError(messages: readonly unknown[]): string | undefined {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		const message = messages[index];
-		if (!isRecord(message) || message.role !== "assistant") continue;
-		if (message.stopReason !== "error") return undefined;
+		if (!isRecord(message) || message.role !== "assistant") {
+			continue;
+		}
+		if (message.stopReason !== "error") {
+			return undefined;
+		}
 		return typeof message.errorMessage === "string" && message.errorMessage.trim().length > 0
 			? message.errorMessage
 			: "agent provider/runtime error";
@@ -866,21 +961,29 @@ export function lastAssistantError(messages: readonly unknown[]): string | undef
 function lastAssistantText(messages: readonly unknown[]): string | undefined {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		const message = messages[index];
-		if (!isRecord(message) || message.role !== "assistant") continue;
+		if (!isRecord(message) || message.role !== "assistant") {
+			continue;
+		}
 		const text = messageText(message);
-		if (text !== undefined) return text;
+		if (text !== undefined) {
+			return text;
+		}
 	}
 	return undefined;
 }
 
 function messagePreview(message: unknown): string | undefined {
 	const text = messageText(message);
-	if (text === undefined) return undefined;
+	if (text === undefined) {
+		return undefined;
+	}
 	return previewText(text);
 }
 
 function messageText(message: unknown): string | undefined {
-	if (!isRecord(message)) return undefined;
+	if (!isRecord(message)) {
+		return undefined;
+	}
 	const content = message.content;
 	let text: string | undefined;
 	if (typeof content === "string") {
@@ -891,7 +994,9 @@ function messageText(message: unknown): string | undefined {
 			.filter((item): item is string => item !== undefined)
 			.join(" ");
 	}
-	if (text === undefined) return undefined;
+	if (text === undefined) {
+		return undefined;
+	}
 	const compact = text.replace(/\s+/g, " ").trim();
 	return compact.length === 0 ? undefined : compact;
 }

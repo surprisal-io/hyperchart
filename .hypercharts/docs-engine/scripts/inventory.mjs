@@ -15,17 +15,26 @@ const EXTRA_UNITS = [
 ];
 
 function hostsFor(path) {
-	if (path.includes("claude")) return "claude";
-	if (path.endsWith("/pi.md") || path.includes("skills/pi") || path.endsWith("api/pi.md")) return "pi";
-	if (path.startsWith("packages/pi-hyperchart/")) return "pi";
+	if (path.includes("claude")) {
+		return "claude";
+	}
+	if (path.endsWith("/pi.md") || path.includes("skills/pi") || path.endsWith("api/pi.md")) {
+		return "pi";
+	}
+	if (path.startsWith("packages/pi-hyperchart/")) {
+		return "pi";
+	}
 	return "both";
 }
 
 function* walk(dir) {
 	for (const entry of readdirSync(dir)) {
 		const path = join(dir, entry);
-		if (statSync(path).isDirectory()) yield* walk(path);
-		else if (path.endsWith(".md")) yield path;
+		if (statSync(path).isDirectory()) {
+			yield* walk(path);
+		} else if (path.endsWith(".md")) {
+			yield path;
+		}
 	}
 }
 

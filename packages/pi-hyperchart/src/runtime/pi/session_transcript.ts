@@ -14,13 +14,19 @@ export function readSessionTranscript(
 	sessionFile: string | undefined,
 	options: SessionTranscriptReadOptions = {},
 ): HyperchartSessionMessageInfo[] | undefined {
-	if (sessionFile === undefined) return undefined;
+	if (sessionFile === undefined) {
+		return undefined;
+	}
 	const file = resolveContainedSessionFile(sessionsDir, sessionFile);
-	if (file === undefined) return undefined;
+	if (file === undefined) {
+		return undefined;
+	}
 	try {
 		const entries: unknown[] = [];
 		for (const line of readFileSync(file, "utf8").split("\n")) {
-			if (line.trim().length === 0) continue;
+			if (line.trim().length === 0) {
+				continue;
+			}
 			let entry: unknown;
 			try {
 				entry = JSON.parse(line);
@@ -46,12 +52,16 @@ export function transcriptMessagesFromPiEntries(
 }
 
 function messagesFromEntry(value: unknown): HyperchartSessionMessageInfo[] {
-	if (!isRecord(value) || typeof value.id !== "string") return [];
+	if (!isRecord(value) || typeof value.id !== "string") {
+		return [];
+	}
 	const timestamp = messageTimestamp(value);
 	if (value.type === "message" && isRecord(value.message)) {
 		const message = value.message;
 		const role = message.role;
-		if (role === "user") return [messageInfo(value.id, "user", contentText(message.content), timestamp)];
+		if (role === "user") {
+			return [messageInfo(value.id, "user", contentText(message.content), timestamp)];
+		}
 		if (role === "assistant") {
 			const out: HyperchartSessionMessageInfo[] = [];
 			if (Array.isArray(message.content)) {
@@ -59,13 +69,19 @@ function messagesFromEntry(value: unknown): HyperchartSessionMessageInfo[] {
 					.filter((block) => isRecord(block) && block.type === "thinking" && typeof block.thinking === "string")
 					.map((block) => (block as { thinking: string }).thinking)
 					.join("\n\n");
-				if (reasoning.length > 0) out.push(messageInfo(`${value.id}:reasoning`, "reasoning", reasoning, timestamp));
+				if (reasoning.length > 0) {
+					out.push(messageInfo(`${value.id}:reasoning`, "reasoning", reasoning, timestamp));
+				}
 			}
 			const text = contentText(message.content);
-			if (text !== undefined) out.push(messageInfo(value.id, "assistant", text, timestamp));
+			if (text !== undefined) {
+				out.push(messageInfo(value.id, "assistant", text, timestamp));
+			}
 			if (Array.isArray(message.content)) {
 				message.content.forEach((block, index) => {
-					if (!isRecord(block) || block.type !== "toolCall" || typeof block.name !== "string") return;
+					if (!isRecord(block) || block.type !== "toolCall" || typeof block.name !== "string") {
+						return;
+					}
 					out.push({
 						id: `${value.id}:tool:${index}`,
 						role: "tool",
@@ -119,11 +135,19 @@ function messageInfo(
 }
 
 function contentText(content: unknown): string | undefined {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return undefined;
+	if (typeof content === "string") {
+		return content;
+	}
+	if (!Array.isArray(content)) {
+		return undefined;
+	}
 	const parts = content.flatMap((block) => {
-		if (!isRecord(block)) return [];
-		if (block.type === "text" && typeof block.text === "string") return [block.text];
+		if (!isRecord(block)) {
+			return [];
+		}
+		if (block.type === "text" && typeof block.text === "string") {
+			return [block.text];
+		}
 		return [];
 	});
 	return parts.length === 0 ? undefined : parts.join("\n\n");
@@ -131,8 +155,12 @@ function contentText(content: unknown): string | undefined {
 
 function messageTimestamp(entry: Record<string, unknown>): number | undefined {
 	const message = isRecord(entry.message) ? entry.message : undefined;
-	if (typeof message?.timestamp === "number") return message.timestamp;
-	if (typeof entry.timestamp !== "string") return undefined;
+	if (typeof message?.timestamp === "number") {
+		return message.timestamp;
+	}
+	if (typeof entry.timestamp !== "string") {
+		return undefined;
+	}
 	const parsed = Date.parse(entry.timestamp);
 	return Number.isNaN(parsed) ? undefined : parsed;
 }

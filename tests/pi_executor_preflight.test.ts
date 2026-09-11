@@ -80,7 +80,9 @@ export default function(pi) {
 			allowModelNetwork: false,
 		});
 		const model = modelRuntime.getModels("anthropic")[0];
-		if (model === undefined) throw new Error("Missing fixture model");
+		if (model === undefined) {
+			throw new Error("Missing fixture model");
+		}
 		await modelRuntime.setRuntimeApiKey(model.provider, "isolated-test-key");
 		// Only provider I/O is substituted. Real prompt, preflight, abort and idle detection run.
 		let requests = 0;
@@ -169,19 +171,22 @@ export default function(pi) {
 		const current = executor;
 		let nextCompletion: Promise<AgentOutcome> | undefined;
 		let cancellation: Promise<void> | undefined;
-		if (operation === "supersede")
+		if (operation === "supersede") {
 			nextCompletion = new Promise((resolve) =>
 				current.start({ ...effect, id: "preflight:work:worker:2:2", sessionId: "second" }, resolve),
 			);
-		else cancellation = operation === "cancel" ? executor.cancel(actionUid) : executor.dispose();
+		} else {
+			cancellation = operation === "cancel" ? executor.cancel(actionUid) : executor.dispose();
+		}
 		await abortReturned.promise;
 		await new Promise((resolve) => setImmediate(resolve));
 		// The actual SDK abort returned while the extension is still awaiting preflight.
 		expect(bridge.events).toEqual(["preflight"]);
 		expect(handles).toBe(1);
 		release.resolve();
-		if (nextCompletion !== undefined)
+		if (nextCompletion !== undefined) {
 			expect(await nextCompletion).toEqual({ kind: "completed", event: { type: "DONE" } });
+		}
 		await cancellation;
 		await executor.dispose();
 		expect(firstEmission).not.toHaveBeenCalled();
@@ -190,7 +195,9 @@ export default function(pi) {
 		expect(requests).toBeLessThanOrEqual(2);
 		expect(handles).toBe(0);
 		const expected = ["preflight", "acquire:first", "shutdown:first", "dispose:first", "close:first"];
-		if (operation === "supersede") expected.push("acquire:second", "shutdown:second", "dispose:second", "close:second");
+		if (operation === "supersede") {
+			expected.push("acquire:second", "shutdown:second", "dispose:second", "close:second");
+		}
 		expect(bridge.events).toEqual(expected);
 	} finally {
 		release.resolve();

@@ -18,7 +18,9 @@ export async function requestHyperchartCommand(events: HyperchartCommandEventBus
 	const request: HyperchartCommandRequest = {
 		args,
 		claim(run) {
-			if (claimed) return false;
+			if (claimed) {
+				return false;
+			}
 			claimed = true;
 			completion = Promise.resolve().then(run);
 			return true;
@@ -26,7 +28,9 @@ export async function requestHyperchartCommand(events: HyperchartCommandEventBus
 	};
 
 	events.emit(HYPERCHART_COMMAND_EVENT, request);
-	if (!claimed) return false;
+	if (!claimed) {
+		return false;
+	}
 	await completion;
 	return true;
 }

@@ -51,7 +51,9 @@ describe("Pi host snapshot concurrency", () => {
 		let calls = 0;
 		const load = createAsyncMemo(async () => {
 			calls += 1;
-			if (calls === 1) throw new Error("not ready");
+			if (calls === 1) {
+				throw new Error("not ready");
+			}
 			return "ready";
 		});
 

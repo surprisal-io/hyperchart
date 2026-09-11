@@ -17,7 +17,9 @@ export function Section({
 }) {
 	const [open, setOpen] = useState(defaultOpen);
 	useEffect(() => {
-		if (forceOpen) setOpen(true);
+		if (forceOpen) {
+			setOpen(true);
+		}
 	}, [forceOpen]);
 	const DisclosureIcon = open ? ChevronDownIcon : ChevronRightIcon;
 	return (

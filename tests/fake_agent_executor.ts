@@ -29,7 +29,9 @@ export class FakeAgentExecutor implements AgentExecutor {
 	async dispose(): Promise<void> {}
 
 	waitForStart(count = this.starts.length + 1): Promise<void> {
-		if (this.starts.length >= count) return Promise.resolve();
+		if (this.starts.length >= count) {
+			return Promise.resolve();
+		}
 		return new Promise((resolve) => {
 			this.startWaiters.push({ count, resolve });
 		});

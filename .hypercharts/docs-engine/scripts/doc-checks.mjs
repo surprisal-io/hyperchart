@@ -7,9 +7,13 @@ export const SKILL_SIZE_LIMIT = 16000;
 // sweep. Returns every violation, never just the first one.
 export function checkUnit(unit, registry) {
 	const violations = [];
-	if (!existsSync(unit.path)) return [`${unit.path} does not exist`];
+	if (!existsSync(unit.path)) {
+		return [`${unit.path} does not exist`];
+	}
 	const text = readFileSync(unit.path, "utf8");
-	if (text.trim().length === 0) violations.push(`${unit.path} is empty`);
+	if (text.trim().length === 0) {
+		violations.push(`${unit.path} is empty`);
+	}
 
 	const allowed = allowedToolNames(unit.hosts, registry);
 	// Match concrete tool names only (hyperchart_run, ...); the bare project
@@ -24,13 +28,18 @@ export function checkUnit(unit, registry) {
 
 	for (const match of text.matchAll(/\]\((\.\.?\/[^)#\s]+)(?:#[^)\s]*)?\)/g)) {
 		const target = resolve(dirname(unit.path), match[1]);
-		if (!existsSync(target)) violations.push(`${unit.path} has a broken relative link: ${match[1]}`);
+		if (!existsSync(target)) {
+			violations.push(`${unit.path} has a broken relative link: ${match[1]}`);
+		}
 	}
 
 	if (unit.path.startsWith("skills/")) {
-		if (!text.startsWith("---\n")) violations.push(`${unit.path} must start with YAML frontmatter`);
-		if (text.length > SKILL_SIZE_LIMIT)
+		if (!text.startsWith("---\n")) {
+			violations.push(`${unit.path} must start with YAML frontmatter`);
+		}
+		if (text.length > SKILL_SIZE_LIMIT) {
 			violations.push(`${unit.path} exceeds the skill size budget: ${text.length} > ${SKILL_SIZE_LIMIT} chars`);
+		}
 	}
 	return violations;
 }
@@ -38,8 +47,12 @@ export function checkUnit(unit, registry) {
 // Tool tokens are prefixes of each other (`hyperchart` vs `hyperchart_run`),
 // so the regex above already captures maximal tokens; membership is exact.
 export function allowedToolNames(hosts, registry) {
-	if (hosts === "pi") return new Set(registry.pi);
-	if (hosts === "claude") return new Set(registry.claude);
+	if (hosts === "pi") {
+		return new Set(registry.pi);
+	}
+	if (hosts === "claude") {
+		return new Set(registry.claude);
+	}
 	return new Set([...registry.pi, ...registry.claude]);
 }
 

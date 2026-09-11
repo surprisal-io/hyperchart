@@ -11,7 +11,9 @@ let output;
 try {
 	output = execFileSync("npm", ["audit", "--omit=dev", "--json"], { cwd: root, encoding: "utf8" });
 } catch (error) {
-	if (typeof error.stdout !== "string" || error.stdout.length === 0) throw error;
+	if (typeof error.stdout !== "string" || error.stdout.length === 0) {
+		throw error;
+	}
 	output = error.stdout;
 }
 
@@ -19,9 +21,13 @@ const report = JSON.parse(output);
 const advisories = new Map();
 for (const vulnerability of Object.values(report.vulnerabilities ?? {})) {
 	for (const via of vulnerability.via) {
-		if (typeof via !== "object") continue;
+		if (typeof via !== "object") {
+			continue;
+		}
 		const id = via.url?.split("/").at(-1);
-		if (id) advisories.set(id, `${via.name} (${via.severity}): ${via.title} — ${via.url}`);
+		if (id) {
+			advisories.set(id, `${via.name} (${via.severity}): ${via.title} — ${via.url}`);
+		}
 	}
 }
 

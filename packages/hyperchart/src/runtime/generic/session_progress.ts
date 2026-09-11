@@ -56,7 +56,9 @@ export function sessionProgressPath(sessionsDir: string): string {
 
 export function readSessionProgress(sessionsDir: string): HyperchartSessionProgressFile {
 	const file = sessionProgressPath(sessionsDir);
-	if (!existsSync(file)) return emptyProgress();
+	if (!existsSync(file)) {
+		return emptyProgress();
+	}
 	try {
 		const parsed = JSON.parse(readFileSync(file, "utf8")) as Partial<HyperchartSessionProgressFile>;
 		return {
@@ -78,7 +80,9 @@ type SessionProgressPatch = {
 export function sessionProgressKey(actionUid: ActionUID, effectId: string, branchId: BranchId = "main"): string {
 	const actionKey = actionUidKey(actionUid);
 	const invokeSeqId = seqIdFromEffectId(actionKey, effectId);
-	if (invokeSeqId === undefined) throw new Error(`Invalid durable agent effect id: ${effectId}`);
+	if (invokeSeqId === undefined) {
+		throw new Error(`Invalid durable agent effect id: ${effectId}`);
+	}
 	return `${branchId}:${actionKey}:invoke:${invokeSeqId}`;
 }
 
@@ -92,7 +96,9 @@ export function updateSessionProgress(
 	const actionKey = actionUidKey(actionUid);
 	const visit = visitFromEffectId(actionKey, effectId);
 	const invokeSeqId = seqIdFromEffectId(actionKey, effectId);
-	if (visit === undefined || invokeSeqId === undefined) throw new Error(`Invalid durable agent effect id: ${effectId}`);
+	if (visit === undefined || invokeSeqId === undefined) {
+		throw new Error(`Invalid durable agent effect id: ${effectId}`);
+	}
 	const progressKey = sessionProgressKey(actionUid, effectId, branchId);
 	const file = readSessionProgress(sessionsDir);
 	const now = Date.now();
@@ -156,12 +162,18 @@ function emptyProgress(): HyperchartSessionProgressFile {
 function normalizeSessions(value: Record<string, unknown>): Record<string, HyperchartSessionProgress> {
 	const out: Record<string, HyperchartSessionProgress> = {};
 	for (const [key, entry] of Object.entries(value)) {
-		if (!isRecord(entry)) continue;
-		if (!isActionUid(entry.actionUid)) continue;
+		if (!isRecord(entry)) {
+			continue;
+		}
+		if (!isActionUid(entry.actionUid)) {
+			continue;
+		}
 		const status = parseStatus(entry.status);
 		const invokeSeqId = positiveInteger(entry.invokeSeqId);
 		const visit = positiveInteger(entry.visit);
-		if (status === undefined || invokeSeqId === undefined || visit === undefined) continue;
+		if (status === undefined || invokeSeqId === undefined || visit === undefined) {
+			continue;
+		}
 		out[key] = {
 			actionKey: typeof entry.actionKey === "string" ? entry.actionKey : actionUidKey(entry.actionUid),
 			actionUid: entry.actionUid,
@@ -197,13 +209,17 @@ function normalizeSessions(value: Record<string, unknown>): Record<string, Hyper
 }
 
 function visitFromEffectId(actionKey: string, effectId: string): number | undefined {
-	if (!effectId.startsWith(`${actionKey}:`)) return undefined;
+	if (!effectId.startsWith(`${actionKey}:`)) {
+		return undefined;
+	}
 	const visit = Number(effectId.slice(actionKey.length + 1).split(":", 1)[0]);
 	return Number.isInteger(visit) && visit > 0 ? visit : undefined;
 }
 
 function seqIdFromEffectId(actionKey: string, effectId: string): number | undefined {
-	if (!effectId.startsWith(`${actionKey}:`)) return undefined;
+	if (!effectId.startsWith(`${actionKey}:`)) {
+		return undefined;
+	}
 	const seqId = Number(effectId.split(":").at(-1));
 	return Number.isSafeInteger(seqId) && seqId > 0 ? seqId : undefined;
 }
@@ -271,7 +287,9 @@ export function createThrottledProgressWriter(
 	let lastWrite = 0;
 	let timer: NodeJS.Timeout | undefined;
 	const clearTimer = () => {
-		if (timer !== undefined) clearTimeout(timer);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
 		timer = undefined;
 	};
 	const publish = () => {

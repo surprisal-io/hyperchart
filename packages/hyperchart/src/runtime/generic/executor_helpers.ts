@@ -72,10 +72,11 @@ export function shouldRecoverRestoredFinish(runOptions: { resumePrompt?: string;
 
 export function validateDeclaredReadPaths(reads: readonly { path: string }[] | undefined): void {
 	for (const artifact of reads ?? []) {
-		if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path))
+		if (/^[a-z][a-z\d+.-]*:\/\//i.test(artifact.path)) {
 			throw new Error(
 				`Read '${artifact.path}' is a web URL, not a local artifact; use browser/search acquisition first`,
 			);
+		}
 	}
 }
 
@@ -104,7 +105,9 @@ export async function checkEffectArtifacts(
 	const errors: string[] = [];
 	for (const artifact of effect.artifacts ?? []) {
 		const check = await checkArtifactFile(artifact, workDir, registry);
-		if (!check.ok) errors.push(...check.errors);
+		if (!check.ok) {
+			errors.push(...check.errors);
+		}
 	}
 	return errors;
 }
@@ -150,7 +153,9 @@ export type EvaluateAgentTurnOptions = {
 
 /** Classify one finished agent turn. Recovery is selected durably by the machine, never here. */
 export async function evaluateAgentTurn(options: EvaluateAgentTurnOptions): Promise<AgentOutcome | undefined> {
-	if (options.isCancelled()) return undefined;
+	if (options.isCancelled()) {
+		return undefined;
+	}
 	if (options.sink.captured === undefined) {
 		const assistantError = options.lastAssistantError?.();
 		if (assistantError !== undefined) {
@@ -215,7 +220,9 @@ export function effectInvokeSeqId(effectId: string): number | undefined {
 
 export function previewText(text: string, limit = 240): string | undefined {
 	const compact = text.replace(/\s+/g, " ").trim();
-	if (compact.length === 0) return undefined;
+	if (compact.length === 0) {
+		return undefined;
+	}
 	return compact.length > limit ? `${compact.slice(0, limit - 3)}...` : compact;
 }
 

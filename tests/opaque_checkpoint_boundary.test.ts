@@ -14,7 +14,9 @@ import { chart, final } from "../packages/hyperchart/src/core/dsl.js";
 
 const roots: string[] = [];
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function checkpoint(headSeqId: number): OpaqueCheckpointEnvelope {
@@ -75,7 +77,9 @@ describe("opaque stamped-commit boundary", () => {
 						roots.push(root);
 						return new JsonlLogStore(join(root, "log.jsonl"));
 					})();
-		if (store instanceof JsonlLogStore) await store.initializeRootBranch();
+		if (store instanceof JsonlLogStore) {
+			await store.initializeRootBranch();
+		}
 		await expect(
 			store.appendDrafts([{ type: "args", args: {} }], (records) => ({
 				checkpoints: [{ ...checkpoint(records[0]!.seqId), blob: { fn: () => undefined } }],
@@ -92,7 +96,9 @@ describe("opaque stamped-commit boundary", () => {
 		const normalized = normalizeChartConfig(
 			chart({ kind: "chart", id: "serialized", initial: "done", states: { done: final() } }),
 		);
-		if (!normalized.ok) throw new Error("invalid test chart");
+		if (!normalized.ok) {
+			throw new Error("invalid test chart");
+		}
 		const store = new MemoryLogStore();
 		const semantic = await BranchExecution.restore({ ast: normalized.ast, branchId: "main", store });
 		await Promise.all([
@@ -113,7 +119,9 @@ describe("opaque stamped-commit boundary", () => {
 						const value = new JsonlLogStore(join(root, "log.jsonl"));
 						return value;
 					})();
-		if (store instanceof JsonlLogStore) await store.initializeRootBranch();
+		if (store instanceof JsonlLogStore) {
+			await store.initializeRootBranch();
+		}
 		await expect(
 			store.appendDrafts([{ type: "args", args: {} }], () => ({
 				checkpoints: [],

@@ -106,12 +106,18 @@ export class MemoryLogStore implements LogStore {
 		return this.index.recordsBySeqId.get(seqId);
 	}
 	async containsInHistory(input: { headSeqId: number | null; seqId: number }): Promise<boolean> {
-		if (input.headSeqId === null) return false;
+		if (input.headSeqId === null) {
+			return false;
+		}
 		let current: number | null = input.headSeqId;
 		while (current !== null) {
-			if (current === input.seqId) return true;
+			if (current === input.seqId) {
+				return true;
+			}
 			const record = this.index.recordsBySeqId.get(current);
-			if (record === undefined) throw new Error(`No durable log record with seqId ${current}`);
+			if (record === undefined) {
+				throw new Error(`No durable log record with seqId ${current}`);
+			}
 			current = record.parentId;
 		}
 		return false;
@@ -212,7 +218,9 @@ export class MemoryLogStore implements LogStore {
 	}
 	async discardCheckpoint(checkpointId: string): Promise<void> {
 		const index = this.checkpoints.findIndex((checkpoint) => checkpoint.checkpointId === checkpointId);
-		if (index >= 0) this.checkpoints.splice(index, 1);
+		if (index >= 0) {
+			this.checkpoints.splice(index, 1);
+		}
 	}
 	async storeCheckpoint(checkpoint: OpaqueCheckpointEnvelope): Promise<void> {
 		this.rememberClonedCheckpoint(cloneOpaqueCheckpoint(checkpoint));
@@ -238,8 +246,9 @@ export class MemoryLogStore implements LogStore {
 	}
 	private ancestryForSnapshot(snapshot: HistorySnapshot): readonly DurableLogRecord[] {
 		this.index.branch(snapshot.branchId);
-		if (snapshot.headSeqId !== null && !this.index.recordsBySeqId.has(snapshot.headSeqId))
+		if (snapshot.headSeqId !== null && !this.index.recordsBySeqId.has(snapshot.headSeqId)) {
 			throw new Error(`No durable log record with seqId ${snapshot.headSeqId}`);
+		}
 		return this.index.materializeHistoryToHead(snapshot.headSeqId);
 	}
 
@@ -249,18 +258,26 @@ export class MemoryLogStore implements LogStore {
 		prepare?: PrepareStampedCommit,
 		compareHead = false,
 	): Promise<readonly DurableLogRecord[]> {
-		if (drafts.length === 0) return Promise.resolve([]);
+		if (drafts.length === 0) {
+			return Promise.resolve([]);
+		}
 		return this.enqueue(async () => {
-			if (this.poisoned)
+			if (this.poisoned) {
 				throw new Error("Memory Hyperchart journal is unusable after a post-commit confirmation failure");
+			}
 			const branch = this.index.branch(this.branchId);
-			if (compareHead && branch.headSeqId !== expectedHeadSeqId)
+			if (compareHead && branch.headSeqId !== expectedHeadSeqId) {
 				throw new BranchHeadMovedError(this.branchId, expectedHeadSeqId ?? null, branch.headSeqId);
+			}
 			const records = stampDrafts(this.index, this.branchId, drafts, Date.now());
 			const prepared = prepare?.(records);
 			const checkpoints = (prepared?.checkpoints ?? []).map(cloneOpaqueCheckpoint);
-			for (const record of records) this.index.applyEntry(record);
-			for (const checkpoint of checkpoints) this.rememberClonedCheckpoint(checkpoint);
+			for (const record of records) {
+				this.index.applyEntry(record);
+			}
+			for (const checkpoint of checkpoints) {
+				this.rememberClonedCheckpoint(checkpoint);
+			}
 			try {
 				prepared?.committed();
 			} catch (error) {
@@ -276,8 +293,9 @@ export class MemoryLogStore implements LogStore {
 			this.checkpoints.some(
 				(candidate) => candidate.headSeqId === checkpoint.headSeqId && candidate.selectorKey === checkpoint.selectorKey,
 			)
-		)
+		) {
 			return;
+		}
 		this.checkpoints.push(checkpoint);
 	}
 

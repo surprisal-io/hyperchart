@@ -16,7 +16,9 @@ function runToken(): string | undefined {
 
 function initialTheme(): ThemeName {
 	const stored = window.localStorage.getItem("hyperchart-inspector-theme");
-	if (stored === "light" || stored === "dark") return stored;
+	if (stored === "light" || stored === "dark") {
+		return stored;
+	}
 	return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
 }
 
@@ -39,14 +41,17 @@ function InspectorApp() {
 		let disposed = false;
 		let loading = false;
 		const load = async () => {
-			if (loading) return;
+			if (loading) {
+				return;
+			}
 			loading = true;
 			try {
 				const branchQuery = selectedBranchId === undefined ? "" : `?branchId=${encodeURIComponent(selectedBranchId)}`;
 				const response = await fetch(`/api/runs/${token}${branchQuery}`, { cache: "no-store" });
 				const payload = (await response.json()) as RunResponse;
-				if (!response.ok || payload.run === undefined)
+				if (!response.ok || payload.run === undefined) {
 					throw new Error(payload.error ?? `Inspector request failed (${response.status})`);
+				}
 				if (!disposed) {
 					setLatestHistorySnapshot(payload.run.historySnapshot);
 					setRun((current) => {
@@ -59,7 +64,9 @@ function InspectorApp() {
 					setError(undefined);
 				}
 			} catch (nextError) {
-				if (!disposed) setError(nextError instanceof Error ? nextError.message : String(nextError));
+				if (!disposed) {
+					setError(nextError instanceof Error ? nextError.message : String(nextError));
+				}
 			} finally {
 				loading = false;
 			}
@@ -79,15 +86,21 @@ function InspectorApp() {
 	};
 
 	const steerSession = async (_runId: string, actionKey: string, message: string) => {
-		if (token === undefined) throw new Error("Invalid inspector URL");
-		if (run?.branchId === undefined) throw new Error("The selected branch is unavailable");
+		if (token === undefined) {
+			throw new Error("Invalid inspector URL");
+		}
+		if (run?.branchId === undefined) {
+			throw new Error("The selected branch is unavailable");
+		}
 		const response = await fetch(`/api/runs/${token}/steer`, {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ branchId: run.branchId, actionKey, message }),
 		});
 		const payload = (await response.json()) as { error?: string };
-		if (!response.ok) throw new Error(payload.error ?? `Steering request failed (${response.status})`);
+		if (!response.ok) {
+			throw new Error(payload.error ?? `Steering request failed (${response.status})`);
+		}
 	};
 
 	return (
@@ -138,7 +151,9 @@ function InspectorApp() {
 }
 
 const root = document.getElementById("root");
-if (root === null) throw new Error("Hyperchart inspector root is missing");
+if (root === null) {
+	throw new Error("Hyperchart inspector root is missing");
+}
 createRoot(root).render(
 	<StrictMode>
 		<InspectorApp />

@@ -15,7 +15,9 @@ export function routedEdgePoints(data: EdgeProps["data"]): ElkPoint[] | undefine
 
 export function routedPolylinePath(points: ElkPoint[]): string {
 	const first = points[0];
-	if (first === undefined) return "";
+	if (first === undefined) {
+		return "";
+	}
 	return [`M ${first.x} ${first.y}`, ...points.slice(1).map((point) => `L ${point.x} ${point.y}`)].join(" ");
 }
 
@@ -29,14 +31,20 @@ export function routeLabelPoint(points: ElkPoint[]): ElkPoint {
 
 function samplePolyline(points: ElkPoint[], count: number): ElkPoint[] {
 	const first = points[0];
-	if (first === undefined || count <= 0) return [];
-	if (points.length === 1 || count === 1) return [first];
+	if (first === undefined || count <= 0) {
+		return [];
+	}
+	if (points.length === 1 || count === 1) {
+		return [first];
+	}
 	const segments = points.slice(1).map((point, index) => {
 		const start = points[index] ?? first;
 		return { start, end: point, length: Math.hypot(point.x - start.x, point.y - start.y) };
 	});
 	const totalLength = segments.reduce((total, segment) => total + segment.length, 0);
-	if (totalLength === 0) return Array.from({ length: count }, () => ({ ...first }));
+	if (totalLength === 0) {
+		return Array.from({ length: count }, () => ({ ...first }));
+	}
 
 	return Array.from({ length: count }, (_, index) => {
 		const distance = (totalLength * index) / (count - 1);
@@ -79,7 +87,9 @@ export function edgeMotionPoints({
 	routedPoints?: ElkPoint[] | undefined;
 	count?: number | undefined;
 }): ElkPoint[] {
-	if (routedPoints && routedPoints.length >= 2) return samplePolyline(routedPoints, count);
+	if (routedPoints && routedPoints.length >= 2) {
+		return samplePolyline(routedPoints, count);
+	}
 	const dx = targetX - sourceX;
 	const dy = targetY - sourceY;
 	const horizontal = Math.abs(dx) >= Math.abs(dy);

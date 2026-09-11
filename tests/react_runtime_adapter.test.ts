@@ -43,13 +43,17 @@ import {
 function ast(cst: ChartCst): ChartAst {
 	const parsed = normalizeChartConfig(cst, { path: "test.chart.ts" });
 	expect(parsed.ok).toBe(true);
-	if (!parsed.ok) throw new Error("invalid chart");
+	if (!parsed.ok) {
+		throw new Error("invalid chart");
+	}
 	return parsed.ast;
 }
 
 function actionUid(chartAst: ChartAst, statePath: StatePath) {
 	const state = chartAst.states[templatePath(statePath)];
-	if (state?.kind !== "state") throw new Error(`not an action state: ${statePath}`);
+	if (state?.kind !== "state") {
+		throw new Error(`not an action state: ${statePath}`);
+	}
 	return { ...state.action.uid, state: statePath };
 }
 
@@ -150,7 +154,9 @@ describe("React runtime adapter", () => {
 			}),
 		);
 		const declaration = chartAst.actors["@worker"];
-		if (declaration === undefined) throw new Error("missing actor declaration");
+		if (declaration === undefined) {
+			throw new Error("missing actor declaration");
+		}
 		const inspect = inspectChartAst(chartAst);
 		const staticRun = hyperchartRunFromInspectResult(inspect);
 		expect(staticRun.actorDeclarations?.[0]?.inputValue).toEqual({ file: "configured.ts" });
@@ -292,7 +298,9 @@ describe("React runtime adapter", () => {
 		);
 		const firstWork = chartAst.states["first.work"];
 		const secondWork = chartAst.states["second.work"];
-		if (firstWork?.kind !== "state" || secondWork?.kind !== "state") throw new Error("missing compound work state");
+		if (firstWork?.kind !== "state" || secondWork?.kind !== "state") {
+			throw new Error("missing compound work state");
+		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
 			{
@@ -349,7 +357,9 @@ describe("React runtime adapter", () => {
 		);
 		const route = chartAst.states["pipeline.route"];
 		const publish = chartAst.states.publish;
-		if (route?.kind !== "state" || publish?.kind !== "state") throw new Error("missing action state");
+		if (route?.kind !== "state" || publish?.kind !== "state") {
+			throw new Error("missing action state");
+		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
 			{
@@ -407,7 +417,9 @@ describe("React runtime adapter", () => {
 		);
 		const action = (path: string) => {
 			const state = chartAst.states[path];
-			if (state?.kind !== "state") throw new Error(`missing action state ${path}`);
+			if (state?.kind !== "state") {
+				throw new Error(`missing action state ${path}`);
+			}
 			return state.action;
 		};
 		const invoke = (path: string, seqId: number): DurableLogRecord => ({
@@ -473,7 +485,9 @@ describe("React runtime adapter", () => {
 		);
 		const route = chartAst.states["items.route"];
 		const publish = chartAst.states.publish;
-		if (route?.kind !== "state" || publish?.kind !== "state") throw new Error("missing action state");
+		if (route?.kind !== "state" || publish?.kind !== "state") {
+			throw new Error("missing action state");
+		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
@@ -741,7 +755,9 @@ describe("React runtime adapter", () => {
 		);
 		const work = chartAst.states.work;
 		const ask = chartAst.states.ask;
-		if (work?.kind !== "state" || ask?.kind !== "state") throw new Error("missing input story actions");
+		if (work?.kind !== "state" || ask?.kind !== "state") {
+			throw new Error("missing input story actions");
+		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: {}, ...baseRecord(1) },
 			{
@@ -1595,7 +1611,9 @@ describe("React runtime adapter", () => {
 			}),
 		);
 		const worker = chartAst.states["items.work"];
-		if (worker?.kind !== "state") throw new Error("missing map worker");
+		if (worker?.kind !== "state") {
+			throw new Error("missing map worker");
+		}
 		const instances = { a: "Alpha", b: "Beta", c: "Gamma" };
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: instances }, ...baseRecord(1) },
@@ -1819,7 +1837,9 @@ describe("React runtime adapter", () => {
 		);
 		const worker = chartAst.states["items.work"];
 		const gate = chartAst.states.gate;
-		if (worker?.kind !== "state" || gate?.kind !== "state") throw new Error("missing action state");
+		if (worker?.kind !== "state" || gate?.kind !== "state") {
+			throw new Error("missing action state");
+		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { items: { a: "Alpha" } }, ...baseRecord(1) },
 			{ type: "spawned", path: "items", instances: { a: "Alpha" }, ...baseRecord(2) },
@@ -1988,7 +2008,9 @@ describe("React runtime adapter", () => {
 			}),
 		);
 		const declaration = chartAst.actors["outer.inner.@worker"];
-		if (declaration === undefined) throw new Error("missing nested actor declaration");
+		if (declaration === undefined) {
+			throw new Error("missing nested actor declaration");
+		}
 		const records: DurableLogRecord[] = [
 			{ type: "args", args: { outer: { a: { inner: { b: {} } } } }, ...baseRecord(1) },
 			{ type: "spawned", path: "outer", instances: { a: { inner: { b: {} } } }, ...baseRecord(2) },

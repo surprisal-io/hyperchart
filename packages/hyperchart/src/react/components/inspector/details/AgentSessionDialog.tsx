@@ -29,13 +29,17 @@ export function AgentSessionDialog({
 	useModalDialog({ dialogRef, initialFocusRef: closeRef, onClose, open: true });
 	useEffect(() => {
 		const transcript = transcriptRef.current;
-		if (transcript !== null && stickToBottomRef.current) transcript.scrollTop = transcript.scrollHeight;
+		if (transcript !== null && stickToBottomRef.current) {
+			transcript.scrollTop = transcript.scrollHeight;
+		}
 	}, [session.messages, session.currentReasoning, session.currentText, session.currentTool, session.lastMessage]);
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		const value = message.trim();
-		if (value.length === 0 || !steeringEnabled || onSteer === undefined || sending) return;
+		if (value.length === 0 || !steeringEnabled || onSteer === undefined || sending) {
+			return;
+		}
 		setSending(true);
 		setSendError(undefined);
 		try {
@@ -231,8 +235,9 @@ export function AgentSessionDialog({
 								value={message}
 								onChange={(event) => setMessage(event.target.value)}
 								onKeyDown={(event) => {
-									if (event.key === "Enter" && (event.metaKey || event.ctrlKey))
+									if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
 										event.currentTarget.form?.requestSubmit();
+									}
 								}}
 								disabled={!steeringEnabled || sending}
 								rows={2}
@@ -264,12 +269,22 @@ export function AgentSessionDialog({
 }
 
 function toolLifecycleText(entry: HyperchartSessionMessageInfo): string {
-	if (entry.toolInput === undefined && entry.toolOutput === undefined) return entry.text ?? "";
+	if (entry.toolInput === undefined && entry.toolOutput === undefined) {
+		return entry.text ?? "";
+	}
 	const sections: string[] = [];
-	if (entry.toolInput !== undefined) sections.push(`CALL\n${entry.toolInput}`);
-	if (entry.toolStatus === "running") sections.push("LOADING…");
-	if (entry.toolStatus === "completed") sections.push(`RESULT\n${entry.toolOutput ?? "Completed"}`);
-	if (entry.toolStatus === "error") sections.push(`ERROR\n${entry.toolOutput ?? "Tool failed"}`);
+	if (entry.toolInput !== undefined) {
+		sections.push(`CALL\n${entry.toolInput}`);
+	}
+	if (entry.toolStatus === "running") {
+		sections.push("LOADING…");
+	}
+	if (entry.toolStatus === "completed") {
+		sections.push(`RESULT\n${entry.toolOutput ?? "Completed"}`);
+	}
+	if (entry.toolStatus === "error") {
+		sections.push(`ERROR\n${entry.toolOutput ?? "Tool failed"}`);
+	}
 	return sections.join("\n\n");
 }
 
@@ -281,12 +296,16 @@ function CollapsibleTranscriptText({ text }: { text: string }) {
 	useLayoutEffect(() => {
 		const container = containerRef.current;
 		const measurement = measurementRef.current;
-		if (container === null || measurement === null) return;
+		if (container === null || measurement === null) {
+			return;
+		}
 		const measure = () => {
 			const lineHeight = Number.parseFloat(window.getComputedStyle(measurement).lineHeight);
 			const nextExpandable = Number.isFinite(lineHeight) && measurement.scrollHeight > lineHeight * 2 + 1;
 			setExpandable(nextExpandable);
-			if (!nextExpandable) setExpanded(false);
+			if (!nextExpandable) {
+				setExpanded(false);
+			}
 		};
 		measure();
 		const observer = new ResizeObserver(measure);
@@ -341,10 +360,20 @@ function CollapsibleTranscriptText({ text }: { text: string }) {
 }
 
 function messageClasses(role: HyperchartSessionMessageInfo["role"], isError: boolean): string {
-	if (isError) return "border-red-500/25 bg-red-500/10 text-[var(--hc-red-text)]";
-	if (role === "user") return "border-blue-500/25 bg-blue-500/10 text-[var(--text-primary)]";
-	if (role === "tool") return "border-cyan-500/20 bg-cyan-500/5 text-[var(--text-secondary)]";
-	if (role === "reasoning") return "border-violet-500/20 bg-violet-500/5 text-[var(--text-secondary)]";
-	if (role === "system") return "border-amber-500/20 bg-amber-500/5 text-[var(--text-secondary)]";
+	if (isError) {
+		return "border-red-500/25 bg-red-500/10 text-[var(--hc-red-text)]";
+	}
+	if (role === "user") {
+		return "border-blue-500/25 bg-blue-500/10 text-[var(--text-primary)]";
+	}
+	if (role === "tool") {
+		return "border-cyan-500/20 bg-cyan-500/5 text-[var(--text-secondary)]";
+	}
+	if (role === "reasoning") {
+		return "border-violet-500/20 bg-violet-500/5 text-[var(--text-secondary)]";
+	}
+	if (role === "system") {
+		return "border-amber-500/20 bg-amber-500/5 text-[var(--text-secondary)]";
+	}
 	return "border-[var(--border-secondary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]";
 }

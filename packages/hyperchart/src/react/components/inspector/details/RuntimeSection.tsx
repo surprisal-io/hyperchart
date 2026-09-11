@@ -165,10 +165,14 @@ function ActorInternalGenerationRuntime({
 				(generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true,
 			);
 	useEffect(() => {
-		if (selectedInPreviousGeneration) setShowHistory(true);
+		if (selectedInPreviousGeneration) {
+			setShowHistory(true);
+		}
 	}, [selectedInPreviousGeneration]);
 	const latest = generations.at(-1);
-	if (latest === undefined) return null;
+	if (latest === undefined) {
+		return null;
+	}
 	const previous = generations.slice(0, -1).reverse();
 	const renderGeneration = (generation: (typeof generations)[number], latestInstance: boolean) => {
 		const focused = selectedInvokeSeqId !== undefined;
@@ -220,8 +224,9 @@ function ActorInternalGenerationRuntime({
 		const selectedGeneration = generations.find(
 			(generation) => generation.visitHistory?.some((visit) => visit.invokeSeqId === selectedInvokeSeqId) === true,
 		);
-		if (selectedGeneration !== undefined)
+		if (selectedGeneration !== undefined) {
 			return <div className="grid gap-2">{renderGeneration(selectedGeneration, selectedGeneration === latest)}</div>;
+		}
 	}
 	return (
 		<div className="grid gap-2">
@@ -244,8 +249,9 @@ function ActorInternalGenerationRuntime({
 
 function messagesByVisit(messages: HyperchartActorSentMessageInfo[] | undefined) {
 	const visits = new Map<number, HyperchartActorSentMessageInfo[]>();
-	for (const message of messages ?? [])
+	for (const message of messages ?? []) {
 		visits.set(message.producerVisit, [...(visits.get(message.producerVisit) ?? []), message]);
+	}
 	return [...visits.entries()];
 }
 
@@ -328,16 +334,22 @@ export function useTargetCursor(history: RuntimeHistoryContext, subject: History
 	const [resolved, setResolved] = useState<{ key: string; cursor?: HistoryCursor; error?: string }>();
 	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
-		if (history.targetSeqId === undefined) return;
+		if (history.targetSeqId === undefined) {
+			return;
+		}
 		let current = true;
 		void history.dataSource
 			.cursorAt({ runId: history.runId, snapshot: history.snapshot, subject, seqId: history.targetSeqId })
 			.then(
 				(cursor) => {
-					if (current) setResolved({ key, ...(cursor === undefined ? {} : { cursor }) });
+					if (current) {
+						setResolved({ key, ...(cursor === undefined ? {} : { cursor }) });
+					}
 				},
 				(error: unknown) => {
-					if (current) setResolved({ key, error: error instanceof Error ? error.message : String(error) });
+					if (current) {
+						setResolved({ key, error: error instanceof Error ? error.message : String(error) });
+					}
 				},
 			);
 		return () => {
@@ -373,11 +385,15 @@ type VisitSessionReader = NonNullable<Parameters<typeof VisitHistory>[0]["onRead
 /** One canonical promise per invocation and selected-branch snapshot, shared by both session buttons. */
 export function useVisitSessionReader(history: RuntimeHistoryContext | undefined): VisitSessionReader | undefined {
 	return useMemo(() => {
-		if (history === undefined) return undefined;
+		if (history === undefined) {
+			return undefined;
+		}
 		const cache = new Map<number, ReturnType<VisitSessionReader>>();
 		return (invokeSeqId: number) => {
 			const existing = cache.get(invokeSeqId);
-			if (existing !== undefined) return existing;
+			if (existing !== undefined) {
+				return existing;
+			}
 			const pending = history.dataSource.readVisitSession({
 				runId: history.runId,
 				snapshot: history.snapshot,
@@ -416,7 +432,9 @@ function LazyStateVisits({
 					stateId,
 					...(cursor === undefined ? {} : { cursor }),
 				});
-				if (history.targetSeqId === undefined) return chunk;
+				if (history.targetSeqId === undefined) {
+					return chunk;
+				}
 				return {
 					snapshot: chunk.snapshot,
 					items: chunk.items.filter((visit) => visit.invokeSeqId === history.targetSeqId),
@@ -425,11 +443,15 @@ function LazyStateVisits({
 		}),
 		[history.dataSource, history.runId, history.snapshot, history.targetSeqId, stateId],
 	);
-	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined)
+	if (!target.ready) {
+		return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	}
+	if ("error" in target && target.error !== undefined) {
 		return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing)
+	}
+	if (target.missing) {
 		return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a visit of this state.</div>;
+	}
 	return (
 		<VirtualizedHistoryList<HyperchartVisitInfo>
 			cacheKey={`${historyCacheKey(history, "state-visits", stateId)}:${history.targetSeqId ?? "all"}`}
@@ -467,7 +489,9 @@ function LazyMapVisits({ history, state }: { history: RuntimeHistoryContext; sta
 					mapPath,
 					...(cursor === undefined ? {} : { cursor }),
 				});
-				if (history.targetSeqId === undefined) return chunk;
+				if (history.targetSeqId === undefined) {
+					return chunk;
+				}
 				return {
 					snapshot: chunk.snapshot,
 					items: chunk.items.filter((visit) => visit.spawnSeqId === history.targetSeqId),
@@ -476,11 +500,15 @@ function LazyMapVisits({ history, state }: { history: RuntimeHistoryContext; sta
 		}),
 		[history.dataSource, history.runId, history.snapshot, history.targetSeqId, mapPath],
 	);
-	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined)
+	if (!target.ready) {
+		return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	}
+	if ("error" in target && target.error !== undefined) {
 		return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing)
+	}
+	if (target.missing) {
 		return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not a launch of this map.</div>;
+	}
 	return (
 		<VirtualizedHistoryList<HyperchartMapVisitInfo>
 			cacheKey={`${historyCacheKey(history, "map-visits", mapPath)}:${history.targetSeqId ?? "all"}`}
@@ -516,11 +544,15 @@ function LazyActorGenerations({
 		}),
 		[history.dataSource, history.runId, history.snapshot, logicalOccurrence],
 	);
-	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined)
+	if (!target.ready) {
+		return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	}
+	if ("error" in target && target.error !== undefined) {
 		return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing)
+	}
+	if (target.missing) {
 		return <div className="text-[10px] text-[var(--text-muted)]">The linked record is not an actor generation.</div>;
+	}
 	return (
 		<VirtualizedHistoryList<HyperchartActorGenerationInfo>
 			cacheKey={historyCacheKey(history, "actor-generations", logicalOccurrence)}
@@ -555,15 +587,19 @@ function LazyActorMessages({ history, occurrence }: { history: RuntimeHistoryCon
 		}),
 		[history.dataSource, history.runId, history.snapshot, occurrence],
 	);
-	if (!target.ready) return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
-	if ("error" in target && target.error !== undefined)
+	if (!target.ready) {
+		return <div className="text-[10px] text-[var(--text-muted)]">Locating history item…</div>;
+	}
+	if ("error" in target && target.error !== undefined) {
 		return <TargetCursorError error={target.error} onRetry={target.retry} />;
-	if (target.missing)
+	}
+	if (target.missing) {
 		return (
 			<div className="text-[10px] text-[var(--text-muted)]">
 				The linked record is not an enqueue batch for this actor.
 			</div>
 		);
+	}
 	return (
 		<VirtualizedHistoryList<HyperchartActorMessageBatchInfo>
 			cacheKey={historyCacheKey(history, "actor-messages", occurrence)}
@@ -616,15 +652,20 @@ export function RuntimeSection({
 		error?: string;
 	}>();
 	useEffect(() => {
-		if (state.type !== "agent" || readSession === undefined || targetInvoke === undefined) return;
+		if (state.type !== "agent" || readSession === undefined || targetInvoke === undefined) {
+			return;
+		}
 		let current = true;
 		void readSession(targetInvoke).then(
 			(value) => {
-				if (current) setResolvedSession({ key: sessionScope, value });
+				if (current) {
+					setResolvedSession({ key: sessionScope, value });
+				}
 			},
 			(error: unknown) => {
-				if (current)
+				if (current) {
 					setResolvedSession({ key: sessionScope, error: error instanceof Error ? error.message : String(error) });
+				}
 			},
 		);
 		return () => {
@@ -640,7 +681,9 @@ export function RuntimeSection({
 					? resolvedSession.value
 					: undefined;
 	const sessionIdentity = `${sessionScope}:${state.id}:${session?.actionKey ?? "none"}:${session?.startedAt ?? "unknown"}`;
-	if (!stateHasRuntimeDetails(state) && !(recordOnly && history !== undefined)) return null;
+	if (!stateHasRuntimeDetails(state) && !(recordOnly && history !== undefined)) {
+		return null;
+	}
 	const sessionIsLive = session?.status === "running" || session?.status === "starting";
 	const actorOccurrence = state.actorOccurrence;
 	const actorMessage =

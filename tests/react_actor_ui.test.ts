@@ -55,7 +55,9 @@ describe("React actor inspector structure", () => {
 		for (const spec of actorSpecs) {
 			const tile = inspectorPanelTileProps(spec);
 			expect(tile.variant).toBe("panel");
-			if (tile.variant !== "panel" || tile.selectedStateId === null) continue;
+			if (tile.variant !== "panel" || tile.selectedStateId === null) {
+				continue;
+			}
 			expect(tile.run.states.some((state) => state.id === tile.selectedStateId)).toBe(true);
 			expect(tile.runtimeSources.map((source) => source.title)).toEqual(
 				expect.arrayContaining(["Definition", "log records", "status.json"]),
@@ -67,10 +69,14 @@ describe("React actor inspector structure", () => {
 			["Call batch state", "callBatch"],
 		] as const) {
 			const tile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === title)!);
-			if (tile.variant !== "panel" || tile.selectedStateId === null) throw new Error(`missing ${title} fixture`);
+			if (tile.variant !== "panel" || tile.selectedStateId === null) {
+				throw new Error(`missing ${title} fixture`);
+			}
 			const state = tile.run.states.find((candidate) => candidate.id === tile.selectedStateId);
 			expect(state?.type).toBe(kind);
-			if (state !== undefined) batchStates.push(state);
+			if (state !== undefined) {
+				batchStates.push(state);
+			}
 			const markup =
 				state === undefined
 					? ""
@@ -86,7 +92,9 @@ describe("React actor inspector structure", () => {
 		expect(stateKindMeta(batchStates[0]!).Icon).not.toBe(stateKindMeta(batchStates[1]!).Icon);
 
 		const selfTile = inspectorPanelTileProps(actorSpecs.find((spec) => spec.title === "Self-send state")!);
-		if (selfTile.variant !== "panel" || selfTile.selectedStateId === null) throw new Error("missing self-send fixture");
+		if (selfTile.variant !== "panel" || selfTile.selectedStateId === null) {
+			throw new Error("missing self-send fixture");
+		}
 		const selfState = selfTile.run.states.find((state) => state.id === selfTile.selectedStateId);
 		expect(selfState).toMatchObject({
 			actorMessageLink: { kind: "sendBatch", to: "@workers", event: "CRAWL", self: true },
@@ -121,8 +129,9 @@ describe("React actor inspector structure", () => {
 			actorSpecs.find((spec) => spec.title === "Actor pool workers and backlog")!,
 		);
 		expect(poolTile.variant).toBe("panel");
-		if (poolTile.variant !== "panel" || poolTile.selectedStateId === null)
+		if (poolTile.variant !== "panel" || poolTile.selectedStateId === null) {
 			throw new Error("missing actor pool panel fixture");
+		}
 		const poolState = poolTile.run.states.find((state) => state.id === poolTile.selectedStateId);
 		expect(poolState?.actorOccurrence).toMatchObject({
 			kind: "actorPool",
@@ -411,8 +420,9 @@ describe("React actor inspector structure", () => {
 		const declaration = ast.actors["@worker"];
 		const sendA = ast.states.sendA;
 		const sendB = ast.states.sendB;
-		if (declaration === undefined || sendA === undefined || sendB === undefined)
+		if (declaration === undefined || sendA === undefined || sendB === undefined) {
 			throw new Error("missing actor fixture");
+		}
 		const replyAContract = declaration.protocol.A?.reply;
 		const replyBContract = declaration.protocol.B?.reply;
 		if (
@@ -422,8 +432,9 @@ describe("React actor inspector structure", () => {
 			replyBContract === undefined ||
 			replyAContract.kind !== "named" ||
 			replyBContract.kind !== "named"
-		)
+		) {
 			throw new Error("expected send states and named replies");
+		}
 		const source = (definition: typeof sendA, event: "A" | "B") => ({
 			producerState: definition.id,
 			kind: "send" as const,
@@ -698,7 +709,9 @@ describe("React actor inspector structure", () => {
 
 		const declaration = actorRuntimeAdapterRun.states.find((state) => state.id === "@editor");
 		expect(declaration).toBeDefined();
-		if (declaration === undefined) return;
+		if (declaration === undefined) {
+			return;
+		}
 		const declarationMarkup = renderToStaticMarkup(
 			createElement(StateDetails, {
 				state: declaration,
@@ -720,7 +733,9 @@ describe("React actor inspector structure", () => {
 
 		const internal = actorRuntimeAdapterRun.states.find((state) => state.id === "@editor.apply");
 		expect(internal).toBeDefined();
-		if (internal === undefined) return;
+		if (internal === undefined) {
+			return;
+		}
 		const internalMarkup = renderToStaticMarkup(
 			createElement(StateDetails, {
 				state: internal,

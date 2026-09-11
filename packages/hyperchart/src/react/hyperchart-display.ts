@@ -67,12 +67,16 @@ export function hyperchartStatusIcon(status: string) {
 }
 
 export function formatHyperchartTime(ts?: number): string {
-	if (!ts) return "—";
+	if (!ts) {
+		return "—";
+	}
 	return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 export function formatHyperchartDateTime(ts?: number): string {
-	if (!ts) return "—";
+	if (!ts) {
+		return "—";
+	}
 	return new Date(ts).toLocaleString([], {
 		month: "short",
 		day: "numeric",
@@ -87,10 +91,16 @@ export function runningHyperchartStates(run?: HyperchartRunInfo): HyperchartStat
 }
 
 export function formatHyperchartUsage(usage?: HyperchartUsageInfo): string | null {
-	if (!usage) return null;
+	if (!usage) {
+		return null;
+	}
 	const parts: string[] = [];
-	if (typeof usage.total === "number" && usage.total > 0) parts.push(`${usage.total.toLocaleString()} tok`);
-	if (typeof usage.cost === "number" && usage.cost > 0) parts.push(`$${usage.cost.toFixed(4)}`);
+	if (typeof usage.total === "number" && usage.total > 0) {
+		parts.push(`${usage.total.toLocaleString()} tok`);
+	}
+	if (typeof usage.cost === "number" && usage.cost > 0) {
+		parts.push(`$${usage.cost.toFixed(4)}`);
+	}
 	return parts.length > 0 ? parts.join(" · ") : null;
 }
 

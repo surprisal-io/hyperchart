@@ -102,13 +102,17 @@ function userAst(): ChartAst {
 		},
 	});
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
 async function appendOpenGate(store: PostgresLogStore, ast: ChartAst): Promise<number> {
 	const state = ast.states.ask;
-	if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("invalid user chart fixture");
+	if (state?.kind !== "state" || state.action.kind !== "user") {
+		throw new Error("invalid user chart fixture");
+	}
 	await store.appendDrafts([{ type: "args", args: {} }]);
 	const [invoke] = await store.appendDrafts([
 		{
@@ -201,7 +205,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-	if (dsn === undefined || usedRunIds.length === 0) return;
+	if (dsn === undefined || usedRunIds.length === 0) {
+		return;
+	}
 	const { Client } = await import("pg");
 	const client = new Client({ connectionString: dsn });
 	await client.connect();
@@ -648,7 +654,9 @@ describePg("PostgresLogStore", () => {
 		const runId = newRunId();
 		const seed = await openWriter(runId);
 		await seed.initializeRootBranch();
-		for (let index = 0; index < 20; index++) await seed.appendDrafts([argsDraft({ index })]);
+		for (let index = 0; index < 20; index++) {
+			await seed.appendDrafts([argsDraft({ index })]);
+		}
 		await seed.close();
 
 		const { Client } = await import("pg");
@@ -1078,8 +1086,9 @@ describePg("PostgresLogStore", () => {
 		const store = await openWriter(newRunId());
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([argsDraft()]);
-		for (let index = 0; index < 105; index++)
+		for (let index = 0; index < 105; index++) {
 			await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		}
 		const first = await store.listBranches();
 		expect(first.items).toHaveLength(100);
 		expect(first.totalCount).toBe(106);
@@ -1097,8 +1106,12 @@ describePg("PostgresLogStore", () => {
 		await store.initializeRootBranch();
 		const records = await store.appendDrafts(Array.from({ length: 1_201 }, () => invokeDraft()));
 		const batches: number[][] = [];
-		for await (const batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null }))
+		for await (const batch of openExecutionReplay(store, {
+			targetHeadSeqId: records.at(-1)!.seqId,
+			afterSeqId: null,
+		})) {
 			batches.push(batch.map((record) => record.seqId));
+		}
 		expect(batches.map((batch) => batch.length)).toEqual([500, 500, 201]);
 		expect(batches.flat()).toEqual(records.map((record) => record.seqId));
 	});
@@ -1143,8 +1156,9 @@ describePg("PostgresLogStore", () => {
 		await listener.connect();
 		const received: string[] = [];
 		listener.on("notification", (message: { channel: string; payload?: string | undefined }) => {
-			if (message.channel === JOURNAL_CHANNEL && message.payload?.startsWith(`${runId}:`))
+			if (message.channel === JOURNAL_CHANNEL && message.payload?.startsWith(`${runId}:`)) {
 				received.push(message.payload);
+			}
 		});
 		await listener.query(`LISTEN ${JOURNAL_CHANNEL}`);
 		const writer = await openWriter(runId);

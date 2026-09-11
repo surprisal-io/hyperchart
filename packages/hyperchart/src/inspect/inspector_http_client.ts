@@ -9,8 +9,9 @@ export function browserHistoryDataSource(token: string): HyperchartInspectorData
 			body: JSON.stringify({ operation, input }),
 		});
 		const payload = (await response.json()) as { found?: boolean; result?: T; error?: string };
-		if (!response.ok || typeof payload.found !== "boolean")
+		if (!response.ok || typeof payload.found !== "boolean") {
 			throw new Error(payload.error ?? `History request failed (${response.status})`);
+		}
 		return (payload.found ? payload.result : undefined) as T;
 	};
 	return {

@@ -88,7 +88,9 @@ export class RunHistoryOverlay implements Component {
 		}
 		if (data === "\r" || data === "\n") {
 			const item = this.opts.items[this.selected];
-			if (item !== undefined) this.opts.done({ kind: "view", runId: item.runId });
+			if (item !== undefined) {
+				this.opts.done({ kind: "view", runId: item.runId });
+			}
 		}
 	}
 
@@ -130,11 +132,21 @@ function runSelectItems(items: readonly RunHistoryItem[]): SelectItem[] {
 }
 
 function runStateGlyph(item: RunHistoryItem): string {
-	if (item.live) return "▶";
-	if (item.state === "complete") return "✓";
-	if (item.state === "failed") return "✗";
-	if (item.state === "stopped") return "■";
-	if (item.state === "stale") return "◌";
+	if (item.live) {
+		return "▶";
+	}
+	if (item.state === "complete") {
+		return "✓";
+	}
+	if (item.state === "failed") {
+		return "✗";
+	}
+	if (item.state === "stopped") {
+		return "■";
+	}
+	if (item.state === "stale") {
+		return "◌";
+	}
 	return "○";
 }
 
@@ -219,10 +231,14 @@ export class RunWidget implements Component {
 	}
 
 	private readonly refresh = AsyncLocalStorage.bind(async (): Promise<void> => {
-		if (this.disposed) return;
+		if (this.disposed) {
+			return;
+		}
 		const progressPath = sessionProgressPath(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions"));
 		const stat = `${readRunStatus(this.opts.runId)?.updatedAt ?? 0}:${statKeyFor(progressPath)}`;
-		if (stat === this.lastStat && this.view !== undefined) return;
+		if (stat === this.lastStat && this.view !== undefined) {
+			return;
+		}
 		this.lastStat = stat;
 		const branchId = this.opts.branchId ?? "main";
 		const store = await openRunLogStore(this.opts.runId, { branchId });
@@ -254,7 +270,9 @@ export class RunWidget implements Component {
 	});
 
 	private handleRefreshError(cause: unknown): void {
-		if (this.disposed) return;
+		if (this.disposed) {
+			return;
+		}
 		this.refreshError = cause instanceof Error ? cause.message : String(cause);
 		this.tui.requestRender();
 	}
@@ -283,16 +301,28 @@ function compactSessionLine(session: HyperchartSessionProgress, theme: Theme, li
 }
 
 function sessionActivity(session: HyperchartSessionProgress, live: boolean): string {
-	if (!live) return "detached";
-	if (session.status === "starting") return "starting";
-	if (session.status === "running") return session.currentTool ?? "thinking";
+	if (!live) {
+		return "detached";
+	}
+	if (session.status === "starting") {
+		return "starting";
+	}
+	if (session.status === "running") {
+		return session.currentTool ?? "thinking";
+	}
 	return session.status;
 }
 
 function activeStatusLabel(row: GraphRow, live: boolean): string {
-	if (!live) return "detached";
-	if (row.status === "validating") return "validating";
-	if (row.status === "rejected") return "retrying";
+	if (!live) {
+		return "detached";
+	}
+	if (row.status === "validating") {
+		return "validating";
+	}
+	if (row.status === "rejected") {
+		return "retrying";
+	}
 	return row.action ?? "running";
 }
 
@@ -316,25 +346,39 @@ function activeStatus(status: GraphRow["status"]): boolean {
 }
 
 function runStateLabel(view: RunView, live: boolean): string {
-	if (view.final) return view.failedTerminal ? "FAILED" : "DONE";
+	if (view.final) {
+		return view.failedTerminal ? "FAILED" : "DONE";
+	}
 	return live ? "RUNNING" : "DETACHED";
 }
 
 function colorRunGlyph(theme: Theme, view: RunView, live: boolean): string {
-	if (view.final) return runStateLabel(view, live) === "FAILED" ? error(theme, "✗") : success(theme, "✓");
+	if (view.final) {
+		return runStateLabel(view, live) === "FAILED" ? error(theme, "✗") : success(theme, "✓");
+	}
 	return live ? accent(theme, "◐") : warning(theme, "○");
 }
 
 function colorActionGlyph(theme: Theme, row: GraphRow, live: boolean): string {
-	if (!live) return warning(theme, "○");
-	if (row.status === "rejected") return warning(theme, "↻");
+	if (!live) {
+		return warning(theme, "○");
+	}
+	if (row.status === "rejected") {
+		return warning(theme, "↻");
+	}
 	return accent(theme, "●");
 }
 
 function colorRunState(theme: Theme, state: string): string {
-	if (state === "DONE") return success(theme, state);
-	if (state === "FAILED") return error(theme, state);
-	if (state === "DETACHED") return warning(theme, state);
+	if (state === "DONE") {
+		return success(theme, state);
+	}
+	if (state === "FAILED") {
+		return error(theme, state);
+	}
+	if (state === "DETACHED") {
+		return warning(theme, state);
+	}
 	return accent(theme, state);
 }
 
@@ -344,8 +388,12 @@ function shortPath(path: string): string {
 }
 
 function formatDuration(ms: number): string {
-	if (ms < 1_000) return `${Math.max(0, Math.round(ms))}ms`;
-	if (ms < 60_000) return `${Math.floor(ms / 1_000)}s`;
+	if (ms < 1_000) {
+		return `${Math.max(0, Math.round(ms))}ms`;
+	}
+	if (ms < 60_000) {
+		return `${Math.floor(ms / 1_000)}s`;
+	}
 	return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1_000)}s`;
 }
 

@@ -22,7 +22,9 @@ export function ActorMessageDefinitionSection({
 	onNavigateToState?: (stateId: string) => void;
 }) {
 	const definition = state.actorMessageDefinition;
-	if (definition === undefined) return null;
+	if (definition === undefined) {
+		return null;
+	}
 	const title =
 		definition.kind === "receive"
 			? "Accepted message contracts"

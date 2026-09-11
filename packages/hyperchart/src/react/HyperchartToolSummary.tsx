@@ -41,7 +41,9 @@ function persistedRun(
 	const runId = stringArg(args?.runId) ?? stringArg(args?.runDir);
 	if (runId) {
 		const byId = runs.find((run) => run.runId === runId || runId.endsWith(`/${run.runId}`));
-		if (byId) return byId;
+		if (byId) {
+			return byId;
+		}
 	}
 	const chartName = chartNameFromArgs(args);
 	if (chartName) {
@@ -54,11 +56,21 @@ function persistedRun(
 }
 
 function actionLabel(toolName: string, args?: Record<string, unknown>): string {
-	if (toolName !== "hyperchart") return toolName;
-	if (args?.action === "inspect") return "inspect definition";
-	if (args?.action === "run_inspect") return "inspect run";
-	if (args?.action === "rewind") return "rewind";
-	if (args?.action === "list") return "list definitions";
+	if (toolName !== "hyperchart") {
+		return toolName;
+	}
+	if (args?.action === "inspect") {
+		return "inspect definition";
+	}
+	if (args?.action === "run_inspect") {
+		return "inspect run";
+	}
+	if (args?.action === "rewind") {
+		return "rewind";
+	}
+	if (args?.action === "list") {
+		return "list definitions";
+	}
 	return "run";
 }
 
@@ -93,9 +105,14 @@ export function HyperchartToolSummary({
 			? "waiting…"
 			: "not found";
 	const open = () => {
-		if (!run) return;
-		if (!isDefinition && onOpenRun) onOpenRun(run.runId);
-		else setInspectorOpen(true);
+		if (!run) {
+			return;
+		}
+		if (!isDefinition && onOpenRun) {
+			onOpenRun(run.runId);
+		} else {
+			setInspectorOpen(true);
+		}
 	};
 
 	return (

@@ -76,7 +76,9 @@ export class ChartRuntime implements Runtime {
 			projectDir: options.projectDir ?? options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
 		});
-		if (options.runId !== undefined) this.artifactStore = new ArtifactStore(resolveRunPaths(options.runId).runDir);
+		if (options.runId !== undefined) {
+			this.artifactStore = new ArtifactStore(resolveRunPaths(options.runId).runDir);
+		}
 		this.now = options.now ?? Date.now;
 		this.onWarn = options.onWarn ?? (() => {});
 	}
@@ -92,19 +94,23 @@ export class ChartRuntime implements Runtime {
 
 	/** Composition hook: accepts an opaque callback without importing execution semantics. */
 	bindArtifactValidator(validate: (artifact: RenderedArtifact, content: string) => Promise<SchemaCheck>): void {
-		if (this.options.validateArtifactSnapshot !== undefined && this.options.validateArtifactSnapshot !== validate)
+		if (this.options.validateArtifactSnapshot !== undefined && this.options.validateArtifactSnapshot !== validate) {
 			throw new Error("ChartRuntime artifact validator is already bound");
+		}
 		this.options.validateArtifactSnapshot = validate;
 	}
 
 	bindStampedCommit(prepare: PrepareStampedCommit): void {
-		if (this.options.prepareStampedCommit !== undefined && this.options.prepareStampedCommit !== prepare)
+		if (this.options.prepareStampedCommit !== undefined && this.options.prepareStampedCommit !== prepare) {
 			throw new Error("ChartRuntime commit preparer is already bound");
+		}
 		this.options.prepareStampedCommit = prepare;
 	}
 
 	runEffects(effects: Effect[]): Promise<void> {
-		if (this.quiescing) return Promise.resolve();
+		if (this.quiescing) {
+			return Promise.resolve();
+		}
 		let tracked!: Promise<void>;
 		tracked = this.performRunEffects(effects).finally(() => this.effectRuns.delete(tracked));
 		this.effectRuns.add(tracked);
@@ -112,18 +118,24 @@ export class ChartRuntime implements Runtime {
 	}
 
 	private async performRunEffects(effects: Effect[]): Promise<void> {
-		if (this.quiescing) return;
+		if (this.quiescing) {
+			return;
+		}
 		// The machine drops completions whose invoke facts it has not projected yet, so no
 		// event may be delivered between dispatching this batch and enqueueing its
 		// durable_records_added acknowledgements. Buffer sends until the batch settles.
 		this.sendBuffer = [];
 		try {
 			for (const effect of effects) {
-				if (this.quiescing) return;
+				if (this.quiescing) {
+					return;
+				}
 				switch (effect.kind) {
 					case "durable_records": {
 						const records = await this.options.logStore.appendDrafts(effect.records, this.options.prepareStampedCommit);
-						if (!this.quiescing) this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
+						if (!this.quiescing) {
+							this.queue.send({ kind: "durable_records_added", effectId: effect.id, records });
+						}
 						break;
 					}
 					case "actor_create":
@@ -185,7 +197,9 @@ export class ChartRuntime implements Runtime {
 						this.track(
 							this.restorePinnedReads(effect.reads)
 								.then(() => {
-									if (this.quiescing) return;
+									if (this.quiescing) {
+										return;
+									}
 									this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
 								})
 								.catch((error: unknown) => {
@@ -208,7 +222,9 @@ export class ChartRuntime implements Runtime {
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
 								.then((admitted) => {
-									if (admitted !== undefined) this.send({ kind: "script", effectId: effect.id, ...admitted });
+									if (admitted !== undefined) {
+										this.send({ kind: "script", effectId: effect.id, ...admitted });
+									}
 								})
 								.catch((error: unknown) => {
 									this.send({ kind: "script", effectId: effect.id, event: toFailedEvent(error) });
@@ -223,7 +239,9 @@ export class ChartRuntime implements Runtime {
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
 								.then((admitted) => {
-									if (admitted !== undefined) this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
+									if (admitted !== undefined) {
+										this.send({ kind: "tsImport", effectId: effect.id, ...admitted });
+									}
 								})
 								.catch((error: unknown) => {
 									this.send({ kind: "tsImport", effectId: effect.id, event: toFailedEvent(error) });
@@ -282,8 +300,9 @@ export class ChartRuntime implements Runtime {
 						this.track(
 							Promise.allSettled(cancellations).then((results) => {
 								for (const result of results) {
-									if (result.status === "rejected")
+									if (result.status === "rejected") {
 										this.onWarn(`Cancellation ${effect.id} failed: ${errorMessage(result.reason)}`);
+									}
 								}
 							}),
 						);
@@ -294,13 +313,19 @@ export class ChartRuntime implements Runtime {
 		} finally {
 			const buffered = this.sendBuffer;
 			this.sendBuffer = undefined;
-			if (buffered !== undefined) for (const event of buffered) this.send(event);
+			if (buffered !== undefined) {
+				for (const event of buffered) {
+					this.send(event);
+				}
+			}
 		}
 	}
 
 	/** Queue records committed by an external control path; execution was confirmed under the store writer boundary. */
 	acknowledgeCommittedRecords(records: readonly DurableLogRecord[], effectId: string): void {
-		if (records.length === 0 || this.disposed) return;
+		if (records.length === 0 || this.disposed) {
+			return;
+		}
 		this.send({ kind: "durable_records_added", effectId, records });
 	}
 
@@ -310,14 +335,20 @@ export class ChartRuntime implements Runtime {
 
 	/** Synchronously reject new effects and late host callbacks without finalizing durable state. */
 	beginDrain(): void {
-		if (this.quiescing) return;
+		if (this.quiescing) {
+			return;
+		}
 		this.quiescing = true;
-		for (const timer of this.timers.values()) clearTimeout(timer);
+		for (const timer of this.timers.values()) {
+			clearTimeout(timer);
+		}
 		this.timers.clear();
 	}
 
 	dispose(): Promise<void> {
-		if (this.disposal !== undefined) return this.disposal;
+		if (this.disposal !== undefined) {
+			return this.disposal;
+		}
 		this.beginDrain();
 		this.disposed = true;
 		this.disposal = this.performDispose();
@@ -331,7 +362,9 @@ export class ChartRuntime implements Runtime {
 			Promise.resolve().then(() => this.options.agentExecutor.dispose()),
 		];
 		const cleanupResults = await Promise.allSettled(cleanups);
-		while (this.effectRuns.size > 0) await Promise.allSettled([...this.effectRuns]);
+		while (this.effectRuns.size > 0) {
+			await Promise.allSettled([...this.effectRuns]);
+		}
 		await this.drainPending();
 		this.queue.close();
 		const errors = [
@@ -360,11 +393,15 @@ export class ChartRuntime implements Runtime {
 	}
 
 	private async drainPending(): Promise<void> {
-		while (this.pending.size > 0) await Promise.allSettled([...this.pending]);
+		while (this.pending.size > 0) {
+			await Promise.allSettled([...this.pending]);
+		}
 	}
 
 	private send(event: MachineEvent): void {
-		if (this.quiescing) return;
+		if (this.quiescing) {
+			return;
+		}
 		if (this.sendBuffer !== undefined) {
 			this.sendBuffer.push(event);
 			return;
@@ -373,7 +410,9 @@ export class ChartRuntime implements Runtime {
 	}
 
 	private dispatchAgentOutcome(effect: AgentEffect, outcome: AgentOutcome): void {
-		if (this.quiescing) return;
+		if (this.quiescing) {
+			return;
+		}
 		if (outcome.kind === "failed") {
 			this.send({ kind: "agent", effectId: effect.id, outcome });
 			return;
@@ -401,12 +440,18 @@ export class ChartRuntime implements Runtime {
 	 */
 	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {
 		const store = this.artifactStore;
-		if (store === undefined || reads === undefined || reads.length === 0) return;
+		if (store === undefined || reads === undefined || reads.length === 0) {
+			return;
+		}
 		for (const artifact of reads) {
 			const pin = artifact.pin;
-			if (pin === undefined) continue;
+			if (pin === undefined) {
+				continue;
+			}
 			const path = renderedArtifactPath(artifact, this.options.workDir);
-			if (await matchesHash(path, pin.hash)) continue;
+			if (await matchesHash(path, pin.hash)) {
+				continue;
+			}
 			const source = await store.get(pin.hash);
 			await fsp.mkdir(dirname(path), { recursive: true });
 			await fsp.copyFile(source, path);
@@ -433,7 +478,9 @@ export class ChartRuntime implements Runtime {
 				if (artifact.shape !== undefined) {
 					const content = await fsp.readFile(store.objectPath(pin.hash), "utf8");
 					const validate = this.options.validateArtifactSnapshot;
-					if (validate === undefined) throw new Error("Execution did not provide artifact snapshot validation");
+					if (validate === undefined) {
+						throw new Error("Execution did not provide artifact snapshot validation");
+					}
 					const check = await validate(artifact, content);
 					if (!check.ok) {
 						throw new Error(`Artifact ${artifact.path}: snapshotted content is invalid: ${check.errors.join("; ")}`);

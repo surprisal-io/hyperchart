@@ -58,8 +58,9 @@ export function HyperchartInspectorSidePanel({
 			highlightedArtifact === null &&
 			highlightedInputName === null &&
 			highlightedRefValue === null
-		)
+		) {
 			return;
+		}
 		const timeout = window.setTimeout(() => {
 			setHighlightedReply(null);
 			setHighlightedArtifact(null);
@@ -72,10 +73,14 @@ export function HyperchartInspectorSidePanel({
 		const ids = new Set<string>();
 		for (const state of run.states) {
 			const parentId = stateScopeParentId(state);
-			if (parentId === undefined) continue;
+			if (parentId === undefined) {
+				continue;
+			}
 			ids.add(parentId);
 			const mapId = immediateMapScopeId(parentId);
-			if (mapId !== undefined) ids.add(mapId);
+			if (mapId !== undefined) {
+				ids.add(mapId);
+			}
 		}
 		return ids;
 	}, [run]);

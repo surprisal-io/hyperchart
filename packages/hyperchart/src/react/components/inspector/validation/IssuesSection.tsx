@@ -10,7 +10,9 @@ export function IssuesSection({
 	issues: readonly HyperchartIssueInfo[] | undefined;
 	title?: string;
 }) {
-	if (!issues || issues.length === 0) return null;
+	if (!issues || issues.length === 0) {
+		return null;
+	}
 	return (
 		<Section title={title} icon={ExclamationTriangleIcon}>
 			<div className="space-y-2">

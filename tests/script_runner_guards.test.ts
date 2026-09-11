@@ -32,7 +32,9 @@ afterEach(async () => {
 
 function make(config: ChartCst): ChartAst {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -46,7 +48,9 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
 			}),
 		]);
 	} finally {
-		if (timer !== undefined) clearTimeout(timer);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
 	}
 }
 

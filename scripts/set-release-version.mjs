@@ -53,7 +53,9 @@ if (check) {
 	assertContains("README.md", `experimental version ${version}`, mismatches);
 	assertContains("packages/hyperchart/README.md", `experimental \`${version}\``, mismatches);
 	assertContains("packages/pi-hyperchart/README.md", `experimental \`${version}\``, mismatches);
-	if (mismatches.length > 0) throw new Error(`Release version mismatch:\n${mismatches.join("\n")}`);
+	if (mismatches.length > 0) {
+		throw new Error(`Release version mismatch:\n${mismatches.join("\n")}`);
+	}
 	console.log(`Release version ${version} is consistent.`);
 	process.exit(0);
 }
@@ -75,7 +77,9 @@ if (coreDependency !== current) {
 if (claudeCoreDependency !== current) {
 	throw new Error(`Claude package pins core ${claudeCoreDependency}; expected current version ${current}`);
 }
-if (current === version) throw new Error(`Version is already ${version}`);
+if (current === version) {
+	throw new Error(`Version is already ${version}`);
+}
 
 lockfile.version = version;
 lockfile.packages[""].version = version;
@@ -116,7 +120,9 @@ function isValidVersion(value) {
 		/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
 			value,
 		);
-	if (!match) return false;
+	if (!match) {
+		return false;
+	}
 	return !match[1]?.split(".").some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith("0"));
 }
 
@@ -132,7 +138,9 @@ function replaceExact(path, from, to) {
 	const absolute = resolve(root, path);
 	const source = readFileSync(absolute, "utf8");
 	const first = source.indexOf(from);
-	if (first < 0) throw new Error(`${path} does not contain ${JSON.stringify(from)}`);
+	if (first < 0) {
+		throw new Error(`${path} does not contain ${JSON.stringify(from)}`);
+	}
 	if (source.indexOf(from, first + from.length) >= 0) {
 		throw new Error(`${path} contains ${JSON.stringify(from)} more than once`);
 	}
@@ -140,7 +148,9 @@ function replaceExact(path, from, to) {
 }
 
 function assertEqual(label, actual, expected, mismatches) {
-	if (actual !== expected) mismatches.push(`- ${label}: expected ${expected}, found ${String(actual)}`);
+	if (actual !== expected) {
+		mismatches.push(`- ${label}: expected ${expected}, found ${String(actual)}`);
+	}
 }
 
 function assertContains(path, expected, mismatches) {

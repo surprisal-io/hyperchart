@@ -5,7 +5,9 @@ import { JsonBlock } from "../ui/JsonBlock.js";
 
 export function MapResolvedInputList({ state }: { state: HyperchartStateInfo }) {
 	const items = state.type === "map" ? state.mapConfig?.items : undefined;
-	if (items === undefined) return null;
+	if (items === undefined) {
+		return null;
+	}
 	return (
 		<div className="space-y-2">
 			<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Resolved map items</div>

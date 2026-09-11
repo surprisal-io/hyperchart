@@ -21,7 +21,9 @@ import { ActorNodePreview } from "./ActorNodePreview.js";
 function useDurationSnapshot(active: boolean, snapshotAt?: number): number | undefined {
 	const [current, setCurrent] = useState(() => snapshotAt ?? Date.now());
 	useEffect(() => {
-		if (!active) return;
+		if (!active) {
+			return;
+		}
 		const baseline = snapshotAt ?? Date.now();
 		const mountedAt = Date.now();
 		setCurrent(baseline);

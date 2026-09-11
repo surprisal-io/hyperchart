@@ -35,12 +35,16 @@ let openInspectorCount = 0;
 
 function usePauseBackgroundAnimations(active: boolean): void {
 	useEffect(() => {
-		if (!active || typeof document === "undefined") return;
+		if (!active || typeof document === "undefined") {
+			return;
+		}
 		openInspectorCount += 1;
 		document.documentElement.setAttribute("data-hyperchart-inspector-open", "");
 		return () => {
 			openInspectorCount = Math.max(0, openInspectorCount - 1);
-			if (openInspectorCount === 0) document.documentElement.removeAttribute("data-hyperchart-inspector-open");
+			if (openInspectorCount === 0) {
+				document.documentElement.removeAttribute("data-hyperchart-inspector-open");
+			}
 		};
 	}, [active]);
 }
@@ -121,7 +125,9 @@ export function HyperchartInspectorDialogInner({
 	const miniMapMaskColor = resolved === "light" ? "rgba(0, 0, 0, 0.14)" : "rgba(0, 0, 0, 0.45)";
 	const miniMapBackgroundColor = resolved === "light" ? "#f0f0f0" : "#1e1e1e";
 	const run = useMemo(() => {
-		if (selectedRunId) return runs.find((candidate) => candidate.runId === selectedRunId) ?? runs[0];
+		if (selectedRunId) {
+			return runs.find((candidate) => candidate.runId === selectedRunId) ?? runs[0];
+		}
 		return runs.find((candidate) => candidate.status === "running") ?? runs[0];
 	}, [runs, selectedRunId]);
 	const runRef = useRef(run);
@@ -185,14 +191,18 @@ export function HyperchartInspectorDialogInner({
 			const parentId = stateScopeParentId(candidate);
 			return parentId === state?.id || parentId?.startsWith(`${state?.id}#`) === true;
 		});
-		if (!state || !hasChildScope) return;
+		if (!state || !hasChildScope) {
+			return;
+		}
 		setScopeStack((prev) => [...prev, state.id]);
 		setSelectedStateId(null);
 		setSelectedVisit(null);
 	}, []);
 	const navigateToState = useCallback((stateId: string) => {
 		const latestRun = runRef.current;
-		if (latestRun?.states.some((state) => state.id === stateId) !== true) return;
+		if (latestRun?.states.some((state) => state.id === stateId) !== true) {
+			return;
+		}
 		setScopeStack(scopeStackForState(latestRun.states, stateId));
 		setSelectedStateId(stateId);
 		setSelectedVisit(null);
@@ -210,7 +220,9 @@ export function HyperchartInspectorDialogInner({
 	}, []);
 	const selectExecutionState = useCallback((stateId: string, nodeId: string, targetSeqId?: number) => {
 		const latestRun = runRef.current;
-		if (latestRun?.states.some((state) => state.id === stateId) !== true) return;
+		if (latestRun?.states.some((state) => state.id === stateId) !== true) {
+			return;
+		}
 		setScopeStack(scopeStackForState(latestRun.states, stateId));
 		setSelectedStateId(stateId);
 		setSelectedVisit(
@@ -232,7 +244,9 @@ export function HyperchartInspectorDialogInner({
 	}, []);
 	const loadMoreBranches = useCallback(async () => {
 		const latestRun = runRef.current;
-		if (latestRun === undefined || historyDataSource === undefined || branchCursor === undefined) return;
+		if (latestRun === undefined || historyDataSource === undefined || branchCursor === undefined) {
+			return;
+		}
 		try {
 			const chunk = await historyDataSource.listBranches({ runId: latestRun.runId, cursor: branchCursor });
 			setVisibleBranches((current) => [
@@ -259,7 +273,9 @@ export function HyperchartInspectorDialogInner({
 	}, []);
 	const handleNodeDoubleClick = useCallback<NodeMouseHandler<StateNode>>((_, node) => openScope(node.id), [openScope]);
 
-	if (!run || !historyRun) return null;
+	if (!run || !historyRun) {
+		return null;
+	}
 
 	return (
 		<DialogPortal>
@@ -335,13 +351,16 @@ export function HyperchartInspectorDialogInner({
 										className="rounded border border-[var(--border-secondary)] px-2 py-1 text-xs"
 										onClick={() => {
 											const head = visibleBranches.find((branch) => branch.branchId === run.branchId)?.headSeqId;
-											if (head === null || head === undefined) return;
+											if (head === null || head === undefined) {
+												return;
+											}
 											const branchId = window.prompt("New branch name");
 											if (
 												branchId &&
 												window.confirm(`Create branch ${branchId} at seqId ${head}? This will not select or start it.`)
-											)
+											) {
 												void onForkBranch(run.runId, head, branchId);
+											}
 										}}
 									>
 										Fork…
@@ -374,8 +393,9 @@ export function HyperchartInspectorDialogInner({
 												window.confirm(
 													`Move only branch ${run.branchId} to seqId ${seqId}? All records stay preserved.`,
 												)
-											)
+											) {
 												void onRewindBranch(run.runId, run.branchId!, seqId);
+											}
 										}}
 									>
 										Rewind…

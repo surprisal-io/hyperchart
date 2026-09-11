@@ -11,7 +11,9 @@ const declarationsByChart = new WeakMap<ChartAst, readonly ActorEndpointDeclarat
 
 function sortedActorDeclarations(ast: ChartAst): readonly ActorEndpointDeclarationAst[] {
 	const cached = declarationsByChart.get(ast);
-	if (cached !== undefined) return cached;
+	if (cached !== undefined) {
+		return cached;
+	}
 	const declarations = Object.values(ast.actors).sort((left, right) => right.path.length - left.path.length);
 	declarationsByChart.set(ast, declarations);
 	return declarations;
@@ -37,7 +39,9 @@ export function actorGenerationPath(logicalOccurrence: StatePath, generation: nu
 }
 
 export function actorLogicalOccurrencePath(occurrence: StatePath, generation: number): StatePath {
-	if (generation === 1) return occurrence;
+	if (generation === 1) {
+		return occurrence;
+	}
 	const suffix = `~${generation}`;
 	return occurrence.endsWith(suffix) ? occurrence.slice(0, -suffix.length) : occurrence;
 }
@@ -56,9 +60,13 @@ export function parseActorPoolWorkerOccurrence(
 	path: StatePath,
 ): { endpointOccurrence: StatePath; workerIndex: number } | undefined {
 	const match = /^(.*)\.\$worker-([0-9]+)$/.exec(path);
-	if (match === null) return undefined;
+	if (match === null) {
+		return undefined;
+	}
 	const workerIndex = Number(match[2]);
-	if (!Number.isSafeInteger(workerIndex)) return undefined;
+	if (!Number.isSafeInteger(workerIndex)) {
+		return undefined;
+	}
 	return { endpointOccurrence: match[1] ?? "", workerIndex };
 }
 
@@ -92,18 +100,24 @@ export function actorContextForState(ast: ChartAst, statePath: StatePath): Actor
 		const prefix = endpoint.kind === "actorPool" ? `${endpoint.path}.$worker.` : `${endpoint.path}.`;
 		return template.startsWith(prefix);
 	});
-	if (declaration === undefined) return undefined;
+	if (declaration === undefined) {
+		return undefined;
+	}
 	const canonicalOccurrence = declaration.kind === "actorPool" ? `${declaration.path}.$worker` : declaration.path;
 	const localState = template.slice(canonicalOccurrence.length + 1);
 	const node = actorDefinitionForEndpoint(declaration).states[localState];
-	if (node === undefined) return undefined;
+	if (node === undefined) {
+		return undefined;
+	}
 	const suffixSegments = localState.split(".").length;
 	const occurrence = statePath.split(".").slice(0, -suffixSegments).join(".");
 	if (declaration.kind !== "actorPool") {
 		return { declaration, occurrence, endpointOccurrence: occurrence, localState, node };
 	}
 	const parsed = parseActorPoolWorkerOccurrence(occurrence);
-	if (parsed === undefined) return undefined;
+	if (parsed === undefined) {
+		return undefined;
+	}
 	return {
 		declaration,
 		occurrence,

@@ -31,7 +31,9 @@ describe("host public surface", () => {
 			initial: "done",
 			states: { done: final() },
 		});
-		if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
 
 		const inspect = inspectChartAst(parsed.ast);
 		const run = hyperchartRunFromInspectResult(inspect);

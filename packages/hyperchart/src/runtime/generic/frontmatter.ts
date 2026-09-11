@@ -12,31 +12,49 @@ export type FrontmatterParser = (content: string) => ParsedFrontmatter;
  */
 export function parseSimpleFrontmatter(content: string): ParsedFrontmatter {
 	const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(content);
-	if (match === null) return { frontmatter: {}, body: content };
+	if (match === null) {
+		return { frontmatter: {}, body: content };
+	}
 	const frontmatter: Record<string, unknown> = {};
 	for (const line of match[1]?.split(/\r?\n/) ?? []) {
 		const trimmed = line.trim();
-		if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+		if (trimmed.length === 0 || trimmed.startsWith("#")) {
+			continue;
+		}
 		const separator = trimmed.indexOf(":");
-		if (separator <= 0) continue;
+		if (separator <= 0) {
+			continue;
+		}
 		const key = trimmed.slice(0, separator).trim();
 		const value = trimmed.slice(separator + 1).trim();
-		if (key.length === 0) continue;
+		if (key.length === 0) {
+			continue;
+		}
 		frontmatter[key] = parseScalar(value);
 	}
 	return { frontmatter, body: content.slice(match[0].length) };
 }
 
 function parseScalar(value: string): unknown {
-	if (value.length === 0) return "";
+	if (value.length === 0) {
+		return "";
+	}
 	if (value.startsWith("[") && value.endsWith("]")) {
 		const inner = value.slice(1, -1).trim();
-		if (inner.length === 0) return [];
+		if (inner.length === 0) {
+			return [];
+		}
 		return inner.split(",").map((entry) => unquote(entry.trim()));
 	}
-	if (value === "true") return true;
-	if (value === "false") return false;
-	if (/^-?\d+(?:\.\d+)?$/.test(value)) return Number(value);
+	if (value === "true") {
+		return true;
+	}
+	if (value === "false") {
+		return false;
+	}
+	if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+		return Number(value);
+	}
 	return unquote(value);
 }
 

@@ -10,7 +10,8 @@ export function capturedStorySchedule(ast: ChartAst, schedule: readonly DurableL
 
 export function capturedStoryRecords(name: string): DurableLogRecord[] {
 	const records = (captured.snapshots as unknown as Record<string, DurableLogRecord[]>)[name];
-	if (records === undefined)
+	if (records === undefined) {
 		throw new Error(`Missing captured story ${name}; run node scripts/record-story-fixtures.mjs --write`);
+	}
 	return records;
 }

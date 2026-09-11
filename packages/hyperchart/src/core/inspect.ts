@@ -37,7 +37,9 @@ export function parseChartModuleSync(filePath: string, options: InspectChartModu
 
 function selfEntryPath(): string {
 	const js = fileURLToPath(new URL("../index.js", import.meta.url));
-	if (existsSync(js)) return js;
+	if (existsSync(js)) {
+		return js;
+	}
 	return fileURLToPath(new URL("../index.ts", import.meta.url));
 }
 
@@ -47,7 +49,9 @@ export function inspectChartModuleSync(
 ): HyperchartInspectResult {
 	const absolutePath = resolve(filePath);
 	const parsed = parseChartModuleSync(absolutePath, options);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	return inspectChartAst(parsed.ast, {
 		chartPath: absolutePath,
 		...(options.exportName === undefined ? {} : { exportName: options.exportName }),

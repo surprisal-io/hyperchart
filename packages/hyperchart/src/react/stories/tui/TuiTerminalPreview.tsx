@@ -42,7 +42,9 @@ async function post(path: string, body: Record<string, unknown>): Promise<Previe
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify(body),
 	});
-	if (!response.ok) throw new Error(`TUI preview ${path} failed (${response.status})`);
+	if (!response.ok) {
+		throw new Error(`TUI preview ${path} failed (${response.status})`);
+	}
 	return (await response.json()) as PreviewResponse;
 }
 
@@ -69,8 +71,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 			.then((payload) => {
 				createdSessionId = payload.sessionId;
 				if (disposed) {
-					if (createdSessionId !== undefined)
+					if (createdSessionId !== undefined) {
 						void post("dispose", { sessionId: createdSessionId }).catch(() => undefined);
+					}
 					return;
 				}
 				sessionIdRef.current = payload.sessionId ?? null;
@@ -79,7 +82,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 				setMode("live");
 			})
 			.catch(() => {
-				if (!disposed) setMode("static");
+				if (!disposed) {
+					setMode("static");
+				}
 			});
 		return () => {
 			disposed = true;
@@ -92,7 +97,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 
 	const send = (input: string, label: string) => {
 		const sessionId = sessionIdRef.current;
-		if (!interactive || mode !== "live" || sessionId === null || action !== undefined) return;
+		if (!interactive || mode !== "live" || sessionId === null || action !== undefined) {
+			return;
+		}
 		inputQueueRef.current = inputQueueRef.current
 			.then(async () => {
 				const payload = await post("input", { sessionId, input, width });
@@ -108,7 +115,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 
 	useLayoutEffect(() => {
 		const host = hostRef.current;
-		if (host === null) return;
+		if (host === null) {
+			return;
+		}
 		host.replaceChildren();
 		const terminal = new Terminal({
 			cols: width,
@@ -129,7 +138,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 		terminal.open(host);
 		terminalRef.current = terminal;
 		const input = terminal.onData((data) => sendRef.current(data, JSON.stringify(data)));
-		if (interactive) terminal.focus();
+		if (interactive) {
+			terminal.focus();
+		}
 		return () => {
 			input.dispose();
 			terminalRef.current = null;
@@ -140,7 +151,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 
 	useEffect(() => {
 		const terminal = terminalRef.current;
-		if (terminal === null) return;
+		if (terminal === null) {
+			return;
+		}
 		terminal.write(`\u001b[2J\u001b[H${lines.join("\r\n")}`);
 	}, [lines, width]);
 

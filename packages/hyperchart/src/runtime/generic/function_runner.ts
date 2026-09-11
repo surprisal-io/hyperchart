@@ -75,7 +75,9 @@ export class FunctionRunner {
 		void operation.catch(() => undefined);
 		try {
 			const result = await Promise.race([operation, live.aborted]);
-			if (result === ABORTED || live.cancelled) return undefined;
+			if (result === ABORTED || live.cancelled) {
+				return undefined;
+			}
 			return validateActionCompletion(effect, result, {
 				workDir: this.opts.workDir,
 				...(this.opts.schemaRegistry === undefined ? {} : { schemaRegistry: this.opts.schemaRegistry }),
@@ -88,14 +90,18 @@ export class FunctionRunner {
 
 	cancel(actionUid: ActionUID): Promise<void> {
 		const live = this.live.get(actionUidKey(actionUid));
-		if (live === undefined) return Promise.resolve();
+		if (live === undefined) {
+			return Promise.resolve();
+		}
 		this.abort(live);
 		return live.settled;
 	}
 
 	/** Abort cooperatively and return without awaiting user code, which may never settle. */
 	dispose(): Promise<void> {
-		for (const live of this.live.values()) this.abort(live);
+		for (const live of this.live.values()) {
+			this.abort(live);
+		}
 		return Promise.resolve();
 	}
 
@@ -106,12 +112,18 @@ export class FunctionRunner {
 		prepare: (() => Promise<void>) | undefined,
 	): Promise<ChartEvent> {
 		await prepare?.();
-		if (signal.aborted) throw signal.reason ?? new Error("imported action cancelled");
+		if (signal.aborted) {
+			throw signal.reason ?? new Error("imported action cancelled");
+		}
 		const params = await this.resolveParams(effect.env);
-		if (signal.aborted) throw signal.reason ?? new Error("imported action cancelled");
+		if (signal.aborted) {
+			throw signal.reason ?? new Error("imported action cancelled");
+		}
 		const moduleSpecifier = importedModuleSpecifier(effect.module, this.opts.chartDir);
 		const mod = (await import(moduleSpecifier)) as Record<string, unknown>;
-		if (signal.aborted) throw signal.reason ?? new Error("imported action cancelled");
+		if (signal.aborted) {
+			throw signal.reason ?? new Error("imported action cancelled");
+		}
 		const fn = mod[effect.export];
 		if (typeof fn !== "function") {
 			throw new Error(`Imported action export '${effect.export}' is not a function in ${effect.module}`);
@@ -156,7 +168,9 @@ export class FunctionRunner {
 	}
 
 	private begin(key: string): LiveFunction {
-		if (this.live.has(key)) throw new Error(`Imported action phase ${key} is already running`);
+		if (this.live.has(key)) {
+			throw new Error(`Imported action phase ${key} is already running`);
+		}
 		let abortWait!: () => void;
 		let settle!: () => void;
 		const live: LiveFunction = {
@@ -186,7 +200,9 @@ export class FunctionRunner {
 	}
 
 	private finish(key: string, live: LiveFunction): void {
-		if (this.live.get(key) === live) this.live.delete(key);
+		if (this.live.get(key) === live) {
+			this.live.delete(key);
+		}
 		live.settle();
 	}
 }

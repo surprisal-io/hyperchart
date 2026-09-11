@@ -29,7 +29,9 @@ export function ContractsSection({
 		...revealedReplyStateIds,
 		...revealedArtifactStateIds,
 	]);
-	if (contractStates.length === 0) return null;
+	if (contractStates.length === 0) {
+		return null;
+	}
 	return (
 		<Section
 			title={contractStates.length === 1 && contractStates[0]?.id === state.id ? "Contracts" : "Contracts in scope"}

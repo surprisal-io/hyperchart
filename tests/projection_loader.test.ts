@@ -64,7 +64,9 @@ function ast(id = "checkpoint-chart"): ChartAst {
 	const result = normalizeChartConfig(
 		chart({ kind: "chart", id, initial: "done", states: { done: final() } }) as ChartCst,
 	);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 function args(index: number): DurableRecordDraft {
@@ -93,7 +95,9 @@ function openInputGateAst(): ChartAst {
 			},
 		}) as ChartCst,
 	);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -109,7 +113,9 @@ function bareMapAst(): ChartAst {
 			},
 		}) as ChartCst,
 	);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -139,7 +145,9 @@ function mapOwnedActorAst(): ChartAst {
 			},
 		}) as ChartCst,
 	);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -189,7 +197,9 @@ function structuralOwnedActorAst(owner: "compound" | "parallel" | "region"): Cha
 			states: { scope: container, done: final() },
 		}) as ChartCst,
 	);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -231,7 +241,9 @@ function representativeAst(): ChartAst {
 			},
 		}) as ChartCst,
 	);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -258,12 +270,13 @@ class RepresentativeRuntime implements Runtime {
 						artifacts: { "report.txt": { hash: "a".repeat(64), size: 12 } },
 					},
 				});
-			} else if (effect.kind === "actor_create")
+			} else if (effect.kind === "actor_create") {
 				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "create", ok: true });
-			else if (effect.kind === "actor_enqueue")
+			} else if (effect.kind === "actor_enqueue") {
 				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "enqueue", ok: true });
-			else if (effect.kind === "actor_reply" && !this.pauseActorReply)
+			} else if (effect.kind === "actor_reply" && !this.pauseActorReply) {
 				this.queue.send({ kind: "actor_effect", effectId: effect.id, operation: "reply", ok: true });
+			}
 		}
 	}
 	eventsQueue() {
@@ -284,7 +297,9 @@ async function waitForRecord<T extends DurableLogRecord>(
 ): Promise<T> {
 	for (let attempt = 0; attempt < 2_000; attempt++) {
 		const record = (await collectHistoryRecords(store, "main")).find(select);
-		if (record !== undefined) return record;
+		if (record !== undefined) {
+			return record;
+		}
 		await new Promise<void>((resolve) => setImmediate(resolve));
 	}
 	throw new Error(message);
@@ -316,7 +331,9 @@ describe("projection checkpoint schema", () => {
 	it("round-trips and restores an open gate with JSON-valid resolved input", async () => {
 		const chartAst = openInputGateAst();
 		const action = chartAst.states.ask;
-		if (action?.kind !== "state" || action.action.kind !== "user") throw new Error("expected user action");
+		if (action?.kind !== "state" || action.action.kind !== "user") {
+			throw new Error("expected user action");
+		}
 		const store = new MemoryLogStore();
 		const records = await store.appendDrafts([
 			{ type: "args", args: {} },
@@ -360,7 +377,9 @@ describe("projection checkpoint schema", () => {
 		const opened = (
 			malformed.blob as { projection: { openUserInteractions: Record<string, { opened: Record<string, unknown> }> } }
 		).projection.openUserInteractions[String(records.at(-1)!.seqId)]?.opened;
-		if (opened === undefined) throw new Error("missing opened interaction");
+		if (opened === undefined) {
+			throw new Error("missing opened interaction");
+		}
 		opened.input = { invalid: Number.POSITIVE_INFINITY };
 		expect(decodeCheckpoint(malformed, chartAst)).toBeUndefined();
 	});
@@ -501,8 +520,12 @@ describe("projection loader", () => {
 		const chartAst = ast();
 		const contract = projectionContractForAst(chartAst);
 		const batchSizes: number[] = [];
-		for await (const batch of openExecutionReplay(store, { targetHeadSeqId: records.at(-1)!.seqId, afterSeqId: null }))
+		for await (const batch of openExecutionReplay(store, {
+			targetHeadSeqId: records.at(-1)!.seqId,
+			afterSeqId: null,
+		})) {
 			batchSizes.push(batch.length);
+		}
 		const loaded = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
 		expect(loaded.projection).toEqual(fullyProject(chartAst, records));
 		expect(PROJECTION_CHECKPOINT_INTERVAL).toBe(512);
@@ -603,7 +626,9 @@ describe("projection loader", () => {
 			(projection) => {
 				const pool = projection.actorPools[Object.keys(projection.actorPools)[0]!];
 				const worker = pool?.workers[0];
-				if (worker === undefined) throw new Error("missing actor pool worker");
+				if (worker === undefined) {
+					throw new Error("missing actor pool worker");
+				}
 				worker.currentState = "@pool.$worker-0.missing";
 			},
 			(projection) => {

@@ -477,7 +477,9 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 
 function prepareAppend(state: MachineState, append: RecordAppend): DurableRecordsEffect {
 	for (const record of append.records) {
-		if (record.type !== "actor_message" || record.kind !== "accepted" || record.workerIndex === undefined) continue;
+		if (record.type !== "actor_message" || record.kind !== "accepted" || record.workerIndex === undefined) {
+			continue;
+		}
 		const reservations = state.poolAdmissionReservations.get(record.occurrence) ?? [];
 		reservations.push({
 			effectId: append.id,
@@ -503,9 +505,13 @@ function actionEffectId(actionUid: ActionUID, visitId: number, seqId: number): E
 
 function dueUserInteractionOpens(state: MachineState): RecordAppend[] {
 	return state.projection.pendingActions.flatMap((pending): RecordAppend[] => {
-		if (pending.phase === "validating" || pending.gateSeqId !== undefined) return [];
+		if (pending.phase === "validating" || pending.gateSeqId !== undefined) {
+			return [];
+		}
 		const draft = userInteractionOpenedDraft(state, pending);
-		if (draft === undefined) return [];
+		if (draft === undefined) {
+			return [];
+		}
 		return [{ kind: "append", id: `user:open:${pendingEffectId(pending)}`, records: [draft] }];
 	});
 }
@@ -515,9 +521,13 @@ export function userInteractionOpenedDraft(
 	state: Pick<MachineState, "ast" | "projection">,
 	pending: PendingAction,
 ): Extract<DurableRecordDraft, { type: "user_interaction"; kind: "opened" }> | undefined {
-	if (pending.phase === "validating") return undefined;
+	if (pending.phase === "validating") {
+		return undefined;
+	}
 	const node = actionStateAtMachine(state.ast, pending.actionUid.state);
-	if (node?.action.kind !== "user") return undefined;
+	if (node?.action.kind !== "user") {
+		return undefined;
+	}
 	return {
 		type: "user_interaction",
 		kind: "opened",
@@ -723,8 +733,12 @@ function renderScriptEnv(
 ): Readonly<Record<string, string | RenderedArtifact>> {
 	return Object.fromEntries(
 		Object.entries(env).map(([name, value]) => {
-			if (typeof value === "string") return [name, value];
-			if (value.kind === "template") return [name, renderTemplate(state, value, stateId)];
+			if (typeof value === "string") {
+				return [name, value];
+			}
+			if (value.kind === "template") {
+				return [name, renderTemplate(state, value, stateId)];
+			}
 			if (value.kind === "joinArtifactOf") {
 				const paths = renderJoin(state, value, stateId).map((read) => read.path);
 				return [name, JSON.stringify(paths)];
@@ -793,9 +807,13 @@ function userInvocationForAction(
 
 function resumeRequestForAction(state: MachineState, actionUid: ActionUID, id: EffectId): ResumeRequest | undefined {
 	const parts = effectIdParts(id);
-	if (parts === null || parts.visitId <= 1) return undefined;
+	if (parts === null || parts.visitId <= 1) {
+		return undefined;
+	}
 	const match = onReenterForAction(state.ast, actionUid.state);
-	if (match === undefined || match.policy === "restart") return undefined;
+	if (match === undefined || match.policy === "restart") {
+		return undefined;
+	}
 	return {
 		message: renderTemplate(state, match.policy.message, match.scope),
 		...(state.projection.sessions[actionUidKey(actionUid)] === undefined
@@ -854,8 +872,11 @@ function recoveryDecisionRecords(
 			: pending.definition.onFail;
 	const counters = pending.recovery[scope];
 	let mode: AgentRecoveryMode | undefined;
-	if (counters.nudges < policy.nudge) mode = "nudge";
-	else if (counters.restarts < policy.restart) mode = "restart";
+	if (counters.nudges < policy.nudge) {
+		mode = "nudge";
+	} else if (counters.restarts < policy.restart) {
+		mode = "restart";
+	}
 	if (mode === undefined) {
 		return [{ type: "failure_intent", origin: pending.actionUid.state, error: failure.message }];
 	}
@@ -881,13 +902,18 @@ function recoveryDecisionRecords(
 }
 
 export function stepMachine(state: MachineState, event: MachineEvent): MachineOutput {
-	if (state.projection.failure !== undefined && event.kind !== "durable_records_added" && event.kind !== "start")
+	if (state.projection.failure !== undefined && event.kind !== "durable_records_added" && event.kind !== "start") {
 		return createMachineOutput(state, []);
+	}
 	switch (event.kind) {
 		case "agent": {
 			const pending = findPendingAction(state, event.effectId);
-			if (pending === null) break;
-			if (typeof pending === "string") return { kind: "error", state, error: pending };
+			if (pending === null) {
+				break;
+			}
+			if (typeof pending === "string") {
+				return { kind: "error", state, error: pending };
+			}
 			if (event.outcome.kind === "failed") {
 				return createMachineOutput(state, [
 					{
@@ -940,8 +966,12 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 		case "script":
 		case "tsImport": {
 			const pending = findPendingAction(state, event.effectId);
-			if (pending === null) break;
-			if (typeof pending === "string") return { kind: "error", state, error: pending };
+			if (pending === null) {
+				break;
+			}
+			if (typeof pending === "string") {
+				return { kind: "error", state, error: pending };
+			}
 			if (event.event.type === "FAILED") {
 				return createMachineOutput(state, [
 					{
@@ -957,12 +987,13 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					},
 				]);
 			}
-			if (!hasActionTransition(state.ast, pending.actionUid.state, event.event.type))
+			if (!hasActionTransition(state.ast, pending.actionUid.state, event.event.type)) {
 				return {
 					kind: "error",
 					state,
 					error: `No transition found for event type ${event.event.type} in state ${pending.actionUid.state}`,
 				};
+			}
 			return createMachineOutput(state, [
 				{
 					kind: "append",
@@ -1028,7 +1059,9 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			// A response whose effect is no longer due lost a race — e.g. the owner
 			// scope exited before actor-create validation returned. Race losers are
 			// no-ops, mirroring invoke/spawn facts on inactive leaves.
-			if (effect === undefined) break;
+			if (effect === undefined) {
+				break;
+			}
 			if (!event.ok) {
 				const origin =
 					effect.kind === "actor_enqueue"
@@ -1153,13 +1186,16 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 
 function dueActorBatchResolutions(state: MachineState): RecordAppend[] {
 	return Object.values(state.projection.pendingActorCalls).flatMap((pending) => {
-		if (pending.kind !== "batch") return [];
+		if (pending.kind !== "batch") {
+			return [];
+		}
 		const endpoint = projectedActorEndpoint(state.projection, pending.occurrence);
 		if (
 			endpoint === undefined ||
 			!pending.messageIds.every((messageId) => projectedActorMessage(state.projection, messageId)?.status === "settled")
-		)
+		) {
 			return [];
+		}
 		return [
 			{
 				kind: "append",
@@ -1178,7 +1214,9 @@ function dueActorBatchResolutions(state: MachineState): RecordAppend[] {
 }
 
 function actorCallResolutionAfterReply(state: MachineState, effect: ActorReplyEffect): DurableRecordDraft[] {
-	if (effect.callId === undefined || effect.callerState === undefined) return [];
+	if (effect.callId === undefined || effect.callerState === undefined) {
+		return [];
+	}
 	const pending = state.projection.pendingActorCalls[effect.callId];
 	if (pending?.kind === "batch") {
 		const endpoint = projectedActorEndpoint(state.projection, pending.occurrence);
@@ -1244,20 +1282,28 @@ function dueInvokes(state: MachineState): ActionUID[] {
 	const due: ActionUID[] = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const node = nodeAt(state.ast, leaf);
-		if (node?.kind !== "state" || blocked.has(leaf)) continue;
+		if (node?.kind !== "state" || blocked.has(leaf)) {
+			continue;
+		}
 		// The uid of the invoke carries the INSTANCE path — that is the action's identity in the
 		// log and in effect ids; the chart's declared uid keeps the template path.
 		const actionUid = { ...node.action.uid, state: leaf };
-		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid)))
+		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid))) {
 			due.push(actionUid);
+		}
 	}
 	for (const actor of executableActorInstances(state)) {
-		if (actor.status === "stopped" || actor.status === "failed" || actor.status === "cancelled") continue;
+		if (actor.status === "stopped" || actor.status === "failed" || actor.status === "cancelled") {
+			continue;
+		}
 		const node = actor.definition.states[actor.currentState];
-		if (node?.kind !== "state") continue;
+		if (node?.kind !== "state") {
+			continue;
+		}
 		const actionUid = { ...node.action.uid, state: actorStatePath(actor.occurrence, actor.currentState) };
-		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid)))
+		if (!state.projection.pendingActions.some((entry) => sameActionUid(entry.actionUid, actionUid))) {
 			due.push(actionUid);
+		}
 	}
 	return due;
 }
@@ -1274,19 +1320,29 @@ export function concurrencyBlockedActionLeaves(ast: ChartAst, projection: Branch
 	const running = new Map<StatePath, Set<string>>();
 	for (const entry of projection.pendingActions) {
 		const instance = nearestInstance(entry.actionUid.state);
-		if (instance === undefined) continue;
+		if (instance === undefined) {
+			continue;
+		}
 		const keys = running.get(instance.container) ?? new Set<string>();
 		keys.add(instance.key);
 		running.set(instance.container, keys);
 	}
 	for (const leaf of projection.activeLeaves) {
-		if (nodeAt(ast, leaf)?.kind !== "state") continue;
+		if (nodeAt(ast, leaf)?.kind !== "state") {
+			continue;
+		}
 		const instance = nearestInstance(leaf);
-		if (instance === undefined) continue;
+		if (instance === undefined) {
+			continue;
+		}
 		const container = nodeAt(ast, instance.container);
-		if (container?.kind !== "map" || container.concurrency === undefined) continue;
+		if (container?.kind !== "map" || container.concurrency === undefined) {
+			continue;
+		}
 		const keys = running.get(instance.container) ?? new Set<string>();
-		if (keys.has(instance.key)) continue;
+		if (keys.has(instance.key)) {
+			continue;
+		}
 		if (keys.size >= container.concurrency) {
 			blocked.add(leaf);
 			continue;
@@ -1304,7 +1360,9 @@ function dueSpawns(state: MachineState): RecordAppend[] {
 	const appends: RecordAppend[] = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const node = nodeAt(state.ast, leaf);
-		if (node?.kind !== "map" || lastSegmentKey(leaf) !== undefined) continue;
+		if (node?.kind !== "map" || lastSegmentKey(leaf) !== undefined) {
+			continue;
+		}
 		const over = resolveRef(state, node.over, leaf);
 		const instances = Array.isArray(over) ? Object.fromEntries(over.map((item, index) => [String(index), item])) : over;
 		if (typeof instances !== "object" || instances === null) {
@@ -1328,15 +1386,21 @@ function ownerOccurrencesForActor(
 	state: MachineState,
 	declaration: ActorEndpointDeclarationAst,
 ): Array<StatePath | undefined> {
-	if (declaration.owner === undefined) return [undefined];
+	if (declaration.owner === undefined) {
+		return [undefined];
+	}
 	const ownerNode = nodeAt(state.ast, declaration.owner);
 	if (ownerNode?.kind === "map") {
 		const occurrences: StatePath[] = [];
 		for (const [mapPath, instances] of Object.entries(state.projection.spawns)) {
-			if (templatePath(mapPath) !== declaration.owner) continue;
+			if (templatePath(mapPath) !== declaration.owner) {
+				continue;
+			}
 			for (const key of Object.keys(instances)) {
 				const occurrence = `${mapPath}#${key}`;
-				if (state.projection.activeLeaves.some((leaf) => underScope(leaf, occurrence))) occurrences.push(occurrence);
+				if (state.projection.activeLeaves.some((leaf) => underScope(leaf, occurrence))) {
+					occurrences.push(occurrence);
+				}
 			}
 		}
 		return occurrences;
@@ -1344,7 +1408,9 @@ function ownerOccurrencesForActor(
 	const occurrences = new Set<StatePath>();
 	for (const leaf of state.projection.activeLeaves) {
 		const concrete = instancePathFor(declaration.owner, leaf);
-		if (underScope(leaf, concrete)) occurrences.add(concrete);
+		if (underScope(leaf, concrete)) {
+			occurrences.add(concrete);
+		}
 	}
 	return [...occurrences];
 }
@@ -1361,8 +1427,9 @@ function dueActorCreates(state: MachineState): ActorCreateEffect[] {
 			if (
 				latest !== undefined &&
 				(declaration.owner === undefined || latest.status !== "stopped" || actorOwnerIsClosing(state, latest))
-			)
+			) {
 				continue;
+			}
 			const generation = (latest?.generation ?? 0) + 1;
 			const occurrence = actorGenerationPath(logicalOccurrence, generation);
 			const scope = owner ?? state.projection.activeLeaves[0] ?? state.ast.initial;
@@ -1389,14 +1456,18 @@ function messagingStates(state: MachineState): Array<{ path: StatePath; node: Me
 	const states: Array<{ path: StatePath; node: MessagingNode }> = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const node = nodeAt(state.ast, leaf);
-		if (node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch")
+		if (node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch") {
 			states.push({ path: leaf, node });
+		}
 	}
 	for (const actor of executableActorInstances(state)) {
-		if (actor.status === "stopped" || actor.status === "failed" || actor.status === "cancelled") continue;
+		if (actor.status === "stopped" || actor.status === "failed" || actor.status === "cancelled") {
+			continue;
+		}
 		const node = actor.definition.states[actor.currentState];
-		if (node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch")
+		if (node?.kind === "send" || node?.kind === "sendBatch" || node?.kind === "call" || node?.kind === "callBatch") {
 			states.push({ path: actorStatePath(actor.occurrence, actor.currentState), node });
+		}
 	}
 	return states;
 }
@@ -1420,11 +1491,16 @@ function targetActorForProducer(
 
 function producerMayUseClosingActor(state: MachineState, producerState: StatePath): boolean {
 	const context = actorContextForState(state.ast, producerState);
-	if (context === undefined) return false;
+	if (context === undefined) {
+		return false;
+	}
 	const endpoint = projectedActorEndpoint(state.projection, context.endpointOccurrence);
-	if (endpoint === undefined) return false;
-	if (context.workerIndex !== undefined && endpoint.definition.kind === "actorPool")
+	if (endpoint === undefined) {
+		return false;
+	}
+	if (context.workerIndex !== undefined && endpoint.definition.kind === "actorPool") {
 		return (endpoint as ProjectedActorPoolOccurrence).workers[context.workerIndex]?.currentMessageId !== undefined;
+	}
 	return (endpoint as ProjectedActorOccurrence).currentMessageId !== undefined;
 }
 
@@ -1460,12 +1536,16 @@ function dueActorEnqueues(state: MachineState): ActorEnqueueEffect[] {
 		if (
 			(node.kind === "call" || node.kind === "callBatch") &&
 			Object.values(state.projection.pendingActorCalls).some((call) => call.callerState === path)
-		)
+		) {
 			continue;
+		}
 		const target = targetActorForProducer(state, node.to, path);
-		if (target === undefined) continue;
-		if ((target.status === "closing" || target.status === "draining") && !producerMayUseClosingActor(state, path))
+		if (target === undefined) {
 			continue;
+		}
+		if ((target.status === "closing" || target.status === "draining") && !producerMayUseClosingActor(state, path)) {
+			continue;
+		}
 		const contract = liveActorDeclaration(state, target).protocol[node.event];
 		assert(contract !== undefined, `${node.kind} in ${path} names unknown protocol message ${node.event}`);
 		const visit = (state.projection.actorProducerVisits[path] ?? 0) + 1;
@@ -1474,8 +1554,9 @@ function dueActorEnqueues(state: MachineState): ActorEnqueueEffect[] {
 		assert(Array.isArray(values), `${node.kind} in ${path} inputs must resolve to an array`);
 		assert(values.length > 0, `${node.kind} in ${path} must contain at least one message`);
 		assert(batch || values.length === 1, `${node.kind} in ${path} sends exactly one message`);
-		if (node.kind === "callBatch")
+		if (node.kind === "callBatch") {
 			assert(contract.reply.kind === "single", `callBatch() in ${path} requires a single-reply protocol message`);
+		}
 		const callId = node.kind === "call" || node.kind === "callBatch" ? `${path}:call:${visit}` : undefined;
 		const messages = values.map(
 			(input, batchIndex): ActorMessageEnvelope => ({
@@ -1546,16 +1627,21 @@ export function actorEndpointAdmission(
 			endpoint.status === "stopped" ||
 			endpoint.status === "cancelled" ||
 			endpoint.status === "failed"
-		)
+		) {
 			continue;
+		}
 		const definition = actorDefinitionForEndpoint(ast.actors[endpoint.declaration] ?? endpoint.definition);
 		if (endpoint.definition.kind !== "actorPool") {
 			const actor = endpoint as ProjectedActorOccurrence;
-			if (actor.currentMessageId !== undefined) continue;
+			if (actor.currentMessageId !== undefined) {
+				continue;
+			}
 			const head = projectedActorMessage(projection, actor.mailbox[0]);
 			const receive = definition.states[actor.currentState];
-			if (head === undefined || receive?.kind !== "receive") continue;
-			if (receive.on[head.event] === undefined)
+			if (head === undefined || receive?.kind !== "receive") {
+				continue;
+			}
+			if (receive.on[head.event] === undefined) {
 				return {
 					assignments: [],
 					failure: {
@@ -1565,6 +1651,7 @@ export function actorEndpointAdmission(
 						messageId: head.messageId,
 					},
 				};
+			}
 			assignments.push({
 				occurrence: actor.occurrence,
 				messageId: head.messageId,
@@ -1577,7 +1664,9 @@ export function actorEndpointAdmission(
 		const reservedWorkers = new Set(
 			pool.workers.filter((worker) => worker.currentMessageId !== undefined).map((worker) => worker.index),
 		);
-		for (const reservation of inFlight) reservedWorkers.add(reservation.workerIndex);
+		for (const reservation of inFlight) {
+			reservedWorkers.add(reservation.workerIndex);
+		}
 		let mailboxIndex = 0;
 		for (const reservation of inFlight) {
 			const reservedMessage = projectedActorMessage(projection, pool.mailbox[mailboxIndex]);
@@ -1590,15 +1679,18 @@ export function actorEndpointAdmission(
 		}
 		for (; mailboxIndex < pool.mailbox.length; mailboxIndex++) {
 			const head = projectedActorMessage(projection, pool.mailbox[mailboxIndex]);
-			if (head === undefined) break;
+			if (head === undefined) {
+				break;
+			}
 			const eligible = pool.workers.filter((candidate) => {
 				if (
 					reservedWorkers.has(candidate.index) ||
 					candidate.status === "stopped" ||
 					candidate.status === "failed" ||
 					candidate.status === "cancelled"
-				)
+				) {
 					return false;
+				}
 				const receive = definition.states[candidate.currentState];
 				return receive?.kind === "receive" && receive.on[head.event] !== undefined;
 			});
@@ -1669,7 +1761,9 @@ function dueActorReplies(state: MachineState): ActorReplyEffect[] {
 	for (const actor of executableActorInstances(state)) {
 		const message = actor.currentMessage;
 		const reply = actor.definition.states[actor.currentState];
-		if (message === undefined || reply?.kind !== "reply" || message.status === "replied") continue;
+		if (message === undefined || reply?.kind !== "reply" || message.status === "replied") {
+			continue;
+		}
 		const contract = actor.definition.protocol[message.event]?.reply;
 		assert(contract !== undefined, `Actor ${actor.occurrence} has no protocol contract for ${message.event}`);
 		const schema =
@@ -1755,15 +1849,17 @@ function executableActorInstances(state: MachineState): ExecutableActorInstance[
 }
 
 function actorOwnerIsClosing(state: MachineState, actor: ProjectedActorEndpointOccurrence): boolean {
-	if (actor.owner === undefined)
+	if (actor.owner === undefined) {
 		return state.projection.activeLeaves.some((leaf) => {
 			const node = nodeAt(state.ast, leaf);
 			return node?.kind === "final" && node.parent === undefined;
 		});
+	}
 	const ownerNode = nodeAt(state.ast, actor.owner);
 	const leaves = state.projection.activeLeaves.filter((leaf) => underScope(leaf, actor.owner as string));
-	if (ownerNode?.kind === "map" && leaves.length > 0)
+	if (ownerNode?.kind === "map" && leaves.length > 0) {
 		return leaves.every((leaf) => nodeAt(state.ast, leaf)?.kind === "final");
+	}
 	return leaves.length === 0 || leaves.every((leaf) => nodeAt(state.ast, leaf)?.kind === "final");
 }
 
@@ -1805,16 +1901,22 @@ function actorsTerminalForRun(state: MachineState): boolean {
 		rootDeclarations.some(
 			(declaration) => !endpoints.some((actor) => actor.declaration === declaration.path && actor.status === "stopped"),
 		)
-	)
+	) {
 		return false;
+	}
 	return endpoints.every((actor) => actor.status === "stopped");
 }
 
 function resolveValueAst(state: MachineState, value: ValueAst, stateId: StatePath): unknown {
-	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 		return value;
-	if (Array.isArray(value)) return value.map((entry) => resolveValueAst(state, entry, stateId));
-	if (isInputRef(value)) return resolveRef(state, value, stateId);
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry) => resolveValueAst(state, entry, stateId));
+	}
+	if (isInputRef(value)) {
+		return resolveRef(state, value, stateId);
+	}
 	return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveValueAst(state, entry, stateId)]));
 }
 
@@ -1930,7 +2032,9 @@ export function renderJoin(state: MachineState, read: JoinArtifactOfAst, stateId
 function enclosingMapPath(ast: ChartAst, producer: StatePath, stateId: string): StatePath {
 	let path = parentPath(producer);
 	while (path !== undefined) {
-		if (nodeAt(ast, path)?.kind === "map") return path;
+		if (nodeAt(ast, path)?.kind === "map") {
+			return path;
+		}
 		path = parentPath(path);
 	}
 	throw new Error(`Read in state ${stateId}: joinArtifactOf('${producer}') is not inside a map`);
@@ -1963,7 +2067,9 @@ function resolvedStateInput(
 ): { input?: Readonly<Record<string, JsonValue>> } {
 	const node = actionStateAtMachine(state.ast, actionUid.state);
 	assert(node !== undefined, `Cannot resolve input for non-action state ${actionUid.state}`);
-	if (node.input === undefined) return {};
+	if (node.input === undefined) {
+		return {};
+	}
 	const input = state.projection.inputs[actionUid.state];
 	assert(input !== undefined, `State ${actionUid.state} has no resolved input`);
 	return { input: structuredClone(input) as Readonly<Record<string, JsonValue>> };
@@ -1995,13 +2101,17 @@ function hasActionTransition(ast: ChartAst, statePath: StatePath, event: string)
 
 function allowedEventsForAction(ast: ChartAst, statePath: StatePath): string[] {
 	const actor = actorContextForState(ast, statePath)?.node;
-	if (actor?.kind === "state") return Object.keys(actor.transitions);
+	if (actor?.kind === "state") {
+		return Object.keys(actor.transitions);
+	}
 	return allowedEvents(ast, statePath);
 }
 
 function actionStateAtMachine(ast: ChartAst, statePath: StatePath): ActionStateAst | undefined {
 	const main = nodeAt(ast, statePath);
-	if (main?.kind === "state") return main;
+	if (main?.kind === "state") {
+		return main;
+	}
 	const actor = actorContextForState(ast, statePath)?.node;
 	return actor?.kind === "state" ? actor : undefined;
 }
@@ -2009,8 +2119,11 @@ function actionStateAtMachine(ast: ChartAst, statePath: StatePath): ActionStateA
 function removePoolAdmissionReservations(state: MachineState, effectId: EffectId): void {
 	for (const [occurrence, reservations] of state.poolAdmissionReservations) {
 		const remaining = reservations.filter((reservation) => reservation.effectId !== effectId);
-		if (remaining.length === 0) state.poolAdmissionReservations.delete(occurrence);
-		else if (remaining.length !== reservations.length) state.poolAdmissionReservations.set(occurrence, remaining);
+		if (remaining.length === 0) {
+			state.poolAdmissionReservations.delete(occurrence);
+		} else if (remaining.length !== reservations.length) {
+			state.poolAdmissionReservations.set(occurrence, remaining);
+		}
 	}
 }
 
@@ -2022,10 +2135,14 @@ function pendingValidationExecutionError(ast: ChartAst, projection: BranchProjec
 	}
 
 	for (const pending of projection.pendingActions) {
-		if (pending.phase === "running") continue;
+		if (pending.phase === "running") {
+			continue;
+		}
 		const statePath = pending.actionUid.state;
 		const currentState = actionStateAtMachine(ast, statePath);
-		if (currentState?.action.kind === "agent" && currentState.action.validation !== undefined) continue;
+		if (currentState?.action.kind === "agent" && currentState.action.validation !== undefined) {
+			continue;
+		}
 		return (
 			`Cannot resume state ${statePath} (invoke seqId ${pending.invokeSeqId}): historical agent validator was removed; ` +
 			"restore it or rewind before the invocation."

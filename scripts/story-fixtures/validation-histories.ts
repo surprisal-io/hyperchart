@@ -56,18 +56,23 @@ export async function captureRemovedValidatorHistory(
 						const added = await append(effect.records);
 						records.push(...added);
 						queue.push({ kind: "durable_records_added", effectId: effect.id, records: added });
-					} else if (effect.kind === "agent") completion(effect);
-					else if (effect.kind === "validate")
+					} else if (effect.kind === "agent") {
+						completion(effect);
+					} else if (effect.kind === "validate") {
 						queue.push({
 							kind: "validated",
 							effectId: effect.id,
 							outcome: ++verdicts === 1 ? { ok: false, reason: "candidate rejected" } : true,
 						});
-					else if (effect.kind !== "cancel") throw new Error(`Unexpected validation fixture effect ${effect.kind}`);
+					} else if (effect.kind !== "cancel") {
+						throw new Error(`Unexpected validation fixture effect ${effect.kind}`);
+					}
 				}
 			},
 			async *eventsQueue() {
-				while (queue.length > 0) yield queue.shift()!;
+				while (queue.length > 0) {
+					yield queue.shift()!;
+				}
 			},
 		},
 		{ machineState: () => createMachine(ast, projection) },
@@ -109,7 +114,9 @@ export async function captureReplayIncompatibleHistory(
 									record.actionUid.state === "suffix.clock.work",
 							)
 						) {
-							if (suffixValidationEffectId === undefined) throw new Error("Suffix validation must be pending");
+							if (suffixValidationEffectId === undefined) {
+								throw new Error("Suffix validation must be pending");
+							}
 							queue.push({ kind: "validated", effectId: suffixValidationEffectId, outcome: true });
 						}
 					} else if (effect.kind === "agent") {
@@ -134,7 +141,9 @@ export async function captureReplayIncompatibleHistory(
 					} else if (effect.kind === "validate") {
 						if (effect.actionUid.state === "suffix.guarded.work") {
 							suffixValidationEffectId = effect.id;
-							if (clockEffectId === undefined) throw new Error("Clock must be invoked before suffix validation");
+							if (clockEffectId === undefined) {
+								throw new Error("Clock must be invoked before suffix validation");
+							}
 							queue.push({
 								kind: "agent",
 								effectId: clockEffectId,
@@ -147,19 +156,26 @@ export async function captureReplayIncompatibleHistory(
 							effectId: effect.id,
 							outcome: ++validations === 1 ? { ok: false, reason: "record lab notes and retry" } : true,
 						});
-					} else if (effect.kind !== "cancel") throw new Error(`Unexpected replay fixture effect ${effect.kind}`);
+					} else if (effect.kind !== "cancel") {
+						throw new Error(`Unexpected replay fixture effect ${effect.kind}`);
+					}
 				}
 			},
 			async *eventsQueue() {
-				while (queue.length > 0) yield queue.shift()!;
+				while (queue.length > 0) {
+					yield queue.shift()!;
+				}
 			},
 		},
 		{ machineState: () => createMachine(ast, projection) },
 	);
 	const original = explainReplay(ast, records);
-	if (original.broken !== undefined || original.stale.length > 0 || original.skipped.length > 0)
+	if (original.broken !== undefined || original.stale.length > 0 || original.skipped.length > 0) {
 		throw new Error("Captured history must replay with its original chart");
+	}
 	const broken = explainReplay(changedReplayScenario.ast, records).broken;
-	if (broken === undefined) throw new Error("Changed action identity must break replay");
+	if (broken === undefined) {
+		throw new Error("Changed action identity must break replay");
+	}
 	return { records, broken };
 }

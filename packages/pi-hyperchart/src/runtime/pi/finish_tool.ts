@@ -22,8 +22,12 @@ export function createFinishTool(effect: AgentEffect, sink: CompletionSink, regi
 		parameters: Type.Unsafe(buildFinishSchema(effect) as TSchema),
 		async execute(_toolCallId, params): Promise<AgentToolResult<unknown>> {
 			const result = await validateFinishParams(effect, params as FinishParams, registry);
-			if (!result.ok) return toolError(result.errors.join("\n"));
-			if (sink.captured !== undefined) return toolError("finish has already been called for this assignment");
+			if (!result.ok) {
+				return toolError(result.errors.join("\n"));
+			}
+			if (sink.captured !== undefined) {
+				return toolError("finish has already been called for this assignment");
+			}
 			sink.captured = result.event;
 			return {
 				content: [{ type: "text", text: "Recorded. You may stop now." }],

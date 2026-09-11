@@ -34,8 +34,9 @@ export async function loadRunMeta(runId: string): Promise<RunMeta> {
 			error.code = "ENOENT";
 			throw error;
 		}
-		if (meta.runId !== undefined && meta.runId !== runId)
+		if (meta.runId !== undefined && meta.runId !== runId) {
 			throw new Error(`Hyperchart run identity mismatch for '${runId}'`);
+		}
 		return { ...normalizeRunMeta(meta), runId };
 	} finally {
 		await store.close();
@@ -44,8 +45,9 @@ export async function loadRunMeta(runId: string): Promise<RunMeta> {
 
 export async function saveRunMeta(runId: string, meta: RunMeta): Promise<void> {
 	const { runDir } = resolveRunPaths(runId);
-	if (meta.runId !== undefined && meta.runId !== runId)
+	if (meta.runId !== undefined && meta.runId !== runId) {
 		throw new Error(`Hyperchart run identity mismatch for '${runId}'`);
+	}
 	mkdirSync(join(runDir, "sessions"), { recursive: true });
 	const store = await openRunLogStore(runId, { access: "writer" });
 	try {
@@ -66,7 +68,9 @@ export async function deleteRunStorage(runId: string): Promise<void> {
 
 /** Enumerate authoritative storage keys, never infer identity from a caller's path. */
 export async function listRunIds(storage: RunStorage | undefined = currentRunStorage()): Promise<string[]> {
-	if (storage === undefined) throw new Error("Hyperchart run storage scope is required");
+	if (storage === undefined) {
+		throw new Error("Hyperchart run storage scope is required");
+	}
 	if (storage.kind === "postgres") {
 		const { default: pg } = await import("pg");
 		const client = new pg.Client({ connectionString: storage.dsn });
@@ -80,27 +84,38 @@ export async function listRunIds(storage: RunStorage | undefined = currentRunSto
 				return run_id;
 			});
 		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "42P01") return [];
+			if ((error as NodeJS.ErrnoException).code === "42P01") {
+				return [];
+			}
 			throw error;
 		} finally {
 			await client.end();
 		}
 	}
-	if (!existsSync(storage.rootDir)) return [];
+	if (!existsSync(storage.rootDir)) {
+		return [];
+	}
 	const result: string[] = [];
 	for (const entry of readdirSync(storage.rootDir, { withFileTypes: true })) {
-		if (!entry.isDirectory()) continue;
+		if (!entry.isDirectory()) {
+			continue;
+		}
 		if (storage.layout === "run-id") {
 			assertRunId(entry.name);
 			result.push(entry.name);
 			continue;
 		}
 		const path = join(storage.rootDir, entry.name, "meta.json");
-		if (!existsSync(path)) continue;
+		if (!existsSync(path)) {
+			continue;
+		}
 		const meta = JSON.parse(readFileSync(path, "utf8")) as RunMeta;
-		if (meta.runId === undefined) throw new Error(`Hashed JSONL run metadata lacks runId: ${path}`);
-		if (resolveRunPaths(meta.runId, storage).runDir !== resolve(storage.rootDir, entry.name))
+		if (meta.runId === undefined) {
+			throw new Error(`Hashed JSONL run metadata lacks runId: ${path}`);
+		}
+		if (resolveRunPaths(meta.runId, storage).runDir !== resolve(storage.rootDir, entry.name)) {
 			throw new Error(`Hashed JSONL run identity mismatch: ${path}`);
+		}
 		result.push(meta.runId);
 	}
 	return result.sort();

@@ -22,7 +22,9 @@ import {
 
 function parsed(config: ChartCst): ChartAst {
 	const normalized = normalizeChartConfig(config);
-	if (!normalized.ok) throw new Error(normalized.diagnostics.map((entry) => entry.message).join("\n"));
+	if (!normalized.ok) {
+		throw new Error(normalized.diagnostics.map((entry) => entry.message).join("\n"));
+	}
 	return normalized.ast;
 }
 
@@ -50,7 +52,9 @@ describe("projection retention", () => {
 		);
 		const plan = compileProjectionRetention(ast);
 		const writer = ast.states.writer;
-		if (writer?.kind !== "state") throw new Error("missing writer");
+		if (writer?.kind !== "state") {
+			throw new Error("missing writer");
+		}
 
 		expect(plan.resultReaders.get("writer")).toEqual(new Set(["reader"]));
 		expect(plan.resumableActions.has(actionUidKey(writer.action.uid))).toBe(true);
@@ -152,7 +156,9 @@ describe("projection retention", () => {
 		);
 		const resumable = ast.states.resumable;
 		const restart = ast.states.restart;
-		if (resumable?.kind !== "state" || restart?.kind !== "state") throw new Error("missing actions");
+		if (resumable?.kind !== "state" || restart?.kind !== "state") {
+			throw new Error("missing actions");
+		}
 		const projection = createBranchProjection(ast);
 		projection.sessions[actionUidKey(resumable.action.uid)] = "resume.jsonl";
 		projection.sessions[actionUidKey(restart.action.uid)] = "restart.jsonl";

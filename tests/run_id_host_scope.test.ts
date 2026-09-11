@@ -26,7 +26,9 @@ function root() {
 }
 afterEach(() => {
 	vi.restoreAllMocks();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 it.each([
@@ -40,12 +42,13 @@ it.each([
 	const owner = { runsRoot: storage.rootDir, host: "pi", sessionId: "session", workDir: home };
 	const coordinate = { runId, branchId: "main", seqId: 9 };
 	const read = () => readUserInteractionReceipt(runId, "main", 9, "pi", "session");
-	for (const scope of [storage, foreign])
+	for (const scope of [storage, foreign]) {
 		withRunStorage(scope, () => {
 			expect(claimUserInteractionReceipt(runId, "main", 9, "pi", "session")).toBe(true);
 			markUserInteractionReceipt(runId, "main", 9, "pi", "session");
 			expect(read()?.state).toBe("confirmed");
 		});
+	}
 	withRunStorage(foreign, () =>
 		expect(() => releaseActiveUserInteraction(owner, coordinate)).toThrow("outside the configured runs root"),
 	);
@@ -61,7 +64,7 @@ it("Claude monitor uses explicit runsRoot under conflicting ambient storage and 
 	const a: RunStorage = { kind: "jsonl", rootDir: join(home, "a"), layout: "run-id" };
 	const b: RunStorage = { kind: "jsonl", rootDir: join(home, "b"), layout: "sha256" };
 	const runId = "same-id";
-	for (const storage of [a, b])
+	for (const storage of [a, b]) {
 		await withRunStorage(storage, async () => {
 			await initializeRun(runId);
 			await saveRunMeta(runId, {
@@ -82,6 +85,7 @@ it("Claude monitor uses explicit runsRoot under conflicting ambient storage and 
 			});
 			patchRunStatus(runId, { state: "complete" });
 		});
+	}
 	const lines: string[] = [];
 	const options = {
 		runsRoot: a.rootDir,

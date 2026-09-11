@@ -62,13 +62,14 @@ describe("bidirectional inspector history window", () => {
 			"initial",
 			identity,
 		);
-		for (let page = 1; page < 10; page++)
+		for (let page = 1; page < 10; page++) {
 			state = mergeHistoryWindow(
 				state,
 				chunk(1_000 - page * 100, 100, { older: `o${page}`, newer: `n${page}` }),
 				"older",
 				identity,
 			);
+		}
 		state = mergeHistoryWindow(state, chunk(1_100, 100, { older: "o-new", newer: "n-new" }), "newer", identity);
 		const items = state.segments.flatMap((segment) => segment.items);
 		expect(items).toHaveLength(1_000);

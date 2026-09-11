@@ -47,7 +47,9 @@ function sourceForScript() {
 			},
 		}),
 	);
-	if (!parsed.ok) throw new Error("expected valid chart");
+	if (!parsed.ok) {
+		throw new Error("expected valid chart");
+	}
 	return hyperchartSource(parsed.ast);
 }
 
@@ -417,7 +419,9 @@ describe("hyperchart source", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("expected valid chart");
+		if (!parsed.ok) {
+			throw new Error("expected valid chart");
+		}
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("z.number().min(5).max(10).multipleOf(0.5)");
 		expect(source).toContain('z.string().min(3).max(20).regex(new RegExp("^[a-z]+$"))');

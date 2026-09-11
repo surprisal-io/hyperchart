@@ -21,7 +21,9 @@ import {
 const roots: string[] = [];
 
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function makeWorkspace(): { workDir: string; sessionsDir: string; agentsDir: string } {
@@ -77,7 +79,9 @@ function fakeQuery(turns: TurnScript[], afterInputClosed?: () => void): FakeQuer
 				| { _registeredTools?: Record<string, { handler?: (args: unknown, extra: unknown) => Promise<unknown> }> }
 				| undefined;
 			const handler = instance?._registeredTools?.finish?.handler;
-			if (handler === undefined) throw new Error("finish tool is not registered");
+			if (handler === undefined) {
+				throw new Error("finish tool is not registered");
+			}
 			return handler(args, {});
 		};
 		async function* generate() {
@@ -98,7 +102,9 @@ function fakeQuery(turns: TurnScript[], afterInputClosed?: () => void): FakeQuer
 				prompts.push(text);
 				const script = turns[turnIndex++] ?? (() => []);
 				const messages = await script(text, finish);
-				for (const value of messages) yield value as never;
+				for (const value of messages) {
+					yield value as never;
+				}
 				yield {
 					type: "result",
 					subtype: "success",
@@ -383,7 +389,9 @@ describe("ClaudeAgentExecutor", () => {
 		expect(progress?.model).toBeUndefined();
 		expect(progress?.sessionFile).toBeUndefined();
 		expect(emitted).toEqual([]);
-		if (shutdownMode === "cancel") await executor.dispose();
+		if (shutdownMode === "cancel") {
+			await executor.dispose();
+		}
 	});
 
 	it("suppresses emission when the action is cancelled mid-run", async () => {

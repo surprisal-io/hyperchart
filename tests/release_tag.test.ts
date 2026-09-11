@@ -9,7 +9,9 @@ const script = fileURLToPath(new URL("../scripts/tag-release.mjs", import.meta.u
 let tempDir = "";
 
 afterEach(() => {
-	if (tempDir !== "") rmSync(tempDir, { recursive: true, force: true });
+	if (tempDir !== "") {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
 });
 
 describe("release tag script", () => {

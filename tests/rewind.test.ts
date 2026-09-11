@@ -53,7 +53,9 @@ class LiveExecutor implements SteerableAgentExecutor {
 async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!check()) {
-		if (Date.now() > deadline) throw new Error("Timed out waiting for live runner");
+		if (Date.now() > deadline) {
+			throw new Error("Timed out waiting for live runner");
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
@@ -218,9 +220,13 @@ describe("append-only branch rewind", () => {
 				(record): record is Extract<DurableLogRecord, { type: "user_interaction"; kind: "opened" }> =>
 					record.type === "user_interaction" && record.kind === "opened",
 			);
-			if (opened === undefined) await new Promise((resolve) => setTimeout(resolve, 5));
+			if (opened === undefined) {
+				await new Promise((resolve) => setTimeout(resolve, 5));
+			}
 		}
-		if (opened === undefined) throw new Error("live gate did not open");
+		if (opened === undefined) {
+			throw new Error("live gate did not open");
+		}
 		const target = beforeRecords[0]!;
 
 		let closeReached!: () => void;

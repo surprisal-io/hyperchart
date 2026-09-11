@@ -107,7 +107,9 @@ async function effectFor(runtime: PoolRuntime, state: string, visit: number) {
 			(effect): effect is Extract<Effect, { kind: "agent" }> =>
 				effect.kind === "agent" && effect.actionUid.state === state,
 		);
-		if (effects[visit - 1] !== undefined) return effects[visit - 1]!;
+		if (effects[visit - 1] !== undefined) {
+			return effects[visit - 1]!;
+		}
 		await new Promise<void>((resolve) => setImmediate(resolve));
 	}
 	throw new Error(`missing agent effect ${state} visit ${visit}`);
@@ -153,10 +155,11 @@ describe("static actor pools", () => {
 			chart({ kind: "chart", id: "unused-pool", actors: { workers }, initial: "done", states: { done: final() } }),
 		);
 		expect(normalized.ok).toBe(false);
-		if (!normalized.ok)
+		if (!normalized.ok) {
 			expect(normalized.diagnostics).toEqual(
 				expect.arrayContaining([expect.objectContaining({ code: "UNUSED_ACTOR", path: "/actors/workers" })]),
 			);
+		}
 	});
 
 	it("durably assigns FIFO heads to eligible persistent workers and resolves callBatch in input order", async () => {
@@ -176,9 +179,13 @@ describe("static actor pools", () => {
 		);
 		const declaration = ast.actors["@workers"];
 		expect(declaration).toMatchObject({ kind: "actorPool", concurrency: 2, worker: { initial: "idle" } });
-		if (declaration?.kind !== "actorPool") throw new Error("missing normalized pool");
+		if (declaration?.kind !== "actorPool") {
+			throw new Error("missing normalized pool");
+		}
 		const declaredWork = declaration.worker.states.work;
-		if (declaredWork?.kind !== "state") throw new Error("missing normalized worker action");
+		if (declaredWork?.kind !== "state") {
+			throw new Error("missing normalized worker action");
+		}
 		expect(declaredWork.action.uid.state).toBe("@workers.$worker.work");
 
 		const runtime = new PoolRuntime(ast);

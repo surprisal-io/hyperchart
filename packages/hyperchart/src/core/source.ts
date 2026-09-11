@@ -29,7 +29,9 @@ export function hyperchartSource(ast: ChartAst, selectedStateId: StatePath | nul
 				.sort()
 				.map((path, index) => [path, `actorDeclaration${index + 1}`]),
 		);
-		if (actorBindings.size === 0) return `chart(${chartDsl(ast, actorBindings)})`;
+		if (actorBindings.size === 0) {
+			return `chart(${chartDsl(ast, actorBindings)})`;
+		}
 		// Allocate every static capability before evaluating any actor body. This keeps
 		// actor-to-actor send cycles representable without strings or temporal-dead-zone
 		// failures; Object.create(null) is intentionally typed as `any` in generated TS.
@@ -47,7 +49,9 @@ export function hyperchartSource(ast: ChartAst, selectedStateId: StatePath | nul
 			.map((path, index) => [path, `actorDeclaration${index + 1}`]),
 	);
 	const actor = ast.actors[selectedStateId];
-	if (actor !== undefined) return `${objectKeyDsl(actor.name)}: ${actorDeclarationDsl(actor, actorBindings)}`;
+	if (actor !== undefined) {
+		return `${objectKeyDsl(actor.name)}: ${actorDeclarationDsl(actor, actorBindings)}`;
+	}
 	const actorOwner = Object.values(ast.actors)
 		.filter((candidate) => selectedStateId.startsWith(`${candidate.path}.`))
 		.sort((left, right) => right.path.length - left.path.length)[0];
@@ -57,10 +61,14 @@ export function hyperchartSource(ast: ChartAst, selectedStateId: StatePath | nul
 			.slice(actorOwner.path.length + 1)
 			.replace(new RegExp(`^${workerPrefix.replace("$", "\\$")}`), "");
 		const actorState = actorDefinition(actorOwner).states[localState];
-		if (actorState !== undefined) return `${objectKeyDsl(localState)}: ${actorStateDsl(actorState, actorBindings)}`;
+		if (actorState !== undefined) {
+			return `${objectKeyDsl(localState)}: ${actorStateDsl(actorState, actorBindings)}`;
+		}
 	}
 	const state = ast.states[selectedStateId];
-	if (state === undefined) return "undefined";
+	if (state === undefined) {
+		return "undefined";
+	}
 	return `${objectKeyDsl(state.id)}: ${stateDsl(ast, selectedStateId, actorBindings)}`;
 }
 
@@ -81,20 +89,28 @@ function objectKeyDsl(key: string): string {
 }
 
 function stringDsl(value: string): string {
-	if (value.includes("\n")) return `\`${value.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
+	if (value.includes("\n")) {
+		return `\`${value.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
+	}
 	return JSON.stringify(value);
 }
 
 function objectDsl(entries: Array<[string, string | undefined]>): string {
 	const present = entries.filter((entry): entry is [string, string] => entry[1] !== undefined);
-	if (present.length === 0) return "{}";
+	if (present.length === 0) {
+		return "{}";
+	}
 	return `{\n${present.map(([key, value]) => `${DSL_INDENT}${objectKeyDsl(key)}: ${indentDslValue(value)},`).join("\n")}\n}`;
 }
 
 function arrayDsl(values: string[]): string {
-	if (values.length === 0) return "[]";
+	if (values.length === 0) {
+		return "[]";
+	}
 	const inline = `[${values.join(", ")}]`;
-	if (!values.some((value) => value.includes("\n")) && inline.length <= 100) return inline;
+	if (!values.some((value) => value.includes("\n")) && inline.length <= 100) {
+		return inline;
+	}
 	return `[\n${values.map((value) => `${DSL_INDENT}${indentDslValue(value)},`).join("\n")}\n]`;
 }
 
@@ -123,18 +139,31 @@ function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>):
 }
 
 export function hyperchartValueSource(value: import("./types.js").ValueAst): string {
-	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 		return JSON.stringify(value);
-	if (Array.isArray(value)) return arrayDsl(value.map(hyperchartValueSource));
-	if (isInputRef(value)) return inputRefDsl(value);
+	}
+	if (Array.isArray(value)) {
+		return arrayDsl(value.map(hyperchartValueSource));
+	}
+	if (isInputRef(value)) {
+		return inputRefDsl(value);
+	}
 	return objectDsl(Object.entries(value).map(([key, child]) => [key, hyperchartValueSource(child)]));
 }
 
 function jsonValueDsl(value: JsonValue): string {
-	if (value === null) return "null";
-	if (typeof value === "string") return stringDsl(value);
-	if (typeof value === "number" || typeof value === "boolean") return String(value);
-	if (Array.isArray(value)) return arrayDsl(value.map(jsonValueDsl));
+	if (value === null) {
+		return "null";
+	}
+	if (typeof value === "string") {
+		return stringDsl(value);
+	}
+	if (typeof value === "number" || typeof value === "boolean") {
+		return String(value);
+	}
+	if (Array.isArray(value)) {
+		return arrayDsl(value.map(jsonValueDsl));
+	}
 	return objectDsl(Object.entries(value).map(([key, child]) => [key, jsonValueDsl(child)]));
 }
 
@@ -154,7 +183,9 @@ function actorsDsl(
 	actorBindings: ReadonlyMap<StatePath, string>,
 ): string | undefined {
 	const declarations = Object.values(ast.actors).filter((actor) => actor.owner === owner);
-	if (declarations.length === 0) return undefined;
+	if (declarations.length === 0) {
+		return undefined;
+	}
 	return objectDsl(
 		declarations.map((actor) => [
 			actor.name,
@@ -209,29 +240,33 @@ function actorDeclarationDsl(
 }
 
 function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<StatePath, string>): string {
-	if (state.kind === "receive")
+	if (state.kind === "receive") {
 		return `receive(${objectDsl([["on", objectDsl(Object.entries(state.on).map(([event, target]) => [event, stringDsl(target)]))]])})`;
-	if (state.kind === "reply")
+	}
+	if (state.kind === "reply") {
 		return `reply(${objectDsl([
 			["target", stringDsl(state.target)],
 			["event", state.event === undefined ? undefined : stringDsl(state.event)],
 			["output", state.output === undefined ? undefined : hyperchartValueSource(state.output)],
 		])})`;
-	if (state.kind === "send")
+	}
+	if (state.kind === "send") {
 		return `send(${objectDsl([
 			["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))],
 			["event", stringDsl(state.event)],
 			["input", hyperchartValueSource(state.input)],
 			["target", stringDsl(state.target)],
 		])})`;
-	if (state.kind === "sendBatch")
+	}
+	if (state.kind === "sendBatch") {
 		return `sendBatch(${objectDsl([
 			["to", state.self === true ? "self()" : (actorBindings.get(state.to) ?? stringDsl(state.to))],
 			["event", stringDsl(state.event)],
 			["inputs", hyperchartValueSource(state.inputs)],
 			["target", stringDsl(state.target)],
 		])})`;
-	if (state.kind === "call")
+	}
+	if (state.kind === "call") {
 		return `call(${objectDsl([
 			["to", actorBindings.get(state.to) ?? stringDsl(state.to)],
 			["event", stringDsl(state.event)],
@@ -239,14 +274,16 @@ function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<
 			["target", state.target === undefined ? undefined : stringDsl(state.target)],
 			["transitions", transitionsDsl(state.transitions)],
 		])})`;
-	if (state.kind === "callBatch")
+	}
+	if (state.kind === "callBatch") {
 		return `callBatch(${objectDsl([
 			["to", actorBindings.get(state.to) ?? stringDsl(state.to)],
 			["event", stringDsl(state.event)],
 			["inputs", hyperchartValueSource(state.inputs)],
 			["target", stringDsl(state.target)],
 		])})`;
-	if (state.kind === "state")
+	}
+	if (state.kind === "state") {
 		return objectDsl([
 			["kind", stringDsl("state")],
 			["input", schemaRecordDsl(state.input)],
@@ -262,20 +299,30 @@ function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<
 						]),
 			],
 		]);
+	}
 	return "undefined";
 }
 
 function stateDsl(ast: ChartAst, path: StatePath, actorBindings: ReadonlyMap<StatePath, string>): string {
 	const state = ast.states[path];
-	if (state === undefined) return "undefined";
+	if (state === undefined) {
+		return "undefined";
+	}
 	if (state.kind === "final") {
 		const factory = state.outcome === "failed" ? "failed" : "final";
-		if (state.notify === undefined) return `${factory}()`;
+		if (state.notify === undefined) {
+			return `${factory}()`;
+		}
 		const notifyEntries: [string, string | undefined][] = [];
-		if (state.notify.prompt !== undefined) notifyEntries.push(["prompt", templateDsl(state.notify.prompt)]);
-		if (state.notify.artifacts !== undefined)
+		if (state.notify.prompt !== undefined) {
+			notifyEntries.push(["prompt", templateDsl(state.notify.prompt)]);
+		}
+		if (state.notify.artifacts !== undefined) {
 			notifyEntries.push(["artifacts", arrayDsl(state.notify.artifacts.map(readDsl))]);
-		if (state.notify.scope !== undefined) notifyEntries.push(["scope", stringDsl(state.notify.scope)]);
+		}
+		if (state.notify.scope !== undefined) {
+			notifyEntries.push(["scope", stringDsl(state.notify.scope)]);
+		}
 		const notify = objectDsl(notifyEntries);
 		return `${factory}(${objectDsl([["notify", notify]])})`;
 	}
@@ -404,8 +451,12 @@ function actionDsl(action: StateActionAst): string {
 		]);
 		return options === "{}" ? `agent(${stringDsl(action.name)})` : `agent(${stringDsl(action.name)}, ${options})`;
 	}
-	if (action.kind === "script") return scriptDsl(action);
-	if (action.kind === "tsImport") return importedActionDsl(action);
+	if (action.kind === "script") {
+		return scriptDsl(action);
+	}
+	if (action.kind === "tsImport") {
+		return importedActionDsl(action);
+	}
 	return `user(${objectDsl([
 		["prompt", templateDsl(action.prompt)],
 		["options", action.options.length === 0 ? undefined : arrayDsl(action.options.map(stringDsl))],
@@ -418,10 +469,12 @@ function scriptDsl(
 ): string {
 	const args = "args" in value && value.args.length > 0 ? value.args : undefined;
 	const optionEntries: Array<[string, string | undefined]> = [["env", envDsl(value.env)]];
-	if ("artifacts" in value)
+	if ("artifacts" in value) {
 		optionEntries.push(["artifacts", artifactsDsl(value.artifacts as Readonly<Record<string, ArtifactAst>>)]);
-	if ("reply" in value)
+	}
+	if ("reply" in value) {
 		optionEntries.push(["reply", value.reply === undefined ? undefined : schemaDsl(value.reply as SchemaAst)]);
+	}
 	const options = objectDsl(optionEntries);
 	const callArgs = [
 		stringDsl(value.command),
@@ -441,18 +494,24 @@ function importedActionDsl(value: Extract<StateActionAst, { kind: "tsImport" }>)
 }
 
 function guardDsl(value: GuardRefAst): string {
-	if (value.kind === "script") return scriptDsl(value);
+	if (value.kind === "script") {
+		return scriptDsl(value);
+	}
 	return `tsImport(${stringDsl(value.module)}, ${stringDsl(value.export)})`;
 }
 
 function transitionsDsl(transitions: Readonly<Record<string, TransitionAst>>): string | undefined {
 	const entries = Object.entries(transitions);
-	if (entries.length === 0) return undefined;
+	if (entries.length === 0) {
+		return undefined;
+	}
 	return objectDsl(entries.map(([eventType, transition]) => [eventType, transitionDsl(transition)]));
 }
 
 function transitionDsl(transition: TransitionAst): string {
-	if (transition.input === undefined || Object.keys(transition.input).length === 0) return stringDsl(transition.target);
+	if (transition.input === undefined || Object.keys(transition.input).length === 0) {
+		return stringDsl(transition.target);
+	}
 	return objectDsl([
 		["target", stringDsl(transition.target)],
 		["input", transitionInputsDsl(transition.input)],
@@ -473,14 +532,22 @@ function transitionInputsDsl(input: Readonly<Record<string, TransitionInputAst>>
 }
 
 function onReenterDsl(value: OnReenterAst | undefined): string | undefined {
-	if (value === undefined) return undefined;
-	if (value === "restart") return stringDsl("restart");
+	if (value === undefined) {
+		return undefined;
+	}
+	if (value === "restart") {
+		return stringDsl("restart");
+	}
 	return `resume(${templateDsl(value.message)})`;
 }
 
 function templateDsl(value: TemplateAst | undefined): string | undefined {
-	if (value === undefined) return undefined;
-	if (value.refs.length === 0) return stringDsl(value.strings.join(""));
+	if (value === undefined) {
+		return undefined;
+	}
+	if (value.refs.length === 0) {
+		return stringDsl(value.strings.join(""));
+	}
 	const chunks = value.strings.map((chunk) =>
 		chunk.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${"),
 	);
@@ -512,10 +579,11 @@ function inputRefDslBase(ref: InputRef): string {
 		case "key":
 			return ref.map === undefined ? "key()" : `key(${stringDsl(ref.map)})`;
 		case "item":
-			if (ref.map !== undefined)
+			if (ref.map !== undefined) {
 				return ref.path === undefined
 					? `item(${stringDsl(ref.map)})`
 					: `item(${stringDsl(ref.map)}, ${stringDsl(ref.path)})`;
+			}
 			return ref.path === undefined ? "item()" : `item(${stringDsl(ref.path)})`;
 		case "actorInput":
 			return ref.path === undefined ? "actorInput()" : `actorInput(${stringDsl(ref.path)})`;
@@ -527,7 +595,9 @@ function inputRefDslBase(ref: InputRef): string {
 }
 
 function schemaRecordDsl(input: Readonly<Record<string, SchemaAst>> | undefined): string | undefined {
-	if (input === undefined || Object.keys(input).length === 0) return undefined;
+	if (input === undefined || Object.keys(input).length === 0) {
+		return undefined;
+	}
 	return objectDsl(Object.entries(input).map(([name, schema]) => [name, schemaDsl(schema)]));
 }
 
@@ -577,12 +647,24 @@ function jsonSchemaDsl(schema: Readonly<JsonSchema>): string {
 		const members = schema.type.map((type) => jsonSchemaDsl({ ...schema, type, default: undefined }));
 		return withSchemaMetadata(schema, `z.union(${arrayDsl(members)})`, new Set(["type"]));
 	}
-	if (schema.type === "string") return stringSchemaDsl(schema);
-	if (schema.type === "integer") return numberSchemaDsl(schema, true);
-	if (schema.type === "number") return numberSchemaDsl(schema, false);
-	if (schema.type === "boolean") return withSchemaMetadata(schema, "z.boolean()", new Set(["type"]));
-	if (schema.type === "null") return withSchemaMetadata(schema, "z.null()", new Set(["type"]));
-	if (schema.type === "array") return arraySchemaDsl(schema);
+	if (schema.type === "string") {
+		return stringSchemaDsl(schema);
+	}
+	if (schema.type === "integer") {
+		return numberSchemaDsl(schema, true);
+	}
+	if (schema.type === "number") {
+		return numberSchemaDsl(schema, false);
+	}
+	if (schema.type === "boolean") {
+		return withSchemaMetadata(schema, "z.boolean()", new Set(["type"]));
+	}
+	if (schema.type === "null") {
+		return withSchemaMetadata(schema, "z.null()", new Set(["type"]));
+	}
+	if (schema.type === "array") {
+		return arraySchemaDsl(schema);
+	}
 	if (schema.type === "object" || schema.properties !== undefined || schema.additionalProperties !== undefined) {
 		return objectSchemaDsl(schema);
 	}
@@ -633,7 +715,9 @@ function numberSchemaDsl(schema: Readonly<JsonSchema>, integer: boolean): string
 	} else if (typeof schema.minimum === "number") {
 		value += exclusiveMinimum === true ? `.gt(${schema.minimum})` : `.min(${schema.minimum})`;
 		supported.add("minimum");
-		if (typeof exclusiveMinimum === "boolean") supported.add("exclusiveMinimum");
+		if (typeof exclusiveMinimum === "boolean") {
+			supported.add("exclusiveMinimum");
+		}
 	}
 	if (typeof exclusiveMaximum === "number") {
 		value += `.lt(${exclusiveMaximum})`;
@@ -641,7 +725,9 @@ function numberSchemaDsl(schema: Readonly<JsonSchema>, integer: boolean): string
 	} else if (typeof schema.maximum === "number") {
 		value += exclusiveMaximum === true ? `.lt(${schema.maximum})` : `.max(${schema.maximum})`;
 		supported.add("maximum");
-		if (typeof exclusiveMaximum === "boolean") supported.add("exclusiveMaximum");
+		if (typeof exclusiveMaximum === "boolean") {
+			supported.add("exclusiveMaximum");
+		}
 	}
 	if (typeof schema.multipleOf === "number" && schema.multipleOf > 0) {
 		value += `.multipleOf(${schema.multipleOf})`;
@@ -691,10 +777,13 @@ function objectSchemaDsl(schema: Readonly<JsonSchema>): string {
 				return [name, required.has(name) ? propertyValue : `${propertyValue}.optional()`];
 			}),
 		)})`;
-		if (additional === false) value += ".strict()";
-		else if (typeof additional === "object" && additional !== null) {
+		if (additional === false) {
+			value += ".strict()";
+		} else if (typeof additional === "object" && additional !== null) {
 			value += `.catchall(${jsonSchemaDsl(additional as JsonSchema)})`;
-		} else value += ".loose()";
+		} else {
+			value += ".loose()";
+		}
 	} else if (typeof additional === "object" && additional !== null) {
 		value = `z.record(z.string(), ${jsonSchemaDsl(additional as JsonSchema)})`;
 	} else {
@@ -724,7 +813,9 @@ function withSchemaMetadata(schema: Readonly<JsonSchema>, value: string, support
 }
 
 function artifactsDsl(artifacts: Readonly<Record<string, ArtifactAst>> | undefined): string | undefined {
-	if (artifacts === undefined || Object.keys(artifacts).length === 0) return undefined;
+	if (artifacts === undefined || Object.keys(artifacts).length === 0) {
+		return undefined;
+	}
 	return objectDsl(Object.entries(artifacts).map(([name, value]) => [name, artifactDsl(value)]));
 }
 
@@ -734,13 +825,19 @@ function artifactDsl(value: ArtifactAst): string {
 }
 
 function readsDsl(reads: readonly (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined): string | undefined {
-	if (reads === undefined || reads.length === 0) return undefined;
+	if (reads === undefined || reads.length === 0) {
+		return undefined;
+	}
 	return arrayDsl(reads.map(readDsl));
 }
 
 function readDsl(read: TemplateAst | ArtifactOfAst | JoinArtifactOfAst): string {
-	if (read.kind === "artifactOf") return artifactOfDsl(read);
-	if (read.kind === "joinArtifactOf") return joinArtifactOfDsl(read);
+	if (read.kind === "artifactOf") {
+		return artifactOfDsl(read);
+	}
+	if (read.kind === "joinArtifactOf") {
+		return joinArtifactOfDsl(read);
+	}
 	return templateDsl(read) ?? stringDsl("");
 }
 
@@ -762,7 +859,9 @@ function joinArtifactOfDsl(read: JoinArtifactOfAst): string {
 function envDsl(
 	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined,
 ): string | undefined {
-	if (env === undefined || Object.keys(env).length === 0) return undefined;
+	if (env === undefined || Object.keys(env).length === 0) {
+		return undefined;
+	}
 	return objectDsl(
 		Object.entries(env).map(([name, value]) => [name, typeof value === "string" ? stringDsl(value) : readDsl(value)]),
 	);

@@ -28,15 +28,18 @@ export function resolveLiveSessionForSteering(
 			([leftKey, left], [rightKey, right]) => left.invokeSeqId - right.invokeSeqId || leftKey.localeCompare(rightKey),
 		);
 	const live = matches.filter(([, session]) => session.status === "starting" || session.status === "running");
-	if (live.length === 1) return live[0]![1];
+	if (live.length === 1) {
+		return live[0]![1];
+	}
 	if (live.length > 1) {
 		throw new Error(
 			`Agent session '${actionKey}' is ambiguous on branch '${branchId}' (${live.map(([, session]) => session.invokeSeqId).join(", ")})`,
 		);
 	}
 	const stale = matches.at(-1)?.[1];
-	if (stale !== undefined)
+	if (stale !== undefined) {
 		throw new Error(`Agent session '${stale.actionName}' is ${stale.status} and cannot be steered`);
+	}
 	throw new Error(`Agent session '${actionKey}' was not found on branch '${branchId}'`);
 }
 
@@ -62,13 +65,21 @@ export function queueSessionSteering(
 	message: string,
 ): SessionSteeringRequest {
 	const trimmed = message.trim();
-	if (branchId.trim().length === 0) throw new Error("Steering branch is required");
-	if (actionKey.length === 0) throw new Error("Steering target is required");
-	if (!Number.isSafeInteger(invokeSeqId) || invokeSeqId <= 0)
+	if (branchId.trim().length === 0) {
+		throw new Error("Steering branch is required");
+	}
+	if (actionKey.length === 0) {
+		throw new Error("Steering target is required");
+	}
+	if (!Number.isSafeInteger(invokeSeqId) || invokeSeqId <= 0) {
 		throw new Error("Steering invocation seqId must be a positive safe integer");
-	if (trimmed.length === 0) throw new Error("Steering message is required");
-	if (trimmed.length > MAX_STEERING_MESSAGE_LENGTH)
+	}
+	if (trimmed.length === 0) {
+		throw new Error("Steering message is required");
+	}
+	if (trimmed.length > MAX_STEERING_MESSAGE_LENGTH) {
 		throw new Error(`Steering message is limited to ${MAX_STEERING_MESSAGE_LENGTH} characters`);
+	}
 	const request: SessionSteeringRequest = {
 		id: randomUUID(),
 		branchId,
@@ -93,11 +104,15 @@ export function watchSessionSteering(
 	let disposed = false;
 	let draining = false;
 	const drain = async () => {
-		if (disposed || draining) return;
+		if (disposed || draining) {
+			return;
+		}
 		draining = true;
 		try {
 			for (const file of steeringFiles(sessionsDir)) {
-				if (disposed) break;
+				if (disposed) {
+					break;
+				}
 				const path = join(steeringDir(sessionsDir), file);
 				const request = readSteeringRequest(path);
 				if (request === undefined) {
@@ -105,7 +120,9 @@ export function watchSessionSteering(
 					continue;
 				}
 				try {
-					if (await deliver(request)) safeUnlink(path);
+					if (await deliver(request)) {
+						safeUnlink(path);
+					}
 				} catch {
 					/* retain for retry */
 				}
@@ -147,8 +164,9 @@ function readSteeringRequest(path: string): SessionSteeringRequest | undefined {
 			(value.invokeSeqId ?? 0) <= 0 ||
 			typeof value.message !== "string" ||
 			typeof value.createdAt !== "number"
-		)
+		) {
 			return undefined;
+		}
 		return {
 			id: value.id,
 			branchId: value.branchId,

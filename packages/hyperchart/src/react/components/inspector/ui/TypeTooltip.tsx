@@ -15,7 +15,9 @@ export function TypeTooltip({ text, children }: { text: string; children: React.
 	const [position, setPosition] = useState<{ left: number; top: number; above: boolean } | null>(null);
 	const show = () => {
 		const rect = ref.current?.getBoundingClientRect();
-		if (!rect) return;
+		if (!rect) {
+			return;
+		}
 		const maxBubbleWidth = Math.min(288, Math.max(180, window.innerWidth - 16));
 		const center = rect.left + rect.width / 2;
 		const left = Math.min(Math.max(center, maxBubbleWidth / 2 + 8), window.innerWidth - maxBubbleWidth / 2 - 8);

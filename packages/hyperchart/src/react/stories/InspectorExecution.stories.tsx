@@ -11,23 +11,30 @@ function ExecutedFixtureBoard() {
 		let current = true;
 		void captureExecutionBoardRun().then(
 			(value) => {
-				if (current) setRun(value);
+				if (current) {
+					setRun(value);
+				}
 			},
 			(reason) => {
-				if (current) setError(reason instanceof Error ? reason.message : String(reason));
+				if (current) {
+					setError(reason instanceof Error ? reason.message : String(reason));
+				}
 			},
 		);
 		return () => {
 			current = false;
 		};
 	}, []);
-	if (error !== undefined) return <div className="p-6 text-sm text-red-400">{error}</div>;
-	if (run === undefined)
+	if (error !== undefined) {
+		return <div className="p-6 text-sm text-red-400">{error}</div>;
+	}
+	if (run === undefined) {
 		return (
 			<div className="grid min-h-screen place-items-center bg-[var(--bg-primary)] text-sm text-[var(--text-muted)]">
 				Executing fixture and replay-validating its durable log…
 			</div>
 		);
+	}
 	return <HyperchartInspectorDialog runs={[run]} onClose={() => undefined} embedded initialCanvasMode="execution" />;
 }
 

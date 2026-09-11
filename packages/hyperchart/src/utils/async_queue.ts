@@ -38,7 +38,9 @@ export function createAsyncQueue<T>(): AsyncQueue<T> {
 			buffer.push(value);
 		},
 		close(): void {
-			if (closed) return;
+			if (closed) {
+				return;
+			}
 			closed = true;
 			if (waiting !== undefined) {
 				const resolve = waiting;

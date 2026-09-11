@@ -93,7 +93,9 @@ const presetInputs: Record<ComponentKind, Record<string, string[]>> = {
 
 async function waitForData(component: PreviewComponent, width: number): Promise<void> {
 	for (let attempt = 0; attempt < 40; attempt += 1) {
-		if (!component.render(width).join("\n").includes("loading")) return;
+		if (!component.render(width).join("\n").includes("loading")) {
+			return;
+		}
 		await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
 	}
 }
@@ -198,7 +200,9 @@ export function tuiPreviewPlugin(): Plugin {
 	const sessions = new Map<string, PreviewSession>();
 	let nextSessionId = 1;
 	const disposeAll = () => {
-		for (const session of sessions.values()) session.component.dispose?.();
+		for (const session of sessions.values()) {
+			session.component.dispose?.();
+		}
 		sessions.clear();
 		cleanupProductionTuiFixture(productionFixture);
 		productionFixture = undefined;
@@ -209,13 +213,17 @@ export function tuiPreviewPlugin(): Plugin {
 			return id === VIRTUAL_ID ? RESOLVED_VIRTUAL_ID : undefined;
 		},
 		async load(id) {
-			if (id !== RESOLVED_VIRTUAL_ID) return undefined;
+			if (id !== RESOLVED_VIRTUAL_ID) {
+				return undefined;
+			}
 			return `export default ${JSON.stringify(await staticFrames())};`;
 		},
 		configureServer(server) {
 			server.httpServer?.once("close", disposeAll);
 			server.middlewares.use(async (request, response, next) => {
-				if (request.url?.startsWith(API_PREFIX) !== true) return next();
+				if (request.url?.startsWith(API_PREFIX) !== true) {
+					return next();
+				}
 				try {
 					const body = await readBody(request);
 					if (request.url === `${API_PREFIX}/create`) {
@@ -244,7 +252,9 @@ export function tuiPreviewPlugin(): Plugin {
 					}
 					const sessionId = String(body.sessionId ?? "");
 					const session = sessions.get(sessionId);
-					if (session === undefined) return sendJson(response, 404, { error: "Unknown TUI preview session" });
+					if (session === undefined) {
+						return sendJson(response, 404, { error: "Unknown TUI preview session" });
+					}
 					if (request.url === `${API_PREFIX}/input`) {
 						const input = typeof body.input === "string" ? body.input : "";
 						const width = Number(body.width);

@@ -6,7 +6,9 @@ type RandomSource = Pick<Crypto, "getRandomValues"> & {
 
 /** Generate a UUID in browsers where randomUUID is unavailable on insecure origins. */
 export function randomUUID(source: RandomSource = globalThis.crypto): UUID {
-	if (typeof source.randomUUID === "function") return source.randomUUID();
+	if (typeof source.randomUUID === "function") {
+		return source.randomUUID();
+	}
 
 	const bytes = source.getRandomValues(new Uint8Array(16));
 	bytes[6] = (bytes[6]! & 0x0f) | 0x40;

@@ -6,10 +6,14 @@ import type { HyperchartLaunchDialogProps } from "./dialog-props.js";
 
 export function validateLaunchArgsText(value: string): string | undefined {
 	const trimmed = value.trim();
-	if (!trimmed) return undefined;
+	if (!trimmed) {
+		return undefined;
+	}
 	try {
 		const parsed = JSON.parse(trimmed) as unknown;
-		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) return undefined;
+		if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+			return undefined;
+		}
 	} catch {
 		// Fall through to the shared validation message.
 	}
@@ -35,7 +39,9 @@ export function HyperchartLaunchDialogInner({
 	useModalDialog({ dialogRef, initialFocusRef: textareaRef, onClose: onCancel });
 	const validationError = validateLaunchArgsText(value);
 	const submit = () => {
-		if (validationError === undefined) onSubmit(value.trim());
+		if (validationError === undefined) {
+			onSubmit(value.trim());
+		}
 	};
 	const argsHint =
 		args && Object.keys(args).length > 0
@@ -81,7 +87,9 @@ export function HyperchartLaunchDialogInner({
 							rows={8}
 							className="w-full px-3 py-2 text-sm font-mono bg-[var(--bg-primary)] border border-[var(--border-primary)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-blue)] resize-y"
 							onKeyDown={(event) => {
-								if ((event.metaKey || event.ctrlKey) && event.key === "Enter") submit();
+								if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+									submit();
+								}
 							}}
 						/>
 						{validationError && (

@@ -23,7 +23,9 @@ const originalExitCode = process.exitCode;
 afterEach(() => {
 	process.chdir(originalCwd);
 	process.exitCode = originalExitCode;
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 type Deferred = { promise: Promise<void>; resolve(): void };
@@ -38,7 +40,9 @@ function deferred(): Deferred {
 async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!check()) {
-		if (Date.now() > deadline) throw new Error("Timed out waiting for runner state");
+		if (Date.now() > deadline) {
+			throw new Error("Timed out waiting for runner state");
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
@@ -217,7 +221,9 @@ describe("live branch sealing and move", () => {
 		const releaseDispose = deferred();
 		const f = await fixture(["main"], new Map([["main", releaseDispose.promise]]));
 		const first = f.executors.get("main")?.[0];
-		if (first === undefined) throw new Error("missing main executor");
+		if (first === undefined) {
+			throw new Error("missing main executor");
+		}
 		const before = await branchView(f.runDir, "main");
 		const drainedHeadSeqId = before.branch.headSeqId!;
 
@@ -280,7 +286,9 @@ describe("live branch sealing and move", () => {
 		const initial = await branchView(f.runDir, "main");
 		const siblingInitial = await branchView(f.runDir, "sibling");
 		const mainTargetSeqId = initial.records[0]?.seqId;
-		if (mainTargetSeqId === undefined) throw new Error("missing main target record");
+		if (mainTargetSeqId === undefined) {
+			throw new Error("missing main target record");
+		}
 		const mainHeadSeqId = initial.branch.headSeqId!;
 		await expect(
 			f.controller.forkBranch({
@@ -294,7 +302,9 @@ describe("live branch sealing and move", () => {
 		await waitFor(() => f.executors.get("child")?.[0]?.emit !== undefined);
 		const oldMain = f.executors.get("main")?.[0]!;
 		const oldChild = f.executors.get("child")?.[0];
-		if (oldMain === undefined || oldChild === undefined) throw new Error("missing executors before branch move");
+		if (oldMain === undefined || oldChild === undefined) {
+			throw new Error("missing executors before branch move");
+		}
 
 		let moved = false;
 		const moving = f.controller.moveBranch("main", mainTargetSeqId).then((moveSeqId) => {

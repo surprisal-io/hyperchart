@@ -29,9 +29,13 @@ export function useModalDialog({
 	}, [onClose]);
 
 	useEffect(() => {
-		if (!open || typeof document === "undefined") return undefined;
+		if (!open || typeof document === "undefined") {
+			return undefined;
+		}
 		const dialog = dialogRef.current;
-		if (dialog === null) return undefined;
+		if (dialog === null) {
+			return undefined;
+		}
 		const modalId = modalIdRef.current;
 		modalStack.push(modalId);
 		const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -43,13 +47,17 @@ export function useModalDialog({
 		(initialFocusRef?.current ?? focusableElements()[0] ?? dialog).focus();
 
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (modalStack.at(-1) !== modalId) return;
+			if (modalStack.at(-1) !== modalId) {
+				return;
+			}
 			if (event.key === "Escape") {
 				event.preventDefault();
 				onCloseRef.current();
 				return;
 			}
-			if (event.key !== "Tab") return;
+			if (event.key !== "Tab") {
+				return;
+			}
 			const focusable = focusableElements();
 			if (focusable.length === 0) {
 				event.preventDefault();
@@ -58,7 +66,9 @@ export function useModalDialog({
 			}
 			const first = focusable[0];
 			const last = focusable.at(-1);
-			if (first === undefined || last === undefined) return;
+			if (first === undefined || last === undefined) {
+				return;
+			}
 			if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
 				event.preventDefault();
 				last.focus();
@@ -73,8 +83,12 @@ export function useModalDialog({
 			document.removeEventListener("keydown", onKeyDown);
 			const stackIndex = modalStack.lastIndexOf(modalId);
 			const wasTopmost = stackIndex === modalStack.length - 1;
-			if (stackIndex !== -1) modalStack.splice(stackIndex, 1);
-			if (wasTopmost && previousFocus?.isConnected) previousFocus.focus();
+			if (stackIndex !== -1) {
+				modalStack.splice(stackIndex, 1);
+			}
+			if (wasTopmost && previousFocus?.isConnected) {
+				previousFocus.focus();
+			}
 		};
 	}, [dialogRef, initialFocusRef, open]);
 }

@@ -126,7 +126,9 @@ function toChartAst(
 	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
 	for (const placement of rawActors) {
 		const declaration = toActorDeclarationAst(placement, chartId, actorTargets, diagnostics, source, schemaRegistry);
-		if (declaration !== undefined) actors[placement.path] = declaration;
+		if (declaration !== undefined) {
+			actors[placement.path] = declaration;
+		}
 	}
 	for (const [stateId, stateInput] of Object.entries(input.states)) {
 		collectState(
@@ -164,7 +166,9 @@ function toChartAst(
 		validateActorPlacementRefs(states, actors, typeof initial === "string" ? initial : "", diagnostics, source);
 	}
 
-	if (diagnostics.length > 0) return undefined;
+	if (diagnostics.length > 0) {
+		return undefined;
+	}
 	return deepFreeze({
 		kind: "chart",
 		id: chartId,
@@ -180,7 +184,9 @@ function toChartArguments(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): Record<string, ChartArgumentAst> | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_CHART_ARGS", "Chart args metadata must be an object.", "/args", source));
 		return undefined;
@@ -229,7 +235,9 @@ function toChartArguments(
 		}
 		let defaultValue: JsonValue | undefined;
 		const hasDefault = Object.hasOwn(raw, "default");
-		if (hasDefault) defaultValue = toJsonValue(raw.default, `${pointer}/default`, diagnostics, source, new WeakSet());
+		if (hasDefault) {
+			defaultValue = toJsonValue(raw.default, `${pointer}/default`, diagnostics, source, new WeakSet());
+		}
 		args[name] = {
 			...(description === undefined ? {} : { description }),
 			...(!hasDefault || defaultValue === undefined ? {} : { default: defaultValue }),
@@ -245,9 +253,13 @@ function toJsonValue(
 	source: ChartSource,
 	ancestors: WeakSet<object>,
 ): JsonValue | undefined {
-	if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
+		return value;
+	}
 	if (typeof value === "number") {
-		if (Number.isFinite(value)) return value;
+		if (Number.isFinite(value)) {
+			return value;
+		}
 		diagnostics.push(
 			diagnostic(
 				"INVALID_CHART_ARGUMENT",
@@ -280,7 +292,9 @@ function toJsonValue(
 		const result: JsonValue[] = [];
 		for (let index = 0; index < value.length; index++) {
 			const item = toJsonValue(value[index], `${pointer}/${index}`, diagnostics, source, ancestors);
-			if (item !== undefined) result.push(item);
+			if (item !== undefined) {
+				result.push(item);
+			}
 		}
 		ancestors.delete(value);
 		return result;
@@ -301,7 +315,9 @@ function toJsonValue(
 	const result: Record<string, JsonValue> = {};
 	for (const [key, child] of Object.entries(value)) {
 		const item = toJsonValue(child, `${pointer}/${escapePointer(key)}`, diagnostics, source, ancestors);
-		if (item !== undefined) result[key] = item;
+		if (item !== undefined) {
+			result[key] = item;
+		}
 	}
 	ancestors.delete(value);
 	return result;
@@ -390,9 +406,13 @@ function collectActorPlacements(
 			}
 		}
 	}
-	if (!isRecord(ownerInput.states)) return;
+	if (!isRecord(ownerInput.states)) {
+		return;
+	}
 	for (const [childName, child] of Object.entries(ownerInput.states)) {
-		if (!isRecord(child)) continue;
+		if (!isRecord(child)) {
+			continue;
+		}
 		const childPath = ownerPath === undefined ? childName : `${ownerPath}.${childName}`;
 		const childIsOwner = child.kind === "compound" || child.kind === "parallel" || child.kind === "map";
 		collectActorPlacements(
@@ -540,7 +560,7 @@ function toActorDeclarationAst(
 					: isRecord(raw.to)
 						? actorTargets.get(raw.to)
 						: undefined;
-			if (targetActor === undefined && !authoredSelf)
+			if (targetActor === undefined && !authoredSelf) {
 				diagnostics.push(
 					diagnostic(
 						"INVALID_ACTOR_TARGET",
@@ -549,16 +569,19 @@ function toActorDeclarationAst(
 						source,
 					),
 				);
+			}
 			const event = typeof raw.event === "string" ? raw.event : "";
 			if (raw.kind === "send" || raw.kind === "sendBatch") {
 				const batch = raw.kind === "sendBatch";
 				const field = batch ? "inputs" : "input";
-				if (!Object.hasOwn(raw, field))
+				if (!Object.hasOwn(raw, field)) {
 					diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${raw.kind}() requires ${field}.`, pointer, source));
-				if (batch && Array.isArray(raw.inputs) && raw.inputs.length === 0)
+				}
+				if (batch && Array.isArray(raw.inputs) && raw.inputs.length === 0) {
 					diagnostics.push(
 						diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
 					);
+				}
 				const value = toValueAst(raw[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
 				states[id] = batch
 					? {
@@ -586,10 +609,11 @@ function toActorDeclarationAst(
 				continue;
 			}
 			if (raw.kind === "callBatch") {
-				if (Array.isArray(raw.inputs) && raw.inputs.length === 0)
+				if (Array.isArray(raw.inputs) && raw.inputs.length === 0) {
 					diagnostics.push(
 						diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
 					);
+				}
 				states[id] = {
 					kind: "callBatch",
 					id,
@@ -638,9 +662,11 @@ function toActorDeclarationAst(
 				source,
 				schemaRegistry,
 			);
-			if (action === undefined) continue;
+			if (action === undefined) {
+				continue;
+			}
 			const transitions = toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
-			if ("FAILED" in transitions)
+			if ("FAILED" in transitions) {
 				diagnostics.push(
 					diagnostic(
 						"RESERVED_FAILED_TRANSITION",
@@ -649,10 +675,11 @@ function toActorDeclarationAst(
 						source,
 					),
 				);
+			}
 			const stateInput = toInputDeclarations(raw.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
 			for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
-				if (raw[legacy] !== undefined)
+				if (raw[legacy] !== undefined) {
 					diagnostics.push(
 						diagnostic(
 							"LEGACY_AGENT_POLICY",
@@ -661,6 +688,7 @@ function toActorDeclarationAst(
 							source,
 						),
 					);
+				}
 			}
 			states[id] = {
 				kind: "state",
@@ -697,11 +725,16 @@ function toActorDeclarationAst(
 		protocol === undefined
 			? states
 			: inferAndValidateActorReplies(placement, states, protocol, actorTargets, diagnostics, source);
-	if (input !== undefined && protocol !== undefined)
+	if (input !== undefined && protocol !== undefined) {
 		validateActorIsolation(placement, resolved, initial, input, protocol, diagnostics, source);
-	if (input === undefined || inputValue === undefined || protocol === undefined) return undefined;
+	}
+	if (input === undefined || inputValue === undefined || protocol === undefined) {
+		return undefined;
+	}
 	if (isPool) {
-		if (concurrency === undefined) return undefined;
+		if (concurrency === undefined) {
+			return undefined;
+		}
 		const worker: ActorDefinitionAst = { input, protocol, initial, states: resolved };
 		return deepFreeze({
 			kind: "actorPool",
@@ -751,14 +784,17 @@ function toProtocolAst(
 		const messageInput = toSchemaAst(raw.input, `${path}/input`, diagnostics, source, schemaRegistry);
 		const hasReply = Object.hasOwn(raw, "reply");
 		const hasReplies = Object.hasOwn(raw, "replies");
-		if (hasReply && hasReplies)
+		if (hasReply && hasReplies) {
 			diagnostics.push(
 				diagnostic("INVALID_REPLY_CONTRACT", "message() cannot declare both reply and replies.", path, source),
 			);
+		}
 		let reply: ProtocolMessageAst["reply"] = { kind: "void" };
 		if (hasReply) {
 			const schema = toSchemaAst(raw.reply, `${path}/reply`, diagnostics, source, schemaRegistry);
-			if (schema !== undefined) reply = { kind: "single", schema };
+			if (schema !== undefined) {
+				reply = { kind: "single", schema };
+			}
 		} else if (hasReplies) {
 			if (!isRecord(raw.replies) || Object.keys(raw.replies).length === 0) {
 				diagnostics.push(
@@ -772,7 +808,7 @@ function toProtocolAst(
 			} else {
 				const schemas: Record<string, SchemaAst> = {};
 				for (const [name, schemaInput] of Object.entries(raw.replies)) {
-					if (!STATE_ID_PATTERN.test(name) || name === "FAILED")
+					if (!STATE_ID_PATTERN.test(name) || name === "FAILED") {
 						diagnostics.push(
 							diagnostic(
 								"INVALID_REPLY_EVENT",
@@ -781,6 +817,7 @@ function toProtocolAst(
 								source,
 							),
 						);
+					}
 					const schema = toSchemaAst(
 						schemaInput,
 						`${path}/replies/${escapePointer(name)}`,
@@ -788,27 +825,35 @@ function toProtocolAst(
 						source,
 						schemaRegistry,
 					);
-					if (schema !== undefined) schemas[name] = schema;
+					if (schema !== undefined) {
+						schemas[name] = schema;
+					}
 				}
 				reply = { kind: "named", schemas };
 			}
 		}
-		if (messageInput !== undefined) protocol[event] = { input: messageInput, reply };
+		if (messageInput !== undefined) {
+			protocol[event] = { input: messageInput, reply };
+		}
 	}
 	return protocol;
 }
 
 function actorWorkflowSuccessors(node: ActorWorkflowStateAst): StateId[] {
-	if (node.kind === "state")
+	if (node.kind === "state") {
 		return [
 			...Object.values(node.transitions).map((transition) => transition.target),
 			...(node.after === undefined ? [] : [node.after.target]),
 		];
-	if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "callBatch") return [node.target];
-	if (node.kind === "call")
+	}
+	if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "callBatch") {
+		return [node.target];
+	}
+	if (node.kind === "call") {
 		return node.target === undefined
 			? Object.values(node.transitions).map((transition) => transition.target)
 			: [node.target];
+	}
 	return [];
 }
 
@@ -829,9 +874,11 @@ function inferAndValidateActorReplies(
 		return set.size !== before;
 	};
 	for (const [id, node] of Object.entries(states)) {
-		if (node.kind !== "receive") continue;
+		if (node.kind !== "receive") {
+			continue;
+		}
 		for (const [message, target] of Object.entries(node.on)) {
-			if (!(message in protocol))
+			if (!(message in protocol)) {
 				diagnostics.push(
 					diagnostic(
 						"UNKNOWN_PROTOCOL_MESSAGE",
@@ -840,7 +887,8 @@ function inferAndValidateActorReplies(
 						source,
 					),
 				);
-			if (!(target in states))
+			}
+			if (!(target in states)) {
 				diagnostics.push(
 					diagnostic(
 						"UNKNOWN_TRANSITION_TARGET",
@@ -849,6 +897,7 @@ function inferAndValidateActorReplies(
 						source,
 					),
 				);
+			}
 			addContext(target, message);
 		}
 	}
@@ -857,15 +906,19 @@ function inferAndValidateActorReplies(
 		changed = false;
 		for (const [id, node] of Object.entries(states)) {
 			for (const message of contexts.get(id) ?? []) {
-				for (const target of actorWorkflowSuccessors(node)) if (addContext(target, message)) changed = true;
+				for (const target of actorWorkflowSuccessors(node)) {
+					if (addContext(target, message)) {
+						changed = true;
+					}
+				}
 			}
 		}
 	}
 	const result = { ...states };
 	for (const [id, node] of Object.entries(states)) {
 		const pointer = `${placement.pointer}/states/${escapePointer(id)}`;
-		for (const target of actorWorkflowSuccessors(node))
-			if (!(target in states))
+		for (const target of actorWorkflowSuccessors(node)) {
+			if (!(target in states)) {
 				diagnostics.push(
 					diagnostic(
 						"UNKNOWN_TRANSITION_TARGET",
@@ -874,9 +927,14 @@ function inferAndValidateActorReplies(
 						source,
 					),
 				);
-		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch")
+			}
+		}
+		if (node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") {
 			validateMessagingNode(placement, node, protocol, actorTargets, diagnostics, pointer, source);
-		if (node.kind !== "reply") continue;
+		}
+		if (node.kind !== "reply") {
+			continue;
+		}
 		const messages = [...(contexts.get(id) ?? [])];
 		if (messages.length !== 1) {
 			diagnostics.push(
@@ -891,7 +949,7 @@ function inferAndValidateActorReplies(
 		}
 		const message = messages[0] ?? "";
 		const contract = protocol[message]?.reply;
-		if (contract?.kind === "void" && (node.event !== undefined || node.output !== undefined))
+		if (contract?.kind === "void" && (node.event !== undefined || node.output !== undefined)) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_VOID_REPLY",
@@ -900,7 +958,8 @@ function inferAndValidateActorReplies(
 					source,
 				),
 			);
-		if (contract?.kind === "single" && (node.event !== undefined || node.output === undefined))
+		}
+		if (contract?.kind === "single" && (node.event !== undefined || node.output === undefined)) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_SINGLE_REPLY",
@@ -909,10 +968,11 @@ function inferAndValidateActorReplies(
 					source,
 				),
 			);
+		}
 		if (
 			contract?.kind === "named" &&
 			(node.event === undefined || !(node.event in contract.schemas) || node.output === undefined)
-		)
+		) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_NAMED_REPLY",
@@ -921,7 +981,8 @@ function inferAndValidateActorReplies(
 					source,
 				),
 			);
-		if (states[node.target]?.kind !== "receive")
+		}
+		if (states[node.target]?.kind !== "receive") {
 			diagnostics.push(
 				diagnostic(
 					"REPLY_TARGET_NOT_RECEIVE",
@@ -930,29 +991,43 @@ function inferAndValidateActorReplies(
 					source,
 				),
 			);
+		}
 		result[id] = { ...node, message };
 	}
 	for (const [receiveId, receive] of Object.entries(states)) {
-		if (receive.kind !== "receive") continue;
+		if (receive.kind !== "receive") {
+			continue;
+		}
 		for (const [message, target] of Object.entries(receive.on)) {
 			const visiting = new Set<string>();
 			const verified = new Set<string>();
 			const walk = (stateId: string): boolean => {
-				if (verified.has(stateId)) return true;
-				if (visiting.has(stateId)) return false;
+				if (verified.has(stateId)) {
+					return true;
+				}
+				if (visiting.has(stateId)) {
+					return false;
+				}
 				const state = states[stateId];
-				if (state === undefined || state.kind === "receive") return false;
-				if (state.kind === "reply")
+				if (state === undefined || state.kind === "receive") {
+					return false;
+				}
+				if (state.kind === "reply") {
 					return contexts.get(stateId)?.size === 1 && contexts.get(stateId)?.has(message) === true;
+				}
 				const next = actorWorkflowSuccessors(state);
-				if (next.length === 0) return false;
+				if (next.length === 0) {
+					return false;
+				}
 				visiting.add(stateId);
 				const ok = next.every(walk);
 				visiting.delete(stateId);
-				if (ok) verified.add(stateId);
+				if (ok) {
+					verified.add(stateId);
+				}
 				return ok;
 			};
-			if (!walk(target))
+			if (!walk(target)) {
 				diagnostics.push(
 					diagnostic(
 						"MISSING_REPLY",
@@ -961,6 +1036,7 @@ function inferAndValidateActorReplies(
 						source,
 					),
 				);
+			}
 		}
 	}
 	return result;
@@ -973,23 +1049,37 @@ function valueRefs(value: ValueAst | undefined): InputRef[] {
 		typeof value === "string" ||
 		typeof value === "number" ||
 		typeof value === "boolean"
-	)
+	) {
 		return [];
-	if (Array.isArray(value)) return value.flatMap(valueRefs);
-	if (isInputRef(value)) return [value];
+	}
+	if (Array.isArray(value)) {
+		return value.flatMap(valueRefs);
+	}
+	if (isInputRef(value)) {
+		return [value];
+	}
 	return Object.values(value).flatMap(valueRefs);
 }
 
 function schemaHasPath(schema: SchemaAst, path: string | undefined): boolean {
-	if (path === undefined) return true;
+	if (path === undefined) {
+		return true;
+	}
 	let current: unknown = schema.schema;
 	for (const segment of path.split(".")) {
-		if (!isRecord(current)) return false;
+		if (!isRecord(current)) {
+			return false;
+		}
 		const properties = isRecord(current.properties) ? current.properties : undefined;
-		if (properties !== undefined && segment in properties) current = properties[segment];
-		else if (isRecord(current.additionalProperties)) current = current.additionalProperties;
-		else if (current.type === "array" && isRecord(current.items)) current = current.items;
-		else return false;
+		if (properties !== undefined && segment in properties) {
+			current = properties[segment];
+		} else if (isRecord(current.additionalProperties)) {
+			current = current.additionalProperties;
+		} else if (current.type === "array" && isRecord(current.items)) {
+			current = current.items;
+		} else {
+			return false;
+		}
 	}
 	return true;
 }
@@ -1010,9 +1100,11 @@ function validateActorIsolation(
 		const pointer = `${placement.pointer}/states/${escapePointer(stateId)}`;
 		const refs: ActorRefUse[] = [];
 		if (node.kind === "state") {
-			for (const template of actionTemplates(node.action)) refs.push(...template.refs.map((ref) => ({ ref, pointer })));
+			for (const template of actionTemplates(node.action)) {
+				refs.push(...template.refs.map((ref) => ({ ref, pointer })));
+			}
 			for (const read of artifactReads(node.action, pointer)) {
-				if (states[read.state]?.kind !== "state")
+				if (states[read.state]?.kind !== "state") {
 					diagnostics.push(
 						diagnostic(
 							"ACTOR_ISOLATION_VIOLATION",
@@ -1021,29 +1113,38 @@ function validateActorIsolation(
 							source,
 						),
 					);
+				}
 			}
 		}
 		if ("transitions" in node) {
 			for (const [eventType, transition] of Object.entries(node.transitions)) {
 				for (const [name, binding] of Object.entries(transition.input ?? {})) {
-					if (binding.kind !== "event")
+					if (binding.kind !== "event") {
 						refs.push({
 							ref: binding,
 							pointer: `${pointer}/transitions/${escapePointer(eventType)}/input/${escapePointer(name)}`,
 							allowSelfResult: true,
 						});
+					}
 				}
 			}
 		}
-		if (node.kind === "send") refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
-		if (node.kind === "sendBatch" || node.kind === "callBatch")
+		if (node.kind === "send") {
+			refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
+		}
+		if (node.kind === "sendBatch" || node.kind === "callBatch") {
 			refs.push(...valueRefs(node.inputs).map((ref) => ({ ref, pointer })));
-		if (node.kind === "call") refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
-		if (node.kind === "reply") refs.push(...valueRefs(node.output).map((ref) => ({ ref, pointer })));
+		}
+		if (node.kind === "call") {
+			refs.push(...valueRefs(node.input).map((ref) => ({ ref, pointer })));
+		}
+		if (node.kind === "reply") {
+			refs.push(...valueRefs(node.output).map((ref) => ({ ref, pointer })));
+		}
 		for (const use of refs) {
 			const { ref } = use;
 			if (ref.kind === "actorInput") {
-				if (!schemaHasPath(actorInputSchema, ref.path))
+				if (!schemaHasPath(actorInputSchema, ref.path)) {
 					diagnostics.push(
 						diagnostic(
 							"INVALID_ACTOR_INPUT_REF",
@@ -1052,11 +1153,12 @@ function validateActorIsolation(
 							source,
 						),
 					);
+				}
 				continue;
 			}
 			if (ref.kind === "messageInput") {
 				const message = protocol[ref.message];
-				if (message === undefined || !schemaHasPath(message.input, ref.path))
+				if (message === undefined || !schemaHasPath(message.input, ref.path)) {
 					diagnostics.push(
 						diagnostic(
 							"INVALID_MESSAGE_INPUT_REF",
@@ -1065,11 +1167,12 @@ function validateActorIsolation(
 							source,
 						),
 					);
+				}
 				continue;
 			}
 			if (ref.kind === "result") {
 				const producer = states[ref.state];
-				if (producer?.kind !== "state")
+				if (producer?.kind !== "state") {
 					diagnostics.push(
 						diagnostic(
 							"ACTOR_ISOLATION_VIOLATION",
@@ -1078,7 +1181,7 @@ function validateActorIsolation(
 							source,
 						),
 					);
-				else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path))
+				} else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path)) {
 					diagnostics.push(
 						diagnostic(
 							"UNKNOWN_INPUT_RESULT",
@@ -1087,7 +1190,7 @@ function validateActorIsolation(
 							source,
 						),
 					);
-				else if (
+				} else if (
 					use.allowSelfResult === true &&
 					ref.state !== stateId &&
 					dominators.get(stateId)?.has(ref.state) !== true
@@ -1105,7 +1208,7 @@ function validateActorIsolation(
 			}
 			if (ref.kind === "input") {
 				const schema = node.kind === "state" ? node.input?.[ref.name] : undefined;
-				if (schema === undefined || !schemaHasPath(schema, ref.path))
+				if (schema === undefined || !schemaHasPath(schema, ref.path)) {
 					diagnostics.push(
 						diagnostic(
 							"ACTOR_ISOLATION_VIOLATION",
@@ -1114,9 +1217,10 @@ function validateActorIsolation(
 							source,
 						),
 					);
+				}
 				continue;
 			}
-			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state")
+			if (ref.kind === "visit" && ref.state !== undefined && states[ref.state]?.kind !== "state") {
 				diagnostics.push(
 					diagnostic(
 						"ACTOR_ISOLATION_VIOLATION",
@@ -1125,7 +1229,7 @@ function validateActorIsolation(
 						source,
 					),
 				);
-			else if (ref.kind !== "visit")
+			} else if (ref.kind !== "visit") {
 				diagnostics.push(
 					diagnostic(
 						"ACTOR_ISOLATION_VIOLATION",
@@ -1134,13 +1238,18 @@ function validateActorIsolation(
 						source,
 					),
 				);
+			}
 		}
 	}
 }
 
 function actorWorkflowControlSuccessors(node: ActorWorkflowStateAst): StateId[] {
-	if (node.kind === "receive") return Object.values(node.on);
-	if (node.kind === "reply") return [node.target];
+	if (node.kind === "receive") {
+		return Object.values(node.on);
+	}
+	if (node.kind === "reply") {
+		return [node.target];
+	}
 	return actorWorkflowSuccessors(node);
 }
 
@@ -1152,23 +1261,34 @@ function actorWorkflowDominators(
 	const pending = [initial];
 	while (pending.length > 0) {
 		const state = pending.shift()!;
-		if (reachable.has(state) || states[state] === undefined) continue;
+		if (reachable.has(state) || states[state] === undefined) {
+			continue;
+		}
 		reachable.add(state);
 		pending.push(...actorWorkflowControlSuccessors(states[state]!));
 	}
 	const predecessors = new Map<StatePath, Set<StatePath>>();
-	for (const state of reachable) predecessors.set(state, new Set());
 	for (const state of reachable) {
-		for (const target of actorWorkflowControlSuccessors(states[state]!))
-			if (reachable.has(target)) predecessors.get(target)!.add(state);
+		predecessors.set(state, new Set());
+	}
+	for (const state of reachable) {
+		for (const target of actorWorkflowControlSuccessors(states[state]!)) {
+			if (reachable.has(target)) {
+				predecessors.get(target)!.add(state);
+			}
+		}
 	}
 	const dominators = new Map<StatePath, Set<StatePath>>();
-	for (const state of reachable) dominators.set(state, state === initial ? new Set([state]) : new Set(reachable));
+	for (const state of reachable) {
+		dominators.set(state, state === initial ? new Set([state]) : new Set(reachable));
+	}
 	let changed = true;
 	while (changed) {
 		changed = false;
 		for (const state of reachable) {
-			if (state === initial) continue;
+			if (state === initial) {
+				continue;
+			}
 			const incoming = [...predecessors.get(state)!];
 			const common =
 				incoming.length === 0
@@ -1198,7 +1318,9 @@ function validateMessagingNode(
 	pointer: string,
 	source: ChartSource,
 ): void {
-	if (node.to.length === 0) return;
+	if (node.to.length === 0) {
+		return;
+	}
 	const targetOwner = node.to.includes(".@") ? node.to.slice(0, node.to.lastIndexOf(".@")) : undefined;
 	if (
 		targetOwner !== undefined &&
@@ -1234,11 +1356,14 @@ function validateActorTargets(
 	source: ChartSource,
 ): void {
 	for (const [path, node] of Object.entries(states)) {
-		if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch")
+		if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch") {
 			continue;
+		}
 		const actor = actors[node.to];
-		if (actor === undefined) continue;
-		if (!(node.event in actor.protocol))
+		if (actor === undefined) {
+			continue;
+		}
+		if (!(node.event in actor.protocol)) {
 			diagnostics.push(
 				diagnostic(
 					"UNKNOWN_PROTOCOL_MESSAGE",
@@ -1247,8 +1372,9 @@ function validateActorTargets(
 					source,
 				),
 			);
+		}
 		const owner = actor.owner;
-		if (owner !== undefined && path !== owner && !path.startsWith(`${owner}.`))
+		if (owner !== undefined && path !== owner && !path.startsWith(`${owner}.`)) {
 			diagnostics.push(
 				diagnostic(
 					"ACTOR_SCOPE_VIOLATION",
@@ -1257,16 +1383,20 @@ function validateActorTargets(
 					source,
 				),
 			);
+		}
 		validateCallRouting(node, actor.protocol[node.event], `${statePointer(path)}`, diagnostics, source);
 	}
 	for (const declaration of Object.values(actors)) {
 		for (const [stateId, node] of Object.entries(actorDefinitionAst(declaration).states)) {
-			if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch")
+			if (node.kind !== "send" && node.kind !== "sendBatch" && node.kind !== "call" && node.kind !== "callBatch") {
 				continue;
+			}
 			const target = actors[node.to];
 			const pointer = `/actors/${escapePointer(declaration.name)}/states/${escapePointer(stateId)}`;
-			if (target === undefined) continue;
-			if (!(node.event in target.protocol))
+			if (target === undefined) {
+				continue;
+			}
+			if (!(node.event in target.protocol)) {
 				diagnostics.push(
 					diagnostic(
 						"UNKNOWN_PROTOCOL_MESSAGE",
@@ -1275,12 +1405,13 @@ function validateActorTargets(
 						source,
 					),
 				);
+			}
 			const targetOwner = target.owner;
 			if (
 				targetOwner !== undefined &&
 				declaration.owner !== targetOwner &&
 				!(declaration.owner?.startsWith(`${targetOwner}.`) ?? false)
-			)
+			) {
 				diagnostics.push(
 					diagnostic(
 						"ACTOR_SCOPE_VIOLATION",
@@ -1289,6 +1420,7 @@ function validateActorTargets(
 						source,
 					),
 				);
+			}
 			validateCallRouting(node, target.protocol[node.event], pointer, diagnostics, source);
 		}
 	}
@@ -1301,9 +1433,11 @@ function validateCallRouting(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
-	if (message === undefined || (node.kind !== "call" && node.kind !== "callBatch")) return;
+	if (message === undefined || (node.kind !== "call" && node.kind !== "callBatch")) {
+		return;
+	}
 	if (node.kind === "callBatch") {
-		if (message.reply.kind !== "single")
+		if (message.reply.kind !== "single") {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_CALL_BATCH_REPLY",
@@ -1312,14 +1446,16 @@ function validateCallRouting(
 					source,
 				),
 			);
-		if (node.target.length === 0)
+		}
+		if (node.target.length === 0) {
 			diagnostics.push(diagnostic("INVALID_CALL_TARGET", "callBatch() requires a target.", pointer, source));
+		}
 		return;
 	}
 	if (message.reply.kind === "named") {
 		const expected = Object.keys(message.reply.schemas).sort();
 		const actual = Object.keys(node.transitions).sort();
-		if (JSON.stringify(expected) !== JSON.stringify(actual) || node.target !== undefined)
+		if (JSON.stringify(expected) !== JSON.stringify(actual) || node.target !== undefined) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_CALL_TRANSITIONS",
@@ -1328,6 +1464,7 @@ function validateCallRouting(
 					source,
 				),
 			);
+		}
 	} else if (node.target === undefined || Object.keys(node.transitions).length > 0) {
 		diagnostics.push(
 			diagnostic(
@@ -1351,15 +1488,22 @@ function validateActorUsage(
 		if (
 			(node.kind === "send" || node.kind === "sendBatch" || node.kind === "call" || node.kind === "callBatch") &&
 			!("self" in node && node.self === true)
-		)
+		) {
 			targeted.add(node.to);
+		}
 	};
-	for (const node of Object.values(states)) collect(node);
+	for (const node of Object.values(states)) {
+		collect(node);
+	}
 	for (const actor of Object.values(actors)) {
-		for (const node of Object.values(actorDefinitionAst(actor).states)) collect(node);
+		for (const node of Object.values(actorDefinitionAst(actor).states)) {
+			collect(node);
+		}
 	}
 	for (const [path, actor] of Object.entries(actors)) {
-		if (targeted.has(path)) continue;
+		if (targeted.has(path)) {
+			continue;
+		}
 		const pointer =
 			actor.owner === undefined
 				? `/actors/${escapePointer(actor.name)}`
@@ -1394,7 +1538,9 @@ function validateActorCallCycles(
 	const settled = new Set<string>();
 	const visiting = new Set<string>();
 	const visit = (path: string, trail: string[]): void => {
-		if (settled.has(path)) return;
+		if (settled.has(path)) {
+			return;
+		}
 		if (visiting.has(path)) {
 			const cycle = [...trail.slice(trail.indexOf(path)), path];
 			diagnostics.push(
@@ -1408,11 +1554,17 @@ function validateActorCallCycles(
 			return;
 		}
 		visiting.add(path);
-		for (const next of graph.get(path) ?? []) if (graph.has(next)) visit(next, [...trail, path]);
+		for (const next of graph.get(path) ?? []) {
+			if (graph.has(next)) {
+				visit(next, [...trail, path]);
+			}
+		}
 		visiting.delete(path);
 		settled.add(path);
 	};
-	for (const path of graph.keys()) visit(path, []);
+	for (const path of graph.keys()) {
+		visit(path, []);
+	}
 }
 
 function toValueAst(
@@ -1422,9 +1574,13 @@ function toValueAst(
 	source: ChartSource,
 	ancestors = new WeakSet<object>(),
 ): ValueAst | undefined {
-	if (input === null || typeof input === "string" || typeof input === "boolean") return input;
+	if (input === null || typeof input === "string" || typeof input === "boolean") {
+		return input;
+	}
 	if (typeof input === "number") {
-		if (Number.isFinite(input)) return input;
+		if (Number.isFinite(input)) {
+			return input;
+		}
 		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values require finite numbers.", pointer, source));
 		return undefined;
 	}
@@ -1445,7 +1601,9 @@ function toValueAst(
 		);
 		return undefined;
 	}
-	if (isInputRef(input)) return toInputRef(input, pointer, diagnostics, source);
+	if (isInputRef(input)) {
+		return toInputRef(input, pointer, diagnostics, source);
+	}
 	if (ancestors.has(input)) {
 		diagnostics.push(diagnostic("INVALID_ACTOR_VALUE", "Actor values cannot be circular.", pointer, source));
 		return undefined;
@@ -1469,8 +1627,9 @@ function toValueAst(
 		return undefined;
 	}
 	const value: Record<string, ValueAst> = {};
-	for (const [name, child] of Object.entries(input))
+	for (const [name, child] of Object.entries(input)) {
 		value[name] = toValueAst(child, `${pointer}/${escapePointer(name)}`, diagnostics, source, ancestors) ?? null;
+	}
 	ancestors.delete(input);
 	return value;
 }
@@ -1737,7 +1896,7 @@ function collectState(
 		}
 		const authoredSelf = isRecord(input.to) && input.to.kind === "actorSelf";
 		const targetActor = authoredSelf ? undefined : isRecord(input.to) ? actorTargets.get(input.to) : undefined;
-		if (authoredSelf)
+		if (authoredSelf) {
 			diagnostics.push(
 				diagnostic(
 					"SELF_OUTSIDE_ACTOR",
@@ -1746,7 +1905,7 @@ function collectState(
 					source,
 				),
 			);
-		else if (targetActor === undefined)
+		} else if (targetActor === undefined) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_ACTOR_TARGET",
@@ -1755,8 +1914,9 @@ function collectState(
 					source,
 				),
 			);
+		}
 		const eventType = typeof input.event === "string" && input.event.length > 0 ? input.event : undefined;
-		if (eventType === undefined)
+		if (eventType === undefined) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_ACTOR_EVENT",
@@ -1765,17 +1925,20 @@ function collectState(
 					source,
 				),
 			);
+		}
 		if (input.kind === "send" || input.kind === "sendBatch") {
 			const batch = input.kind === "sendBatch";
 			const field = batch ? "inputs" : "input";
-			if (!Object.hasOwn(input, field))
+			if (!Object.hasOwn(input, field)) {
 				diagnostics.push(diagnostic("INVALID_SEND_INPUT", `${input.kind}() requires ${field}.`, pointer, source));
-			if (batch && Array.isArray(input.inputs) && input.inputs.length === 0)
+			}
+			if (batch && Array.isArray(input.inputs) && input.inputs.length === 0) {
 				diagnostics.push(
 					diagnostic("EMPTY_ACTOR_BATCH", "sendBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
 				);
+			}
 			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
-			if (target.length === 0)
+			if (target.length === 0) {
 				diagnostics.push(
 					diagnostic(
 						"INVALID_TRANSITION_TARGET",
@@ -1784,6 +1947,7 @@ function collectState(
 						source,
 					),
 				);
+			}
 			const value = toValueAst(input[field], `${pointer}/${field}`, diagnostics, source) ?? (batch ? [] : null);
 			states[path] = deepFreeze(
 				batch
@@ -1811,12 +1975,13 @@ function collectState(
 			return;
 		}
 		if (input.kind === "callBatch") {
-			if (Array.isArray(input.inputs) && input.inputs.length === 0)
+			if (Array.isArray(input.inputs) && input.inputs.length === 0) {
 				diagnostics.push(
 					diagnostic("EMPTY_ACTOR_BATCH", "callBatch() inputs must be non-empty.", `${pointer}/inputs`, source),
 				);
+			}
 			const target = typeof input.target === "string" && input.target.length > 0 ? input.target : "";
-			if (target.length === 0)
+			if (target.length === 0) {
 				diagnostics.push(
 					diagnostic(
 						"INVALID_CALL_TARGET",
@@ -1825,6 +1990,7 @@ function collectState(
 						source,
 					),
 				);
+			}
 			states[path] = deepFreeze({
 				kind: "callBatch",
 				id: localId,
@@ -1894,7 +2060,9 @@ function collectState(
 				);
 			}
 		}
-		if (action === undefined) return;
+		if (action === undefined) {
+			return;
+		}
 		const validation = action.kind === "agent" ? action.validation : undefined;
 		if (validation?.guard.kind === "script") {
 			const actionArtifacts = action.kind === "agent" ? (action.artifacts ?? {}) : {};
@@ -1931,16 +2099,22 @@ function collectState(
 export function declaredArtifactsForState(
 	state: Extract<StateAst, { kind: "state" }>,
 ): Readonly<Record<string, ArtifactAst>> | undefined {
-	if (state.action.kind === "user") return undefined;
+	if (state.action.kind === "user") {
+		return undefined;
+	}
 	const merged: Record<string, ArtifactAst> = {};
 	const add = (artifacts: Readonly<Record<string, ArtifactAst>> | undefined) => {
 		for (const [name, artifact] of Object.entries(artifacts ?? {})) {
 			Object.defineProperty(merged, name, { configurable: true, enumerable: true, value: artifact, writable: true });
 		}
 	};
-	if ("artifacts" in state.action) add(state.action.artifacts as Readonly<Record<string, ArtifactAst>> | undefined);
+	if ("artifacts" in state.action) {
+		add(state.action.artifacts as Readonly<Record<string, ArtifactAst>> | undefined);
+	}
 	const guard = state.action.kind === "agent" ? state.action.validation?.guard : undefined;
-	if (guard?.kind === "script") add(guard.artifacts);
+	if (guard?.kind === "script") {
+		add(guard.artifacts);
+	}
 	return Object.keys(merged).length === 0 ? undefined : merged;
 }
 
@@ -2163,8 +2337,9 @@ function validateTargets(
 			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 			if (guard?.kind === "script") {
 				for (const value of Object.values(guard.env ?? {})) {
-					if (typeof value !== "string" && value.kind === "template")
+					if (typeof value !== "string" && value.kind === "template") {
 						validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
+					}
 				}
 				for (const declared of Object.values(guard.artifacts ?? {})) {
 					validateTemplateRefs(
@@ -2271,9 +2446,15 @@ function validateEnterCycles(
 ): void {
 	const successors = (path: StatePath): StatePath[] => {
 		const node = states[path];
-		if (node === undefined) return [];
-		if (node.kind === "compound" || node.kind === "region") return [`${path}.${node.initial}`];
-		if (node.kind === "parallel") return node.regions.map((region) => `${path}.${region}`);
+		if (node === undefined) {
+			return [];
+		}
+		if (node.kind === "compound" || node.kind === "region") {
+			return [`${path}.${node.initial}`];
+		}
+		if (node.kind === "parallel") {
+			return node.regions.map((region) => `${path}.${region}`);
+		}
 		if (node.kind === "final" && node.parent !== undefined) {
 			const container = states[node.parent];
 			if (container?.kind === "compound") {
@@ -2285,7 +2466,9 @@ function validateEnterCycles(
 	const settled = new Set<StatePath>();
 	const entering = new Set<StatePath>();
 	const visit = (path: StatePath, trail: StatePath[]): void => {
-		if (settled.has(path)) return;
+		if (settled.has(path)) {
+			return;
+		}
 		if (entering.has(path)) {
 			const cycle = [...trail.slice(trail.indexOf(path)), path];
 			diagnostics.push(
@@ -2299,11 +2482,15 @@ function validateEnterCycles(
 			return;
 		}
 		entering.add(path);
-		for (const next of successors(path)) visit(next, [...trail, path]);
+		for (const next of successors(path)) {
+			visit(next, [...trail, path]);
+		}
 		entering.delete(path);
 		settled.add(path);
 	};
-	for (const path of Object.keys(states)) visit(path, []);
+	for (const path of Object.keys(states)) {
+		visit(path, []);
+	}
 }
 
 function validateActorPlacementRefs(
@@ -2318,7 +2505,9 @@ function validateActorPlacementRefs(
 		const consumer = actor.owner;
 		for (const ref of valueRefs(actor.inputValue)) {
 			const pointer = `/actors/${escapePointer(actor.name)}/placement`;
-			if (ref.kind === "arg") continue;
+			if (ref.kind === "arg") {
+				continue;
+			}
 			if (ref.kind === "result") {
 				if (
 					consumer === undefined ||
@@ -2338,8 +2527,10 @@ function validateActorPlacementRefs(
 			}
 			if (ref.kind === "key" || ref.kind === "item") {
 				let scope = consumer;
-				while (scope !== undefined && states[scope]?.kind !== "map") scope = parentStatePath(scope);
-				if (scope === undefined || (ref.map !== undefined && ref.map !== scope))
+				while (scope !== undefined && states[scope]?.kind !== "map") {
+					scope = parentStatePath(scope);
+				}
+				if (scope === undefined || (ref.map !== undefined && ref.map !== scope)) {
 					diagnostics.push(
 						diagnostic(
 							"INVALID_ACTOR_PLACEMENT_REF",
@@ -2348,6 +2539,7 @@ function validateActorPlacementRefs(
 							source,
 						),
 					);
+				}
 				continue;
 			}
 			diagnostics.push(
@@ -2377,12 +2569,16 @@ function validateInputs(
 		edges.push({ target: initial, pointer: "/initial" });
 	}
 	for (const [path, node] of Object.entries(states)) {
-		if (node.kind === "final") continue;
+		if (node.kind === "final") {
+			continue;
+		}
 		const pointer = statePointer(path);
 		const sibling = (target: string) => (node.parent === undefined ? target : `${node.parent}.${target}`);
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			const target = sibling(transition.target);
-			if (!(target in states)) continue;
+			if (!(target in states)) {
+				continue;
+			}
 			const inputTargets = inputEntryTargets(states, target);
 			const declared = new Set(inputTargets.flatMap((entry) => Object.keys(entry.input)));
 			for (const bindingName of Object.keys(transition.input ?? {})) {
@@ -2408,23 +2604,30 @@ function validateInputs(
 			node.target !== undefined
 		) {
 			const target = sibling(node.target);
-			if (target in states) edges.push({ target, pointer: `${pointer}/target` });
+			if (target in states) {
+				edges.push({ target, pointer: `${pointer}/target` });
+			}
 		}
 		if (node.kind === "state" && node.after !== undefined) {
 			const target = sibling(node.after.target);
-			if (target in states) edges.push({ target, pointer: `${pointer}/after` });
+			if (target in states) {
+				edges.push({ target, pointer: `${pointer}/after` });
+			}
 		}
 		if (node.kind === "map" && node.initial.length > 0) {
 			const target = `${path}.${node.initial}`;
-			if (target in states)
+			if (target in states) {
 				edges.push({
 					target,
 					pointer: `${pointer}/states/${escapePointer(node.initial)}`,
 				});
+			}
 		}
 		if ((node.kind === "compound" || node.kind === "parallel" || node.kind === "map") && node.onDone.length > 0) {
 			const target = sibling(node.onDone);
-			if (target in states) edges.push({ target, pointer: `${pointer}/onDone` });
+			if (target in states) {
+				edges.push({ target, pointer: `${pointer}/onDone` });
+			}
 		}
 	}
 	const edgesByInputTarget = new Map<StatePath, typeof edges>();
@@ -2436,10 +2639,14 @@ function validateInputs(
 		}
 	}
 	for (const [path, node] of Object.entries(states)) {
-		if ((node.kind !== "state" && node.kind !== "map") || node.input === undefined) continue;
+		if ((node.kind !== "state" && node.kind !== "map") || node.input === undefined) {
+			continue;
+		}
 		const incoming = edgesByInputTarget.get(path) ?? [];
 		for (const [name, schema] of Object.entries(node.input)) {
-			if (schemaHasDefault(schema)) continue;
+			if (schemaHasDefault(schema)) {
+				continue;
+			}
 			for (const edge of incoming) {
 				if (edge.bindings?.[name] === undefined) {
 					diagnostics.push(
@@ -2462,7 +2669,9 @@ function inputEntryTargets(
 	path: StatePath,
 ): Array<{ path: StatePath; input: Readonly<Record<string, SchemaAst>> }> {
 	const node = states[path];
-	if (node === undefined) return [];
+	if (node === undefined) {
+		return [];
+	}
 	if (node.kind === "state") {
 		return node.input === undefined ? [] : [{ path, input: node.input }];
 	}
@@ -2497,8 +2706,12 @@ function validateDominatedRefs(
 	const graph = buildDominanceGraph(states, initial);
 	const dominators = computeDominators(graph);
 	const check = (producer: StatePath, consumer: StatePath, pointer: string, label: string, allowSelf = false) => {
-		if (states[producer]?.kind !== "state") return;
-		if ((allowSelf && producer === consumer) || dominatesForDataRef(states, dominators, producer, consumer)) return;
+		if (states[producer]?.kind !== "state") {
+			return;
+		}
+		if ((allowSelf && producer === consumer) || dominatesForDataRef(states, dominators, producer, consumer)) {
+			return;
+		}
 		diagnostics.push(
 			diagnostic(
 				"NON_DOMINATED_REF",
@@ -2513,7 +2726,9 @@ function validateDominatedRefs(
 		const pointer = statePointer(path);
 		if (node.kind === "final") {
 			for (const ref of node.notify?.prompt?.refs ?? []) {
-				if (ref.kind === "result") check(ref.state, path, `${pointer}/notify/prompt`, "result()");
+				if (ref.kind === "result") {
+					check(ref.state, path, `${pointer}/notify/prompt`, "result()");
+				}
 			}
 			for (const [index, read] of (node.notify?.artifacts ?? []).entries()) {
 				check(read.state, path, `${pointer}/notify/artifacts/${index}`, "artifactOf()");
@@ -2536,12 +2751,16 @@ function validateDominatedRefs(
 		if (node.kind === "state") {
 			for (const template of actionTemplates(node.action)) {
 				for (const ref of template.refs) {
-					if (ref.kind === "result") check(ref.state, path, `${pointer}/action`, "result()");
+					if (ref.kind === "result") {
+						check(ref.state, path, `${pointer}/action`, "result()");
+					}
 				}
 			}
 			if (node.action.kind === "agent" && typeof node.action.reentry === "object") {
 				for (const ref of node.action.reentry.resume.refs) {
-					if (ref.kind === "result") check(ref.state, path, `${pointer}/action/reentry/resume`, "result()");
+					if (ref.kind === "result") {
+						check(ref.state, path, `${pointer}/action/reentry/resume`, "result()");
+					}
 				}
 			}
 			const reads = artifactReads(node.action, pointer);
@@ -2556,15 +2775,19 @@ function validateDominatedRefs(
 						});
 					}
 					if (typeof value !== "string" && value.kind === "template") {
-						for (const ref of value.refs)
-							if (ref.kind === "result")
+						for (const ref of value.refs) {
+							if (ref.kind === "result") {
 								check(ref.state, path, `${pointer}/action/validation/guard/env/${escapePointer(name)}`, "result()");
+							}
+						}
 					}
 				}
 				for (const [name, declared] of Object.entries(guard.artifacts ?? {})) {
-					for (const ref of declared.path.refs)
-						if (ref.kind === "result")
+					for (const ref of declared.path.refs) {
+						if (ref.kind === "result") {
 							check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
+						}
+					}
 				}
 			}
 			for (const read of reads) {
@@ -2573,10 +2796,14 @@ function validateDominatedRefs(
 			continue;
 		}
 		if (node.kind === "map") {
-			if (node.over.kind === "result") check(node.over.state, path, `${pointer}/over`, "result()");
+			if (node.over.kind === "result") {
+				check(node.over.state, path, `${pointer}/over`, "result()");
+			}
 			if (typeof node.onReenter === "object") {
 				for (const ref of node.onReenter.message.refs) {
-					if (ref.kind === "result") check(ref.state, path, `${pointer}/onReenter/message`, "result()");
+					if (ref.kind === "result") {
+						check(ref.state, path, `${pointer}/onReenter/message`, "result()");
+					}
 				}
 			}
 		}
@@ -2590,14 +2817,16 @@ function artifactReads(
 	const reads: Array<{ state: StatePath; pointer: string; allowSelf?: boolean }> = [];
 	if (action.kind === "agent") {
 		for (const [index, read] of (action.reads ?? []).entries()) {
-			if (read.kind === "artifactOf" || read.kind === "joinArtifactOf")
+			if (read.kind === "artifactOf" || read.kind === "joinArtifactOf") {
 				reads.push({ state: read.state, pointer: `${basePointer}/action/reads/${index}` });
+			}
 		}
 	}
 	if (action.kind === "script" || action.kind === "tsImport") {
 		for (const [name, value] of Object.entries(action.env ?? {})) {
-			if (value.kind === "artifactOf" || value.kind === "joinArtifactOf")
+			if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") {
 				reads.push({ state: value.state, pointer: `${basePointer}/action/env/${escapePointer(name)}` });
+			}
 		}
 	}
 	return reads;
@@ -2608,11 +2837,17 @@ function buildDominanceGraph(
 	initial: StateId,
 ): Map<DominatorNode, Set<DominatorNode>> {
 	const graph = new Map<DominatorNode, Set<DominatorNode>>([[DOMINATOR_START, new Set()]]);
-	for (const path of Object.keys(states)) graph.set(path, new Set());
+	for (const path of Object.keys(states)) {
+		graph.set(path, new Set());
+	}
 	const addEdge = (from: DominatorNode, to: StatePath) => {
-		if (to in states) graph.get(from)?.add(to);
+		if (to in states) {
+			graph.get(from)?.add(to);
+		}
 	};
-	if (initial in states) addEdge(DOMINATOR_START, initial);
+	if (initial in states) {
+		addEdge(DOMINATOR_START, initial);
+	}
 
 	for (const [path, node] of Object.entries(states)) {
 		if (node.kind !== "final") {
@@ -2638,7 +2873,9 @@ function buildDominanceGraph(
 			addEdge(path, siblingTarget(node, node.onDone));
 		}
 		if (node.kind === "parallel") {
-			for (const region of node.regions) addEdge(path, `${path}.${region}`);
+			for (const region of node.regions) {
+				addEdge(path, `${path}.${region}`);
+			}
 			// Parallel onDone is an AND-join in the runtime; this edge keeps the join target reachable
 			// for ordinary dominators, while parallelJoinDominates handles region products precisely.
 			addEdge(path, siblingTarget(node, node.onDone));
@@ -2656,11 +2893,17 @@ function buildDominanceGraph(
 function computeDominators(graph: Map<DominatorNode, Set<DominatorNode>>): Map<DominatorNode, Set<DominatorNode>> {
 	const reachable = reachableNodes(graph);
 	const predecessors = new Map<DominatorNode, Set<DominatorNode>>();
-	for (const node of reachable) predecessors.set(node, new Set());
+	for (const node of reachable) {
+		predecessors.set(node, new Set());
+	}
 	for (const [from, targets] of graph) {
-		if (!reachable.has(from)) continue;
+		if (!reachable.has(from)) {
+			continue;
+		}
 		for (const to of targets) {
-			if (reachable.has(to)) predecessors.get(to)?.add(from);
+			if (reachable.has(to)) {
+				predecessors.get(to)?.add(from);
+			}
 		}
 	}
 	const all = [...reachable];
@@ -2672,11 +2915,15 @@ function computeDominators(graph: Map<DominatorNode, Set<DominatorNode>>): Map<D
 	while (changed) {
 		changed = false;
 		for (const node of all) {
-			if (node === DOMINATOR_START) continue;
+			if (node === DOMINATOR_START) {
+				continue;
+			}
 			const preds = [...(predecessors.get(node) ?? [])];
 			const next = new Set<DominatorNode>([node]);
 			const intersection = intersectSets(preds.map((pred) => dominators.get(pred) ?? new Set<DominatorNode>()));
-			for (const item of intersection) next.add(item);
+			for (const item of intersection) {
+				next.add(item);
+			}
 			if (!sameSet(dominators.get(node) ?? new Set(), next)) {
 				dominators.set(node, next);
 				changed = true;
@@ -2691,9 +2938,13 @@ function reachableNodes(graph: Map<DominatorNode, Set<DominatorNode>>): Set<Domi
 	const queue: DominatorNode[] = [DOMINATOR_START];
 	for (let index = 0; index < queue.length; index++) {
 		const node = queue[index];
-		if (node === undefined || reachable.has(node)) continue;
+		if (node === undefined || reachable.has(node)) {
+			continue;
+		}
 		reachable.add(node);
-		for (const next of graph.get(node) ?? []) queue.push(next);
+		for (const next of graph.get(node) ?? []) {
+			queue.push(next);
+		}
 	}
 	return reachable;
 }
@@ -2704,7 +2955,9 @@ function dominatesForDataRef(
 	producer: StatePath,
 	consumer: StatePath,
 ): boolean {
-	if (strictlyDominates(dominators, producer, consumer)) return true;
+	if (strictlyDominates(dominators, producer, consumer)) {
+		return true;
+	}
 	return (
 		parallelJoinDominates(states, dominators, producer, consumer) ||
 		mapJoinDominates(states, dominators, producer, consumer)
@@ -2718,12 +2971,20 @@ function parallelJoinDominates(
 	consumer: StatePath,
 ): boolean {
 	const scope = enclosingParallelRegion(states, producer);
-	if (scope === undefined || underStateScope(consumer, scope.parallelPath)) return false;
+	if (scope === undefined || underStateScope(consumer, scope.parallelPath)) {
+		return false;
+	}
 	const parallel = states[scope.parallelPath];
-	if (parallel?.kind !== "parallel") return false;
+	if (parallel?.kind !== "parallel") {
+		return false;
+	}
 	const joinTarget = siblingTarget(parallel, parallel.onDone);
-	if (!isDominatedBy(dominators, scope.parallelPath, consumer)) return false;
-	if (consumer !== joinTarget && !strictlyDominates(dominators, joinTarget, consumer)) return false;
+	if (!isDominatedBy(dominators, scope.parallelPath, consumer)) {
+		return false;
+	}
+	if (consumer !== joinTarget && !strictlyDominates(dominators, joinTarget, consumer)) {
+		return false;
+	}
 	return finalDescendants(states, scope.regionPath).some((finalPath) =>
 		strictlyDominates(dominators, producer, finalPath),
 	);
@@ -2736,13 +2997,23 @@ function mapJoinDominates(
 	consumer: StatePath,
 ): boolean {
 	let mapPath = parentStatePath(producer);
-	while (mapPath !== undefined && states[mapPath]?.kind !== "map") mapPath = parentStatePath(mapPath);
-	if (mapPath === undefined || underStateScope(consumer, mapPath)) return false;
+	while (mapPath !== undefined && states[mapPath]?.kind !== "map") {
+		mapPath = parentStatePath(mapPath);
+	}
+	if (mapPath === undefined || underStateScope(consumer, mapPath)) {
+		return false;
+	}
 	const map = states[mapPath];
-	if (map?.kind !== "map") return false;
+	if (map?.kind !== "map") {
+		return false;
+	}
 	const joinTarget = siblingTarget(map, map.onDone);
-	if (!isDominatedBy(dominators, mapPath, consumer)) return false;
-	if (consumer !== joinTarget && !strictlyDominates(dominators, joinTarget, consumer)) return false;
+	if (!isDominatedBy(dominators, mapPath, consumer)) {
+		return false;
+	}
+	if (consumer !== joinTarget && !strictlyDominates(dominators, joinTarget, consumer)) {
+		return false;
+	}
 	return finalDescendants(states, mapPath).some((finalPath) => strictlyDominates(dominators, producer, finalPath));
 }
 
@@ -2797,11 +3068,15 @@ function isDominatedBy(
 }
 
 function intersectSets<T>(sets: Set<T>[]): Set<T> {
-	if (sets.length === 0) return new Set();
+	if (sets.length === 0) {
+		return new Set();
+	}
 	const [first, ...rest] = sets;
 	const result = new Set(first);
 	for (const item of first ?? []) {
-		if (!rest.every((set) => set.has(item))) result.delete(item);
+		if (!rest.every((set) => set.has(item))) {
+			result.delete(item);
+		}
 	}
 	return result;
 }
@@ -2931,7 +3206,9 @@ function insideMap(
 ): boolean {
 	let cur = includeSelf ? path : states[path]?.parent;
 	while (cur !== undefined) {
-		if (states[cur]?.kind === "map" && (map === undefined || cur === map)) return true;
+		if (states[cur]?.kind === "map" && (map === undefined || cur === map)) {
+			return true;
+		}
 		cur = states[cur]?.parent;
 	}
 	return false;
@@ -2960,7 +3237,9 @@ function toTerminalNotification(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): TerminalNotificationAst | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_TERMINAL_NOTIFICATION", "notify must be an object.", path, source));
 		return undefined;
@@ -2997,7 +3276,9 @@ function toTerminalNotification(
 						),
 					);
 				}
-				if (ref !== undefined) artifacts.push(ref);
+				if (ref !== undefined) {
+					artifacts.push(ref);
+				}
 			}
 		}
 	}
@@ -3025,7 +3306,9 @@ function toTemplate(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): TemplateAst | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	// A plain string is a template with no refs.
 	if (typeof input === "string") {
 		return { kind: "template", strings: [input], refs: [] };
@@ -3042,7 +3325,9 @@ function toTemplate(
 	const refs: InputRef[] = [];
 	for (const [index, raw] of input.refs.entries()) {
 		const ref = toInputRef(raw, `${path}/${index}`, diagnostics, source);
-		if (ref === undefined) return undefined;
+		if (ref === undefined) {
+			return undefined;
+		}
 		refs.push(ref);
 	}
 	return { kind: "template", strings, refs };
@@ -3055,7 +3340,9 @@ function toArtifacts(
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
 ): Record<string, ArtifactAst> | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_ARTIFACT", "artifacts must be a map of name → artifact.", path, source));
 		return undefined;
@@ -3100,7 +3387,9 @@ function toEnv(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst> | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(
 			diagnostic("INVALID_SCRIPT", "Script env must be a map of name → template or artifactOf.", path, source),
@@ -3112,16 +3401,22 @@ function toEnv(
 		const pointer = `${path}/${escapePointer(name)}`;
 		if (isRecord(value) && value.kind === "artifactOf") {
 			const ref = toArtifactOf(value, pointer, diagnostics, source);
-			if (ref !== undefined) env[name] = ref;
+			if (ref !== undefined) {
+				env[name] = ref;
+			}
 			continue;
 		}
 		if (isRecord(value) && value.kind === "joinArtifactOf") {
 			const ref = toJoinArtifactOf(value, pointer, diagnostics, source);
-			if (ref !== undefined) env[name] = ref;
+			if (ref !== undefined) {
+				env[name] = ref;
+			}
 			continue;
 		}
 		const template = toTemplate(value, pointer, diagnostics, source);
-		if (template !== undefined) env[name] = template;
+		if (template !== undefined) {
+			env[name] = template;
+		}
 	}
 	return env;
 }
@@ -3187,7 +3482,9 @@ function toReads(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!Array.isArray(input)) {
 		diagnostics.push(
 			diagnostic(
@@ -3203,16 +3500,22 @@ function toReads(
 	for (const [index, item] of input.entries()) {
 		if (isRecord(item) && item.kind === "artifactOf") {
 			const ref = toArtifactOf(item, `${path}/${index}`, diagnostics, source);
-			if (ref !== undefined) reads.push(ref);
+			if (ref !== undefined) {
+				reads.push(ref);
+			}
 			continue;
 		}
 		if (isRecord(item) && item.kind === "joinArtifactOf") {
 			const ref = toJoinArtifactOf(item, `${path}/${index}`, diagnostics, source);
-			if (ref !== undefined) reads.push(ref);
+			if (ref !== undefined) {
+				reads.push(ref);
+			}
 			continue;
 		}
 		const template = toTemplate(item, `${path}/${index}`, diagnostics, source);
-		if (template !== undefined) reads.push(template);
+		if (template !== undefined) {
+			reads.push(template);
+		}
 	}
 	return reads;
 }
@@ -3373,7 +3676,9 @@ function toAgentOverrides(
 	} = {};
 	for (const key of ["model", "thinking"] as const) {
 		const value = input[key];
-		if (value === undefined) continue;
+		if (value === undefined) {
+			continue;
+		}
 		if (typeof value !== "string" || value.length === 0) {
 			diagnostics.push(
 				diagnostic("INVALID_AGENT_OPTION", `Agent ${key} must be a non-empty string.`, `${path}/${key}`, source),
@@ -3400,7 +3705,9 @@ function toOnDone(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): string | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (typeof input !== "string" || input.length === 0) {
 		diagnostics.push(diagnostic("INVALID_ON_DONE", "onDone must be a non-empty state id.", path, source));
 		return undefined;
@@ -3415,8 +3722,12 @@ function toOnReenter(
 	source: ChartSource,
 	allowResume: boolean,
 ): OnReenterAst | undefined {
-	if (input === undefined) return undefined;
-	if (input === "restart") return "restart";
+	if (input === undefined) {
+		return undefined;
+	}
+	if (input === "restart") {
+		return "restart";
+	}
 	if (!isRecord(input) || input.kind !== "resume") {
 		diagnostics.push(
 			diagnostic("INVALID_ON_REENTER", "onReenter must be 'restart' or { kind: 'resume', message }.", path, source),
@@ -3478,8 +3789,12 @@ function toRecoveryPolicy(
 	source: ChartSource,
 	fallback: RecoveryPolicyAst,
 ): RecoveryPolicyAst {
-	if (input === undefined) return fallback;
-	if (input === "fail") return { nudge: 0, restart: 0 };
+	if (input === undefined) {
+		return fallback;
+	}
+	if (input === "fail") {
+		return { nudge: 0, restart: 0 };
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(
 			diagnostic(
@@ -3493,7 +3808,9 @@ function toRecoveryPolicy(
 	}
 	const count = (key: "nudge" | "restart"): number => {
 		const value = input[key];
-		if (value === undefined) return 0;
+		if (value === undefined) {
+			return 0;
+		}
 		if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
 			diagnostics.push(
 				diagnostic("INVALID_RECOVERY_POLICY", `${key} must be a non-negative safe integer.`, `${path}/${key}`, source),
@@ -3513,7 +3830,9 @@ function toAgentValidation(
 	schemaRegistry: SchemaRegistry,
 	fallback: RecoveryPolicyAst,
 ): AgentActionAst["validation"] {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(
 			diagnostic("INVALID_AGENT_VALIDATION", "validation must be an object with a guard.", path, source),
@@ -3521,7 +3840,9 @@ function toAgentValidation(
 		return undefined;
 	}
 	const guard = toGuardRef(input.guard, `${path}/guard`, diagnostics, source, schemaRegistry);
-	if (guard === undefined) return undefined;
+	if (guard === undefined) {
+		return undefined;
+	}
 	return { guard, onFail: toRecoveryPolicy(input.onFail, `${path}/onFail`, diagnostics, source, fallback) };
 }
 
@@ -3531,8 +3852,12 @@ function toAgentReentry(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): AgentReentryAst | undefined {
-	if (input === undefined) return undefined;
-	if (input === "restart") return "restart";
+	if (input === undefined) {
+		return undefined;
+	}
+	if (input === "restart") {
+		return "restart";
+	}
 	if (!isRecord(input) || !("resume" in input)) {
 		diagnostics.push(
 			diagnostic("INVALID_AGENT_REENTRY", "reentry must be 'restart' or { resume: message }.", path, source),
@@ -3715,7 +4040,9 @@ function toSchemaAst(
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
 ): SchemaAst | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (input instanceof z.ZodType) {
 		const runtimeContract = runtimeContractMetadata(input);
 		if (runtimeContract !== undefined) {
@@ -3761,7 +4088,9 @@ function toInputDeclarations(
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
 ): Record<string, SchemaAst> | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_INPUT", "input must be a map of name → zod schema.", path, source));
 		return undefined;
@@ -3786,7 +4115,9 @@ function toInputDeclarations(
 			continue;
 		}
 		const ast = toSchemaAst(schema, `${path}/${escapePointer(name)}`, diagnostics, source, schemaRegistry);
-		if (ast !== undefined) inputs[name] = ast;
+		if (ast !== undefined) {
+			inputs[name] = ast;
+		}
 	}
 	return inputs;
 }
@@ -3797,7 +4128,9 @@ function toTransitionMap(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): Record<string, TransitionAst> | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_TRANSITIONS", "Transitions must be an object map.", path, source));
 		return undefined;
@@ -3863,7 +4196,9 @@ function toTransitionInputs(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): Record<string, TransitionInputAst> | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(
 			diagnostic("INVALID_BINDING", "Transition input must be a map of name → event() binding or ref.", path, source),
@@ -3894,7 +4229,9 @@ function toTransitionInputs(
 			continue;
 		}
 		const ref = toInputRef(raw, pointer, diagnostics, source);
-		if (ref !== undefined) bindings[name] = ref;
+		if (ref !== undefined) {
+			bindings[name] = ref;
+		}
 	}
 	return bindings;
 }
@@ -3905,7 +4242,9 @@ function toAfter(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): { delayMs: number; target: string } | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_AFTER", "after must be an object with delayMs and target.", path, source));
 		return undefined;
@@ -3932,7 +4271,9 @@ function toGuardRef(
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
 ): GuardRefAst | undefined {
-	if (input === undefined) return undefined;
+	if (input === undefined) {
+		return undefined;
+	}
 	if (!isRecord(input)) {
 		diagnostics.push(
 			diagnostic("INVALID_GUARD", "Guard must be a tsImport or script reference, not an inline value.", path, source),

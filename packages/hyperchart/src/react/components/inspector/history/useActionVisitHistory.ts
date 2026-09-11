@@ -34,17 +34,25 @@ export function useActionVisitHistory(run: HyperchartRunInfo, dataSource?: Hyper
 	});
 	const embeddedRows = useMemo(() => embeddedActionVisitRows(run), [run]);
 	const rows = useMemo<ActionVisitRow[]>(() => {
-		if (dataSource === undefined) return embeddedRows;
-		if (!sameSnapshot(records.window.snapshot, snapshot)) return [];
+		if (dataSource === undefined) {
+			return embeddedRows;
+		}
+		if (!sameSnapshot(records.window.snapshot, snapshot)) {
+			return [];
+		}
 		return actionVisitRows(records.window.items).map((row) => {
 			const graphStateId = graphStateIdForRuntimePath(run.states, row.statePath);
-			if (graphStateId === undefined) return row;
+			if (graphStateId === undefined) {
+				return row;
+			}
 			const state = run.states.find((candidate) => candidate.id === graphStateId);
 			const actorVisit =
 				row.visit === undefined && state !== undefined
 					? actorMessageVisitForState(state, row.invokeSeqId, row.originBranchId)
 					: undefined;
-			if (actorVisit === undefined) return { ...row, graphStateId };
+			if (actorVisit === undefined) {
+				return { ...row, graphStateId };
+			}
 			const { error: _error, ...index } = row;
 			return { ...index, graphStateId, visit: actorVisit };
 		});
@@ -71,7 +79,9 @@ function sameSnapshot(left: HistorySnapshot | undefined, right: HistorySnapshot)
 }
 
 function historySnapshot(run: HyperchartRunInfo): HistorySnapshot {
-	if (run.historySnapshot !== undefined) return run.historySnapshot;
+	if (run.historySnapshot !== undefined) {
+		return run.historySnapshot;
+	}
 	const branchId = run.branchId ?? "main";
 	return {
 		branchId,

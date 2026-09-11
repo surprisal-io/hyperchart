@@ -14,7 +14,9 @@ const enabled = process.env.HYPERCHART_E2E === "1";
 const roots: string[] = [];
 
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 describe.skipIf(!enabled)("claude e2e", () => {

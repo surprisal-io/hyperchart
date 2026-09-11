@@ -33,8 +33,9 @@ const families = [
 	".storybook/tui-production-fixture.ts",
 ];
 function replaceRequired(source, before, after, filename) {
-	if (source.split(before).length !== 2)
+	if (source.split(before).length !== 2) {
 		throw new Error(`Capture transform expected exactly one ${JSON.stringify(before)} in ${filename}`);
+	}
 	return source.replace(before, after);
 }
 const transformed = new Set();
@@ -46,7 +47,9 @@ const jiti = createJiti(import.meta.url, {
 		let source = options.source;
 		if (families.some((family) => options.filename === `${root}${family}`)) {
 			const imports = source.match(/import \{ capturedStorySchedule \} from "[^"]+";/g);
-			if (imports?.length !== 1) throw new Error(`Missing/ambiguous capture import in ${options.filename}`);
+			if (imports?.length !== 1) {
+				throw new Error(`Missing/ambiguous capture import in ${options.filename}`);
+			}
 			source = source
 				.replace(imports[0], `import { captureStorySchedule } from ${JSON.stringify(captureModule)};`)
 				.replaceAll("capturedStorySchedule(", "await captureStorySchedule(");
@@ -78,9 +81,12 @@ const jiti = createJiti(import.meta.url, {
 		return { code: compiler.transform({ ...options, source }) };
 	},
 });
-for (const family of families) await jiti.import(`${root}${family}`);
-if (transformed.size !== families.length)
+for (const family of families) {
+	await jiti.import(`${root}${family}`);
+}
+if (transformed.size !== families.length) {
 	throw new Error("Not every named fixture family was transformed for real capture");
+}
 const { captures } = await jiti.import(captureModule);
 const { captureRemovedValidatorHistory, captureReplayIncompatibleHistory } = await jiti.import(
 	`${root}scripts/story-fixtures/validation-histories.ts`,
@@ -101,7 +107,9 @@ for (const [name, capture] of [
 	);
 	captures.set(name, records);
 }
-if (captures.size === 0) throw new Error("No story records captured; refusing to write an empty registry");
+if (captures.size === 0) {
+	throw new Error("No story records captured; refusing to write an empty registry");
+}
 const output =
 	JSON.stringify(
 		{ captureContext, snapshots: Object.fromEntries([...captures].sort(([a], [b]) => a.localeCompare(b))) },

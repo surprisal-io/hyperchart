@@ -20,8 +20,12 @@ export function buildTaskPrompt(effect: AgentEffect, resolvedReads: ResolvedRead
 
 export function buildRecoveryPrompt(effect: AgentEffect, lastAssistantText?: string): string {
 	const recovery = effect.recovery;
-	if (recovery === undefined) return buildResumePrompt(effect);
-	if (recovery.failure.kind === "incomplete") return buildNudgePrompt(effect, lastAssistantText);
+	if (recovery === undefined) {
+		return buildResumePrompt(effect);
+	}
+	if (recovery.failure.kind === "incomplete") {
+		return buildNudgePrompt(effect, lastAssistantText);
+	}
 	const artifactReminder =
 		(effect.artifacts?.length ?? 0) === 0
 			? ""

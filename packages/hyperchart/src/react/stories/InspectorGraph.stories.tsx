@@ -48,9 +48,13 @@ export const CardAtlas: Story = {
 			Array<{ title: string; run: NonNullable<ReturnType<typeof inspectorPanelScenario>>["run"]; stateId: string }>
 		>();
 		for (const spec of inspectorPanelSpecs) {
-			if (spec.graphAtlas === false) continue;
+			if (spec.graphAtlas === false) {
+				continue;
+			}
 			const scenario = inspectorPanelScenario(spec);
-			if (scenario === undefined || scenario.selectedStateId === null) continue;
+			if (scenario === undefined || scenario.selectedStateId === null) {
+				continue;
+			}
 			const group = atlasGroups.get(spec.group) ?? [];
 			group.push({ title: spec.title, run: scenario.run, stateId: scenario.selectedStateId });
 			atlasGroups.set(spec.group, group);

@@ -18,7 +18,9 @@ it("loads actual offline captures synchronously with explicit invocation policie
 	expect(Object.keys(captured.snapshots).length).toBeGreaterThan(50);
 	for (const snapshot of Object.values(captured.snapshots)) {
 		for (const record of snapshot as DurableLogRecord[]) {
-			if (record.type === "state_action" && record.kind === "invoke") expect(record.definition).toBeDefined();
+			if (record.type === "state_action" && record.kind === "invoke") {
+				expect(record.definition).toBeDefined();
+			}
 		}
 	}
 	const loader = readFileSync(
@@ -57,7 +59,9 @@ it.each([
 	const index = actorNamedReplyRecords.findIndex((record) => record.type === "actor_message" && record.kind === kind);
 	expect(index).toBeGreaterThanOrEqual(0);
 	const selected = actorNamedReplyRecords[index]!;
-	if (selected.type !== "actor_message") throw new Error("Expected actor message selector");
+	if (selected.type !== "actor_message") {
+		throw new Error("Expected actor message selector");
+	}
 	const recaptured = await captureStorySchedule(actorCallAst, actorNamedReplyRecords.slice(0, index + 1));
 	for (const records of [recaptured, actorNamedReplyRecords]) {
 		expect(records.slice(-3)).toMatchObject([

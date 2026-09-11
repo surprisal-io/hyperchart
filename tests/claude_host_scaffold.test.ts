@@ -17,11 +17,19 @@ const roots: string[] = [];
 const savedEnv = { runsRoot: process.env.HYPERCHART_RUNS_ROOT, configDir: process.env.CLAUDE_CONFIG_DIR };
 
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-	if (savedEnv.runsRoot === undefined) delete process.env.HYPERCHART_RUNS_ROOT;
-	else process.env.HYPERCHART_RUNS_ROOT = savedEnv.runsRoot;
-	if (savedEnv.configDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-	else process.env.CLAUDE_CONFIG_DIR = savedEnv.configDir;
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
+	if (savedEnv.runsRoot === undefined) {
+		delete process.env.HYPERCHART_RUNS_ROOT;
+	} else {
+		process.env.HYPERCHART_RUNS_ROOT = savedEnv.runsRoot;
+	}
+	if (savedEnv.configDir === undefined) {
+		delete process.env.CLAUDE_CONFIG_DIR;
+	} else {
+		process.env.CLAUDE_CONFIG_DIR = savedEnv.configDir;
+	}
 });
 
 function tempRoot(): string {

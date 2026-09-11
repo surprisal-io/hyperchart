@@ -32,7 +32,9 @@ const roots: string[] = [];
 afterEach(() => {
 	cleanup();
 	vi.restoreAllMocks();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 async function fixture() {
@@ -128,7 +130,9 @@ it("recovers a changed action identity as definition-only while preserving inher
 		const last = [...invocations]
 			.reverse()
 			.find((record) => record.type === "state_action" && record.actionUid.state === "after")!;
-		if (last.type !== "state_action" || last.kind !== "invoke") throw new Error("missing final invocation");
+		if (last.type !== "state_action" || last.kind !== "invoke") {
+			throw new Error("missing final invocation");
+		}
 		const lastCompletion = [...f.records]
 			.reverse()
 			.find(
@@ -333,8 +337,9 @@ it("does not accept a guarded suffix completion before its first validation or t
 			claim.kind !== "complete" ||
 			clock === undefined ||
 			accepted === undefined
-		)
+		) {
 			throw new Error("Missing executed suffix facts");
+		}
 		expect(f.broken.seqId).toBeLessThan(invoke.seqId);
 		expect(claim.artifacts?.["candidate.txt"]).toBeDefined();
 		expect(clock.timestamp).toBeGreaterThan(claim.timestamp);

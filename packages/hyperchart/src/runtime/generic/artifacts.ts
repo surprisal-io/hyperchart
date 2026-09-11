@@ -34,7 +34,9 @@ export async function resolveArtifactValue(
 }
 
 export function serializeEnvValue(value: unknown): string {
-	if (typeof value === "string") return value;
+	if (typeof value === "string") {
+		return value;
+	}
 	const serialized = JSON.stringify(value);
 	if (serialized === undefined) {
 		throw new Error("Environment value is not JSON-serializable");

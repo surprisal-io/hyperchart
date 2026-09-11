@@ -49,13 +49,17 @@ export function loadAgentDefinition(
 ): AgentDefinition {
 	for (const dir of dirs) {
 		const direct = parseAgentFile(join(dir, `${name}.md`), name, parse);
-		if (direct !== undefined) return direct;
+		if (direct !== undefined) {
+			return direct;
+		}
 	}
 
 	for (const dir of dirs) {
 		for (const path of listAgentFiles(dir)) {
 			const definition = parseAgentFile(path, name, parse);
-			if (definition !== undefined) return definition;
+			if (definition !== undefined) {
+				return definition;
+			}
 		}
 	}
 	throw new Error(`Agent definition '${name}' not found in ${dirs.join(", ")}`);
@@ -69,7 +73,9 @@ export function createAgentDefaultsResolver(
 	const cache = new Map<string, HyperchartInspectAgentDefaults>();
 	return (agentName) => {
 		const cached = cache.get(agentName);
-		if (cached !== undefined) return cached;
+		if (cached !== undefined) {
+			return cached;
+		}
 		let defaults: HyperchartInspectAgentDefaults;
 		try {
 			const definition = loadAgentDefinition(agentName, dirs, parse);
@@ -96,7 +102,9 @@ export function resolveAgentDefaults(
 	defaults: HyperchartInspectAgentDefaults,
 	resolution: AgentDefinitionResolution,
 ): HyperchartInspectAgentDefaults {
-	if (defaults.agentDefinitionUnavailable === true) return defaults;
+	if (defaults.agentDefinitionUnavailable === true) {
+		return defaults;
+	}
 	const roleModel = defaults.role === undefined ? undefined : resolution.modelRoles?.[defaults.role];
 	const resolvedModel =
 		defaults.role === undefined ? (defaults.model ?? resolution.defaultModel) : (roleModel ?? defaults.model);
@@ -118,7 +126,9 @@ export function parseAgentFile(
 	requestedName: string,
 	parse: FrontmatterParser = parseSimpleFrontmatter,
 ): AgentDefinition | undefined {
-	if (!existsSync(path)) return undefined;
+	if (!existsSync(path)) {
+		return undefined;
+	}
 	let content: string;
 	try {
 		content = readFileSync(path, "utf8");
@@ -136,8 +146,9 @@ export function parseAgentFile(
 		typeof frontmatter.name === "string" && frontmatter.name.trim() !== "" ? frontmatter.name.trim() : fileStem(path);
 	const packageName = parsePackageName(frontmatter.package);
 	const runtimeName = packageName === undefined ? localName : `${packageName}.${localName}`;
-	if (requestedName !== runtimeName && requestedName !== localName && requestedName !== fileStem(path))
+	if (requestedName !== runtimeName && requestedName !== localName && requestedName !== fileStem(path)) {
 		return undefined;
+	}
 
 	const tools = parseTools(frontmatter.tools);
 	const thinking = parseThinking(frontmatter.thinking);
@@ -159,7 +170,9 @@ export function parseAgentFile(
 }
 
 export function listAgentFiles(dir: string): string[] {
-	if (!isDirectory(dir)) return [];
+	if (!isDirectory(dir)) {
+		return [];
+	}
 	const files: string[] = [];
 	walk(dir, files);
 	return files.sort();
@@ -170,7 +183,9 @@ export function uniqueExistingDirs(dirs: string[]): string[] {
 	const seen = new Set<string>();
 	for (const dir of dirs) {
 		const resolved = resolve(dir);
-		if (seen.has(resolved) || !isDirectory(resolved)) continue;
+		if (seen.has(resolved) || !isDirectory(resolved)) {
+			continue;
+		}
 		seen.add(resolved);
 		out.push(resolved);
 	}
@@ -181,10 +196,14 @@ function walk(dir: string, files: string[]): void {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		const path = join(dir, entry.name);
 		if (entry.isDirectory()) {
-			if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+			if (entry.name === "node_modules" || entry.name.startsWith(".")) {
+				continue;
+			}
 			walk(path, files);
 		} else if (entry.isFile() && entry.name.endsWith(".md") && !entry.name.endsWith(".chain.md")) {
-			if (!isLegacyAgentSkillPath(path)) files.push(path);
+			if (!isLegacyAgentSkillPath(path)) {
+				files.push(path);
+			}
 		}
 	}
 }
@@ -194,7 +213,9 @@ function isLegacyAgentSkillPath(path: string): boolean {
 }
 
 function parsePackageName(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
+	if (typeof value !== "string") {
+		return undefined;
+	}
 	const normalized = value
 		.trim()
 		.toLowerCase()
@@ -231,7 +252,9 @@ function parseThinking(value: unknown): ThinkingLevel | undefined {
 }
 
 function parsePromptMode(value: unknown, localName: string): "replace" | "append" {
-	if (value === "replace" || value === "append") return value;
+	if (value === "replace" || value === "append") {
+		return value;
+	}
 	return localName === "delegate" ? "append" : "replace";
 }
 

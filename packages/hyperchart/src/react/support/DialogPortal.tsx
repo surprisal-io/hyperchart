@@ -8,7 +8,9 @@ export type DialogPortalProps = {
 
 export function DialogPortal({ children }: DialogPortalProps) {
 	const renderer = useContext(PortalContext);
-	if (renderer !== undefined) return <>{renderer(children)}</>;
+	if (renderer !== undefined) {
+		return <>{renderer(children)}</>;
+	}
 	if (typeof document !== "undefined" && document.body !== null) {
 		return createPortal(children, document.body);
 	}

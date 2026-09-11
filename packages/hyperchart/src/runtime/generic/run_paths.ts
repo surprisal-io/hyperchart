@@ -12,10 +12,12 @@ export type RunStorage = Readonly<{
 const scope = new AsyncLocalStorage<RunStorage>();
 
 export function assertRunId(runId: string, layout = scope.getStore()?.layout ?? "run-id"): void {
-	if (typeof runId !== "string" || runId.trim().length === 0 || runId.includes("\0"))
+	if (typeof runId !== "string" || runId.trim().length === 0 || runId.includes("\0")) {
 		throw new Error("Invalid Hyperchart runId");
-	if (layout === "run-id" && (runId === "." || runId === ".." || /[/\\]/.test(runId)))
+	}
+	if (layout === "run-id" && (runId === "." || runId === ".." || /[/\\]/.test(runId))) {
 		throw new Error("Invalid Hyperchart runId: literal layout requires a single segment, not a path");
+	}
 }
 
 export function withRunStorage<T>(storage: RunStorage, operation: () => T): T {
@@ -32,12 +34,15 @@ export function resolveRunPaths(
 	storage = scope.getStore(),
 ): Readonly<{ runDir: string; storage: RunStorage }> {
 	assertRunId(runId, storage?.layout);
-	if (storage === undefined) throw new Error("Hyperchart run storage scope is required");
+	if (storage === undefined) {
+		throw new Error("Hyperchart run storage scope is required");
+	}
 	const segment = storage.layout === "sha256" ? createHash("sha256").update(runId, "utf8").digest("hex") : runId;
 	const root = resolve(storage.rootDir);
 	const runDir = join(root, segment);
 	// A storage key must not escape through a pre-existing run-directory symlink.
-	if (existsSync(runDir) && realpathSync(runDir) !== join(realpathSync(root), segment))
+	if (existsSync(runDir) && realpathSync(runDir) !== join(realpathSync(root), segment)) {
 		throw new Error(`Hyperchart run '${runId}' escapes the configured storage root`);
+	}
 	return { runDir, storage };
 }

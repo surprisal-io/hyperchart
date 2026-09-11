@@ -176,7 +176,9 @@ describe("JsonlLogStore branch journal", () => {
 	it("opens once and incrementally updates one private materialized index", async () => {
 		const main = new JsonlLogStore(join(await makeTempDir(), "log.jsonl"));
 		await main.initializeRootBranch();
-		for (let index = 0; index < 50; index++) await main.appendDrafts([invokeDraft()]);
+		for (let index = 0; index < 50; index++) {
+			await main.appendDrafts([invokeDraft()]);
+		}
 		expect(main.fullReadCount()).toBe(1);
 		expect(await main.countRecords()).toBe(50);
 		expect((await collectHistoryRecords(main, "main")).length).toBe(50);
@@ -222,7 +224,9 @@ describe("JsonlLogStore branch journal", () => {
 type HistoryTestStore = LogStore & { close?: () => Promise<void> };
 
 async function historyStore(kind: "memory" | "jsonl"): Promise<HistoryTestStore> {
-	if (kind === "memory") return new MemoryLogStore();
+	if (kind === "memory") {
+		return new MemoryLogStore();
+	}
 	const store = new JsonlLogStore(join(await makeTempDir(), "log.jsonl"));
 	await store.initializeRootBranch();
 	return store;
@@ -343,16 +347,18 @@ for (const backend of ["memory", "jsonl"] as const) {
 			for await (const batch of openExecutionReplay(store, {
 				targetHeadSeqId: records.at(-1)!.seqId,
 				afterSeqId: null,
-			}))
+			})) {
 				actual.push(batch.map((record) => record.seqId));
+			}
 			expect(actual.map((batch) => batch.length)).toEqual([500, 500, 201]);
 			expect(actual.flat()).toEqual(records.map((record) => record.seqId));
 			const tail: number[] = [];
 			for await (const batch of openExecutionReplay(store, {
 				targetHeadSeqId: records.at(-1)!.seqId,
 				afterSeqId: records[499]!.seqId,
-			}))
+			})) {
 				tail.push(...batch.map((record) => record.seqId));
+			}
 			expect(tail).toEqual(records.slice(500).map((record) => record.seqId));
 			await expect(
 				(async () => {
@@ -473,8 +479,9 @@ describe("JsonlLogStore branch keyset pagination and divergent snapshots", () =>
 		const store = new JsonlLogStore(join(await makeTempDir(), "log.jsonl"));
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([argsDraft()]);
-		for (let index = 0; index < 205; index++)
+		for (let index = 0; index < 205; index++) {
 			await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root!.seqId);
+		}
 		const first = await store.listBranches();
 		expect(first.items).toHaveLength(100);
 		expect(first.totalCount).toBe(206);

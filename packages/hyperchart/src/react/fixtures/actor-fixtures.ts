@@ -52,23 +52,30 @@ const stamp = (seqId: number) => ({
 
 function endpointDefinition(ast: ChartAst, path: string): ActorEndpointDeclarationAst {
 	const definition = ast.actors[path];
-	if (definition === undefined) throw new Error(`missing actor endpoint declaration ${path}`);
+	if (definition === undefined) {
+		throw new Error(`missing actor endpoint declaration ${path}`);
+	}
 	return definition;
 }
 function actorDefinition(ast: ChartAst, path: string): ActorDeclarationAst {
 	const definition = endpointDefinition(ast, path);
-	if (definition.kind !== "actor") throw new Error(`missing ordinary actor declaration ${path}`);
+	if (definition.kind !== "actor") {
+		throw new Error(`missing ordinary actor declaration ${path}`);
+	}
 	return definition;
 }
 function messageContract(ast: ChartAst, declaration: string, event: string) {
 	const contract = endpointDefinition(ast, declaration).protocol[event];
-	if (contract === undefined) throw new Error(`missing actor message ${declaration}.${event}`);
+	if (contract === undefined) {
+		throw new Error(`missing actor message ${declaration}.${event}`);
+	}
 	return contract;
 }
 function sourceState(ast: ChartAst, path: string): SendStateAst | SendBatchStateAst | CallStateAst | CallBatchStateAst {
 	const state = ast.states[path];
-	if (state?.kind !== "send" && state?.kind !== "sendBatch" && state?.kind !== "call" && state?.kind !== "callBatch")
+	if (state?.kind !== "send" && state?.kind !== "sendBatch" && state?.kind !== "call" && state?.kind !== "callBatch") {
 		throw new Error(`missing actor source ${path}`);
+	}
 	return state;
 }
 function created(
@@ -107,7 +114,9 @@ function envelope(
 			: Array.isArray(definition.inputs)
 				? definition.inputs[batchIndex]
 				: undefined;
-	if (input === undefined) throw new Error(`missing concrete actor input ${definitionPath}[${batchIndex}]`);
+	if (input === undefined) {
+		throw new Error(`missing concrete actor input ${definitionPath}[${batchIndex}]`);
+	}
 	return {
 		messageId,
 		event: definition.event,
@@ -161,8 +170,9 @@ function buildRun(
 		replay.prefixEnd !== records.length ||
 		replay.stale.length > 0 ||
 		replay.skipped.length > 0
-	)
+	) {
 		throw new Error(`invalid actor story ${name}: ${JSON.stringify(replay)}`);
+	}
 	return hyperchartRunFromRuntime(inspect, ast, records, {
 		runId: `actor:${name}`,
 		status: {
@@ -256,15 +266,22 @@ export const actorPendingCallRun = callScenario.runtimeRun(
 );
 
 const applyReply = messageContract(callAst, "@editor", "APPLY").reply;
-if (applyReply.kind !== "named") throw new Error("expected named APPLY reply");
+if (applyReply.kind !== "named") {
+	throw new Error("expected named APPLY reply");
+}
 const editorDefinition = actorDefinition(callAst, "@editor");
 const editorApply = editorDefinition.states.apply;
-if (editorApply?.kind !== "state") throw new Error("expected editor apply action");
+if (editorApply?.kind !== "state") {
+	throw new Error("expected editor apply action");
+}
 const editorSettle = editorDefinition.states.settle;
-if (editorSettle?.kind !== "reply" || editorSettle.event === undefined || editorSettle.output === undefined)
+if (editorSettle?.kind !== "reply" || editorSettle.event === undefined || editorSettle.output === undefined) {
 	throw new Error("expected concrete named editor reply");
+}
 const appliedSchema = applyReply.schemas[editorSettle.event];
-if (appliedSchema === undefined) throw new Error(`missing ${editorSettle.event} schema`);
+if (appliedSchema === undefined) {
+	throw new Error(`missing ${editorSettle.event} schema`);
+}
 const editorApplyUid = { ...editorApply.action.uid, state: "@editor.apply" };
 const actorNamedReplySchedule: DurableLogRecord[] = [
 	...pendingCallRecords,
@@ -348,8 +365,9 @@ const drainScenario = storyScenario(
 );
 const drainAst = drainScenario.ast;
 const drainDispatch = sourceState(drainAst, "phase.dispatch");
-if (drainDispatch.kind !== "sendBatch" || !Array.isArray(drainDispatch.inputs))
+if (drainDispatch.kind !== "sendBatch" || !Array.isArray(drainDispatch.inputs)) {
 	throw new Error("expected structured-drain batch send");
+}
 const drainMessages = drainDispatch.inputs.map((_, index) =>
 	envelope(drainAst, "phase.dispatch", "phase.dispatch", `phase.dispatch:message:1:${index}`, index),
 );
@@ -554,7 +572,9 @@ const reentryScenario = storyScenario(
 const reentryAst = reentryScenario.ast;
 const reentryDefinition = actorDefinition(reentryAst, "phase.@auditor");
 const reentryAction = reentryAst.states.between;
-if (reentryAction?.kind !== "state") throw new Error("expected reentry chooser state");
+if (reentryAction?.kind !== "state") {
+	throw new Error("expected reentry chooser state");
+}
 const reentryMessage1 = envelope(reentryAst, "phase.record", "phase.record", "phase.record:message:1:0", 0);
 const reentryMessage2 = {
 	...envelope(reentryAst, "phase.record", "phase.record", "phase.record:message:2:0", 0),
@@ -847,16 +867,25 @@ export const actorPoolChart = chart({
 const poolScenario = storyScenario(actorPoolChart);
 export const actorPoolAst = poolScenario.ast;
 const poolDefinition = endpointDefinition(actorPoolAst, "@workers");
-if (poolDefinition.kind !== "actorPool") throw new Error("expected pool story declaration");
+if (poolDefinition.kind !== "actorPool") {
+	throw new Error("expected pool story declaration");
+}
 const poolAction = poolDefinition.worker.states.work;
-if (poolAction?.kind !== "state") throw new Error("expected pool worker action");
+if (poolAction?.kind !== "state") {
+	throw new Error("expected pool worker action");
+}
 const poolReply = poolDefinition.worker.states.settle;
-if (poolReply?.kind !== "reply") throw new Error("expected pool worker reply");
+if (poolReply?.kind !== "reply") {
+	throw new Error("expected pool worker reply");
+}
 const poolReplyContract = messageContract(actorPoolAst, "@workers", "WORK").reply;
-if (poolReplyContract.kind !== "single") throw new Error("expected single pool reply schema");
+if (poolReplyContract.kind !== "single") {
+	throw new Error("expected single pool reply schema");
+}
 const poolSource = sourceState(actorPoolAst, "batch");
-if (poolSource.kind !== "callBatch" || !Array.isArray(poolSource.inputs))
+if (poolSource.kind !== "callBatch" || !Array.isArray(poolSource.inputs)) {
 	throw new Error("expected pool callBatch story");
+}
 const poolMessages = poolSource.inputs.map((_, index) =>
 	envelope(actorPoolAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:call:1"),
 );
@@ -1059,14 +1088,21 @@ export const actorPoolCrowdedChart = chart({
 const crowdedScenario = storyScenario(actorPoolCrowdedChart);
 const crowdedAst = crowdedScenario.ast;
 const crowdedDefinition = endpointDefinition(crowdedAst, "@workers");
-if (crowdedDefinition.kind !== "actorPool") throw new Error("expected crowded pool declaration");
+if (crowdedDefinition.kind !== "actorPool") {
+	throw new Error("expected crowded pool declaration");
+}
 const crowdedAction = crowdedDefinition.worker.states.work;
-if (crowdedAction?.kind !== "state") throw new Error("expected crowded pool worker action");
+if (crowdedAction?.kind !== "state") {
+	throw new Error("expected crowded pool worker action");
+}
 const crowdedReplyContract = messageContract(crowdedAst, "@workers", "WORK").reply;
-if (crowdedReplyContract.kind !== "single") throw new Error("expected crowded pool reply schema");
+if (crowdedReplyContract.kind !== "single") {
+	throw new Error("expected crowded pool reply schema");
+}
 const crowdedSource = sourceState(crowdedAst, "batch");
-if (crowdedSource.kind !== "callBatch" || !Array.isArray(crowdedSource.inputs))
+if (crowdedSource.kind !== "callBatch" || !Array.isArray(crowdedSource.inputs)) {
 	throw new Error("expected crowded pool callBatch");
+}
 const crowdedMessages = crowdedSource.inputs.map((_, index) =>
 	envelope(crowdedAst, "batch", "batch", `batch:message:1:${index}`, index, "batch:call:1"),
 );
@@ -1191,8 +1227,9 @@ const poolDrainScenario = storyScenario(
 );
 const poolDrainAst = poolDrainScenario.ast;
 const poolDrainSource = sourceState(poolDrainAst, "phase.dispatch");
-if (poolDrainSource.kind !== "sendBatch" || !Array.isArray(poolDrainSource.inputs))
+if (poolDrainSource.kind !== "sendBatch" || !Array.isArray(poolDrainSource.inputs)) {
 	throw new Error("expected pool drain sendBatch");
+}
 const poolDrainMessages = poolDrainSource.inputs.map((_, index) =>
 	envelope(poolDrainAst, "phase.dispatch", "phase.dispatch", `phase.dispatch:message:1:${index}`, index),
 );
@@ -1267,12 +1304,17 @@ const mapPoolBetween = mapPoolAst.states.between;
 const mapPoolHold = mapPoolAst.states["projects.hold"];
 const mapPoolDispatch = sourceState(mapPoolAst, "projects.dispatch");
 const mapPoolDefinition = endpointDefinition(mapPoolAst, "projects.@workers");
-if (mapPoolBetween?.kind !== "state" || mapPoolHold?.kind !== "state" || mapPoolDefinition.kind !== "actorPool")
+if (mapPoolBetween?.kind !== "state" || mapPoolHold?.kind !== "state" || mapPoolDefinition.kind !== "actorPool") {
 	throw new Error("expected map pool loop actions");
+}
 const mapPoolWorkerAction = mapPoolDefinition.worker.states.work;
-if (mapPoolWorkerAction?.kind !== "state") throw new Error("expected map pool worker action");
+if (mapPoolWorkerAction?.kind !== "state") {
+	throw new Error("expected map pool worker action");
+}
 const mapPoolReply = messageContract(mapPoolAst, "projects.@workers", "WORK").reply;
-if (mapPoolReply.kind !== "single") throw new Error("expected map pool reply schema");
+if (mapPoolReply.kind !== "single") {
+	throw new Error("expected map pool reply schema");
+}
 const mapPoolHoldUid = { ...mapPoolHold.action.uid, state: "projects#a.hold" };
 const mapPoolWorkerUid = { ...mapPoolWorkerAction.action.uid, state: "projects#a.@workers.$worker-0.work" };
 const mapPoolMessage = envelope(
@@ -1453,8 +1495,9 @@ const overflowScenario = storyScenario(
 );
 const overflowAst = overflowScenario.ast;
 const overflowQueue = sourceState(overflowAst, "queue");
-if (overflowQueue.kind !== "sendBatch" || !Array.isArray(overflowQueue.inputs))
+if (overflowQueue.kind !== "sendBatch" || !Array.isArray(overflowQueue.inputs)) {
 	throw new Error("expected overflow batch send state");
+}
 const overflowMessages = overflowQueue.inputs.map((_, index) =>
 	envelope(overflowAst, "queue", "queue", `queue:message:1:${index}`, index),
 );

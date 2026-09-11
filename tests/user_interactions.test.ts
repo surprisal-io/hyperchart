@@ -33,7 +33,9 @@ import {
 const roots: string[] = [];
 afterEach(() => {
 	vi.restoreAllMocks();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 async function fixture(reply = false, loadCounterKey?: string) {
@@ -59,7 +61,9 @@ async function fixture(reply = false, loadCounterKey?: string) {
 	`,
 	);
 	const parsed = parseChartModuleSync(chartPath);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((d) => d.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((d) => d.message).join("\n"));
+	}
 	await withRunStorage(storage, () =>
 		saveRunMeta(runId, {
 			chartPath,
@@ -72,7 +76,9 @@ async function fixture(reply = false, loadCounterKey?: string) {
 	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 	await store.initializeRootBranch();
 	const state = parsed.ast.states.ask;
-	if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
+	if (state?.kind !== "state" || state.action.kind !== "user") {
+		throw new Error("bad fixture");
+	}
 	await store.appendDrafts([{ type: "args", args: {} }]);
 	const [invoke] = await store.appendDrafts([
 		{
@@ -241,7 +247,9 @@ describe("journal-native user interactions", () => {
 	it("reclassifies a divergent stopped-JSONL head race without a second append", async () => {
 		const f = await fixture();
 		const state = f.ast.states.ask;
-		if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
+		if (state?.kind !== "state" || state.action.kind !== "user") {
+			throw new Error("bad fixture");
+		}
 		const original = JsonlLogStore.prototype.appendDraftsAtHead;
 		let raced = false;
 		vi.spyOn(JsonlLogStore.prototype, "appendDraftsAtHead").mockImplementation(async function (
@@ -382,7 +390,9 @@ describe("journal-native user interactions", () => {
 		const f = await fixture();
 		const memory = new MemoryLogStore();
 		const state = f.ast.states.ask;
-		if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("bad fixture");
+		if (state?.kind !== "state" || state.action.kind !== "user") {
+			throw new Error("bad fixture");
+		}
 		const [invoke] = await memory.appendDrafts([
 			{
 				type: "state_action",

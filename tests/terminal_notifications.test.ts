@@ -32,7 +32,9 @@ import { renderTerminalNotificationPayload } from "../packages/hyperchart/src/ex
 
 const roots: string[] = [];
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function tempRoot(): string {
@@ -43,13 +45,17 @@ function tempRoot(): string {
 
 function normalized(config: Parameters<typeof normalizeChartConfig>[0]): ChartAst {
 	const parsed = normalizeChartConfig(config);
-	if (!parsed.ok) throw new Error(JSON.stringify(parsed.diagnostics));
+	if (!parsed.ok) {
+		throw new Error(JSON.stringify(parsed.diagnostics));
+	}
 	return parsed.ast;
 }
 
 function action(ast: ChartAst, state: string): StateActionAst {
 	const node = ast.states[state];
-	if (node?.kind !== "state") throw new Error(`Expected action state ${state}`);
+	if (node?.kind !== "state") {
+		throw new Error(`Expected action state ${state}`);
+	}
 	return node.action;
 }
 

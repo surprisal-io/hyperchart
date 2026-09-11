@@ -29,10 +29,14 @@ export async function validateActionCompletion(
 		};
 	}
 	if (event.type === "FAILED") {
-		if (!("error" in event)) return { type: "FAILED", error: `${opts.label} emitted FAILED without an error` };
+		if (!("error" in event)) {
+			return { type: "FAILED", error: `${opts.label} emitted FAILED without an error` };
+		}
 	} else if (contract.reply !== undefined) {
 		const error = await replyValidationError(contract.reply, event, opts.schemaRegistry);
-		if (error !== undefined) return { type: "FAILED", error: `${opts.label} ${error}` };
+		if (error !== undefined) {
+			return { type: "FAILED", error: `${opts.label} ${error}` };
+		}
 	}
 	const artifactErrors = await validateArtifacts(contract.artifacts, opts.workDir, opts.schemaRegistry);
 	if (artifactErrors.length > 0) {
@@ -58,7 +62,9 @@ export async function validateArtifacts(
 	const errors: string[] = [];
 	for (const artifact of artifacts ?? []) {
 		const check = await checkArtifactFile(artifact, workDir, schemaRegistry);
-		if (!check.ok) errors.push(...check.errors);
+		if (!check.ok) {
+			errors.push(...check.errors);
+		}
 	}
 	return errors;
 }

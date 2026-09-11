@@ -46,7 +46,9 @@ export const InteractiveSelection: Story = {
 		</BoardPage>
 	),
 	play: async ({ canvasElement, args }) => {
-		if (args.preset !== "initial" || args.interactive !== true) return;
+		if (args.preset !== "initial" || args.interactive !== true) {
+			return;
+		}
 		const canvas = within(canvasElement);
 		await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("TUI live: history"));
 		await userEvent.click(canvas.getByRole("button", { name: "Enter · open inspector" }));

@@ -21,7 +21,9 @@ function RunningEdgeMarker({ points }: { points: Array<{ x: number; y: number }>
 
 	useEffect(() => {
 		setCanAnimate(typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.animate === "function");
-		if (globalThis.matchMedia === undefined) return;
+		if (globalThis.matchMedia === undefined) {
+			return;
+		}
 		const media = globalThis.matchMedia("(prefers-reduced-motion: reduce)");
 		const update = () => setReduceMotion(media.matches);
 		update();
@@ -31,7 +33,9 @@ function RunningEdgeMarker({ points }: { points: Array<{ x: number; y: number }>
 
 	useEffect(() => {
 		const marker = markerRef.current;
-		if (marker === null || points.length < 2 || reduceMotion || !canAnimate) return;
+		if (marker === null || points.length < 2 || reduceMotion || !canAnimate) {
+			return;
+		}
 		const lastIndex = points.length - 1;
 		const animation = marker.animate(
 			points.map((point, index) => {
@@ -47,7 +51,9 @@ function RunningEdgeMarker({ points }: { points: Array<{ x: number; y: number }>
 		return () => animation.cancel();
 	}, [canAnimate, points, reduceMotion]);
 
-	if (reduceMotion || !canAnimate) return null;
+	if (reduceMotion || !canAnimate) {
+		return null;
+	}
 	return (
 		<EdgeLabelRenderer>
 			<div

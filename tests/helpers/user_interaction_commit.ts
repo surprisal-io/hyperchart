@@ -36,8 +36,9 @@ export async function prepareUserInteractionCommit(
 	const semantic = await BranchExecution.restore({ ast, branchId, store, snapshot, saveCheckpoint: "never" });
 	const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId });
 	if (existing !== undefined) {
-		if (!isDeepStrictEqual(existing.event, event))
+		if (!isDeepStrictEqual(existing.event, event)) {
 			throw new Error(`Conflicting response for user interaction ${gateSeqId}`);
+		}
 		return {
 			expectedHeadSeqId: snapshot.headSeqId,
 			gateSeqId,
@@ -70,7 +71,9 @@ export async function commitUserInteractionResponse(
 	} = {},
 ): Promise<UserInteractionResponseCommit> {
 	const prepared = await prepareUserInteractionCommit(store, ast, gateSeqId, event, options);
-	if (prepared.existing !== undefined) return { record: prepared.existing, idempotent: true };
+	if (prepared.existing !== undefined) {
+		return { record: prepared.existing, idempotent: true };
+	}
 	const records = await store.appendDraftsAtHead(
 		{ expectedHeadSeqId: prepared.expectedHeadSeqId, drafts: [prepared.draft] },
 		prepared.semantic.prepareStampedCommit,

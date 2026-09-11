@@ -14,7 +14,9 @@ function fixtureStorage() {
 }
 afterEach(() => {
 	vi.unstubAllEnvs();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 it("uses an explicit scoped backend/root/layout instead of process-wide PostgreSQL", async () => {
 	vi.stubEnv("HYPERCHART_PG_DSN", "postgres://leaked.invalid/example");

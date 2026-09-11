@@ -8,8 +8,9 @@ import type { HyperchartRunInfo, HyperchartStateInfo } from "../types.js";
 import { actionAt } from "../fixtures/story-scenario.js";
 
 const researchAction = actionAt(scenario.ast, "research");
-if (researchAction.kind !== "agent" || researchAction.model === undefined || researchAction.thinking === undefined)
+if (researchAction.kind !== "agent" || researchAction.model === undefined || researchAction.thinking === undefined) {
 	throw new Error("expected concrete research agent metadata");
+}
 const researchUid = researchAction.uid;
 const progress: HyperchartRuntimeSessionProgressFile = {
 	updatedAt: 1_700_000_040_000,
@@ -50,7 +51,9 @@ const progress: HyperchartRuntimeSessionProgressFile = {
 };
 function requiredState(run: HyperchartRunInfo, stateId: string): HyperchartStateInfo {
 	const state = run.states.find((candidate) => candidate.id === stateId);
-	if (state === undefined) throw new Error(`adapter-derived runtime section state is unavailable: ${stateId}`);
+	if (state === undefined) {
+		throw new Error(`adapter-derived runtime section state is unavailable: ${stateId}`);
+	}
 	return state;
 }
 const run = scenario.runtimeRun(records, {

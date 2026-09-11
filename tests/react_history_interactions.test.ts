@@ -94,7 +94,9 @@ describe("interactive bounded history", () => {
 			useHistoryWindow({ cacheKey: "main:head", source, identity: (item) => String(item.id) }),
 		);
 		await waitFor(() => expect(result.current.window.items).toHaveLength(100));
-		for (let page = 1; page <= 11; page++) await act(() => result.current.loadOlder());
+		for (let page = 1; page <= 11; page++) {
+			await act(() => result.current.loadOlder());
+		}
 		expect(result.current.window.items).toHaveLength(1_000);
 		expect(result.current.window.items[0]?.id).toBe(200);
 		expect(result.current.window.newer).toBeDefined();
@@ -145,7 +147,9 @@ describe("interactive bounded history", () => {
 		const source = {
 			load: async (cursor?: HistoryCursor) => {
 				calls += 1;
-				if (cursor !== undefined && calls <= 2) throw new Error("persistent edge failure");
+				if (cursor !== undefined && calls <= 2) {
+					throw new Error("persistent edge failure");
+				}
 				return {
 					snapshot,
 					items: cursor === undefined ? rows(0, 8) : rows(8, 2),
@@ -166,7 +170,9 @@ describe("interactive bounded history", () => {
 		expect(list.innerHTML).not.toContain("translateY");
 		expect(list.querySelector('[data-history-spacer="after"]')).not.toBeNull();
 		const viewport = list.querySelector(".overflow-auto");
-		if (viewport === null) throw new Error("history viewport missing");
+		if (viewport === null) {
+			throw new Error("history viewport missing");
+		}
 		fireEvent.scroll(viewport, { target: { scrollTop: 500 } });
 		await screen.findByText(/older load failed/);
 		await new Promise((resolve) => setTimeout(resolve, 30));
@@ -250,7 +256,9 @@ describe("interactive bounded history", () => {
 		);
 		expect(rendered.queryByText("spawn seq 9")).toBeNull();
 		const details = rendered.container.querySelector("details");
-		if (details === null) throw new Error("map visit details missing");
+		if (details === null) {
+			throw new Error("map visit details missing");
+		}
 		details.open = true;
 		fireEvent(details, new Event("toggle"));
 		expect(rendered.getByText("spawn seq 9")).toBeTruthy();
@@ -272,7 +280,9 @@ describe("interactive bounded history", () => {
 		);
 		expect(rendered.queryByText("completed event")).toBeNull();
 		const details = rendered.container.querySelector("details");
-		if (details === null) throw new Error("visit details missing");
+		if (details === null) {
+			throw new Error("visit details missing");
+		}
 		details.open = true;
 		fireEvent(details, new Event("toggle"));
 		expect(rendered.getByText("completed event")).toBeTruthy();
@@ -571,7 +581,9 @@ describe("interactive bounded history", () => {
 		const dataSource = {
 			cursorAt: async () => {
 				calls += 1;
-				if (calls === 1) throw new Error("lookup offline");
+				if (calls === 1) {
+					throw new Error("lookup offline");
+				}
 				return "cursor:9";
 			},
 		} as unknown as HyperchartInspectorDataSource;
@@ -584,7 +596,9 @@ describe("interactive bounded history", () => {
 		);
 		expect(calls).toBe(1);
 		act(() => {
-			if ("retry" in result.current) result.current.retry();
+			if ("retry" in result.current) {
+				result.current.retry();
+			}
 		});
 		await waitFor(() =>
 			expect(result.current.ready && "cursor" in result.current ? result.current.cursor : undefined).toBe("cursor:9"),

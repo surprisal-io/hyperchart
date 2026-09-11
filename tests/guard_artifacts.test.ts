@@ -53,7 +53,9 @@ function schema(value: z.ZodType): SchemaAst {
 
 function parsed(config: ChartCst) {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(result.diagnostics.map((entry) => entry.message).join("\n"));
+	if (!result.ok) {
+		throw new Error(result.diagnostics.map((entry) => entry.message).join("\n"));
+	}
 	return result;
 }
 
@@ -252,7 +254,9 @@ describe("validation script env", () => {
 
 	it.each(["missing", "invalid"] as const)("rejects %s selected artifacts before invoking a guard", async (kind) => {
 		const dir = await tempDir();
-		if (kind === "invalid") await writeFile(join(dir, "report.json"), "not-json", "utf8");
+		if (kind === "invalid") {
+			await writeFile(join(dir, "report.json"), "not-json", "utf8");
+		}
 		const guard = script(node, ["-e", 'require("node:fs").writeFileSync("called","yes"); process.exit(0)'], {
 			env: { CHECK: { kind: "artifactOf", state: "work", artifact: "report", select: "ok" } },
 		});
@@ -380,10 +384,11 @@ describe("validation script env", () => {
 			}),
 		);
 		expect(result.ok).toBe(false);
-		if (!result.ok)
+		if (!result.ok) {
 			expect(result.diagnostics).toEqual(
 				expect.arrayContaining([expect.objectContaining({ code: "DUPLICATE_GUARD_ARTIFACT" })]),
 			);
+		}
 	});
 
 	it("fails closed when a guard-produced artifact is missing", async () => {
@@ -421,7 +426,9 @@ describe("validation script env", () => {
 			"1",
 			z.object({ approved: z.boolean() }).superRefine(async (value, ctx) => {
 				await Promise.resolve();
-				if (!value.approved) ctx.addIssue({ code: "custom", message: "not approved" });
+				if (!value.approved) {
+					ctx.addIssue({ code: "custom", message: "not approved" });
+				}
 			}),
 		);
 		const result = parsed(

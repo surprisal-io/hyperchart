@@ -25,13 +25,17 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	process.chdir(originalCwd);
 	process.exitCode = originalExitCode;
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (!check()) {
-		if (Date.now() > deadline) throw new Error("Timed out waiting for runner state");
+		if (Date.now() > deadline) {
+			throw new Error("Timed out waiting for runner state");
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
@@ -53,7 +57,9 @@ function storedRecordSeqIds(runDir: string): number[] {
 function latestArtifactHash(records: readonly DurableLogRecord[], path: string): string | undefined {
 	let hash: string | undefined;
 	for (const record of records) {
-		if (record.type === "state_action" && record.kind === "complete") hash = record.artifacts?.[path]?.hash ?? hash;
+		if (record.type === "state_action" && record.kind === "complete") {
+			hash = record.artifacts?.[path]?.hash ?? hash;
+		}
 	}
 	return hash;
 }
@@ -74,7 +80,9 @@ class ControlledExecutor implements SteerableAgentExecutor {
 		this.disposed = true;
 		this.onDispose?.();
 		await this.disposeGate;
-		if (this.disposeError !== undefined) throw this.disposeError;
+		if (this.disposeError !== undefined) {
+			throw this.disposeError;
+		}
 	}
 	async steer(): Promise<boolean> {
 		return true;
@@ -651,8 +659,9 @@ describe("multi-branch process runner", () => {
 			const ancestry = await collectHistoryRecords(main, branchId);
 			expect(ancestry.length).toBeGreaterThan(0);
 			expect(ancestry.every((record) => record.branchId === branchId)).toBe(true);
-			for (let index = 1; index < ancestry.length; index++)
+			for (let index = 1; index < ancestry.length; index++) {
 				expect(ancestry[index]?.parentId).toBe(ancestry[index - 1]?.seqId);
+			}
 		}
 		expect(main.fullReadCount()).toBe(1);
 	});
@@ -834,7 +843,9 @@ describe("multi-branch process runner", () => {
 		const controller = await createHyperchartRunnerController(
 			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "reserve", workDir, branchId: "main" },
 			async ({ config }) => {
-				if (config.branchId === "experiment") await experimentBuild;
+				if (config.branchId === "experiment") {
+					await experimentBuild;
+				}
 				const executor = new ControlledExecutor();
 				executors.set(config.branchId, executor);
 				return executor;
@@ -1077,7 +1088,11 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 						if (effect.action.name === "writer") {
 							writeFileSync(join(config.workDir, "shared.txt"), `${config.branchId} bytes`);
 							writerEmits.push(() => emit({ kind: "completed", event: { type: "DONE" } }));
-							if (writerEmits.length === 2) for (const done of writerEmits) done();
+							if (writerEmits.length === 2) {
+								for (const done of writerEmits) {
+									done();
+								}
+							}
 							return;
 						}
 						observedReads.set(config.branchId, readFileSync(join(config.workDir, "shared.txt"), "utf8"));

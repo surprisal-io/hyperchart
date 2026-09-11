@@ -51,7 +51,9 @@ export function VisitHistory({
 		const reader = onReadSession;
 		void reader(visit.invokeSeqId, visit.originBranchId).then(
 			(session) => {
-				if (readerRef.current !== reader) return;
+				if (readerRef.current !== reader) {
+					return;
+				}
 				if (session === undefined) {
 					setSessionReads((current) => ({
 						...current,
@@ -64,7 +66,9 @@ export function VisitHistory({
 				setOpenSessionIdentity(identity);
 			},
 			(error: unknown) => {
-				if (readerRef.current !== reader) return;
+				if (readerRef.current !== reader) {
+					return;
+				}
 				setSessionReads((current) => ({
 					...current,
 					[visit.invokeSeqId]: { loading: false, error: error instanceof Error ? error.message : String(error) },
@@ -72,7 +76,9 @@ export function VisitHistory({
 			},
 		);
 	};
-	if (visits.length === 0) return null;
+	if (visits.length === 0) {
+		return null;
+	}
 	const openVisit = visits.find((visit) => visitSessionIdentity(visit) === openSessionIdentity);
 	const openSession =
 		openVisit === undefined ? undefined : (loadedSessions[openVisit.invokeSeqId] ?? openVisit.session);
@@ -268,7 +274,11 @@ function isLiveSession(status: string): boolean {
 }
 
 function formatPinSize(size: number): string {
-	if (size < 1024) return `${size} B`;
-	if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+	if (size < 1024) {
+		return `${size} B`;
+	}
+	if (size < 1024 * 1024) {
+		return `${(size / 1024).toFixed(1)} KB`;
+	}
 	return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }

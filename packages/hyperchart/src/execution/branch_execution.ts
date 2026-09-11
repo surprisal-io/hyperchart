@@ -133,7 +133,9 @@ export class BranchExecution {
 			checkpointable &&= diagnostics.stale.length === 0 && diagnostics.unpinned.length === 0 && skipped.length === 0;
 			remaining++;
 			if (remaining === PROJECTION_CHECKPOINT_INTERVAL) {
-				if (checkpointable) checkpoints.push(prepareProjectionCheckpoint(next, this.contract, record.seqId));
+				if (checkpointable) {
+					checkpoints.push(prepareProjectionCheckpoint(next, this.contract, record.seqId));
+				}
 				remaining = 0;
 			}
 		}
@@ -141,7 +143,9 @@ export class BranchExecution {
 		return {
 			checkpoints,
 			committed: () => {
-				if (confirmed) throw new Error("Stamped commit confirmed twice");
+				if (confirmed) {
+					throw new Error("Stamped commit confirmed twice");
+				}
 				confirmed = true;
 				this.projection = next;
 				this.recordsSinceCheckpoint = remaining;
@@ -195,8 +199,9 @@ export class BranchExecution {
 	workspaceArtifactPins(): Readonly<Record<string, ArtifactPin>> {
 		const pins = structuredClone(this.projection.artifactPins);
 		for (const pending of this.projection.pendingActions) {
-			if (pending.phase !== "running" && pending.completionArtifacts?.branchId === this.branchId)
+			if (pending.phase !== "running" && pending.completionArtifacts?.branchId === this.branchId) {
 				Object.assign(pins, pending.completionArtifacts.pins);
+			}
 		}
 		return pins;
 	}
@@ -209,8 +214,12 @@ export class BranchExecution {
 			: undefined;
 	}
 	async storeExactCheckpoint(): Promise<void> {
-		if (!this.checkpointableValue || this.recordsSinceCheckpoint === 0) return;
-		if (this.store === undefined) return;
+		if (!this.checkpointableValue || this.recordsSinceCheckpoint === 0) {
+			return;
+		}
+		if (this.store === undefined) {
+			return;
+		}
 		await this.store.storeCheckpoint(prepareProjectionCheckpoint(this.projection, this.contract));
 		this.recordsSinceCheckpoint = 0;
 	}
@@ -230,14 +239,18 @@ export class BranchExecution {
 
 	async finalOutcome(state: MachineState): Promise<{ terminal: RunTerminalState; error?: string }> {
 		const terminal = terminalStateForFinalMachine(state);
-		if (terminal !== "failed") return { terminal };
+		if (terminal !== "failed") {
+			return { terminal };
+		}
 		const provenance = createFailureProvenanceTracker(state);
-		if (this.store !== undefined)
+		if (this.store !== undefined) {
 			for await (const batch of openExecutionReplay(this.store, {
 				targetHeadSeqId: this.headSeqId(),
 				afterSeqId: null,
-			}))
+			})) {
 				provenance.push(batch);
+			}
+		}
 		const error = provenance.message();
 		return { terminal, ...(error === undefined ? {} : { error }) };
 	}

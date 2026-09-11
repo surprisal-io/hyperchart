@@ -39,7 +39,9 @@ export class ArtifactStore {
 				// same bytes is benign: first rename wins, the loser's temp is removed.
 				await fsp.rename(tempPath, finalPath);
 			} catch (error) {
-				if (!(await this.has(hash))) throw error;
+				if (!(await this.has(hash))) {
+					throw error;
+				}
 				await fsp.rm(tempPath, { force: true });
 			}
 			return { hash, size };

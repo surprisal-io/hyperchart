@@ -39,7 +39,9 @@ afterEach(async () => {
 
 function make(config: ChartCst): ChartAst {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 
@@ -124,7 +126,9 @@ function invokeRecords(log: readonly DurableLogRecord[]) {
 async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
 	const started = Date.now();
 	while (!(await predicate())) {
-		if (Date.now() - started > timeoutMs) throw new Error("timed out waiting for condition");
+		if (Date.now() - started > timeoutMs) {
+			throw new Error("timed out waiting for condition");
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
@@ -139,7 +143,9 @@ async function withTimeout<T>(promise: Promise<T>): Promise<T> {
 			}),
 		]);
 	} finally {
-		if (timer !== undefined) clearTimeout(timer);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
 	}
 }
 
@@ -148,7 +154,9 @@ describe("ChartRuntime", () => {
 		const ast = linearChart();
 		const store = new MemoryLogStore();
 		const action = ast.states.work;
-		if (action?.kind !== "state" || action.action.kind !== "agent") throw new Error("expected work agent");
+		if (action?.kind !== "state" || action.action.kind !== "agent") {
+			throw new Error("expected work agent");
+		}
 		await store.appendDrafts([
 			{ type: "args", args: {} },
 			{
@@ -214,8 +222,11 @@ describe("ChartRuntime", () => {
 			const snapshot = await store.captureSnapshot("main");
 			const contract = projectionContractForAst(ast);
 			const exact = await store.loadExactCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
-			if (count === 512) expect(exact?.headSeqId).toBe(snapshot.headSeqId);
-			else expect(exact).toBeUndefined();
+			if (count === 512) {
+				expect(exact?.headSeqId).toBe(snapshot.headSeqId);
+			} else {
+				expect(exact).toBeUndefined();
+			}
 			if (count === 513) {
 				const nearest = await store.findNearestCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
 				expect(nearest?.headSeqId).toBe(snapshot.headSeqId! - 1);
@@ -261,7 +272,9 @@ describe("ChartRuntime", () => {
 		const ast = linearChart();
 		const store = new MemoryLogStore();
 		const action = ast.states.work;
-		if (action?.kind !== "state" || action.action.kind !== "agent") throw new Error("expected work agent");
+		if (action?.kind !== "state" || action.action.kind !== "agent") {
+			throw new Error("expected work agent");
+		}
 		const semantic = await BranchExecution.restore({ ast, branchId: "main", store, saveCheckpoint: "never" });
 		const stagedRecord = {
 			type: "state_action",
@@ -395,7 +408,9 @@ describe("ChartRuntime", () => {
 		await writeFile(source, "pinned");
 		const ast = linearChart();
 		const state = ast.states.work;
-		if (state?.kind !== "state" || state.action.kind !== "agent") throw new Error("expected agent state");
+		if (state?.kind !== "state" || state.action.kind !== "agent") {
+			throw new Error("expected agent state");
+		}
 		const pin = { hash: "a".repeat(64), size: 6 };
 		const store = new MemoryLogStore();
 		let releaseRead!: () => void;
@@ -551,7 +566,9 @@ describe("ChartRuntime", () => {
 		const opened = (await collectHistoryRecords(logStore, "main")).find(
 			(record) => record.type === "user_interaction" && record.kind === "opened",
 		);
-		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
+		if (opened?.type !== "user_interaction" || opened.kind !== "opened") {
+			throw new Error("expected opened gate");
+		}
 		await firstRuntime.dispose();
 		await firstRun;
 		await commitUserInteractionResponse(logStore, ast, opened.seqId, { type: "APPROVED" });
@@ -601,7 +618,9 @@ describe("ChartRuntime", () => {
 		const opened = (await collectHistoryRecords(runtimeStore, "main")).find(
 			(record) => record.type === "user_interaction" && record.kind === "opened",
 		);
-		if (opened?.type !== "user_interaction" || opened.kind !== "opened") throw new Error("expected opened gate");
+		if (opened?.type !== "user_interaction" || opened.kind !== "opened") {
+			throw new Error("expected opened gate");
+		}
 		const committed = await commitUserInteractionResponse(runtimeStore, ast, opened.seqId, { type: "APPROVED" });
 		runtime.acknowledgeCommittedRecords([committed.record], `test-control:${committed.record.seqId}`);
 		runtime.acknowledgeCommittedRecords([committed.record], `test-control-retry:${committed.record.seqId}`);

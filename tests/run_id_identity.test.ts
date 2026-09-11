@@ -28,7 +28,9 @@ import { scanOpenUserInteractions } from "../packages/hyperchart/src/runner/user
 
 const roots: string[] = [];
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 	process.exitCode = 0;
 });
 function fixture(layout: RunStorage["layout"] = "sha256") {
@@ -98,8 +100,9 @@ describe("runId storage identity", () => {
 	});
 	it("rejects literal path selectors and symlink escapes rather than inferring an ID", () => {
 		const f = fixture("run-id");
-		for (const id of ["../outside", "/tmp/run", "a/b", "a\\b", "..", ""])
+		for (const id of ["../outside", "/tmp/run", "a/b", "a\\b", "..", ""]) {
 			expect(() => resolveRunPaths(id, f.storage)).toThrow();
+		}
 		mkdirSync(f.storage.rootDir);
 		symlinkSync(f.root, join(f.storage.rootDir, "escape"));
 		expect(() => resolveRunPaths("escape", f.storage)).toThrow("escapes");

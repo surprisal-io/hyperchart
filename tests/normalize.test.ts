@@ -51,7 +51,9 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		expect(result.ast.args).toEqual({
 			topic: { description: "Subject to research", default: "Hyperchart" },
 			options: { description: "Optional structured settings", default: { depth: 2, tags: ["dsl"] } },
@@ -113,7 +115,9 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		expect(result.ast.states.start?.kind).toBe("state");
 		expect(Object.isFrozen(result.ast)).toBe(true);
 		expect(Object.isFrozen(result.ast.states)).toBe(true);
@@ -129,7 +133,9 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(parsed.ok).toBe(true);
-		if (!parsed.ok) throw new Error("expected valid chart");
+		if (!parsed.ok) {
+			throw new Error("expected valid chart");
+		}
 		expect(parsed.ast.states.done).toMatchObject({ kind: "final", outcome: "complete" });
 		expect(parsed.ast.states.failed).toMatchObject({ kind: "final", outcome: "failed" });
 		expect(parsed.ast.states.raw).toMatchObject({ kind: "final", outcome: "complete" });
@@ -161,7 +167,9 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(parsed.ok).toBe(true);
-		if (!parsed.ok) throw new Error("expected valid chart");
+		if (!parsed.ok) {
+			throw new Error("expected valid chart");
+		}
 		expect(parsed.ast.states.done).toMatchObject({
 			kind: "final",
 			notify: { scope: "work", prompt: { kind: "template", refs: [{ kind: "input", name: "topic" }] } },
@@ -247,9 +255,13 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		const work = result.ast.states.work;
-		if (work?.kind !== "state") throw new Error("expected action state");
+		if (work?.kind !== "state") {
+			throw new Error("expected action state");
+		}
 		expect(work.action).toMatchObject({
 			kind: "tsImport",
 			uid: { chart: "imported-action", state: "work", action: "tsImport" },
@@ -296,9 +308,13 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		const work = result.ast.states.work;
-		if (work?.kind !== "state") throw new Error("expected action state");
+		if (work?.kind !== "state") {
+			throw new Error("expected action state");
+		}
 		expect(work.action.kind === "agent" ? work.action.validation : undefined).toEqual({
 			guard: { kind: "tsImport", module: "./checks.js", export: "testsPass" },
 			onFail: { nudge: 2, restart: 1 },
@@ -327,13 +343,19 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		const review = result.ast.states.review;
-		if (review?.kind !== "compound") throw new Error("expected compound state");
+		if (review?.kind !== "compound") {
+			throw new Error("expected compound state");
+		}
 		expect(review.initial).toBe("analyze");
 		expect(review.onDone).toBe("done");
 		const analyze = result.ast.states["review.analyze"];
-		if (analyze?.kind !== "state") throw new Error("expected nested action state");
+		if (analyze?.kind !== "state") {
+			throw new Error("expected nested action state");
+		}
 		expect(analyze.parent).toBe("review");
 		expect(analyze.action.uid.state).toBe("review.analyze");
 	});
@@ -349,7 +371,9 @@ describe("normalizeChartConfig", () => {
 		});
 
 		expect(result.ok).toBe(false);
-		if (result.ok) throw new Error("expected diagnostics");
+		if (result.ok) {
+			throw new Error("expected diagnostics");
+		}
 		expect(result.diagnostics.map((d) => d.code)).toContain("ON_DONE_CYCLE");
 	});
 
@@ -486,9 +510,13 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		const audit = result.ast.states.audit;
-		if (audit?.kind !== "parallel") throw new Error("expected parallel state");
+		if (audit?.kind !== "parallel") {
+			throw new Error("expected parallel state");
+		}
 		expect(audit.regions).toEqual(["security", "perf"]);
 		expect(result.ast.states["audit.security.scan"]?.kind).toBe("state");
 	});
@@ -596,9 +624,13 @@ describe("normalizeChartConfig", () => {
 		);
 
 		expect(result.ok).toBe(true);
-		if (!result.ok) throw new Error("expected valid chart");
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
 		const work = result.ast.states.work;
-		if (work?.kind !== "state") throw new Error("expected action state");
+		if (work?.kind !== "state") {
+			throw new Error("expected action state");
+		}
 		expect(work.after).toEqual({ delayMs: 500, target: "escalated" });
 	});
 
@@ -683,9 +715,13 @@ describe("normalizeChartConfig", () => {
 			},
 		});
 		expect(valid.diagnostics).toEqual([]);
-		if (!valid.ok) throw new Error("expected valid chart");
+		if (!valid.ok) {
+			throw new Error("expected valid chart");
+		}
 		const build = valid.ast.states.build;
-		if (build?.kind !== "state" || build.action.kind !== "agent") throw new Error("expected agent state");
+		if (build?.kind !== "state" || build.action.kind !== "agent") {
+			throw new Error("expected agent state");
+		}
 		expect(build.action.task).toEqual({
 			kind: "template",
 			strings: ["Build ", " following ", ""],
@@ -908,7 +944,9 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(valid.ok).toBe(true);
-		if (!valid.ok) throw new Error("expected valid chart");
+		if (!valid.ok) {
+			throw new Error("expected valid chart");
+		}
 		const gate = valid.ast.states.gate;
 		expect(gate?.kind === "state" ? gate.transitions.BLOCK : undefined).toEqual({
 			target: "fix",
@@ -1125,7 +1163,9 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(valid.ok).toBe(true);
-		if (!valid.ok) throw new Error("expected valid chart");
+		if (!valid.ok) {
+			throw new Error("expected valid chart");
+		}
 		const work = valid.ast.states.work;
 		expect(work?.kind === "state" && work.action.kind === "agent" ? work.action.reentry : undefined).toMatchObject({
 			resume: { kind: "template" },
@@ -1268,7 +1308,9 @@ describe("normalizeChartConfig", () => {
 			}),
 		);
 		expect(parsed.ok).toBe(true);
-		if (!parsed.ok) return;
+		if (!parsed.ok) {
+			return;
+		}
 		expect(parsed.ast.states.chapters).toMatchObject({
 			kind: "map",
 			over: { kind: "result", state: "plan", path: "chapters" },

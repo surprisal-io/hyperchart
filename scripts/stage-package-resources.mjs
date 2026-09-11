@@ -25,7 +25,9 @@ for (const [sourcePath, targetPath] of resources[packageName]) {
 		rmSync(target, { recursive: true, force: true });
 		continue;
 	}
-	if (!existsSync(source)) throw new Error(`Missing canonical package resource: ${sourcePath}`);
+	if (!existsSync(source)) {
+		throw new Error(`Missing canonical package resource: ${sourcePath}`);
+	}
 	rmSync(target, { recursive: true, force: true });
 	mkdirSync(dirname(target), { recursive: true });
 	cpSync(source, target, { recursive: true });

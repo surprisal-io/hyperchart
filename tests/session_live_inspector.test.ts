@@ -11,7 +11,9 @@ import { readSessionTranscript } from "../packages/pi-hyperchart/src/runtime/pi/
 const roots: string[] = [];
 
 afterEach(() => {
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function tempSessions(): string {

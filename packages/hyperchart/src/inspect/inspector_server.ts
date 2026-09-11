@@ -52,7 +52,9 @@ export async function openRunInspector(options: OpenRunInspectorOptions): Promis
 export async function closeRunInspectorServer(): Promise<void> {
 	const pending = singleton;
 	singleton = undefined;
-	if (pending === undefined) return;
+	if (pending === undefined) {
+		return;
+	}
 	const state = await pending;
 	state.entries.clear();
 	await new Promise<void>((resolveClose, reject) => {
@@ -80,11 +82,15 @@ async function startInspectorServer(): Promise<InspectorServerState> {
 	} catch (error) {
 		// A fixed port serves one process; parallel sessions fall back to an
 		// ephemeral port so every inspector still hands out a working URL.
-		if (fixedPort === 0 || (error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+		if (fixedPort === 0 || (error as NodeJS.ErrnoException).code !== "EADDRINUSE") {
+			throw error;
+		}
 		await listenOnce(server, 0, host);
 	}
 	const address = server.address();
-	if (address === null || typeof address === "string") throw new Error("Inspector server did not bind a TCP port");
+	if (address === null || typeof address === "string") {
+		throw new Error("Inspector server did not bind a TCP port");
+	}
 	server.unref();
 	return { server, origin: `http://${inspectorUrlHost(host)}:${address.port}`, entries };
 }
@@ -112,10 +118,14 @@ function inspectorHost(): string {
 
 /** The host to advertise in inspector URLs; wildcard binds resolve to the machine's LAN address. */
 function inspectorUrlHost(bindHost: string): string {
-	if (bindHost !== "0.0.0.0" && bindHost !== "::") return bindHost;
+	if (bindHost !== "0.0.0.0" && bindHost !== "::") {
+		return bindHost;
+	}
 	for (const interfaces of Object.values(networkInterfaces())) {
 		for (const entry of interfaces ?? []) {
-			if (entry.family === "IPv4" && !entry.internal) return entry.address;
+			if (entry.family === "IPv4" && !entry.internal) {
+				return entry.address;
+			}
 		}
 	}
 	return "127.0.0.1";
@@ -132,11 +142,16 @@ async function routeRequest(
 
 		const historyToken = routeToken(url.pathname, "/api/runs/", "/history");
 		if (historyToken !== undefined) {
-			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
+			if (request.method !== "POST") {
+				return sendText(response, 405, "Method not allowed");
+			}
 			const entry = entries.get(historyToken);
-			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
-			if (entry.historyDataSource === undefined)
+			if (entry === undefined) {
+				return sendJson(response, 404, { error: "Inspector run not found or expired" });
+			}
+			if (entry.historyDataSource === undefined) {
 				return sendJson(response, 409, { error: "Lazy history is unavailable for this run" });
+			}
 			entry.touchedAt = Date.now();
 			try {
 				const body = await readJsonBody(request);
@@ -182,11 +197,16 @@ async function routeRequest(
 
 		const steerToken = routeToken(url.pathname, "/api/runs/", "/steer");
 		if (steerToken !== undefined) {
-			if (request.method !== "POST") return sendText(response, 405, "Method not allowed");
+			if (request.method !== "POST") {
+				return sendText(response, 405, "Method not allowed");
+			}
 			const entry = entries.get(steerToken);
-			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
-			if (entry.steerSession === undefined)
+			if (entry === undefined) {
+				return sendJson(response, 404, { error: "Inspector run not found or expired" });
+			}
+			if (entry.steerSession === undefined) {
 				return sendJson(response, 409, { error: "Steering is unavailable for this run" });
+			}
 			entry.touchedAt = Date.now();
 			try {
 				const body = await readJsonBody(request);
@@ -207,28 +227,41 @@ async function routeRequest(
 
 		const apiToken = routeToken(url.pathname, "/api/runs/");
 		if (apiToken !== undefined) {
-			if (request.method !== "GET") return sendText(response, 405, "Method not allowed");
+			if (request.method !== "GET") {
+				return sendText(response, 405, "Method not allowed");
+			}
 			const entry = entries.get(apiToken);
-			if (entry === undefined) return sendJson(response, 404, { error: "Inspector run not found or expired" });
+			if (entry === undefined) {
+				return sendJson(response, 404, { error: "Inspector run not found or expired" });
+			}
 			entry.touchedAt = Date.now();
 			try {
 				const branchId = url.searchParams.get("branchId") ?? undefined;
-				if (branchId !== undefined && !validBranchId(branchId))
+				if (branchId !== undefined && !validBranchId(branchId)) {
 					return sendJson(response, 400, { error: "Invalid branch id" });
+				}
 				return sendJson(response, 200, { run: await entry.loadRun(branchId) });
 			} catch (error) {
 				return sendJson(response, 500, { error: error instanceof Error ? error.message : String(error) });
 			}
 		}
 
-		if (request.method !== "GET") return sendText(response, 405, "Method not allowed");
+		if (request.method !== "GET") {
+			return sendText(response, 405, "Method not allowed");
+		}
 		const pageToken = routeToken(url.pathname, "/runs/");
 		if (pageToken !== undefined) {
-			if (!entries.has(pageToken)) return sendText(response, 404, "Inspector run not found or expired");
+			if (!entries.has(pageToken)) {
+				return sendText(response, 404, "Inspector run not found or expired");
+			}
 			return sendHtml(response, inspectorHtml());
 		}
-		if (url.pathname === "/assets/client.js") return sendAsset(response, "client.js", "text/javascript; charset=utf-8");
-		if (url.pathname === "/assets/styles.css") return sendAsset(response, "styles.css", "text/css; charset=utf-8");
+		if (url.pathname === "/assets/client.js") {
+			return sendAsset(response, "client.js", "text/javascript; charset=utf-8");
+		}
+		if (url.pathname === "/assets/styles.css") {
+			return sendAsset(response, "styles.css", "text/css; charset=utf-8");
+		}
 		return sendText(response, 404, "Not found");
 	} catch (error) {
 		return sendText(response, 500, error instanceof Error ? error.message : String(error));
@@ -236,7 +269,9 @@ async function routeRequest(
 }
 
 function routeToken(pathname: string, prefix: string, suffix = ""): string | undefined {
-	if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+	if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) {
+		return undefined;
+	}
 	const token = pathname.slice(prefix.length, suffix.length === 0 ? undefined : -suffix.length);
 	return /^[A-Za-z0-9_-]+$/.test(token) ? token : undefined;
 }
@@ -247,11 +282,15 @@ async function readJsonBody(request: IncomingMessage): Promise<Record<string, un
 	for await (const chunk of request) {
 		const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 		size += buffer.length;
-		if (size > 16_384) throw new Error("Request body is too large");
+		if (size > 16_384) {
+			throw new Error("Request body is too large");
+		}
 		chunks.push(buffer);
 	}
 	const value = JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
-	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("JSON object required");
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		throw new Error("JSON object required");
+	}
 	return value as Record<string, unknown>;
 }
 
@@ -322,15 +361,21 @@ function sendText(response: ServerResponse, status: number, value: string): void
 }
 
 function trimEntries(entries: Map<string, InspectorEntry>): void {
-	if (entries.size <= MAX_INSPECTOR_ENTRIES) return;
+	if (entries.size <= MAX_INSPECTOR_ENTRIES) {
+		return;
+	}
 	const oldest = [...entries.entries()].sort((left, right) => left[1].touchedAt - right[1].touchedAt);
-	for (const [token] of oldest.slice(0, entries.size - MAX_INSPECTOR_ENTRIES)) entries.delete(token);
+	for (const [token] of oldest.slice(0, entries.size - MAX_INSPECTOR_ENTRIES)) {
+		entries.delete(token);
+	}
 }
 
 /** Fixed inspector port for remote setups so `ssh -L` can be configured once; 0 picks a free port. */
 function inspectorPort(): number {
 	const raw = process.env.HYPERCHART_INSPECTOR_PORT;
-	if (raw === undefined || raw.trim().length === 0) return 0;
+	if (raw === undefined || raw.trim().length === 0) {
+		return 0;
+	}
 	const port = Number(raw);
 	if (!Number.isInteger(port) || port < 0 || port > 65_535) {
 		throw new Error(`HYPERCHART_INSPECTOR_PORT must be a port number, got '${raw}'`);

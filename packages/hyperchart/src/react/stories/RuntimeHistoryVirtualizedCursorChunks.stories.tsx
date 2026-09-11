@@ -103,30 +103,41 @@ class SemanticStoryRuntime implements Runtime {
 						}) as DurableLogRecord,
 				);
 				this.records.push(...records);
-				if (effect.id === "args") projectBranch(this.projection, this.ast, records);
+				if (effect.id === "args") {
+					projectBranch(this.projection, this.ast, records);
+				}
 				this.targetCount += records.filter((record) => record.type === this.targetType).length;
-				if (this.targetCount >= this.count) throw new CaptureFinished();
+				if (this.targetCount >= this.count) {
+					throw new CaptureFinished();
+				}
 				this.push({ kind: "durable_records_added", effectId: effect.id, records });
-			} else if (effect.kind === "script") this.push({ kind: "script", effectId: effect.id, event: { type: "DONE" } });
-			else if (effect.kind === "tsImport")
+			} else if (effect.kind === "script") {
+				this.push({ kind: "script", effectId: effect.id, event: { type: "DONE" } });
+			} else if (effect.kind === "tsImport") {
 				this.push({ kind: "tsImport", effectId: effect.id, event: { type: "DONE" } });
-			else if (effect.kind === "agent")
+			} else if (effect.kind === "agent") {
 				this.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "DONE" } } });
-			else if (effect.kind === "actor_create" || effect.kind === "actor_enqueue" || effect.kind === "actor_reply")
+			} else if (effect.kind === "actor_create" || effect.kind === "actor_enqueue" || effect.kind === "actor_reply") {
 				this.push({
 					kind: "actor_effect",
 					effectId: effect.id,
 					operation: effect.kind === "actor_create" ? "create" : effect.kind === "actor_enqueue" ? "enqueue" : "reply",
 					ok: true,
 				});
-			else if (effect.kind !== "cancel") throw new Error(`Unexpected semantic story effect ${effect.kind}`);
+			} else if (effect.kind !== "cancel") {
+				throw new Error(`Unexpected semantic story effect ${effect.kind}`);
+			}
 		}
 	}
 	async *eventsQueue(): AsyncIterable<MachineEvent> {
 		while (true) {
-			if (this.queued.length === 0) await new Promise<void>((resolve) => this.waiters.push(resolve));
+			if (this.queued.length === 0) {
+				await new Promise<void>((resolve) => this.waiters.push(resolve));
+			}
 			const event = this.queued.shift();
-			if (event !== undefined) yield event;
+			if (event !== undefined) {
+				yield event;
+			}
 		}
 	}
 	private push(event: MachineEvent) {
@@ -142,14 +153,18 @@ async function captureSemantic(
 	count: number,
 ) {
 	const normalized = normalizeChartConfig(cst, { path: "storybook:runtime-history-semantic" });
-	if (!normalized.ok) throw new Error(normalized.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!normalized.ok) {
+		throw new Error(normalized.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	const runtime = new SemanticStoryRuntime(normalized.ast, targetType, count);
 	await runtime.runEffects([{ kind: "durable_records", id: "args", records: [{ type: "args", args }] }]);
 	const semantic = { machineState: () => createMachine(normalized.ast, structuredClone(runtime.projection)) };
 	try {
 		await loop(runtime, semantic);
 	} catch (error) {
-		if (!(error instanceof CaptureFinished)) throw error;
+		if (!(error instanceof CaptureFinished)) {
+			throw error;
+		}
 	}
 	const replay = explainReplay(normalized.ast, runtime.records);
 	if (
@@ -157,8 +172,9 @@ async function captureSemantic(
 		replay.prefixEnd !== runtime.records.length ||
 		replay.skipped.length > 0 ||
 		replay.stale.length > 0
-	)
+	) {
 		throw new Error("Semantic Runtime History fixture failed replay validation");
+	}
 	return { ast: normalized.ast, records: runtime.records };
 }
 
@@ -195,8 +211,9 @@ async function captureRuntime(visits: number): Promise<Fixture> {
 				invoke: record,
 				records: [record],
 			});
-		} else if (record.type === "state_action" && record.actionUid.state === "work")
+		} else if (record.type === "state_action" && record.actionUid.state === "work") {
 			ascending.at(-1)?.records.push(record);
+		}
 	}
 	const items: readonly StateVisitHistoryItem[] = ascending.reverse();
 	const run = hyperchartRunFromRuntime(
@@ -205,7 +222,9 @@ async function captureRuntime(visits: number): Promise<Fixture> {
 		runtime.records,
 	);
 	const state = run.states.find((candidate) => candidate.id === "work");
-	if (state === undefined) throw new Error("Runtime History story state is missing");
+	if (state === undefined) {
+		throw new Error("Runtime History story state is missing");
+	}
 	return {
 		rows: stateRows(items),
 		rowCount: items.length,
@@ -251,7 +270,9 @@ function fixtureFromRuntime(
 		captured.records,
 	);
 	const selected = state(run.states);
-	if (selected === undefined) throw new Error(`Runtime History story state is missing for ${captured.ast.id}`);
+	if (selected === undefined) {
+		throw new Error(`Runtime History story state is missing for ${captured.ast.id}`);
+	}
 	return {
 		rows,
 		rowCount: rows.length,
@@ -263,7 +284,9 @@ function fixtureFromRuntime(
 const semanticFixturePromises = new Map<"map" | "generations" | "messages", Promise<Fixture>>();
 function semanticFixtureRows(kind: "map" | "generations" | "messages"): Promise<Fixture> {
 	const existing = semanticFixturePromises.get(kind);
-	if (existing !== undefined) return existing;
+	if (existing !== undefined) {
+		return existing;
+	}
 	const captured = captureSemanticRows(kind, 1).then((fixture) => scaleFixture(fixture));
 	semanticFixturePromises.set(kind, captured);
 	return captured;
@@ -388,7 +411,9 @@ async function captureSemanticRows(kind: "map" | "generations" | "messages", cou
 }
 
 function scaleFixture(fixture: Fixture): Fixture {
-	if (fixture.rows.length === 0) throw new Error("Runtime History load-test seed is empty");
+	if (fixture.rows.length === 0) {
+		throw new Error("Runtime History load-test seed is empty");
+	}
 	return {
 		...fixture,
 		rowCount: LOAD_TEST_VISITS,
@@ -452,8 +477,9 @@ function storyChunk(fixture: Fixture, cursor?: HistoryCursor): HistoryChunk<Stor
 	if (cursor !== undefined) {
 		const [direction, raw] = cursor.split(":");
 		const boundary = Number(raw);
-		if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary >= fixture.rowCount)
+		if (!Number.isSafeInteger(boundary) || boundary < 0 || boundary >= fixture.rowCount) {
 			throw new Error("Invalid story history cursor");
+		}
 		start = direction === "older" ? boundary + 1 : direction === "newer" ? Math.max(0, boundary - 100) : boundary;
 	}
 	const end = Math.min(fixture.rowCount, start + 100);
@@ -552,7 +578,9 @@ function RuntimeHistoryStory({ scenario }: { scenario: Scenario }) {
 				? semanticFixtureRows(scenario)
 				: runtimeFixture();
 		void pending.then((value) => {
-			if (current) setLoaded({ scenario, fixture: value });
+			if (current) {
+				setLoaded({ scenario, fixture: value });
+			}
 		});
 		return () => {
 			current = false;
@@ -565,7 +593,9 @@ function RuntimeHistoryStory({ scenario }: { scenario: Scenario }) {
 		}),
 		[fixture],
 	);
-	if (fixture === undefined) return <div className="p-6 text-sm">Preparing the 10,000-row cursor source…</div>;
+	if (fixture === undefined) {
+		return <div className="p-6 text-sm">Preparing the 10,000-row cursor source…</div>;
+	}
 	return <ProductionHistoryStory key={scenario} fixture={fixture} scenario={scenario} source={source} />;
 }
 
@@ -581,7 +611,9 @@ type Story = StoryObj<typeof meta>;
 async function storyHistoryList(canvasElement: HTMLElement) {
 	const canvas = within(canvasElement);
 	const runtime = canvas.queryByRole("button", { name: /Runtime/ });
-	if (runtime?.getAttribute("aria-expanded") === "false") fireEvent.click(runtime);
+	if (runtime?.getAttribute("aria-expanded") === "false") {
+		fireEvent.click(runtime);
+	}
 	const scenario = canvasElement.querySelector<HTMLElement>("[data-history-scenario]")?.dataset.historyScenario;
 	let disclosure: string | undefined;
 	switch (scenario) {
@@ -597,8 +629,9 @@ async function storyHistoryList(canvasElement: HTMLElement) {
 		default:
 			break;
 	}
-	if (disclosure !== undefined)
+	if (disclosure !== undefined) {
 		fireEvent.click(await canvas.findByRole("button", { name: disclosure }, { timeout: 20_000 }));
+	}
 	return canvas.findByTestId("virtualized-history", {}, { timeout: 20_000 });
 }
 

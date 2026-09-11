@@ -166,10 +166,16 @@ afterEach(async () => {
 	vi.useRealTimers();
 	await closeRunInspectorServer();
 	process.chdir(previousCwd);
-	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
-	if (previousHyperchartPgDsn === undefined) delete process.env.HYPERCHART_PG_DSN;
-	else process.env.HYPERCHART_PG_DSN = previousHyperchartPgDsn;
+	if (previousAgentDir === undefined) {
+		delete process.env.PI_CODING_AGENT_DIR;
+	} else {
+		process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	}
+	if (previousHyperchartPgDsn === undefined) {
+		delete process.env.HYPERCHART_PG_DSN;
+	} else {
+		process.env.HYPERCHART_PG_DSN = previousHyperchartPgDsn;
+	}
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -519,7 +525,9 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
-				if (event === "session_start") sessionStart = handler;
+				if (event === "session_start") {
+					sessionStart = handler;
+				}
 			},
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
@@ -544,9 +552,13 @@ describe("hyperchart extension", () => {
 		`,
 		);
 		const parsed = parseChartModuleSync(chartPath);
-		if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		if (!parsed.ok) {
+			throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+		}
 		const state = parsed.ast.states.ask;
-		if (state?.kind !== "state" || state.action.kind !== "user") throw new Error("invalid user gate fixture");
+		if (state?.kind !== "state" || state.action.kind !== "user") {
+			throw new Error("invalid user gate fixture");
+		}
 		const { runId, runDir } = createRun("observable-user-gate", projectDir, chartPath, "session-a");
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
@@ -560,7 +572,9 @@ describe("hyperchart extension", () => {
 				definition: state.action,
 			},
 		]);
-		if (invoke === undefined) throw new Error("missing invocation record");
+		if (invoke === undefined) {
+			throw new Error("missing invocation record");
+		}
 		const [opened] = await store.appendDrafts([
 			{
 				type: "user_interaction",
@@ -583,7 +597,9 @@ describe("hyperchart extension", () => {
 				options: { deliverAs: "followUp", triggerTurn: true },
 			}),
 		]);
-		if (opened === undefined) throw new Error("missing opened interaction");
+		if (opened === undefined) {
+			throw new Error("missing opened interaction");
+		}
 		expect(
 			withRunStorage(testStorage(), () => hasUserInteractionReceipt(runId, "main", opened.seqId, "pi", "session-a")),
 		).toBe(true);
@@ -623,7 +639,9 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
-				if (event === "session_start") sessionStart = handler;
+				if (event === "session_start") {
+					sessionStart = handler;
+				}
 			},
 			sendMessage: (message: { customType: string; details: { requestId: string } }) => sent.push(message),
 			events: { on: () => {}, emit: () => {} },
@@ -671,14 +689,18 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
-				if (event === "session_start") sessionStart = handler;
+				if (event === "session_start") {
+					sessionStart = handler;
+				}
 			},
 			sendMessage: () => {
 				attempts++;
 				expect(withRunStorage(testStorage(), () => hasTerminalNotificationReceipt(runId, "pi", "session-a"))).toBe(
 					false,
 				);
-				if (attempts === 1) throw new Error("send failed");
+				if (attempts === 1) {
+					throw new Error("send failed");
+				}
 			},
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
@@ -719,7 +741,9 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
-				if (event === "session_start") sessionStart = handler;
+				if (event === "session_start") {
+					sessionStart = handler;
+				}
 			},
 			sendMessage: () => {
 				sends++;
@@ -773,7 +797,9 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
-				if (event === "session_start") sessionStart = handler;
+				if (event === "session_start") {
+					sessionStart = handler;
+				}
 			},
 			sendMessage: (message: { details: { requestId: string } }) => sent.push(message),
 			events: { on: () => {}, emit: () => {} },
@@ -950,9 +976,12 @@ describe("hyperchart extension", () => {
 		const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 		await store.initializeRootBranch();
 		const [root] = await store.appendDrafts([{ type: "args", args: {} }]);
-		if (root === undefined) throw new Error("missing root record");
-		for (let index = 0; index < 105; index++)
+		if (root === undefined) {
+			throw new Error("missing root record");
+		}
+		for (let index = 0; index < 105; index++) {
 			await store.createBranch(`branch-${index.toString().padStart(3, "0")}`, root.seqId);
+		}
 		const tool = registeredTool("hyperchart");
 		const ctx = commandContext(projectDir).ctx;
 		const first = await tool.execute(
@@ -1037,11 +1066,15 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: (event: { reason: string }, ctx: ExtensionCommandContext) => Promise<void>) => {
-				if (event === "session_start") sessionStart = handler;
+				if (event === "session_start") {
+					sessionStart = handler;
+				}
 			},
 			events: {
 				on: (event: string, handler: (request: HyperchartCommandRequest) => void) => {
-					if (event === HYPERCHART_COMMAND_EVENT) commandRequest = handler;
+					if (event === HYPERCHART_COMMAND_EVENT) {
+						commandRequest = handler;
+					}
 				},
 				emit: () => {},
 			},
@@ -1053,7 +1086,9 @@ describe("hyperchart extension", () => {
 		const handled = await requestHyperchartCommand(
 			{
 				emit(event, payload) {
-					if (event === HYPERCHART_COMMAND_EVENT) commandRequest?.(payload as HyperchartCommandRequest);
+					if (event === HYPERCHART_COMMAND_EVENT) {
+						commandRequest?.(payload as HyperchartCommandRequest);
+					}
 				},
 			},
 			"status",
@@ -1065,7 +1100,9 @@ describe("hyperchart extension", () => {
 			requestHyperchartCommand(
 				{
 					emit(event, payload) {
-						if (event === HYPERCHART_COMMAND_EVENT) commandRequest?.(payload as HyperchartCommandRequest);
+						if (event === HYPERCHART_COMMAND_EVENT) {
+							commandRequest?.(payload as HyperchartCommandRequest);
+						}
 					},
 				},
 				"resume",
@@ -1079,7 +1116,9 @@ describe("hyperchart extension", () => {
 			registerCommand: () => {},
 			registerTool: () => {},
 			on: (event: string, handler: () => Promise<void>) => {
-				if (event === "session_shutdown") sessionShutdown = handler;
+				if (event === "session_shutdown") {
+					sessionShutdown = handler;
+				}
 			},
 			events: { on: () => {}, emit: () => {} },
 		} as unknown as ExtensionAPI;
@@ -1771,7 +1810,9 @@ function lifecycleHarness(cwd: string, initiallyIdle: boolean): LifecycleHarness
 	} as unknown as ExtensionAPI;
 	register(pi);
 	const tool = tools.find((candidate) => candidate.name === "hyperchart");
-	if (tool === undefined) throw new Error("hyperchart tool was not registered");
+	if (tool === undefined) {
+		throw new Error("hyperchart tool was not registered");
+	}
 	return {
 		ctx,
 		tool,
@@ -1800,14 +1841,18 @@ function registeredCommand(): HyperchartCommand {
 	let command: HyperchartCommand | undefined;
 	const pi = {
 		registerCommand: (name: string, config: HyperchartCommand) => {
-			if (name === "hyperchart") command = config;
+			if (name === "hyperchart") {
+				command = config;
+			}
 		},
 		registerTool: () => {},
 		on: () => {},
 		events: { on: () => {}, emit: () => {} },
 	} as unknown as ExtensionAPI;
 	register(pi);
-	if (command === undefined) throw new Error("hyperchart command was not registered");
+	if (command === undefined) {
+		throw new Error("hyperchart command was not registered");
+	}
 	return command;
 }
 
@@ -1833,7 +1878,9 @@ function registeredTool(name: string): HyperchartTool {
 	} as unknown as ExtensionAPI;
 	register(pi);
 	const tool = tools.find((entry) => entry.name === name);
-	if (tool === undefined) throw new Error(`hyperchart tool ${name} was not registered`);
+	if (tool === undefined) {
+		throw new Error(`hyperchart tool ${name} was not registered`);
+	}
 	return tool;
 }
 
@@ -1858,7 +1905,9 @@ function commandContext(cwd: string): {
 				},
 				setStatus: () => {},
 				setWidget: (key: string, widget: unknown) => {
-					if (widget !== undefined) widgetKeys.push(key);
+					if (widget !== undefined) {
+						widgetKeys.push(key);
+					}
 				},
 				confirm: async () => false,
 				custom: async () => undefined,

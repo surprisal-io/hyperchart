@@ -20,7 +20,9 @@ export type StoryScenario = Readonly<{
 /** Production-boundary fixture: chart normalization + inspection + replay-checked runtime projection. */
 export function storyScenario(chart: ChartCst, path = `storybook:${chart.id}`): StoryScenario {
 	const parsed = normalizeChartConfig(chart, { path });
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join("\n"));
+	}
 	const ast = parsed.ast;
 	const inspect = inspectChartAst(ast, { chartPath: path });
 	return {
@@ -44,7 +46,9 @@ export function storyScenario(chart: ChartCst, path = `storybook:${chart.id}`): 
 
 export function actionAt(ast: ChartAst, statePath: string) {
 	const state = ast.states[statePath];
-	if (state?.kind !== "state") throw new Error(`expected action state at ${statePath}`);
+	if (state?.kind !== "state") {
+		throw new Error(`expected action state at ${statePath}`);
+	}
 	return state.action;
 }
 

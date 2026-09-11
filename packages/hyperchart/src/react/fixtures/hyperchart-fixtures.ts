@@ -68,7 +68,9 @@ function timestamp(seqId: number): number {
 
 function actionRecord(statePath: string, kind: "invoke" | "complete", seqId: number, event?: string): DurableLogRecord {
 	const state = inspectorDialogAst.states[statePath];
-	if (state?.kind !== "state") throw new Error(`expected action state at ${statePath}`);
+	if (state?.kind !== "state") {
+		throw new Error(`expected action state at ${statePath}`);
+	}
 	const session = {
 		parentId: seqId === 1 ? null : seqId - 1,
 		seqId,
@@ -85,7 +87,9 @@ function actionRecord(statePath: string, kind: "invoke" | "complete", seqId: num
 			...session,
 		};
 	}
-	if (event === undefined) throw new Error(`completion event is required for ${statePath}`);
+	if (event === undefined) {
+		throw new Error(`completion event is required for ${statePath}`);
+	}
 	return {
 		type: "state_action",
 		kind: "complete",

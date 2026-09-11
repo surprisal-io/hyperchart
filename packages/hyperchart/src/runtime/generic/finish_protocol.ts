@@ -24,10 +24,13 @@ export async function validateFinishParams(
 ): Promise<{ ok: true; event: ChartEvent } | { ok: false; errors: string[] }> {
 	const errors = validateFinishBasics(effect, params);
 	if (effect.reply !== undefined) {
-		if (!("output" in params)) errors.push("output is required for this completion event");
-		else {
+		if (!("output" in params)) {
+			errors.push("output is required for this completion event");
+		} else {
 			const check = await checkSchemaAsync(effect.reply, params.output, registry);
-			if (!check.ok) errors.push(...check.errors.map((message) => `output ${message}`));
+			if (!check.ok) {
+				errors.push(...check.errors.map((message) => `output ${message}`));
+			}
 		}
 	}
 	return errors.length > 0
@@ -41,15 +44,17 @@ export async function validateFinishParams(
 function validateFinishBasics(effect: AgentEffect, params: FinishParams): string[] {
 	const errors: string[] = [];
 	const unexpected = Object.keys(params).filter((key) => key !== "event" && key !== "output");
-	if (unexpected.length > 0) errors.push(`unexpected finish field(s): ${unexpected.join(", ")}`);
+	if (unexpected.length > 0) {
+		errors.push(`unexpected finish field(s): ${unexpected.join(", ")}`);
+	}
 	if (typeof params.event !== "string") {
 		errors.push("event must be a string");
 		return errors;
 	}
 	const allowedEvents = finishableEvents(effect);
-	if (params.event === "FAILED")
+	if (params.event === "FAILED") {
 		errors.push("FAILED is reserved for runtime failures and cannot be returned by an agent");
-	else if (!allowedEvents.includes(params.event)) {
+	} else if (!allowedEvents.includes(params.event)) {
 		errors.push(`event '${params.event}' is not allowed; expected one of ${allowedEvents.join(", ")}`);
 	}
 	return errors;

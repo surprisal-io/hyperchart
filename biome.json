@@ -18,6 +18,7 @@
 		"rules": {
 			"preset": "recommended",
 			"style": {
+				"useBlockStatements": "error",
 				"useConst": "off",
 				"useImportType": "off"
 			}

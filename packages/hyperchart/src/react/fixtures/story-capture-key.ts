@@ -21,6 +21,8 @@ export function storyCaptureKey(ast: ChartAst, schedule: readonly DurableLogReco
 	const identity = storyCaptureIdentity(ast, schedule);
 	// A compact registry key; the generator independently detects collisions.
 	let hash = 2166136261;
-	for (let i = 0; i < identity.length; i++) hash = Math.imul(hash ^ identity.charCodeAt(i), 16777619);
+	for (let i = 0; i < identity.length; i++) {
+		hash = Math.imul(hash ^ identity.charCodeAt(i), 16777619);
+	}
 	return `${ast.id}:${(hash >>> 0).toString(16)}`;
 }

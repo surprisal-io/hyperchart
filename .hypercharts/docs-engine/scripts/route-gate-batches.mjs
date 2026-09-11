@@ -5,8 +5,9 @@ import { emit, readJson, rejectAll } from "./doc-checks.mjs";
 function parsePathArray(name) {
 	try {
 		const value = JSON.parse(process.env[name] ?? "[]");
-		if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string"))
+		if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
 			throw new Error("not an array of paths");
+		}
 		return value;
 	} catch (error) {
 		rejectAll([`${name} must be a JSON array of paths: ${error.message}`]);
@@ -26,16 +27,22 @@ const refs = Object.values(batches.items ?? {}).flatMap((batch) => batch.finding
 const decisionById = new Map();
 for (const file of verdictFiles) {
 	const verdict = readJson(file);
-	for (const decision of verdict.decisions ?? []) decisionById.set(decision.id, decision);
+	for (const decision of verdict.decisions ?? []) {
+		decisionById.set(decision.id, decision);
+	}
 }
 
 const rework = { units: {} };
 for (const unitId of batches.unitIds ?? []) {
 	const unit = units[unitId];
-	if (!unit) rejectAll([`Unknown unit '${unitId}' in gate batches`]);
+	if (!unit) {
+		rejectAll([`Unknown unit '${unitId}' in gate batches`]);
+	}
 	const unitRefs = refs.filter((ref) => ref.unitId === unitId);
 	const decisions = unitRefs.map((ref) => decisionById.get(ref.id));
-	if (decisions.some((decision) => !decision)) rejectAll([`Gate decisions are incomplete for unit '${unitId}'`]);
+	if (decisions.some((decision) => !decision)) {
+		rejectAll([`Gate decisions are incomplete for unit '${unitId}'`]);
+	}
 	const reworkDecisions = decisions.filter((decision) => decision.result === "rework");
 	if (reworkDecisions.length > 0) {
 		delete ledger.units[unitId];
@@ -64,10 +71,15 @@ const output = {
 };
 
 if (feedbackCount > 0) {
-	if (gateRound >= maxGateRounds) emit("FAILED", output);
-	else emit("GATE_REWORK_REQUIRED", output);
+	if (gateRound >= maxGateRounds) {
+		emit("FAILED", output);
+	} else {
+		emit("GATE_REWORK_REQUIRED", output);
+	}
 } else {
 	const missing = Object.keys(units).filter((unitId) => !ledger.units[unitId]);
-	if (missing.length > 0) rejectAll([`Gate ledger is missing finalized units: ${missing.join(", ")}`]);
+	if (missing.length > 0) {
+		rejectAll([`Gate ledger is missing finalized units: ${missing.join(", ")}`]);
+	}
 	emit("GATE_APPROVED", output);
 }

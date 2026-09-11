@@ -12,7 +12,9 @@ import {
 
 function ast(config: Parameters<typeof normalizeChartConfig>[0]): ChartAst {
 	const result = normalizeChartConfig(config);
-	if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
 	return result.ast;
 }
 

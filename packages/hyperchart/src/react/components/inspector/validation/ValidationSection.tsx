@@ -11,7 +11,9 @@ export function ValidationSection({ state }: { state: HyperchartStateInfo }) {
 	const rejectionReason =
 		state.validation?.latestRejectedReason ??
 		state.issues?.find((issue) => issue.kind === "validation_rejected")?.message;
-	if (guard === undefined && validationLabel === undefined && rejectionReason === undefined) return null;
+	if (guard === undefined && validationLabel === undefined && rejectionReason === undefined) {
+		return null;
+	}
 	return (
 		<Section title="Validation guard" icon={CheckBadgeIcon}>
 			{guard === undefined ? (

@@ -42,7 +42,9 @@ export class ScriptRunner {
 		const live = this.begin(key);
 		try {
 			const env = await this.resolveEnv(effect.env, validationAttempt);
-			if (live.cancelled) return { type: "FAILED", error: "script cancelled before process start" };
+			if (live.cancelled) {
+				return { type: "FAILED", error: "script cancelled before process start" };
+			}
 			const result = await this.runProcess(effect.command, effect.args, env, undefined, live);
 			if (result.code !== 0) {
 				return {
@@ -89,7 +91,9 @@ export class ScriptRunner {
 				env.HYPERCHART_BRANCH_ID = invocation.branchId;
 				env.HYPERCHART_ACTION_UID = JSON.stringify(invocation.actionUid);
 			}
-			if (live.cancelled) return { ok: false, reason: "script guard cancelled before process start" };
+			if (live.cancelled) {
+				return { ok: false, reason: "script guard cancelled before process start" };
+			}
 			const result = await this.runProcess(guard.command, guard.args ?? [], env, JSON.stringify(event), live);
 			if (result.code !== 0) {
 				return { ok: false, reason: result.stderr.trim() || `exit ${result.code ?? result.signal ?? "unknown"}` };
@@ -98,7 +102,9 @@ export class ScriptRunner {
 			if (reply !== undefined) {
 				const replyEvent = eventFromStdout(result.stdout, ["DONE"]);
 				const error = await replyValidationError(reply, replyEvent, this.opts.schemaRegistry);
-				if (error !== undefined) return { ok: false, reason: `script guard ${error}` };
+				if (error !== undefined) {
+					return { ok: false, reason: `script guard ${error}` };
+				}
 			}
 			const artifactErrors = await validateArtifacts(artifacts, this.opts.workDir, this.opts.schemaRegistry);
 			if (artifactErrors.length > 0) {
@@ -112,7 +118,9 @@ export class ScriptRunner {
 
 	cancel(actionUid: ActionUID): Promise<void> {
 		const live = this.live.get(actionUidKey(actionUid));
-		if (live === undefined) return Promise.resolve();
+		if (live === undefined) {
+			return Promise.resolve();
+		}
 		live.cancelled = true;
 		this.terminate(live);
 		return live.settled;
@@ -137,21 +145,29 @@ export class ScriptRunner {
 			settle: () => settle(),
 		};
 		if (key !== undefined) {
-			if (this.live.has(key)) throw new Error(`Script phase ${key} is already running`);
+			if (this.live.has(key)) {
+				throw new Error(`Script phase ${key} is already running`);
+			}
 			this.live.set(key, live);
 		}
 		return live;
 	}
 
 	private finish(key: string | undefined, live: LiveScript): void {
-		if (live.killTimer !== undefined) clearTimeout(live.killTimer);
-		if (key !== undefined && this.live.get(key) === live) this.live.delete(key);
+		if (live.killTimer !== undefined) {
+			clearTimeout(live.killTimer);
+		}
+		if (key !== undefined && this.live.get(key) === live) {
+			this.live.delete(key);
+		}
 		live.settle();
 	}
 
 	private terminate(live: LiveScript): void {
 		const child = live.child;
-		if (child === undefined || !this.isRunning(child)) return;
+		if (child === undefined || !this.isRunning(child)) {
+			return;
+		}
 		try {
 			child.kill("SIGTERM");
 		} catch {
@@ -199,9 +215,13 @@ export class ScriptRunner {
 			// A guard is allowed to ignore stdin. Large completion envelopes can still be in flight
 			// when such a guard exits, causing the parent-side pipe to report EPIPE. The child exit
 			// status remains authoritative; without this listener Node terminates the runner.
-			if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") stdinError = error;
+			if (error.code !== "EPIPE" && error.code !== "ERR_STREAM_DESTROYED") {
+				stdinError = error;
+			}
 		});
-		if (stdin !== undefined) child.stdin.end(stdin);
+		if (stdin !== undefined) {
+			child.stdin.end(stdin);
+		}
 		try {
 			const exit = await waitForExit(child);
 			if (stdinError !== undefined && exit.code === 0) {
@@ -213,7 +233,9 @@ export class ScriptRunner {
 				clearTimeout(live.killTimer);
 				delete live.killTimer;
 			}
-			if (live.child === child) delete live.child;
+			if (live.child === child) {
+				delete live.child;
+			}
 		}
 	}
 
@@ -232,7 +254,9 @@ export class ScriptRunner {
 		env.HYPERCHART_BRANCH_WORKSPACE = this.opts.workDir;
 		if (validationAttempt !== undefined) {
 			env.HYPERCHART_VALIDATION_ATTEMPT = String(validationAttempt.n);
-			if (validationAttempt.reason !== undefined) env.HYPERCHART_REJECT_REASON = validationAttempt.reason;
+			if (validationAttempt.reason !== undefined) {
+				env.HYPERCHART_REJECT_REASON = validationAttempt.reason;
+			}
 		}
 		return env;
 	}
@@ -258,7 +282,9 @@ function eventFromStdout(stdout: string, events: readonly string[]): ChartEvent 
 		}
 	}
 	const nonFailedEvents = events.filter((event) => event !== "FAILED");
-	if (nonFailedEvents.length === 1) return { type: nonFailedEvents[0] as string };
+	if (nonFailedEvents.length === 1) {
+		return { type: nonFailedEvents[0] as string };
+	}
 	return {
 		type: "FAILED",
 		error: `ambiguous completion: print JSON {"type": ...} as the last stdout line; allowed: ${events.join(", ")}`,

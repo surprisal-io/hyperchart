@@ -102,7 +102,9 @@ export function ActorMailboxCard({
 	const [expanded, setExpanded] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
 	const latest = instances.at(-1);
-	if (latest === undefined) return null;
+	if (latest === undefined) {
+		return null;
+	}
 	const mailboxEntries = latest.mailbox.entries;
 	const messageHistory = latest.messageHistory ?? [];
 	const entries = mailboxEntries === undefined ? [] : expanded ? mailboxEntries : mailboxEntries.slice(0, 4);

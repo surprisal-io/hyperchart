@@ -15,7 +15,9 @@ import { loop } from "./helpers/execution.js";
 const roots: string[] = [];
 afterEach(() => {
 	vi.unstubAllEnvs();
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 it("restores an unanswered gate without future action state, transcripts or moving the branch", async () => {
@@ -34,7 +36,9 @@ it("restores an unanswered gate without future action state, transcripts or movi
  work:{kind:"state",action:agent("worker"),transitions:{DONE:"done"}},done:final()}});`,
 	);
 	const parsed = parseChartModuleSync(chartPath);
-	if (!parsed.ok) throw new Error("Invalid fixture chart");
+	if (!parsed.ok) {
+		throw new Error("Invalid fixture chart");
+	}
 	const ast = parsed.ast;
 	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
 	await store.writeRunMeta({ chartPath, workDir: root, chartId: ast.id, createdAt: new Date(0).toISOString() });
@@ -90,12 +94,15 @@ it("restores an unanswered gate without future action state, transcripts or movi
 		},
 		async *eventsQueue(): AsyncIterable<MachineEvent> {
 			while (true) {
-				if (queued.length === 0)
+				if (queued.length === 0) {
 					await new Promise<void>((resolve) => {
 						wake = resolve;
 					});
+				}
 				const event = queued.shift();
-				if (event !== undefined) yield event;
+				if (event !== undefined) {
+					yield event;
+				}
 			}
 		},
 	};

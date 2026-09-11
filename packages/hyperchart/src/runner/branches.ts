@@ -52,7 +52,9 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 		meta.chartPath,
 		meta.exportName === undefined ? {} : { exportName: meta.exportName },
 	);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	const store = await openRunLogStore(options.runId, { access: "writer" });
 	let branch: BranchHead;
 	try {
@@ -101,11 +103,15 @@ export async function forkHyperchartRun(options: ForkBranchOptions): Promise<For
 
 export function assertStoppedRun(runId: string, operation: string): void {
 	const status = readRunStatus(runId);
-	if (isRunLive(status)) throw new Error(`Run '${runId}' is live; stop it before ${operation}`);
+	if (isRunLive(status)) {
+		throw new Error(`Run '${runId}' is live; stop it before ${operation}`);
+	}
 }
 
 export async function assertRunOwnership(runId: string, cwd: string | undefined): Promise<void> {
-	if (cwd === undefined) return;
+	if (cwd === undefined) {
+		return;
+	}
 	const meta = await loadRunMeta(runId);
 	if (resolve(meta.workDir) !== resolve(cwd)) {
 		throw new Error(`Run '${runId}' belongs to ${meta.workDir}; open that directory first`);

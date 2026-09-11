@@ -33,7 +33,9 @@ export function removedValidatorStoryRun(pending = false) {
 			)
 		: records;
 	const replay = explainReplay(removedValidationScenario.ast, snapshot);
-	if (replay.broken !== undefined) throw new Error(replay.broken.error);
+	if (replay.broken !== undefined) {
+		throw new Error(replay.broken.error);
+	}
 	return hyperchartRunFromRuntime(removedValidationScenario.inspect, removedValidationScenario.ast, snapshot, {
 		runId: "recorded-validation",
 		cwd: "/workspace",

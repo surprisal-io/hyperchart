@@ -14,6 +14,8 @@ export function TypeBlock({
 	highlightedPath?: string | null;
 }) {
 	const lines = typeAliasLines(schema, name, stateId, highlightedPath);
-	if (!lines) return null;
+	if (!lines) {
+		return null;
+	}
 	return <TypeSyntaxBlock lines={lines} />;
 }

@@ -11,7 +11,9 @@ const bootstrapSource = fileURLToPath(
 let tempDir = "";
 
 afterEach(() => {
-	if (tempDir !== "") rmSync(tempDir, { recursive: true, force: true });
+	if (tempDir !== "") {
+		rmSync(tempDir, { recursive: true, force: true });
+	}
 });
 
 describe("Pi runner bootstrap", () => {

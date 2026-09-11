@@ -21,7 +21,9 @@ export class SchemaRegistry implements SchemaRegistryLike {
 				`Conflicting runtime contract ${contract.id}@${contract.version}: the same id/version is used by different Zod schemas`,
 			);
 		}
-		if (previous === undefined) this.#schemas.set(key, { contract, schema });
+		if (previous === undefined) {
+			this.#schemas.set(key, { contract, schema });
+		}
 	}
 
 	get(contract: RuntimeContractMetadata): ZodType | undefined {

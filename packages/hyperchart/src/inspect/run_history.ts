@@ -50,9 +50,13 @@ export async function createRunInspectorDataSource(
 		options.ast === undefined
 			? parseChartModuleSync(meta.chartPath, meta.exportName === undefined ? {} : { exportName: meta.exportName })
 			: { ok: true as const, ast: options.ast };
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	const assertRun = (candidate: string) => {
-		if (candidate !== runId) throw new Error(`Inspector data source is bound to run '${runId}'`);
+		if (candidate !== runId) {
+			throw new Error(`Inspector data source is bound to run '${runId}'`);
+		}
 	};
 	const withStore = async <T>(
 		operation: (store: Awaited<ReturnType<typeof openRunLogStore>>) => Promise<T>,
@@ -81,7 +85,9 @@ export async function createRunInspectorDataSource(
 				);
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const broken = explainReplay(parsed.ast, records).broken;
-				if (broken !== undefined) return mapChunk(chunk, (item) => incompatibleStateVisitToHost(item, broken));
+				if (broken !== undefined) {
+					return mapChunk(chunk, (item) => incompatibleStateVisitToHost(item, broken));
+				}
 				const semanticVisits = runtimeVisitHistoriesForInspector(parsed.ast, records).get(stateId) ?? [];
 				return mapChunkAsync(chunk, (item) =>
 					stateVisitWithProjection(
@@ -136,8 +142,9 @@ export async function createRunInspectorDataSource(
 				const chunk = await readChunkOrEmpty(store, snapshot, () =>
 					store.readRecords({ snapshot, ...(cursor === undefined ? {} : { cursor }) }),
 				);
-				if (includeActionVisits !== true || !chunk.items.some(isActionInvoke))
+				if (includeActionVisits !== true || !chunk.items.some(isActionInvoke)) {
 					return mapChunk(chunk, durableRecordToHost);
+				}
 				const ancestry = await collectSnapshotRecordsForMapping(store, snapshot);
 				return {
 					...chunk,
@@ -155,8 +162,9 @@ export async function createRunInspectorDataSource(
 						isMissingSyntheticBranch(error) &&
 						input.snapshot.headSeqId === null &&
 						(await store.countRecords()) === 0
-					)
+					) {
 						return undefined;
+					}
 					throw error;
 				}
 			});
@@ -168,11 +176,16 @@ export async function createRunInspectorDataSource(
 				if (
 					snapshot.headSeqId !== null &&
 					!(await store.containsInHistory({ headSeqId: live.headSeqId, seqId: snapshot.headSeqId }))
-				)
+				) {
 					return undefined;
-				if (!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: invokeSeqId }))) return undefined;
+				}
+				if (!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: invokeSeqId }))) {
+					return undefined;
+				}
 				const record = await store.getRecord(invokeSeqId);
-				if (!isActionInvoke(record) || record.definition.kind !== "agent") return undefined;
+				if (!isActionInvoke(record) || record.definition.kind !== "agent") {
+					return undefined;
+				}
 				const records = await collectSnapshotRecordsForMapping(store, snapshot);
 				const broken = explainReplay(parsed.ast, records).broken;
 				const visits =
@@ -180,7 +193,9 @@ export async function createRunInspectorDataSource(
 						? runtimeVisitHistoriesForInspector(parsed.ast, records)
 						: incompatibleVisitHistories(records, broken);
 				const visit = visits.get(record.actionUid.state)?.find((item) => item.invokeSeqId === invokeSeqId);
-				if (visit === undefined) return undefined;
+				if (visit === undefined) {
+					return undefined;
+				}
 				const liveBoundary = live.headSeqId === snapshot.headSeqId;
 				const boundary = records.at(-1)?.timestamp;
 				const end = visit.endedAt ?? (broken === undefined && liveBoundary ? Date.now() : boundary);
@@ -250,8 +265,14 @@ export function actionVisitRecordsToHost(
 			? runtimeVisitHistoriesForInspector(ast, ancestry)
 			: incompatibleVisitHistories(ancestry, broken);
 	for (const visits of semantic.values()) {
-		for (const visit of visits) if (requested.has(visit.invokeSeqId)) visitsBySeqId.set(visit.invokeSeqId, visit);
-		if (visitsBySeqId.size === requested.size) break;
+		for (const visit of visits) {
+			if (requested.has(visit.invokeSeqId)) {
+				visitsBySeqId.set(visit.invokeSeqId, visit);
+			}
+		}
+		if (visitsBySeqId.size === requested.size) {
+			break;
+		}
 	}
 	return pageRecords.map((record) => {
 		const base = durableRecordToHost(record);
@@ -360,8 +381,9 @@ async function readChunkOrEmpty<T>(
 	try {
 		return await read();
 	} catch (error) {
-		if (isMissingSyntheticBranch(error) && snapshot.headSeqId === null && (await store.countRecords()) === 0)
+		if (isMissingSyntheticBranch(error) && snapshot.headSeqId === null && (await store.countRecords()) === 0) {
 			return { snapshot, items: [] };
+		}
 		throw error;
 	}
 }
@@ -403,7 +425,9 @@ async function stateVisitWithProjection(
 		(candidate): candidate is Extract<(typeof projection.pendingActions)[number], { phase: "running" }> =>
 			candidate.phase === "running" && candidate.invokeSeqId === item.seqId,
 	);
-	if (pending === undefined) return base;
+	if (pending === undefined) {
+		return base;
+	}
 	const invocation = actionEffectInfo(renderPendingActionInvocation(ast, projection, pending));
 	const inputs = item.invoke.input ?? projection.inputs[item.state];
 	const hasRecordedInput = item.invoke.input !== undefined;

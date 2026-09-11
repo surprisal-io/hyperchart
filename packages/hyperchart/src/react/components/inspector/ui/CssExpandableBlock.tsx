@@ -19,10 +19,14 @@ export function CssExpandableBlock({
 
 	useLayoutEffect(() => {
 		const content = contentRef.current;
-		if (content === null) return;
+		if (content === null) {
+			return;
+		}
 		const measure = () => setContentOverflows(content.scrollHeight > content.clientHeight + 1);
 		measure();
-		if (typeof ResizeObserver === "undefined") return;
+		if (typeof ResizeObserver === "undefined") {
+			return;
+		}
 		const observer = new ResizeObserver(measure);
 		observer.observe(content);
 		return () => observer.disconnect();

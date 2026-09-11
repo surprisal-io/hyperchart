@@ -18,7 +18,9 @@ export function VisitInvocationDetails({
 	allStates: HyperchartStateInfo[];
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 }) {
-	if (invocation.kind === "actor") return null;
+	if (invocation.kind === "actor") {
+		return null;
+	}
 	if (invocation.kind === "user") {
 		return (
 			<div>

@@ -89,7 +89,9 @@ it.each([
 			},
 		}),
 	);
-	if (!normalized.ok) throw new Error(JSON.stringify(normalized.diagnostics));
+	if (!normalized.ok) {
+		throw new Error(JSON.stringify(normalized.diagnostics));
+	}
 	const ast = normalized.ast;
 	const store = new JsonlLogStore(join(directory, "journal.jsonl"));
 	await store.initializeRootBranch();
@@ -129,7 +131,9 @@ it.each([
 	const _rejection = records.find(
 		(record) => record.type === "state_action" && record.kind === "validated" && record.outcome !== true,
 	);
-	if (!completion) throw new Error("Source completion missing");
+	if (!completion) {
+		throw new Error("Source completion missing");
+	}
 	const forkPoint = completion;
 	const validating = projectBranch(
 		createBranchProjection(ast),
@@ -139,7 +143,9 @@ it.each([
 	const verdict = records.find(
 		(record) => record.type === "state_action" && record.kind === "validated" && record.outcome === true,
 	);
-	if (!verdict) throw new Error("Source verdict missing");
+	if (!verdict) {
+		throw new Error("Source verdict missing");
+	}
 	await store.createBranch("fork", forkPoint.seqId, { sourceBranchId: "main", sourceSeqId: forkPoint.seqId });
 	const forkStore = store.forBranch("fork");
 	const semantic = await BranchExecution.restore({ ast, branchId: "fork", store: forkStore });

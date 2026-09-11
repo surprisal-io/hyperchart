@@ -146,10 +146,14 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 }
 
 export function formatStateDuration(state: HyperchartStateInfo, snapshotAt = Date.now()): string | undefined {
-	if (state.startedAt === undefined) return undefined;
+	if (state.startedAt === undefined) {
+		return undefined;
+	}
 	const end = state.endedAt ?? snapshotAt;
 	const seconds = Math.max(0, Math.round((end - state.startedAt) / 1000));
-	if (seconds < 60) return `${seconds}s`;
+	if (seconds < 60) {
+		return `${seconds}s`;
+	}
 	return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
@@ -158,12 +162,16 @@ function compactCost(value: number): string {
 }
 
 function formatCompactUsage(usage?: HyperchartUsageInfo): string | undefined {
-	if (!usage || typeof usage.cost !== "number" || usage.cost <= 0) return undefined;
+	if (!usage || typeof usage.cost !== "number" || usage.cost <= 0) {
+		return undefined;
+	}
 	return compactCost(usage.cost);
 }
 
 export function stateConcurrencyLabel(state: HyperchartStateInfo): string | undefined {
-	if (state.concurrency !== undefined) return `concurrency ×${state.concurrency}`;
+	if (state.concurrency !== undefined) {
+		return `concurrency ×${state.concurrency}`;
+	}
 	if ((state.type ?? "agent") === "parallel") {
 		const regions = state.subProgress?.total ?? state.parallelConfig?.count ?? state.parallelConfig?.branches?.length;
 		return regions !== undefined && regions > 0 ? `concurrency ×${regions}` : undefined;
@@ -195,7 +203,7 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 			return state.module === undefined ? "tsAction" : `${state.module}#${state.export ?? "default"}`;
 		case "map": {
 			const progress = state.subProgress;
-			if (progress)
+			if (progress) {
 				return [
 					`${progress.done} done`,
 					`${progress.running} running`,
@@ -206,6 +214,7 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 				]
 					.filter(Boolean)
 					.join(" · ");
+			}
 			const count = state.mapConfig?.items?.length;
 			return count === undefined ? "map" : `${count} items`;
 		}
@@ -236,17 +245,25 @@ export function compactTriageFacts(_state: HyperchartStateInfo, validationLabel:
 }
 
 export function compactFactClass(fact: string): string {
-	if (fact.startsWith("validation")) return "bg-amber-500/10 px-1.5 py-0.5 text-[var(--hc-amber-text)]";
+	if (fact.startsWith("validation")) {
+		return "bg-amber-500/10 px-1.5 py-0.5 text-[var(--hc-amber-text)]";
+	}
 	return "text-[var(--text-tertiary)]";
 }
 
 export function validationRetryLabel(state: HyperchartStateInfo): string | undefined {
 	const policy = state.validationPolicy?.onFail;
-	if (policy === undefined && state.validationAttempts === undefined) return undefined;
+	if (policy === undefined && state.validationAttempts === undefined) {
+		return undefined;
+	}
 	const max = policy === undefined ? undefined : policy.restart + policy.nudge * (policy.restart + 1);
 	const attempts = state.validationAttempts;
-	if (attempts !== undefined && max !== undefined) return `validation ×${attempts}/${max}`;
-	if (attempts !== undefined) return `validation ×${attempts}`;
+	if (attempts !== undefined && max !== undefined) {
+		return `validation ×${attempts}/${max}`;
+	}
+	if (attempts !== undefined) {
+		return `validation ×${attempts}`;
+	}
 	return max !== undefined ? `validation recovery ≤${max}` : undefined;
 }
 
@@ -254,7 +271,9 @@ export function agentStatesForSelection(
 	state: HyperchartStateInfo,
 	allStates: HyperchartStateInfo[],
 ): HyperchartStateInfo[] {
-	if (state.agent) return [state];
+	if (state.agent) {
+		return [state];
+	}
 	const childPrefix = `${state.id}.`;
 	const mapInstancePrefix = `${state.id}#`;
 	const seenAgents = new Set<string>();
@@ -301,13 +320,17 @@ export function contractStatesForSelection(
 	highlightedReply?: { stateId: string; path: string } | null,
 	revealedReplyStateIds: readonly string[] = [],
 ): HyperchartStateInfo[] {
-	if (state.type === "compound" && !stateHasContracts(state)) return [];
+	if (state.type === "compound" && !stateHasContracts(state)) {
+		return [];
+	}
 	const prefix = `${state.id}.`;
 	const selected = stateHasContracts(state)
 		? [state]
 		: allStates.filter((candidate) => candidate.id.startsWith(prefix) && stateHasContracts(candidate));
 	const extraIds = new Set(revealedReplyStateIds);
-	if (highlightedReply) extraIds.add(highlightedReply.stateId);
+	if (highlightedReply) {
+		extraIds.add(highlightedReply.stateId);
+	}
 	const extras = [...extraIds]
 		.map((stateId) => allStates.find((candidate) => candidate.id === stateId && stateHasContracts(candidate)))
 		.filter(

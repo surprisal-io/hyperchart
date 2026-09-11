@@ -11,7 +11,9 @@ export function MapVisitHistory({
 	onReenter?: HyperchartOnReenterInfo;
 }) {
 	const [expandedVisits, setExpandedVisits] = useState<Record<number, boolean>>({});
-	if (visits.length === 0) return null;
+	if (visits.length === 0) {
+		return null;
+	}
 	return (
 		<div className="space-y-2">
 			<div className="flex flex-wrap items-center gap-2">

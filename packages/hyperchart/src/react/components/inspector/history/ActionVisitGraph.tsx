@@ -140,12 +140,13 @@ export function ActionVisitGraph({
 							onSelectVisit(row);
 							return;
 						}
-						if (node.type === "mapVisitGroup")
+						if (node.type === "mapVisitGroup") {
 							onSelectState(
 								String(node.data.stateId),
 								node.id,
 								typeof node.data.targetSeqId === "number" ? node.data.targetSeqId : undefined,
 							);
+						}
 					}}
 				>
 					<Controls position="bottom-left" />
@@ -211,12 +212,18 @@ export function executionGraph(
 						parentId: mapNodeId,
 						extent: "parent",
 					});
-					if (actionIndex === 0) entryIds.push(id);
-					if (actionIndex === block.entries.length - 1) exitIds.push(id);
+					if (actionIndex === 0) {
+						entryIds.push(id);
+					}
+					if (actionIndex === block.entries.length - 1) {
+						exitIds.push(id);
+					}
 					const previous = block.entries[actionIndex - 1];
-					if (previous !== undefined) edges.push(executionEdge(nodeId(previous.row), id));
+					if (previous !== undefined) {
+						edges.push(executionEdge(nodeId(previous.row), id));
+					}
 				});
-			} else
+			} else {
 				lanes.forEach((lane, laneIndex) => {
 					const workerNodeId = `${mapNodeId}-worker-${laneIndex}`;
 					const workerHeight = workerHeightFor(lane.entries.length);
@@ -247,12 +254,19 @@ export function executionGraph(
 							parentId: workerNodeId,
 							extent: "parent",
 						});
-						if (actionIndex === 0) entryIds.push(id);
-						if (actionIndex === lane.entries.length - 1) exitIds.push(id);
+						if (actionIndex === 0) {
+							entryIds.push(id);
+						}
+						if (actionIndex === lane.entries.length - 1) {
+							exitIds.push(id);
+						}
 						const previous = lane.entries[actionIndex - 1];
-						if (previous !== undefined) edges.push(executionEdge(nodeId(previous.row), id));
+						if (previous !== undefined) {
+							edges.push(executionEdge(nodeId(previous.row), id));
+						}
 					});
 				});
+			}
 			connectBlocks(edges, previousExitIds, entryIds);
 			previousExitIds = exitIds;
 		}
@@ -296,10 +310,15 @@ function authoredExecutionScopeForState(
 	while (parentId !== undefined && !seen.has(parentId)) {
 		seen.add(parentId);
 		const parent = statesById.get(parentId);
-		if (parent === undefined) return undefined;
-		if (parent.type === "parallel") return { groupId: parent.id, groupType: "parallel", laneScopeId: child.id };
-		if (parent.type === "actor-occurrence")
+		if (parent === undefined) {
+			return undefined;
+		}
+		if (parent.type === "parallel") {
+			return { groupId: parent.id, groupType: "parallel", laneScopeId: child.id };
+		}
+		if (parent.type === "actor-occurrence") {
 			return { groupId: parent.id, groupType: "actor-occurrence", laneScopeId: parent.id };
+		}
 		child = parent;
 		parentId = stateScopeParentId(parent);
 	}
@@ -314,13 +333,20 @@ function executionBlocks(entries: readonly VisitEntry[]): ExecutionBlock[] {
 	for (const entry of entries) {
 		const previous = provisional.at(-1);
 		if (entry.groupId !== undefined && entry.groupType !== undefined) {
-			if (previous?.kind === "scope" && previous.groupId === entry.groupId) previous.entries.push(entry);
-			else provisional.push({ kind: "scope", groupId: entry.groupId, groupType: entry.groupType, entries: [entry] });
-		} else provisional.push({ kind: "action", entry });
+			if (previous?.kind === "scope" && previous.groupId === entry.groupId) {
+				previous.entries.push(entry);
+			} else {
+				provisional.push({ kind: "scope", groupId: entry.groupId, groupType: entry.groupType, entries: [entry] });
+			}
+		} else {
+			provisional.push({ kind: "action", entry });
+		}
 	}
 	const cycles = new Map<string, number>();
 	return provisional.map((block) => {
-		if (block.kind === "action") return { ...block, width: ACTION_WIDTH, height: ACTION_HEIGHT };
+		if (block.kind === "action") {
+			return { ...block, width: ACTION_WIDTH, height: ACTION_HEIGHT };
+		}
 		const cycle = (cycles.get(block.groupId) ?? 0) + 1;
 		cycles.set(block.groupId, cycle);
 		if (block.groupType === "actor-occurrence") {
@@ -346,8 +372,11 @@ function workerLanes(entries: readonly VisitEntry[]): Array<{ laneScopeId: strin
 	for (const entry of entries) {
 		const key = entry.laneScopeId ?? `${entry.groupId ?? "scope"}#unknown`;
 		const lane = lanes.get(key);
-		if (lane === undefined) lanes.set(key, [entry]);
-		else lane.push(entry);
+		if (lane === undefined) {
+			lanes.set(key, [entry]);
+		} else {
+			lane.push(entry);
+		}
 	}
 	return [...lanes].map(([laneScopeId, laneEntries]) => ({ laneScopeId, entries: laneEntries }));
 }
@@ -371,7 +400,11 @@ function actionNode(entry: VisitEntry, position: { x: number; y: number }): Stat
 
 function connectBlocks(edges: Edge[], sourceIds: readonly string[], targetIds: readonly string[]): void {
 	const type = sourceIds.length > 1 || targetIds.length > 1 ? "smoothstep" : "straight";
-	for (const source of sourceIds) for (const target of targetIds) edges.push(executionEdge(source, target, type));
+	for (const source of sourceIds) {
+		for (const target of targetIds) {
+			edges.push(executionEdge(source, target, type));
+		}
+	}
 }
 
 function executionEdge(source: string, target: string, type: "straight" | "smoothstep" = "straight"): Edge {
@@ -396,7 +429,9 @@ function workerHeightFor(actionCount: number): number {
 function workerScopeFromRuntimePath(statePath: string, mapIds: ReadonlySet<string>): string | undefined {
 	for (const mapId of mapIds) {
 		const prefix = `${mapId}#`;
-		if (!statePath.startsWith(prefix)) continue;
+		if (!statePath.startsWith(prefix)) {
+			continue;
+		}
 		const dot = statePath.indexOf(".", prefix.length);
 		return dot === -1 ? statePath : statePath.slice(0, dot);
 	}
@@ -405,7 +440,9 @@ function workerScopeFromRuntimePath(statePath: string, mapIds: ReadonlySet<strin
 
 function workerLabel(workerScopeId: string): string {
 	const marker = workerScopeId.lastIndexOf("#");
-	if (marker !== -1) return `worker ${workerScopeId.slice(marker + 1)}`;
+	if (marker !== -1) {
+		return `worker ${workerScopeId.slice(marker + 1)}`;
+	}
 	return workerScopeId.slice(workerScopeId.lastIndexOf(".") + 1);
 }
 

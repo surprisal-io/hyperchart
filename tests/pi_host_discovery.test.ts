@@ -259,8 +259,11 @@ describe("Pi Hyperchart host adapter", () => {
 			const snapshot = await createPiHyperchartHost().readSessionSnapshot(projectDir);
 			expect(snapshot.hypercharts).toEqual([expect.objectContaining({ name: "user-chart", scope: "user" })]);
 		} finally {
-			if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
-			else process.env.PI_CODING_AGENT_DIR = previous;
+			if (previous === undefined) {
+				delete process.env.PI_CODING_AGENT_DIR;
+			} else {
+				process.env.PI_CODING_AGENT_DIR = previous;
+			}
 		}
 	});
 

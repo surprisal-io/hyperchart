@@ -59,7 +59,9 @@ function linearAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -74,7 +76,9 @@ function finalAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -99,7 +103,9 @@ function twoStepAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -120,7 +126,9 @@ function semanticDownstreamAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -140,7 +148,9 @@ function userAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("user chart should be valid");
+	if (!result.ok) {
+		throw new Error("user chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -166,7 +176,9 @@ function inputUserAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("input user chart should be valid");
+	if (!result.ok) {
+		throw new Error("input user chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -194,7 +206,9 @@ function transitionRefAst(): ChartAst {
 			},
 		}),
 	);
-	if (!parsed.ok) throw new Error(`transition-ref chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+	if (!parsed.ok) {
+		throw new Error(`transition-ref chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+	}
 	return parsed.ast;
 }
 
@@ -222,7 +236,9 @@ function validatedAst(mode?: "nudge" | "restart", budget?: number): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -244,7 +260,9 @@ function afterAst(escalated: StateCst = final()): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -270,7 +288,9 @@ function compoundAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -299,7 +319,9 @@ function parallelAst(): ChartAst {
 			},
 		}),
 	);
-	if (!result.ok) throw new Error("test chart should be valid");
+	if (!result.ok) {
+		throw new Error("test chart should be valid");
+	}
 	return result.ast;
 }
 
@@ -337,7 +359,9 @@ function mapAst(concurrency?: number): ChartAst {
 			},
 		}),
 	);
-	if (!parsed.ok) throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+	if (!parsed.ok) {
+		throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+	}
 	return parsed.ast;
 }
 
@@ -346,7 +370,9 @@ const PLAN_OUTPUT = { chapters: { intro: { title: "Intro" }, body: { title: "Bod
 const actionDefinitions = new Map<string, StateActionAst>();
 function actionUid(ast: ChartAst, stateId: StateId = "start"): ActionUID {
 	const state = ast.states[stateId];
-	if (state?.kind !== "state") throw new Error(`state ${stateId} should be actionable`);
+	if (state?.kind !== "state") {
+		throw new Error(`state ${stateId} should be actionable`);
+	}
 	actionDefinitions.set(`${state.action.uid.chart}:${stateId.replace(/#[^.]+/g, "")}`, state.action);
 	return state.action.uid;
 }
@@ -372,10 +398,15 @@ function invoke(uid: ActionUID, seqId = 1): DurableLogRecord {
 
 function definitionForUid(uid: ActionUID): StateActionAst {
 	const recorded = actionDefinitions.get(`${uid.chart}:${uid.state.replace(/#[^.]+/g, "")}`);
-	if (recorded !== undefined) return { ...recorded, uid };
-	if (uid.action === "script") return { kind: "script", uid, command: "test", args: [] };
-	if (uid.action === "user")
+	if (recorded !== undefined) {
+		return { ...recorded, uid };
+	}
+	if (uid.action === "script") {
+		return { kind: "script", uid, command: "test", args: [] };
+	}
+	if (uid.action === "user") {
 		return { kind: "user", uid, prompt: { kind: "template", strings: [""], refs: [] }, options: [] };
+	}
 	return { kind: "agent", uid, name: "test-worker", onFail: { nudge: 2, restart: 1 } };
 }
 
@@ -402,7 +433,9 @@ function durableRecordsAdded(
 ): MachineEvent {
 	if (records.some((record) => record.type === "state_action" && record.kind !== "invoke")) {
 		const sourceSeqId = Number(effectId.match(/:(\d+)$/)?.[1]);
-		if (Number.isSafeInteger(sourceSeqId)) nextAckSeqId = Math.max(nextAckSeqId, sourceSeqId);
+		if (Number.isSafeInteger(sourceSeqId)) {
+			nextAckSeqId = Math.max(nextAckSeqId, sourceSeqId);
+		}
 	}
 	let parentId: number | null = nextAckSeqId === 0 ? null : nextAckSeqId;
 	const stamped = records.map((record) => {
@@ -481,7 +514,9 @@ describe("execution loop", () => {
 			events,
 			onRunEffects(effects) {
 				const [effect] = effects;
-				if (effect === undefined) throw new Error("expected effect");
+				if (effect === undefined) {
+					throw new Error("expected effect");
+				}
 
 				sequence.push(effect.kind);
 				switch (effect.kind) {
@@ -530,9 +565,13 @@ describe("execution loop", () => {
 			events,
 			onRunEffects(effects) {
 				for (const effect of effects) {
-					if (effect.kind !== "durable_records") continue;
+					if (effect.kind !== "durable_records") {
+						continue;
+					}
 					const ack = durableRecordsAdded(effect.records, effect.id);
-					if (ack.kind !== "durable_records_added") throw new Error("expected durable ack");
+					if (ack.kind !== "durable_records_added") {
+						throw new Error("expected durable ack");
+					}
 					events.push(ack);
 					const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
 					if (opened?.type === "user_interaction" && opened.kind === "opened") {
@@ -590,7 +629,9 @@ describe("execution loop", () => {
 						});
 					} else if (effect.kind === "durable_records") {
 						const ack = durableRecordsAdded(effect.records, effect.id);
-						if (ack.kind !== "durable_records_added") throw new Error("expected durable ack");
+						if (ack.kind !== "durable_records_added") {
+							throw new Error("expected durable ack");
+						}
 						events.push(ack);
 						const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
 						if (opened?.type === "user_interaction" && opened.kind === "opened") {
@@ -646,7 +687,9 @@ describe("execution loop", () => {
 						events.push({ kind: "validated", effectId: effect.id, outcome: true });
 					} else if (effect.kind === "durable_records") {
 						for (const record of effect.records) {
-							if (record.type === "state_action" && record.actionUid.state === "score") scoreRecords.push(record);
+							if (record.type === "state_action" && record.actionUid.state === "score") {
+								scoreRecords.push(record);
+							}
 						}
 						events.push(durableRecordsAdded(effect.records, effect.id));
 					}
@@ -657,8 +700,9 @@ describe("execution loop", () => {
 		const state = await start(runtime);
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(scoreRecords.map((record) => record.kind)).toEqual(["invoke", "complete", "validated"]);
-		for (const record of scoreRecords)
+		for (const record of scoreRecords) {
 			expect("input" in record ? record.input : undefined).toEqual({ hypothesisId: "hypothesis-7" });
+		}
 	});
 
 	it("fails closed when a transition result ref has no completed result", async () => {
@@ -669,13 +713,15 @@ describe("execution loop", () => {
 			events,
 			onRunEffects(effects) {
 				for (const effect of effects) {
-					if (effect.kind === "agent")
+					if (effect.kind === "agent") {
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
 							outcome: { kind: "completed", event: { type: "SELECTED" } },
 						});
-					else if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+					} else if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
 				}
 			},
 		});
@@ -692,13 +738,15 @@ describe("execution loop", () => {
 			logs: [invoke(uid)],
 			events,
 			onRunEffects(effects) {
-				for (const effect of effects)
+				for (const effect of effects) {
 					if (effect.kind === "durable_records") {
 						const ack = durableRecordsAdded(effect.records, effect.id);
-						if (ack.kind !== "durable_records_added") throw new Error("expected durable ack");
+						if (ack.kind !== "durable_records_added") {
+							throw new Error("expected durable ack");
+						}
 						events.push(ack);
 						const opened = ack.records.find((record) => record.type === "user_interaction" && record.kind === "opened");
-						if (opened?.type === "user_interaction" && opened.kind === "opened")
+						if (opened?.type === "user_interaction" && opened.kind === "opened") {
 							events.push(
 								durableRecordsAdded(
 									[
@@ -713,7 +761,9 @@ describe("execution loop", () => {
 									"external",
 								),
 							);
+						}
 					}
+				}
 			},
 		});
 		await expect(loop(runtime)).rejects.toThrow("Event 'NOPE' is not allowed");
@@ -728,7 +778,9 @@ describe("execution loop", () => {
 			events,
 			onRunEffects(effects) {
 				const [effect] = effects;
-				if (effect === undefined) throw new Error("expected effect");
+				if (effect === undefined) {
+					throw new Error("expected effect");
+				}
 
 				switch (effect.kind) {
 					case "agent": {
@@ -786,7 +838,9 @@ describe("execution loop", () => {
 			onRunEffects(effects) {
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
-						if (effect.recovery !== undefined) retries.push(effect);
+						if (effect.recovery !== undefined) {
+							retries.push(effect);
+						}
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
@@ -796,7 +850,9 @@ describe("execution loop", () => {
 					if (effect.kind === "validate") {
 						validations.push(effect);
 						const outcome = outcomes.shift();
-						if (outcome === undefined) throw new Error("unexpected validate effect");
+						if (outcome === undefined) {
+							throw new Error("unexpected validate effect");
+						}
 						events.push({ kind: "validated", effectId: effect.id, outcome });
 					}
 					if (effect.kind === "durable_records") {
@@ -943,7 +999,9 @@ describe("execution loop", () => {
 									: { kind: "completed", event: { type: "FAILED", error: "stop after proving recovery" } },
 						});
 					}
-					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
 				}
 			},
 		});
@@ -979,7 +1037,9 @@ describe("execution loop", () => {
 							outcome: { kind: "completed", event: { type: "DOWNSTREAM_DONE" } },
 						});
 					}
-					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
 				}
 			},
 		});
@@ -1065,7 +1125,9 @@ describe("execution loop", () => {
 			"complete",
 		]);
 		const invoke = records[0];
-		if (invoke?.type !== "state_action" || invoke.kind !== "invoke") throw new Error("missing invoke record");
+		if (invoke?.type !== "state_action" || invoke.kind !== "invoke") {
+			throw new Error("missing invoke record");
+		}
 		expect(invoke.sessionId).toMatch(/^[0-9a-f-]{36}$/);
 		const agent = runtime.effectBatches.flat().find((effect) => effect.kind === "agent");
 		expect(agent?.kind === "agent" ? agent.sessionId : undefined).toBe(invoke.sessionId);
@@ -1118,7 +1180,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const ast = parsed.ast;
 		const events: MachineEvent[] = [];
 		const tasks: Record<string, unknown> = {};
@@ -1198,7 +1262,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		const outputs: Record<string, unknown> = {};
 		const readsSeen: Record<string, unknown> = {};
@@ -1265,7 +1331,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		const writerPaths: string[] = [];
 		let readerPath: string | undefined;
@@ -1285,7 +1353,9 @@ describe("execution loop", () => {
 					}
 					if (effect.kind === "agent" && effect.actionUid.state === "gate") {
 						const eventType = gateEvents.shift();
-						if (eventType === undefined) throw new Error("unexpected gate run");
+						if (eventType === undefined) {
+							throw new Error("unexpected gate run");
+						}
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
@@ -1332,7 +1402,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		const workEffects: Extract<Effect, { kind: "agent" }>[] = [];
 		let gateRuns = 0;
@@ -1404,7 +1476,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		const workerEffects: Extract<Effect, { kind: "agent" }>[] = [];
 		let gateRuns = 0;
@@ -1461,7 +1535,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const uid = actionUid(parsed.ast, "work");
 		const gateUid = actionUid(parsed.ast, "gate");
 		const logs: DurableLogRecord[] = [
@@ -1506,7 +1582,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		const writerPaths: string[] = [];
 		const verdicts: GuardOutcome[] = [{ ok: false, reason: "try again" }, true];
@@ -1525,7 +1603,9 @@ describe("execution loop", () => {
 					}
 					if (effect.kind === "validate") {
 						const outcome = verdicts.shift();
-						if (outcome === undefined) throw new Error("unexpected validate effect");
+						if (outcome === undefined) {
+							throw new Error("unexpected validate effect");
+						}
 						events.push({ kind: "validated", effectId: effect.id, outcome });
 					}
 					if (effect.kind === "durable_records") {
@@ -1578,7 +1658,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		let scriptEffect: unknown;
 		let consumeEffect: unknown;
@@ -1597,8 +1679,11 @@ describe("execution loop", () => {
 						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: reply } });
 					}
 					if (effect.kind === "script") {
-						if (effect.actionUid.state === "normalize") scriptEffect = effect;
-						else consumeEffect = effect;
+						if (effect.actionUid.state === "normalize") {
+							scriptEffect = effect;
+						} else {
+							consumeEffect = effect;
+						}
 						// the runtime ran the process and mapped its outcome to a chart event
 						const eventType = effect.actionUid.state === "normalize" ? "NORMALIZED" : "CONSUMED";
 						events.push({ kind: "script", effectId: effect.id, event: { type: eventType } });
@@ -1660,7 +1745,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const events: MachineEvent[] = [];
 		const runtime = new MockRuntime({
 			ast: parsed.ast,
@@ -1735,7 +1822,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("test chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const ast = parsed.ast;
 		const planUid = actionUid(ast, "plan");
 		const buildUid = actionUid(ast, "build");
@@ -1971,7 +2060,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error("timed user chart should be valid");
+		if (!parsed.ok) {
+			throw new Error("timed user chart should be valid");
+		}
 		const ast = parsed.ast;
 		const uid = actionUid(ast, "work");
 		const events: MachineEvent[] = [];
@@ -1988,8 +2079,12 @@ describe("execution loop", () => {
 							outcome: { kind: "completed", event: { type: "HANDLED" } },
 						});
 					}
-					if (effect.kind === "timer") events.push({ kind: "timer", effectId: effect.id });
-					if (effect.kind === "durable_records") events.push(durableRecordsAdded(effect.records, effect.id));
+					if (effect.kind === "timer") {
+						events.push({ kind: "timer", effectId: effect.id });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
 				}
 			},
 		});
@@ -2036,7 +2131,9 @@ describe("execution loop", () => {
 					}
 					if (effect.kind === "durable_records") {
 						for (const record of effect.records) {
-							if (record.type === "state_action") sequence.push(`${record.kind}:${record.actionUid.state}`);
+							if (record.type === "state_action") {
+								sequence.push(`${record.kind}:${record.actionUid.state}`);
+							}
 						}
 						events.push(durableRecordsAdded(effect.records, effect.id));
 					}
@@ -2211,7 +2308,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!result.ok) throw new Error("test chart should be valid");
+		if (!result.ok) {
+			throw new Error("test chart should be valid");
+		}
 		const ast = result.ast;
 		const uid = actionUid(ast, "work");
 		const events: MachineEvent[] = [];
@@ -2293,7 +2392,9 @@ describe("execution loop", () => {
 					.filter((effect): effect is Extract<Effect, { kind: "agent" }> => effect.kind === "agent")
 					.map((effect) => effect.actionUid.state)
 					.filter((state) => state.includes("#"));
-				if (instances.length > 0) batches.push(instances);
+				if (instances.length > 0) {
+					batches.push(instances);
+				}
 				for (const effect of effects) {
 					if (effect.kind === "agent") {
 						const output = effect.actionUid.state === "plan" ? { output: PLAN_OUTPUT } : {};
@@ -2399,7 +2500,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		if (!parsed.ok) {
+			throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		}
 		const ast = parsed.ast;
 		const events: MachineEvent[] = [];
 		let reads: readonly { path: string }[] = [];
@@ -2416,7 +2519,9 @@ describe("execution loop", () => {
 							outcome: { kind: "completed", event: { type: "OK", output: { chapters: PLAN_OUTPUT.chapters } } },
 						});
 					} else if (effect.kind === "agent") {
-						if (effect.actionUid.state === "gather") reads = effect.reads ?? [];
+						if (effect.actionUid.state === "gather") {
+							reads = effect.reads ?? [];
+						}
 						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "script") {
@@ -2486,7 +2591,9 @@ describe("execution loop", () => {
 				},
 			}),
 		);
-		if (!parsed.ok) throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		if (!parsed.ok) {
+			throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		}
 		const ast = parsed.ast;
 		const events: MachineEvent[] = [];
 		const joined = new Map<string, string>();

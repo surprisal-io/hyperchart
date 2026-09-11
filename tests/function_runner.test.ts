@@ -49,14 +49,18 @@ afterEach(async () => {
 
 function ast(config: ChartCst): ChartAst {
 	const parsed = normalizeChartConfig(config);
-	if (!parsed.ok) throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
 	return parsed.ast;
 }
 
 async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs = 1_000): Promise<void> {
 	const started = Date.now();
 	while (!(await predicate())) {
-		if (Date.now() - started > timeoutMs) throw new Error("timed out waiting for condition");
+		if (Date.now() - started > timeoutMs) {
+			throw new Error("timed out waiting for condition");
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 }
@@ -71,7 +75,9 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 1_000): Promise<T
 			}),
 		]);
 	} finally {
-		if (timer !== undefined) clearTimeout(timer);
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
 	}
 }
 
@@ -155,7 +161,9 @@ export async function consume(params, ctx) {
 			}),
 		);
 		expect(parsed.ok).toBe(true);
-		if (!parsed.ok) return;
+		if (!parsed.ok) {
+			return;
+		}
 		const store = new MemoryLogStore();
 		const runtime = withRunStorage(
 			storage,
@@ -224,8 +232,9 @@ export async function consume(params, ctx) {
 		const completes = records.filter((record) => record.type === "state_action" && record.kind === "complete");
 		expect(completes).toHaveLength(2);
 		const summaryComplete = completes.find((record) => record.actionUid.state === "consume");
-		if (summaryComplete?.type !== "state_action" || summaryComplete.kind !== "complete")
+		if (summaryComplete?.type !== "state_action" || summaryComplete.kind !== "complete") {
 			throw new Error("missing completion");
+		}
 		const summaryPin = summaryComplete.artifacts?.["summary.json"];
 		expect(summaryPin?.hash).toBe(
 			createHash("sha256")
@@ -233,7 +242,9 @@ export async function consume(params, ctx) {
 				.digest("hex"),
 		);
 		expect(state.projection.artifactPins["summary.json"]).toEqual(summaryPin);
-		if (summaryPin === undefined) throw new Error("missing summary artifact pin");
+		if (summaryPin === undefined) {
+			throw new Error("missing summary artifact pin");
+		}
 		expect(await readFile(await new ArtifactStore(runDir).get(summaryPin.hash), "utf8")).toBe(
 			await readFile(join(workDir, "summary.json"), "utf8"),
 		);

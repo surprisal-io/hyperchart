@@ -43,12 +43,16 @@ export function mergeHistoryWindow<T>(
 	identity: (item: T) => string,
 	limit = HISTORY_WINDOW_ITEMS,
 ): WindowState<T> {
-	if (limit <= 0) return { snapshot: chunk.snapshot, segments: [] };
+	if (limit <= 0) {
+		return { snapshot: chunk.snapshot, segments: [] };
+	}
 	const existing = new Set(current.segments.flatMap((segment) => segment.items.map(identity)));
 	const seen = new Set<string>();
 	const unique = chunk.items.filter((item) => {
 		const key = identity(item);
-		if (existing.has(key) || seen.has(key)) return false;
+		if (existing.has(key) || seen.has(key)) {
+			return false;
+		}
 		seen.add(key);
 		return true;
 	});
@@ -119,21 +123,29 @@ export function useHistoryWindow<T>(options: {
 	const request = useCallback(async (direction: MergeDirection, cursor?: HistoryCursor) => {
 		const edge = direction === "initial" ? setInitial : direction === "older" ? setOlder : setNewer;
 		const active = controllers.current[direction];
-		if (active !== undefined) return;
+		if (active !== undefined) {
+			return;
+		}
 		const controller = new AbortController();
 		controllers.current[direction] = controller;
 		const requestGeneration = generation.current;
 		edge({ loading: true });
 		try {
 			const chunk = await sourceRef.current.load(cursor, controller.signal);
-			if (controller.signal.aborted || requestGeneration !== generation.current) return;
+			if (controller.signal.aborted || requestGeneration !== generation.current) {
+				return;
+			}
 			setWindow((current) => mergeHistoryWindow(current, chunk, direction, identityRef.current));
 			edge({ loading: false });
 		} catch (error) {
-			if (controller.signal.aborted || requestGeneration !== generation.current) return;
+			if (controller.signal.aborted || requestGeneration !== generation.current) {
+				return;
+			}
 			edge({ loading: false, error: error instanceof Error ? error.message : String(error) });
 		} finally {
-			if (controllers.current[direction] === controller) delete controllers.current[direction];
+			if (controllers.current[direction] === controller) {
+				delete controllers.current[direction];
+			}
 		}
 	}, []);
 
@@ -141,7 +153,9 @@ export function useHistoryWindow<T>(options: {
 		void cacheKey;
 		void source;
 		generation.current += 1;
-		for (const controller of Object.values(controllers.current)) controller?.abort();
+		for (const controller of Object.values(controllers.current)) {
+			controller?.abort();
+		}
 		controllers.current = {};
 		setWindow({ segments: [] });
 		setInitial({ loading: true });
@@ -150,19 +164,25 @@ export function useHistoryWindow<T>(options: {
 		void request("initial", initialCursor);
 		return () => {
 			generation.current += 1;
-			for (const controller of Object.values(controllers.current)) controller?.abort();
+			for (const controller of Object.values(controllers.current)) {
+				controller?.abort();
+			}
 			controllers.current = {};
 		};
 	}, [cacheKey, initialCursor, request, source]);
 
 	const loadOlder = useCallback(() => {
 		const cursor = windowRef.current.older;
-		if (cursor !== undefined) return request("older", cursor);
+		if (cursor !== undefined) {
+			return request("older", cursor);
+		}
 		return Promise.resolve();
 	}, [request]);
 	const loadNewer = useCallback(() => {
 		const cursor = windowRef.current.newer;
-		if (cursor !== undefined) return request("newer", cursor);
+		if (cursor !== undefined) {
+			return request("newer", cursor);
+		}
 		return Promise.resolve();
 	}, [request]);
 	const retryInitial = useCallback(() => request("initial", initialCursor), [initialCursor, request]);

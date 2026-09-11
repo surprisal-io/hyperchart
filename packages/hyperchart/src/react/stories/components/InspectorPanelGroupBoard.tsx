@@ -27,7 +27,9 @@ export function InspectorPanelGroupBoard<TSpec extends InspectorPanelGroupedSpec
 }) {
 	const group = groups.find((item) => item.id === groupId);
 	const groupSpecs = specs.filter((spec) => spec.group === groupId);
-	if (group === undefined) return null;
+	if (group === undefined) {
+		return null;
+	}
 	return (
 		<BoardPage
 			title={`Inspector panel · ${group.title}`}

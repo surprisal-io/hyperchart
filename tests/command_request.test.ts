@@ -8,7 +8,9 @@ import {
 function eventBusWith(...listeners: Array<(request: HyperchartCommandRequest) => void>) {
 	return {
 		emit: vi.fn((event: string, request: HyperchartCommandRequest) => {
-			if (event === HYPERCHART_COMMAND_EVENT) listeners.forEach((listener) => listener(request));
+			if (event === HYPERCHART_COMMAND_EVENT) {
+				listeners.forEach((listener) => listener(request));
+			}
 		}),
 	};
 }

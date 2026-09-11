@@ -62,8 +62,9 @@ export function VirtualizedHistoryList<T>({
 			history.newer.error === undefined &&
 			firstIndex !== undefined &&
 			firstIndex <= HISTORY_PREFETCH_ITEMS
-		)
+		) {
 			void history.loadNewer();
+		}
 	}, [firstIndex, history.loadNewer, history.newer.error, history.newer.loading, history.window.newer]);
 	useEffect(() => {
 		if (
@@ -72,36 +73,44 @@ export function VirtualizedHistoryList<T>({
 			history.older.error === undefined &&
 			lastIndex !== undefined &&
 			lastIndex >= items.length - HISTORY_PREFETCH_ITEMS
-		)
+		) {
 			void history.loadOlder();
+		}
 	}, [history.loadOlder, history.older.error, history.older.loading, history.window.older, items.length, lastIndex]);
 
 	const prefetchAtScrollEdge = () => {
 		const element = parentRef.current;
-		if (element === null) return;
+		if (element === null) {
+			return;
+		}
 		const threshold = Math.max(element.clientHeight * 3, estimateSize * HISTORY_PREFETCH_ITEMS);
 		if (
 			element.scrollTop <= threshold &&
 			history.window.newer !== undefined &&
 			!history.newer.loading &&
 			history.newer.error === undefined
-		)
+		) {
 			void history.loadNewer();
+		}
 		if (
 			element.scrollHeight - element.scrollTop - element.clientHeight <= threshold &&
 			history.window.older !== undefined &&
 			!history.older.loading &&
 			history.older.error === undefined
-		)
+		) {
 			void history.loadOlder();
+		}
 	};
 
-	if (history.initial.loading && items.length === 0)
+	if (history.initial.loading && items.length === 0) {
 		return <div className="text-[10px] text-[var(--text-muted)]">Loading history…</div>;
+	}
 	if (history.initial.error !== undefined && items.length === 0) {
 		return <HistoryError edge="history" error={history.initial.error} onRetry={history.retryInitial} />;
 	}
-	if (items.length === 0) return <div className="text-[10px] text-[var(--text-muted)]">{emptyLabel}</div>;
+	if (items.length === 0) {
+		return <div className="text-[10px] text-[var(--text-muted)]">{emptyLabel}</div>;
+	}
 
 	if (usePlainLayout) {
 		return (
@@ -142,7 +151,9 @@ export function VirtualizedHistoryList<T>({
 					)}
 					{virtualItems.map((virtualRow) => {
 						const item = items[virtualRow.index];
-						if (item === undefined) return null;
+						if (item === undefined) {
+							return null;
+						}
 						return (
 							<div
 								key={virtualRow.key}

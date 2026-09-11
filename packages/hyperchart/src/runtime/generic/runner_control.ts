@@ -113,8 +113,9 @@ export async function requestLiveRunnerUserResponse(
 		createdAt: Date.now(),
 	};
 	const result = await publishAndWait(runId, request, options);
-	if (result.kind !== "respond_user_interaction")
+	if (result.kind !== "respond_user_interaction") {
 		throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
+	}
 	return { record: result.record, idempotent: result.idempotent };
 }
 
@@ -134,8 +135,9 @@ export async function requestLiveRunnerBranchMove(
 		createdAt: Date.now(),
 	};
 	const result = await publishAndWait(runId, request, options);
-	if (result.kind !== "move_branch")
+	if (result.kind !== "move_branch") {
 		throw new RunnerControlUnavailableError("Runner returned the wrong control result kind");
+	}
 	return {
 		moveSeqId: result.moveSeqId,
 		previousHeadSeqId: result.previousHeadSeqId,
@@ -152,11 +154,15 @@ export function watchRunnerControl(
 	let disposed = false;
 	let draining = false;
 	const drain = async () => {
-		if (disposed || draining) return;
+		if (disposed || draining) {
+			return;
+		}
 		draining = true;
 		try {
 			for (const file of requestFiles(runId)) {
-				if (disposed) break;
+				if (disposed) {
+					break;
+				}
 				const path = join(requestsDir(runId), file);
 				const request = readRequest(path);
 				if (request === undefined) {
@@ -171,7 +177,9 @@ export function watchRunnerControl(
 				try {
 					const committed = await deliver(request);
 					if (request.kind === "move_branch") {
-						if (!isMoveCommit(committed)) throw new Error("Runner move control returned invalid commit metadata");
+						if (!isMoveCommit(committed)) {
+							throw new Error("Runner move control returned invalid commit metadata");
+						}
 						result = {
 							version: CONTROL_VERSION,
 							kind: request.kind,
@@ -182,8 +190,9 @@ export function watchRunnerControl(
 							completedAt: Date.now(),
 						};
 					} else {
-						if (typeof committed !== "object" || committed === null || !("record" in committed))
+						if (typeof committed !== "object" || committed === null || !("record" in committed)) {
 							throw new Error("Runner response control returned an invalid commit");
+						}
 						result = {
 							version: CONTROL_VERSION,
 							kind: request.kind,
@@ -209,7 +218,9 @@ export function watchRunnerControl(
 				try {
 					publishJsonExclusive(resultPath(runId, request.id), result);
 				} catch (error) {
-					if (!isNodeError(error) || error.code !== "EEXIST") continue;
+					if (!isNodeError(error) || error.code !== "EEXIST") {
+						continue;
+					}
 				}
 				safeUnlink(path);
 			}
@@ -234,8 +245,9 @@ export function watchRunnerUserResponses(
 	deliver: (request: RunnerUserResponseRequest) => Promise<UserInteractionResponseCommit>,
 ): () => void {
 	return watchRunnerControl(runId, attemptId, (request) => {
-		if (request.kind !== "respond_user_interaction")
+		if (request.kind !== "respond_user_interaction") {
 			return Promise.reject(new Error("This runner control watcher does not accept branch moves"));
+		}
 		return deliver(request);
 	});
 }
@@ -267,13 +279,17 @@ function waitForResult(
 			if (result !== undefined) {
 				return finish(() => {
 					rmSync(resultPath(runId, request.id), { force: true });
-					if (result.attemptId !== request.attemptId)
+					if (result.attemptId !== request.attemptId) {
 						return rejectResult(
 							new RunnerControlUnavailableError("Runner attempt changed before control acknowledgement"),
 						);
-					if (result.kind !== request.kind)
+					}
+					if (result.kind !== request.kind) {
 						return rejectResult(new RunnerControlUnavailableError("Runner returned the wrong control result kind"));
-					if (!result.ok) return rejectResult(new Error(result.error));
+					}
+					if (!result.ok) {
+						return rejectResult(new Error(result.error));
+					}
 					resolveResult(result);
 				});
 			}
@@ -339,7 +355,9 @@ function publishJsonExclusive(path: string, value: unknown): void {
 	}
 }
 function readRequest(path: string): RunnerControlRequest | undefined {
-	if (!existsSync(path)) return undefined;
+	if (!existsSync(path)) {
+		return undefined;
+	}
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Partial<RunnerControlRequest>;
 		if (
@@ -348,21 +366,31 @@ function readRequest(path: string): RunnerControlRequest | undefined {
 			typeof value.attemptId !== "string" ||
 			typeof value.branchId !== "string" ||
 			typeof value.createdAt !== "number"
-		)
+		) {
 			return undefined;
+		}
 		if (value.kind === "move_branch") {
-			if (value.targetHeadSeqId !== null && !isPositiveInteger(value.targetHeadSeqId)) return undefined;
+			if (value.targetHeadSeqId !== null && !isPositiveInteger(value.targetHeadSeqId)) {
+				return undefined;
+			}
 			return value as RunnerMoveBranchRequest;
 		}
-		if (value.kind !== "respond_user_interaction" || !isPositiveInteger(value.gateSeqId) || !isChartEvent(value.event))
+		if (
+			value.kind !== "respond_user_interaction" ||
+			!isPositiveInteger(value.gateSeqId) ||
+			!isChartEvent(value.event)
+		) {
 			return undefined;
+		}
 		return value as RunnerUserResponseRequest;
 	} catch {
 		return undefined;
 	}
 }
 function readResult(path: string): RunnerControlResult | undefined {
-	if (!existsSync(path)) return undefined;
+	if (!existsSync(path)) {
+		return undefined;
+	}
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & {
 			record?: Partial<UserInteractionResolvedLog>;
@@ -374,9 +402,12 @@ function readResult(path: string): RunnerControlResult | undefined {
 			typeof value.attemptId !== "string" ||
 			typeof value.ok !== "boolean" ||
 			typeof value.completedAt !== "number"
-		)
+		) {
 			return undefined;
-		if (!value.ok) return typeof value.error === "string" ? (value as unknown as RunnerControlFailure) : undefined;
+		}
+		if (!value.ok) {
+			return typeof value.error === "string" ? (value as unknown as RunnerControlFailure) : undefined;
+		}
 		if (value.kind === "move_branch") {
 			return isPositiveInteger(value.moveSeqId) &&
 				(value.previousHeadSeqId === null || isPositiveInteger(value.previousHeadSeqId)) &&
@@ -390,8 +421,9 @@ function readResult(path: string): RunnerControlResult | undefined {
 			value.record.kind !== "resolved" ||
 			!isPositiveInteger(value.record.seqId) ||
 			!isPositiveInteger(value.record.gateSeqId)
-		)
+		) {
 			return undefined;
+		}
 		return value as unknown as RunnerUserResponseResult;
 	} catch {
 		return undefined;

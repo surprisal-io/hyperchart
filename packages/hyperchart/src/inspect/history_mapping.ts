@@ -109,9 +109,11 @@ export function actorMessageHistoryItemToHost(
 	ancestry?: readonly DurableLogRecord[],
 ): HyperchartActorMessageBatchInfo {
 	const lifecycle = new Map<string, DurableLogRecord[]>();
-	for (const record of item.records)
-		if (record.type === "actor_message")
+	for (const record of item.records) {
+		if (record.type === "actor_message") {
 			lifecycle.set(record.messageId, [...(lifecycle.get(record.messageId) ?? []), record]);
+		}
+	}
 	const batch = {
 		occurrencePath: item.occurrence,
 		enqueueSeqId: item.seqId,
@@ -165,11 +167,12 @@ function enrichActorMessageBatch(
 	ancestry: readonly DurableLogRecord[],
 ): HyperchartActorMessageBatchInfo {
 	const logicalOccurrence = actorLogicalOccurrencePath(item.occurrence, item.enqueued.generation);
-	if (!ancestry.some((record) => record.type === "actor_created" && record.occurrence === item.occurrence))
+	if (!ancestry.some((record) => record.type === "actor_created" && record.occurrence === item.occurrence)) {
 		return {
 			...batch,
 			messages: batch.messages.map((message) => ({ ...message, actorLogicalPath: logicalOccurrence })),
 		};
+	}
 	return actorMessageHistoryItemsToHost([item], ast, ancestry, [batch])[0]!;
 }
 
@@ -187,7 +190,7 @@ export function actorMessageHistoryItemsToHost(
 			)
 			.map((record) => record.occurrence),
 	);
-	if (items.every((item) => !createdOccurrences.has(item.occurrence)))
+	if (items.every((item) => !createdOccurrences.has(item.occurrence))) {
 		return items.map((item, index) => ({
 			...base[index]!,
 			messages: base[index]!.messages.map((message) => ({
@@ -195,16 +198,18 @@ export function actorMessageHistoryItemsToHost(
 				actorLogicalPath: actorLogicalOccurrencePath(item.occurrence, item.enqueued.generation),
 			})),
 		}));
+	}
 	const replay = createBranchProjection(ast);
 	const messages = new Map<string, { info: HyperchartActorMessageInfo; logicalOccurrence: string }>();
 	for (let index = 0; index < items.length; index++) {
 		const item = items[index]!;
 		const logicalOccurrence = actorLogicalOccurrencePath(item.occurrence, item.enqueued.generation);
-		for (const message of base[index]!.messages)
+		for (const message of base[index]!.messages) {
 			messages.set(`${item.occurrence}\0${message.messageId}`, {
 				info: { ...message, actorLogicalPath: logicalOccurrence },
 				logicalOccurrence,
 			});
+		}
 	}
 	for (const record of ancestry) {
 		if (record.type === "actor_message") {
@@ -223,8 +228,12 @@ export function actorMessageHistoryItemsToHost(
 			} else if (message !== undefined && logicalOccurrence !== undefined && record.kind === "replied") {
 				message.status = "replied";
 				message.repliedAt = record.timestamp;
-				if (record.replyEvent !== undefined) message.replyEvent = record.replyEvent;
-				if (Object.hasOwn(record, "output")) message.replyOutput = record.output;
+				if (record.replyEvent !== undefined) {
+					message.replyEvent = record.replyEvent;
+				}
+				if (Object.hasOwn(record, "output")) {
+					message.replyOutput = record.output;
+				}
 				if (record.schema !== undefined) {
 					message.replySchema = { schema: record.schema.schema };
 					message.validation = "valid";
@@ -239,9 +248,12 @@ export function actorMessageHistoryItemsToHost(
 						: undefined;
 				const ordinary = actor?.definition.kind === "actor" ? (actor as ProjectedActorOccurrence) : undefined;
 				const currentState = worker?.currentState ?? ordinary?.currentState;
-				if (currentState !== undefined)
+				if (currentState !== undefined) {
 					message.replyState = `${logicalOccurrence}${worker === undefined ? "" : `.$worker-${worker.index}`}.${currentState}`;
-			} else if (message !== undefined && record.kind === "settled") message.status = "settled";
+				}
+			} else if (message !== undefined && record.kind === "settled") {
+				message.status = "settled";
+			}
 		}
 		projectBranch(replay, ast, [record]);
 	}
@@ -279,6 +291,8 @@ function invocationInfo(action: StateActionAst): HyperchartVisitInfo["invocation
 
 function templatePreview(template: TemplateAst): string {
 	const parts = [template.strings[0] ?? ""];
-	for (let index = 0; index < template.refs.length; index++) parts.push("{{…}}", template.strings[index + 1] ?? "");
+	for (let index = 0; index < template.refs.length; index++) {
+		parts.push("{{…}}", template.strings[index + 1] ?? "");
+	}
 	return parts.join("");
 }

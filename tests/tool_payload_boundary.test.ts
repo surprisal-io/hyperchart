@@ -371,7 +371,9 @@ describe("model-facing tool payload boundary", () => {
 			expect((error as Error).message).toMatch(/1 entries would be omitted.*browser inspector/i);
 		}
 		let deep: Record<string, unknown> = { type: "string" };
-		for (let index = 0; index < 14; index++) deep = { type: "array", items: deep };
+		for (let index = 0; index < 14; index++) {
+			deep = { type: "array", items: deep };
+		}
 		expect(() => summarize(deep)).toThrow(/depth exceeds.*browser inspector/i);
 		const nodeTree = (levels: number): Record<string, unknown> =>
 			levels === 0 ? { type: "string" } : { anyOf: Array.from({ length: 6 }, () => nodeTree(levels - 1)) };

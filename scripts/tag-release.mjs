@@ -65,7 +65,9 @@ function readLocalTag(tagName) {
 
 function readRemoteTag(remoteName, tagName) {
 	const output = git(["ls-remote", "--tags", remoteName, `refs/tags/${tagName}`, `refs/tags/${tagName}^{}`]);
-	if (output === "") return undefined;
+	if (output === "") {
+		return undefined;
+	}
 	const refs = new Map(
 		output.split("\n").map((line) => {
 			const [commit, ref] = line.trim().split(/\s+/, 2);

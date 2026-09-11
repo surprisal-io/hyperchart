@@ -66,8 +66,9 @@ export const changedReplayScenario = storyScenario(definition(false));
 export function replayIncompatibleStoryRun() {
 	const records = capturedStoryRecords("replay-incompatible-history");
 	const broken = explainReplay(changedReplayScenario.ast, records).broken;
-	if (broken === undefined || records[0] === undefined || records.at(-1) === undefined)
+	if (broken === undefined || records[0] === undefined || records.at(-1) === undefined) {
 		throw new Error("Changed action identity must break replay");
+	}
 	return hyperchartRunFromReplayIncompatibility(changedReplayScenario.inspect, broken, {
 		runId: "removed-validator",
 		cwd: "/workspace",

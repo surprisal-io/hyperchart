@@ -4,7 +4,9 @@ import { isAbsolute } from "node:path";
 import { createJiti } from "jiti";
 
 const configPath = process.argv[2];
-if (configPath === undefined) throw new Error("hyperchart runner requires a config path");
+if (configPath === undefined) {
+	throw new Error("hyperchart runner requires a config path");
+}
 
 const rawConfig = JSON.parse(readFileSync(configPath, "utf8"));
 const piModules = rawConfig?.piModules;

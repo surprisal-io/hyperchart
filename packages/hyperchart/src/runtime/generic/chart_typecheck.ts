@@ -29,7 +29,9 @@ const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 export async function preflightChartModule(chartPath: string): Promise<ChartPreflightResult> {
 	const lint = lintChartModuleSource(chartPath);
 	const typecheck = await typecheckChartModule(chartPath);
-	if (lint.length === 0 && typecheck.ok) return { ok: true, lint, typecheck };
+	if (lint.length === 0 && typecheck.ok) {
+		return { ok: true, lint, typecheck };
+	}
 	return { ok: false, lint, typecheck, diagnostics: formatPreflightDiagnostics(chartPath, lint, typecheck) };
 }
 
@@ -41,7 +43,9 @@ export async function assertChartPreflight(chartPath: string): Promise<void> {
 }
 
 export function lintChartModuleSource(chartPath: string): ChartSourceLintDiagnostic[] {
-	if (!TYPESCRIPT_EXTENSIONS.has(extname(chartPath))) return [];
+	if (!TYPESCRIPT_EXTENSIONS.has(extname(chartPath))) {
+		return [];
+	}
 	const source = readFileSync(chartPath, "utf8");
 	const diagnostics: ChartSourceLintDiagnostic[] = [];
 	const lines = source.split(/\r?\n/);
@@ -75,7 +79,9 @@ export function lintChartModuleSource(chartPath: string): ChartSourceLintDiagnos
 }
 
 export async function typecheckChartModule(chartPath: string): Promise<ChartTypecheckResult> {
-	if (!TYPESCRIPT_EXTENSIONS.has(extname(chartPath))) return { ok: true, skipped: true };
+	if (!TYPESCRIPT_EXTENSIONS.has(extname(chartPath))) {
+		return { ok: true, skipped: true };
+	}
 	const tscPath = resolveTypeScriptCompiler();
 	const nodeTypeRoot = resolveNodeTypeRoot();
 	const tempDir = mkdtempSync(join(tmpdir(), "hyperchart-typecheck-"));
@@ -216,7 +222,9 @@ function resolveHyperchartTypeEntry(): string {
 		// Package self-resolution is independent of TypeScript's physical install location (pnpm).
 		const packageDir = dirname(require.resolve("@surprisal/hyperchart/package.json"));
 		const entry = join(packageDir, "dist", "index.d.ts");
-		if (existsSync(entry)) return entry;
+		if (existsSync(entry)) {
+			return entry;
+		}
 		throw new Error(`missing ${entry}`);
 	} catch (error) {
 		throw new Error(
@@ -236,7 +244,9 @@ function resolveNodeTypeRoot(): string {
 }
 
 function compilerOutput(error: unknown): string {
-	if (isExecError(error)) return [error.stdout, error.stderr].filter(Boolean).join("\n").trim();
+	if (isExecError(error)) {
+		return [error.stdout, error.stderr].filter(Boolean).join("\n").trim();
+	}
 	return error instanceof Error ? error.message : String(error);
 }
 
@@ -245,6 +255,8 @@ function isExecError(error: unknown): error is { stdout?: string; stderr?: strin
 }
 
 function shellQuote(value: string): string {
-	if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
+	if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) {
+		return value;
+	}
 	return `'${value.replace(/'/g, "'\\''")}'`;
 }

@@ -17,21 +17,28 @@ export function renderTerminalNotificationPayload(
 	const artifactPaths: string[] = [];
 	for (const leaf of state.projection.activeLeaves) {
 		const terminal = nodeAt(state.ast, leaf);
-		if (terminal?.kind !== "final" || terminal.notify === undefined) continue;
+		if (terminal?.kind !== "final" || terminal.notify === undefined) {
+			continue;
+		}
 		const scope = terminal.notify.scope ?? leaf;
-		if (terminal.notify.prompt !== undefined) custom.push(renderTemplate(state, terminal.notify.prompt, scope));
+		if (terminal.notify.prompt !== undefined) {
+			custom.push(renderTemplate(state, terminal.notify.prompt, scope));
+		}
 		for (const read of terminal.notify.artifacts ?? []) {
 			const rendered =
 				read.kind === "joinArtifactOf" ? renderJoin(state, read, scope) : [renderRead(state, read, scope)];
-			for (const artifact of rendered) artifactPaths.push(authoritativeArtifactPath(input.workDir, artifact.path));
+			for (const artifact of rendered) {
+				artifactPaths.push(authoritativeArtifactPath(input.workDir, artifact.path));
+			}
 		}
 	}
 	const artifacts = [...new Set(artifactPaths)];
 	const sections = [standard, ...custom];
-	if (artifacts.length > 0)
+	if (artifacts.length > 0) {
 		sections.push(
 			`Declared artifacts (authoritative paths; contents not inlined):\n${artifacts.map((path) => `- ${path}`).join("\n")}`,
 		);
+	}
 	return {
 		runId: input.runId,
 		branchId: input.branchId,
@@ -44,12 +51,14 @@ export function renderTerminalNotificationPayload(
 }
 
 function authoritativeArtifactPath(workDir: string, authoredPath: string): string {
-	if (/^[a-z][a-z\d+.-]*:\/\//i.test(authoredPath))
+	if (/^[a-z][a-z\d+.-]*:\/\//i.test(authoredPath)) {
 		throw new Error(`Terminal artifact '${authoredPath}' is not a local path`);
+	}
 	const root = resolve(workDir);
 	const path = resolve(root, authoredPath);
 	const rel = relative(root, path);
-	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+	if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
 		throw new Error(`Terminal artifact '${authoredPath}' escapes workDir ${root}`);
+	}
 	return path;
 }

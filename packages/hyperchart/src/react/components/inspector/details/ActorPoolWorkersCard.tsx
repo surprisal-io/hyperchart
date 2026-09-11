@@ -11,7 +11,9 @@ export function ActorPoolWorkersCard({
 	onNavigateToState?: (stateId: string) => void;
 }) {
 	const [selectedWorkerIndex, setSelectedWorkerIndex] = useState<number | null>(null);
-	if (occurrence.kind !== "actorPool" || occurrence.workers === undefined) return null;
+	if (occurrence.kind !== "actorPool" || occurrence.workers === undefined) {
+		return null;
+	}
 	return (
 		<div className="grid min-w-0 gap-1">
 			{occurrence.workers.map((worker) => {

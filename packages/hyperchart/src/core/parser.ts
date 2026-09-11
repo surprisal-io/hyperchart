@@ -46,8 +46,12 @@ export async function parseChartModule(filePath: string, options: ParseChartModu
 
 export function selectChartModuleExport(module: Record<string, unknown>, exportName: string): unknown {
 	let value = module[exportName];
-	if (exportName !== "default") return value;
-	while (isDefaultOnlyModule(value)) value = value.default;
+	if (exportName !== "default") {
+		return value;
+	}
+	while (isDefaultOnlyModule(value)) {
+		value = value.default;
+	}
 	return value;
 }
 
@@ -70,6 +74,8 @@ export async function parseChartModuleAst(
 	options: ParseChartModuleOptions = {},
 ): Promise<Extract<ParsedChart, { ok: true }>> {
 	const result = await parseChartModule(filePath, options);
-	if (result.ok) return result;
+	if (result.ok) {
+		return result;
+	}
 	throw new ChartParseError(result);
 }

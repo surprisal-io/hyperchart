@@ -36,12 +36,18 @@ type Command = {
 const roots: string[] = [];
 const fixtures: Array<{ storage: RunStorage; runId: string }> = [];
 afterEach(async () => {
-	for (const f of fixtures.splice(0)) withRunStorage(f.storage, () => patchRunStatus(f.runId, { state: "stopped" }));
-	if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(2000);
+	for (const f of fixtures.splice(0)) {
+		withRunStorage(f.storage, () => patchRunStatus(f.runId, { state: "stopped" }));
+	}
+	if (vi.isFakeTimers()) {
+		await vi.advanceTimersByTimeAsync(2000);
+	}
 	vi.useRealTimers();
 	vi.restoreAllMocks();
 	inspected.length = 0;
-	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	for (const root of roots.splice(0)) {
+		rmSync(root, { recursive: true, force: true });
+	}
 });
 
 function host(storage: RunStorage, cwd: string) {
@@ -60,7 +66,9 @@ function host(storage: RunStorage, cwd: string) {
 				command = value;
 			},
 			registerTool(value: Tool & { name: string }) {
-				if (value.name === "hyperchart") tool = value;
+				if (value.name === "hyperchart") {
+					tool = value;
+				}
 			},
 			on(name: string, handler: (event: unknown, ctx: ExtensionCommandContext) => Promise<void>) {
 				hooks.set(name, handler);
@@ -110,7 +118,9 @@ function live(f: Awaited<ReturnType<typeof fixture>>, pid: number) {
 function signals(entries: Array<{ fixture: Awaited<ReturnType<typeof fixture>>; pid: number }>) {
 	const alive = new Set(entries.map(({ pid }) => pid));
 	return vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
-		if (signal === 0 && alive.has(pid)) return true;
+		if (signal === 0 && alive.has(pid)) {
+			return true;
+		}
 		const target = entries.find((entry) => entry.pid === pid);
 		if (signal === "SIGTERM" && target !== undefined) {
 			alive.delete(pid);
@@ -121,7 +131,9 @@ function signals(entries: Array<{ fixture: Awaited<ReturnType<typeof fixture>>; 
 	});
 }
 const flush = async () => {
-	for (let i = 0; i < 30; i++) await Promise.resolve();
+	for (let i = 0; i < 30; i++) {
+		await Promise.resolve();
+	}
 };
 
 it("same-ID Pi registrations isolate view AST, stop wait and completion cleanup", async () => {

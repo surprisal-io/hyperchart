@@ -292,13 +292,17 @@ export function storyLog(args: Record<string, unknown> = { topic: "visual QA boa
 
 function storyActionUid(ast: ChartAst, statePath: StatePath): ActionUID {
 	const state = ast.states[templatePath(statePath)];
-	if (state?.kind !== "state") throw new Error(`Story state ${statePath} is not an action state`);
+	if (state?.kind !== "state") {
+		throw new Error(`Story state ${statePath} is not an action state`);
+	}
 	return { ...state.action.uid, state: statePath };
 }
 
 function storyActionDefinition(ast: ChartAst, statePath: StatePath): Extract<StateAst, { kind: "state" }>["action"] {
 	const state = ast.states[templatePath(statePath)];
-	if (state?.kind !== "state") throw new Error(`Story state ${statePath} is not an action state`);
+	if (state?.kind !== "state") {
+		throw new Error(`Story state ${statePath} is not an action state`);
+	}
 	return state.action;
 }
 
@@ -346,7 +350,9 @@ function pushAction(
 	artifacts?: Readonly<Record<string, ArtifactPin>>,
 ): void {
 	pushInvoke(builder, ast, statePath);
-	if (event !== undefined) pushComplete(builder, ast, statePath, event, artifacts);
+	if (event !== undefined) {
+		pushComplete(builder, ast, statePath, event, artifacts);
+	}
 }
 
 function pushFailure(builder: StoryLogBuilder, ast: ChartAst, statePath: StatePath, error: unknown): void {
@@ -370,8 +376,9 @@ function pushValidated(
 	reason: string,
 ): void {
 	const state = ast.states[templatePath(statePath)];
-	if (state?.kind !== "state" || state.action.kind !== "agent" || state.action.validation === undefined)
+	if (state?.kind !== "state" || state.action.kind !== "agent" || state.action.validation === undefined) {
 		throw new Error(`Story state ${statePath} has no validation guard`);
+	}
 	builder.records.push({
 		type: "state_action",
 		kind: "validated",
@@ -478,7 +485,9 @@ function mapReviewRecords(
 		return b.records;
 	}
 	if (opts.complete === true) {
-		for (const key of Object.keys(sections)) pushAction(b, ast, `map-review#${key}.risk-write`, { type: "DONE" });
+		for (const key of Object.keys(sections)) {
+			pushAction(b, ast, `map-review#${key}.risk-write`, { type: "DONE" });
+		}
 		return b.records;
 	}
 	if (opts.overflow === true) {
@@ -495,8 +504,11 @@ function parallelReviewRecords(ast: ChartAst, complete = false): DurableLogRecor
 	const b = storyLog();
 	pushAction(b, ast, "parallel-review.copy.review", { type: "DONE" });
 	pushAction(b, ast, "parallel-review.visual.review", { type: complete ? "DONE" : "ERROR" });
-	if (complete) pushAction(b, ast, "parallel-review.data.review", { type: "DONE" });
-	else pushInvoke(b, ast, "parallel-review.data.review");
+	if (complete) {
+		pushAction(b, ast, "parallel-review.data.review", { type: "DONE" });
+	} else {
+		pushInvoke(b, ast, "parallel-review.data.review");
+	}
 	return b.records;
 }
 
@@ -1274,9 +1286,13 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 ];
 
 export const inspectorPanelSpecs: InspectorPanelSpec[] = inspectorPanelSpecInputs.map((spec) => {
-	if (spec.runtime.mode === "static") return spec;
+	if (spec.runtime.mode === "static") {
+		return spec;
+	}
 	const normalized = normalizeChartConfig(spec.chart);
-	if (!normalized.ok) return spec;
+	if (!normalized.ok) {
+		return spec;
+	}
 	const schedule = spec.runtime.records?.(normalized.ast) ?? storyLog(spec.runtime.run?.args).records;
 	const captured = capturedStorySchedule(normalized.ast, schedule);
 	return { ...spec, runtime: { ...spec.runtime, records: () => captured } };

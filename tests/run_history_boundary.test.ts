@@ -28,10 +28,16 @@ const inspectRun = fileURLToPath(new URL("../packages/hyperchart/src/inspect/run
 
 function sourceFilesUnder(path: string): string[] {
 	return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
-		if (entry.isSymbolicLink()) return [];
-		if (entry.name === "node_modules" || entry.name === "dist") return [];
+		if (entry.isSymbolicLink()) {
+			return [];
+		}
+		if (entry.name === "node_modules" || entry.name === "dist") {
+			return [];
+		}
 		const child = join(path, entry.name);
-		if (entry.isDirectory()) return sourceFilesUnder(child);
+		if (entry.isDirectory()) {
+			return sourceFilesUnder(child);
+		}
 		return /\.(?:ts|tsx)$/.test(entry.name) && !entry.name.endsWith(".d.ts") ? [child] : [];
 	});
 }
