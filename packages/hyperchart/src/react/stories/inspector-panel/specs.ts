@@ -219,6 +219,14 @@ const richAgentSourceBriefSchema = z
 	})
 	.describe("One source brief produced by a map instance.");
 const scopedPlanSchema = z.object({ next: z.string().optional() });
+const candidatePoolReplySchema = z.union([
+	z.object({ candidateOrdinal: z.number().int().nonnegative() }),
+	z.object({
+		refill: z.literal(true),
+		screeningAttempt: z.number().int().min(1),
+		rejectedHypotheses: z.array(z.string()),
+	}),
+]);
 
 function panelChart(id: string, initial: string, states: ChartCst["states"]): ChartCst {
 	return chart({ kind: "chart", id, initial, states });
@@ -962,6 +970,46 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			done: final(),
 		}),
 		runtime: { selectedStateId: "user-feedback" },
+	},
+	{
+		group: "user",
+		title: "Union reply transition inputs",
+		description: "Event bindings resolve field types from the matching members of a union reply contract.",
+		chart: panelChart("inspector-user-union-reply", "candidate-selection", {
+			"candidate-selection": {
+				kind: "state",
+				input: { parentHypothesisId: z.string().nullable().default(null) },
+				action: user({
+					prompt: "Select a candidate or refill the candidate pool.",
+					options: ["SELECTED", "REFILL"],
+					reply: candidatePoolReplySchema,
+				}),
+				transitions: {
+					SELECTED: "done",
+					REFILL: {
+						target: "generate-candidates",
+						input: {
+							parentHypothesisId: input("parentHypothesisId"),
+							screeningAttempt: event("screeningAttempt"),
+							rejectedHypotheses: event("rejectedHypotheses"),
+						},
+					},
+				},
+			},
+			"generate-candidates": {
+				kind: "state",
+				input: {
+					parentHypothesisId: z.string().nullable().default(null),
+					screeningAttempt: z.number().int().min(1).default(1),
+					rejectedHypotheses: z.array(z.string()).default([]),
+				},
+				action: agent("generator", {
+					task: t`Generate a replacement candidate batch for screening attempt ${input("screeningAttempt")}.`,
+				}),
+			},
+			done: final(),
+		}),
+		runtime: { selectedStateId: "candidate-selection", mode: "static" },
 	},
 	{
 		group: "user",

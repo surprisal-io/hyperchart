@@ -81,4 +81,7 @@ export type InterpolatedTextProps = {
 export type StateTransition = NonNullable<HyperchartStateInfo["transitions"]>[number];
 export type StateInput = NonNullable<HyperchartStateInfo["inputs"]>[number];
 
-export type EventBindingDisplay = { kind: "event"; path?: string } | { kind: "unknown"; preview: string };
+export type TransitionBindingDisplay =
+	| { kind: "event"; path?: string }
+	| { kind: "input"; name: string; path?: string; preview: string }
+	| { kind: "unknown"; preview: string };

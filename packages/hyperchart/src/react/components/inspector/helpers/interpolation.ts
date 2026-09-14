@@ -1,29 +1,7 @@
 import type { HyperchartStateInfo } from "../../../types.js";
 import type { PromptInterpolationAction, PromptInterpolationRef, PromptInterpolationTone } from "../types.js";
+import { parseDslCallArgs, stateInputRefSchema } from "./dslRefs.js";
 import { schemaAtPath, schemaTypeText } from "./schema.js";
-
-function parseDslCallArgs(token: string, name: string): string[] | undefined {
-	const trimmed = token.trim();
-	const prefix = `${name}(`;
-	if (!trimmed.startsWith(prefix) || !trimmed.endsWith(")")) {
-		return undefined;
-	}
-	const body = trimmed.slice(prefix.length, -1).trim();
-	if (body.length === 0) {
-		return [];
-	}
-	const args: string[] = [];
-	let rest = body;
-	while (rest.length > 0) {
-		const match = /^"((?:\\.|[^"\\])*)"\s*(?:,\s*|$)/.exec(rest);
-		if (!match) {
-			return undefined;
-		}
-		args.push(JSON.parse(`"${match[1] ?? ""}"`) as string);
-		rest = rest.slice(match[0].length);
-	}
-	return args;
-}
 
 function unwrapDslCall(token: string, name: string): string | undefined {
 	const trimmed = token.trim();
@@ -118,11 +96,8 @@ function inputRefTypeInfo(
 	if (ref.kind !== "input") {
 		return undefined;
 	}
-	const input = state.inputs?.find((candidate) => candidate.name === ref.name);
-	if (!input?.schema) {
-		return { name: ref.name };
-	}
-	return { name: ref.name, schema: schemaAtPath(input.schema, ref.path) ?? input.schema };
+	const schema = stateInputRefSchema(state, ref.name, ref.path);
+	return { name: ref.name, ...(schema === undefined ? {} : { schema }) };
 }
 
 function actorDeclarationForState(

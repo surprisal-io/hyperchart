@@ -1,30 +1,55 @@
 import type { HyperchartStateInfo } from "../../../types.js";
-import type { EventBindingDisplay, StateInput, StateTransition } from "../types.js";
+import type { StateInput, StateTransition, TransitionBindingDisplay } from "../types.js";
+import { parseDslCallArgs, stateInputRefSchema } from "./dslRefs.js";
 import { schemaAtPath, schemaTypeText } from "./schema.js";
 
-export function transitionBindingDisplay(binding: string): EventBindingDisplay {
+function inputBindingDisplay(binding: string): TransitionBindingDisplay | undefined {
+	const args = parseDslCallArgs(binding, "input");
+	if (args?.[0] === undefined || args.length > 2) {
+		return undefined;
+	}
+	return {
+		kind: "input",
+		name: args[0],
+		...(args[1] === undefined ? {} : { path: args[1] }),
+		preview: binding,
+	};
+}
+
+export function transitionBindingDisplay(binding: string): TransitionBindingDisplay {
 	if (binding === "event()") {
 		return { kind: "event" };
 	}
 	if (binding.startsWith("event:")) {
 		return { kind: "event", path: binding.slice("event:".length) };
 	}
-	return { kind: "unknown", preview: binding };
+	return inputBindingDisplay(binding) ?? { kind: "unknown", preview: binding };
 }
 
-export function transitionBindingLabel(binding: EventBindingDisplay): string {
-	if (binding.kind === "unknown") {
-		return binding.preview;
+export function transitionBindingLabel(binding: TransitionBindingDisplay): string {
+	switch (binding.kind) {
+		case "event":
+			return binding.path === undefined ? "event()" : `event().${binding.path}`;
+		case "input":
+			return binding.preview;
+		case "unknown":
+			return binding.preview;
 	}
-	return binding.path === undefined ? "event()" : `event().${binding.path}`;
 }
 
-export function transitionBindingTitle(state: HyperchartStateInfo, binding: EventBindingDisplay): string {
-	if (binding.kind === "unknown") {
-		return "unknown";
+export function transitionBindingTitle(state: HyperchartStateInfo, binding: TransitionBindingDisplay): string {
+	switch (binding.kind) {
+		case "event": {
+			const sourceSchema = schemaAtPath(state.replySchema, binding.path);
+			return sourceSchema ? schemaTypeText(sourceSchema) : "unknown";
+		}
+		case "input": {
+			const sourceSchema = stateInputRefSchema(state, binding.name, binding.path);
+			return sourceSchema ? schemaTypeText(sourceSchema) : "unknown";
+		}
+		case "unknown":
+			return "unknown";
 	}
-	const sourceSchema = schemaAtPath(state.replySchema, binding.path);
-	return sourceSchema ? schemaTypeText(sourceSchema) : "unknown";
 }
 
 export function transitionTargetInput(

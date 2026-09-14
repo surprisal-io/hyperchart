@@ -241,6 +241,45 @@ export function inputTypeElementId(stateId: string, name: string): string {
 	return `hc-input-type-${safeDomId(stateId)}-${safeDomId(name)}`;
 }
 
+function schemasAtPath(value: unknown, segments: string[]): JsonSchemaRecord[] {
+	const schema = asSchemaRecord(value);
+	if (!schema) {
+		return [];
+	}
+	if (segments.length === 0) {
+		return [schema];
+	}
+
+	const matches: JsonSchemaRecord[] = [];
+	const segment = segments[0]!;
+	const remaining = segments.slice(1);
+	const properties = asSchemaRecord(schema.properties);
+	if (properties && segment in properties) {
+		matches.push(...schemasAtPath(properties[segment], remaining));
+	}
+	for (const keyword of ["anyOf", "oneOf"] as const) {
+		const variants = schema[keyword];
+		if (Array.isArray(variants)) {
+			for (const variant of variants) {
+				matches.push(...schemasAtPath(variant, segments));
+			}
+		}
+	}
+	return matches;
+}
+
+function uniqueSchemas(schemas: JsonSchemaRecord[]): JsonSchemaRecord[] {
+	const seen = new Set<string>();
+	return schemas.filter((schema) => {
+		const key = JSON.stringify(schema);
+		if (seen.has(key)) {
+			return false;
+		}
+		seen.add(key);
+		return true;
+	});
+}
+
 export function schemaAtPath(
 	schema: HyperchartStateInfo["replySchema"],
 	path: string | undefined,
@@ -252,17 +291,11 @@ export function schemaAtPath(
 	if (path === undefined) {
 		return { schema: root };
 	}
-	let current: unknown = root;
-	for (const segment of path.split(".")) {
-		const record = asSchemaRecord(current);
-		const properties = asSchemaRecord(record?.properties);
-		if (!properties || !(segment in properties)) {
-			return undefined;
-		}
-		current = properties[segment];
+	const matches = uniqueSchemas(schemasAtPath(root, path.split(".")));
+	if (matches.length === 0) {
+		return undefined;
 	}
-	const field = asSchemaRecord(current);
-	return field ? { schema: field } : undefined;
+	return { schema: matches.length === 1 ? matches[0]! : { anyOf: matches } };
 }
 
 export function schemaTypeText(schema: HyperchartStateInfo["replySchema"]): string {
