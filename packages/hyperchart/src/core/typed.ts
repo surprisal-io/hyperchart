@@ -5,6 +5,7 @@ import type {
 	ChartCst,
 	EventBindingCst,
 	JoinArtifactOfCst,
+	JoinResultOfCst,
 	InputRef,
 } from "./types.js";
 
@@ -213,6 +214,13 @@ type Refs<Args, Results, Files, Maps, Inputs> = {
 			opts: { artifact: A },
 		): JoinArtifactOfCst;
 	};
+	joinResultOf: {
+		<S extends keyof Results & string>(state: S): JoinResultOfCst;
+		<S extends keyof Results & string, P extends Paths<Results[S]> & string>(
+			state: S,
+			opts: { path: P },
+		): JoinResultOfCst;
+	};
 	// The instance args of the named map (its template path — the registry key): the key is
 	// always a string, the item type comes from the registry and is verified against `over`.
 	key: <M extends keyof Maps & string>(map: M) => InputRef<string>;
@@ -263,6 +271,11 @@ export function refs<
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 		})) as Refs<Args, Results, Files, Maps, Inputs>["joinArtifactOf"],
+		joinResultOf: ((state: string, opts: { path?: string } = {}) => ({
+			kind: "joinResultOf",
+			state,
+			...(opts.path === undefined ? {} : { path: opts.path }),
+		})) as Refs<Args, Results, Files, Maps, Inputs>["joinResultOf"],
 		key: (map) => ({ kind: "key", map }),
 		item: ((map: string, path?: string) => ({
 			kind: "item",

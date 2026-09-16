@@ -3011,7 +3011,21 @@ function guardInfo(
 			...(guard.reply === undefined ? {} : { reply: { schema: guard.reply } }),
 		};
 	}
-	return { kind: "tsImport", module: guard.module, export: guard.export };
+	return {
+		kind: "tsImport",
+		module: guard.module,
+		export: guard.export,
+		...(guard.env === undefined
+			? {}
+			: {
+					env: guard.env.map((env) => ({
+						name: env.name,
+						type: env.type,
+						...(env.value === undefined ? {} : { value: env.value }),
+						...(env.schema === undefined ? {} : { schema: { schema: env.schema } }),
+					})),
+				}),
+	};
 }
 
 function refsInfo(refs: HyperchartInspectState["refs"]): HyperchartRefInfo | undefined {
@@ -3020,7 +3034,13 @@ function refsInfo(refs: HyperchartInspectState["refs"]): HyperchartRefInfo | und
 	}
 	const grouped: HyperchartRefInfo = {};
 	for (const ref of refs) {
-		appendRef(grouped, ref.kind === "artifactOf" || ref.kind === "joinArtifactOf" ? "artifact" : ref.kind, ref.preview);
+		const kind =
+			ref.kind === "artifactOf" || ref.kind === "joinArtifactOf"
+				? "artifact"
+				: ref.kind === "joinResultOf"
+					? "result"
+					: ref.kind;
+		appendRef(grouped, kind, ref.preview);
 	}
 	return Object.keys(grouped).length === 0 ? undefined : grouped;
 }

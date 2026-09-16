@@ -481,7 +481,12 @@ type HyperchartGuardInfo =
       artifacts?: HyperchartArtifactInfo[];
       reply?: HyperchartSchemaInfo;
     }
-  | { kind: "tsImport"; module: string; export: string };
+  | {
+      kind: "tsImport";
+      module: string;
+      export: string;
+      env?: HyperchartEnvInfo[];
+    };
 ```
 
 ## Map and parallel summaries

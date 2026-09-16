@@ -6,6 +6,26 @@ import type { ActionUID, ChartAst, StateAst, StateId, StatePath } from "./types.
 // instance path. All node lookups and parent/sibling walks in the projection and the machine go
 // through these helpers, so template charts and their instances share one code path.
 
+/** Canonical across in-memory records and JSONB replay; array indices remain numeric. */
+export function canonicalMapKeys(instances: object): string[] {
+	return Object.keys(instances).sort((left, right) => {
+		const leftIsIndex = /^(0|[1-9]\d*)$/.test(left);
+		const rightIsIndex = /^(0|[1-9]\d*)$/.test(right);
+		if (leftIsIndex && rightIsIndex) {
+			// Comparing canonical decimal strings avoids Number precision loss for
+			// arbitrary-length map keys while retaining numeric ordering.
+			return left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
+		}
+		if (leftIsIndex) {
+			return -1;
+		}
+		if (rightIsIndex) {
+			return 1;
+		}
+		return left < right ? -1 : left > right ? 1 : 0;
+	});
+}
+
 // The template path of a possibly-instanced path: map "#key" and actor "~generation"
 // suffixes are stripped per segment. Generation 1 deliberately has no suffix for stable paths.
 export function templatePath(path: StatePath): StatePath {

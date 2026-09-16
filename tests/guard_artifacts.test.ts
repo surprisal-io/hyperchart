@@ -94,6 +94,47 @@ function envGuard(env: Record<string, Templatable | ArtifactOfCst | JoinArtifact
 }
 
 describe("validation script env", () => {
+	it("passes rendered env to an imported guard without spawning a subprocess", async () => {
+		const dir = await tempDir();
+		await writeFile(
+			join(dir, "guard.mjs"),
+			`export function check(event, context, invocation) {
+			  return event.output?.count === Number(invocation?.env?.EXPECTED)
+			    && context.invocation?.branchId === "main";
+			}`,
+		);
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "imported-env",
+				args: { expected: { default: 8 } },
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", {
+							validation: {
+								guard: tsImport("./guard.mjs", "check", {
+									env: { EXPECTED: t`${arg("expected")}` },
+								}),
+							},
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		).ast;
+
+		const result = await run(
+			ast,
+			dir,
+			{ expected: 3 },
+			new FakeAgentExecutor({ work: [{ type: "DONE", output: { count: 3 } }] }),
+		);
+		expect(result.projection.activeLeaves).toEqual(["done"]);
+	});
+
 	it("exposes the originating invocation across rejection and distinguishes repeated visits", async () => {
 		const dir = await tempDir();
 		const guard = script(

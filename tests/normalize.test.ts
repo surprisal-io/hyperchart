@@ -15,6 +15,7 @@ import {
 	protocol,
 	receive,
 	reply,
+	script,
 	send,
 	t,
 	tsAction,
@@ -29,6 +30,7 @@ import {
 	event,
 	input,
 	item,
+	joinResultOf,
 	key,
 	result,
 	resume,
@@ -36,6 +38,175 @@ import {
 } from "../packages/hyperchart/src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
+	it.each([
+		{
+			name: "missing producer",
+			producer: undefined,
+			read: joinResultOf("samples.missing"),
+			code: "UNKNOWN_INPUT_RESULT",
+		},
+		{
+			name: "producer outside a map",
+			producer: {
+				plain: {
+					kind: "state" as const,
+					action: agent("sample", { reply: z.object({ value: z.string() }) }),
+					transitions: { OK: "aggregate" },
+				},
+			},
+			read: joinResultOf("plain"),
+			code: "INVALID_MAP_REF",
+		},
+		{
+			name: "mapped producer without a result",
+			producer: {
+				samples: map({
+					over: arg("items"),
+					initial: "sample",
+					onDone: "aggregate",
+					states: {
+						sample: {
+							kind: "state",
+							action: agent("sample"),
+							transitions: { OK: "done" },
+						},
+						done: final(),
+					},
+				}),
+			},
+			read: joinResultOf("samples.sample"),
+			code: "UNKNOWN_INPUT_RESULT",
+		},
+		{
+			name: "missing selected result path",
+			producer: {
+				samples: map({
+					over: arg("items"),
+					initial: "sample",
+					onDone: "aggregate",
+					states: {
+						sample: {
+							kind: "state",
+							action: agent("sample", { reply: z.object({ value: z.string() }) }),
+							transitions: { OK: "done" },
+						},
+						done: final(),
+					},
+				}),
+			},
+			read: joinResultOf("samples.sample", { path: "missing" }),
+			code: "UNKNOWN_INPUT_RESULT",
+		},
+	] as const)("diagnoses joinResultOf with a $name", ({ producer, read, code }) => {
+		const normalized = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "invalid-joined-result",
+				args: { items: { default: ["only"] } },
+				initial: producer !== undefined && "plain" in producer ? "plain" : "aggregate",
+				states: {
+					...producer,
+					aggregate: {
+						kind: "state",
+						action: script("aggregate", [], { env: { RESULTS: read } }),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(normalized.ok).toBe(false);
+		expect(normalized.diagnostics.map((diagnostic) => diagnostic.code)).toContain(code);
+	});
+
+	it("rejects a joined consumer inside its concurrent producer map", () => {
+		const normalized = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "unsafe-concurrent-inner-join",
+				args: { items: { default: ["slow", "fast"] } },
+				initial: "items",
+				states: {
+					items: map({
+						over: arg("items"),
+						concurrency: 2,
+						initial: "produce",
+						onDone: "done",
+						states: {
+							produce: {
+								kind: "state",
+								action: agent("uneven-producer", { reply: z.object({ value: z.string() }) }),
+								transitions: { OK: "consume" },
+							},
+							consume: {
+								kind: "state",
+								action: script("consume", [], { env: { VALUES: joinResultOf("items.produce") } }),
+								transitions: { OK: "done" },
+							},
+							done: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+
+		expect(normalized.ok).toBe(false);
+		expect(normalized.diagnostics).toEqual(
+			expect.arrayContaining([expect.objectContaining({ code: "INVALID_MAP_REF" })]),
+		);
+	});
+
+	it("rejects a nested join after the consumer has left its outer map occurrence", () => {
+		const normalized = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "ambiguous-nested-join",
+				args: { groups: { default: [["a"]] } },
+				initial: "groups",
+				states: {
+					groups: map({
+						over: arg("groups"),
+						initial: "samples",
+						onDone: "aggregate",
+						states: {
+							samples: map({
+								over: item("groups"),
+								initial: "sample",
+								onDone: "done",
+								states: {
+									sample: {
+										kind: "state",
+										action: agent("sample", { reply: z.object({ value: z.string() }) }),
+										transitions: { OK: "done" },
+									},
+									done: final(),
+								},
+							}),
+							done: final(),
+						},
+					}),
+					aggregate: {
+						kind: "state",
+						action: script("aggregate", [], {
+							env: { VALUES: joinResultOf("groups.samples.sample", { path: "value" }) },
+						}),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(normalized.ok).toBe(false);
+		expect(normalized.diagnostics).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ code: "INVALID_MAP_REF" }),
+			]),
+		);
+	});
+
 	it("normalizes serializable chart argument metadata into the frozen AST", () => {
 		const result = normalizeChartConfig(
 			chart({
@@ -319,6 +490,102 @@ describe("normalizeChartConfig", () => {
 			guard: { kind: "tsImport", module: "./checks.js", export: "testsPass" },
 			onFail: { nudge: 2, restart: 1 },
 		});
+	});
+
+	it("normalizes dynamic imported guard options", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "imported-guard-options",
+				args: { expected: { default: 8 } },
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("coder", {
+							validation: {
+								guard: tsImport("./checks.js", "testsPass", {
+									env: { EXPECTED: t`${arg("expected")}` },
+								}),
+							},
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) {
+			throw new Error("expected valid chart");
+		}
+		const work = result.ast.states.work;
+		if (work?.kind !== "state" || work.action.kind !== "agent") {
+			throw new Error("expected agent state");
+		}
+		expect(work.action.validation?.guard).toMatchObject({
+			kind: "tsImport",
+			module: "./checks.js",
+			export: "testsPass",
+			env: { EXPECTED: { kind: "template" } },
+		});
+	});
+
+	it("validates imported guard env refs", () => {
+		const result = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "invalid-imported-guard-env",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("coder", {
+							validation: {
+								guard: tsImport("./checks.js", "testsPass", {
+									env: { BAD: t`${input("missing")}` },
+								}),
+							},
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain("UNKNOWN_INPUT");
+	});
+
+	it("rejects artifact and reply declarations on imported guards", () => {
+		const config = {
+			kind: "chart",
+			id: "invalid-imported-guard-outputs",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: agent("coder", {
+						validation: {
+							guard: {
+								kind: "tsImport",
+								module: "./checks.js",
+								export: "testsPass",
+								reply: z.boolean(),
+							},
+						},
+					}),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		} as unknown as Parameters<typeof normalizeChartConfig>[0];
+		const result = normalizeChartConfig(config);
+
+		expect(result.ok).toBe(false);
+		expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain("INVALID_GUARD");
 	});
 
 	it("applies chart recovery defaults unless an agent overrides them", () => {

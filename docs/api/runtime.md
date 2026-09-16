@@ -430,8 +430,9 @@ For `tsImport` guards:
 - relative modules resolve from `chartDir`;
 - package specifiers are imported directly;
 - the named export must be a function;
-- the function receives `(event, context)`; existing one-argument guards remain valid;
-- the context contains only `chartDir` and `workDir`; dynamic values belong in a script guard's `env`;
+- the function receives `(event, context, invocation?)`; existing one-argument guards remain valid;
+- declared `env` is structurally validated and rendered into `invocation.env` by ChartRuntime;
+- imported guards do not support artifact declarations or reply schemas; use a script guard for checked outputs;
 - the result must be `boolean` or `{ ok: false, reason: string }`.
 
 For script guards:

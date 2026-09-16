@@ -31,6 +31,7 @@ import type {
 	ArtifactCst,
 	ArtifactOfCst,
 	JoinArtifactOfCst,
+	JoinResultOfCst,
 	InputRef,
 	MapStateCst,
 	OnReenterCst,
@@ -404,8 +405,17 @@ export function joinArtifactOf(state: string, opts: { artifact?: string } = {}):
 	return { kind: "joinArtifactOf", state, ...(opts.artifact === undefined ? {} : { artifact: opts.artifact }) };
 }
 
-export function tsImport(module: string, exportName: string): GuardRef {
-	return { kind: "tsImport", module, export: exportName };
+/** JSON-array fan-in of every mapped instance result in durable spawn order. */
+export function joinResultOf(state: string, opts: { path?: string } = {}): JoinResultOfCst {
+	return { kind: "joinResultOf", state, ...(opts.path === undefined ? {} : { path: opts.path }) };
+}
+
+export function tsImport<const O extends Omit<Extract<GuardRef, { kind: "tsImport" }>, "kind" | "module" | "export">>(
+	module: string,
+	exportName: string,
+	opts: O = {} as O,
+): Extract<GuardRef, { kind: "tsImport" }> & O {
+	return { kind: "tsImport", module, export: exportName, ...opts };
 }
 
 /** Declare a trusted in-process imported function action without embedding a closure in the chart. */

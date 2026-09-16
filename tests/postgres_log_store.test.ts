@@ -684,7 +684,11 @@ describePg("PostgresLogStore", () => {
 		expect(normalized.some((query) => query.includes("max(seq)"))).toBe(false);
 		expect(
 			normalized.some(
-				(query) => query.includes("update hyperchart_run_meta") && query.includes("returning next_seq - $2"),
+				(query) =>
+					query.includes("with allocation as") &&
+					query.includes("update hyperchart_run_meta") &&
+					query.includes("insert into hyperchart_journal") &&
+					query.includes("pg_notify"),
 			),
 		).toBe(true);
 		expect(normalized.some((query) => query.includes("record_type, payload") && query.includes("order by seq"))).toBe(

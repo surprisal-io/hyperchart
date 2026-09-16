@@ -475,11 +475,21 @@ export type ArtifactOfCst = {
 
 // A fan-in read: the artifact of EVERY instance of a map, addressed by the producer's template
 // path inside it. In an agent's reads it expands to one file per spawned instance; in a script's
-// env it renders to a JSON array of paths. Instance set and order come from the spawned fact.
+// env it renders to a JSON array of paths. Instance set comes from the spawned fact; keys use
+// canonical numeric-then-lexicographic order so JSONB replay is stable.
 export type JoinArtifactOfCst = {
 	kind: "joinArtifactOf";
 	state: StatePath;
 	artifact?: string;
+};
+
+// A fan-in value read: the result of EVERY instance of a map, addressed by the
+// producing action's template path. Script environments receive a JSON array in
+// canonical numeric-then-lexicographic spawn-key order.
+export type JoinResultOfCst = {
+	kind: "joinResultOf";
+	state: StatePath;
+	path?: string;
 };
 
 // The per-invocation surface of a subagent, mirroring pi-subagents' chain step: `name` points at
@@ -545,7 +555,7 @@ export type ScriptActionCst = {
 	args?: readonly string[];
 	// All dynamic values flow through env: templates render from args/results, artifactOf renders
 	// to the producer's artifact PATH — the process reads the file itself, no prompt channel.
-	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
+	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	reply?: SchemaCst;
 };
@@ -557,7 +567,7 @@ export type ImportedActionCst = {
 	kind: "tsImport";
 	module: string;
 	export: string;
-	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
+	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	reply?: SchemaCst;
 };
@@ -572,14 +582,16 @@ export type GuardRef =
 			kind: "tsImport";
 			module: string;
 			export: string;
+			// Imported guards run in process and support rendered inputs only.
+			env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 	  }
 	| {
 			kind: "script";
 			command: string;
 			args?: readonly string[];
-			// A script guard has the complete script-option surface. Its reply is validation-only and
-			// its artifacts are declared outputs of the containing action state.
-			env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>;
+			// Guards share the script-option surface. Imported guards receive rendered
+			// options in process rather than through environment variables and files.
+			env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 			artifacts?: Record<string, Templatable | ArtifactCst>;
 			reply?: SchemaCst;
 	  };
@@ -590,12 +602,13 @@ export type GuardRefAst =
 			kind: "tsImport";
 			module: string;
 			export: string;
+			env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
 	  }
 	| {
 			kind: "script";
 			command: string;
 			args?: readonly string[];
-			env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+			env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
 			artifacts?: Readonly<Record<string, ArtifactAst>>;
 			reply?: SchemaAst;
 	  };
@@ -938,6 +951,8 @@ export type ArtifactOfAst = Readonly<ArtifactOfCst>;
 
 export type JoinArtifactOfAst = Readonly<JoinArtifactOfCst>;
 
+export type JoinResultOfAst = Readonly<JoinResultOfCst>;
+
 export type RecoveryPolicyAst = Readonly<{ nudge: number; restart: number }>;
 
 export type AgentValidationAst = Readonly<{
@@ -974,7 +989,7 @@ export type ScriptActionAst = Readonly<{
 	uid: ActionUID;
 	command: string;
 	args: readonly string[];
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;
@@ -983,7 +998,7 @@ export type ImportedActionAst = Readonly<{
 	uid: ActionUID;
 	module: string;
 	export: string;
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;

@@ -446,20 +446,21 @@ describe("replay gauntlet", () => {
 			},
 		});
 		expect(live.state.projection.activeLeaves).toEqual(["done"]);
-		// Cut right after intro's completion: with concurrency 1, body was never even started.
+		// Cut right after canonical-first body's completion: with concurrency 1,
+		// intro was never even started.
 		const cut = live.log.findIndex(
 			(record) =>
-				record.type === "state_action" && record.kind === "complete" && record.actionUid.state.includes("#intro"),
+				record.type === "state_action" && record.kind === "complete" && record.actionUid.state.includes("#body"),
 		);
 		const prefix = live.log.slice(0, cut + 1);
 
-		const resumed = await runLive(ast, { logs: prefix, agents: { "chapters#body.author": ["AUTHORED"] } });
+		const resumed = await runLive(ast, { logs: prefix, agents: { "chapters#intro.author": ["AUTHORED"] } });
 
 		expect(resumed.state.projection.activeLeaves).toEqual(["done"]);
 		const agentRuns = resumed.runtime.effectBatches
 			.flat()
 			.flatMap((effect) => (effect.kind === "agent" ? [effect.actionUid.state] : []));
-		expect(agentRuns).toEqual(["chapters#body.author"]);
+		expect(agentRuns).toEqual(["chapters#intro.author"]);
 		// The fan-out is a fact: resuming does not re-resolve `over` — no second spawned record.
 		expect(resumed.log.filter((record) => record.type === "spawned")).toHaveLength(1);
 	});

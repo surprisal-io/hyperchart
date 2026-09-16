@@ -489,6 +489,9 @@ class PiUserInteractionCoordinator {
 	start(): void {
 		this.stopTimer();
 		const ctx = this.currentContext();
+		if (currentRunLogStorage()?.kind !== "jsonl") {
+			return;
+		}
 		// Real Pi contexts always expose isIdle. Minimal extension-test contexts may not;
 		// those still receive the immediate scan without leaking a process-wide timer.
 		if (ctx === undefined || typeof ctx.isIdle !== "function") {
@@ -522,7 +525,7 @@ class PiUserInteractionCoordinator {
 
 	async beforeAgentStart(_userPrompt: string) {
 		const ctx = this.currentContext();
-		if (ctx === undefined) {
+		if (ctx === undefined || currentRunLogStorage()?.kind !== "jsonl") {
 			return undefined;
 		}
 		const active = await acquireActiveUserInteraction(interactionOwner(ctx));
@@ -561,7 +564,7 @@ class PiUserInteractionCoordinator {
 
 	private async scanOnce(): Promise<void> {
 		const ctx = this.currentContext();
-		if (ctx === undefined) {
+		if (ctx === undefined || currentRunLogStorage()?.kind !== "jsonl") {
 			return;
 		}
 		const active = await acquireActiveUserInteraction(interactionOwner(ctx));
@@ -721,6 +724,9 @@ function interactionKey(active: OwnedUserInteraction): string {
 }
 
 async function inspectOwnedUserInteractions(ctx: HyperchartContext) {
+	if (currentRunLogStorage()?.kind !== "jsonl") {
+		return { active: undefined, queued: [] };
+	}
 	const interactions = await scanOwnedOpenUserInteractions(interactionOwner(ctx));
 	const active = await acquireActiveUserInteraction(interactionOwner(ctx));
 	const activeKey = active === undefined ? undefined : interactionKey(active);

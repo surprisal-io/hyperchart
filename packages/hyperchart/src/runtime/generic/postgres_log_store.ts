@@ -138,6 +138,8 @@ type SharedPgJournal = {
 	client: PgClientLike;
 	runId: string;
 	access: PostgresLogAccess;
+	/** Writer-only durable allocation head, loaded under the advisory lock. */
+	nextSeq?: number;
 	writeChain: Promise<void>;
 	closed: boolean;
 	poisoned: boolean;
@@ -225,6 +227,34 @@ export class PostgresLogStore implements RunLogStore {
 						`Another live writer holds Hyperchart run '${options.runId}' in Postgres; stop it before writing`,
 					);
 				}
+				// The writer lock makes the run-meta row stable for this store's
+				// lifetime. Load its allocation head once; each append advances it in
+				// the same SQL statement that inserts the corresponding journal rows.
+				const allocation = await client.query(
+					`WITH created AS (
+					   INSERT INTO ${RUN_META_TABLE} (run_id) VALUES ($1)
+					   ON CONFLICT (run_id) DO NOTHING
+					   RETURNING next_seq
+					 )
+					 SELECT next_seq FROM created
+					 UNION ALL
+					 SELECT next_seq FROM ${RUN_META_TABLE} WHERE run_id = $1
+					 LIMIT 1`,
+					[options.runId],
+				);
+				const nextSeq = pgNumber(allocation.rows[0]?.next_seq);
+				return new PostgresLogStore(
+					{
+						client,
+						runId: options.runId,
+						access,
+						nextSeq,
+						writeChain: Promise.resolve(),
+						closed: false,
+						poisoned: false,
+					},
+					branchId,
+				);
 			}
 			return new PostgresLogStore(
 				{ client, runId: options.runId, access, writeChain: Promise.resolve(), closed: false, poisoned: false },
@@ -564,11 +594,11 @@ export class PostgresLogStore implements RunLogStore {
 			let commitAttempted = false;
 			try {
 				await client.query("BEGIN");
-				const tx = new TransactionImpl(client, runId);
+				const tx = new TransactionImpl(client, runId, this.journal.nextSeq);
 				const result = await task(tx);
 				commitAttempted = true;
 				await client.query("COMMIT");
-				tx.confirmCommitted();
+				this.journal.nextSeq = tx.confirmCommitted();
 				return result;
 			} catch (error) {
 				if (!commitAttempted) {
@@ -654,14 +684,22 @@ export class PostgresLogStore implements RunLogStore {
 
 class TransactionImpl implements PostgresRunTransaction {
 	private readonly confirmations: Array<() => void> = [];
+	private nextSeq: number;
 	constructor(
 		readonly client: PgClientLike,
 		readonly runId: string,
-	) {}
-	confirmCommitted(): void {
+		nextSeq: number | undefined,
+	) {
+		if (nextSeq === undefined) {
+			throw new Error(`Missing sequence allocation head for writable Hyperchart run '${runId}'`);
+		}
+		this.nextSeq = nextSeq;
+	}
+	confirmCommitted(): number {
 		for (const confirm of this.confirmations) {
 			confirm();
 		}
+		return this.nextSeq;
 	}
 	query(text: string, values?: readonly unknown[]): Promise<PgQueryResult> {
 		return this.client.query(text, values);
@@ -816,17 +854,13 @@ class TransactionImpl implements PostgresRunTransaction {
 		if (!Number.isSafeInteger(count) || count <= 0) {
 			throw new Error(`Invalid Hyperchart sequence allocation size ${count}`);
 		}
-		await this.client.query(`INSERT INTO ${RUN_META_TABLE} (run_id) VALUES ($1) ON CONFLICT (run_id) DO NOTHING`, [
-			this.runId,
-		]);
-		const result = await this.client.query(
-			`UPDATE ${RUN_META_TABLE}
-			    SET next_seq = next_seq + $2
-			  WHERE run_id = $1
-			  RETURNING next_seq - $2 AS first_seq`,
-			[this.runId, count],
-		);
-		return pgNumber(result.rows[0]?.first_seq);
+		const firstSeq = this.nextSeq;
+		const nextSeq = firstSeq + count;
+		if (!Number.isSafeInteger(nextSeq)) {
+			throw new Error(`Hyperchart sequence allocation exceeds the safe integer range for run '${this.runId}'`);
+		}
+		this.nextSeq = nextSeq;
+		return firstSeq;
 	}
 	private async commitEntries(entries: readonly StorageEntry[]): Promise<void> {
 		if (entries.length === 0) {
@@ -853,13 +887,45 @@ class TransactionImpl implements PostgresRunTransaction {
 			}
 			return `($1, $${parameter}, $${parameter + 1}, $${parameter + 2}, $${parameter + 3}, $${parameter + 4}, $${parameter + 5}, $${parameter + 6}::jsonb, $${parameter + 7}::jsonb, $${parameter + 8})`;
 		});
-		await this.client.query(
-			`INSERT INTO ${JOURNAL_TABLE}
-			   (run_id, seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms)
-			 VALUES ${rows.join(", ")}`,
+		const firstSeq = entries[0]!.seqId;
+		const nextSeq = entries.at(-1)!.seqId + 1;
+		const expectedSeqParameter = values.length + 1;
+		const nextSeqParameter = values.length + 2;
+		const notifyChannelParameter = values.length + 3;
+		const notifyPayloadParameter = values.length + 4;
+		values.push(firstSeq, nextSeq, JOURNAL_CHANNEL, `${this.runId}:${entries.at(-1)!.seqId}`);
+		const result = await this.client.query(
+			`WITH allocation AS (
+			   UPDATE ${RUN_META_TABLE}
+			      SET next_seq = $${nextSeqParameter}
+			    WHERE run_id = $1 AND next_seq = $${expectedSeqParameter}
+			    RETURNING run_id
+			 ), inserted AS (
+			   INSERT INTO ${JOURNAL_TABLE}
+			     (run_id, seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms)
+			   SELECT input.run_id,
+			          input.seq::bigint,
+			          input.kind,
+			          input.branch_id,
+			          input.parent_id::bigint,
+			          input.head_seq_id::bigint,
+			          input.record_type,
+			          input.payload::jsonb,
+			          input.metadata::jsonb,
+			          input.committed_at_ms::bigint
+			     FROM (VALUES ${rows.join(", ")}) AS input
+			       (run_id, seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms)
+			     JOIN allocation USING (run_id)
+			   RETURNING seq
+			 )
+			 SELECT pg_notify($${notifyChannelParameter}, $${notifyPayloadParameter})
+			   FROM inserted
+			  LIMIT 1`,
 			values,
 		);
-		await this.client.query("SELECT pg_notify($1, $2)", [JOURNAL_CHANNEL, `${this.runId}:${entries.at(-1)!.seqId}`]);
+		if (result.rows.length !== 1) {
+			throw new Error(`Hyperchart sequence allocation head changed unexpectedly for run '${this.runId}'`);
+		}
 	}
 }
 

@@ -26,6 +26,14 @@ export async function runGuard(
 	ctx: GuardContext,
 	invocation?: RenderedGuardInvocation,
 ): Promise<GuardOutcome> {
+	const hasRawOptions =
+		guard.env !== undefined ||
+		(guard.kind === "script" && (guard.artifacts !== undefined || guard.reply !== undefined));
+	if (invocation === undefined && hasRawOptions) {
+		throw new Error(
+			"Guard env/artifacts/reply require a rendered guard invocation from ChartRuntime; call runGuard with RenderedGuardInvocation options.",
+		);
+	}
 	if (guard.kind === "tsImport") {
 		const moduleUrl = importedModuleSpecifier(guard.module, ctx.chartDir);
 		const mod = (await import(moduleUrl)) as Record<string, unknown>;
@@ -33,18 +41,13 @@ export async function runGuard(
 		if (typeof fn !== "function") {
 			throw new Error(`Guard export '${guard.export}' is not a function in ${guard.module}`);
 		}
-		// Context carries workspace paths and optional runtime-supplied invocation provenance.
-		return normalizeGuardOutcome(await fn(event, ctx));
-	}
-
-	const hasRawOptions =
-		guard.env !== undefined ||
-		("artifacts" in guard && guard.artifacts !== undefined) ||
-		("reply" in guard && guard.reply !== undefined);
-	if (invocation === undefined && hasRawOptions) {
-		throw new Error(
-			"Script guard env/artifacts/reply require a rendered guard invocation from ChartRuntime; call runGuard with RenderedGuardInvocation options.",
-		);
+		// Imported guards receive rendered env in process. Artifact and reply
+		// ownership remain exclusive to subprocess guards.
+		const importedInvocation =
+			invocation === undefined
+				? undefined
+				: { env: invocation.env, actionUid: invocation.actionUid };
+		return normalizeGuardOutcome(await fn(event, ctx, importedInvocation));
 	}
 	const runner = invocation?.scripts ?? new ScriptRunner({ workDir: ctx.workDir });
 	return runner.runGuard(

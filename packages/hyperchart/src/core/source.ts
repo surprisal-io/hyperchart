@@ -9,6 +9,7 @@ import type {
 	GuardRefAst,
 	InputRef,
 	JoinArtifactOfAst,
+	JoinResultOfAst,
 	JsonSchema,
 	JsonValue,
 	OnReenterAst,
@@ -493,7 +494,8 @@ function guardDsl(value: GuardRefAst): string {
 	if (value.kind === "script") {
 		return scriptDsl(value);
 	}
-	return `tsImport(${stringDsl(value.module)}, ${stringDsl(value.export)})`;
+	const options = objectDsl([["env", envDsl(value.env)]]);
+	return `tsImport(${stringDsl(value.module)}, ${stringDsl(value.export)}${options === "{}" ? "" : `, ${options}`})`;
 }
 
 function transitionsDsl(transitions: Readonly<Record<string, TransitionAst>>): string | undefined {
@@ -852,13 +854,27 @@ function joinArtifactOfDsl(read: JoinArtifactOfAst): string {
 		: `joinArtifactOf(${stringDsl(read.state)}, ${options})`;
 }
 
+function joinResultOfDsl(read: JoinResultOfAst): string {
+	const options = objectDsl([["path", read.path === undefined ? undefined : stringDsl(read.path)]]);
+	return options === "{}"
+		? `joinResultOf(${stringDsl(read.state)})`
+		: `joinResultOf(${stringDsl(read.state)}, ${options})`;
+}
+
 function envDsl(
-	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined,
+	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>> | undefined,
 ): string | undefined {
 	if (env === undefined || Object.keys(env).length === 0) {
 		return undefined;
 	}
 	return objectDsl(
-		Object.entries(env).map(([name, value]) => [name, typeof value === "string" ? stringDsl(value) : readDsl(value)]),
+		Object.entries(env).map(([name, value]) => [
+			name,
+			typeof value === "string"
+				? stringDsl(value)
+				: value.kind === "joinResultOf"
+					? joinResultOfDsl(value)
+					: readDsl(value),
+		]),
 	);
 }

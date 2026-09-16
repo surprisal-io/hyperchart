@@ -14,6 +14,8 @@ import type {
 	ArtifactOfCst,
 	JoinArtifactOfAst,
 	JoinArtifactOfCst,
+	JoinResultOfAst,
+	JoinResultOfCst,
 	GuardRefAst,
 	InputRef,
 	JsonValue,
@@ -66,6 +68,7 @@ import {
 	resolveRef,
 } from "./projection.js";
 import {
+	canonicalMapKeys,
 	instancePathFor,
 	lastSegmentKey,
 	matchesDeclaredUid,
@@ -602,14 +605,12 @@ function pendingEffect(state: MachineState, pending: PendingAction): Effect {
 				actionUid: pending.actionUid,
 				guard: validation.guard,
 				event: pending.event,
-				...(validation.guard.kind === "script"
-					? renderScriptOptions(
-							state,
-							validation.guard as ScriptOptionsAst,
-							pending.actionUid.state,
-							pending.actionUid.state,
-						)
-					: {}),
+				...renderScriptOptions(
+					state,
+					validation.guard as ScriptOptionsAst,
+					pending.actionUid.state,
+					pending.actionUid.state,
+				),
 			};
 		}
 	}
@@ -696,7 +697,7 @@ function agentInvocationForAction(
 }
 
 type ScriptOptionsAst = {
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>>;
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 };
@@ -727,7 +728,7 @@ function renderScriptOptions(
 
 function renderScriptEnv(
 	state: MachineState,
-	env: Readonly<Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst>>,
+	env: Readonly<Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>>,
 	stateId: StatePath,
 	selfActionArtifactsState?: StatePath,
 ): Readonly<Record<string, string | RenderedArtifact>> {
@@ -742,6 +743,9 @@ function renderScriptEnv(
 			if (value.kind === "joinArtifactOf") {
 				const paths = renderJoin(state, value, stateId).map((read) => read.path);
 				return [name, JSON.stringify(paths)];
+			}
+			if (value.kind === "joinResultOf") {
+				return [name, JSON.stringify(renderResultJoin(state, value, stateId))];
 			}
 			const read = renderRead(state, value, stateId, selfActionArtifactsState);
 			return [name, read.select === undefined ? read.path : read];
@@ -1368,7 +1372,7 @@ function dueSpawns(state: MachineState): RecordAppend[] {
 		if (typeof instances !== "object" || instances === null) {
 			throw new Error(`Map ${leaf}: 'over' must resolve to a record or an array, got ${typeof over}`);
 		}
-		for (const key of Object.keys(instances)) {
+		for (const key of canonicalMapKeys(instances)) {
 			if (!/^[A-Za-z0-9_-]+$/.test(key)) {
 				throw new Error(`Map ${leaf}: instance key '${key}' must match [A-Za-z0-9_-]+`);
 			}
@@ -1396,7 +1400,7 @@ function ownerOccurrencesForActor(
 			if (templatePath(mapPath) !== declaration.owner) {
 				continue;
 			}
-			for (const key of Object.keys(instances)) {
+			for (const key of canonicalMapKeys(instances)) {
 				const occurrence = `${mapPath}#${key}`;
 				if (state.projection.activeLeaves.some((leaf) => underScope(leaf, occurrence))) {
 					occurrences.push(occurrence);
@@ -2020,10 +2024,27 @@ export function renderJoin(state: MachineState, read: JoinArtifactOfAst, stateId
 		state: read.state,
 		...(read.artifact === undefined ? {} : { artifact: read.artifact }),
 	};
-	return Object.keys(instances).map((key) => ({
+	return canonicalMapKeys(instances).map((key) => ({
 		...renderRead(state, single, `${mapPath}#${key}${read.state.slice(container.length)}`),
 		readKind: "join" as const,
 	}));
+}
+
+function renderResultJoin(state: MachineState, read: JoinResultOfAst, stateId: string): unknown[] {
+	const container = enclosingMapPath(state.ast, read.state, stateId);
+	const mapPath = stripLastKey(instancePathFor(container, stateId));
+	const instances = state.projection.spawns[mapPath];
+	if (instances === undefined) {
+		throw new Error(`Read in state ${stateId}: map ${mapPath} has no spawned instances`);
+	}
+	const single: InputRef = {
+		kind: "result",
+		state: read.state,
+		...(read.path === undefined ? {} : { path: read.path }),
+	};
+	return canonicalMapKeys(instances).map((key) =>
+		resolveRef(state, single, `${mapPath}#${key}${read.state.slice(container.length)}`),
+	);
 }
 
 // The innermost map the producer's template path sits in — the container whose instances the

@@ -24,6 +24,7 @@ import {
 	input,
 	item,
 	joinArtifactOf,
+	joinResultOf,
 	key,
 	result,
 	visit,
@@ -2414,9 +2415,9 @@ describe("execution loop", () => {
 		const state = await loop(runtime);
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		// One instance at a time, in spawn-fact key order — the second starts only after the
-		// first completes.
-		expect(batches).toEqual([["chapters#intro.author"], ["chapters#body.author"]]);
+		// One instance at a time, in canonical spawn-key order — the second starts only
+		// after the first completes.
+		expect(batches).toEqual([["chapters#body.author"], ["chapters#intro.author"]]);
 	});
 
 	it("aborts all instances and cancels their agents when an event exits the map", async () => {
@@ -2538,9 +2539,136 @@ describe("execution loop", () => {
 		const state = await loop(runtime);
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		// One artifact per spawned instance, in spawn-fact key order, shape carried along.
-		expect(reads.map((read) => read.path)).toEqual(["out/intro.json", "out/body.json"]);
-		expect(files).toBe(JSON.stringify(["out/intro.json", "out/body.json"]));
+		// One artifact per spawned instance, in replay-stable canonical key order.
+		expect(reads.map((read) => read.path)).toEqual(["out/body.json", "out/intro.json"]);
+		expect(files).toBe(JSON.stringify(["out/body.json", "out/intro.json"]));
+	});
+
+	it("fans mapped action results into one JSON script environment value", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "join-result-chart",
+				initial: "plan",
+				states: {
+					plan: {
+						kind: "state",
+						action: agent("planner", { reply: z.object({ chapters: z.record(z.string(), z.string()) }) }),
+						transitions: { OK: "samples" },
+					},
+					samples: map({
+						over: result("plan", "chapters"),
+						initial: "sample",
+						onDone: "aggregate",
+						states: {
+							sample: {
+								kind: "state",
+								action: agent("sampler", { reply: z.object({ belief: z.string() }) }),
+								transitions: { OK: "done" },
+							},
+							done: final(),
+						},
+					}),
+					aggregate: {
+						kind: "state",
+						action: script("aggregate", [], {
+							env: { BELIEFS: joinResultOf("samples.sample", { path: "belief" }) },
+						}),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(`test chart should be valid: ${JSON.stringify(parsed.diagnostics)}`);
+		}
+		const events: MachineEvent[] = [];
+		let beliefs = "";
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						const output =
+							effect.actionUid.state === "plan"
+								? {
+									chapters: {
+										"9007199254740993": "large-second",
+										"9007199254740992": "large-first",
+										z: "last",
+										a: "first",
+									},
+								}
+								: {
+									belief: effect.actionUid.state.includes("#9007199254740992")
+										? "large-first"
+										: effect.actionUid.state.includes("#9007199254740993")
+											? "large-second"
+											: effect.actionUid.state.includes("#a")
+												? "first"
+												: "last",
+								};
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "OK", output } },
+						});
+					}
+					if (effect.kind === "script") {
+						beliefs = typeof effect.env?.BELIEFS === "string" ? effect.env.BELIEFS : "";
+						events.push({ kind: "script", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(beliefs).toBe(JSON.stringify(["large-first", "large-second", "first", "last"]));
+
+		// PostgreSQL JSONB canonicalizes object keys. Re-enter immediately before
+		// aggregation with that decoded key order and verify the joined value is
+		// identical to the live execution.
+		const liveLogs = await runtime.loadLogs();
+		const aggregateInvoke = liveLogs.findIndex(
+			(record) => record.type === "state_action" && record.kind === "invoke" && record.actionUid.state === "aggregate",
+		);
+		expect(aggregateInvoke).toBeGreaterThan(0);
+		const persistedPrefix = liveLogs.slice(0, aggregateInvoke).map((record) =>
+			record.type === "spawned"
+				? {
+						...record,
+						instances: Object.fromEntries(
+							Object.entries(record.instances).sort(([left], [right]) => left.localeCompare(right)),
+						),
+					}
+				: record,
+		);
+		const replayEvents: MachineEvent[] = [];
+		let replayedBeliefs = "";
+		const replay = new MockRuntime({
+			ast: parsed.ast,
+			logs: persistedPrefix,
+			events: replayEvents,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "script") {
+						replayedBeliefs = typeof effect.env?.BELIEFS === "string" ? effect.env.BELIEFS : "";
+						replayEvents.push({ kind: "script", effectId: effect.id, event: { type: "OK" } });
+					}
+					if (effect.kind === "durable_records") {
+						replayEvents.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+		await loop(replay);
+		expect(replayedBeliefs).toBe(beliefs);
 	});
 
 	it("joins nested-map artifacts within the current outer-map instance", async () => {

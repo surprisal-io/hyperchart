@@ -33,6 +33,7 @@ import {
 } from "./actors.js";
 import { actionUidKey } from "./action_uid.js";
 import {
+	canonicalMapKeys,
 	childPath,
 	instancePathFor,
 	lastSegmentKey,
@@ -462,7 +463,7 @@ export function projectBranch(
 					throw new Error(`Spawned record for non-map state ${record.path}`);
 				}
 				projection.spawns[record.path] = record.instances;
-				const keys = Object.keys(record.instances);
+				const keys = canonicalMapKeys(record.instances);
 				const entered = keys.length === 0 ? siblingPath(record.path, node.onDone) : undefined;
 				projection.activeLeaves = [
 					...projection.activeLeaves.filter((leaf) => leaf !== record.path),

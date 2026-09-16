@@ -319,11 +319,40 @@ For an agent action, the runtime provides the selected file/read. For a script e
 joinArtifactOf(state, { artifact? }): JoinArtifactOfCst;
 ```
 
-Collects one artifact from every spawned instance of the map enclosing `state`. Agent `reads` receive all files. Script `env` receives a JSON array of paths.
+Collects one artifact from every spawned instance of the map enclosing `state`.
+Agent `reads` receive all files. Script `env` receives a JSON array of paths in
+the same canonical numeric-then-lexicographic key order as `joinResultOf`. For a
+nested map, the consumer must remain inside every enclosing outer-map scope.
 
 ```ts
 env: { CHAPTER_FILES: joinArtifactOf("chapters.write", { artifact: "chapter" }) }
 ```
+
+#### `joinResultOf(state, options?)`
+
+```ts
+joinResultOf(state, { path? }): JoinResultOfCst;
+```
+
+Collects the declared result, or one selected result field, from every spawned
+instance of the map enclosing `state`. Script and imported-action `env` receive
+a JSON array in canonical spawn-key order. Non-negative integer keys sort
+numerically before other keys; remaining keys sort lexicographically. This
+ordering is identical for live records and PostgreSQL JSONB replay. The
+producing action must declare `reply`, and the map must dominate the consumer
+just like other result reads. The consumer must run after leaving the joined
+innermost map (normally via its `onDone` target), never inside an individual map
+occurrence. For nested maps, it must remain inside every enclosing outer-map
+instance scope so the joined occurrence is unambiguous.
+
+```ts
+env: { SAMPLES: joinResultOf("samples.sample") }
+```
+
+`joinResultOf` changes only effect-boundary interpolation. It writes no new
+durable fact: replay reconstructs the same array from spawn facts and accepted
+action results, so the durable log contract and TLA+ transition system are
+unchanged.
 
 #### `key(map)` and `item(map, path?)`
 
@@ -770,22 +799,31 @@ See [`examples/deck-director.chart.ts`](../../examples/deck-director.chart.ts) f
 
 ## Validation
 
-### `tsImport(module, exportName)`
+### `tsImport(module, exportName, options?)`
 
 ```ts
-function tsImport(module: string, exportName: string): GuardRef;
+function tsImport(
+  module: string,
+  exportName: string,
+  options?: { env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst> },
+): GuardRef;
 ```
 
-The export receives the completion event and returns:
+The export receives `(event, context, invocation?)`, where `invocation.env`
+contains rendered environment values, and returns:
 
 ```ts
 type GuardOutcome = boolean | { ok: false; reason: string };
 ```
 
-Relative modules resolve from the chart directory.
+Relative modules resolve from the chart directory. Imported guards intentionally
+do not declare artifacts or reply schemas; use a script guard when those output
+checks are required.
 
 ```ts
-validate: tsImport("./validators/report.ts", "acceptReport")
+validate: tsImport("./validators/report.ts", "acceptReport", {
+  env: { EXPECTED: t`${arg("expected")}` },
+})
 ```
 
 ### Script guard

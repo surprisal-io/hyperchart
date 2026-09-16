@@ -14,6 +14,7 @@ import {
 	failed,
 	final,
 	item,
+	joinResultOf,
 	map,
 	message,
 	messageInput,
@@ -54,6 +55,45 @@ function sourceForScript() {
 }
 
 describe("hyperchart source", () => {
+	it("prints mapped result joins in script environments", () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "joined-result-source",
+				args: { items: { default: ["one"] } },
+				initial: "samples",
+				states: {
+					samples: map({
+						over: arg("items"),
+						initial: "sample",
+						onDone: "aggregate",
+						states: {
+							sample: {
+								kind: "state",
+								action: agent("sample", { reply: z.object({ value: z.string() }) }),
+								transitions: { OK: "done" },
+							},
+							done: final(),
+						},
+					}),
+					aggregate: {
+						kind: "state",
+						action: script("aggregate", [], {
+							env: { RESULTS: joinResultOf("samples.sample", { path: "value" }) },
+						}),
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		assert(parsed.ok, JSON.stringify(parsed.diagnostics));
+
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain('RESULTS: joinResultOf("samples.sample", {');
+		expect(source).toContain('path: "value"');
+	});
+
 	it("prints chart argument metadata in generated definition source", () => {
 		const parsed = normalizeChartConfig(
 			chart({

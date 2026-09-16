@@ -11,6 +11,7 @@ import type {
 	GuardRefAst,
 	InputRef,
 	JoinArtifactOfAst,
+	JoinResultOfAst,
 	JsonSchema,
 	OnReenterAst,
 	SchemaAst,
@@ -62,7 +63,7 @@ export type HyperchartInspectTransition = {
 };
 
 export type HyperchartInspectRef = {
-	kind: InputRef["kind"] | "artifactOf" | "joinArtifactOf";
+	kind: InputRef["kind"] | "artifactOf" | "joinArtifactOf" | "joinResultOf";
 	preview: string;
 	state?: string;
 	name?: string;
@@ -96,7 +97,12 @@ export type HyperchartInspectGuard =
 			artifacts?: HyperchartInspectArtifact[];
 			reply?: JsonSchema;
 	  }
-	| { kind: "tsImport"; module: string; export: string };
+	| {
+			kind: "tsImport";
+			module: string;
+			export: string;
+			env?: HyperchartInspectEnv[];
+	  };
 
 export type HyperchartInspectBranch = {
 	id: string;
@@ -669,11 +675,17 @@ function guardInfo(guard: GuardRefAst, ast: ChartAst, statePath: string): Hyperc
 			...(guard.reply === undefined ? {} : { reply: (guard.reply as SchemaAst).schema }),
 		};
 	}
-	return { kind: "tsImport", module: guard.module, export: guard.export };
+	const env = envInfo(guard.env, ast, statePath);
+	return {
+		kind: "tsImport",
+		module: guard.module,
+		export: guard.export,
+		...(env === undefined ? {} : { env }),
+	};
 }
 
 function envInfo(
-	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst>> | undefined,
+	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>> | undefined,
 	ast: ChartAst,
 	statePath: string,
 ): HyperchartInspectEnv[] | undefined {
@@ -689,6 +701,9 @@ function envInfo(
 		}
 		if (value.kind === "joinArtifactOf") {
 			return { name, type: "string (joined artifact paths)", value: artifactRefPreview(value) };
+		}
+		if (value.kind === "joinResultOf") {
+			return { name, type: "JSON string (joined results)", value: joinResultRefPreview(value) };
 		}
 		const preview = templatePreview(value);
 		const schema = jsonTemplateSchema(value, ast, statePath);
@@ -936,7 +951,19 @@ function actionRefs(action: StateActionAst): HyperchartInspectRef[] {
 	return uniqueRefs(refs);
 }
 
-function appendReadRefs(refs: HyperchartInspectRef[], value: TemplateAst | ArtifactOfAst | JoinArtifactOfAst): void {
+function appendReadRefs(
+	refs: HyperchartInspectRef[],
+	value: TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst,
+): void {
+	if (value.kind === "joinResultOf") {
+		refs.push({
+			kind: value.kind,
+			preview: joinResultRefPreview(value),
+			state: value.state,
+			...(value.path === undefined ? {} : { path: value.path }),
+		});
+		return;
+	}
 	if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") {
 		const path = [value.artifact, value.kind === "artifactOf" ? value.select : undefined].filter(Boolean).join(".");
 		refs.push({
@@ -1001,6 +1028,12 @@ function inputRefInfo(ref: InputRef): HyperchartInspectRef {
 
 function literal(value: string): string {
 	return JSON.stringify(value);
+}
+
+function joinResultRefPreview(ref: JoinResultOfAst): string {
+	return ref.path === undefined
+		? `joinResultOf(${literal(ref.state)})`
+		: `joinResultOf(${literal(ref.state)}, { path: ${literal(ref.path)} })`;
 }
 
 function artifactRefPreview(ref: ArtifactOfAst | JoinArtifactOfAst): string {

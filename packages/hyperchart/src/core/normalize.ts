@@ -24,6 +24,7 @@ import type {
 	CompoundStateAst,
 	ArtifactOfAst,
 	JoinArtifactOfAst,
+	JoinResultOfAst,
 	FinalStateAst,
 	GuardRefAst,
 	InputRef,
@@ -2292,17 +2293,70 @@ function validateTargets(
 						? Object.values(node.action.env ?? {})
 						: []),
 				];
-				const guardArtifactRefs = guard?.kind === "script" ? Object.values(guard.env ?? {}) : [];
+				const guardArtifactRefs = guard === undefined ? [] : Object.values(guard.env ?? {});
 				const artifactRefs = [...actionArtifactRefs, ...guardArtifactRefs].filter(
 					(item): item is ArtifactOfAst | JoinArtifactOfAst =>
 						typeof item !== "string" && (item.kind === "artifactOf" || item.kind === "joinArtifactOf"),
 				);
+				const joinedResults = [...actionArtifactRefs, ...guardArtifactRefs].filter(
+					(item): item is JoinResultOfAst => typeof item !== "string" && item.kind === "joinResultOf",
+				);
+				for (const read of joinedResults) {
+					if (!insideMap(states, read.state)) {
+						diagnostics.push(
+							diagnostic(
+								"INVALID_MAP_REF",
+								`joinResultOf in state '${path}' references '${read.state}', which is not inside a map.`,
+								`${pointer}/action/env`,
+								source,
+							),
+						);
+					} else if (!isSafeJoinResultScope(states, read.state, path)) {
+						diagnostics.push(
+							diagnostic(
+								"INVALID_MAP_REF",
+								`joinResultOf in state '${path}' cannot safely join '${read.state}'; place the consumer after the joined map while keeping it inside every enclosing outer map.`,
+								`${pointer}/action/env`,
+								source,
+							),
+						);
+					}
+					const producer = states[read.state];
+					if (producer?.kind !== "state" || producer.action.reply === undefined) {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_INPUT_RESULT",
+								`joinResultOf in state '${path}' references '${read.state}', which declares no result.`,
+								`${pointer}/action/env`,
+								source,
+							),
+						);
+					} else if (!schemaHasPath(producer.action.reply, read.path)) {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_INPUT_RESULT",
+								`joinResultOf selector '${read.path}' does not exist on '${read.state}'.`,
+								`${pointer}/action/env`,
+								source,
+							),
+						);
+					}
+				}
 				for (const read of artifactRefs) {
 					if (read.kind === "joinArtifactOf" && !insideMap(states, read.state)) {
 						diagnostics.push(
 							diagnostic(
 								"INVALID_MAP_REF",
 								`joinArtifactOf in state '${path}' references '${read.state}', which is not inside a map.`,
+								`${pointer}/action/reads`,
+								source,
+							),
+						);
+					} else if (read.kind === "joinArtifactOf" && !retainsJoinOuterScope(states, read.state, path)) {
+						diagnostics.push(
+							diagnostic(
+								"INVALID_MAP_REF",
+								`joinArtifactOf in state '${path}' cannot identify the nested map occurrence containing '${read.state}'; keep the consumer inside every enclosing outer map.`,
 								`${pointer}/action/reads`,
 								source,
 							),
@@ -2354,12 +2408,14 @@ function validateTargets(
 				validateTemplateRefs(states, path, template, `${pointer}/action`, diagnostics, source);
 			}
 			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
-			if (guard?.kind === "script") {
+			if (guard !== undefined) {
 				for (const value of Object.values(guard.env ?? {})) {
 					if (typeof value !== "string" && value.kind === "template") {
 						validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
 					}
 				}
+			}
+			if (guard?.kind === "script") {
 				for (const declared of Object.values(guard.artifacts ?? {})) {
 					validateTemplateRefs(
 						states,
@@ -2783,9 +2839,18 @@ function validateDominatedRefs(
 				}
 			}
 			const reads = artifactReads(node.action, pointer);
+			const actionEnv = node.action.kind === "script" || node.action.kind === "tsImport" ? node.action.env : undefined;
+			for (const [name, value] of Object.entries(actionEnv ?? {})) {
+				if (typeof value !== "string" && value.kind === "joinResultOf") {
+					check(value.state, path, `${pointer}/action/env/${escapePointer(name)}`, "joinResultOf()");
+				}
+			}
 			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
-			if (guard?.kind === "script") {
+			if (guard !== undefined) {
 				for (const [name, value] of Object.entries(guard.env ?? {})) {
+					if (typeof value !== "string" && value.kind === "joinResultOf") {
+						check(value.state, path, `${pointer}/action/validation/guard/env/${escapePointer(name)}`, "joinResultOf()");
+					}
 					if (typeof value !== "string" && (value.kind === "artifactOf" || value.kind === "joinArtifactOf")) {
 						reads.push({
 							state: value.state,
@@ -2801,10 +2866,12 @@ function validateDominatedRefs(
 						}
 					}
 				}
-				for (const [name, declared] of Object.entries(guard.artifacts ?? {})) {
-					for (const ref of declared.path.refs) {
-						if (ref.kind === "result") {
-							check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
+				if (guard.kind === "script") {
+					for (const [name, declared] of Object.entries(guard.artifacts ?? {})) {
+						for (const ref of declared.path.refs) {
+							if (ref.kind === "result") {
+								check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
+							}
 						}
 					}
 				}
@@ -3233,6 +3300,29 @@ function insideMap(
 	return false;
 }
 
+function enclosingMapScopes(states: Record<StatePath, StateAst>, producer: StatePath): StatePath[] {
+	const enclosingMaps: StatePath[] = [];
+	let current = states[producer]?.parent;
+	while (current !== undefined) {
+		if (states[current]?.kind === "map") enclosingMaps.push(current);
+		current = states[current]?.parent;
+	}
+	return enclosingMaps;
+}
+
+// Artifact joins may run within the joined map because each artifact path is
+// known at invocation time. Only outer occurrences must remain identifiable.
+function retainsJoinOuterScope(states: Record<StatePath, StateAst>, producer: StatePath, consumer: StatePath): boolean {
+	return enclosingMapScopes(states, producer).slice(1).every((map) => insideMap(states, consumer, map));
+}
+
+// Result joins require every producer completion, so a consumer inside the
+// innermost concurrent map could render before unfinished siblings exist.
+function isSafeJoinResultScope(states: Record<StatePath, StateAst>, producer: StatePath, consumer: StatePath): boolean {
+	const [joinedMap, ...outerMaps] = enclosingMapScopes(states, producer);
+	return joinedMap !== undefined && !insideMap(states, consumer, joinedMap) && outerMaps.every((map) => insideMap(states, consumer, map));
+}
+
 // All templated parameters of an action, for ref validation.
 function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	if (action.kind === "user") {
@@ -3405,7 +3495,7 @@ function toEnv(
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst> | undefined {
+): Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> | undefined {
 	if (input === undefined) {
 		return undefined;
 	}
@@ -3415,7 +3505,7 @@ function toEnv(
 		);
 		return undefined;
 	}
-	const env: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst> = {};
+	const env: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> = {};
 	for (const [name, value] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
 		if (isRecord(value) && value.kind === "artifactOf") {
@@ -3427,6 +3517,13 @@ function toEnv(
 		}
 		if (isRecord(value) && value.kind === "joinArtifactOf") {
 			const ref = toJoinArtifactOf(value, pointer, diagnostics, source);
+			if (ref !== undefined) {
+				env[name] = ref;
+			}
+			continue;
+		}
+		if (isRecord(value) && value.kind === "joinResultOf") {
+			const ref = toJoinResultOf(value, pointer, diagnostics, source);
 			if (ref !== undefined) {
 				env[name] = ref;
 			}
@@ -3492,6 +3589,31 @@ function toJoinArtifactOf(
 		kind: "joinArtifactOf",
 		state: item.state,
 		...(item.artifact === undefined ? {} : { artifact: item.artifact }),
+	};
+}
+
+function toJoinResultOf(
+	item: Record<string, unknown>,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): JoinResultOfAst | undefined {
+	if (typeof item.state !== "string" || item.state.length === 0) {
+		diagnostics.push(
+			diagnostic("INVALID_TEMPLATE", "joinResultOf state must be a non-empty state path.", pointer, source),
+		);
+		return undefined;
+	}
+	if (item.path !== undefined && (typeof item.path !== "string" || item.path.length === 0)) {
+		diagnostics.push(
+			diagnostic("INVALID_TEMPLATE", "joinResultOf path must be a non-empty dot-path.", pointer, source),
+		);
+		return undefined;
+	}
+	return {
+		kind: "joinResultOf",
+		state: item.state,
+		...(item.path === undefined ? {} : { path: item.path }),
 	};
 }
 
@@ -3778,7 +3900,7 @@ function toScriptOptions(
 	code: "INVALID_SCRIPT" | "INVALID_GUARD" | "INVALID_TS_IMPORT",
 ): {
 	args?: readonly string[];
-	env?: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst>;
+	env?: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>;
 	artifacts?: Record<string, ArtifactAst>;
 	reply?: SchemaAst;
 } {
@@ -4314,7 +4436,18 @@ function toGuardRef(
 				);
 				return undefined;
 			}
-			return { kind: "tsImport", module: input.module, export: input.export };
+			if (input.args !== undefined || input.artifacts !== undefined || input.reply !== undefined) {
+				diagnostics.push(
+					diagnostic("INVALID_GUARD", "Imported guards support only rendered env options.", path, source),
+				);
+			}
+			const env = toEnv(input.env, `${path}/env`, diagnostics, source);
+			return deepFreeze({
+				kind: "tsImport",
+				module: input.module,
+				export: input.export,
+				...(env === undefined ? {} : { env }),
+			} satisfies GuardRefAst);
 		case "script": {
 			if (typeof input.command !== "string" || input.command.length === 0) {
 				diagnostics.push(
