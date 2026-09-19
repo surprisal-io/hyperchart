@@ -26,6 +26,7 @@ import type {
 	ChartCst,
 	CompoundStateCst,
 	EventBindingCst,
+	EmitCst,
 	FinalStateCst,
 	GuardRef,
 	ArtifactCst,
@@ -50,6 +51,7 @@ import type {
 	Templatable,
 	TemplateCst,
 	UserActionCst,
+	GateActionCst,
 	ValueExpr,
 } from "./types.js";
 
@@ -267,6 +269,14 @@ export function agent<const O extends Omit<AgentActionCst, "kind" | "name">>(
 
 export function user<const O extends Omit<UserActionCst, "kind">>(options: O): { kind: "user" } & O {
 	return { kind: "user", ...options };
+}
+
+export function gate<const O extends Omit<GateActionCst, "kind">>(options: O): { kind: "gate" } & O {
+	return { kind: "gate", ...options };
+}
+
+export function emit<const O extends EmitCst>(options: O & Record<Exclude<keyof O, keyof EmitCst>, never>): O {
+	return options;
 }
 
 // Tagged template for parameter values: t`Report on ${arg("topic")} using ${result("plan", "dir")}`.

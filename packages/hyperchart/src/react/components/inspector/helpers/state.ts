@@ -10,9 +10,15 @@ import {
 	QueueListIcon,
 	PaperAirplaneIcon,
 	RectangleStackIcon,
+	ShieldCheckIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
-import type { HyperchartRunInfo, HyperchartStateInfo, HyperchartUsageInfo } from "../../../types.js";
+import type {
+	HyperchartRunInfo,
+	HyperchartStateInfo,
+	HyperchartStateType,
+	HyperchartUsageInfo,
+} from "../../../types.js";
 import type { HeroIcon } from "../types.js";
 
 export function localStateId(stateId: string): string {
@@ -34,7 +40,8 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 	className: string;
 	iconClassName: string;
 } {
-	switch (state.type ?? "agent") {
+	const type: HyperchartStateType = state.type ?? "agent";
+	switch (type) {
 		case "send":
 			return {
 				label: "send",
@@ -74,7 +81,7 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 		case "receive":
 		case "reply":
 			return {
-				label: state.type === "receive" ? "receive" : "reply",
+				label: type,
 				Icon: QueueListIcon,
 				className: "border-amber-500/45 bg-amber-500/10 text-[var(--hc-amber-text)]",
 				iconClassName: "text-[var(--hc-amber-text)]",
@@ -135,13 +142,24 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 				className: "border-pink-500/45 bg-pink-500/10 text-[var(--hc-pink-text)]",
 				iconClassName: "text-[var(--hc-pink-text)]",
 			};
-		default:
+		case "gate":
+			return {
+				label: "gate",
+				Icon: ShieldCheckIcon,
+				className: "border-yellow-500/45 bg-yellow-500/10 text-[var(--hc-yellow-text)]",
+				iconClassName: "text-[var(--hc-yellow-text)]",
+			};
+		case "agent":
 			return {
 				label: "agent",
 				Icon: UserCircleIcon,
 				className: "border-blue-500/45 bg-blue-500/10 text-[var(--hc-blue-text)]",
 				iconClassName: "text-[var(--hc-blue-text)]",
 			};
+		default: {
+			const exhaustive: never = type;
+			throw new Error(`Unknown Hyperchart state type: ${exhaustive}`);
+		}
 	}
 }
 
@@ -180,7 +198,8 @@ export function stateConcurrencyLabel(state: HyperchartStateInfo): string | unde
 }
 
 export function stateMechanismLabel(state: HyperchartStateInfo): string | undefined {
-	switch (state.type ?? "agent") {
+	const type: HyperchartStateType = state.type ?? "agent";
+	switch (type) {
 		case "agent":
 			return state.agent ? `@${state.agent}` : "agent";
 		case "send":
@@ -188,7 +207,7 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 			return state.taskPreview;
 		case "sendBatch":
 		case "callBatch":
-			return `${state.type} · ${state.taskPreview ?? "message batch"}`;
+			return `${type} · ${state.taskPreview ?? "message batch"}`;
 		case "actor-declaration":
 			return `${state.actorDeclaration?.protocol.length ?? 0} messages`;
 		case "actor-occurrence":
@@ -229,7 +248,12 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 		case "final":
 			return "terminal";
 		case "user":
+		case "gate":
 			return undefined;
+		default: {
+			const exhaustive: never = type;
+			throw new Error(`Unknown Hyperchart state type: ${exhaustive}`);
+		}
 	}
 }
 
@@ -292,7 +316,7 @@ export function agentStatesForSelection(
 }
 
 export function stateHasContracts(state: HyperchartStateInfo): boolean {
-	return (state.artifacts?.length ?? 0) > 0 || Boolean(state.replySchema);
+	return (state.artifacts?.length ?? 0) > 0 || Boolean(state.replySchema) || (state.emits?.length ?? 0) > 0;
 }
 
 export function stateHasRuntimeDetails(state: HyperchartStateInfo): boolean {

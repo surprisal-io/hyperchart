@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	type ArgsOf,
 	actor,
 	actorPool,
 	actorInput,
@@ -94,18 +95,26 @@ describe("typed refs (TS-first)", () => {
 			kind: "chart",
 			id: "typed-launch-args",
 			args: {
-				topic: { description: "Research subject", default: "Hyperchart" },
-				limit: { default: 3 },
+				topic: { description: "Research subject", schema: z.string(), default: "Hyperchart" },
+				limit: { schema: z.number().int(), default: 3 },
 			},
 			initial: "done",
 			states: { done: final() },
 		} as const;
 		expect(typed.chart(body).args).toEqual(body.args);
+		type InferredArgs = ArgsOf<typeof body>;
+		const inferredArgs: InferredArgs = { topic: "Hyperchart", limit: 3 };
+		expect(inferredArgs).toEqual({ topic: "Hyperchart", limit: 3 });
+		// @ts-expect-error inferred argument schemas reject the wrong value type
+		const invalidInferredArgs: InferredArgs = { topic: "Hyperchart", limit: "three" };
+		void invalidInferredArgs;
 		expect(typed.chart({ ...body, args: { topic: {} } }).args).toEqual({ topic: {} });
 		expect(typed.chart({ ...body, args: {} }).args).toEqual({});
 
 		// @ts-expect-error metadata default does not match the typed argument value
 		typed.chart({ ...body, args: { topic: { default: 42 } } });
+		// @ts-expect-error metadata schema output does not match the typed argument value
+		typed.chart({ ...body, args: { limit: { schema: z.string() } } });
 		// @ts-expect-error metadata names an argument absent from the Args registry
 		typed.chart({ ...body, args: { typo: { default: "x" } } });
 		// @ts-expect-error metadata mixes a registered argument with an unknown key

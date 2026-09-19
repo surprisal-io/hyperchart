@@ -11,8 +11,10 @@ import {
 	call,
 	chart,
 	event,
+	emit,
 	failed,
 	final,
+	gate,
 	item,
 	joinResultOf,
 	map,
@@ -55,6 +57,40 @@ function sourceForScript() {
 }
 
 describe("hyperchart source", () => {
+	it("prints host gates and ordered emit declarations", () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "gate-emit-source",
+				initial: "wait",
+				states: {
+					wait: {
+						kind: "state",
+						action: gate({ event: "approval.requested", payload: { id: "r-1" }, reply: z.object({ ok: z.boolean() }) }),
+						emit: [
+							emit({
+								event: "approval.resolved",
+								payload: { value: result("wait", "ok") },
+								schema: z.object({ value: z.boolean() }),
+							}),
+						],
+						transitions: { APPROVE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const source = hyperchartSource(parsed.ast);
+		expect(source).toContain("action: gate({");
+		expect(source).toContain('event: "approval.requested"');
+		expect(source).toContain("emit: [");
+		expect(source).toContain('event: "approval.resolved"');
+		expect(source).toContain('value: result("wait", "ok")');
+		expect(source).toContain("schema: z.object({");
+	});
 	it("prints mapped result joins in script environments", () => {
 		const parsed = normalizeChartConfig(
 			chart({
@@ -99,7 +135,7 @@ describe("hyperchart source", () => {
 			chart({
 				kind: "chart",
 				id: "argument-source",
-				args: { topic: { description: "Research subject", default: "Hyperchart" } },
+				args: { topic: { description: "Research subject", schema: z.string().min(1), default: "Hyperchart" } },
 				initial: "done",
 				states: { done: final() },
 			}),
@@ -109,6 +145,7 @@ describe("hyperchart source", () => {
 		const source = hyperchartSource(parsed.ast);
 		expect(source).toContain("args: {");
 		expect(source).toContain('description: "Research subject"');
+		expect(source).toContain("schema: z.string().min(1)");
 		expect(source).toContain('default: "Hyperchart"');
 	});
 

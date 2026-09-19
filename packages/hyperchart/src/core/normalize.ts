@@ -21,6 +21,7 @@ import type {
 	ChartSource,
 	JsonValue,
 	ArtifactAst,
+	EmitAst,
 	CompoundStateAst,
 	ArtifactOfAst,
 	JoinArtifactOfAst,
@@ -49,6 +50,7 @@ import type {
 	TemplateAst,
 	TerminalNotificationAst,
 	TransitionAst,
+	GateActionAst,
 	TransitionInputAst,
 	UserActionAst,
 	ValueAst,
@@ -115,7 +117,7 @@ function toChartAst(
 
 	const chartId = typeof id === "string" ? id : "";
 	const recovery = toRecoveryPolicy(input.recovery, "/recovery", diagnostics, source, DEFAULT_RECOVERY_POLICY);
-	const args = toChartArguments(input.args, diagnostics, source);
+	const args = toChartArguments(input.args, diagnostics, source, schemaRegistry);
 	const states: Record<StatePath, StateAst> = {};
 	const actors: Record<StatePath, ActorEndpointDeclarationAst> = {};
 	const actorTargets = new Map<object, StatePath>();
@@ -196,6 +198,7 @@ function toChartArguments(
 	input: unknown,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
+	schemaRegistry: SchemaRegistry,
 ): Record<string, ChartArgumentAst> | undefined {
 	if (input === undefined) {
 		return undefined;
@@ -220,7 +223,7 @@ function toChartArguments(
 			continue;
 		}
 		for (const field of Object.keys(raw)) {
-			if (field !== "description" && field !== "default") {
+			if (field !== "description" && field !== "schema" && field !== "default") {
 				diagnostics.push(
 					diagnostic(
 						"INVALID_CHART_ARGUMENT",
@@ -246,13 +249,39 @@ function toChartArguments(
 				description = raw.description;
 			}
 		}
+		const schema = toSchemaAst(raw.schema, `${pointer}/schema`, diagnostics, source, schemaRegistry);
 		let defaultValue: JsonValue | undefined;
 		const hasDefault = Object.hasOwn(raw, "default");
 		if (hasDefault) {
 			defaultValue = toJsonValue(raw.default, `${pointer}/default`, diagnostics, source, new WeakSet());
 		}
+		if (hasDefault && defaultValue !== undefined && raw.schema instanceof z.ZodType) {
+			try {
+				const parsedDefault = raw.schema.safeParse(defaultValue);
+				if (!parsedDefault.success) {
+					diagnostics.push(
+						diagnostic(
+							"INVALID_CHART_ARGUMENT",
+							`Chart argument '${name}' default does not match its schema: ${parsedDefault.error.issues.map((issue) => issue.message).join("; ")}`,
+							`${pointer}/default`,
+							source,
+						),
+					);
+				}
+			} catch (error) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_CHART_ARGUMENT",
+						`Chart argument '${name}' default could not be checked against its schema: ${String(error)}`,
+						`${pointer}/default`,
+						source,
+					),
+				);
+			}
+		}
 		args[name] = {
 			...(description === undefined ? {} : { description }),
+			...(schema === undefined ? {} : { schema }),
 			...(!hasDefault || defaultValue === undefined ? {} : { default: defaultValue }),
 		};
 	}
@@ -691,6 +720,7 @@ function toActorDeclarationAst(
 					),
 				);
 			}
+			const emits = toEmits(raw.emit, `${pointer}/emit`, diagnostics, source, schemaRegistry);
 			const stateInput = toInputDeclarations(raw.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
 			for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
@@ -711,6 +741,7 @@ function toActorDeclarationAst(
 				parent,
 				action,
 				transitions,
+				...(emits === undefined ? {} : { emit: emits }),
 				...(stateInput === undefined ? {} : { input: stateInput }),
 				...(after === undefined ? {} : { after }),
 			};
@@ -1117,6 +1148,12 @@ function validateActorIsolation(
 		if (node.kind === "state") {
 			for (const template of actionTemplates(node.action)) {
 				refs.push(...template.refs.map((ref) => ({ ref, pointer })));
+			}
+			if (node.action.kind === "gate") {
+				refs.push(...valueRefs(node.action.payload).map((ref) => ({ ref, pointer: `${pointer}/action/payload` })));
+			}
+			for (const [index, emitted] of (node.emit ?? []).entries()) {
+				refs.push(...valueRefs(emitted.payload).map((ref) => ({ ref, pointer: `${pointer}/emit/${index}/payload` })));
 			}
 			for (const read of artifactReads(node.action, pointer)) {
 				if (states[read.state]?.kind !== "state") {
@@ -2065,6 +2102,7 @@ function collectState(
 			schemaRegistry,
 			recovery,
 		);
+		const emits = toEmits(input.emit, `${pointer}/emit`, diagnostics, source, schemaRegistry);
 		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
@@ -2104,6 +2142,7 @@ function collectState(
 			id: localId,
 			...parent,
 			action,
+			...(emits === undefined ? {} : { emit: emits }),
 			...(inputs === undefined ? {} : { input: inputs }),
 			transitions: transitions ?? {},
 			...(after === undefined ? {} : { after }),
@@ -2119,7 +2158,7 @@ function collectState(
 export function declaredArtifactsForState(
 	state: Extract<StateAst, { kind: "state" }>,
 ): Readonly<Record<string, ArtifactAst>> | undefined {
-	if (state.action.kind === "user") {
+	if (state.action.kind === "user" || state.action.kind === "gate") {
 		return undefined;
 	}
 	const merged: Record<string, ArtifactAst> = {};
@@ -2366,7 +2405,7 @@ function validateTargets(
 					const selfGuardRef = guard?.kind === "script" && read.kind === "artifactOf" && read.state === path;
 					const artifacts =
 						producer?.kind === "state"
-							? selfGuardRef && producer.action.kind !== "user"
+							? selfGuardRef && "artifacts" in producer.action
 								? producer.action.artifacts
 								: declaredArtifactsForState(producer)
 							: undefined;
@@ -2406,6 +2445,26 @@ function validateTargets(
 			// Result refs address action states by absolute path — data lookup, not control flow.
 			for (const template of actionTemplates(node.action)) {
 				validateTemplateRefs(states, path, template, `${pointer}/action`, diagnostics, source);
+			}
+			if (node.action.kind === "gate") {
+				validateInputRefs(
+					states,
+					path,
+					valueRefs(node.action.payload),
+					`${pointer}/action/payload`,
+					diagnostics,
+					source,
+				);
+			}
+			for (const [index, emitted] of (node.emit ?? []).entries()) {
+				validateInputRefs(
+					states,
+					path,
+					valueRefs(emitted.payload),
+					`${pointer}/emit/${index}/payload`,
+					diagnostics,
+					source,
+				);
 			}
 			const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 			if (guard !== undefined) {
@@ -2831,6 +2890,20 @@ function validateDominatedRefs(
 					}
 				}
 			}
+			if (node.action.kind === "gate") {
+				for (const ref of valueRefs(node.action.payload)) {
+					if (ref.kind === "result") {
+						check(ref.state, path, `${pointer}/action/payload`, "result()");
+					}
+				}
+			}
+			for (const [index, emitted] of (node.emit ?? []).entries()) {
+				for (const ref of valueRefs(emitted.payload)) {
+					if (ref.kind === "result") {
+						check(ref.state, path, `${pointer}/emit/${index}/payload`, "result()", true);
+					}
+				}
+			}
 			if (node.action.kind === "agent" && typeof node.action.reentry === "object") {
 				for (const ref of node.action.reentry.resume.refs) {
 					if (ref.kind === "result") {
@@ -2870,7 +2943,12 @@ function validateDominatedRefs(
 					for (const [name, declared] of Object.entries(guard.artifacts ?? {})) {
 						for (const ref of declared.path.refs) {
 							if (ref.kind === "result") {
-								check(ref.state, path, `${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`, "result()");
+								check(
+									ref.state,
+									path,
+									`${pointer}/action/validation/guard/artifacts/${escapePointer(name)}`,
+									"result()",
+								);
 							}
 						}
 					}
@@ -3304,7 +3382,9 @@ function enclosingMapScopes(states: Record<StatePath, StateAst>, producer: State
 	const enclosingMaps: StatePath[] = [];
 	let current = states[producer]?.parent;
 	while (current !== undefined) {
-		if (states[current]?.kind === "map") enclosingMaps.push(current);
+		if (states[current]?.kind === "map") {
+			enclosingMaps.push(current);
+		}
 		current = states[current]?.parent;
 	}
 	return enclosingMaps;
@@ -3313,20 +3393,29 @@ function enclosingMapScopes(states: Record<StatePath, StateAst>, producer: State
 // Artifact joins may run within the joined map because each artifact path is
 // known at invocation time. Only outer occurrences must remain identifiable.
 function retainsJoinOuterScope(states: Record<StatePath, StateAst>, producer: StatePath, consumer: StatePath): boolean {
-	return enclosingMapScopes(states, producer).slice(1).every((map) => insideMap(states, consumer, map));
+	return enclosingMapScopes(states, producer)
+		.slice(1)
+		.every((map) => insideMap(states, consumer, map));
 }
 
 // Result joins require every producer completion, so a consumer inside the
 // innermost concurrent map could render before unfinished siblings exist.
 function isSafeJoinResultScope(states: Record<StatePath, StateAst>, producer: StatePath, consumer: StatePath): boolean {
 	const [joinedMap, ...outerMaps] = enclosingMapScopes(states, producer);
-	return joinedMap !== undefined && !insideMap(states, consumer, joinedMap) && outerMaps.every((map) => insideMap(states, consumer, map));
+	return (
+		joinedMap !== undefined &&
+		!insideMap(states, consumer, joinedMap) &&
+		outerMaps.every((map) => insideMap(states, consumer, map))
+	);
 }
 
 // All templated parameters of an action, for ref validation.
 function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	if (action.kind === "user") {
 		return [action.prompt];
+	}
+	if (action.kind === "gate") {
+		return [];
 	}
 	return [
 		...(action.kind === "agent" && action.task ? [action.task] : []),
@@ -4009,6 +4098,62 @@ function toAgentReentry(
 	return resume === undefined ? undefined : { resume };
 }
 
+function toEmits(
+	input: unknown,
+	path: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	schemaRegistry: SchemaRegistry,
+): readonly EmitAst[] | undefined {
+	if (input === undefined) {
+		return undefined;
+	}
+	if (!Array.isArray(input)) {
+		diagnostics.push(diagnostic("INVALID_EMIT", "emit must be an array of emit() declarations.", path, source));
+		return undefined;
+	}
+	const emits: EmitAst[] = [];
+	for (const [index, raw] of input.entries()) {
+		const pointer = `${path}/${index}`;
+		if (!isRecord(raw)) {
+			diagnostics.push(diagnostic("INVALID_EMIT", "emit entries must be objects.", pointer, source));
+			continue;
+		}
+		if (typeof raw.event !== "string" || raw.event.length === 0) {
+			diagnostics.push(
+				diagnostic("INVALID_EMIT_EVENT", "Emit event must be a non-empty string.", `${pointer}/event`, source),
+			);
+		} else if (isReservedSystemEvent(raw.event)) {
+			diagnostics.push(
+				diagnostic(
+					"RESERVED_EVENT_EMIT",
+					`Emit event '${raw.event}' is reserved for system events.`,
+					`${pointer}/event`,
+					source,
+				),
+			);
+		}
+		for (const key of Object.keys(raw)) {
+			if (key !== "event" && key !== "payload" && key !== "schema") {
+				diagnostics.push(
+					diagnostic("INVALID_EMIT", `Unknown emit field '${key}'.`, `${pointer}/${escapePointer(key)}`, source),
+				);
+			}
+		}
+		if (!Object.hasOwn(raw, "payload")) {
+			diagnostics.push(diagnostic("INVALID_EMIT_PAYLOAD", "Emit payload is required.", `${pointer}/payload`, source));
+		}
+		const payload = toValueAst(raw.payload, `${pointer}/payload`, diagnostics, source);
+		const schema = toSchemaAst(raw.schema, `${pointer}/schema`, diagnostics, source, schemaRegistry);
+		emits.push({
+			event: typeof raw.event === "string" ? raw.event : "",
+			payload: payload ?? null,
+			...(schema === undefined ? {} : { schema }),
+		});
+	}
+	return emits;
+}
+
 function toStateActionAst(
 	input: unknown,
 	chartId: string,
@@ -4123,6 +4268,43 @@ function toStateActionAst(
 				...(options.reply === undefined ? {} : { reply: options.reply }),
 			} satisfies ImportedActionAst);
 		}
+		case "gate": {
+			if (typeof input.event !== "string" || input.event.length === 0) {
+				diagnostics.push(
+					diagnostic("INVALID_GATE_EVENT", "Gate event must be a non-empty string.", `${path}/event`, source),
+				);
+			} else if (isReservedSystemEvent(input.event)) {
+				diagnostics.push(
+					diagnostic(
+						"RESERVED_EVENT_EMIT",
+						`Gate event '${input.event}' is reserved for system events.`,
+						`${path}/event`,
+						source,
+					),
+				);
+			}
+			if (!Object.hasOwn(input, "payload")) {
+				diagnostics.push(diagnostic("INVALID_GATE_PAYLOAD", "Gate payload is required.", `${path}/payload`, source));
+			}
+			if (Object.hasOwn(input, "prompt")) {
+				diagnostics.push(diagnostic("INVALID_GATE_OPTION", "gate() does not accept prompt.", `${path}/prompt`, source));
+			}
+			if (Object.hasOwn(input, "options")) {
+				diagnostics.push(
+					diagnostic("INVALID_GATE_OPTION", "gate() does not accept options.", `${path}/options`, source),
+				);
+			}
+			const payload = toValueAst(input.payload, `${path}/payload`, diagnostics, source);
+			const reply = toSchemaAst(input.reply, `${path}/reply`, diagnostics, source, schemaRegistry);
+			const uid: ActionUID = { chart: chartId, state: statePath, action: "gate" };
+			return deepFreeze({
+				kind: "gate",
+				uid,
+				event: typeof input.event === "string" ? input.event : "",
+				payload: payload ?? null,
+				...(reply === undefined ? {} : { reply }),
+			} satisfies GateActionAst);
+		}
 		case "user": {
 			const prompt = toTemplate(input.prompt, `${path}/prompt`, diagnostics, source);
 			if (prompt === undefined) {
@@ -4165,7 +4347,7 @@ function toStateActionAst(
 			diagnostics.push(
 				diagnostic(
 					"INVALID_ACTION_KIND",
-					"Action kind must be 'agent', 'user', 'script' or 'tsImport'.",
+					"Action kind must be 'agent', 'user', 'gate', 'script' or 'tsImport'.",
 					`${path}/kind`,
 					source,
 				),
@@ -4423,7 +4605,7 @@ function toGuardRef(
 		return undefined;
 	}
 	switch (input.kind) {
-		case "tsImport":
+		case "tsImport": {
 			if (typeof input.module !== "string" || input.module.length === 0) {
 				diagnostics.push(
 					diagnostic("INVALID_GUARD", "Guard tsImport module must be a non-empty string.", `${path}/module`, source),
@@ -4448,6 +4630,7 @@ function toGuardRef(
 				export: input.export,
 				...(env === undefined ? {} : { env }),
 			} satisfies GuardRefAst);
+		}
 		case "script": {
 			if (typeof input.command !== "string" || input.command.length === 0) {
 				diagnostics.push(

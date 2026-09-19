@@ -1,5 +1,6 @@
 import { isInputRef } from "./types.js";
 import type {
+	ActionStateAst,
 	ActorDefinitionAst,
 	ActorEndpointDeclarationAst,
 	ActorWorkflowStateAst,
@@ -136,6 +137,7 @@ function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>):
 							name,
 							objectDsl([
 								["description", metadata.description === undefined ? undefined : stringDsl(metadata.description)],
+								["schema", metadata.schema === undefined ? undefined : schemaDsl(metadata.schema)],
 								["default", metadata.default === undefined ? undefined : jsonValueDsl(metadata.default)],
 							]),
 						]),
@@ -297,6 +299,7 @@ function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<
 			["kind", stringDsl("state")],
 			["input", schemaRecordDsl(state.input)],
 			["action", actionDsl(state.action)],
+			["emit", emitsDsl(state.emit)],
 			["transitions", transitionsDsl(state.transitions)],
 			[
 				"after",
@@ -340,6 +343,7 @@ function stateDsl(ast: ChartAst, path: StatePath, actorBindings: ReadonlyMap<Sta
 			["kind", stringDsl("state")],
 			["input", schemaRecordDsl(state.input)],
 			["action", actionDsl(state.action)],
+			["emit", emitsDsl(state.emit)],
 			["transitions", transitionsDsl(state.transitions)],
 			[
 				"after",
@@ -454,11 +458,34 @@ function actionDsl(action: StateActionAst): string {
 	if (action.kind === "tsImport") {
 		return importedActionDsl(action);
 	}
+	if (action.kind === "gate") {
+		return `gate(${objectDsl([
+			["event", stringDsl(action.event)],
+			["payload", hyperchartValueSource(action.payload)],
+			["reply", action.reply === undefined ? undefined : schemaDsl(action.reply)],
+		])})`;
+	}
 	return `user(${objectDsl([
 		["prompt", templateDsl(action.prompt)],
 		["options", action.options.length === 0 ? undefined : arrayDsl(action.options.map(stringDsl))],
 		["reply", action.reply === undefined ? undefined : schemaDsl(action.reply)],
 	])})`;
+}
+
+function emitsDsl(emits: ActionStateAst["emit"]): string | undefined {
+	if (emits === undefined) {
+		return undefined;
+	}
+	return arrayDsl(
+		emits.map(
+			(emitted) =>
+				`emit(${objectDsl([
+					["event", stringDsl(emitted.event)],
+					["payload", hyperchartValueSource(emitted.payload)],
+					["schema", emitted.schema === undefined ? undefined : schemaDsl(emitted.schema)],
+				])})`,
+		),
+	);
 }
 
 function scriptDsl(

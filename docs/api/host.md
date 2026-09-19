@@ -330,6 +330,8 @@ interface HyperchartVisitInfo {
   endedAt?: number;
   status: "running" | "done" | "failed" | "cancelled";
   completedEvent?: string;
+  completedOutput?: unknown;
+  emits?: Array<{ seqId: number; event: string; payload: unknown }>;
   endedReason?: "timed_out" | "scope_exit";
   validationAttempts?: number;
   inputs?: Record<string, unknown>;
@@ -364,7 +366,7 @@ interface HyperchartRenderedArtifactInfo {
 }
 ```
 
-Visit histories are append-only views derived from durable records. `inputs` prefers the optional resolved-input provenance copied onto `state_action` phases and `user_interaction/opened`; for older journals without those fields, the adapter retains the replay-derived input fallback. The React Inspector renders a present input as structured JSON in the visit detail and adds no block when input is absent. Session progress records that include a durable `visit` number are joined to the matching entry. Run-directory inspection also reconstructs older per-action progress files from the persisted per-visit invocation directories; when several visits resumed one transcript, timestamped messages are segmented by each visit's durable start/end range. Updating a run snapshot must not rewrite previously returned snapshot objects.
+Visit histories are append-only views derived from durable records. `completedOutput` is the reply carried by the visit's durable accepted completion. `emits` preserves the matching emit records appended atomically after that completion in ascending `seqId` order; neither field is used to infer acceptance when semantic replay is unavailable. `inputs` prefers the optional resolved-input provenance copied onto `state_action` phases and `user_interaction/opened`; for older journals without those fields, the adapter retains the replay-derived input fallback. The React Inspector renders a present input as structured JSON in the visit detail and adds no block when input is absent. Session progress records that include a durable `visit` number are joined to the matching entry. Run-directory inspection also reconstructs older per-action progress files from the persisted per-visit invocation directories; when several visits resumed one transcript, timestamped messages are segmented by each visit's durable start/end range. Updating a run snapshot must not rewrite previously returned snapshot objects.
 
 ## Transitions, inputs, refs, and schemas
 

@@ -99,6 +99,26 @@ describe("Hyperchart path progress", () => {
 		expect(progress).toEqual({ done: 0, total: 4, pct: 0 });
 	});
 
+	it("counts a completed host gate as an action when visit history is unavailable", () => {
+		const progress = summarizeHyperchartProgress(
+			run([
+				state("approval", "done", {
+					type: "gate",
+					endedAt: 10,
+					transitions: [{ event: "APPROVED", target: "deploy" }],
+				}),
+				state("deploy", "running", {
+					type: "agent",
+					startedAt: 20,
+					transitions: [{ event: "DEPLOYED", target: "done" }],
+				}),
+				state("done", "pending", { final: true }),
+			]),
+		);
+
+		expect(progress).toEqual({ done: 1, total: 2, pct: 50 });
+	});
+
 	it("does not double-count completed compound, parallel, or region containers as action visits", () => {
 		const progress = summarizeHyperchartProgress(
 			run([

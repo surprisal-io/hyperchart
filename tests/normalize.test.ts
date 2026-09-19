@@ -6,8 +6,11 @@ import {
 	agent,
 	artifact,
 	compound,
+	contract,
+	emit,
 	failed,
 	final,
+	gate,
 	map,
 	message,
 	normalizeChartConfig,
@@ -38,6 +41,163 @@ import {
 } from "../packages/hyperchart/src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
+	it("normalizes emit declarations and allows result() from the completing state", () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "emits",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { reply: z.object({ id: z.string() }) }),
+						emit: [
+							emit({
+								event: "domain.completed",
+								payload: { id: result("work", "id") },
+								schema: contract("domain.completed", "1", z.object({ id: z.string() })),
+							}),
+						],
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) {
+			return;
+		}
+		expect(parsed.ast.states.work).toMatchObject({
+			emit: [
+				{
+					event: "domain.completed",
+					payload: { id: { kind: "result", state: "work", path: "id" } },
+					schema: {
+						kind: "jsonSchema",
+						schema: { type: "object" },
+						runtimeContract: { id: "domain.completed", version: "1" },
+					},
+				},
+			],
+		});
+	});
+
+	it.each([
+		{ event: "", code: "INVALID_EMIT_EVENT" },
+		{ event: "FAILED", code: "RESERVED_EVENT_EMIT" },
+	] as const)("diagnoses invalid emit event '$event'", ({ event: emittedEvent, code }) => {
+		const parsed = normalizeChartConfig({
+			kind: "chart",
+			id: "bad-emit",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: agent("worker"),
+					emit: [{ event: emittedEvent, payload: { value: 1 } }],
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toContain(code);
+	});
+
+	it("validates emit refs", () => {
+		const parsed = normalizeChartConfig({
+			kind: "chart",
+			id: "bad-emit-refs",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: agent("worker"),
+					emit: [{ event: "domain.event", payload: { missing: { kind: "result", state: "missing" } } }],
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).toContain("UNKNOWN_INPUT_RESULT");
+	});
+
+	it("diagnoses missing emit and gate payloads plus reserved gate events", () => {
+		const emitted = normalizeChartConfig({
+			kind: "chart",
+			id: "missing-emit-payload",
+			initial: "work",
+			states: {
+				work: {
+					kind: "state",
+					action: { kind: "agent", name: "worker" },
+					emit: [{ event: "domain.event", schema: {} }],
+					transitions: { DONE: "done" },
+				},
+				done: { kind: "final" },
+			},
+		});
+		expect(emitted.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+			expect.arrayContaining(["INVALID_EMIT_PAYLOAD", "INVALID_SCHEMA"]),
+		);
+
+		const gated = normalizeChartConfig({
+			kind: "chart",
+			id: "missing-gate-payload",
+			initial: "wait",
+			states: {
+				wait: {
+					kind: "state",
+					action: { kind: "gate", event: "FAILED" },
+					transitions: { ACCEPT: "done" },
+				},
+				done: { kind: "final" },
+			},
+		});
+		expect(gated.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(
+			expect.arrayContaining(["INVALID_GATE_PAYLOAD", "RESERVED_EVENT_EMIT"]),
+		);
+	});
+
+	it("normalizes gate reply schemas and rejects human-only fields", () => {
+		const valid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "gate",
+				initial: "wait",
+				states: {
+					wait: {
+						kind: "state",
+						action: gate({ event: "build.ready", payload: { id: "42" }, reply: z.object({ accepted: z.boolean() }) }),
+						transitions: { ACCEPT: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		expect(valid.ok).toBe(true);
+		if (valid.ok) {
+			expect(valid.ast.states.wait).toMatchObject({
+				action: { kind: "gate", uid: { action: "gate" }, event: "build.ready", reply: { kind: "jsonSchema" } },
+			});
+		}
+
+		const invalid = normalizeChartConfig({
+			kind: "chart",
+			id: "bad-gate",
+			initial: "wait",
+			states: {
+				wait: {
+					kind: "state",
+					action: { kind: "gate", event: "build.ready", payload: {}, prompt: "no", options: ["no"] },
+					transitions: { ACCEPT: "done" },
+				},
+				done: final(),
+			},
+		});
+		expect(invalid.diagnostics.filter((diagnostic) => diagnostic.code === "INVALID_GATE_OPTION")).toHaveLength(2);
+	});
 	it.each([
 		{
 			name: "missing producer",
@@ -201,20 +361,23 @@ describe("normalizeChartConfig", () => {
 
 		expect(normalized.ok).toBe(false);
 		expect(normalized.diagnostics).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({ code: "INVALID_MAP_REF" }),
-			]),
+			expect.arrayContaining([expect.objectContaining({ code: "INVALID_MAP_REF" })]),
 		);
 	});
 
-	it("normalizes serializable chart argument metadata into the frozen AST", () => {
+	it("normalizes typed chart argument metadata into the frozen AST", () => {
+		const TopicArgument = contract("story.topic", "1", z.string().min(1));
 		const result = normalizeChartConfig(
 			chart({
 				kind: "chart",
 				id: "launch-args",
 				args: {
-					topic: { description: "Subject to research", default: "Hyperchart" },
-					options: { description: "Optional structured settings", default: { depth: 2, tags: ["dsl"] } },
+					topic: { description: "Subject to research", schema: TopicArgument, default: "Hyperchart" },
+					options: {
+						description: "Optional structured settings",
+						schema: z.object({ depth: z.number().int(), tags: z.array(z.string()) }),
+						default: { depth: 2, tags: ["dsl"] },
+					},
 				},
 				initial: "done",
 				states: { done: final() },
@@ -225,10 +388,23 @@ describe("normalizeChartConfig", () => {
 		if (!result.ok) {
 			throw new Error("expected valid chart");
 		}
-		expect(result.ast.args).toEqual({
-			topic: { description: "Subject to research", default: "Hyperchart" },
-			options: { description: "Optional structured settings", default: { depth: 2, tags: ["dsl"] } },
+		expect(result.ast.args).toMatchObject({
+			topic: {
+				description: "Subject to research",
+				default: "Hyperchart",
+				schema: {
+					kind: "jsonSchema",
+					schema: { type: "string", minLength: 1 },
+					runtimeContract: { id: "story.topic", version: "1" },
+				},
+			},
+			options: {
+				description: "Optional structured settings",
+				default: { depth: 2, tags: ["dsl"] },
+				schema: { kind: "jsonSchema", schema: { type: "object" } },
+			},
 		});
+		expect(result.schemaRegistry.get({ id: "story.topic", version: "1" })).toBe(TopicArgument);
 		expect(Object.isFrozen(result.ast.args)).toBe(true);
 		expect(JSON.parse(JSON.stringify(result.ast.args))).toEqual(result.ast.args);
 	});
@@ -243,6 +419,7 @@ describe("normalizeChartConfig", () => {
 				badDescription: { description: 42 },
 				badDefault: { default: { callback: () => undefined } },
 				badSchema: { default: z.string() },
+				mismatchedDefault: { schema: z.number(), default: "three" },
 			},
 			initial: "done",
 			states: { done: final() },
@@ -255,6 +432,7 @@ describe("normalizeChartConfig", () => {
 			"INVALID_CHART_ARGUMENT",
 			"INVALID_CHART_ARGUMENT",
 			"INVALID_CHART_ARGUMENT",
+			"INVALID_CHART_ARGUMENT",
 		]);
 		expect(result.diagnostics.map((diagnostic) => diagnostic.path)).toEqual([
 			"/args/",
@@ -262,7 +440,9 @@ describe("normalizeChartConfig", () => {
 			"/args/badDescription/description",
 			"/args/badDefault/default/callback",
 			"/args/badSchema/default",
+			"/args/mismatchedDefault/default",
 		]);
+		expect(result.diagnostics.at(-1)?.message).toContain("default does not match its schema");
 	});
 
 	it("normalizes a valid chart into a frozen AST", () => {

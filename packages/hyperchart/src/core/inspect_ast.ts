@@ -21,6 +21,7 @@ import type {
 	TransitionInputAst,
 	ValueAst,
 } from "./types.js";
+import { isInputRef } from "./types.js";
 
 export type HyperchartInspectAgentDefaults = {
 	description?: string;
@@ -70,6 +71,15 @@ export type HyperchartInspectRef = {
 	path?: string;
 	json?: boolean;
 };
+
+export type HyperchartInspectValue =
+	| null
+	| string
+	| number
+	| boolean
+	| HyperchartInspectRef
+	| readonly HyperchartInspectValue[]
+	| { readonly [key: string]: HyperchartInspectValue };
 
 export type HyperchartInspectOnReenter =
 	| { mode: "restart" }
@@ -126,7 +136,12 @@ export type HyperchartInspectActorMessageDefinition = {
 	targetKind?: "actor" | "self";
 	event?: string;
 	target?: string;
-	payload?: { label: "input" | "inputs" | "output"; source: string; schema?: JsonSchema };
+	payload?: {
+		label: "input" | "inputs" | "output";
+		source: string;
+		value: HyperchartInspectValue;
+		schema?: JsonSchema;
+	};
 	contracts?: HyperchartInspectActorMessageContract[];
 };
 
@@ -138,6 +153,7 @@ export type HyperchartInspectState = {
 	kind:
 		| "agent"
 		| "user"
+		| "gate"
 		| "script"
 		| "tsImport"
 		| "send"
@@ -167,6 +183,9 @@ export type HyperchartInspectState = {
 	reentry?: HyperchartInspectOnReenter;
 	artifacts?: HyperchartInspectArtifact[];
 	reply?: JsonSchema;
+	emits?: Array<{ event: string; payload: HyperchartInspectValue; schema?: JsonSchema }>;
+	gateEvent?: string;
+	gatePayload?: HyperchartInspectValue;
 	validation?: HyperchartInspectAgentValidation;
 	onFail?: HyperchartInspectRecoveryPolicy;
 	description?: string;
@@ -336,6 +355,7 @@ function outgoingActorMessageDefinition(
 		payload: {
 			label: state.kind === "send" || state.kind === "call" ? "input" : "inputs",
 			source,
+			value: inspectValue(state.kind === "send" || state.kind === "call" ? state.input : state.inputs),
 			...(message === undefined ? {} : { schema: message.input.schema }),
 		},
 		...(message === undefined ? {} : { contracts: [inspectActorMessageContract(state.event, message)] }),
@@ -385,6 +405,7 @@ function replyActorMessageDefinition(
 					payload: {
 						label: "output" as const,
 						source: hyperchartValueSource(state.output),
+						value: inspectValue(state.output),
 						...(schema === undefined ? {} : { schema }),
 					},
 				}),
@@ -552,7 +573,9 @@ function branchInfos(ast: ChartAst, _path: string, regions: string[]): Hyperchar
 					? [action.command, ...action.args].join(" ")
 					: action.kind === "tsImport"
 						? `${action.module}#${action.export}`
-						: templatePreview(action.kind === "agent" ? action.task : action.prompt);
+						: action.kind === "gate"
+							? `${action.event}: ${hyperchartValueSource(action.payload)}`
+							: templatePreview(action.kind === "agent" ? action.task : action.prompt);
 		return {
 			id: regionPath,
 			...(action?.kind === "agent" ? { agent: action.name } : {}),
@@ -583,6 +606,11 @@ function actionStateFromAst(
 	const validation = action.kind === "agent" ? action.validation : undefined;
 	const artifacts = actionArtifacts(action, validation?.guard);
 	const inputs = inputDefinitions(state.input);
+	const emits = (state.emit ?? []).map((emitted) => ({
+		event: emitted.event,
+		payload: inspectValue(emitted.payload),
+		...(emitted.schema === undefined ? {} : { schema: emitted.schema.schema }),
+	}));
 	const base = {
 		id: path,
 		...(reads.length === 0 ? {} : { reads: [...new Set(reads)] }),
@@ -598,6 +626,7 @@ function actionStateFromAst(
 				}),
 		...(artifacts.length === 0 ? {} : { artifacts }),
 		...(action.reply === undefined ? {} : { reply: action.reply.schema }),
+		...(emits.length === 0 ? {} : { emits }),
 		...(validation === undefined
 			? {}
 			: { validation: { guard: guardInfo(validation.guard, ast, path), onFail: validation.onFail } }),
@@ -651,6 +680,15 @@ function actionStateFromAst(
 			module: action.module,
 			export: action.export,
 			...(env === undefined ? {} : { env }),
+		};
+	}
+	if (action.kind === "gate") {
+		return {
+			...base,
+			kind: "gate",
+			task: `${action.event}: ${hyperchartValueSource(action.payload)}`,
+			gateEvent: action.event,
+			gatePayload: inspectValue(action.payload),
 		};
 	}
 	const task = templatePreview(action.prompt);
@@ -836,7 +874,7 @@ function artifactInfo(name: string, artifact: ArtifactAst): HyperchartInspectArt
 }
 
 function actionArtifacts(action: StateActionAst, guard: GuardRefAst | undefined): HyperchartInspectArtifact[] {
-	const entries = action.kind === "user" ? [] : Object.entries(action.artifacts ?? {});
+	const entries = "artifacts" in action ? Object.entries(action.artifacts ?? {}) : [];
 	const guardEntries = guard?.kind === "script" && "artifacts" in guard ? Object.entries(guard.artifacts ?? {}) : [];
 	return [...entries, ...guardEntries].map(([name, artifact]) => artifactInfo(name, artifact));
 }
@@ -945,10 +983,38 @@ function actionRefs(action: StateActionAst): HyperchartInspectRef[] {
 		for (const value of Object.values(action.env ?? {})) {
 			appendReadRefs(refs, value);
 		}
-	} else {
+	} else if (action.kind === "user") {
 		appendTemplateRefs(refs, action.prompt);
+	} else {
+		appendValueRefs(refs, action.payload);
 	}
 	return uniqueRefs(refs);
+}
+
+function inspectValue(value: ValueAst): HyperchartInspectValue {
+	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+		return value;
+	}
+	if (isInputRef(value)) {
+		return inputRefInfo(value);
+	}
+	if (Array.isArray(value)) {
+		return value.map(inspectValue);
+	}
+	return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, inspectValue(child)]));
+}
+
+function appendValueRefs(refs: HyperchartInspectRef[], value: ValueAst): void {
+	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+		return;
+	}
+	if (isInputRef(value)) {
+		refs.push(inputRefInfo(value));
+		return;
+	}
+	for (const child of Array.isArray(value) ? value : Object.values(value)) {
+		appendValueRefs(refs, child);
+	}
 }
 
 function appendReadRefs(

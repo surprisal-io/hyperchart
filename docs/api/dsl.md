@@ -8,9 +8,11 @@ import {
   artifact,
   chart,
   compound,
+  emit,
   event,
   failed,
   final,
+  gate,
   input,
   json,
   map,
@@ -73,6 +75,7 @@ type JsonValue =
 
 type ChartArgumentCst = {
   description?: string;
+  schema?: z.ZodType;
   default?: JsonValue;
 };
 
@@ -96,7 +99,7 @@ type ChartCst = {
 | `kind` | yes | Must be `"chart"`. |
 | `id` | yes | Non-empty durable chart identifier. |
 | `recovery` | no | Default recoverable-failure policy for agents in this chart. Defaults to `{ nudge: 2, restart: 1 }`. |
-| `args` | no | Serializable metadata for host launch forms, keyed by run argument name. |
+| `args` | no | Typed metadata for host launch forms, keyed by run argument name. |
 | `initial` | yes | Local id of the first top-level state. |
 | `states` | yes | Top-level state table. |
 
@@ -113,16 +116,16 @@ chart({
 });
 ```
 
-`args` is an explicit display contract, not an executable schema or an implicit module export. `description` is a host-visible hint and `default` is a suggested launch value. Defaults must be finite JSON data; functions, Zod schemas, class instances, `undefined`, circular values, and non-finite numbers are rejected during normalization. Hyperchart does not inject these defaults into a run: the host shows or submits them, and the concrete values supplied at launch become the durable `args` fact.
+`args` is an explicit launch contract, not an implicit module export. `description` is a host-visible hint, `schema` is a Zod contract normalized to serializable JSON Schema, and `default` is a suggested launch value. When both `schema` and `default` are present, normalization rejects a default that the schema does not accept. Runtime-contract id/version metadata declared with `contract()` is retained beside the normalized argument schema. Defaults must still be finite JSON data; functions, Zod values used as defaults, class instances, `undefined`, circular values, and non-finite numbers are rejected. Hyperchart does not inject defaults into a run: the host shows or submits them, and the concrete values supplied at launch become the durable `args` fact.
 
 ```ts
 args: {
-  topic: { description: "Subject to research", default: "Hyperchart" },
-  depth: { description: "Number of research passes", default: 2 },
+  topic: { description: "Subject to research", schema: z.string(), default: "Hyperchart" },
+  depth: { description: "Number of research passes", schema: z.number().int(), default: 2 },
 },
 ```
 
-The `chart()` returned by `refs<Args>()` additionally checks metadata names and default value types against `Args`. Every declared key must exist in `Args`, including when valid keys and a typo are mixed in the same object. Metadata may describe a subset of typed arguments, and an empty metadata object is valid; charts without metadata remain unchanged.
+The `chart()` returned by `refs<Args>()` additionally checks metadata names, schema output types, and default value types against `Args`. Every declared key must exist in `Args`, including when valid keys and a typo are mixed in the same object. Metadata may describe a subset of typed arguments, and an empty metadata object is valid; charts without metadata remain unchanged. `ArgsOf<typeof chartDefinition>` infers a registry from declared argument schemas (falling back to a declared default's type, then `unknown`).
 
 ### `final()` and `failed()`
 
@@ -373,7 +376,9 @@ t`Process ${key("chapters")}: ${item("chapters", "title")}`
 ```ts
 type Paths<T> = /* valid object dot-paths */;
 type ValueAt<T, P extends string> = /* value selected by P */;
+type ArgsOf<C> = /* run arguments inferred from chart argument schemas */;
 type InputsOf<C> = /* input registry inferred from chart type C */;
+type EmitsOf<C> = /* emit event name → declared payload type */;
 ```
 
 Array indexes are not part of `Paths<T>`. Select the array as a value and use `json()` when embedding it.
@@ -424,7 +429,8 @@ Every `Templatable` field accepts either a plain string or `t` template.
 ```ts
 type ActionStateCst = {
   kind: "state";
-  action: AgentActionCst | ScriptActionCst | ImportedActionCst | UserActionCst;
+  action: AgentActionCst | ScriptActionCst | ImportedActionCst | UserActionCst | GateActionCst;
+  emit?: readonly EmitCst[];
   input?: Record<string, z.ZodType>;
   transitions?: TransitionMapCst;
   after?: { delayMs: number; target: string };
@@ -437,7 +443,8 @@ type ActionStateCst = {
 
 | Field | Meaning |
 |---|---|
-| `action` | Work dispatched on entry. |
+| `action` | Work dispatched on entry, or a journal-native `user()`/`gate()` interaction. |
+| `emit` | Ordered domain-event declarations appended only when the completion is accepted. |
 | `input` | Zod schemas for visit-local transition inputs. Incoming bindings may select the event output or resolve ordinary refs. |
 | `transitions` | Completion-event routes. |
 | `after` | Deadline while the action is running. The target is a sibling. |
@@ -447,6 +454,39 @@ type ActionStateCst = {
 | `retries` | Number of rejected rounds allowed. The next rejection records global failure intent and terminalizes the run. Omitted means unbounded. Requires `validate`. |
 
 `FAILED` is reserved global fail-fast and is not a routable transition. An executor `FAILED`, protocol/schema failure, or exhausted validation budget writes durable failure intent, blocks successors, terminalizes immediately, and emits best-effort runtime cancellation for pending actions. Use ordinary events, named actor replies, or an explicit `failed()` terminal for authored business outcomes.
+
+### `emit(options)`
+
+```ts
+type EmitCst = {
+  event: string;
+  payload: ValueExpr;
+  schema?: z.ZodType;
+};
+
+function emit<const O extends EmitCst>(
+  options: O & Record<Exclude<keyof O, keyof EmitCst>, never>,
+): O;
+```
+
+Use `emit()` entries on an action state to publish typed domain facts from an accepted outcome:
+
+```ts
+publish: {
+  kind: "state",
+  action: agent("publisher", { reply: z.object({ id: z.string() }) }),
+  emit: [emit({
+    event: "ARTICLE_PUBLISHED",
+    payload: { id: result("publish", "id") },
+    schema: z.object({ id: z.string() }),
+  })],
+  transitions: { DONE: "complete" },
+},
+```
+
+`event` must be a non-empty non-reserved event name. `payload` uses the ordinary value/ref expression language; unlike templates, a ref may resolve to a structured JSON value. Optional `schema` is a declarative contract for consumers, `EmitsOf<C>` typing, and inspector UI. It is normalized exactly like a reply schema (including exact runtime-contract metadata), but the machine does not validate emitted payloads against it and the schema is not stored in the journal. Unknown declaration fields are rejected. Emits are written in declaration order in the same append as the accepted `state_action/complete`, positive `state_action/validated`, or interaction resolution. Rejected validation claims and `FAILED` outcomes append no emit records. Emit records contain only the action identity, event, resolved JSON payload, and standard journal coordinates, and are inert facts that do not route the chart or create executor work.
+
+A state may read its own accepted completion with `result("publish", ...)` in an emit payload. That result is available at the acceptance boundary before the successor is entered. `EmitsOf<typeof chart>` maps declared event names to their inferred schema payloads; events without `schema` map to `unknown`.
 
 ### `agent(name, options?)`
 
@@ -579,15 +619,43 @@ transitions: {
 },
 ```
 
-Each reached user phase receives a durable numeric `seqId`. The public coordinate is exactly `(runId, seqId)`; internal runtime callback ids are not part of the response contract. A host presents one owned gate at a time and commits an explicit envelope:
+Each reached user phase receives a durable numeric `seqId`. The public coordinate is exactly `(runId, branchId, seqId)`; internal runtime callback ids are not part of the response contract. A host presents one owned gate at a time and commits an explicit envelope:
 
 ```json
-{"runId":"review-20260723-120000","seqId":14,"event":"BLOCK","output":{"feedback":"Clarify the risks."}}
+{"runId":"review-20260723-120000","branchId":"main","seqId":14,"event":"BLOCK","output":{"feedback":"Clarify the risks."}}
 ```
 
-The event must be an allowed non-`FAILED` event, and `output` must satisfy `reply` when a schema is declared. An invalid claim is rejected without consuming the gate so the human can retry. An identical committed retry is idempotent; a different retry conflicts. Timeouts and cancellation still participate in normal machine ordering: whichever completion wins closes the phase, and later duplicate responses cannot resume it.
+The event must be an allowed non-`FAILED` event, and `output` must satisfy `reply` when a schema is declared. An invalid claim is rejected without consuming the interaction so the human can retry. An identical committed retry is idempotent; a different retry conflicts. Timeouts and cancellation still participate in normal machine ordering: whichever completion wins closes the phase, and later duplicate responses cannot resume it.
 
-The detached runner remains alive while waiting, and only the branch containing the journal-open gate blocks. Other `parallel` regions and admitted `map` instances continue. Pi and Claude Code route live answers through the owning runner control API; only a stopped run opens the serialized writer temporarily. Custom hosts use the same high-level response API and never open a second writer for a live run.
+The detached runner remains alive while waiting, and only the branch containing the journal-open interaction blocks. Other `parallel` regions and admitted `map` instances continue. Pi and Claude Code route live answers through the owning runner control API; only a stopped run opens the serialized writer temporarily. Custom hosts use the same high-level response API and never open a second writer for a live run.
+
+### `gate(options)`
+
+```ts
+function gate(options: {
+  event: string;
+  payload: ValueExpr;
+  reply?: z.ZodType;
+}): GateActionCst;
+```
+
+Declares a durable interaction intended for a host application rather than a human prompt:
+
+```ts
+select: {
+  kind: "state",
+  action: gate({
+    event: "SELECT_ARTICLE",
+    payload: { candidates: result("search", "articles") },
+    reply: z.object({ articleId: z.string() }),
+  }),
+  transitions: { SELECTED: "publish", CANCELLED: "done" },
+},
+```
+
+The machine renders `event`, `payload`, `reply`, action identity, phase identity, and state input into `gate/opened`, then waits without dispatching an executor. Allowed response events remain chart transitions and are derived from the selected AST during admission and replay. A host resolves the opened record through the same runner-controller and offline interaction APIs used for `user()`; an accepted answer writes `gate/resolved` and completes the action. `prompt` and `options` are intentionally invalid on `gate()` because a gate is an application contract, not a human presentation model.
+
+Gate coordinates are `(runId, branchId, seqId)`, where `seqId` is the opened record. Allowed event, reply-schema, stale-head, idempotency, conflict, rewind, and sole-writer rules are identical to user interactions. Human interaction scanners and request/receipt files include only `user()` records; hosts discover and resolve `gate()` records through projection, targeted lookup, or controller APIs.
 
 ## Transitions and inputs
 
@@ -898,7 +966,7 @@ Normalization converts Zod to plain JSON Schema in the AST. Runtime validation u
 | `INVALID_CHART_KIND` | Root `kind` is not `"chart"`. |
 | `INVALID_CHART_ID` | Chart id is missing or empty. |
 | `INVALID_CHART_ARGS` | Chart argument metadata is not an object. |
-| `INVALID_CHART_ARGUMENT` | An argument name, metadata field, description, or default is invalid/non-serializable. |
+| `INVALID_CHART_ARGUMENT` | An argument name, metadata field, description, default, or schema/default pairing is invalid. |
 | `INVALID_STATE_ID` | State id uses a reserved character. |
 | `UNKNOWN_INITIAL_STATE` | `initial` does not name a child. |
 | `MISSING_ACTION` | An action state has no action. |
@@ -927,7 +995,7 @@ Values:
 
 ```text
 actor, actorPool, actorInput, call, callBatch, chart, agent, artifact, compound,
-contract, event, final, input, json, map, message, messageInput, parallel,
+contract, emit, event, final, gate, input, json, map, message, messageInput, parallel,
 protocol, receive, refs, reply, resume, script, self, send, sendBatch, t, tsAction, tsImport,
 user, visit, z
 ```
@@ -938,12 +1006,12 @@ Authoring types:
 
 ```text
 ActionStateCst, ActorSelfTarget, AgentActionCst, ArtifactCst, ArtifactOfCst, AfterCst,
-ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst,
-EventBindingCst, FinalStateCst, InputRef,
+ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst, EmitCst,
+EventBindingCst, FinalStateCst, GateActionCst, InputRef,
 JoinArtifactOfCst, MapStateCst, OnReject, OnReenterCst,
 ImportedActionCst, ParallelStateCst, SchemaCst, ScriptActionCst, StateActionCst, StateCst,
 TemplateCst, Templatable, TransitionCst, TransitionInputCst, TransitionMapCst,
-UserActionCst, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
+UserActionCst, ArgsOf, EmitsOf, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
 Paths, ValueAt
 ```
 

@@ -14,6 +14,7 @@ import { createBranchProjection, projectBranch } from "../packages/hyperchart/sr
 import type { ChartAst } from "../packages/hyperchart/src/core/types.js";
 import { JsonlLogStore } from "../packages/hyperchart/src/runtime/generic/log_store.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
+import { StaleUserInteractionError } from "../packages/hyperchart/src/execution/user_interaction.js";
 import { saveRunMeta } from "../packages/hyperchart/src/runtime/generic/run_dir.js";
 import { patchRunStatus } from "../packages/hyperchart/src/runtime/generic/run_status.js";
 import { watchRunnerUserResponses } from "../packages/hyperchart/src/runtime/generic/runner_control.js";
@@ -129,6 +130,68 @@ function owner(runsRoot: string, workDir: string): UserInteractionOwner {
 	return { runsRoot, workDir, sessionId: "session-a", host: "test" };
 }
 
+async function gateFixture() {
+	const root = mkdtempSync(join(tmpdir(), "hyperchart-host-gate-"));
+	roots.push(root);
+	const runsRoot = join(root, "runs");
+	const workDir = join(root, "project");
+	const chartPath = join(workDir, "chart.ts");
+	const runId = "run-gate";
+	const storage: RunStorage = { kind: "jsonl", rootDir: runsRoot, layout: "sha256" };
+	const runDir = resolveRunPaths(runId, storage).runDir;
+	mkdirSync(runsRoot);
+	mkdirSync(workDir);
+	writeFileSync(
+		chartPath,
+		`
+		import { chart, final, gate } from "@surprisal/hyperchart";
+		export default chart({ id: "gate-chart", initial: "wait", states: {
+			wait: { kind: "state", action: gate({ event: "approval.requested", payload: { id: "r-1" } }), transitions: { APPROVED: "done" } },
+			done: final(),
+		} });
+	`,
+	);
+	const parsed = parseChartModuleSync(chartPath);
+	if (!parsed.ok) {
+		throw new Error(parsed.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+	}
+	await withRunStorage(storage, () =>
+		saveRunMeta(runId, {
+			chartPath,
+			workDir,
+			chartId: "gate-chart",
+			createdAt: new Date().toISOString(),
+			originSessionId: "session-a",
+		}),
+	);
+	const store = new JsonlLogStore(join(runDir, "log.jsonl"));
+	await store.initializeRootBranch();
+	const state = parsed.ast.states.wait;
+	if (state?.kind !== "state" || state.action.kind !== "gate") {
+		throw new Error("bad gate fixture");
+	}
+	const [invoke] = await store.appendDrafts([
+		{
+			type: "state_action",
+			kind: "invoke",
+			sessionId: "gate-session",
+			actionUid: state.action.uid,
+			definition: state.action,
+		},
+	]);
+	const [opened] = await store.appendDrafts([
+		{
+			type: "gate",
+			kind: "opened",
+			actionUid: state.action.uid,
+			phaseSeqId: invoke!.seqId,
+			event: state.action.event,
+			payload: { id: "r-1" },
+		},
+	]);
+	return { runId, storage, store, ast: parsed.ast, invokeSeqId: invoke!.seqId, gateSeqId: opened!.seqId };
+}
+
 describe("journal-native user interactions", () => {
 	it("derives an open rendered gate from selected journal ancestry without request.json", async () => {
 		const f = await fixture();
@@ -157,6 +220,45 @@ describe("journal-native user interactions", () => {
 				),
 			),
 		).toBe(false);
+	});
+
+	it("keeps host gates out of human interaction scans while allowing commit through the shared API", async () => {
+		const f = await gateFixture();
+		expect(await withRunStorage(f.storage, () => scanOpenUserInteractions(f.runId, "main"))).toEqual([]);
+		const committed = await commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, {
+			type: "APPROVED",
+			output: { source: "host" },
+		});
+		expect(committed).toMatchObject({
+			idempotent: false,
+			record: { type: "gate", kind: "resolved", gateSeqId: f.gateSeqId, event: { type: "APPROVED" } },
+		});
+		expect(
+			await f.store.findUserInteractionResponse({
+				headSeqId: (await f.store.captureSnapshot("main")).headSeqId,
+				gateSeqId: f.gateSeqId,
+			}),
+		).toEqual(committed.record);
+		expect(
+			await commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, {
+				type: "APPROVED",
+				output: { source: "host" },
+			}),
+		).toMatchObject({ idempotent: true, record: { type: "gate", gateSeqId: f.gateSeqId } });
+		await expect(
+			commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, {
+				type: "APPROVED",
+				output: { source: "different-host" },
+			}),
+		).rejects.toThrow("Conflicting response");
+
+		await f.store.moveBranch("main", f.invokeSeqId);
+		await expect(
+			commitUserInteractionResponse(f.store, f.ast, f.gateSeqId, {
+				type: "APPROVED",
+				output: { source: "host" },
+			}),
+		).rejects.toBeInstanceOf(StaleUserInteractionError);
 	});
 
 	it("reuses a parsed chart across interaction scans and invalidates it when source changes", async () => {

@@ -16,15 +16,21 @@ export type JsonSchema = Record<string, unknown>;
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
-/** Serializable, display-only metadata for one run argument. */
+/** Serializable launch metadata and an optional runtime contract for one run argument. */
 export type ChartArgumentCst = {
 	/** Human-readable guidance for launch UIs. */
 	description?: string;
+	/** Zod contract used for type metadata and default validation during normalization. */
+	schema?: SchemaCst;
 	/** Suggested launch value; hosts may let the user edit or omit it. */
 	default?: JsonValue;
 };
 
-export type ChartArgumentAst = Readonly<ChartArgumentCst>;
+export type ChartArgumentAst = Readonly<{
+	description?: string;
+	schema?: SchemaAst;
+	default?: JsonValue;
+}>;
 
 export type ChartSource = {
 	path?: string;
@@ -355,7 +361,9 @@ type ActionValues<Action> = Action extends { kind: "agent" }
 				| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
 		: Action extends { kind: "user" }
 			? TemplateValues<Action extends { prompt: infer Prompt } ? Prompt : never>
-			: never;
+			: Action extends { kind: "gate"; payload: infer Payload }
+				? Payload
+				: never;
 type NodeValues<Node> = Node extends { kind: "reply"; output: infer Output }
 	? Output
 	: Node extends { kind: "send"; input: infer Input }
@@ -366,8 +374,14 @@ type NodeValues<Node> = Node extends { kind: "reply"; output: infer Output }
 				? Input
 				: Node extends { kind: "callBatch"; inputs: infer Inputs }
 					? Inputs
-					: Node extends { kind: "state"; action: infer Action }
-						? ActionValues<Action>
+					: Node extends { kind: "state"; action: infer Action; emit?: infer Emits }
+						?
+								| ActionValues<Action>
+								| (Emits extends readonly (infer Emit)[]
+										? Emit extends { payload: infer Payload }
+											? Payload
+											: never
+										: never)
 						: never;
 type NodeSelectorsValid<P extends ProtocolCst, I, S, Id extends keyof S & string> = [NodeValues<S[Id]>] extends [never]
 	? true
@@ -545,6 +559,14 @@ export type UserActionCst = {
 	reply?: SchemaCst;
 };
 
+/** A journal-native host-resolved gate with a typed request payload. */
+export type GateActionCst = {
+	kind: "gate";
+	event: string;
+	payload: ValueExpr;
+	reply?: SchemaCst;
+};
+
 // A command step: the runtime executes the command and answers with a completion event, exactly
 // like an agent — same artifact/reads channels, same reply shape for the parsed stdout. The
 // command and args are static; parameters flow through env templates (the taskflow contract).
@@ -572,7 +594,7 @@ export type ImportedActionCst = {
 	reply?: SchemaCst;
 };
 
-export type StateActionCst = AgentActionCst | UserActionCst | ScriptActionCst | ImportedActionCst;
+export type StateActionCst = AgentActionCst | UserActionCst | GateActionCst | ScriptActionCst | ImportedActionCst;
 
 // Serializable reference to validation code. Inline closures are not allowed: the chart stays
 // plain data. A validator is an acceptance check on the action's completion claim — it runs live
@@ -760,9 +782,17 @@ export type TemplateAst = Readonly<{
 export type OnReenterCst = "restart" | { kind: "resume"; message: Templatable };
 export type OnReenterAst = "restart" | { kind: "resume"; message: TemplateAst };
 
+export type EmitCst = {
+	event: string;
+	payload: ValueExpr;
+	schema?: SchemaCst;
+};
+
 export type ActionStateCst = {
 	kind: "state";
 	action: StateActionCst;
+	/** Ordered domain events published atomically with accepted completion. */
+	emit?: readonly EmitCst[];
 	input?: Record<string, SchemaCst>;
 	transitions?: TransitionMapCst;
 	after?: AfterCst;
@@ -984,6 +1014,13 @@ export type UserActionAst = Readonly<{
 	options: readonly string[];
 	reply?: SchemaAst;
 }>;
+export type GateActionAst = Readonly<{
+	kind: "gate";
+	uid: ActionUID;
+	event: string;
+	payload: ValueAst;
+	reply?: SchemaAst;
+}>;
 export type ScriptActionAst = Readonly<{
 	kind: "script";
 	uid: ActionUID;
@@ -1002,11 +1039,17 @@ export type ImportedActionAst = Readonly<{
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;
-export type StateActionAst = AgentActionAst | UserActionAst | ScriptActionAst | ImportedActionAst;
+export type StateActionAst = AgentActionAst | UserActionAst | GateActionAst | ScriptActionAst | ImportedActionAst;
 
 // Absolute path of a state in the chart: local ids joined with "." (e.g. "review.analyze").
 // Top-level states' paths equal their ids, so flat charts keep their addresses.
 export type StatePath = string;
+
+export type EmitAst = Readonly<{
+	event: string;
+	payload: ValueAst;
+	schema?: SchemaAst;
+}>;
 
 export type ActionStateAst = Readonly<{
 	kind: "state";
@@ -1014,6 +1057,7 @@ export type ActionStateAst = Readonly<{
 	// Path of the containing compound; absent at top level.
 	parent?: StatePath;
 	action: StateActionAst;
+	emit?: readonly EmitAst[];
 	input?: Readonly<Record<string, SchemaAst>>;
 	transitions: Readonly<Record<EventType, TransitionAst>>;
 	after?: Readonly<AfterCst>;

@@ -31,6 +31,22 @@ export function VisitInvocationDetails({
 			</div>
 		);
 	}
+	if (invocation.kind === "gate") {
+		return (
+			<div className="space-y-2">
+				<div>
+					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">gate event</div>
+					<ExpandablePre collapsedLines={3}>{invocation.event}</ExpandablePre>
+				</div>
+				{invocation.payload !== undefined && (
+					<div>
+						<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">payload</div>
+						<JsonBlock value={invocation.payload} previewLines={9} />
+					</div>
+				)}
+			</div>
+		);
+	}
 	if (invocation.kind === "tsImport") {
 		return (
 			<div className="space-y-2">
@@ -118,7 +134,7 @@ export function VisitInvocationDetails({
 									.join("") || "Read";
 							return (
 								<ArtifactRow
-									key={`${read.path}:${index}`}
+									key={JSON.stringify(read)}
 									{...(artifactBacked ? { kind: joined ? ("join" as const) : ("single" as const) } : {})}
 									label={artifactBacked ? `${read.sourceState} → ${read.name}` : read.path}
 									{...(artifactBacked

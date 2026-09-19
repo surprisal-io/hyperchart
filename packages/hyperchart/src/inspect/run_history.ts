@@ -284,7 +284,15 @@ export function actionVisitRecordsToHost(
 /** Durable catalog mapping only: no current-AST invocation rendering or scope-exit inference. */
 function incompatibleStateVisitToHost(item: StateVisitHistoryItem, broken: ReplayBrokenRecord): HyperchartVisitInfo {
 	const base = stateVisitHistoryItemToHost(item);
-	const { artifactPins: _pins, endedAt: _end, completedEvent: _event, status: _status, ...recorded } = base;
+	const {
+		artifactPins: _pins,
+		endedAt: _end,
+		completedEvent: _event,
+		completedOutput: _output,
+		emits: _emits,
+		status: _status,
+		...recorded
+	} = base;
 	// Without the historical guard contract, a completion is only a claim, even
 	// when no validation has been recorded yet. Never infer acceptance from its absence.
 	const terminal = [...item.records]
@@ -311,6 +319,29 @@ function incompatibleStateVisitToHost(item: StateVisitHistoryItem, broken: Repla
 						(record) => record.type === "state_action" && record.kind === "complete" && record.seqId < terminal.seqId,
 					)
 			: undefined;
+	// Output and emit fields remain recorded provenance in recovery mode. Their
+	// presence must not upgrade a completion claim to an accepted semantic exit.
+	const recordedCompletion = [...item.records]
+		.reverse()
+		.find(
+			(record) =>
+				(record.type === "state_action" &&
+					(record.kind === "complete" || (record.kind === "validated" && record.outcome === true))) ||
+				((record.type === "user_interaction" || record.type === "gate") && record.kind === "resolved"),
+		);
+	const recordedCompletionEvent =
+		recordedCompletion !== undefined &&
+		((recordedCompletion.type === "state_action" &&
+			(recordedCompletion.kind === "complete" || recordedCompletion.kind === "validated")) ||
+			((recordedCompletion.type === "user_interaction" || recordedCompletion.type === "gate") &&
+				recordedCompletion.kind === "resolved"))
+			? recordedCompletion.event
+			: undefined;
+	const recordedEmits = item.records.flatMap((record) =>
+		record.type === "emit" && actionUidKey(record.actionUid) === actionUidKey(item.invoke.actionUid)
+			? [{ seqId: record.seqId, event: record.event, payload: record.payload }]
+			: [],
+	);
 	const recordedInputs = [...item.records]
 		.reverse()
 		.find(
@@ -331,6 +362,10 @@ function incompatibleStateVisitToHost(item: StateVisitHistoryItem, broken: Repla
 						: "done",
 		...(terminal === undefined ? {} : { endedAt: terminal.timestamp }),
 		...(event === undefined ? {} : { completedEvent: event }),
+		...(recordedCompletionEvent !== undefined && "output" in recordedCompletionEvent
+			? { completedOutput: recordedCompletionEvent.output }
+			: {}),
+		...(recordedEmits.length === 0 ? {} : { emits: recordedEmits }),
 		replayWarning: `Replay incompatible at seqId ${broken.seqId}: ${broken.error}. Recorded facts only; invocation templates are not rendered, runtime status and scope exits cannot be derived. Completion claims without explicit acceptance remain unknown.`,
 		...(recordedInputs !== undefined &&
 		(recordedInputs.type === "state_action" || recordedInputs.type === "user_interaction") &&
@@ -510,6 +545,8 @@ function actionEffectInfo(effect: ActionEffect): HyperchartVisitInfo["invocation
 			};
 		case "user":
 			return { kind: "user", prompt: effect.prompt };
+		case "gate":
+			return { kind: "gate", event: effect.event, payload: effect.payload };
 	}
 }
 

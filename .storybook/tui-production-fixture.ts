@@ -1,4 +1,8 @@
 import { capturedStorySchedule } from "../packages/hyperchart/src/react/fixtures/capture-story-schedule.js";
+import {
+	gateStoryScenario,
+	resolvedGateRecords,
+} from "../packages/hyperchart/src/react/fixtures/gate-emit-fixtures.js";
 import { resolveRunPaths, type RunStorage } from "../packages/hyperchart/src/runtime/generic/run_paths.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,6 +27,7 @@ export type ProductionTuiFixture = {
 	ast: ChartAst;
 	primary: RunComponentOptions;
 	manyRunning: RunComponentOptions;
+	gateAndEmit: RunComponentOptions;
 	history: RunHistoryItem[];
 };
 
@@ -420,6 +425,36 @@ function writeRun(storage: RunStorage, ast: ChartAst, variant: "running" | "many
 	return { runId, runDir };
 }
 
+function writeGateAndEmitRun(storage: RunStorage) {
+	const ast = gateStoryScenario.ast;
+	const runId = "host-release-gate-20260918-150000";
+	const runDir = resolveRunPaths(runId, storage).runDir;
+	mkdirSync(join(runDir, "sessions"), { recursive: true });
+	writeJsonl(join(runDir, "log.jsonl"), [
+		{
+			kind: "branch",
+			op: "create",
+			seqId: 1,
+			branchId: "main",
+			headSeqId: null,
+			metadata: { name: "main" },
+			committedAt: STORY_NOW - 90_000,
+		},
+		...resolvedGateRecords,
+	]);
+	writeFileSync(
+		join(runDir, "meta.json"),
+		`${JSON.stringify({ chartId: ast.id, chartPath: "stories/host-release-gate.chart.ts", workDir: "/Users/demo/Work/pi-hyperchart", createdAt: new Date(STORY_NOW - 90_000).toISOString() }, null, 2)}\n`,
+	);
+	writeFileSync(
+		join(runDir, "status.json"),
+		`${JSON.stringify({ version: 2, runId, branchIds: ["main"], chartId: ast.id, state: "running", startedAt: STORY_NOW - 90_000, updatedAt: STORY_NOW - 5_000 }, null, 2)}\n`,
+	);
+	const progress: HyperchartSessionProgressFile = { version: 1, updatedAt: STORY_NOW - 5_000, sessions: {} };
+	writeFileSync(join(runDir, "sessions", "progress.json"), `${JSON.stringify(progress, null, 2)}\n`, "utf8");
+	return { runId, ast };
+}
+
 export function materializeProductionTuiFixture(): ProductionTuiFixture {
 	const root = mkdtempSync(join(tmpdir(), `pi-hyperchart-storybook-tui-${process.pid}-`));
 	const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "run-id" };
@@ -428,6 +463,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 	const manyRunning = writeRun(storage, ast, "many-running");
 	const stopped = writeRun(storage, ast, "stopped");
 	const stale = writeRun(storage, ast, "stale");
+	const gateAndEmit = writeGateAndEmitRun(storage);
 	const history: RunHistoryItem[] = [
 		{
 			runId: running.runId,
@@ -462,6 +498,18 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 			createdAt: new Date(STORY_NOW - 172_800_000).toISOString(),
 			updatedAt: new Date(STORY_NOW - 169_200_000).toISOString(),
 		},
+		{
+			runId: gateAndEmit.runId,
+			branchId: "main",
+			chartId: gateAndEmit.ast.id,
+			state: "running",
+			live: true,
+			final: false,
+			sessionCount: 0,
+			summary: "gate 3 resolved → APPROVED · emit release.approved",
+			createdAt: new Date(STORY_NOW - 90_000).toISOString(),
+			updatedAt: new Date(STORY_NOW - 5_000).toISOString(),
+		},
 	];
 	return {
 		root,
@@ -470,6 +518,7 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		primary: {
 			runId: running.runId,
 			ast,
+			storage,
 			branchId: "main",
 			live: true,
 			cwd: "/Users/demo/Work/pi-hyperchart",
@@ -477,6 +526,15 @@ export function materializeProductionTuiFixture(): ProductionTuiFixture {
 		manyRunning: {
 			runId: manyRunning.runId,
 			ast,
+			storage,
+			branchId: "main",
+			live: true,
+			cwd: "/Users/demo/Work/pi-hyperchart",
+		},
+		gateAndEmit: {
+			runId: gateAndEmit.runId,
+			ast: gateAndEmit.ast,
+			storage,
 			branchId: "main",
 			live: true,
 			cwd: "/Users/demo/Work/pi-hyperchart",

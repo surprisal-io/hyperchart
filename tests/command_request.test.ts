@@ -9,7 +9,9 @@ function eventBusWith(...listeners: Array<(request: HyperchartCommandRequest) =>
 	return {
 		emit: vi.fn((event: string, request: HyperchartCommandRequest) => {
 			if (event === HYPERCHART_COMMAND_EVENT) {
-				listeners.forEach((listener) => listener(request));
+				listeners.forEach((listener) => {
+					listener(request);
+				});
 			}
 		}),
 	};

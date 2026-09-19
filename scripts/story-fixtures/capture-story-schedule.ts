@@ -37,7 +37,7 @@ export async function captureStorySchedule(
 					: record.kind;
 			return `${kind}:${record.actionUid.state}`;
 		}
-		if (record.type === "user_interaction") {
+		if (record.type === "user_interaction" || record.type === "gate") {
 			return `${record.kind}:${record.actionUid.state}`;
 		}
 		if (record.type === "actor_created" || record.type === "actor_scope") {
@@ -71,7 +71,7 @@ export async function captureStorySchedule(
 			record.type === "actor_created" ||
 			record.type === "actor_messages_enqueued" ||
 			(record.type === "actor_message" && record.kind === "replied") ||
-			(record.type === "user_interaction" && record.kind === "resolved") ||
+			((record.type === "user_interaction" || record.type === "gate") && record.kind === "resolved") ||
 			record.type === "failure_intent",
 	);
 	const initialSeqId = (schedule[0]?.seqId ?? 1) - 1;
@@ -128,18 +128,18 @@ export async function captureStorySchedule(
 						for (const [index, response] of responses.entries()) {
 							if (
 								(response.type === "state_action" && response.kind === "complete") ||
-								(response.type === "user_interaction" && response.kind === "resolved")
+								((response.type === "user_interaction" || response.type === "gate") && response.kind === "resolved")
 							) {
 								const gate = Object.values(projection.openUserInteractions).find(
 									(entry) => entry.opened.actionUid.state === response.actionUid.state,
 								)?.opened;
 								if (gate !== undefined) {
-									const draft = await prepareUserInteractionResponseFromProjection(projection, "main", gate, {
+									const drafts = await prepareUserInteractionResponseFromProjection(projection, "main", gate, {
 										ast,
 										gateSeqId: gate.seqId,
 										event: response.event,
 									});
-									const added = append([draft]);
+									const added = append(drafts);
 									retain(added);
 									responses.splice(index, 1);
 									yield { kind: "durable_records_added", effectId: `user:${gate.seqId}`, records: added };

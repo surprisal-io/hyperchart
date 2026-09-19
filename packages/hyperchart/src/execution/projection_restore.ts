@@ -31,7 +31,7 @@ import {
 } from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
-export const PROJECTOR_VERSION = 5;
+export const PROJECTOR_VERSION = 6;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
 export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
@@ -406,34 +406,51 @@ function isOpenInteractions(value: unknown): boolean {
 	);
 }
 function isOpenedInteraction(value: unknown): value is Record<string, unknown> {
-	return (
-		isExactRecord(
-			value,
-			[
-				"type",
-				"kind",
-				"actionUid",
-				"phaseSeqId",
-				"prompt",
-				"options",
-				"events",
-				"seqId",
-				"parentId",
-				"branchId",
-				"timestamp",
-			],
-			["input", "reply"],
-		) &&
-		value.type === "user_interaction" &&
-		value.kind === "opened" &&
+	if (!isRecord(value) || value.kind !== "opened") {
+		return false;
+	}
+	const shared =
 		isActionUid(value.actionUid) &&
 		isPositiveInteger(value.phaseSeqId) &&
-		typeof value.prompt === "string" &&
-		isStringArray(value.options) &&
-		isStringArray(value.events) &&
 		isCoordinates(value) &&
 		(value.input === undefined || isJsonRecord(value.input)) &&
-		(value.reply === undefined || isSchemaAst(value.reply))
+		(value.reply === undefined || isSchemaAst(value.reply));
+	if (!shared) {
+		return false;
+	}
+	if (value.type === "user_interaction") {
+		return (
+			isExactRecord(
+				value,
+				[
+					"type",
+					"kind",
+					"actionUid",
+					"phaseSeqId",
+					"prompt",
+					"options",
+					"events",
+					"seqId",
+					"parentId",
+					"branchId",
+					"timestamp",
+				],
+				["input", "reply"],
+			) &&
+			typeof value.prompt === "string" &&
+			isStringArray(value.options) &&
+			isStringArray(value.events)
+		);
+	}
+	return (
+		value.type === "gate" &&
+		isExactRecord(
+			value,
+			["type", "kind", "actionUid", "phaseSeqId", "event", "payload", "seqId", "parentId", "branchId", "timestamp"],
+			["input", "reply"],
+		) &&
+		isNonEmptyString(value.event) &&
+		isJsonValue(value.payload)
 	);
 }
 function isArtifactPins(value: unknown): boolean {
@@ -717,7 +734,8 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 		!Object.values(projection.openUserInteractions).every((interaction) => {
 			const state = actionStateFor(ast, projection, interaction.opened.actionUid.state);
 			return (
-				state?.action.kind === "user" &&
+				state !== undefined &&
+				state.action.kind === (interaction.opened.type === "gate" ? "gate" : "user") &&
 				matchesDeclaredUid(interaction.opened.actionUid, state.action.uid) &&
 				interaction.opened.seqId <= projection.seqId &&
 				interaction.opened.phaseSeqId <= interaction.opened.seqId

@@ -314,6 +314,15 @@ function graphStatus(
 function actionTimelines(log: readonly DurableLogRecord[]): Map<string, ActionTimeline> {
 	const timelines = new Map<string, ActionTimeline>();
 	for (const record of log) {
+		if ((record.type === "user_interaction" || record.type === "gate") && record.kind === "resolved") {
+			const path = record.actionUid.state;
+			const timeline = timelines.get(path) ?? {};
+			timeline.completedAt = record.timestamp;
+			timeline.event = record.event.type;
+			timeline.failed = record.event.type === "FAILED";
+			timelines.set(path, timeline);
+			continue;
+		}
 		if (record.type !== "state_action") {
 			continue;
 		}
@@ -333,16 +342,22 @@ function actionTimelines(log: readonly DurableLogRecord[]): Map<string, ActionTi
 
 function actionLabel(state: Extract<StateAst, { kind: "state" }>): string {
 	const action = state.action;
-	if (action.kind === "agent") {
-		return `agent:${action.name}`;
+	switch (action.kind) {
+		case "agent":
+			return `agent:${action.name}`;
+		case "script":
+			return `script:${[action.command, ...action.args].join(" ")}`;
+		case "tsImport":
+			return `tsAction:${action.module}#${action.export}`;
+		case "user":
+			return "user";
+		case "gate":
+			return `gate:${action.event}`;
+		default: {
+			const exhaustive: never = action;
+			throw new Error(`Unknown state action: ${JSON.stringify(exhaustive)}`);
+		}
 	}
-	if (action.kind === "script") {
-		return `script:${[action.command, ...action.args].join(" ")}`;
-	}
-	if (action.kind === "tsImport") {
-		return `tsAction:${action.module}#${action.export}`;
-	}
-	return "user";
 }
 
 function materializePath(path: string, templateParent: string, actualParent: string): string {
@@ -393,6 +408,12 @@ function recordText(record: DurableLogRecord): string {
 			return record.kind === "opened"
 				? `user gate ${record.seqId} opened ${record.actionUid.state}`
 				: `user gate ${record.gateSeqId} resolved → ${record.event.type}`;
+		case "gate":
+			return record.kind === "opened"
+				? `gate ${record.seqId} opened ${record.event}`
+				: `gate ${record.gateSeqId} resolved → ${record.event.type}`;
+		case "emit":
+			return `emit ${record.event}`;
 		case "state_action":
 			switch (record.kind) {
 				case "invoke":

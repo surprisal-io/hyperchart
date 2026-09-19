@@ -26,7 +26,8 @@ export const GRAPH_ACTOR_NODE_HEIGHT = 148;
 const elk = new (ElkConstructor as unknown as { new (): ElkLayoutEngine })();
 
 export function graphNodeSize(state: { type?: HyperchartStateType | undefined }): { width: number; height: number } {
-	switch (state.type ?? "agent") {
+	const type: HyperchartStateType = state.type ?? "agent";
+	switch (type) {
 		case "map":
 			return { width: GRAPH_MAP_NODE_WIDTH, height: GRAPH_MAP_NODE_HEIGHT };
 		case "parallel":
@@ -34,8 +35,25 @@ export function graphNodeSize(state: { type?: HyperchartStateType | undefined })
 		case "actor-declaration":
 		case "actor-occurrence":
 			return { width: GRAPH_ACTOR_NODE_WIDTH, height: GRAPH_ACTOR_NODE_HEIGHT };
-		default:
+		case "agent":
+		case "user":
+		case "gate":
+		case "script":
+		case "tsImport":
+		case "send":
+		case "sendBatch":
+		case "call":
+		case "callBatch":
+		case "receive":
+		case "reply":
+		case "compound":
+		case "region":
+		case "final":
 			return { width: GRAPH_COMPACT_NODE_WIDTH, height: GRAPH_COMPACT_NODE_HEIGHT };
+		default: {
+			const exhaustive: never = type;
+			throw new Error(`Unknown Hyperchart state type: ${exhaustive}`);
+		}
 	}
 }
 

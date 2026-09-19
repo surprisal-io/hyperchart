@@ -12,6 +12,17 @@ import {
 import { explainReplay } from "../packages/hyperchart/src/core/replay_check.js";
 import { createBranchProjection, projectBranch } from "../packages/hyperchart/src/core/projection.js";
 import type { DurableLogRecord } from "../packages/hyperchart/src/core/durable_events.js";
+import {
+	emitStoryRecords,
+	emitStoryRun,
+	mapEmitStoryRecords,
+	mapEmitStoryRun,
+	pendingGateRecords,
+	resolvedGateRecords,
+	resolvedGateRun,
+	validatedEmitStoryRecords,
+	validatedEmitStoryRun,
+} from "../packages/hyperchart/src/react/fixtures/gate-emit-fixtures.js";
 
 it("loads actual offline captures synchronously with explicit invocation policies", () => {
 	expect(captured.captureContext.uuidSeed).toBe("hyperchart-story-capture-v1");
@@ -29,6 +40,77 @@ it("loads actual offline captures synchronously with explicit invocation policie
 	);
 	expect(loader).not.toContain("execution_loop");
 	expect(loader).not.toContain("async ");
+
+	expect(pendingGateRecords.at(-1)).toMatchObject({
+		type: "gate",
+		kind: "opened",
+		event: "release.approval-requested",
+	});
+	expect(resolvedGateRecords.map((record) => record.type)).toEqual([
+		"args",
+		"state_action",
+		"gate",
+		"gate",
+		"emit",
+		"state_action",
+	]);
+	expect(emitStoryRecords.slice(-2)).toMatchObject([
+		{ type: "emit", event: "release.published" },
+		{ type: "emit", event: "release.metrics-recorded" },
+	]);
+	const published = emitStoryRecords.find((record) => record.type === "emit" && record.event === "release.published");
+	expect(published).toMatchObject({
+		payload: {
+			release: {
+				environment: "production",
+				state: { nestedPath: "releases/2026.09.18/manifest.json", status: "ready" },
+			},
+			entries: [
+				{ type: "literal", label: "signed" },
+				{ type: "result", label: "releases/2026.09.18/manifest.json" },
+				{ type: "input", label: "releases/2026.09.18" },
+				{ type: "argument", label: "production" },
+				{ type: "visit", ordinal: 1 },
+			],
+			metrics: { attempts: 2, verified: true, absent: null },
+		},
+	});
+	expect(
+		mapEmitStoryRecords.find((record) => record.type === "emit" && record.event === "release.item-published"),
+	).toMatchObject({
+		actionUid: { state: "publish-map#0.announce" },
+		payload: {
+			mapKey: "0",
+			item: { field: "manifest", priority: "high" },
+			accepted: true,
+			environment: "production",
+			visit: 1,
+		},
+	});
+	const positiveVerdict = validatedEmitStoryRecords.findIndex(
+		(record) => record.type === "state_action" && record.kind === "validated" && record.outcome === true,
+	);
+	const validatedEmit = validatedEmitStoryRecords.findIndex((record) => record.type === "emit");
+	expect(positiveVerdict).toBeGreaterThanOrEqual(0);
+	expect(validatedEmit).toBeGreaterThan(positiveVerdict);
+
+	const visit = emitStoryRun.states.find((state) => state.id === "publish")?.visitHistory?.[0];
+	expect(visit?.completedOutput).toMatchObject({ releaseId: "release-2026.09.18", artifactCount: 7 });
+	expect(visit?.emits?.map(({ event }) => event)).toEqual(["release.published", "release.metrics-recorded"]);
+	expect(
+		mapEmitStoryRun.states.find((state) => state.id === "publish-map#0.announce")?.visitHistory?.[0],
+	).toMatchObject({
+		completedOutput: { accepted: true },
+		emits: [{ event: "release.item-published" }],
+	});
+	expect(validatedEmitStoryRun.states.find((state) => state.id === "publish")?.visitHistory?.[0]).toMatchObject({
+		completedOutput: { releaseId: "release-2026.09.18", artifactCount: 7 },
+		emits: [{ event: "release.validated-publish" }],
+	});
+	expect(resolvedGateRun.states.find((state) => state.id === "release-gate")?.visitHistory?.[0]).toMatchObject({
+		completedOutput: { approvedBy: "release-control@surprisal.dev" },
+		emits: [{ event: "release.approved" }],
+	});
 });
 
 it("replays Runtime Section re-entry and no-input user completion from recaptured facts", () => {

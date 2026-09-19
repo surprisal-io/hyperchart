@@ -58,7 +58,7 @@ The run owns two different filesystem locations. `projectDir` is the repository/
 
 ## Bounded live projection
 
-`BranchProjection` is current machine state, not a history view. It retains only open journal-native user gates; resolving, closing, or global failure removes them, while exact historical response lookup and UI history come from the storage history API. `liveActorMessages` is the sole mutable owner of queued, current, or unresolved-call messages; endpoint mailboxes, workers, and pending calls retain message IDs only. Settled non-call message history is reconstructed from durable record groups rather than accumulated in each endpoint. The retained `actorProducerVisits` counter is exact and monotonic: replay requires each enqueue to use the next producer visit and canonical `<producer>:message:<visit>:<batchIndex>` identity, preserving durable global message-id uniqueness after settled payloads leave live state.
+`BranchProjection` is current machine state, not a history view. It retains only open journal-native interactions (`user_interaction/opened` and `gate/opened`); resolving, closing, or global failure removes them, while exact historical response lookup and UI history come from the storage history API. `liveActorMessages` is the sole mutable owner of queued, current, or unresolved-call messages; endpoint mailboxes, workers, and pending calls retain message IDs only. Settled non-call message history is reconstructed from durable record groups rather than accumulated in each endpoint. The retained `actorProducerVisits` counter is exact and monotonic: replay requires each enqueue to use the next producer visit and canonical `<producer>:message:<visit>:<batchIndex>` identity, preserving durable global message-id uniqueness after settled payloads leave live state.
 
 Accepted completion pins are projected into `artifactPins`, keyed by rendered authored path. `machine` attaches the current pin to each rendered artifact read, so `ChartRuntime` restores the accepted revision without reading ancestry or performing storage I/O from synchronous machine code.
 
@@ -77,7 +77,7 @@ That distinction supports:
 - detection of missing action provenance;
 - independent validation against the TLA+ model.
 
-It also means chart changes are not automatically safe. If an old event would route differently, `explainReplay()` reports the mismatch. Resolved state `input` copied onto `state_action/invoke`, `state_action/complete`, `state_action/validated`, and `user_interaction/opened` facts is informational durable provenance for journal consumers. It is intentionally excluded from replay identity, so older facts without it remain compatible and changing a copy cannot mask or relax action-definition, guard, prompt, option, event, reply-schema, or rejection checks.
+It also means chart changes are not automatically safe. If an old event would route differently, `explainReplay()` reports the mismatch. Resolved state `input` copied onto `state_action/invoke`, `state_action/complete`, `state_action/validated`, `user_interaction/opened`, and `gate/opened` facts is informational durable provenance for journal consumers. It is intentionally excluded from replay identity, so changing a copy cannot mask or relax action-definition, guard, interaction-contract, transition, or artifact provenance checks.
 
 ## Projection
 
@@ -125,13 +125,15 @@ An action completion is a claim. The runtime checks:
 
 A validation verdict is durable. Replay reads the stored verdict; it does not run validator code again.
 
-Transition ref bindings resolve while projecting the accepted completion (or positive verdict), after its result has entered the replay-derived result map and before the target state enters. They use the same resolver as prompt/effect refs. Missing results or selectors throw at that boundary, preventing a partial target input or invoke.
+Transition ref bindings and declared emit payloads resolve at the accepted completion boundary (or positive verdict), after the result has entered the replay-derived result map and before the target state enters. They use the same resolver as prompt/effect refs, so an emit may read its own action result. Missing results or selectors and non-JSON payloads fail before any acceptance batch is appended.
+
+A successful unguarded completion or interaction resolution is appended together with all of its `emit` records; for guarded actions, the positive `state_action/validated` fact and emits form that batch instead. Emit order is declaration order. Each emit fact stores the action identity, event, resolved JSON payload, and journal coordinates. A rejected verdict and `FAILED` outcome append none. Projection treats emit records as inert ordered journal facts: they advance sequence bookkeeping but do not route the chart or dispatch effects.
 
 Removing a validator is a supported warning-level replay change, not permission to accept old claims. `guard_removed` warnings are informational: matching recorded positive verdicts accept; recorded rejections keep the same invocation/retry cycle and do not publish results or pins. New invocations use the current chart's explicit unguarded policy. A different current guard remains a blocking stale diagnostic by default.
 
 An invoke without `validation` has unknown legacy policy. With no current guard, its completion stays provisional until a verdict is recorded; even genuinely unguarded legacy completions are blocked when their policy cannot be proved. Unresolved historical guarded/unknown invocations cannot resume under the unguarded chart, including with `ignoreReplayWarnings`. No historical AST is fabricated and no later/sibling snapshot is consulted. See [the recovery procedure](safety.md#a-validator-was-removed).
 
-Projection checkpoint contract version 5 retains per-invocation validation policy across bounded replay batches and invalidates prior projector caches. Histories with compatibility diagnostics, including informational removed-guard warnings, remain non-checkpointable so a cache cannot hide warnings.
+Projection checkpoint contract version 6 retains per-invocation validation policy and open user/host interactions across bounded replay batches and invalidates prior projector caches. Histories with compatibility diagnostics, including informational removed-guard warnings, remain non-checkpointable so a cache cannot hide warnings.
 
 ## Artifact pins
 
@@ -167,9 +169,12 @@ The Pi package adds files that are useful but not semantic history:
 | `terminal-notification/request.json` | persist-once terminal prompt/outcome/artifact-path outbox with a fresh per-attempt UUID, written before terminal status |
 | `terminal-notification/receipts/<request-hash>/*.json` | generation-isolated, recoverable per-host/session terminal-delivery leases and confirmed receipts |
 | `terminal-notification-history/<generation>/` | complete outboxes archived when a terminal run starts another attempt; prior requests and receipts remain auditable but are no longer deliverable |
-| journal `state_action/{invoke,complete,validated}` | non-user action phase fact plus the resolved state input object when declared; the optional copy is informational and replay-compatible with old records |
-| journal `user_interaction/opened` | fully rendered durable gate plus the state's resolved input object when it declares input; its record seqId is the external gate identity |
+| journal `state_action/{invoke,complete,validated}` | executor action phase fact plus the resolved state input object when declared; the optional copy is informational and replay-compatible with old records |
+| journal `user_interaction/opened` | fully rendered durable human interaction plus informational state input; its record seqId is the external interaction identity |
 | journal `user_interaction/resolved` | validated external input that directly completes the user action |
+| journal `gate/opened` | fully rendered host request event/payload/reply contract plus informational state input; its record seqId is the external interaction identity |
+| journal `gate/resolved` | validated external input that directly completes the host gate |
+| journal `emit` | inert ordered domain event and resolved JSON payload appended with accepted completion |
 | `user-interactions/<branchId>/<seqId>/receipts/*.json` | non-semantic per-host/session presentation claims and confirmations |
 | `user-interactions/<branchId>/<seqId>/receipts/*.published` | internal immutable publication-order markers used only for cross-process presentation arbitration |
 | `runner-control/user-responses/{requests,results}/*.json` | attempt-fenced, non-semantic command/ack transport to the sole live runtime writer; journal facts remain authoritative |
@@ -185,7 +190,7 @@ A run may have a valid log and a stale process status. Conversely, a process can
 
 - the `Runtime` effect-interpreter interface;
 - `ChartRuntime`;
-- `AgentExecutor` and journal-native user-input admission;
+- `AgentExecutor` and journal-native user/host interaction admission;
 - `ScriptRunner`;
 - `JsonlLogStore`;
 - run-directory and metadata helpers;
@@ -193,9 +198,9 @@ A run may have a valid log and a stale process status. Conversely, a process can
 
 The generic runtime receives a host `AgentExecutor`. It owns effect interpretation and log mechanics; the host owns actual agent transport and session lifecycle.
 
-Terminal notification metadata is a runner/host outbox protocol, not a durable machine transition or log fact. Delivery waits until `status.json` matches the request outcome. Each host launch opens a fresh opaque runner-attempt identity, and terminal requests record that identity. A new runner attempt archives any prior attempt's complete outbox, so a recovered run may publish a different eventual outcome without rewriting the old request; stale recovery also rejects a predecessor request if the process dies before archival. Receipt claims and confirmations are fenced by the caller's observed request UUID, preventing an in-flight old generation from confirming and suppressing its replacement. User interactions are a second file-backed rendezvous: the runner persists every open request immediately and remains alive while waiting, but only the containing branch blocks. Hosts select one owned request across parallel/map branches and runs by lexical `runId`, then numeric `seqId`, pinning it until response or close. Exact `originSessionId + canonical workDir` checks prevent another session or checkout from answering it.
+Terminal notification metadata is a runner/host outbox protocol, not a durable machine transition or log fact. Delivery waits until `status.json` matches the request outcome. Each host launch opens a fresh opaque runner-attempt identity, and terminal requests record that identity. A new runner attempt archives any prior attempt's complete outbox, so a recovered run may publish a different eventual outcome without rewriting the old request; stale recovery also rejects a predecessor request if the process dies before archival. Receipt claims and confirmations are fenced by the caller's observed request UUID, preventing an in-flight old generation from confirming and suppressing its replacement. Human user interactions are a second file-backed rendezvous: the runner persists every open user request immediately and remains alive while waiting, but only the containing branch blocks. Hosts select one owned request across parallel/map branches and runs by lexical `runId`, then numeric `seqId`, pinning it until response or close. Exact `originSessionId + canonical workDir` checks prevent another session or checkout from answering it. Host-resolved `gate()` actions do not enter this presentation scan or create request/receipt files.
 
-A host validates the exact active `(runId, branchId, seqId)` coordinate, non-`FAILED` allowed event, and optional reply schema before atomically publishing a resolution. Identical responses are idempotent; divergent ones conflict. Machine cancellation closes an abandoned phase, while executor disposal on operator stop preserves it for resume. Gate files remain inspectable; only the exact live runner branch may accept a response, and global sequence ids are never reused.
+A host validates the exact active `(runId, branchId, seqId)` coordinate, non-`FAILED` allowed event, and optional reply schema before atomically publishing either interaction resolution through the shared controller/offline APIs. Identical responses are idempotent; divergent ones conflict. Machine cancellation closes an abandoned phase, while executor disposal on operator stop preserves it for resume. User gate files remain inspectable; only the exact live runner branch may accept a response, and global sequence ids are never reused.
 
 ## Agent executor contract
 
@@ -249,7 +254,7 @@ node tla/tests/trace/record-sample.mjs
 tla/tools/validate.sh tla/tests/trace/sample_chart.ts tla/.cache/trace/sample-run.jsonl main
 ```
 
-`TRACE ACCEPTED` means the sampled engine and formal spec agree. It does not prove external agent or script side effects are transactional.
+`TRACE ACCEPTED` means the sampled engine and formal spec agree. The sample exercises an emitted domain fact plus both human and host-resolved interaction records; trace refinement consumes their exact journal order while keeping opened/emit facts control-inert. It does not prove external agent or script side effects or storage appends are transactional; append-batch atomicity remains covered by runtime/store tests.
 
 ## Related pages
 

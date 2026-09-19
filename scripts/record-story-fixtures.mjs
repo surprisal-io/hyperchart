@@ -29,6 +29,7 @@ const families = [
 	"packages/hyperchart/src/react/fixtures/no-input-records-fixture.ts",
 	"packages/hyperchart/src/react/fixtures/actor-runtime-fixtures.ts",
 	"packages/hyperchart/src/react/fixtures/actor-fixtures.ts",
+	"packages/hyperchart/src/react/fixtures/gate-emit-fixtures.ts",
 	"packages/hyperchart/src/react/stories/inspector-panel/specs.ts",
 	".storybook/tui-production-fixture.ts",
 ];

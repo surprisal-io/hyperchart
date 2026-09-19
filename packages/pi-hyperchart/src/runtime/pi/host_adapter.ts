@@ -5,6 +5,7 @@ import {
 	withRunStorage,
 	type RunStorage,
 } from "@surprisal/hyperchart/runtime";
+import type { Dirent } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
@@ -363,7 +364,7 @@ async function readRunSummary(
 	if (metaFingerprint !== undefined && failedRunMetaFingerprints.get(runId) === metaFingerprint) {
 		return undefined;
 	}
-	let meta;
+	let meta: RunMeta;
 	try {
 		meta = await readRunMeta(runId);
 		failedRunMetaFingerprints.delete(runId);
@@ -442,7 +443,7 @@ async function listChartFiles(root: string): Promise<string[]> {
 }
 
 async function walk(dir: string, files: string[], root: string): Promise<void> {
-	let entries;
+	let entries: Dirent[];
 	try {
 		entries = await readdir(dir, { withFileTypes: true });
 	} catch {

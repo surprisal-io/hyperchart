@@ -27,7 +27,7 @@ const meta = {
 		kind: { control: false },
 		width: { control: "inline-radio", options: [60, 80, 120], description: "Terminal width in columns." },
 		theme: { control: "inline-radio", options: ["dark", "light"] },
-		preset: { control: "select", options: ["initial", "stopped", "stoppedWithWarning"] },
+		preset: { control: "select", options: ["initial", "stopped", "stoppedWithWarning", "gateAndEmit"] },
 		interactive: { control: "boolean" },
 	},
 } satisfies Meta<typeof TuiTerminalPreview>;
@@ -60,6 +60,23 @@ export const InteractiveSelection: Story = {
 export const StoppedRunSelected: Story = {
 	args: { preset: "stopped" },
 	parameters: { docs: { description: { story: "Stopped but resumable production-shaped run selected." } } },
+};
+
+export const GateAndEmitSummary: Story = {
+	args: { preset: "gateAndEmit", width: 120, interactive: false },
+	parameters: {
+		docs: {
+			description: {
+				story: "Production run-history row with the latest host-gate resolution and accepted domain emit summary.",
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("TUI live: history"));
+		await expect(canvas.getByLabelText("TUI plain text")).toHaveTextContent("gate 3 resolved → APPROVED");
+		await expect(canvas.getByLabelText("TUI plain text")).toHaveTextContent("emit release.approved");
+	},
 };
 
 export const WidthMatrix: Story = {

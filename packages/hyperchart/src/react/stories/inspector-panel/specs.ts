@@ -41,6 +41,16 @@ import {
 	actorPoolCrowdedRecords,
 	actorSelfChart,
 } from "../../fixtures/actor-fixtures.js";
+import {
+	emitStoryChart,
+	emitStorySchedule,
+	gateStoryChart,
+	mapEmitStorySchedule,
+	pendingGateSchedule,
+	resolvedGateSchedule,
+	validatedEmitStoryChart,
+	validatedEmitStorySchedule,
+} from "../../fixtures/gate-emit-fixtures.js";
 
 export type InspectorPanelRuntime = {
 	selectedStateId: StatePath | null;
@@ -63,6 +73,7 @@ export type InspectorPanelGroupId =
 	| "actorMessaging"
 	| "actorRuntime"
 	| "user"
+	| "gate"
 	| "script"
 	| "tsImport"
 	| "map"
@@ -123,6 +134,12 @@ export const inspectorPanelGroups: Array<{
 		title: "User states",
 		description: "User-input states and their prompt/transition details.",
 		storyId: "hyperchart-visual-tests-inspector-panel--user-states",
+	},
+	{
+		id: "gate",
+		title: "Host gates & emits",
+		description: "Pending and resolved host gates plus accepted domain emits from ordinary and validated agents.",
+		storyId: "hyperchart-visual-tests-inspector-panel--host-gates-and-emits",
 	},
 	{
 		id: "script",
@@ -1033,6 +1050,64 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 				pushInvoke(builder, ast, "publish");
 				return builder.records;
 			},
+		},
+	},
+	{
+		group: "gate",
+		title: "Pending host gate",
+		description: "An unresolved host gate shows its event, payload, reply contract, and open visit invocation.",
+		graphAtlas: true,
+		chart: gateStoryChart,
+		runtime: {
+			selectedStateId: "release-gate",
+			records: () => pendingGateSchedule,
+		},
+	},
+	{
+		group: "gate",
+		title: "Resolved host gate",
+		description: "The accepted host response is retained in visit history while the selected transition advances.",
+		graphAtlas: true,
+		chart: gateStoryChart,
+		runtime: {
+			selectedStateId: "release-gate",
+			records: () => resolvedGateSchedule,
+		},
+	},
+	{
+		group: "gate",
+		title: "Accepted action emits",
+		description: "Ordered domain facts appear only after the publisher completion is accepted.",
+		graphAtlas: false,
+		chart: emitStoryChart,
+		runtime: {
+			selectedStateId: "publish",
+			run: { status: "completed" },
+			records: () => emitStorySchedule,
+		},
+	},
+	{
+		group: "gate",
+		title: "Mapped action emits",
+		description: "A real map worker emit combines its durable map key, typed item fields, result, argument, and visit.",
+		graphAtlas: false,
+		chart: emitStoryChart,
+		runtime: {
+			selectedStateId: "publish-map#0.announce",
+			run: { status: "completed", args: { environment: "production" } },
+			records: () => mapEmitStorySchedule,
+		},
+	},
+	{
+		group: "gate",
+		title: "Validated agent emits",
+		description: "The validated publisher emits its domain fact only after the positive guard verdict.",
+		graphAtlas: false,
+		chart: validatedEmitStoryChart,
+		runtime: {
+			selectedStateId: "publish",
+			run: { status: "completed" },
+			records: () => validatedEmitStorySchedule,
 		},
 	},
 	{

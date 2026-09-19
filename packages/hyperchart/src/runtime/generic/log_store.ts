@@ -9,6 +9,7 @@ import {
 	type BranchMetadata,
 	type DurableLogRecord,
 	type DurableRecordDraft,
+	type ResolvedGateLog,
 	type StorageEntry,
 } from "../../core/durable_events.js";
 import { actionUidKey } from "../../core/action_uid.js";
@@ -185,7 +186,7 @@ export interface RunHistoryStore {
 	findUserInteractionResponse(input: {
 		headSeqId: number | null;
 		gateSeqId: number;
-	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined>;
+	}): Promise<ResolvedGateLog | undefined>;
 }
 
 /** @internal Materialized index used only by file and memory backends. */
@@ -600,10 +601,14 @@ function recordOccurrence(record: DurableLogRecord): StatePath | undefined {
 export function findUserInteractionResponseInAncestry(
 	ancestry: readonly DurableLogRecord[],
 	gateSeqId: number,
-): Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined {
+): ResolvedGateLog | undefined {
 	for (let index = ancestry.length - 1; index >= 0; index--) {
 		const record = ancestry[index]!;
-		if (record.type === "user_interaction" && record.kind === "resolved" && record.gateSeqId === gateSeqId) {
+		if (
+			(record.type === "user_interaction" || record.type === "gate") &&
+			record.kind === "resolved" &&
+			record.gateSeqId === gateSeqId
+		) {
 			return record;
 		}
 	}
@@ -703,7 +708,7 @@ export async function collectBranches(reader: Pick<RunHistoryStore, "listBranche
 }
 
 export type UserInteractionResponseCommit = Readonly<{
-	record: Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }>;
+	record: ResolvedGateLog;
 	idempotent: boolean;
 }>;
 
@@ -1028,7 +1033,7 @@ export class JsonlLogStore implements RunLogStore {
 	async findUserInteractionResponse(input: {
 		headSeqId: number | null;
 		gateSeqId: number;
-	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
+	}): Promise<ResolvedGateLog | undefined> {
 		return findUserInteractionResponseInAncestry(
 			this.index().materializeHistoryToHead(input.headSeqId),
 			input.gateSeqId,
@@ -1314,7 +1319,8 @@ export function assertDurableRecordDraft(value: DurableRecordDraft): void {
 	if (
 		"input" in value &&
 		value.input !== undefined &&
-		(value.type === "state_action" || (value.type === "user_interaction" && value.kind === "opened"))
+		(value.type === "state_action" ||
+			((value.type === "user_interaction" || value.type === "gate") && value.kind === "opened"))
 	) {
 		requireResolvedInput(value.input, `${value.type}.input`);
 	}

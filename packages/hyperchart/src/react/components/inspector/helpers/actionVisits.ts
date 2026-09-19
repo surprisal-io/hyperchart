@@ -193,14 +193,34 @@ export function actionStateContexts(states: readonly HyperchartStateInfo[]): Act
 	return contexts;
 }
 
-function isActionState(state: HyperchartStateInfo): boolean {
-	return (
-		state.type === undefined ||
-		state.type === "agent" ||
-		state.type === "user" ||
-		state.type === "script" ||
-		state.type === "tsImport"
-	);
+export function isActionState(state: HyperchartStateInfo): boolean {
+	const type = state.type ?? "agent";
+	switch (type) {
+		case "agent":
+		case "user":
+		case "gate":
+		case "script":
+		case "tsImport":
+			return true;
+		case "send":
+		case "sendBatch":
+		case "call":
+		case "callBatch":
+		case "actor-declaration":
+		case "actor-occurrence":
+		case "receive":
+		case "reply":
+		case "map":
+		case "parallel":
+		case "compound":
+		case "region":
+		case "final":
+			return false;
+		default: {
+			const exhaustive: never = type;
+			throw new Error(`Unknown Hyperchart state type: ${exhaustive}`);
+		}
+	}
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

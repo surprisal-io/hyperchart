@@ -8,7 +8,11 @@ import {
 	RectangleStackIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
-import type { HyperchartInspectorDataSource, HyperchartStateInfo } from "../../../types.js";
+import type {
+	HyperchartInspectorDataSource,
+	HyperchartLaunchArgumentInfo,
+	HyperchartStateInfo,
+} from "../../../types.js";
 import type { HistorySnapshot } from "../../../../runtime/generic/log_store.js";
 import { agentStatesForSelection, stateConcurrencyLabel, stateDisplayName, stateKindMeta } from "../helpers/state.js";
 import {
@@ -36,10 +40,12 @@ import { DefinitionSection } from "./DefinitionSection.js";
 import { EnvTypeDisplay } from "./EnvTypeDisplay.js";
 import { RuntimeSection } from "./RuntimeSection.js";
 import { TransitionsSection } from "./TransitionsSection.js";
+import { TransitionBindingJson } from "./TransitionBindingJson.js";
 
 export function StateDetails({
 	state,
 	allStates,
+	launchArgs,
 	definitionSource,
 	onOpenScope,
 	onNavigateToState,
@@ -61,6 +67,7 @@ export function StateDetails({
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
+	launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
 	definitionSource?: string;
 	onOpenScope?: (stateId: string) => void;
 	onNavigateToState?: (stateId: string) => void;
@@ -383,6 +390,32 @@ export function StateDetails({
 				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
 			/>
 
+			{state.type === "gate" && state.gateEvent !== undefined && state.gatePayload !== undefined && (
+				<Section title="Gate request" icon={CodeBracketSquareIcon} defaultOpen>
+					<div>
+						<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">gate event</div>
+						<code className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-[var(--hc-amber-text)]">
+							{state.gateEvent}
+						</code>
+					</div>
+					<div>
+						<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">payload</div>
+						<TransitionBindingJson
+							state={state}
+							allStates={allStates}
+							{...(launchArgs === undefined ? {} : { launchArgs })}
+							input={state.gatePayload}
+							visibleReplyStateIds={[state.id, ...revealedReplyStateIds]}
+							onReplyFieldClick={focusReplyField}
+							{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+							{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+							{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+							{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
+						/>
+					</div>
+				</Section>
+			)}
+
 			{(mapOver !== undefined || state.inputs?.length || state.onReenter) && (
 				<Section title="Inputs & re-entry" icon={CodeBracketSquareIcon}>
 					{mapOver !== undefined && (
@@ -465,6 +498,7 @@ export function StateDetails({
 			<ActorMessageDefinitionSection
 				state={state}
 				allStates={allStates}
+				{...(launchArgs === undefined ? {} : { launchArgs })}
 				{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 				{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
@@ -491,7 +525,17 @@ export function StateDetails({
 				</>
 			)}
 
-			<TransitionsSection state={state} allStates={allStates} onReplyFieldClick={focusReplyField} />
+			<TransitionsSection
+				state={state}
+				allStates={allStates}
+				{...(launchArgs === undefined ? {} : { launchArgs })}
+				visibleReplyStateIds={[state.id, ...revealedReplyStateIds]}
+				onReplyFieldClick={focusReplyField}
+				{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+				{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+				{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+				{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
+			/>
 
 			<ValidationSection state={state} />
 
@@ -591,6 +635,7 @@ export function StateDetails({
 				<ContractsSection
 					state={state}
 					allStates={allStates}
+					{...(launchArgs === undefined ? {} : { launchArgs })}
 					highlightedReply={highlightedReply}
 					highlightedArtifact={highlightedArtifact}
 					revealedReplyStateIds={revealedReplyStateIds}
@@ -598,6 +643,7 @@ export function StateDetails({
 					{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
 					{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
 					{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+					{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 				/>
 			)}
 

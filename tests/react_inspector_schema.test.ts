@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/react/types.js";
-import {
-	schemaAtPath,
-	schemaTypeText,
-} from "../packages/hyperchart/src/react/components/inspector/helpers/schema.js";
+import { schemaAtPath, schemaTypeText } from "../packages/hyperchart/src/react/components/inspector/helpers/schema.js";
 import {
 	transitionBindingDisplay,
 	transitionBindingLabel,
@@ -27,10 +24,7 @@ const unionReplySchema = {
 					rejectedHypotheses: { type: "array", items: { type: "string" } },
 					shared: { type: "number" },
 					nested: {
-						oneOf: [
-							{ type: "object", properties: { reason: { type: "string" } } },
-							{ type: "null" },
-						],
+						oneOf: [{ type: "object", properties: { reason: { type: "string" } } }, { type: "null" }],
 					},
 				},
 			},
@@ -54,6 +48,17 @@ describe("Inspector schema paths", () => {
 		const binding = transitionBindingDisplay("event:screeningAttempt");
 
 		expect(transitionBindingTitle(state, binding)).toBe("number");
+	});
+
+	it("shows normalized chart argument types for arg bindings", () => {
+		const state: HyperchartStateInfo = { id: "publish", status: "running" };
+		const binding = transitionBindingDisplay('arg("environment")');
+
+		expect(
+			transitionBindingTitle(state, binding, [state], {
+				environment: { schema: { kind: "jsonSchema", schema: { enum: ["staging", "production"] } } },
+			}),
+		).toBe('"staging" | "production"');
 	});
 
 	it("shows the source state input type for input bindings", () => {

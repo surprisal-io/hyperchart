@@ -16,6 +16,7 @@ import {
 	chart,
 	compound,
 	final,
+	gate,
 	map,
 	message,
 	parallel,
@@ -90,6 +91,28 @@ function openInputGateAst(): ChartAst {
 					input: { context: z.object({ id: z.string() }).default({ id: "default" }) },
 					action: user({ prompt: "Choose", options: ["CHOOSE"] }),
 					transitions: { CHOOSE: "done" },
+				},
+				done: final(),
+			},
+		}) as ChartCst,
+	);
+	if (!result.ok) {
+		throw new Error(JSON.stringify(result.diagnostics));
+	}
+	return result.ast;
+}
+
+function openHostGateAst(): ChartAst {
+	const result = normalizeChartConfig(
+		chart({
+			kind: "chart",
+			id: "open-host-gate-checkpoint",
+			initial: "wait",
+			states: {
+				wait: {
+					kind: "state",
+					action: gate({ event: "approval.requested", payload: { id: "r-1" }, reply: z.object({ ok: z.boolean() }) }),
+					transitions: { APPROVE: "done" },
 				},
 				done: final(),
 			},
@@ -382,6 +405,53 @@ describe("projection checkpoint schema", () => {
 		}
 		opened.input = { invalid: Number.POSITIVE_INFINITY };
 		expect(decodeCheckpoint(malformed, chartAst)).toBeUndefined();
+	});
+
+	it("round-trips and restores an open host gate", async () => {
+		const chartAst = openHostGateAst();
+		const state = chartAst.states.wait;
+		if (state?.kind !== "state" || state.action.kind !== "gate") {
+			throw new Error("expected gate action");
+		}
+		const store = new MemoryLogStore();
+		const records = await store.appendDrafts([
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "gate-session",
+				actionUid: state.action.uid,
+				definition: state.action,
+			},
+			{
+				type: "gate",
+				kind: "opened",
+				actionUid: state.action.uid,
+				phaseSeqId: 2,
+				event: "approval.requested",
+				payload: { id: "r-1" },
+				...(state.action.reply === undefined ? {} : { reply: state.action.reply }),
+			},
+		]);
+		const projection = fullyProject(chartAst, records);
+		const contract = projectionContractForAst(chartAst);
+		const encoded = encodeCheckpoint({
+			checkpointId: "open-host-gate",
+			headSeqId: records.at(-1)!.seqId,
+			contract,
+			projection,
+			createdAt: 1,
+		});
+		const decoded = decodeCheckpoint(encoded, chartAst);
+		expect(decoded?.projection.openUserInteractions[records.at(-1)!.seqId]?.opened).toMatchObject({
+			type: "gate",
+			kind: "opened",
+			event: "approval.requested",
+			payload: { id: "r-1" },
+		});
+		await store.storeCheckpoint(encoded);
+		const restored = await loadBranchProjection({ ast: chartAst, branchId: "main", store, contract });
+		expect(restored.replayedRecords).toBe(0);
+		expect(restored.projection).toEqual(projection);
 	});
 
 	it("rejects poisoned current-version nested projection families", () => {

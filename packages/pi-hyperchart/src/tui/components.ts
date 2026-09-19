@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { resolveRunPaths, openRunLogStore } from "@surprisal/hyperchart/runtime";
+import { resolveRunPaths, openRunLogStore, withRunStorage, type RunStorage } from "@surprisal/hyperchart/runtime";
 import { readRunStatus } from "@surprisal/hyperchart/sessions";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -30,6 +30,8 @@ export type RunComponentOptions = {
 	branchId?: string;
 	live?: boolean;
 	cwd?: string;
+	/** Explicit storage namespace for previews and other hosts outside an ambient run scope. */
+	storage?: RunStorage;
 };
 
 export type RunHistoryItem = {
@@ -42,6 +44,8 @@ export type RunHistoryItem = {
 	sessionCount: number;
 	createdAt: string;
 	updatedAt: string;
+	/** Optional bounded durable-activity summary supplied by the run-history host. */
+	summary?: string;
 };
 
 export type RunHistoryAction = { kind: "view"; runId: string } | { kind: "close" };
@@ -120,6 +124,7 @@ function runSelectItems(items: readonly RunHistoryItem[]): SelectItem[] {
 		value: item.runId,
 		label: item.runId,
 		description: [
+			item.summary,
 			item.chartId,
 			runStateGlyph(item),
 			item.state,
@@ -214,12 +219,17 @@ export class RunWidget implements Component {
 						this.theme,
 						`  heads ${view.branches.map((branch) => `${branch.branchId}@${branch.headSeqId ?? "empty"}`).join(" · ")}${view.branchCount > view.branches.length ? ` · +${view.branchCount - view.branches.length} more` : ""}`,
 					);
+		const domainActivity = view.tail
+			.filter((entry) => entry.text.startsWith("gate ") || entry.text.startsWith("emit "))
+			.slice(-3)
+			.map((entry) => dim(this.theme, `  ${entry.text}`));
 		return [
 			header,
 			heads,
 			this.refreshError === undefined ? undefined : error(this.theme, `  inspect failed: ${this.refreshError}`),
 			...activeLines,
 			hidden > 0 ? dim(this.theme, `  +${hidden} more`) : undefined,
+			...domainActivity,
 		]
 			.filter((line): line is string => line !== undefined)
 			.map((line) => truncate(line, width));
@@ -234,14 +244,23 @@ export class RunWidget implements Component {
 		if (this.disposed) {
 			return;
 		}
-		const progressPath = sessionProgressPath(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions"));
-		const stat = `${readRunStatus(this.opts.runId)?.updatedAt ?? 0}:${statKeyFor(progressPath)}`;
+		const progressPath = sessionProgressPath(
+			resolve(resolveRunPaths(this.opts.runId, this.opts.storage).runDir, "sessions"),
+		);
+		const status =
+			this.opts.storage === undefined
+				? readRunStatus(this.opts.runId)
+				: withRunStorage(this.opts.storage, () => readRunStatus(this.opts.runId));
+		const stat = `${status?.updatedAt ?? 0}:${statKeyFor(progressPath)}`;
 		if (stat === this.lastStat && this.view !== undefined) {
 			return;
 		}
 		this.lastStat = stat;
 		const branchId = this.opts.branchId ?? "main";
-		const store = await openRunLogStore(this.opts.runId, { branchId });
+		const store = await openRunLogStore(this.opts.runId, {
+			branchId,
+			...(this.opts.storage === undefined ? {} : { storage: this.opts.storage }),
+		});
 		try {
 			const snapshot = await store.captureSnapshot(branchId);
 			const [execution, recordChunk, branches, recordCount] = await Promise.all([
@@ -251,7 +270,11 @@ export class RunWidget implements Component {
 				store.countRecords(),
 			]);
 			const records = [...recordChunk.items].reverse();
-			const run = await hyperchartRunFromRunId(this.opts.runId, { ast: this.opts.ast, branchId });
+			const run = await (this.opts.storage === undefined
+				? hyperchartRunFromRunId(this.opts.runId, { ast: this.opts.ast, branchId })
+				: withRunStorage(this.opts.storage, () =>
+						hyperchartRunFromRunId(this.opts.runId, { ast: this.opts.ast, branchId }),
+					));
 			this.view = buildRunView(this.opts.ast, records, Date.now(), {
 				branchId,
 				...(run.runnerBranchIds === undefined ? {} : { runnerBranchIds: run.runnerBranchIds }),
@@ -260,7 +283,9 @@ export class RunWidget implements Component {
 				recordCount,
 				execution,
 			});
-			this.progress = readSessionProgress(resolve(resolveRunPaths(this.opts.runId).runDir, "sessions")).sessions;
+			this.progress = readSessionProgress(
+				resolve(resolveRunPaths(this.opts.runId, this.opts.storage).runDir, "sessions"),
+			).sessions;
 			this.progressPercent = summarizeHyperchartProgress(run).pct;
 			this.refreshError = undefined;
 			this.tui.requestRender();

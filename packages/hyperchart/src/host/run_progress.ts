@@ -1,4 +1,4 @@
-import type { HyperchartRunInfo, HyperchartStateInfo } from "./models.js";
+import type { HyperchartRunInfo, HyperchartStateInfo, HyperchartStateType } from "./models.js";
 
 /**
  * Estimate durable run progress from completed action visits and the shortest remaining
@@ -53,16 +53,43 @@ function completedVisitCount(states: HyperchartStateInfo[]): number {
 		if (state.visitHistory !== undefined) {
 			return count + state.visitHistory.filter((visit) => visit.status === "done" || visit.status === "failed").length;
 		}
-		const actionState =
-			state.type === undefined ||
-			state.type === "agent" ||
-			state.type === "user" ||
-			state.type === "script" ||
-			state.type === "tsImport";
 		return (
-			count + (state.final !== true && actionState && (state.status === "done" || state.status === "failed") ? 1 : 0)
+			count +
+			(state.final !== true && isActionStateType(state.type) && (state.status === "done" || state.status === "failed")
+				? 1
+				: 0)
 		);
 	}, 0);
+}
+
+function isActionStateType(type: HyperchartStateType | undefined): boolean {
+	const resolvedType: HyperchartStateType = type ?? "agent";
+	switch (resolvedType) {
+		case "agent":
+		case "user":
+		case "gate":
+		case "script":
+		case "tsImport":
+			return true;
+		case "send":
+		case "sendBatch":
+		case "call":
+		case "callBatch":
+		case "actor-declaration":
+		case "actor-occurrence":
+		case "receive":
+		case "reply":
+		case "map":
+		case "parallel":
+		case "compound":
+		case "region":
+		case "final":
+			return false;
+		default: {
+			const exhaustive: never = resolvedType;
+			throw new Error(`Unknown Hyperchart state type: ${exhaustive}`);
+		}
+	}
 }
 
 function shortestDistanceToChartFinal(startId: string, states: HyperchartStateInfo[]): number | undefined {

@@ -88,9 +88,11 @@ The durable log records:
 - completion events;
 - stored validation verdicts;
 - deadline firing;
-- rendered user gates and their validated answers.
+- rendered human interactions and their validated answers;
+- rendered host-gate contracts and their validated answers;
+- ordered domain events emitted atomically by accepted action outcomes.
 
-It does not record transition targets. Projection recomputes targets from completion events and the current AST.
+Emit records are inert journal facts: they affect neither routing nor executor dispatch. They store the action identity, event, and resolved JSON payload. The journal does not record transition targets. Projection recomputes targets from completion events and the current AST.
 
 This permits compatible chart edits while making incompatible edits detectable. If a historical event would now route differently, replay must report it rather than restore an old mutable state snapshot.
 
@@ -107,7 +109,7 @@ Data moves through named channels:
 - declared artifact paths;
 - visit identity.
 
-Templates resolve those channels immediately before dispatch. Transition bindings may select the accepted event output or resolve the same refs from the firing state's replay-derived scope; an unavailable ref fails before target entry. Prompt text and ambient files are not implicit workflow state. Non-user action invoke/complete/validated facts and opened user gates snapshot the fully resolved declared state input for downstream journal consumers. Those optional JSON copies are informational provenance rather than replay identity, so replay continues to enforce the pre-existing action/guard/gate contracts and accepts older records that lack them.
+Templates resolve those channels immediately before dispatch. Transition bindings and emit payloads may select the accepted event output or resolve the same refs from the firing state's replay-derived scope; an unavailable ref fails before target entry or acceptance append. Prompt text and ambient files are not implicit workflow state. Executor-action invoke/complete/validated facts and opened user/host interactions snapshot the fully resolved declared state input for downstream journal consumers. Those optional JSON copies are informational provenance rather than replay identity, so replay continues to enforce the pre-existing action/guard/gate contracts and accepts older records that lack them.
 
 ## Hierarchy
 
@@ -151,7 +153,7 @@ Adapters produce canonical models. React components do not parse raw logs or red
 
 ## Formal model
 
-`tla/spec/Hyperchart.tla` is an independent articulation of machine semantics. It is not generated from TypeScript and should not be changed merely to make an implementation test pass.
+`tla/spec/Hyperchart.tla` is an independent articulation of machine semantics. It is not generated from TypeScript and should not be changed merely to make an implementation test pass. The control model abstracts both `user()` and `gate()` as actions whose opened facts are inert and whose resolved facts supply completion; emitted domain facts are likewise control-inert and occur only after the modeled acceptance transition.
 
 Model-check scenarios cover review/fix, pipeline, validation gate, fan-out, map, and nesting:
 

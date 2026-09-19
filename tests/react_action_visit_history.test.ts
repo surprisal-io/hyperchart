@@ -254,6 +254,18 @@ describe("Inspector action visit chronology", () => {
 					},
 				},
 				{
+					id: "host-gate",
+					type: "gate",
+					status: "waiting",
+					runtimeSummary: {
+						status: "waiting",
+						visitCount: 1,
+						hasOlderRuntime: false,
+						issueCount: 0,
+						actorMessageCount: 0,
+					},
+				},
+				{
 					id: "future",
 					type: "script",
 					status: "pending",
@@ -269,6 +281,7 @@ describe("Inspector action visit chronology", () => {
 		).toEqual([
 			{ stateId: "active", label: "Active" },
 			{ stateId: "waiting", label: "Waiting" },
+			{ stateId: "host-gate", label: "Waiting" },
 			{ stateId: "future", label: "Pending—not guaranteed to execute" },
 		]);
 		expect(actionVisitStatusLabel(visit(7, 1, "cancelled", 1, "scope_exit"))).toBe("Cancelled · Scope exited");

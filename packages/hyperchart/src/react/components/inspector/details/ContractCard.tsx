@@ -1,32 +1,40 @@
 import { ArchiveBoxIcon } from "@heroicons/react/24/outline";
-import type { HyperchartStateInfo } from "../../../types.js";
+import type { HyperchartLaunchArgumentInfo, HyperchartStateInfo } from "../../../types.js";
 import { hasInterpolation } from "../helpers/interpolation.js";
 import { artifactContractElementId, replySectionElementId, schemaLabel } from "../helpers/schema.js";
 import { stateDisplayName } from "../helpers/state.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
 import { TypeBlock } from "../ui/TypeBlock.js";
 import { TypeTooltip } from "../ui/TypeTooltip.js";
+import { TransitionBindingJson } from "./TransitionBindingJson.js";
 
 export function ContractCard({
 	state,
 	allStates,
+	launchArgs,
 	showStateName,
 	highlightedReplyPath,
 	highlightedArtifactName,
 	onHighlightInput,
 	onHighlightReply,
 	onHighlightRef,
+	onNavigateToState,
+	visibleReplyStateIds = [state.id],
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
+	launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
 	showStateName: boolean;
 	highlightedReplyPath?: string | null;
 	highlightedArtifactName?: string | null;
 	onHighlightInput?: (name: string) => void;
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
+	onNavigateToState?: (stateId: string) => void;
+	visibleReplyStateIds?: readonly string[];
 }) {
 	const hasArtifacts = (state.artifacts?.length ?? 0) > 0;
+	const hasEmits = (state.emits?.length ?? 0) > 0;
 	return (
 		<div className="space-y-2 rounded-lg border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2">
 			{showStateName && (
@@ -105,6 +113,42 @@ export function ContractCard({
 						stateId={state.id}
 						highlightedPath={highlightedReplyPath ?? null}
 					/>
+				</div>
+			)}
+			{hasEmits && (
+				<div className="space-y-2">
+					<div className="text-[10px] uppercase tracking-wide text-[var(--hc-cyan-text)]">emits</div>
+					{state.emits?.map((emitted) => (
+						<div
+							key={`${emitted.event}:${JSON.stringify(emitted.payload)}`}
+							className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 p-2"
+						>
+							<span className="rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--hc-cyan-text)]">
+								{emitted.event}
+							</span>
+							<div className="mt-2">
+								<TransitionBindingJson
+									state={state}
+									allStates={allStates}
+									{...(launchArgs === undefined ? {} : { launchArgs })}
+									input={emitted.payload}
+									visibleReplyStateIds={visibleReplyStateIds}
+									{...(onHighlightReply === undefined
+										? {}
+										: { onReplyFieldClick: (path: string) => onHighlightReply(state.id, path) })}
+									{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+									{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+									{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+									{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
+								/>
+							</div>
+							{emitted.schema !== undefined && (
+								<div className="mt-2">
+									<TypeBlock schema={{ schema: emitted.schema }} name={`${emitted.event}Payload`} />
+								</div>
+							)}
+						</div>
+					))}
 				</div>
 			)}
 		</div>

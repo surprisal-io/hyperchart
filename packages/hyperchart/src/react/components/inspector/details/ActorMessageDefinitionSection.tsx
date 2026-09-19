@@ -1,14 +1,16 @@
 import { ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
-import type { HyperchartStateInfo } from "../../../types.js";
+import type { HyperchartLaunchArgumentInfo, HyperchartStateInfo } from "../../../types.js";
 import { TemplateTextBlock } from "../prompt/TemplateTextBlock.js";
 import { Section } from "../ui/Section.js";
 import { TypeBlock } from "../ui/TypeBlock.js";
 import { TypeTooltip } from "../ui/TypeTooltip.js";
 import { ActorProtocolCard } from "./ActorProtocolCard.js";
+import { TransitionBindingJson } from "./TransitionBindingJson.js";
 
 export function ActorMessageDefinitionSection({
 	state,
 	allStates,
+	launchArgs,
 	onHighlightInput,
 	onHighlightReply,
 	onHighlightRef,
@@ -16,6 +18,7 @@ export function ActorMessageDefinitionSection({
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
+	launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
 	onHighlightInput?: (name: string) => void;
 	onHighlightReply?: (stateId: string, path: string) => void;
 	onHighlightRef?: (value: string) => void;
@@ -80,17 +83,30 @@ export function ActorMessageDefinitionSection({
 						<div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--hc-cyan-text)]">
 							{definition.payload.label} expression
 						</div>
-						<TemplateTextBlock
-							text={definition.payload.source}
-							state={state}
-							allStates={allStates}
-							language="typescript"
-							collapsedLines={4}
-							wrapLongLines
-							{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
-							{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
-							{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
-						/>
+						{definition.payload.value === undefined ? (
+							<TemplateTextBlock
+								text={definition.payload.source}
+								state={state}
+								allStates={allStates}
+								language="typescript"
+								collapsedLines={4}
+								wrapLongLines
+								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+							/>
+						) : (
+							<TransitionBindingJson
+								state={state}
+								allStates={allStates}
+								{...(launchArgs === undefined ? {} : { launchArgs })}
+								input={definition.payload.value}
+								{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+								{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+								{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+								{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
+							/>
+						)}
 						{definition.payload.schema !== undefined && definition.kind === "reply" && (
 							<div className="mt-2">
 								<TypeBlock schema={definition.payload.schema} name="ReplyOutput" />

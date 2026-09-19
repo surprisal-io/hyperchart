@@ -1,7 +1,7 @@
 import type { ElkPoint } from "elkjs/lib/elk.bundled.js";
 import type { Edge, Node } from "@xyflow/react";
 import { UserCircleIcon } from "@heroicons/react/24/outline";
-import type { HyperchartStateInfo, HyperchartStateType } from "../../types.js";
+import type { HyperchartInspectRef, HyperchartStateInfo, HyperchartStateType } from "../../types.js";
 
 export type HeroIcon = typeof UserCircleIcon;
 
@@ -83,5 +83,5 @@ export type StateInput = NonNullable<HyperchartStateInfo["inputs"]>[number];
 
 export type TransitionBindingDisplay =
 	| { kind: "event"; path?: string }
-	| { kind: "input"; name: string; path?: string; preview: string }
+	| HyperchartInspectRef
 	| { kind: "unknown"; preview: string };

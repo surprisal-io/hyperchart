@@ -3,8 +3,10 @@ import {
 	agent,
 	artifact,
 	compound,
+	emit,
 	final,
 	failed,
+	gate,
 	json,
 	map,
 	normalizeChartConfig,
@@ -30,6 +32,7 @@ import {
 	visit,
 } from "../packages/hyperchart/src/core/dsl.js";
 import { loop, start } from "./helpers/execution.js";
+import { BranchExecution } from "../packages/hyperchart/src/execution/branch_execution.js";
 import type {
 	ActionUID,
 	ChartAst,
@@ -2594,22 +2597,22 @@ describe("execution loop", () => {
 						const output =
 							effect.actionUid.state === "plan"
 								? {
-									chapters: {
-										"9007199254740993": "large-second",
-										"9007199254740992": "large-first",
-										z: "last",
-										a: "first",
-									},
-								}
+										chapters: {
+											"9007199254740993": "large-second",
+											"9007199254740992": "large-first",
+											z: "last",
+											a: "first",
+										},
+									}
 								: {
-									belief: effect.actionUid.state.includes("#9007199254740992")
-										? "large-first"
-										: effect.actionUid.state.includes("#9007199254740993")
-											? "large-second"
-											: effect.actionUid.state.includes("#a")
-												? "first"
-												: "last",
-								};
+										belief: effect.actionUid.state.includes("#9007199254740992")
+											? "large-first"
+											: effect.actionUid.state.includes("#9007199254740993")
+												? "large-second"
+												: effect.actionUid.state.includes("#a")
+													? "first"
+													: "last",
+									};
 						events.push({
 							kind: "agent",
 							effectId: effect.id,
@@ -2793,5 +2796,309 @@ describe("execution loop", () => {
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		expect(state.projection.spawns.chapters).toEqual(PLAN_OUTPUT.chapters);
+	});
+
+	it("atomically appends ordered emits after an accepted completion, including self result()", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "emit-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { reply: z.object({ id: z.string() }) }),
+						emit: [
+							emit({ event: "work.completed", payload: { id: result("work", "id") } }),
+							emit({ event: "audit.recorded", payload: { order: 2 } }),
+						],
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const events: MachineEvent[] = [];
+		const completionBatches: (readonly DurableRecordDraft[])[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "OK", output: { id: "result-7" } } },
+						});
+					}
+					if (effect.kind === "durable_records") {
+						if (effect.records.some((record) => record.type === "state_action" && record.kind === "complete")) {
+							completionBatches.push(effect.records);
+						}
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		const state = await loop(runtime);
+
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(completionBatches).toHaveLength(1);
+		expect(completionBatches[0]).toEqual([
+			expect.objectContaining({
+				type: "state_action",
+				kind: "complete",
+				event: { type: "OK", output: { id: "result-7" } },
+			}),
+			expect.objectContaining({ type: "emit", event: "work.completed", payload: { id: "result-7" } }),
+			expect.objectContaining({ type: "emit", event: "audit.recorded", payload: { order: 2 } }),
+		]);
+	});
+
+	it("emits atomically with a positive validation verdict", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "validated-emit-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { validation: { guard: tsImport("./guard.js", "accept") } }),
+						emit: [emit({ event: "validated", payload: { id: result("work", "id") } })],
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const events: MachineEvent[] = [];
+		const verdictBatches: (readonly DurableRecordDraft[])[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "OK", output: { id: "v-1" } } },
+						});
+					}
+					if (effect.kind === "validate") {
+						events.push({ kind: "validated", effectId: effect.id, outcome: true });
+					}
+					if (effect.kind === "durable_records") {
+						if (effect.records.some((record) => record.type === "state_action" && record.kind === "validated")) {
+							verdictBatches.push(effect.records);
+						}
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		await loop(runtime);
+		expect(verdictBatches).toHaveLength(1);
+		expect(verdictBatches[0]).toEqual([
+			expect.objectContaining({ type: "state_action", kind: "validated", outcome: true }),
+			expect.objectContaining({ type: "emit", event: "validated", payload: { id: "v-1" } }),
+		]);
+	});
+
+	it("does not emit for rejected validation claims", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "rejected-emit-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker", { validation: { guard: tsImport("./guard.js", "reject") } }),
+						emit: [emit({ event: "must.not.happen", payload: {} })],
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
+					}
+					if (effect.kind === "validate") {
+						events.push({ kind: "validated", effectId: effect.id, outcome: { ok: false, reason: "not accepted" } });
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		await loop(runtime);
+		expect((await runtime.loadLogs()).filter((record) => record.type === "emit")).toEqual([]);
+	});
+
+	it("does not emit for invalid completion events", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "invalid-event-emit-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker"),
+						emit: [emit({ event: "must.not.happen", payload: {} })],
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							outcome: { kind: "completed", event: { type: "NOPE" } },
+						});
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		await expect(loop(runtime)).rejects.toThrow("No transition found for event type NOPE");
+		expect((await runtime.loadLogs()).filter((record) => record.type === "emit")).toEqual([]);
+	});
+
+	it("does not emit for failed action outcomes", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "failed-emit-chart",
+				initial: "work",
+				states: {
+					work: {
+						kind: "state",
+						action: agent("worker"),
+						emit: [emit({ event: "must.not.happen", payload: {} })],
+						transitions: { OK: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "agent") {
+						events.push({
+							kind: "agent",
+							effectId: effect.id,
+							outcome: { kind: "failed", failure: { kind: "explicit", retryable: false, message: "boom" } },
+						});
+					}
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		await loop(runtime);
+		expect((await runtime.loadLogs()).filter((record) => record.type === "emit")).toEqual([]);
+	});
+
+	it("opens gates durably without dispatching an executor effect", async () => {
+		const parsed = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "gate-chart",
+				initial: "wait",
+				states: {
+					wait: {
+						kind: "state",
+						action: gate({ event: "approval.requested", payload: { requestId: "r-1" } }),
+						emit: [emit({ event: "approval.resolved", payload: { answer: result("wait", "answer") } })],
+						transitions: { APPROVED: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		if (!parsed.ok) {
+			throw new Error(JSON.stringify(parsed.diagnostics));
+		}
+		const events: MachineEvent[] = [];
+		const runtime = new MockRuntime({
+			ast: parsed.ast,
+			events,
+			onRunEffects(effects) {
+				for (const effect of effects) {
+					if (effect.kind === "durable_records") {
+						events.push(durableRecordsAdded(effect.records, effect.id));
+					}
+				}
+			},
+		});
+
+		await expect(loop(runtime)).rejects.toThrow("Event queue closed before reaching a final state");
+		const waiting = await runtime.loadProjection();
+		const records = await runtime.loadLogs();
+		const opened = records.find((record) => record.type === "gate" && record.kind === "opened");
+		expect(opened).toMatchObject({
+			type: "gate",
+			kind: "opened",
+			event: "approval.requested",
+			payload: { requestId: "r-1" },
+		});
+		expect(runtime.effectBatches.flat().some((effect) => effect.kind === "gate")).toBe(false);
+		if (opened?.type !== "gate" || opened.kind !== "opened") {
+			throw new Error("gate should be open");
+		}
+
+		const execution = BranchExecution.fromProjection(parsed.ast, "main", waiting);
+		const drafts = await execution.prepareUserInteraction(opened, { type: "APPROVED", output: { answer: "yes" } });
+		expect(drafts).toEqual([
+			expect.objectContaining({ type: "gate", kind: "resolved", gateSeqId: opened.seqId }),
+			expect.objectContaining({ type: "emit", event: "approval.resolved", payload: { answer: "yes" } }),
+		]);
 	});
 });

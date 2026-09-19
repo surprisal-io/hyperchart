@@ -1,8 +1,24 @@
-import type { BranchProjection } from "../core/projection.js";
+import { allowedEventsForAction, type BranchProjection } from "../core/projection.js";
 import type { ChartAst, ChartEvent } from "../core/types.js";
 import type { SchemaRegistryLike } from "../core/schema_registry.js";
-import type { DurableRecordDraft, UserInteractionOpenedLog } from "../core/durable_events.js";
+import type { DurableRecordDraft, OpenedGateLog } from "../core/durable_events.js";
+import { createMachine, emittedRecordsForAcceptedCompletion } from "../core/machine.js";
 import { checkSchemaAsync } from "../runtime/generic/schema.js";
+
+/**
+ * The addressed gate is not an open user interaction in the branch's current
+ * history: it was answered, or a head move removed it. A host that decided
+ * from a stale view should re-read state and decide again.
+ */
+export class StaleUserInteractionError extends Error {
+	constructor(
+		readonly branchId: string,
+		readonly gateSeqId: number,
+	) {
+		super(`User interaction ${gateSeqId} is stale or missing from branch '${branchId}'`);
+		this.name = "StaleUserInteractionError";
+	}
+}
 
 export type RespondToUserInteractionInput = Readonly<{
 	ast: ChartAst;
@@ -14,11 +30,11 @@ export type RespondToUserInteractionInput = Readonly<{
 export async function prepareUserInteractionResponseFromProjection(
 	projection: BranchProjection,
 	branchId: string,
-	gate: UserInteractionOpenedLog,
+	gate: OpenedGateLog,
 	input: RespondToUserInteractionInput,
-): Promise<Extract<DurableRecordDraft, { type: "user_interaction"; kind: "resolved" }>> {
+): Promise<readonly DurableRecordDraft[]> {
 	if (gate.seqId !== input.gateSeqId) {
-		throw new Error(`User interaction ${input.gateSeqId} is stale or missing from branch '${branchId}'`);
+		throw new StaleUserInteractionError(branchId, input.gateSeqId);
 	}
 	assertUserEventShape(input.event);
 	const projected = projection.openUserInteractions[input.gateSeqId];
@@ -34,10 +50,14 @@ export async function prepareUserInteractionResponseFromProjection(
 		throw new Error(`User interaction ${input.gateSeqId} is stale or closed`);
 	}
 	if (input.event.type === "FAILED") {
-		throw new Error("FAILED is reserved and cannot be returned by a user");
+		throw new Error("FAILED is reserved and cannot resolve an interaction");
 	}
-	if (!gate.events.includes(input.event.type)) {
-		throw new Error(`Event '${input.event.type}' is not allowed; expected one of ${gate.events.join(", ")}`);
+	const events =
+		gate.type === "user_interaction"
+			? gate.events
+			: allowedEventsForAction(input.ast, gate.actionUid.state).filter((event) => event !== "FAILED");
+	if (!events.includes(input.event.type)) {
+		throw new Error(`Event '${input.event.type}' is not allowed; expected one of ${events.join(", ")}`);
 	}
 	if (gate.reply !== undefined) {
 		const check = await checkSchemaAsync(
@@ -49,13 +69,17 @@ export async function prepareUserInteractionResponseFromProjection(
 			throw new Error(`User response output does not match reply schema: ${check.errors.join("; ")}`);
 		}
 	}
-	return {
-		type: "user_interaction",
+	const resolved: DurableRecordDraft = {
+		type: gate.type,
 		kind: "resolved",
 		gateSeqId: gate.seqId,
 		actionUid: gate.actionUid,
 		event: input.event,
 	};
+	return [
+		resolved,
+		...emittedRecordsForAcceptedCompletion(createMachine(input.ast, projection), gate.actionUid, input.event),
+	];
 }
 
 function assertUserEventShape(event: ChartEvent): void {

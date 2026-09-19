@@ -63,7 +63,7 @@ export const Index: Story = {
 			</div>
 		</BoardPage>
 	),
-	parameters: { docs: { description: { story: "Navigation index for the twelve focused panel boards." } } },
+	parameters: { docs: { description: { story: "Navigation index for the focused inspector panel boards." } } },
 };
 
 function groupStory(groupId: InspectorPanelGroupId, name: string, description: string): Story {
@@ -81,6 +81,11 @@ export const AgentStates = groupStory(
 	"Agent prompts, contextual reads, re-entry, and validation guards.",
 );
 export const UserStates = groupStory("user", "user states", "User-input prompts and transition details.");
+export const HostGatesAndEmits = groupStory(
+	"gate",
+	"host gates & emits",
+	"Host gate invocation history and accepted emit provenance for ordinary and validated actions.",
+);
 export const ScriptStates = groupStory(
 	"script",
 	"script states",

@@ -52,6 +52,8 @@ export type {
 	EventBindingAst,
 	EventBindingCst,
 	EventType,
+	EmitAst,
+	EmitCst,
 	FinalStateAst,
 	FinalStateCst,
 	InputRef,
@@ -91,6 +93,8 @@ export type {
 	GuardOutcome,
 	GuardRef,
 	GuardRefAst,
+	GateActionAst,
+	GateActionCst,
 	OnReenterAst,
 	OnReenterCst,
 	TransitionAst,
@@ -138,6 +142,7 @@ export {
 	key,
 	item,
 	event,
+	emit,
 	failed,
 	final,
 	input,
@@ -151,6 +156,7 @@ export {
 	tsAction,
 	tsImport,
 	user,
+	gate,
 	contract,
 } from "./core/dsl.js";
 
@@ -159,7 +165,7 @@ export type { Runtime } from "./runtime/runtime.js";
 // charts depend on one package only.
 export { z } from "zod";
 export { refs } from "./core/typed.js";
-export type { InputsOf, Paths, ValueAt } from "./core/typed.js";
+export type { ArgsOf, EmitsOf, InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { SchemaRegistry } from "./core/schema_registry.js";
 export type { SchemaRegistryLike } from "./core/schema_registry.js";
@@ -181,6 +187,7 @@ export type {
 	HyperchartInspectResult,
 	HyperchartInspectState,
 	HyperchartInspectTransition,
+	HyperchartInspectValue,
 	InspectChartModuleOptions,
 } from "./core/inspect.js";
 export type {
@@ -192,6 +199,7 @@ export type {
 	ActorEffectMachineEvent,
 	AgentEffect,
 	AgentMachineEvent,
+	GateEffect,
 	CancelEffect,
 	DurableRecordsAddedMachineEvent,
 	DurableRecordsEffect,
@@ -240,6 +248,13 @@ export type {
 	AgentRecoveryMode,
 	AgentRecoveryScope,
 	FailureIntentLog,
+	EmitLog,
+	GateLog,
+	GateOpenedLog,
+	GateResolvedLog,
+	OpenedGateLog,
+	ResolvedGateLog,
+	ResolvedStateInput,
 	StorageEntry,
 	UserInteractionLog,
 	UserInteractionOpenedLog,

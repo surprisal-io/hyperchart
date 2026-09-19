@@ -6,6 +6,26 @@ Every Inspector, Execution, Structure, history, and Storybook visualization must
 
 Never hand-author, clone, patch, merge, or fabricate `HyperchartRunInfo`, `HyperchartStateInfo`, action visits, runtime statuses, map workers, actor occurrences, or other semantic UI models for visual coverage. A synthetic scenario is allowed only when it is executed as a valid chart and the resulting durable facts are captured; replay-valid records assembled by hand are not a substitute for execution-loop output. React components must receive and render those projected objects directly, without story-only semantic transformations. If a desired visual state cannot be produced by a real chart execution, the story must not claim or display it.
 
+## One Storybook dev server, started through npm, with hot reload
+
+Storybook is a long-lived dev server with hot module reload. Do not start a new
+instance to check every change and never spawn several instances on ad-hoc
+ports.
+
+1. Check first: `lsof -iTCP:6006 -sTCP:LISTEN` (or `curl -fsS
+   http://127.0.0.1:6006/index.json`). If it answers, use it; edits to
+   stories, fixtures, and components reload automatically. Regenerated
+   captured fixtures also reload.
+2. Only when nothing listens: `npm run storybook` (port 6006). Use the npm
+   script, not `npx storybook dev -p <random port>`, and do not pass custom
+   ports.
+3. Never kill a running Storybook that you did not start: it is usually the
+   user's session. Port 6007 belongs to a different repository.
+4. For automated verification prefer `npm run build-storybook` plus the
+   Storybook structure/capture tests over driving a dev server with headless
+   Chrome. If you must render a story, do it against the single running
+   server at `http://127.0.0.1:6006/iframe.html?id=<story-id>`.
+
 ## Changing execution semantics? Update the log contract and the model.
 
 The execution semantics live in three places that MUST stay in sync. A change

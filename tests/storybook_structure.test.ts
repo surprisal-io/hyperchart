@@ -149,6 +149,9 @@ describe("Storybook information architecture", () => {
 			"Map item worker",
 			"Map parent overflow",
 			"Parallel branch scope",
+			"Accepted action emits",
+			"Mapped action emits",
+			"Validated agent emits",
 		]);
 		for (const spec of inspectorPanelSpecs) {
 			if (hiddenTitles.has(spec.title)) {
@@ -175,6 +178,64 @@ describe("Storybook information architecture", () => {
 			module: "./actions/score.mjs",
 			export: "scoreCandidate",
 		});
+		expect(visualState("Pending host gate")).toMatchObject({
+			type: "gate",
+			status: "waiting",
+			gateEvent: "release.approval-requested",
+			gatePayload: {
+				releaseId: { kind: "arg", name: "releaseId", preview: 'arg("releaseId")' },
+			},
+			visitHistory: [
+				expect.objectContaining({
+					status: "running",
+					invocation: expect.objectContaining({ kind: "gate", event: "release.approval-requested" }),
+				}),
+			],
+		});
+		expect(visualState("Resolved host gate")).toMatchObject({
+			type: "gate",
+			status: "done",
+			completedEvent: "APPROVED",
+			transitions: expect.arrayContaining([expect.objectContaining({ event: "APPROVED", taken: true })]),
+			visitHistory: [expect.objectContaining({ status: "done", completedEvent: "APPROVED" })],
+		});
+		const emitSpec = inspectorPanelSpecs.find((candidate) => candidate.title === "Accepted action emits");
+		const emitScenario = emitSpec === undefined ? undefined : inspectorPanelScenario(emitSpec);
+		const emitState =
+			emitScenario?.selectedStateId === null
+				? undefined
+				: emitScenario?.run.states.find((state) => state.id === emitScenario?.selectedStateId);
+		expect(emitState?.emits?.[0]?.payload).toMatchObject({
+			release: {
+				environment: { kind: "arg", name: "environment" },
+				state: { nestedPath: { kind: "result", state: "publish", path: "state.nested.path" } },
+			},
+			metrics: { attempts: 2, verified: true, absent: null },
+		});
+		const emitEntries = (emitState?.emits?.[0]?.payload as { entries?: unknown[] } | undefined)?.entries;
+		expect(emitEntries).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					label: expect.objectContaining({ kind: "input", name: "request", path: "path" }),
+				}),
+			]),
+		);
+		const mappedEmitSpec = inspectorPanelSpecs.find((candidate) => candidate.title === "Mapped action emits");
+		const mappedEmitScenario = mappedEmitSpec === undefined ? undefined : inspectorPanelScenario(mappedEmitSpec);
+		const mappedEmitState =
+			mappedEmitScenario?.selectedStateId === null
+				? undefined
+				: mappedEmitScenario?.run.states.find((state) => state.id === mappedEmitScenario?.selectedStateId);
+		expect(mappedEmitState?.emits?.[0]?.payload).toMatchObject({
+			mapKey: { kind: "key" },
+			item: {
+				field: { kind: "item", path: "field" },
+				priority: { kind: "item", path: "priority" },
+			},
+		});
+		expect(inspectorPanelSpecs.find((spec) => spec.title === "Accepted action emits")?.group).toBe("gate");
+		expect(inspectorPanelSpecs.find((spec) => spec.title === "Mapped action emits")?.group).toBe("gate");
+		expect(inspectorPanelSpecs.find((spec) => spec.title === "Validated agent emits")?.group).toBe("gate");
 		expect(visualState("Call batch state")).toMatchObject({
 			type: "callBatch",
 			actorMessageLink: { kind: "callBatch", to: "@workers", event: "WORK" },

@@ -8,13 +8,13 @@ import type {
 	UserInteractionResponseCommit,
 } from "../../packages/hyperchart/src/runtime/generic/log_store.js";
 import { BranchExecution } from "../../packages/hyperchart/src/execution/branch_execution.js";
+import { StaleUserInteractionError } from "../../packages/hyperchart/src/execution/user_interaction.js";
 
 type PreparedCommitStore = RunLogStore | MemoryLogStore;
-type ResponseDraft = Extract<DurableRecordDraft, { type: "user_interaction"; kind: "resolved" }>;
 export type PreparedTestUserInteraction = Readonly<{
 	expectedHeadSeqId: number | null;
 	gateSeqId: number;
-	draft: ResponseDraft;
+	drafts: readonly DurableRecordDraft[];
 	semantic: BranchExecution;
 	existing?: UserInteractionResponseCommit["record"];
 }>;
@@ -42,21 +42,21 @@ export async function prepareUserInteractionCommit(
 		return {
 			expectedHeadSeqId: snapshot.headSeqId,
 			gateSeqId,
-			draft: { type: "user_interaction", kind: "resolved", gateSeqId, actionUid: existing.actionUid, event },
+			drafts: [],
 			semantic,
 			existing,
 		};
 	}
 	const gate = await store.getRecord(gateSeqId);
 	if (
-		gate?.type !== "user_interaction" ||
+		(gate?.type !== "user_interaction" && gate?.type !== "gate") ||
 		gate.kind !== "opened" ||
 		!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: gateSeqId }))
 	) {
-		throw new Error(`User interaction ${gateSeqId} is stale or missing from branch '${branchId}'`);
+		throw new StaleUserInteractionError(branchId, gateSeqId);
 	}
-	const draft = await semantic.prepareUserInteraction(gate, event, options.schemaRegistry);
-	return { expectedHeadSeqId: snapshot.headSeqId, gateSeqId, draft, semantic };
+	const drafts = await semantic.prepareUserInteraction(gate, event, options.schemaRegistry);
+	return { expectedHeadSeqId: snapshot.headSeqId, gateSeqId, drafts, semantic };
 }
 
 export async function commitUserInteractionResponse(
@@ -75,7 +75,7 @@ export async function commitUserInteractionResponse(
 		return { record: prepared.existing, idempotent: true };
 	}
 	const records = await store.appendDraftsAtHead(
-		{ expectedHeadSeqId: prepared.expectedHeadSeqId, drafts: [prepared.draft] },
+		{ expectedHeadSeqId: prepared.expectedHeadSeqId, drafts: prepared.drafts },
 		prepared.semantic.prepareStampedCommit,
 	);
 	return { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };

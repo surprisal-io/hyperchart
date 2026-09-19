@@ -1,7 +1,10 @@
-import type { ChartArgumentAst } from "../core/types.js";
+import type { HyperchartInspectValue } from "../core/inspect_ast.js";
+import type { ChartArgumentAst, JsonSchema } from "../core/types.js";
 import type { BranchListChunk, BranchListCursor, HistorySnapshot } from "../runtime/generic/log_store.js";
 
-/** Canonical serializable metadata consumed by host launch forms. */
+export type { HyperchartInspectRef, HyperchartInspectValue } from "../core/inspect_ast.js";
+
+/** Canonical serializable launch metadata, including the normalized argument JSON Schema when declared. */
 export type HyperchartLaunchArgumentInfo = ChartArgumentAst;
 
 export interface HyperchartInfo {
@@ -30,6 +33,7 @@ export type HyperchartStateStatus =
 export type HyperchartStateType =
 	| "agent"
 	| "user"
+	| "gate"
 	| "script"
 	| "tsImport"
 	| "send"
@@ -139,6 +143,7 @@ export interface HyperchartActorMessageDefinitionInfo {
 	payload?: {
 		label: "input" | "inputs" | "output";
 		source: string;
+		value?: HyperchartInspectValue;
 		schema?: HyperchartSchemaInfo;
 	};
 	contracts?: HyperchartActorMessageContractInfo[];
@@ -383,6 +388,7 @@ export type HyperchartVisitInvocationInfo =
 			artifacts?: HyperchartRenderedArtifactInfo[];
 	  }
 	| { kind: "user"; prompt: string }
+	| { kind: "gate"; event: string; payload?: unknown }
 	| { kind: "actor" };
 
 /** Immutable revision of a deliverable accepted with a completion: rendered path plus content pin. */
@@ -403,6 +409,10 @@ export interface HyperchartVisitInfo {
 	/** Record-only recovery: invocation is recorded, not rendered; runtime derivations are unavailable. */
 	replayWarning?: string;
 	completedEvent?: string;
+	/** Reply payload carried by the completion event that was accepted for this visit. */
+	completedOutput?: unknown;
+	/** Durable domain facts appended atomically after this visit's accepted completion, in journal order. */
+	emits?: Array<{ seqId: number; event: string; payload: unknown }>;
 	endedReason?: "timed_out" | "scope_exit";
 	validationAttempts?: number;
 	/** Resolved visit input. Durable phase provenance is preferred when present; old logs fall back to replay-derived input. */
@@ -530,6 +540,9 @@ export interface HyperchartStateInfo {
 	export?: string;
 	artifacts?: HyperchartArtifactInfo[];
 	replySchema?: HyperchartSchemaInfo;
+	emits?: Array<{ event: string; payload: HyperchartInspectValue; schema?: JsonSchema }>;
+	gateEvent?: string;
+	gatePayload?: HyperchartInspectValue;
 	env?: HyperchartEnvInfo[];
 	validationPolicy?: { guard: HyperchartGuardInfo; onFail: HyperchartRecoveryPolicyInfo };
 	onFail?: HyperchartRecoveryPolicyInfo;

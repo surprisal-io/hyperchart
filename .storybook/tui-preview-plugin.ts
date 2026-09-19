@@ -87,8 +87,9 @@ const presetInputs: Record<ComponentKind, Record<string, string[]>> = {
 		initial: [],
 		stopped: ["\u001b[B"],
 		stoppedWithWarning: ["\u001b[B", "\u001b[B"],
+		gateAndEmit: ["\u001b[B", "\u001b[B", "\u001b[B"],
 	},
-	widget: { initial: [], manyRunning: [] },
+	widget: { initial: [], manyRunning: [], gateAndEmit: [] },
 };
 
 async function waitForData(component: PreviewComponent, width: number): Promise<void> {
@@ -122,8 +123,15 @@ async function createComponent(
 	} else {
 		session.component = withRunStorage(
 			data.storage,
-			() => new RunWidget(tui, theme as never, preset === "manyRunning" ? data.manyRunning : data.primary),
+			() =>
+				new RunWidget(
+					tui,
+					theme as never,
+					preset === "manyRunning" ? data.manyRunning : preset === "gateAndEmit" ? data.gateAndEmit : data.primary,
+				),
 		);
+		await withRunStorage(data.storage, () => waitForData(session.component, width));
+		return session;
 	}
 	await waitForData(session.component, width);
 	return session;

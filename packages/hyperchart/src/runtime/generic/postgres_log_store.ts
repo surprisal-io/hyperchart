@@ -6,6 +6,7 @@ import {
 	type BranchMetadata,
 	type DurableLogRecord,
 	type DurableRecordDraft,
+	type ResolvedGateLog,
 	type StorageEntry,
 } from "../../core/durable_events.js";
 import {
@@ -358,7 +359,7 @@ export class PostgresLogStore implements RunLogStore {
 	async findUserInteractionResponse(input: {
 		headSeqId: number | null;
 		gateSeqId: number;
-	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
+	}): Promise<ResolvedGateLog | undefined> {
 		await this.awaitReadable();
 		const ancestry = await materializeHistoryToHeadDirect(
 			this.journal.client,

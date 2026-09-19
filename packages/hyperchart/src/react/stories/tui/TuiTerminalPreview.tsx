@@ -24,10 +24,12 @@ type PreviewResponse = {
 const API_PREFIX = "/__hyperchart_tui";
 
 function stripAnsi(value: string): string {
+	const ansiEscape = "\u001b";
+	const bell = "\u0007";
 	return value
-		.replace(/\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g, "")
-		.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "")
-		.replace(/\u001b_[^\u001b]*(?:\u001b\\)/g, "");
+		.replace(new RegExp(`${ansiEscape}\\][^${bell}]*(?:${bell}|${ansiEscape}\\\\)`, "g"), "")
+		.replace(new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g"), "")
+		.replace(new RegExp(`${ansiEscape}_[^${ansiEscape}]*(?:${ansiEscape}\\\\)`, "g"), "");
 }
 
 function staticLines(theme: TuiTheme, width: TuiWidth, kind: TuiComponentKind, preset: string): string[] {
@@ -61,6 +63,7 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 	const [resetToken, setResetToken] = useState(0);
 
 	useEffect(() => {
+		void resetToken;
 		let disposed = false;
 		let createdSessionId: string | undefined;
 		setLines(staticLines(theme, width, kind, preset));
@@ -121,7 +124,7 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 		host.replaceChildren();
 		const terminal = new Terminal({
 			cols: width,
-			rows: kind === "widget" ? (preset === "manyRunning" ? 6 : 3) : 22,
+			rows: kind === "widget" ? (preset === "manyRunning" || preset === "gateAndEmit" ? 7 : 3) : 22,
 			convertEol: true,
 			cursorBlink: false,
 			cursorStyle: "block",
@@ -150,6 +153,7 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 	}, [interactive, kind, preset, theme, width]);
 
 	useEffect(() => {
+		void width;
 		const terminal = terminalRef.current;
 		if (terminal === null) {
 			return;
@@ -168,9 +172,9 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 					? `TUI action: ${action.kind}${action.runId === undefined ? "" : ` ${action.runId}`}`
 					: `TUI ${mode}: ${kind} · ${lastInput}`}
 			</div>
-			<pre className="sr-only" aria-label="TUI plain text">
+			<section aria-label="TUI plain text" className="sr-only">
 				{plainText}
-			</pre>
+			</section>
 			{interactive && kind !== "widget" && (
 				<div className="flex flex-wrap items-center gap-2 text-xs">
 					<fieldset disabled={controlsDisabled} className="contents disabled:opacity-50">
@@ -206,6 +210,7 @@ export function TuiTerminalPreview({ kind, width, theme, preset, interactive = t
 			>
 				<div
 					ref={hostRef}
+					role="img"
 					style={{ position: "relative", width: `${width * 8.15}px`, contain: "paint" }}
 					aria-label={`${width}-column ${kind} TUI preview`}
 				/>

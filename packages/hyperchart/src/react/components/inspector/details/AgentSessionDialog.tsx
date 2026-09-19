@@ -28,6 +28,11 @@ export function AgentSessionDialog({
 	const [sendError, setSendError] = useState<string>();
 	useModalDialog({ dialogRef, initialFocusRef: closeRef, onClose, open: true });
 	useEffect(() => {
+		void session.messages;
+		void session.currentReasoning;
+		void session.currentText;
+		void session.currentTool;
+		void session.lastMessage;
 		const transcript = transcriptRef.current;
 		if (transcript !== null && stickToBottomRef.current) {
 			transcript.scrollTop = transcript.scrollHeight;
@@ -294,6 +299,7 @@ function CollapsibleTranscriptText({ text }: { text: string }) {
 	const [expandable, setExpandable] = useState(false);
 	const [expanded, setExpanded] = useState(false);
 	useLayoutEffect(() => {
+		void text;
 		const container = containerRef.current;
 		const measurement = measurementRef.current;
 		if (container === null || measurement === null) {

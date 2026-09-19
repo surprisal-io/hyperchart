@@ -16,7 +16,7 @@ import {
 	type ProjectionSkippedRecord,
 } from "./projection.js";
 import type { ActionUID, ChartAst, StatePath } from "./types.js";
-import { userInteractionOpenedDraft } from "./machine.js";
+import { gateOpenedDraft, userInteractionOpenedDraft } from "./machine.js";
 
 export type ReplayBrokenRecord = Readonly<{
 	index: number;
@@ -46,7 +46,8 @@ export type ReplayStaleRecord = Readonly<{
 		| "actor_placement_changed"
 		| "actor_message_source_changed"
 		| "actor_reply_contract_changed"
-		| "user_interaction_contract_changed";
+		| "user_interaction_contract_changed"
+		| "gate_contract_changed";
 	message: string;
 	invokeSeqId?: number;
 }>;
@@ -169,7 +170,7 @@ function staleRecordsFor(
 	index: number,
 	record: DurableLogRecord,
 ): ReplayStaleRecord[] {
-	if (record.type === "user_interaction" && record.kind === "opened") {
+	if ((record.type === "user_interaction" || record.type === "gate") && record.kind === "opened") {
 		const pending = projection.pendingActions.find(
 			(entry) =>
 				sameActionUid(entry.actionUid, record.actionUid) &&
@@ -179,7 +180,10 @@ function staleRecordsFor(
 		if (pending === undefined) {
 			return [];
 		}
-		const expected = userInteractionOpenedDraft({ ast, projection }, pending);
+		const expected =
+			record.type === "gate"
+				? gateOpenedDraft({ ast, projection }, pending)
+				: userInteractionOpenedDraft({ ast, projection }, pending);
 		// Resolved gate input is durable informational provenance for consumers, not replay identity.
 		// Omitting it preserves old opened records, while all pre-existing rendered-contract checks remain exact.
 		if (
@@ -194,8 +198,8 @@ function staleRecordsFor(
 				seqId: record.seqId,
 				record,
 				state: record.actionUid.state,
-				reason: "user_interaction_contract_changed",
-				message: `Rendered user interaction contract for ${record.actionUid.state} changed since gate seqId ${record.seqId}`,
+				reason: record.type === "gate" ? "gate_contract_changed" : "user_interaction_contract_changed",
+				message: `Rendered ${record.type === "gate" ? "gate" : "user interaction"} contract for ${record.actionUid.state} changed since gate seqId ${record.seqId}`,
 				invokeSeqId: pending.invokeSeqId,
 			},
 		];
@@ -413,7 +417,7 @@ function brokenRecordFor(
 		error: error instanceof Error ? error.message : String(error),
 	};
 	if (record.type !== "state_action") {
-		if (record.type === "user_interaction") {
+		if (record.type === "user_interaction" || record.type === "gate" || record.type === "emit") {
 			const pending = projection.pendingActions.find((entry) => sameActionUid(entry.actionUid, record.actionUid));
 			return {
 				...base,
@@ -474,9 +478,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function openedComparable(
-	record: Extract<DurableLogRecord | DurableRecordDraft, { type: "user_interaction"; kind: "opened" }>,
-) {
+function openedComparable(record: Extract<DurableLogRecord | DurableRecordDraft, { kind: "opened" }>) {
 	const { input: _input, ...withoutInput } = record;
 	if (!("seqId" in withoutInput)) {
 		return withoutInput;

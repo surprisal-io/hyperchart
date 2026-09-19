@@ -113,6 +113,7 @@ export function HyperchartInspectorSidePanel({
 						state={selectedState}
 						definitionOnly={run.replayIncompatibility !== undefined}
 						allStates={run.states}
+						{...(run.launchArgs === undefined ? {} : { launchArgs: run.launchArgs })}
 						{...(effectiveDefinitionSource === undefined ? {} : { definitionSource: effectiveDefinitionSource })}
 						{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 						highlightedReply={highlightedReply}

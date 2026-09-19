@@ -15,10 +15,9 @@ export function ActorMailboxMessageRow({
 	const [open, setOpen] = useState(false);
 	const toggle = () => setOpen((value) => !value);
 	return (
-		<div
-			className={`cursor-pointer rounded border p-2 text-[10px] ${current ? "border-violet-500/45 bg-violet-500/10 ring-1 ring-violet-500/15" : "border-[var(--border-secondary)] bg-[var(--bg-secondary)]"}`}
-			role="button"
-			tabIndex={0}
+		<button
+			type="button"
+			className={`w-full cursor-pointer rounded border p-2 text-left text-[10px] ${current ? "border-violet-500/45 bg-violet-500/10 ring-1 ring-violet-500/15" : "border-[var(--border-secondary)] bg-[var(--bg-secondary)]"}`}
 			aria-expanded={open}
 			onClick={toggle}
 			onKeyDown={(event) => {
@@ -88,7 +87,7 @@ export function ActorMailboxMessageRow({
 					</ExpandablePre>
 				</div>
 			)}
-		</div>
+		</button>
 	);
 }
 

@@ -19,6 +19,7 @@ import type {
 	GuardRefAst,
 	InputRef,
 	JsonValue,
+	GateActionAst,
 	RecoveryPolicyAst,
 	OnReenterAst,
 	SchemaAst,
@@ -51,7 +52,7 @@ import {
 import { actionUidKey } from "./action_uid.js";
 import { declaredArtifactsForState } from "./normalize.js";
 import {
-	allowedEvents,
+	allowedEventsForAction,
 	type BranchProjection,
 	hasTransition,
 	isFinalState,
@@ -173,6 +174,19 @@ export type UserEffect = Readonly<{
 	reply?: SchemaAst;
 }>;
 
+/** Render-only gate invocation metadata; pending gates never dispatch this to a runtime executor. */
+export type GateEffect = Readonly<{
+	kind: "gate";
+	id: EffectId;
+	seqId: number;
+	actionUid: ActionUID;
+	action: GateActionAst;
+	event: string;
+	payload: JsonValue;
+	events: readonly string[];
+	reply?: SchemaAst;
+}>;
+
 // A command to execute: same completion contract as an agent (events + reply for the parsed
 // stdout), same artifact channels; parameters arrive as rendered env vars.
 export type ScriptEffect = Readonly<{
@@ -208,7 +222,7 @@ export type ImportedActionEffect = Readonly<{
 	input?: Readonly<Record<string, JsonValue>>;
 }>;
 
-export type ActionEffect = AgentEffect | UserEffect | ScriptEffect | ImportedActionEffect;
+export type ActionEffect = AgentEffect | UserEffect | GateEffect | ScriptEffect | ImportedActionEffect;
 
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
@@ -297,6 +311,7 @@ export type CancelEffect = Readonly<{
 export type Effect =
 	| AgentEffect
 	| UserEffect
+	| GateEffect
 	| ScriptEffect
 	| ImportedActionEffect
 	| DurableRecordsEffect
@@ -511,12 +526,19 @@ function dueUserInteractionOpens(state: MachineState): RecordAppend[] {
 		if (pending.phase === "validating" || pending.gateSeqId !== undefined) {
 			return [];
 		}
-		const draft = userInteractionOpenedDraft(state, pending);
+		const draft = openedGateDraft(state, pending);
 		if (draft === undefined) {
 			return [];
 		}
-		return [{ kind: "append", id: `user:open:${pendingEffectId(pending)}`, records: [draft] }];
+		return [{ kind: "append", id: `gate:open:${pendingEffectId(pending)}`, records: [draft] }];
 	});
+}
+
+function openedGateDraft(
+	state: Pick<MachineState, "ast" | "projection">,
+	pending: PendingAction,
+): Extract<DurableRecordDraft, { kind: "opened" }> | undefined {
+	return userInteractionOpenedDraft(state, pending) ?? gateOpenedDraft(state, pending);
 }
 
 /** Exact durable rendering shared by fresh execution and replay provenance checks. */
@@ -544,6 +566,33 @@ export function userInteractionOpenedDraft(
 	};
 }
 
+/** Exact durable rendering for a chart-level host gate. */
+export function gateOpenedDraft(
+	state: Pick<MachineState, "ast" | "projection">,
+	pending: PendingAction,
+): Extract<DurableRecordDraft, { type: "gate"; kind: "opened" }> | undefined {
+	if (pending.phase === "validating") {
+		return undefined;
+	}
+	const node = actionStateAtMachine(state.ast, pending.actionUid.state);
+	if (node?.action.kind !== "gate") {
+		return undefined;
+	}
+	return {
+		type: "gate",
+		kind: "opened",
+		actionUid: pending.actionUid,
+		phaseSeqId: pending.seqId,
+		...resolvedStateInput(state, pending.actionUid),
+		event: node.action.event,
+		payload: asJsonValue(
+			resolveValueAst(state as MachineState, node.action.payload, pending.actionUid.state),
+			`Gate payload in state ${pending.actionUid.state}`,
+		),
+		...(node.action.reply === undefined ? {} : { reply: node.action.reply }),
+	};
+}
+
 // All effects a pending action currently wants: its phase effect, plus — while running under a
 // deadline — the timer racing it.
 function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
@@ -551,8 +600,8 @@ function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 	const node = actionStateAtMachine(ast, pending.actionUid.state);
 	// User phases are represented and completed exclusively by journal facts. They never
 	// dispatch a live executor effect; validation after a resolved fact remains ordinary.
-	const effects: Effect[] =
-		node?.action.kind === "user" && pending.phase !== "validating" ? [] : [pendingEffect(state, pending)];
+	const journalGate = node?.action.kind === "user" || node?.action.kind === "gate";
+	const effects: Effect[] = journalGate && pending.phase !== "validating" ? [] : [pendingEffect(state, pending)];
 	if (pending.phase === "running") {
 		if (node?.after !== undefined) {
 			effects.push({
@@ -653,6 +702,8 @@ function actionInvocationForAction(
 			return importedActionInvocationForAction(state, actionUid, action, id);
 		case "user":
 			return userInvocationForAction(state, actionUid, action, id, seqId);
+		case "gate":
+			return gateInvocationForAction(state, actionUid, action, id, seqId);
 	}
 }
 
@@ -809,6 +860,29 @@ function userInvocationForAction(
 	};
 }
 
+function gateInvocationForAction(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: GateActionAst,
+	id: EffectId,
+	seqId: number,
+): GateEffect {
+	return {
+		kind: "gate",
+		id,
+		seqId,
+		actionUid,
+		action,
+		event: action.event,
+		payload: asJsonValue(
+			resolveValueAst(state, action.payload, actionUid.state),
+			`Gate payload in state ${actionUid.state}`,
+		),
+		events: allowedEventsForAction(state.ast, actionUid.state).filter((event) => event !== "FAILED"),
+		...(action.reply === undefined ? {} : { reply: action.reply }),
+	};
+}
+
 function resumeRequestForAction(state: MachineState, actionUid: ActionUID, id: EffectId): ResumeRequest | undefined {
 	const parts = effectIdParts(id);
 	if (parts === null || parts.visitId <= 1) {
@@ -905,6 +979,27 @@ function recoveryDecisionRecords(
 	];
 }
 
+export function emittedRecordsForAcceptedCompletion(
+	state: MachineState,
+	actionUid: ActionUID,
+	event: ChartEvent,
+): DurableRecordDraft[] {
+	const node = actionStateAtMachine(state.ast, actionUid.state);
+	assert(node !== undefined, `Cannot emit for non-action state ${actionUid.state}`);
+	return (node.emit ?? []).map((emitted) => {
+		const payload = asJsonValue(
+			resolveValueAst(state, emitted.payload, actionUid.state, event),
+			`Emit '${emitted.event}' payload in state ${actionUid.state}`,
+		);
+		return {
+			type: "emit",
+			actionUid,
+			event: emitted.event,
+			payload,
+		};
+	});
+}
+
 export function stepMachine(state: MachineState, event: MachineEvent): MachineOutput {
 	if (state.projection.failure !== undefined && event.kind !== "durable_records_added" && event.kind !== "start") {
 		return createMachineOutput(state, []);
@@ -950,19 +1045,22 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					error: `No transition found for event type ${completion.event.type} in state ${pending.actionUid.state}`,
 				};
 			}
+			const complete: DurableRecordDraft = {
+				type: "state_action",
+				kind: "complete",
+				actionUid: pending.actionUid,
+				...resolvedStateInput(state, pending.actionUid),
+				event: completion.event,
+				...(completion.artifacts === undefined ? {} : { artifacts: completion.artifacts }),
+			};
+			const guarded = pending.definition.kind === "agent" && pending.definition.validation !== undefined;
 			return createMachineOutput(state, [
 				{
 					kind: "append",
 					id: event.effectId,
 					records: [
-						{
-							type: "state_action",
-							kind: "complete",
-							actionUid: pending.actionUid,
-							...resolvedStateInput(state, pending.actionUid),
-							event: completion.event,
-							...(completion.artifacts === undefined ? {} : { artifacts: completion.artifacts }),
-						},
+						complete,
+						...(guarded ? [] : emittedRecordsForAcceptedCompletion(state, pending.actionUid, completion.event)),
 					],
 				},
 			]);
@@ -1011,6 +1109,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 							event: event.event,
 							...(event.artifacts === undefined ? {} : { artifacts: event.artifacts }),
 						},
+						...emittedRecordsForAcceptedCompletion(state, pending.actionUid, event.event),
 					],
 				},
 			]);
@@ -1038,7 +1137,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			};
 			const records =
 				event.outcome === true
-					? [validated]
+					? [validated, ...emittedRecordsForAcceptedCompletion(state, validating.actionUid, validating.event)]
 					: [
 							validated,
 							...recoveryDecisionRecords(
@@ -1911,17 +2010,74 @@ function actorsTerminalForRun(state: MachineState): boolean {
 	return endpoints.every((actor) => actor.status === "stopped");
 }
 
-function resolveValueAst(state: MachineState, value: ValueAst, stateId: StatePath): unknown {
+function resolveValueAst(
+	state: MachineState,
+	value: ValueAst,
+	stateId: StatePath,
+	acceptedEvent?: ChartEvent,
+): unknown {
 	if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 		return value;
 	}
 	if (Array.isArray(value)) {
-		return value.map((entry) => resolveValueAst(state, entry, stateId));
+		return value.map((entry) => resolveValueAst(state, entry, stateId, acceptedEvent));
 	}
 	if (isInputRef(value)) {
+		if (
+			acceptedEvent !== undefined &&
+			value.kind === "result" &&
+			(value.state === stateId || value.state === templatePath(stateId))
+		) {
+			if (!("output" in acceptedEvent) || acceptedEvent.output === undefined) {
+				throw new Error(`Emit in state ${stateId}: result('${value.state}') has no accepted output`);
+			}
+			const selected = selectPath(acceptedEvent.output, value.path);
+			if (selected === undefined) {
+				throw new Error(`Emit in state ${stateId}: result('${value.state}') selector '${value.path}' is missing`);
+			}
+			return selected;
+		}
 		return resolveRef(state, value, stateId);
 	}
-	return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveValueAst(state, entry, stateId)]));
+	return Object.fromEntries(
+		Object.entries(value).map(([key, entry]) => [key, resolveValueAst(state, entry, stateId, acceptedEvent)]),
+	);
+}
+
+function selectPath(value: unknown, path: string | undefined): unknown {
+	if (path === undefined || path.length === 0) {
+		return value;
+	}
+	let current = value;
+	for (const segment of path.split(".")) {
+		if (typeof current !== "object" || current === null || !(segment in current)) {
+			return undefined;
+		}
+		current = (current as Record<string, unknown>)[segment];
+	}
+	return current;
+}
+
+function asJsonValue(value: unknown, context: string): JsonValue {
+	if (value === null || typeof value === "string" || typeof value === "boolean") {
+		return value;
+	}
+	if (typeof value === "number" && Number.isFinite(value)) {
+		return value;
+	}
+	if (Array.isArray(value)) {
+		return value.map((entry, index) => asJsonValue(entry, `${context}[${index}]`));
+	}
+	if (typeof value === "object" && value !== null) {
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null) {
+			throw new Error(`${context} must resolve to plain JSON data`);
+		}
+		return Object.fromEntries(
+			Object.entries(value).map(([key, entry]) => [key, asJsonValue(entry, `${context}.${key}`)]),
+		);
+	}
+	throw new Error(`${context} must resolve to JSON data`);
 }
 
 // Templates are rendered, never logged: the same args/results facts always render to the same
@@ -1983,7 +2139,7 @@ export function renderRead(
 	const artifacts =
 		producer === undefined
 			? undefined
-			: producerState === selfActionArtifactsState && producer.action.kind !== "user"
+			: producerState === selfActionArtifactsState && "artifacts" in producer.action
 				? producer.action.artifacts
 				: declaredArtifactsForState(producer);
 	const names = Object.keys(artifacts ?? {});
@@ -2118,14 +2274,6 @@ function invokeAppend(state: MachineState, actionUid: ActionUID): RecordAppend {
 function hasActionTransition(ast: ChartAst, statePath: StatePath, event: string): boolean {
 	const actor = actorContextForState(ast, statePath)?.node;
 	return actor?.kind === "state" ? actor.transitions[event] !== undefined : hasTransition(ast, statePath, event);
-}
-
-function allowedEventsForAction(ast: ChartAst, statePath: StatePath): string[] {
-	const actor = actorContextForState(ast, statePath)?.node;
-	if (actor?.kind === "state") {
-		return Object.keys(actor.transitions);
-	}
-	return allowedEvents(ast, statePath);
 }
 
 function actionStateAtMachine(ast: ChartAst, statePath: StatePath): ActionStateAst | undefined {

@@ -1,3 +1,4 @@
+import { StaleUserInteractionError } from "../execution/user_interaction.js";
 import { hasBlockingReplayWarnings } from "../core/replay_check.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolveRunPaths, withRunStorage } from "../runtime/generic/run_paths.js";
@@ -11,7 +12,7 @@ import { artifactSnapshotValidator } from "../execution/artifact_admission.js";
 import { parseChartModuleSync } from "../core/inspect.js";
 import type { ReplayExplanation } from "../core/replay_check.js";
 import type { ChartAst, ChartEvent } from "../core/types.js";
-import type { BranchHead, BranchId, BranchMetadata } from "../core/durable_events.js";
+import type { BranchHead, BranchId, BranchMetadata, DurableLogRecord } from "../core/durable_events.js";
 import type { SchemaRegistry } from "../core/schema_registry.js";
 import { ChartRuntime } from "../runtime/generic/chart_runtime.js";
 import { ArtifactStore } from "../runtime/generic/artifact_store.js";
@@ -522,6 +523,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 							options.gateSeqId,
 							response,
 							"control:atomic-user-response",
+							committed.records,
 						);
 						return { response, participant: committed.participant };
 					} catch (error) {
@@ -614,6 +616,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 									options.gateSeqId,
 									response,
 									"control:atomic-fork-response",
+									committed.records,
 								);
 								return { branch: committed.branch, response, participant: committed.participant };
 							} catch (error) {
@@ -659,7 +662,13 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		const semantic =
 			liveSemantic !== undefined && liveSemantic.headSeqId() === snapshot.headSeqId
 				? liveSemantic
-				: await BranchExecution.restore({ ast: this.ast, branchId, store, saveCheckpoint: "never", snapshot });
+				: await BranchExecution.restore({
+						ast: this.ast,
+						branchId,
+						store,
+						saveCheckpoint: "never",
+						snapshot,
+					});
 		const existing = await store.findUserInteractionResponse({ headSeqId: snapshot.headSeqId, gateSeqId });
 		if (existing !== undefined) {
 			if (!isDeepStrictEqual(existing.event, event)) {
@@ -669,14 +678,14 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		}
 		const gate = await store.getRecord(gateSeqId);
 		if (
-			gate?.type !== "user_interaction" ||
+			(gate?.type !== "user_interaction" && gate?.type !== "gate") ||
 			gate.kind !== "opened" ||
 			!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: gateSeqId }))
 		) {
-			throw new Error(`User interaction ${gateSeqId} is stale or missing from branch '${branchId}'`);
+			throw new StaleUserInteractionError(branchId, gateSeqId);
 		}
-		const draft = await semantic.prepareUserInteraction(gate, event, this.schemaRegistry);
-		return { semantic, input: { expectedHeadSeqId: snapshot.headSeqId, drafts: [draft] }, gateSeqId };
+		const drafts = await semantic.prepareUserInteraction(gate, event, this.schemaRegistry);
+		return { semantic, input: { expectedHeadSeqId: snapshot.headSeqId, drafts }, gateSeqId };
 	}
 
 	private async commitUserResponse(
@@ -694,7 +703,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			try {
 				const records = await store.appendDraftsAtHead(prepared.input, prepared.semantic.prepareStampedCommit);
 				const committed = { record: records[0] as UserInteractionResponseCommit["record"], idempotent: false };
-				this.acknowledgeUserInteraction(branchId, gateSeqId, committed, source);
+				this.acknowledgeUserInteraction(branchId, gateSeqId, committed, source, records);
 				return committed;
 			} catch (error) {
 				if (!isHeadMovedError(error) || attempt === 2) {
@@ -710,13 +719,14 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 		gateSeqId: number,
 		committed: UserInteractionResponseCommit,
 		source: string,
+		records: readonly DurableLogRecord[] = [committed.record],
 	): void {
 		if (committed.idempotent) {
 			return;
 		}
 		this.live
 			.get(branchId)
-			?.runtime?.acknowledgeCommittedRecords([committed.record], `${source}:${gateSeqId}:${committed.record.seqId}`);
+			?.runtime?.acknowledgeCommittedRecords(records, `${source}:${gateSeqId}:${committed.record.seqId}`);
 	}
 
 	async startBranch(branchId: BranchId): Promise<RunnerBranchOutcome> {

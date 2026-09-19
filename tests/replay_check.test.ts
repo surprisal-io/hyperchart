@@ -11,6 +11,7 @@ import {
 	createBranchProjection,
 	projectBranch,
 	final,
+	gate,
 	map,
 	message,
 	normalizeChartConfig,
@@ -866,6 +867,61 @@ describe("explainReplay", () => {
 			{ ...oldJournal[3]!, input: { hypothesisId: "historical-validated" } } as DurableLogRecord,
 		];
 		expect(explainReplay(current, withInformationalInput)).toMatchObject({ prefixEnd: 4, stale: [] });
+	});
+
+	it("treats emit facts as inert and reports changed rendered gate contracts", () => {
+		const current = ast(
+			chart({
+				kind: "chart",
+				id: "host-gate-replay",
+				initial: "wait",
+				states: {
+					wait: {
+						kind: "state",
+						action: gate({ event: "approval.requested", payload: { requestId: "r-1" } }),
+						transitions: { APPROVE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const uid = actionUid(current, "wait");
+		const records: DurableLogRecord[] = [
+			{
+				type: "state_action",
+				kind: "invoke",
+				sessionId: "gate-session",
+				actionUid: uid,
+				definition: definition(current, "wait"),
+				...meta(1),
+			},
+			{
+				type: "gate",
+				kind: "opened",
+				actionUid: uid,
+				phaseSeqId: 1,
+				event: "approval.requested",
+				payload: { requestId: "r-1" },
+				...meta(2),
+			},
+			{
+				type: "gate",
+				kind: "resolved",
+				gateSeqId: 2,
+				actionUid: uid,
+				event: { type: "APPROVE" },
+				...meta(3),
+			},
+			{ type: "emit", actionUid: uid, event: "approval.completed", payload: { requestId: "r-1" }, ...meta(4) },
+		];
+		const compatible = explainReplay(current, records);
+		expect(compatible.broken).toBeUndefined();
+		expect(compatible.stale).toEqual([]);
+		expect(compatible.prefixEnd).toBe(4);
+
+		const changedOpened = { ...records[1]!, payload: { requestId: "changed" } } as DurableLogRecord;
+		const stale = explainReplay(current, [records[0]!, changedOpened]);
+		expect(stale.stale).toEqual([expect.objectContaining({ reason: "gate_contract_changed", state: "wait" })]);
 	});
 
 	it("validates opened provenance and resolved user-event legality", () => {

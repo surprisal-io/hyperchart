@@ -20,7 +20,7 @@ import type {
 	ArtifactPin,
 	DurableLogRecord,
 	StateActionRetryLog,
-	UserInteractionOpenedLog,
+	OpenedGateLog,
 } from "./durable_events.js";
 import {
 	actorContextForState,
@@ -166,7 +166,7 @@ export type PendingActorCall =
 	  };
 
 export type OpenProjectedUserInteraction = {
-	opened: UserInteractionOpenedLog;
+	opened: OpenedGateLog;
 	status: "open";
 };
 
@@ -451,6 +451,9 @@ export function projectBranch(
 				}
 				break;
 			}
+			case "emit":
+				// Domain events are journal facts only and never affect chart control flow.
+				break;
 			case "spawned": {
 				// The placeholder guard mirrors invoke: a spawn for a map that is no longer active
 				// lost a race and is skipped.
@@ -485,20 +488,21 @@ export function projectBranch(
 				completeParallels(projection, ast);
 				break;
 			}
-			case "user_interaction": {
+			case "user_interaction":
+			case "gate": {
 				if (record.kind === "opened") {
 					const pending = projection.pendingActions.find(
 						(entry) => sameActionUid(entry.actionUid, record.actionUid) && entry.phase === "running",
 					);
 					if (pending === undefined || pending.seqId !== record.phaseSeqId) {
-						throw new Error(`No matching pending user phase for opened gate in state ${record.actionUid.state}`);
+						throw new Error(`No matching pending phase for opened gate in state ${record.actionUid.state}`);
 					}
 					const node = actionStateAt(ast, record.actionUid.state);
-					if (node?.kind !== "state" || node.action.kind !== "user") {
-						throw new Error(`Opened user interaction for non-user state ${record.actionUid.state}`);
+					if (node?.kind !== "state" || node.action.kind !== (record.type === "gate" ? "gate" : "user")) {
+						throw new Error(`Opened ${record.type} interaction for incompatible state ${record.actionUid.state}`);
 					}
 					if (pending.gateSeqId !== undefined) {
-						throw new Error(`User phase in state ${record.actionUid.state} already has an opened gate`);
+						throw new Error(`Phase in state ${record.actionUid.state} already has an opened gate`);
 					}
 					pending.gateSeqId = record.seqId;
 					projection.openUserInteractions[record.seqId] = { opened: record, status: "open" };
@@ -515,16 +519,23 @@ export function projectBranch(
 					gate === undefined ||
 					gate.status !== "open" ||
 					pending === undefined ||
+					gate.opened.type !== record.type ||
 					!sameActionUid(gate.opened.actionUid, record.actionUid)
 				) {
-					throw new Error(`No open user interaction ${record.gateSeqId} for state ${record.actionUid.state}`);
+					throw new Error(`No open ${record.type} interaction ${record.gateSeqId} for state ${record.actionUid.state}`);
 				}
 				const node = actionStateAt(ast, record.actionUid.state);
-				if (node?.kind !== "state" || node.action.kind !== "user") {
-					throw new Error(`Resolved user interaction for non-user state ${record.actionUid.state}`);
+				if (node?.kind !== "state" || node.action.kind !== (record.type === "gate" ? "gate" : "user")) {
+					throw new Error(`Resolved ${record.type} interaction for incompatible state ${record.actionUid.state}`);
 				}
-				if (record.event.type === "FAILED" || !gate.opened.events.includes(record.event.type)) {
-					throw new Error(`Event '${record.event.type}' is not allowed for user interaction ${record.gateSeqId}`);
+				const events =
+					gate.opened.type === "user_interaction"
+						? gate.opened.events
+						: allowedEventsForAction(ast, record.actionUid.state).filter((event) => event !== "FAILED");
+				if (record.event.type === "FAILED" || !events.includes(record.event.type)) {
+					throw new Error(
+						`Event '${record.event.type}' is not allowed for ${record.type} interaction ${record.gateSeqId}`,
+					);
 				}
 				delete projection.openUserInteractions[record.gateSeqId];
 				applyActionCompletion(projection, ast, record.actionUid, record.event, record.seqId, abandoned);
@@ -1185,6 +1196,12 @@ export function allowedEvents(ast: ChartAst, fromPath: StatePath): string[] {
 		path = parentPath(path);
 	}
 	return events;
+}
+
+/** Completion events accepted by a chart or actor action, including chart ancestor bubbling. */
+export function allowedEventsForAction(ast: ChartAst, statePath: StatePath): string[] {
+	const actor = actorContextForState(ast, statePath)?.node;
+	return actor?.kind === "state" ? Object.keys(actor.transitions) : allowedEvents(ast, statePath);
 }
 
 // Entering a state resolves it to active leaves: compounds and regions drill down their initial

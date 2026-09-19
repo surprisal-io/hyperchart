@@ -4,7 +4,7 @@ import type {
 	BranchId,
 	DurableLogRecord,
 	DurableRecordDraft,
-	UserInteractionOpenedLog,
+	OpenedGateLog,
 } from "../core/durable_events.js";
 import type { SchemaRegistryLike } from "../core/schema_registry.js";
 import { createMachine, type MachineState } from "../core/machine.js";
@@ -186,10 +186,10 @@ export class BranchExecution {
 	isUnseen(records: readonly DurableLogRecord[]): boolean {
 		return records.some((record) => record.seqId > this.projection.seqId);
 	}
-	openUserInteraction(gateSeqId: number): UserInteractionOpenedLog | undefined {
+	openUserInteraction(gateSeqId: number): OpenedGateLog | undefined {
 		return this.projection.openUserInteractions[gateSeqId]?.opened;
 	}
-	openUserInteractions(): readonly UserInteractionOpenedLog[] {
+	openUserInteractions(): readonly OpenedGateLog[] {
 		return Object.values(this.projection.openUserInteractions).map((entry) => entry.opened);
 	}
 	artifactPins(): Readonly<Record<string, ArtifactPin>> {
@@ -256,10 +256,10 @@ export class BranchExecution {
 	}
 
 	async prepareUserInteraction(
-		gate: UserInteractionOpenedLog,
+		gate: OpenedGateLog,
 		event: ChartEvent,
 		schemaRegistry?: SchemaRegistryLike,
-	): Promise<Extract<DurableRecordDraft, { type: "user_interaction"; kind: "resolved" }>> {
+	): Promise<readonly DurableRecordDraft[]> {
 		const input: RespondToUserInteractionInput = {
 			ast: this.ast,
 			gateSeqId: gate.seqId,

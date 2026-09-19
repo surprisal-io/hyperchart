@@ -1,5 +1,5 @@
 import { ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
-import type { HyperchartStateInfo } from "../../../types.js";
+import type { HyperchartLaunchArgumentInfo, HyperchartStateInfo } from "../../../types.js";
 import { transitionWasTaken } from "../helpers/transitions.js";
 import { Section } from "../ui/Section.js";
 import { TransitionBindingJson } from "./TransitionBindingJson.js";
@@ -8,11 +8,23 @@ import { TransitionInputRow } from "./TransitionInputRow.js";
 export function TransitionsSection({
 	state,
 	allStates,
+	launchArgs,
 	onReplyFieldClick,
+	onHighlightInput,
+	onHighlightReply,
+	onHighlightRef,
+	onNavigateToState,
+	visibleReplyStateIds = [state.id],
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
+	launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>;
 	onReplyFieldClick?: (path: string) => void;
+	onHighlightInput?: (name: string) => void;
+	onHighlightReply?: (stateId: string, path: string) => void;
+	onHighlightRef?: (value: string) => void;
+	onNavigateToState?: (stateId: string) => void;
+	visibleReplyStateIds?: readonly string[];
 }) {
 	if (!state.transitions?.length) {
 		return null;
@@ -56,8 +68,16 @@ export function TransitionsSection({
 									/>
 									<TransitionBindingJson
 										state={state}
+										allStates={allStates}
+										{...(launchArgs === undefined ? {} : { launchArgs })}
 										input={transition.input ?? {}}
+										parseStringBindings
+										visibleReplyStateIds={visibleReplyStateIds}
 										{...(onReplyFieldClick === undefined ? {} : { onReplyFieldClick })}
+										{...(onHighlightInput === undefined ? {} : { onHighlightInput })}
+										{...(onHighlightReply === undefined ? {} : { onHighlightReply })}
+										{...(onHighlightRef === undefined ? {} : { onHighlightRef })}
+										{...(onNavigateToState === undefined ? {} : { onNavigateToState })}
 									/>
 								</div>
 							) : (

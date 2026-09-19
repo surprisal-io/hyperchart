@@ -44,9 +44,7 @@ export async function runGuard(
 		// Imported guards receive rendered env in process. Artifact and reply
 		// ownership remain exclusive to subprocess guards.
 		const importedInvocation =
-			invocation === undefined
-				? undefined
-				: { env: invocation.env, actionUid: invocation.actionUid };
+			invocation === undefined ? undefined : { env: invocation.env, actionUid: invocation.actionUid };
 		return normalizeGuardOutcome(await fn(event, ctx, importedInvocation));
 	}
 	const runner = invocation?.scripts ?? new ScriptRunner({ workDir: ctx.workDir });

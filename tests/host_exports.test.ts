@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { final, inspectChartAst, normalizeChartConfig } from "../packages/hyperchart/src/index.js";
+import { final, inspectChartAst, normalizeChartConfig, z } from "../packages/hyperchart/src/index.js";
 import {
 	hyperchartRunFromInfo,
 	hyperchartRunFromInspectResult,
@@ -27,7 +27,7 @@ describe("host public surface", () => {
 		const parsed = normalizeChartConfig({
 			kind: "chart",
 			id: "launchable",
-			args: { topic: { description: "Research subject", default: "Hyperchart" } },
+			args: { topic: { description: "Research subject", schema: z.string(), default: "Hyperchart" } },
 			initial: "done",
 			states: { done: final() },
 		});
@@ -38,7 +38,11 @@ describe("host public surface", () => {
 		const inspect = inspectChartAst(parsed.ast);
 		const run = hyperchartRunFromInspectResult(inspect);
 
-		expect(inspect.args).toEqual({ topic: { description: "Research subject", default: "Hyperchart" } });
+		expect(inspect.args?.topic).toMatchObject({
+			description: "Research subject",
+			default: "Hyperchart",
+			schema: { kind: "jsonSchema", schema: { type: "string" } },
+		});
 		expect(run.launchArgs).toEqual(inspect.args);
 		expect(run.args).toEqual({});
 		expect(JSON.parse(JSON.stringify(run.launchArgs))).toEqual(run.launchArgs);

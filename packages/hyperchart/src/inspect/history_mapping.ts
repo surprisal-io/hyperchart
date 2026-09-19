@@ -1,4 +1,5 @@
 import type { DurableLogRecord } from "../core/durable_events.js";
+import { actionUidKey } from "../core/action_uid.js";
 import { actorLogicalOccurrencePath, actorPoolWorkerOccurrencePath } from "../core/actors.js";
 import {
 	createBranchProjection,
@@ -37,6 +38,7 @@ export function stateVisitHistoryItemToHost(
 		.find(
 			(record) =>
 				record.type === "failure_intent" ||
+				((record.type === "user_interaction" || record.type === "gate") && record.kind === "resolved") ||
 				(record.type === "state_action" && record.kind === "timer_fired") ||
 				(record.type === "state_action" && record.kind === "validated" && record.outcome === true) ||
 				(record.type === "state_action" &&
@@ -50,9 +52,18 @@ export function stateVisitHistoryItemToHost(
 	const event =
 		completed?.type === "failure_intent"
 			? "FAILED"
-			: completed?.type === "state_action" && (completed.kind === "complete" || completed.kind === "validated")
+			: (completed?.type === "user_interaction" || completed?.type === "gate") && completed.kind === "resolved"
 				? completed.event.type
-				: undefined;
+				: completed?.type === "state_action" && (completed.kind === "complete" || completed.kind === "validated")
+					? completed.event.type
+					: undefined;
+	const completionEvent =
+		completed !== undefined &&
+		((completed.type === "state_action" && (completed.kind === "complete" || completed.kind === "validated")) ||
+			((completed.type === "user_interaction" || completed.type === "gate") && completed.kind === "resolved"))
+			? completed.event
+			: undefined;
+	const emits = completionEmits(item.records, completed);
 	return {
 		visit: item.visit,
 		invokeSeqId: item.seqId,
@@ -68,6 +79,10 @@ export function stateVisitHistoryItemToHost(
 						? "cancelled"
 						: "done",
 		...(event === undefined ? {} : { completedEvent: event }),
+		...(completionEvent !== undefined && "output" in completionEvent
+			? { completedOutput: completionEvent.output }
+			: {}),
+		...(emits.length === 0 ? {} : { emits }),
 		...(validations.length === 0 ? {} : { validationAttempts: validations.length }),
 		...(complete?.artifacts === undefined
 			? {}
@@ -82,6 +97,33 @@ export function stateVisitHistoryItemToHost(
 		invocation: invocationInfo(item.invoke.definition),
 		...(session === undefined ? {} : { session }),
 	};
+}
+
+function completionEmits(
+	records: readonly DurableLogRecord[],
+	completion: DurableLogRecord | undefined,
+): NonNullable<HyperchartVisitInfo["emits"]> {
+	if (completion === undefined || !("actionUid" in completion)) {
+		return [];
+	}
+	const completionIndex = records.indexOf(completion);
+	if (completionIndex < 0) {
+		return [];
+	}
+	const emits: NonNullable<HyperchartVisitInfo["emits"]> = [];
+	let expectedSeqId = completion.seqId + 1;
+	for (const record of records.slice(completionIndex + 1)) {
+		if (
+			record.seqId !== expectedSeqId ||
+			record.type !== "emit" ||
+			actionUidKey(record.actionUid) !== actionUidKey(completion.actionUid)
+		) {
+			break;
+		}
+		emits.push({ seqId: record.seqId, event: record.event, payload: record.payload });
+		expectedSeqId += 1;
+	}
+	return emits;
 }
 
 export function mapVisitHistoryItemToHost(item: MapVisitHistoryItem): HyperchartMapVisitInfo {
@@ -286,6 +328,8 @@ function invocationInfo(action: StateActionAst): HyperchartVisitInfo["invocation
 			return { kind: "tsImport", module: action.module, export: action.export };
 		case "user":
 			return { kind: "user", prompt: templatePreview(action.prompt) };
+		case "gate":
+			return { kind: "gate", event: action.event };
 	}
 }
 

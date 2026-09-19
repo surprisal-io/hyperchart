@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 import { RunOverview } from "../components/inspector/details/RunOverview.js";
 import { replayIncompatibleStoryRun } from "../fixtures/replay-incompatible-fixture.js";
+import { gateContractChangedStoryRun } from "../fixtures/gate-emit-fixtures.js";
 
 const meta = {
 	title: "Hyperchart/Inspector/Run Overview/Replay incompatibility",
@@ -37,5 +38,15 @@ export const RemovedValidatorPendingClaim: Story = {
 	loaders: [async () => ({ run: await removedValidatorStoryRun(true) })],
 	play: async ({ canvasElement }) => {
 		await expect(within(canvasElement).getByText(/no recorded positive validation/)).toBeVisible();
+	},
+};
+
+/** The durable opened gate is replayed against a definition whose rendered request payload changed. */
+export const GateContractChanged: Story = {
+	loaders: [async () => ({ run: gateContractChangedStoryRun() })],
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.queryByText("Current definition only")).toBeNull();
+		await expect(canvas.getAllByText(/Rendered gate contract .* changed/).length).toBeGreaterThan(0);
 	},
 };

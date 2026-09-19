@@ -40,6 +40,7 @@ export {
 	RunnerControlUnavailableError,
 } from "../runtime/generic/runner_control.js";
 export type { RunnerMoveBranchCommit } from "../runtime/generic/runner_control.js";
+export { StaleUserInteractionError } from "../execution/user_interaction.js";
 export {
 	BranchAdmissionError,
 	BranchDrainError,

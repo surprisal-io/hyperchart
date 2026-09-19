@@ -2,7 +2,6 @@ import { createHash, randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { promises as fsp } from "node:fs";
 import { dirname, join } from "node:path";
-import { pipeline } from "node:stream/promises";
 import type { ArtifactPin } from "../../core/durable_events.js";
 
 export type { ArtifactPin };
@@ -85,10 +84,8 @@ export class ArtifactStore {
 
 export async function hashFile(path: string): Promise<string> {
 	const hasher = createHash("sha256");
-	await pipeline(createReadStream(path), async function* (source) {
-		for await (const chunk of source) {
-			hasher.update(chunk as Buffer);
-		}
-	});
+	for await (const chunk of createReadStream(path)) {
+		hasher.update(chunk);
+	}
 	return hasher.digest("hex");
 }

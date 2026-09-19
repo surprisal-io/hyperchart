@@ -24,7 +24,7 @@ const meta = {
 		kind: { control: false },
 		width: { control: "inline-radio", options: [60, 80, 120] },
 		theme: { control: "inline-radio", options: ["dark", "light"] },
-		preset: { control: "inline-radio", options: ["initial", "manyRunning"] },
+		preset: { control: "inline-radio", options: ["initial", "manyRunning", "gateAndEmit"] },
 		interactive: { control: false },
 	},
 } satisfies Meta<typeof TuiTerminalPreview>;
@@ -63,6 +63,25 @@ export const ManyActiveStates: Story = {
 		await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("TUI live: widget"));
 		await expect(canvas.getByLabelText("TUI plain text")).toHaveTextContent("8 active");
 		await expect(canvas.getByLabelText("TUI plain text")).toHaveTextContent("+5 more");
+	},
+};
+
+export const GateAndEmitActivity: Story = {
+	args: { preset: "gateAndEmit", width: 120 },
+	parameters: {
+		docs: {
+			description: {
+				story: "Compact widget with durable host-gate open/resolution and accepted emit summaries.",
+			},
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent("TUI live: widget"));
+		const output = canvas.getByLabelText("TUI plain text");
+		await expect(output).toHaveTextContent("gate 3 opened release.approval-requested");
+		await expect(output).toHaveTextContent("gate 3 resolved → APPROVED");
+		await expect(output).toHaveTextContent("emit release.approved");
 	},
 };
 

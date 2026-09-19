@@ -3,6 +3,7 @@ import {
 	ChatBubbleLeftRightIcon,
 	CodeBracketSquareIcon,
 	CommandLineIcon,
+	ShieldCheckIcon,
 	UserCircleIcon,
 } from "@heroicons/react/24/outline";
 import type { HyperchartInspectorDataSource, HyperchartRunInfo, HyperchartVisitInfo } from "../../../types.js";
@@ -244,8 +245,14 @@ function invocationIcon(visit: HyperchartVisitInfo): HeroIcon {
 			return CodeBracketSquareIcon;
 		case "user":
 			return ChatBubbleLeftRightIcon;
+		case "gate":
+			return ShieldCheckIcon;
 		case "actor":
 			return CommandLineIcon;
+		default: {
+			const exhaustive: never = visit.invocation;
+			throw new Error(`Unknown visit invocation: ${JSON.stringify(exhaustive)}`);
+		}
 	}
 }
 

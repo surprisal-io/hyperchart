@@ -880,6 +880,9 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 					})),
 				}),
 		...(state.reply === undefined ? {} : { replySchema: { schema: state.reply } }),
+		...(state.emits === undefined ? {} : { emits: state.emits }),
+		...(state.gateEvent === undefined ? {} : { gateEvent: state.gateEvent }),
+		...(state.gatePayload === undefined ? {} : { gatePayload: state.gatePayload }),
 		...(state.validation === undefined
 			? {}
 			: { validationPolicy: { guard: guardInfo(state.validation.guard), onFail: state.validation.onFail } }),
@@ -918,6 +921,7 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 									payload: {
 										label: state.actorMessageDefinition.payload.label,
 										source: state.actorMessageDefinition.payload.source,
+										value: state.actorMessageDefinition.payload.value,
 										...(state.actorMessageDefinition.payload.schema === undefined
 											? {}
 											: { schema: { schema: state.actorMessageDefinition.payload.schema } }),
@@ -1525,6 +1529,18 @@ function runtimeFacts(
 			byState.set(stateId, facts);
 			continue;
 		}
+		if (
+			(record.type === "user_interaction" || record.type === "gate") &&
+			record.kind === "resolved" &&
+			!skippedRecords.has(record)
+		) {
+			const stateId = record.actionUid.state;
+			const facts = byState.get(stateId) ?? {};
+			facts.completedAt = record.timestamp;
+			facts.completedEvent = record.event;
+			byState.set(stateId, facts);
+			continue;
+		}
 		if (record.type !== "state_action" || skippedRecords.has(record)) {
 			continue;
 		}
@@ -1767,10 +1783,21 @@ function runtimeVisitHistories(
 ): Map<StatePath, HyperchartVisitInfo[]> {
 	const histories = new Map<StatePath, HyperchartVisitInfo[]>();
 	const replay = createBranchProjection(ast);
+	let acceptedEmitTarget: { actionKey: string; visit: HyperchartVisitInfo } | undefined;
 	for (const record of records) {
 		const pendingBefore = [...replay.pendingActions];
 		projectBranch(replay, ast, [record]);
 		closeExitedVisits(histories, pendingBefore, replay.pendingActions, record);
+		if (record.type === "emit") {
+			if (!skippedRecords.has(record) && acceptedEmitTarget?.actionKey === actionUidKey(record.actionUid)) {
+				acceptedEmitTarget.visit.emits = [
+					...(acceptedEmitTarget.visit.emits ?? []),
+					{ seqId: record.seqId, event: record.event, payload: record.payload },
+				];
+			}
+			continue;
+		}
+		acceptedEmitTarget = undefined;
 		if (record.type === "failure_intent") {
 			for (const [state, visits] of histories) {
 				const visit = visits.at(-1);
@@ -1790,10 +1817,18 @@ function runtimeVisitHistories(
 		if (skippedRecords.has(record)) {
 			continue;
 		}
-		if (record.type === "user_interaction" && record.kind === "opened") {
+		if ((record.type === "user_interaction" || record.type === "gate") && record.kind === "opened") {
 			const visit = histories.get(record.actionUid.state)?.at(-1);
 			if (visit !== undefined && record.input !== undefined) {
 				visit.inputs = { ...record.input };
+			}
+			continue;
+		}
+		if ((record.type === "user_interaction" || record.type === "gate") && record.kind === "resolved") {
+			const visit = histories.get(record.actionUid.state)?.at(-1);
+			if (visit !== undefined) {
+				completeVisit(visit, record.event, record.timestamp);
+				acceptedEmitTarget = { actionKey: actionUidKey(record.actionUid), visit };
 			}
 			continue;
 		}
@@ -1859,6 +1894,7 @@ function runtimeVisitHistories(
 					}));
 				}
 				completeVisit(visit, record.event, record.timestamp);
+				acceptedEmitTarget = { actionKey: actionUidKey(record.actionUid), visit };
 			}
 			continue;
 		}
@@ -1875,6 +1911,7 @@ function runtimeVisitHistories(
 					}));
 				}
 				completeVisit(visit, record.event, record.timestamp);
+				acceptedEmitTarget = { actionKey: actionUidKey(record.actionUid), visit };
 			}
 		}
 	}
@@ -1913,6 +1950,11 @@ function pendingVisitKey(pending: PendingAction): string {
 function completeVisit(visit: HyperchartVisitInfo, event: ChartEvent, timestamp: number): void {
 	visit.status = event.type === "FAILED" ? "failed" : "done";
 	visit.completedEvent = event.type;
+	if ("output" in event) {
+		visit.completedOutput = event.output;
+	} else {
+		delete visit.completedOutput;
+	}
 	visit.endedAt = timestamp;
 	delete visit.endedReason;
 }
@@ -1963,6 +2005,8 @@ function visitInvocationInfo(effect: ActionEffect): HyperchartVisitInvocationInf
 			};
 		case "user":
 			return { kind: "user", prompt: effect.prompt };
+		case "gate":
+			return { kind: "gate", event: effect.event, payload: effect.payload };
 	}
 }
 
@@ -2369,11 +2413,14 @@ function materializeMapPath(
 function runtimeValidationAttempts(
 	facts: StateRuntimeFacts | undefined,
 	pending: PendingAction | undefined,
+	hasValidationPolicy: boolean,
 ): number | undefined {
 	if (facts?.validationAttempts !== undefined) {
 		return facts.validationAttempts;
 	}
-	return pending === undefined ? undefined : pending.recovery.validation.nudges + pending.recovery.validation.restarts;
+	return pending === undefined || !hasValidationPolicy
+		? undefined
+		: pending.recovery.validation.nudges + pending.recovery.validation.restarts;
 }
 
 function runtimeMapItemInfo(
@@ -2400,7 +2447,7 @@ function overlayRuntimeState(
 	const runtimeStatePath = state.runtimeStatePath ?? state.id;
 	const facts = runtime.byState.get(runtimeStatePath);
 	const pending = runtime.pendingByState.get(runtimeStatePath);
-	const validationAttempts = runtimeValidationAttempts(facts, pending);
+	const validationAttempts = runtimeValidationAttempts(facts, pending, state.validationPolicy !== undefined);
 	const mapItem = runtimeMapItemInfo(runtimeStatePath, projection);
 	const issues = runtime.issuesByState.get(runtimeStatePath);
 	const latestRejectedReason = facts?.latestRejectedReason;
@@ -2506,7 +2553,9 @@ function runtimeStateStatus(
 	}
 	if (pending !== undefined) {
 		const node = nodeAt(ast, runtimeStatePath);
-		return node?.kind === "state" && node.action.kind === "user" ? "waiting" : "running";
+		return node?.kind === "state" && (node.action.kind === "user" || node.action.kind === "gate")
+			? "waiting"
+			: "running";
 	}
 	if (state.type === "final") {
 		const reached =

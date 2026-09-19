@@ -300,7 +300,7 @@ describe("live branch sealing and move", () => {
 		await f.controller.forkBranch({ branchId: "child", sourceBranchId: "main", fromSeqId: mainHeadSeqId });
 		const childOutcome = f.controller.startBranch("child");
 		await waitFor(() => f.executors.get("child")?.[0]?.emit !== undefined);
-		const oldMain = f.executors.get("main")?.[0]!;
+		const oldMain = f.executors.get("main")?.[0];
 		const oldChild = f.executors.get("child")?.[0];
 		if (oldMain === undefined || oldChild === undefined) {
 			throw new Error("missing executors before branch move");

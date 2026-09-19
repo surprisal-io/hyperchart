@@ -69,7 +69,7 @@ type SpawnedLog = {
 	instances: Readonly<Record<string, unknown>>;
 } & SessionParams;
 
-type ResolvedStateInput = Readonly<Record<string, JsonValue>>;
+export type ResolvedStateInput = Readonly<Record<string, JsonValue>>;
 
 export type StateActionInvokeLog = {
 	type: "state_action";
@@ -184,6 +184,39 @@ export type UserInteractionResolvedLog = {
 } & SessionParams;
 
 export type UserInteractionLog = UserInteractionOpenedLog | UserInteractionResolvedLog;
+
+/** Durable, fully rendered host boundary for a chart-level machine gate. */
+export type GateOpenedLog = {
+	type: "gate";
+	kind: "opened";
+	actionUid: ActionUID;
+	phaseSeqId: number;
+	event: string;
+	payload: JsonValue;
+	reply?: SchemaAst;
+	/** Informational durable provenance excluded from replay identity. */
+	input?: ResolvedStateInput;
+} & SessionParams;
+
+export type GateResolvedLog = {
+	type: "gate";
+	kind: "resolved";
+	gateSeqId: number;
+	actionUid: ActionUID;
+	event: ChartEvent;
+} & SessionParams;
+
+export type GateLog = GateOpenedLog | GateResolvedLog;
+export type OpenedGateLog = UserInteractionOpenedLog | GateOpenedLog;
+export type ResolvedGateLog = UserInteractionResolvedLog | GateResolvedLog;
+
+/** Stable typed domain event published by an accepted chart action. */
+export type EmitLog = {
+	type: "emit";
+	actionUid: ActionUID;
+	event: string;
+	payload: JsonValue;
+} & SessionParams;
 
 /** First durable fact of global fail-fast. No successor state may start after this record. */
 export type FailureIntentLog = {
@@ -301,6 +334,8 @@ export type DurableLogRecord =
 	| SpawnedLog
 	| StateAction
 	| UserInteractionLog
+	| GateLog
+	| EmitLog
 	| FailureIntentLog
 	| ActorLogRecord;
 

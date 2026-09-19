@@ -40,12 +40,15 @@ export function InspectorPanelGroupBoard<TSpec extends InspectorPanelGroupedSpec
 				description={`${groupSpecs.length} panel ${groupSpecs.length === 1 ? "case" : "cases"}.`}
 			>
 				<div className="space-y-5">
-					{groupSpecs.map((spec, index) => (
-						<InspectorPanelTile
-							key={`${group.id}:${spec.runtime.selectedStateId ?? "overview"}:${index}`}
-							{...buildTileProps(spec)}
-						/>
-					))}
+					{groupSpecs.map((spec) => {
+						const props = buildTileProps(spec);
+						return (
+							<InspectorPanelTile
+								key={`${group.id}:${spec.runtime.selectedStateId ?? "overview"}:${props.title}`}
+								{...props}
+							/>
+						);
+					})}
 				</div>
 			</BoardSection>
 		</BoardPage>

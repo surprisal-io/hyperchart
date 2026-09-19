@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { BoltIcon, CommandLineIcon, EnvelopeIcon } from "@heroicons/react/24/outline";
 import type {
@@ -13,6 +13,7 @@ import type {
 } from "../../../types.js";
 import type { HistoryCursor, HistorySnapshot, HistorySubject } from "../../../../runtime/generic/log_store.js";
 import { formatHyperchartDateTime, formatHyperchartUsage } from "../../../hyperchart-display.js";
+import { isActionState } from "../helpers/actionVisits.js";
 import { stateHasRuntimeDetails } from "../helpers/state.js";
 import { FanoutStatusCard } from "../graph/FanoutStatusCard.js";
 import { ExpandablePre } from "../ui/ExpandablePre.js";
@@ -35,11 +36,10 @@ function ActorInternalMessageRow({ message, replies }: { message: HyperchartActo
 	const [open, setOpen] = useState(false);
 	const toggle = () => setOpen((value) => !value);
 	return (
-		<div
-			role="button"
-			tabIndex={0}
+		<button
+			type="button"
 			aria-expanded={open}
-			className="cursor-pointer rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-[10px]"
+			className="w-full cursor-pointer rounded border border-[var(--border-secondary)] bg-[var(--bg-secondary)] p-2 text-left text-[10px]"
 			onClick={toggle}
 			onKeyDown={(event) => {
 				if (event.key === "Enter" || event.key === " ") {
@@ -109,7 +109,7 @@ function ActorInternalMessageRow({ message, replies }: { message: HyperchartActo
 					)}
 				</div>
 			)}
-		</div>
+		</button>
 	);
 }
 
@@ -133,8 +133,8 @@ export function ActorInternalMessageHistory({
 						? "accepted message"
 						: "accepted messages"}
 			</div>
-			{messages.map((message, index) => (
-				<ActorInternalMessageRow key={`${message.messageId}:${index}`} message={message} replies={replies} />
+			{messages.map((message) => (
+				<ActorInternalMessageRow key={message.messageId} message={message} replies={replies} />
 			))}
 		</div>
 	);
@@ -147,6 +147,7 @@ function ActorInternalGenerationRuntime({
 	onSteerSession,
 	onHighlightArtifact,
 	selectedInvokeSeqId,
+	currentBranchId,
 }: {
 	state: HyperchartStateInfo;
 	allStates: HyperchartStateInfo[];
@@ -154,6 +155,7 @@ function ActorInternalGenerationRuntime({
 	onSteerSession?: (actionKey: string, message: string) => void | Promise<void>;
 	onHighlightArtifact?: (stateId: string, artifactName: string) => void;
 	selectedInvokeSeqId?: number;
+	currentBranchId?: string;
 }) {
 	const [showHistory, setShowHistory] = useState(false);
 	const generations = state.actorInternal?.generations ?? [];
@@ -210,6 +212,7 @@ function ActorInternalGenerationRuntime({
 						allStates={allStates}
 						{...(state.agent === undefined ? {} : { agentName: state.agent })}
 						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
+						{...(currentBranchId === undefined ? {} : { currentBranchId })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					/>
@@ -333,13 +336,21 @@ export function useTargetCursor(history: RuntimeHistoryContext, subject: History
 	const key = `${historyCacheKey(history, subject.kind, JSON.stringify(subject))}:${history.targetSeqId ?? "newest"}`;
 	const [resolved, setResolved] = useState<{ key: string; cursor?: HistoryCursor; error?: string }>();
 	const [attempt, setAttempt] = useState(0);
+	const subjectRef = useRef(subject);
+	subjectRef.current = subject;
 	useEffect(() => {
+		void attempt;
 		if (history.targetSeqId === undefined) {
 			return;
 		}
 		let current = true;
 		void history.dataSource
-			.cursorAt({ runId: history.runId, snapshot: history.snapshot, subject, seqId: history.targetSeqId })
+			.cursorAt({
+				runId: history.runId,
+				snapshot: history.snapshot,
+				subject: subjectRef.current,
+				seqId: history.targetSeqId,
+			})
 			.then(
 				(cursor) => {
 					if (current) {
@@ -384,8 +395,11 @@ type VisitSessionReader = NonNullable<Parameters<typeof VisitHistory>[0]["onRead
 
 /** One canonical promise per invocation and selected-branch snapshot, shared by both session buttons. */
 export function useVisitSessionReader(history: RuntimeHistoryContext | undefined): VisitSessionReader | undefined {
+	const dataSource = history?.dataSource;
+	const runId = history?.runId;
+	const snapshot = history?.snapshot;
 	return useMemo(() => {
-		if (history === undefined) {
+		if (dataSource === undefined || runId === undefined || snapshot === undefined) {
 			return undefined;
 		}
 		const cache = new Map<number, ReturnType<VisitSessionReader>>();
@@ -394,16 +408,12 @@ export function useVisitSessionReader(history: RuntimeHistoryContext | undefined
 			if (existing !== undefined) {
 				return existing;
 			}
-			const pending = history.dataSource.readVisitSession({
-				runId: history.runId,
-				snapshot: history.snapshot,
-				invokeSeqId,
-			});
+			const pending = dataSource.readVisitSession({ runId, snapshot, invokeSeqId });
 			cache.set(invokeSeqId, pending);
 			void pending.catch(() => cache.delete(invokeSeqId));
 			return pending;
 		};
-	}, [history?.dataSource, history?.runId, history?.snapshot.branchId, history?.snapshot.headSeqId]);
+	}, [dataSource, runId, snapshot]);
 }
 
 function LazyStateVisits({
@@ -466,6 +476,7 @@ function LazyStateVisits({
 					state={state}
 					allStates={allStates}
 					lazyDetails
+					currentBranchId={history.snapshot.branchId}
 					{...(history.targetSeqId === undefined ? {} : { selectedInvokeSeqId: history.targetSeqId })}
 					{...(state.agent === undefined ? {} : { agentName: state.agent })}
 					onReadSession={readSession}
@@ -791,6 +802,7 @@ export function RuntimeSection({
 								state={state}
 								allStates={allStates}
 								{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
+								{...(history?.snapshot.branchId === undefined ? {} : { currentBranchId: history.snapshot.branchId })}
 								{...(onSteerSession === undefined ? {} : { onSteerSession })}
 								{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 							/>
@@ -811,6 +823,7 @@ export function RuntimeSection({
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
+						{...(history?.snapshot.branchId === undefined ? {} : { currentBranchId: history.snapshot.branchId })}
 					/>
 				)}
 				{actorInternalGenerations === undefined && actorInternalMessages !== undefined && (
@@ -862,18 +875,16 @@ export function RuntimeSection({
 						usage: {formatHyperchartUsage(state.usage) ?? JSON.stringify(state.usage)}
 					</div>
 				)}
-				{history !== undefined &&
-					state.visitHistory === undefined &&
-					(state.type === "agent" || state.type === "user" || state.type === "script" || state.type === "tsImport") && (
-						<LazyStateVisits
-							readSession={readSession!}
-							history={history}
-							state={state}
-							allStates={allStates}
-							{...(onSteerSession === undefined ? {} : { onSteerSession })}
-							{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
-						/>
-					)}
+				{history !== undefined && state.visitHistory === undefined && isActionState(state) && (
+					<LazyStateVisits
+						readSession={readSession!}
+						history={history}
+						state={state}
+						allStates={allStates}
+						{...(onSteerSession === undefined ? {} : { onSteerSession })}
+						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
+					/>
+				)}
 				{history !== undefined && state.type === "map" && state.mapConfig?.visitHistory === undefined && (
 					<HistoryDisclosure label="map launch history">
 						<LazyMapVisits history={history} state={state} />
@@ -901,6 +912,7 @@ export function RuntimeSection({
 						allStates={allStates}
 						{...(state.agent === undefined ? {} : { agentName: state.agent })}
 						{...(selectedInvokeSeqId === undefined ? {} : { selectedInvokeSeqId })}
+						{...(history?.snapshot.branchId === undefined ? {} : { currentBranchId: history.snapshot.branchId })}
 						{...(onSteerSession === undefined ? {} : { onSteerSession })}
 						{...(onHighlightArtifact === undefined ? {} : { onHighlightArtifact })}
 					/>

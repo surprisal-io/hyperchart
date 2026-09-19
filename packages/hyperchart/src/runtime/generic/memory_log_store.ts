@@ -3,6 +3,7 @@ import type {
 	BranchId,
 	DurableLogRecord,
 	DurableRecordDraft,
+	ResolvedGateLog,
 	StorageEntry,
 } from "../../core/durable_events.js";
 import {
@@ -187,7 +188,7 @@ export class MemoryLogStore implements LogStore {
 	async findUserInteractionResponse(input: {
 		headSeqId: number | null;
 		gateSeqId: number;
-	}): Promise<Extract<DurableLogRecord, { type: "user_interaction"; kind: "resolved" }> | undefined> {
+	}): Promise<ResolvedGateLog | undefined> {
 		return findUserInteractionResponseInAncestry(this.index.materializeHistoryToHead(input.headSeqId), input.gateSeqId);
 	}
 	async countRecords(): Promise<number> {

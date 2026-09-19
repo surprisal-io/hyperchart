@@ -155,14 +155,16 @@ export function HyperchartInspectorDialogInner({
 
 	useEffect(() => {
 		void run?.runId;
+		void run?.branchId;
+		const selectedRun = runRef.current;
 		setSelectedStateId(null);
 		setSelectedVisit(null);
 		setSelectedExecutionNodeId(null);
 		setScopeStack([]);
-		setVisibleBranches(run?.branches ?? []);
-		setBranchCursor(run?.branchListNext);
+		setVisibleBranches(selectedRun?.branches ?? []);
+		setBranchCursor(selectedRun?.branchListNext);
 		setBranchLoadError(undefined);
-		setHistorySnapshot(run?.historySnapshot);
+		setHistorySnapshot(selectedRun?.historySnapshot);
 	}, [run?.runId, run?.branchId]);
 
 	const currentScopeId = scopeStack.at(-1) ?? null;

@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { ChartEvent } from "../../core/types.js";
-import type { BranchId, UserInteractionResolvedLog } from "../../core/durable_events.js";
+import type { BranchId, ResolvedGateLog } from "../../core/durable_events.js";
 import type { UserInteractionResponseCommit } from "./log_store.js";
 import { isRunLive, readRunStatus } from "./run_status.js";
 
@@ -61,7 +61,7 @@ export type RunnerUserResponseResult =
 			attemptId: string;
 			ok: true;
 			idempotent: boolean;
-			record: UserInteractionResolvedLog;
+			record: ResolvedGateLog;
 			completedAt: number;
 	  }>
 	| RunnerControlFailure;
@@ -393,7 +393,7 @@ function readResult(path: string): RunnerControlResult | undefined {
 	}
 	try {
 		const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown> & {
-			record?: Partial<UserInteractionResolvedLog>;
+			record?: Partial<ResolvedGateLog>;
 		};
 		if (
 			value.version !== CONTROL_VERSION ||
@@ -417,7 +417,7 @@ function readResult(path: string): RunnerControlResult | undefined {
 		}
 		if (
 			typeof value.idempotent !== "boolean" ||
-			value.record?.type !== "user_interaction" ||
+			(value.record?.type !== "user_interaction" && value.record?.type !== "gate") ||
 			value.record.kind !== "resolved" ||
 			!isPositiveInteger(value.record.seqId) ||
 			!isPositiveInteger(value.record.gateSeqId)

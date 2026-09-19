@@ -188,7 +188,7 @@ type HyperchartInspectResult = {
 };
 ```
 
-`args` is the normalized, serializable chart-level launch metadata. It is omitted for charts that do not declare metadata. It contains only descriptions and JSON defaults—never Zod values, validation functions, or other executable module exports.
+`args` is the normalized, serializable chart-level launch metadata. It is omitted for charts that do not declare metadata. Each `ChartArgumentAst` may contain a description, a JSON default, and a `SchemaAst` whose `schema` is plain JSON Schema and whose optional `runtimeContract` retains a stable contract id/version. Zod values and validation functions never enter the inspect AST. Hosts receive the same metadata as `HyperchartLaunchArgumentInfo`; Inspector binding tooltips use its JSON Schema for typed `arg("name")` chips.
 
 `HyperchartInspectState` fields:
 
@@ -290,7 +290,7 @@ Public AST exports:
 | Type | Important fields |
 |---|---|
 | `ChartArgumentAst` | optional serializable `description` and JSON `default` used by launch UIs |
-| `ActionStateAst` | `id`, `parent?`, `action`, `input?`, `transitions`, `after?`, `validate?`, `onReject?`, `onReenter?`, `retries?` |
+| `ActionStateAst` | `id`, `parent?`, `action`, `emit?`, `input?`, `transitions`, `after?`, `validate?`, `onReject?`, `onReenter?`, `retries?` |
 | `FinalStateAst` | `id`, `parent?`, `kind: "final"` |
 | `CompoundStateAst` | `id`, `parent?`, `initial`, `transitions`, `onDone` |
 | `RegionStateAst` | `id`, `parent?`, `initial`, `transitions` |
@@ -300,6 +300,8 @@ Public AST exports:
 | `ScriptActionAst` | `uid`, `command`, `args`, `env?`, `artifacts?`, `reply?` |
 | `ImportedActionAst` | `kind: "tsImport"`, `uid`, `module`, `export`, `env?`, `artifacts?`, `reply?` |
 | `UserActionAst` | `uid`, `prompt`, `options`, `reply?` |
+| `GateActionAst` | `uid`, host-facing `event`, rendered `payload`, `reply?` |
+| `EmitAst` | domain `event`, rendered `payload`, and optional normalized declarative `schema` |
 | `ArtifactAst` | normalized `path` template and optional schema |
 | `ArtifactOfAst` | producer state, optional artifact and selector |
 | `JoinArtifactOfAst` | map-contained producer and optional artifact |
@@ -530,6 +532,9 @@ type DurableLogRecord =
   | StateActionTimerFiredLog
   | UserInteractionOpenedLog
   | UserInteractionResolvedLog
+  | GateOpenedLog
+  | GateResolvedLog
+  | EmitLog
   | ActorCreatedLog
   | ActorMessagesEnqueuedLog
   | ActorMessageAcceptedLog
@@ -560,8 +565,11 @@ Every record carries:
 | `state_action/complete` | Claimed completion event and optional resolved state input. |
 | `state_action/validated` | Guard, event, accepted/rejected verdict, and optional resolved state input. |
 | `state_action/timer_fired` | Deadline won the race. |
-| `user_interaction/opened` | Fully rendered durable gate, including the resolved state input object when the state declares input. The optional input is informational and excluded from replay identity for compatibility with older records. |
-| `user_interaction/resolved` | Validated external event that answers one exact opened gate. |
+| `user_interaction/opened` | Fully rendered durable human interaction, including the resolved state input object when the state declares input. The optional input is informational and excluded from replay identity. |
+| `user_interaction/resolved` | Validated external event that answers one exact opened user interaction. |
+| `gate/opened` | Fully rendered host interaction contract: request event, payload, optional reply schema, action identity, phase, and informational state input. |
+| `gate/resolved` | Validated external event that answers one exact opened host gate. |
+| `emit` | Ordered domain event and resolved JSON payload published by an accepted action outcome; inert in control projection. |
 | `actor_created` | Ordinary actor or pool generation and immutable definition/input provenance. |
 | `actor_messages_enqueued` | Atomic singleton/batch FIFO transaction with exact four-way source provenance. |
 | `actor_message` | Accepted/replied/settled fact; pool facts preserve `workerIndex`. |
@@ -573,6 +581,8 @@ Every record carries:
 `StateActionInvokeLog` is exported separately because replay and integrations commonly need its `definition` provenance. New records also carry `validation: GuardRefAst | null`; the optional type permits reading legacy records, not treating absence as unguarded. A guarded or unknown completion requires a matching recorded positive verdict before publishing its result/pins when the current guard is absent. Resolved `input` copies are plain finite acyclic JSON, informational only, and excluded from replay identity; records written before the field existed remain compatible.
 
 Transitions are not records. Projection recomputes routing from the current chart. Transition inputs can bind `event()` selectors or ordinary refs such as `result()`; refs resolve from the selected ancestry when the edge fires and fail closed if unavailable.
+
+Each state's emit payloads are resolved as finite JSON at acceptance. An optional emit schema is normalized like a reply schema and serves consumer typing and inspection UI only: the machine does not validate the emitted payload against it, and the schema is not copied into the journal. The durable record remains only the action identity, event, resolved JSON payload, and journal coordinates. The machine appends emit records in declaration order in the same durable batch as an unguarded accepted completion/interaction resolution or a positive validation verdict. `FAILED` and rejected verdicts append no emit records. Projection consumes `emit` only for journal sequence bookkeeping; it does not route, complete, or invoke anything.
 
 ## Replay compatibility
 
@@ -628,7 +638,7 @@ type ReplayStaleRecord = {
   reason: "action_definition_changed" | "guard_changed" | "guard_removed"
     | "actor_definition_changed" | "actor_placement_changed"
     | "actor_message_source_changed" | "actor_reply_contract_changed"
-    | "user_interaction_contract_changed";
+    | "user_interaction_contract_changed" | "gate_contract_changed";
   message: string;
   invokeSeqId?: number;
 };
@@ -693,9 +703,10 @@ The root entry point exports these type names:
 ```text
 ActionEvent, ActionUID, ActionStateAst, ActionStateCst, AfterCst,
 AgentActionAst, AgentActionCst, ArtifactAst, ArtifactCst,
+EmitAst, EmitCst, GateActionAst, GateActionCst,
 ArtifactOfAst, ArtifactOfCst, AuthoringDiagnostic, ChartArgumentAst,
 ChartArgumentCst, ChartAst, ChartCst, ChartEvent, ChartSource,
-CompoundStateAst, CompoundStateCst, EventBindingAst, EventBindingCst,
+CompoundStateAst, CompoundStateCst, EmitsOf, EventBindingAst, EventBindingCst,
 EventType, FinalStateAst, FinalStateCst, InputRef, JoinArtifactOfAst,
 JoinArtifactOfCst, JsonPrimitive, JsonSchema, JsonValue, MapStateAst, MapStateCst,
 RuntimeContract, RuntimeContractMetadata, SchemaAst, SchemaCst,
@@ -719,8 +730,9 @@ RecordAppend, RejectedEffect, ResumeRequest, ScriptEffect,
 ScriptMachineEvent, ImportedActionEffect, ImportedActionMachineEvent, TimerEffect, TimerMachineEvent, ValidateEffect,
 ValidatedMachineEvent, EffectId, MachineEvent, MachineStartEvent, MachineOutput,
 MachineOutputEffect, MachineOutputError, MachineOutputFinal,
-MachineState, RenderedArtifact, UserEffect,
+MachineState, RenderedArtifact, UserEffect, GateEffect,
 UserMachineEvent, DurableLogRecord, StateActionInvokeLog,
+EmitLog, GateLog, GateOpenedLog, GateResolvedLog, OpenedGateLog, ResolvedGateLog,
 ReplayBrokenRecord, ReplayExplanation, ReplaySkippedRecord,
 ReplayStaleRecord, BranchProjection, PendingAction,
 ProjectionSkippedRecord, AsyncQueue, MaybeAsyncIterable

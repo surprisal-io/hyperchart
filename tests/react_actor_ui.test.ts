@@ -685,7 +685,7 @@ describe("React actor inspector structure", () => {
 			expect(mailboxMarkup).not.toContain("patch-0");
 			expect(mailboxMarkup).toContain("REVIEW");
 			expect(mailboxMarkup).toContain("ARCHIVE");
-			expect(mailboxMarkup.match(/role="button"/g)).toHaveLength(4);
+			expect(mailboxMarkup.match(/<button[^>]*aria-expanded="false"/g)).toHaveLength(4);
 			expect(mailboxMarkup.match(/aria-expanded="false"/g)).toHaveLength(4);
 		}
 

@@ -10,6 +10,8 @@ import { RunOverview } from "../packages/hyperchart/src/react/components/inspect
 import { StateDetails } from "../packages/hyperchart/src/react/components/inspector/details/StateDetails.js";
 import { TemplateTextBlock } from "../packages/hyperchart/src/react/components/inspector/prompt/TemplateTextBlock.js";
 import { runningRun } from "../packages/hyperchart/src/react/fixtures/hyperchart-fixtures.js";
+import { emitStoryRun, pendingGateRun } from "../packages/hyperchart/src/react/fixtures/gate-emit-fixtures.js";
+import { stateKindMeta } from "../packages/hyperchart/src/react/components/inspector/helpers/state.js";
 import type { HyperchartStateInfo } from "../packages/hyperchart/src/host/models.js";
 
 afterEach(cleanup);
@@ -124,6 +126,119 @@ describe("StateDetails", () => {
 		expect(markup).toContain('title="Initial state"');
 		expect(markup).toContain(">initial</span>");
 		expect(markup).toContain(">pending</span>");
+	});
+
+	it("renders a pending host gate with its own badge and without agent-only validation details", () => {
+		const state = pendingGateRun.states.find((candidate) => candidate.id === "release-gate");
+		expect(state).toBeDefined();
+		if (state === undefined) {
+			return;
+		}
+		expect(state).toMatchObject({ type: "gate", status: "waiting" });
+		expect(state.validationPolicy).toBeUndefined();
+		expect(state.validationAttempts).toBeUndefined();
+		const meta = stateKindMeta(state);
+		expect(meta.label).toBe("gate");
+		expect(meta.className).toContain("yellow");
+		expect(meta.Icon).not.toBe(stateKindMeta({ ...state, type: "agent" }).Icon);
+		expect(meta.Icon).not.toBe(stateKindMeta({ ...state, type: "user" }).Icon);
+
+		expect(state).toMatchObject({
+			gateEvent: "release.approval-requested",
+			gatePayload: {
+				releaseId: { kind: "arg", name: "releaseId", preview: 'arg("releaseId")' },
+				environment: { kind: "arg", name: "environment", preview: 'arg("environment")' },
+			},
+		});
+		const onHighlightRef = vi.fn();
+		render(
+			createElement(StateDetails, {
+				state,
+				allStates: pendingGateRun.states,
+				...(pendingGateRun.launchArgs === undefined ? {} : { launchArgs: pendingGateRun.launchArgs }),
+				onHighlightRef,
+			}),
+		);
+
+		expect(screen.getByText("gate", { selector: "span" })).toBeTruthy();
+		expect(screen.getByText("Gate request")).toBeTruthy();
+		expect(screen.getByText("release.approval-requested", { selector: "code" })).toBeTruthy();
+		const releaseArg = screen.getAllByRole("button", { name: 'arg("releaseId")' }).at(0);
+		if (releaseArg === undefined) {
+			throw new Error("releaseId argument chip missing");
+		}
+		fireEvent.pointerEnter(releaseArg);
+		expect(screen.getByRole("tooltip").textContent).toContain("string");
+		fireEvent.click(releaseArg);
+		expect(onHighlightRef).toHaveBeenCalledWith('arg("releaseId")');
+		expect(screen.queryByText("Validation guard")).toBeNull();
+		expect(screen.queryByText("Agent")).toBeNull();
+	});
+
+	it("renders declared emit payload sources and schemas as contracts", () => {
+		const state = emitStoryRun.states.find((candidate) => candidate.id === "publish");
+		expect(state).toBeDefined();
+		if (state === undefined) {
+			return;
+		}
+
+		expect(state.emits?.[0]?.payload).toMatchObject({
+			release: {
+				environment: { kind: "arg", name: "environment" },
+				state: {
+					nestedPath: { kind: "result", state: "publish", path: "state.nested.path" },
+				},
+			},
+			metrics: { attempts: 2, verified: true, absent: null },
+		});
+		const entries = (state.emits?.[0]?.payload as { entries?: unknown[] } | undefined)?.entries;
+		expect(entries).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					type: "result",
+					label: expect.objectContaining({ kind: "result", path: "state.nested.path" }),
+				}),
+				expect.objectContaining({
+					type: "input",
+					label: expect.objectContaining({ kind: "input", name: "request", path: "path" }),
+				}),
+			]),
+		);
+		const markup = renderToStaticMarkup(
+			createElement(StateDetails, {
+				state,
+				allStates: emitStoryRun.states,
+				...(emitStoryRun.launchArgs === undefined ? {} : { launchArgs: emitStoryRun.launchArgs }),
+			}),
+		);
+
+		expect(markup).toContain("Contracts");
+		expect(markup).toContain("emits");
+		expect(markup).toContain("release.published");
+		expect(markup).toContain("&quot;nestedPath&quot;");
+		expect(markup).toContain("result(&quot;publish&quot;, &quot;state.nested.path&quot;)");
+		expect(markup).toContain("inline-flex whitespace-nowrap");
+		expect(markup).toContain("ReleasePublishedPayload");
+		expect(markup).toContain("release.metrics-recorded");
+		expect(markup).not.toContain("ReleaseMetricsRecordedPayload");
+
+		const onHighlightReply = vi.fn();
+		render(
+			createElement(StateDetails, {
+				state,
+				allStates: emitStoryRun.states,
+				...(emitStoryRun.launchArgs === undefined ? {} : { launchArgs: emitStoryRun.launchArgs }),
+				onHighlightReply,
+			}),
+		);
+		const nestedRef = screen.getAllByRole("button", { name: 'result("publish", "state.nested.path")' }).at(0);
+		if (nestedRef === undefined) {
+			throw new Error("nested result chip missing");
+		}
+		fireEvent.pointerEnter(nestedRef);
+		expect(screen.getByRole("tooltip").textContent).toContain("string");
+		fireEvent.click(nestedRef);
+		expect(onHighlightReply).toHaveBeenCalledWith("publish", "state.nested.path");
 	});
 
 	it("renders final outcome and terminal notification parameters", () => {

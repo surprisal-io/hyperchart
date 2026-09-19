@@ -1,10 +1,11 @@
+import { StaleUserInteractionError } from "../execution/user_interaction.js";
 import { assertRunId, currentRunStorage, resolveRunPaths } from "../runtime/generic/run_paths.js";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { existsSync, linkSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseChartModuleSync } from "../core/inspect.js";
-import type { BranchId, UserInteractionOpenedLog, UserInteractionResolvedLog } from "../core/durable_events.js";
+import type { BranchId, ResolvedGateLog, UserInteractionOpenedLog } from "../core/durable_events.js";
 import type { ActionUID, ChartEvent, SchemaAst } from "../core/types.js";
 import { listRunIds, loadRunMeta, type RunMeta } from "../runtime/generic/run_dir.js";
 import { openRunLogStore } from "../runtime/generic/log_store_factory.js";
@@ -308,7 +309,10 @@ async function scanOpenUserInteractionsWithMeta(
 				saveCheckpoint: "never",
 			});
 			for (const gate of semantic.openUserInteractions()) {
-				result.push(requestFromOpened(runId, selected, gate));
+				// File-backed arbitration is exclusively for human user() requests.
+				if (gate.type === "user_interaction") {
+					result.push(requestFromOpened(runId, selected, gate));
+				}
 			}
 		}
 		return result.sort(compareCoordinates);
@@ -407,11 +411,11 @@ async function commitOfflineUserInteractionResponse(
 			}
 			const gate = await store.getRecord(options.seqId);
 			if (
-				gate?.type !== "user_interaction" ||
+				(gate?.type !== "user_interaction" && gate?.type !== "gate") ||
 				gate.kind !== "opened" ||
 				!(await store.containsInHistory({ headSeqId: snapshot.headSeqId, seqId: options.seqId }))
 			) {
-				throw new Error(`User interaction ${options.seqId} is stale or missing from branch '${options.branchId}'`);
+				throw new StaleUserInteractionError(options.branchId, options.seqId);
 			}
 			const semantic = await BranchExecution.restore({
 				ast: parsed.ast,
@@ -420,13 +424,13 @@ async function commitOfflineUserInteractionResponse(
 				saveCheckpoint: "never",
 				snapshot,
 			});
-			const draft = await semantic.prepareUserInteraction(gate, options.event, parsed.schemaRegistry);
+			const drafts = await semantic.prepareUserInteraction(gate, options.event, parsed.schemaRegistry);
 			try {
 				const records = await store.appendDraftsAtHead(
-					{ expectedHeadSeqId: snapshot.headSeqId, drafts: [draft] },
+					{ expectedHeadSeqId: snapshot.headSeqId, drafts },
 					semantic.prepareStampedCommit,
 				);
-				const record = records[0] as UserInteractionResolvedLog;
+				const record = records[0] as ResolvedGateLog;
 				return { response: responseFromResolved(options.runId, options.branchId, record), idempotent: false };
 			} catch (error) {
 				const retryable =
@@ -488,11 +492,7 @@ function requestFromOpened(
 		createdAt: new Date(opened.timestamp).toISOString(),
 	};
 }
-function responseFromResolved(
-	runId: string,
-	branchId: BranchId,
-	resolved: UserInteractionResolvedLog,
-): UserInteractionResponse {
+function responseFromResolved(runId: string, branchId: BranchId, resolved: ResolvedGateLog): UserInteractionResponse {
 	return {
 		version: 2,
 		runId,

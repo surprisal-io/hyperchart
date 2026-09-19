@@ -21,7 +21,7 @@ export default chart({
   kind: "chart",
   id: "review",
   args: {
-    task: { description: "Work item to review", default: "Review the current change" },
+    task: { description: "Work item to review", schema: z.string(), default: "Review the current change" },
   },
   initial: "review",
   states: {
@@ -47,11 +47,11 @@ Every chart has:
 - a stable `id`;
 - an `initial` state name;
 - a `states` record;
-- optional run-argument schema metadata.
+- optional typed run-argument metadata.
 
 State names are local inside the authoring tree. Normalization assigns absolute paths such as `review` or `pipeline.verify`.
 
-Chart-level `args` is optional launch-form metadata. Each entry has an optional human-readable `description` and JSON `default`. It stays serializable through normalized inspection and does not validate or automatically inject runtime values; hosts present it when launching, while the supplied values become the durable run arguments. A `refs<Args>()` chart checks every declared metadata key and default type against `Args`, rejecting unknown keys even when they appear beside valid keys. Metadata may remain a subset of `Args` or be empty.
+Chart-level `args` is optional launch-form metadata. Each entry may have a human-readable `description`, a Zod `schema`, and a JSON `default`. Normalization converts the schema to JSON Schema for the AST and inspect/host models, retaining `contract()` id/version metadata when present. If a default is declared with a schema, normalization validates it immediately; the default is still only a launch suggestion and is never injected into a run. Hosts present this metadata while supplied values become the durable run arguments. A `refs<Args>()` chart checks every declared metadata key, schema output, and default type against `Args`, rejecting unknown keys even when they appear beside valid keys. Metadata may remain a subset of `Args` or be empty. `ArgsOf<typeof definition>` can infer argument types from declared schemas.
 
 ## Use typed refs
 
@@ -138,11 +138,16 @@ An action state dispatches one action and waits for an event.
 {
   kind: "state",
   action: agent("reviewer", { task: "Review the change." }),
+  emit: [emit({
+    event: "REVIEW_FINISHED",
+    payload: result("review"),
+    schema: z.object({ summary: z.string() }),
+  })],
   transitions: { PASS: "done", FIX: "repair" },
 }
 ```
 
-The action may be an agent, script, or user request.
+The action may be an agent, script, user request, or host-resolved gate. Optional `emit` declarations publish ordered domain facts only when the completion is accepted. Their payloads use the ordinary value/ref expression language and must resolve to finite JSON. An optional `schema` declares the payload shape for downstream consumers, inferred `EmitsOf<C>` types, and the inspector; it is not runtime validation and is not stored in the journal. Hyperchart resolves every payload before atomically appending the accepted completion or positive validation verdict followed by the emit records. A rejected validation claim or `FAILED` outcome publishes nothing, and emitted facts never drive chart control flow.
 
 ### Agent actions
 
@@ -272,9 +277,23 @@ user({
 })
 ```
 
-A user action is a durable host-neutral input gate. Its allowed events come from reachable non-`FAILED` transitions; `options` supplies host-visible choices and normally uses those event names. The host shows the rendered prompt to the real user and commits the chosen event plus optional schema-validated output. The public gate coordinate is `(runId, seqId)`.
+A user action is a durable host-neutral human interaction. Its allowed events come from reachable non-`FAILED` transitions; `options` supplies host-visible choices and normally uses those event names. The host shows the rendered prompt to the real user and commits the chosen event plus optional schema-validated output. The public interaction coordinate is `(runId, branchId, seqId)`.
 
-A gate suspends only its own branch: the detached runner stays alive and other `parallel` regions or admitted `map` instances continue. Across all owned runs in the same host session and canonical working directory, presentation is serialized by lexical `runId`, then numeric `seqId`. Pi collects the next ordinary user prompt after presenting the gate; Claude Code uses native `AskUserQuestion`. Identical response retries are safe, while divergent retries conflict.
+An interaction suspends only its own branch: the detached runner stays alive and other `parallel` regions or admitted `map` instances continue. Across all owned runs in the same host session and canonical working directory, human presentation is serialized by lexical `runId`, then numeric `seqId`. Pi collects the next ordinary user prompt after presenting the interaction; Claude Code uses native `AskUserQuestion`. Identical response retries are safe, while divergent retries conflict.
+
+### Host-resolved gates
+
+Use `gate()` when an application, scheduler, or service—not a person—must supply the next chart event:
+
+```ts
+gate({
+  event: "SELECT_CANDIDATE",
+  payload: { candidates: result("search", "candidates") },
+  reply: z.object({ candidateId: z.string() }),
+})
+```
+
+`event` names the host-facing request, `payload` is a JSON value expression rendered when the phase opens, and `reply` validates the response event's optional `output`. A gate does not accept `prompt` or `options`, does not dispatch an executor, and is not published through human request/receipt scanning. It appends durable `gate/opened`, waits, and uses the same branch-aware controller and offline commit APIs as `user()` to append `gate/resolved`. Allowed-event, stale-head, rewind, idempotency, and conflict rules are the same for both interaction kinds.
 
 ## Events and transitions
 
@@ -316,7 +335,7 @@ repair: {
 
 Input is bound to a visit, not permanently to a state path. Re-entering the same state creates a new visit and a new input binding. `event()` reads the accepted event output; `result()` and the other ordinary refs use the same replay-derived resolver as templates, evaluated in the firing state's runtime scope. A missing result, missing selector, or otherwise unavailable ref throws before target entry, so no invoke is emitted with partial input.
 
-For non-user actions, the resolved input object is copied onto `state_action/invoke`, `state_action/complete`, and `state_action/validated` records. User actions expose the same provenance on `user_interaction/opened`. These optional copies are durable, JSON-only informational provenance for downstream journal consumers; replay still derives input from the edge and accepts old records without a copy.
+For executor actions, the resolved input object is copied onto `state_action/invoke`, `state_action/complete`, and `state_action/validated` records. User and host-gate actions expose the same provenance on `user_interaction/opened` and `gate/opened`. These optional copies are durable, JSON-only informational provenance for downstream journal consumers; replay still derives input from the edge and excludes the copy from interaction contract identity.
 
 Reserved system events include `FAILED`, validation outcomes, timer events, and scope cancellation. Do not invent application events that collide with reserved names.
 

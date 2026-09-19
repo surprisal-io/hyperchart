@@ -6,6 +6,7 @@ import type {
 	EventBindingCst,
 	JoinArtifactOfCst,
 	JoinResultOfCst,
+	InferSchema,
 	InputRef,
 } from "./types.js";
 
@@ -41,6 +42,33 @@ type FlattenStates<S, Prefix extends string = ""> = {
 }[keyof S & string];
 
 type InferSpec<S> = S extends z.ZodType ? z.infer<S> : unknown;
+
+/** The run-argument registry inferred from chart-level argument schemas. */
+export type ArgsOf<C> = C extends { args: infer A }
+	? Simplify2<{
+			[K in keyof A]: A[K] extends { schema: infer S } ? InferSpec<S> : A[K] extends { default: infer D } ? D : unknown;
+		}>
+	: never;
+
+type DeclaredEmits<S> =
+	FlattenStates<S> extends infer E ? (E extends [string, { emit: readonly (infer Emit)[] }] ? Emit : never) : never;
+
+type EmitEvent<E> = E extends { event: infer Event extends string } ? Event : never;
+
+type EmitPayload<E, Event extends string> = E extends unknown
+	? E extends { event: Event; schema: infer Schema }
+		? InferSchema<Schema>
+		: E extends { event: Event }
+			? unknown
+			: never
+	: never;
+
+/** The domain-event registry declared by emit() entries across all action states. */
+export type EmitsOf<C> = C extends { states: infer S }
+	? Simplify2<{
+			[Event in EmitEvent<DeclaredEmits<S>>]: EmitPayload<DeclaredEmits<S>, Event>;
+		}>
+	: never;
 
 // The registry the chart itself declares: every state whose action has a zod (or other) reply.
 export type ResultsOf<C> = C extends { states: infer S }
@@ -143,7 +171,10 @@ type Mutual<Declared, Actual, Message extends string> = [Declared] extends [Actu
 	: { [K in Message]: { chartDeclares: Actual; registryDeclares: Declared } };
 
 type ArgumentMetadataFor<Args> = Partial<{
-	[K in keyof Args & string]: Omit<ChartArgumentCst, "default"> & { default?: Args[K] };
+	[K in keyof Args & string]: Omit<ChartArgumentCst, "default" | "schema"> & {
+		default?: Args[K];
+		schema?: z.ZodType<Args[K]>;
+	};
 }>;
 
 type VerifyArguments<C, Args> = C extends { args: infer Actual }

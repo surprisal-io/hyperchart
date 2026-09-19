@@ -171,7 +171,7 @@ async function forkAndCommitUserInteraction<T>(
 			...(input.checkpoint === undefined ? {} : { checkpoint: input.checkpoint }),
 			append: {
 				expectedHeadSeqId: prepared.expectedHeadSeqId,
-				drafts: prepared.existing === undefined ? [prepared.draft] : [],
+				drafts: prepared.existing === undefined ? prepared.drafts : [],
 			},
 			...(prepared.existing === undefined ? { prepare: prepared.semantic.prepareStampedCommit } : {}),
 		},

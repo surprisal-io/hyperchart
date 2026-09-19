@@ -310,7 +310,8 @@ function inspectorHtml(): string {
 function sendAsset(response: ServerResponse, fileName: "client.js" | "styles.css", contentType: string): void {
 	const path = resolveInspectorAsset(fileName);
 	if (path === undefined) {
-		return sendText(response, 503, "Inspector browser assets are missing. Rebuild @surprisal/hyperchart.");
+		sendText(response, 503, "Inspector browser assets are missing. Rebuild @surprisal/hyperchart.");
+		return;
 	}
 	response.statusCode = 200;
 	response.setHeader("Content-Type", contentType);

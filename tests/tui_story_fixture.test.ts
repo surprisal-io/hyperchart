@@ -28,21 +28,33 @@ describe("Storybook production TUI fixture", () => {
 		fixture = materializeProductionTuiFixture();
 		for (const item of fixture.history) {
 			const runDir = resolveRunPaths(item.runId, fixture.storage).runDir;
+			const ast = item.runId === fixture.gateAndEmit.runId ? fixture.gateAndEmit.ast : fixture.ast;
 			const status = withRunStorage(fixture.storage, () => readRunStatus(item.runId));
 			expect(status).not.toHaveProperty("runDir");
 			expect(status).toMatchObject({
 				version: 2,
 				runId: item.runId,
 				branchIds: ["main"],
-				chartId: fixture.ast.id,
+				chartId: item.chartId,
 				state: item.state,
 			});
 			const log = await collectHistoryRecords(new JsonlLogStore(join(runDir, "log.jsonl")), "main");
-			const view = buildRunView(fixture.ast, log, Date.UTC(2026, 6, 14, 12, 0, 0));
+			const view = buildRunView(ast, log, Date.UTC(2026, 6, 14, 12, 0, 0));
 			expect(view.final).toBe(false);
-			expect(view.pending.some((entry) => entry.path === "research#market.scout")).toBe(true);
+			if (item.runId === fixture.gateAndEmit.runId) {
+				expect(view.tail.map((entry) => entry.text)).toEqual(
+					expect.arrayContaining(["gate 3 resolved → APPROVED", "emit release.approved"]),
+				);
+				expect(view.graph.find((row) => row.path === "release-gate")).toMatchObject({
+					action: "gate:release.approval-requested",
+					status: "completed",
+					event: "APPROVED",
+				});
+			} else {
+				expect(view.pending.some((entry) => entry.path === "research#market.scout")).toBe(true);
+			}
 			const progress = readSessionProgress(join(runDir, "sessions"));
-			expect(Object.keys(progress.sessions)).toHaveLength(3);
+			expect(Object.keys(progress.sessions)).toHaveLength(item.runId === fixture.gateAndEmit.runId ? 0 : 3);
 			for (const session of Object.values(progress.sessions)) {
 				expect(session.sessionFile).toBeDefined();
 				const header = JSON.parse(readFileSync(session.sessionFile!, "utf8").split("\n")[0]!) as Record<

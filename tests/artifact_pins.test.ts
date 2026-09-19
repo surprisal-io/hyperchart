@@ -203,8 +203,8 @@ describe("artifact pins", () => {
 			(entry): entry is Extract<DurableLogRecord, { type: "state_action"; kind: "complete" }> =>
 				entry.type === "state_action" && entry.kind === "complete",
 		);
-		const parentPin = completions[0]?.artifacts?.["notes.md"]!;
-		const rejectedPin = completions[1]?.artifacts?.["notes.md"]!;
+		const parentPin = completions[0]?.artifacts?.["notes.md"];
+		const rejectedPin = completions[1]?.artifacts?.["notes.md"];
 		const acceptedPin = completions[2]?.artifacts?.["notes.md"];
 		if (parentPin === undefined || rejectedPin === undefined || acceptedPin === undefined) {
 			throw new Error("missing artifact pins");

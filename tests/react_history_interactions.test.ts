@@ -264,14 +264,19 @@ describe("interactive bounded history", () => {
 		expect(rendered.getByText("spawn seq 9")).toBeTruthy();
 	});
 
-	it("does not mount expensive visit details until the row is expanded", () => {
+	it("mounts reply JSON and ordered emit facts only after the visit row expands", () => {
 		const visit = {
 			visit: 1,
 			invokeSeqId: 7,
 			startedAt: 1,
 			endedAt: 2,
 			status: "done" as const,
-			completedEvent: "DONE",
+			completedEvent: "PUBLISHED",
+			completedOutput: { releaseId: "release-2026.09.18", artifactCount: 7 },
+			emits: [
+				{ seqId: 8, event: "release.published", payload: { digest: "sha256:abc" } },
+				{ seqId: 9, event: "release.metrics-recorded", payload: { artifactCount: 7 } },
+			],
 			invocation: { kind: "script" as const, command: "node", args: ["task.mjs"] },
 		};
 		const state = { id: "work", type: "script" as const, status: "done" as const };
@@ -279,6 +284,7 @@ describe("interactive bounded history", () => {
 			createElement(VisitHistory, { visits: [visit], state, allStates: [state], lazyDetails: true }),
 		);
 		expect(rendered.queryByText("completed event")).toBeNull();
+		expect(rendered.queryByText("release.published")).toBeNull();
 		const details = rendered.container.querySelector("details");
 		if (details === null) {
 			throw new Error("visit details missing");
@@ -286,6 +292,10 @@ describe("interactive bounded history", () => {
 		details.open = true;
 		fireEvent(details, new Event("toggle"));
 		expect(rendered.getByText("completed event")).toBeTruthy();
+		expect(rendered.getByText("release.published")).toBeTruthy();
+		expect(rendered.getByText("release.metrics-recorded")).toBeTruthy();
+		expect(rendered.container.textContent).toContain("release-2026.09.18");
+		expect(rendered.container.textContent).toContain("sha256:abc");
 	});
 
 	it("opens and highlights the exact selected invocation", () => {
