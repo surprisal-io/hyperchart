@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
 	type AgentSession,
@@ -518,7 +518,12 @@ export class PiAgentExecutor implements AgentExecutor {
 			if (invokeSeqId === undefined) {
 				throw new Error(`Agent effect ${effect.id} has no durable invoke sequence`);
 			}
-			sessionHandle = await this.options.sessionService.openOrCreate(effect.sessionId);
+			// The service owns transcripts by durable ID. Only explicit reentry may
+			// request another invocation's ID; retries must remain on their own ID.
+			const resumeId = effect.recovery === undefined ? effect.resume?.session : undefined;
+			sessionHandle = await this.options.sessionService.openOrCreate(
+				resumeId !== undefined && !existsSync(resumeId) ? resumeId : effect.sessionId,
+			);
 		}
 		if (isStopped()) {
 			await this.closeSessionHandle(sessionHandle);
@@ -877,22 +882,42 @@ function latestSessionForRunOptions(
 	if (runOptions.forceNewSession) {
 		return undefined;
 	}
-	if (runOptions.resumeSessionFile !== undefined && existsSync(runOptions.resumeSessionFile)) {
-		return runOptions.resumeSessionFile;
+	// An explicit reentry may name a previous file or durable session ID.
+	// A same-invocation recovery must instead restore its own pinned session.
+	if (effect.recovery === undefined && effect.resume !== undefined) {
+		if (runOptions.resumeSessionFile !== undefined && existsSync(runOptions.resumeSessionFile)) {
+			return runOptions.resumeSessionFile;
+		}
+		return effect.resume.session === undefined
+			? undefined
+			: latestJsonlForPreviousActionSession(sessionsDir, branchId, effect, effect.resume.session);
 	}
-	if (runOptions.resumePrompt !== undefined) {
-		return latestJsonlForPreviousActionSession(sessionsDir, branchId, effect);
-	}
-	return latestJsonl(dir);
+	return latestJsonl(dir, effect.sessionId);
 }
 
-function latestJsonl(dir: string): string | undefined {
-	if (!existsSync(dir)) {
+function sessionIdInFile(file: string): string | undefined {
+	const fd = openSync(file, "r");
+	try {
+		const header = Buffer.alloc(4096);
+		const length = readSync(fd, header, 0, header.length, 0);
+		const newline = header.subarray(0, length).indexOf(10);
+		if (newline < 0) return undefined;
+		const record: unknown = JSON.parse(header.toString("utf8", 0, newline));
+		return typeof record === "object" && record !== null && "type" in record && record.type === "session" &&
+			"id" in record && typeof record.id === "string" ? record.id : undefined;
+	} catch {
 		return undefined;
+	} finally {
+		closeSync(fd);
 	}
+}
+
+function latestJsonl(dir: string, sessionId: string): string | undefined {
+	if (!existsSync(dir)) return undefined;
 	return readdirSync(dir)
 		.filter((file) => file.endsWith(".jsonl"))
 		.map((file) => join(dir, file))
+		.filter((file) => sessionIdInFile(file) === sessionId)
 		.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
 }
 
@@ -900,24 +925,15 @@ function latestJsonlForPreviousActionSession(
 	sessionsDir: string,
 	branchId: string,
 	effect: AgentEffect,
+	previousSessionId: string,
 ): string | undefined {
 	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid));
-	if (!existsSync(root)) {
-		return undefined;
-	}
+	if (!existsSync(root)) return undefined;
 	const currentKey = sanitizeSegment(sessionKey(effect.id));
-	const candidates: string[] = [];
-	for (const entry of readdirSync(root, { withFileTypes: true })) {
-		if (!entry.isDirectory() || entry.name === currentKey) {
-			continue;
-		}
-		const dir = join(root, entry.name);
-		for (const file of readdirSync(dir)) {
-			if (file.endsWith(".jsonl")) {
-				candidates.push(join(dir, file));
-			}
-		}
-	}
+	const candidates = readdirSync(root, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory() && entry.name !== currentKey)
+		.map((entry) => latestJsonl(join(root, entry.name), previousSessionId))
+		.filter((file): file is string => file !== undefined);
 	return candidates.sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs)[0];
 }
 

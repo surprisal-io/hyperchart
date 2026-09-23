@@ -35,7 +35,7 @@ function effect(visit = 1): AgentEffect {
 	};
 }
 
-async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
+async function fixture(extensionPolicy: PiExtensionPolicy = "isolated", withSessionService = true) {
 	const root = await mkdtemp(join(tmpdir(), "hyperchart-session-resources-"));
 	roots.push(root);
 	await mkdir(join(root, "extensions"));
@@ -88,7 +88,7 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 		},
 	};
 	const overrides = vi.fn(async () => undefined);
-	const executor = new PiAgentExecutor({
+	const createExecutor = () => new PiAgentExecutor({
 		resolveSessionOverrides: overrides,
 		workDir: root,
 		projectDir: root,
@@ -98,8 +98,9 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 		branchId: "main",
 		modelRuntime,
 		...(extensionPolicy === "ambient" ? {} : { extensionPolicy }),
-		sessionService: service,
+		...(withSessionService ? { sessionService: service } : {}),
 	});
+	const executor = createExecutor();
 	const subscribe = AgentSession.prototype.subscribe;
 	vi.spyOn(AgentSession.prototype, "subscribe").mockImplementation(function (this: AgentSession, listener) {
 		counts.subscriptions++;
@@ -116,12 +117,20 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 		dispose.call(this);
 	});
 	const seenSessions = new WeakSet<AgentSession>();
-	const prompts: Array<{ id: string; text: string; entries: number }> = [];
+	const prompts: Array<{ id: string; text: string; entries: number; previousUsers: string[]; file: string | undefined }> = [];
 	const prompt = vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (
 		this: AgentSession,
 		text,
 	) {
-		prompts.push({ id: this.sessionId, text, entries: this.sessionManager.getEntries().length });
+		const entries = this.sessionManager.getEntries();
+		prompts.push({
+			id: this.sessionId,
+			file: this.sessionManager.getSessionFile(),
+			text,
+			entries: entries.length,
+			previousUsers: entries.flatMap((entry) => entry.type === "message" && entry.message.role === "user"
+				? [typeof entry.message.content === "string" ? entry.message.content : ""] : []),
+		});
 		// Exercise real SDK extension contexts without invoking a provider. The
 		// fixture starts a resource as a normal host would, then executor owns teardown.
 		if (!seenSessions.has(this)) {
@@ -138,10 +147,23 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated") {
 			});
 		}
 		this.sessionManager.appendMessage({ role: "user", content: text, timestamp: Date.now() });
+		// SDK persists a session only after its first assistant message. Keep the
+		// transcript real while stubbing the provider turn and finish tool.
+		const callId = `finish-call-${this.sessionManager.getEntries().length}`;
+		this.sessionManager.appendMessage({
+			role: "assistant", content: [{ type: "toolCall", id: callId, name: "finish", arguments: { event: "DONE" } }],
+			timestamp: Date.now(), stopReason: "toolUse", api: "openai-codex-responses", provider: "openai-codex", model: "test",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		} as never);
 		const finish = this.agent.state.tools.find((tool) => tool.name === "finish")!;
-		await finish.execute("finish-call", { event: "DONE" });
+		await finish.execute(callId, { event: "DONE" });
+		this.sessionManager.appendMessage({
+			role: "toolResult", toolCallId: callId, toolName: "finish", content: [{ type: "text", text: "Recorded." }],
+			isError: false, timestamp: Date.now(),
+		} as never);
 	});
-	return { root, executor, counts, order, prompts, prompt, stored, opened, service, overrides };
+	return { root, executor, createExecutor, counts, order, prompts, prompt, stored, opened, service, overrides };
 }
 
 function complete(executor: PiAgentExecutor, invocation: AgentEffect): Promise<ChartEvent> {
@@ -245,6 +267,122 @@ describe("PiAgentExecutor session resources", () => {
 			}
 			expect(f.counts.handles).toBe(0);
 			expect(f.counts.disposed).toBe(2);
+		} finally {
+			await f.executor.dispose();
+		}
+	});
+
+	it("keeps pooled jobs on their own transcript through validation nudge, restart, and process resume", async () => {
+		const f = await fixture("isolated", false);
+		let resumed: PiAgentExecutor | undefined;
+		const job = (visit: number, name: string): AgentEffect => ({ ...effect(visit), task: `Job: ${name}` });
+		const retry = (
+			invocation: AgentEffect, seq: number, mode: "nudge" | "restart", sessionId = invocation.sessionId,
+		): AgentEffect => ({
+			...invocation,
+			id: `resources:work:worker:2:${seq}`,
+			sessionId,
+			recovery: {
+				mode, scope: "validation", nudgeAttempt: mode === "nudge" ? 1 : 0,
+				restartAttempt: mode === "restart" ? 1 : 0,
+				failure: { kind: "validation", message: "wrong citation" },
+			},
+		});
+		try {
+			const first = job(1, "old-rule");
+			const second = job(2, "current-rule");
+			expect(await complete(f.executor, first)).toEqual({ type: "DONE" });
+			expect(await complete(f.executor, second)).toEqual({ type: "DONE" });
+			expect(await complete(f.executor, retry(second, 3, "nudge"))).toEqual({ type: "DONE" });
+			expect(f.prompts[2]!.previousUsers.some((text) => text.includes("Job: current-rule"))).toBe(true);
+			expect(f.prompts[2]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(false);
+			const restarted = retry(second, 4, "restart", "resource-session-2-restarted");
+			expect(await complete(f.executor, restarted)).toEqual({ type: "DONE" });
+			expect(f.prompts[3]!.text).toContain("Job: current-rule");
+			await f.executor.dispose();
+			resumed = f.createExecutor();
+			expect(await complete(resumed, retry(restarted, 5, "nudge"))).toEqual({ type: "DONE" });
+			expect(f.prompts[4]!.previousUsers.some((text) => text.includes("current-rule"))).toBe(true);
+			expect(f.prompts[4]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(false);
+			// A rejected finish in the restored transcript cannot short-circuit the new nudge.
+			expect(f.prompts).toHaveLength(5);
+		} finally {
+			await resumed?.dispose();
+			await f.executor.dispose();
+		}
+	});
+
+	it("uses the complete current task when its transcript is missing, not a previous pooled job", async () => {
+		const f = await fixture("isolated", false);
+		try {
+			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
+			const second = { ...effect(2), task: "Job: current-rule" };
+			expect(await complete(f.executor, {
+				...second,
+				recovery: {
+					mode: "nudge", scope: "validation", nudgeAttempt: 1, restartAttempt: 0,
+					failure: { kind: "validation", message: "retry current job" },
+				},
+			})).toEqual({ type: "DONE" });
+			expect(f.prompts[1]!.previousUsers).toEqual([]);
+			expect(f.prompts[1]!.text).toContain("Job: current-rule");
+			expect(f.prompts[1]!.text).toContain("retry current job");
+		} finally {
+			await f.executor.dispose();
+		}
+	});
+
+	it.each([false, true])("permits explicit reentry to its pinned previous session (service=%s)", async (withSessionService) => {
+		const f = await fixture("isolated", withSessionService);
+		try {
+			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
+			expect(await complete(f.executor, {
+				...effect(2), task: "Job: current-rule",
+				resume: { message: "Continue the pinned previous session.", session: effect(1).sessionId },
+			})).toEqual({ type: "DONE" });
+			expect(f.prompts[1]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(true);
+			expect(f.prompts[1]!.text).toContain("Continue the pinned previous session.");
+			if (withSessionService) expect(f.opened).toEqual([effect(1).sessionId, effect(1).sessionId]);
+		} finally {
+			await f.executor.dispose();
+		}
+	});
+
+	it("accepts an explicitly pinned session file but not an unrelated session ID", async () => {
+		const f = await fixture("isolated", false);
+		try {
+			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
+			expect(await complete(f.executor, {
+				...effect(2), task: "Job: current-rule",
+				resume: { message: "Resume explicit file.", session: f.prompts[0]!.file! },
+			})).toEqual({ type: "DONE" });
+			expect(f.prompts[1]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(true);
+			expect(f.prompts[1]!.text).toBe("Resume explicit file.");
+			expect(await complete(f.executor, {
+				...effect(3), task: "Job: third-rule",
+				resume: { message: "Resume unknown ID.", session: "not-a-recorded-session" },
+			})).toEqual({ type: "DONE" });
+			expect(f.prompts[2]!.previousUsers).toEqual([]);
+			expect(f.prompts[2]!.text).toContain("Job: third-rule");
+		} finally {
+			await f.executor.dispose();
+		}
+	});
+
+	it("pins session-service recovery to the second pooled job", async () => {
+		const f = await fixture();
+		try {
+			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
+			const second = { ...effect(2), task: "Job: current-rule" };
+			expect(await complete(f.executor, second)).toEqual({ type: "DONE" });
+			expect(await complete(f.executor, {
+				...second, id: "resources:work:worker:2:3",
+				recovery: { mode: "nudge", scope: "validation", nudgeAttempt: 1, restartAttempt: 0,
+					failure: { kind: "validation", message: "wrong citation" } },
+			})).toEqual({ type: "DONE" });
+			expect(f.opened).toEqual([effect(1).sessionId, second.sessionId, second.sessionId]);
+			expect(f.prompts[2]!.previousUsers.some((text) => text.includes("current-rule"))).toBe(true);
+			expect(f.prompts[2]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(false);
 		} finally {
 			await f.executor.dispose();
 		}
