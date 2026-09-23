@@ -745,7 +745,6 @@ Do not overwrite unrelated dirty changes in:
 - All old/new TLA+ models pass.
 - Real sample covers local/global actors, single/batch send, call/reply, drain and failure intent; require `TRACE ACCEPTED`.
 - `npm run check`, package validation, clean-consumer type tests, docs sync and Storybook checks pass.
-- After implementation, offer but do not automatically launch the required `docs-engine` audit.
 
 ## Основные принципы реализации
 

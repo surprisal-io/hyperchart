@@ -149,14 +149,6 @@ assets, and skills are staged transiently into package directories by
 `prepack` and removed by `postpack`; generated package mirrors must never be
 committed. `npm run validate:packages` verifies the published tarball contents.
 
-After changing runtime behavior, tool surfaces, or documentation, offer the
-user a run of the `docs-engine` chart (`.hypercharts/docs-engine`, a
-host-neutral shared chart visible to both Pi and Claude Code). Suggest it —
-do not start it yourself. `args: {mode: "audit"}` audits every canonical unit
-against the code and writes `artifacts/docs-engine/drift-report.json` without
-touching files; `{mode: "fix"}` additionally patches the canonical units from
-confirmed findings and re-syncs the packages.
-
 The change-to-document map and release checklist live in
 [`docs/development.md`](docs/development.md). Tests must accompany behavioral
 changes; UI changes require an appropriate Storybook story and refreshed visual

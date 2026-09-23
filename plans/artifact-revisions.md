@@ -128,8 +128,7 @@ Nothing imports it yet. Pure, safe, reviewable in isolation.
 - Storybook: State Details case with pinned artifacts (production pipeline:
   real execution loop → explainReplay → adapter → component).
 - Docs: canonical page under `docs/` (artifact semantics: boundary revisions,
-  pin verification, store layout), package README touchpoints, offer
-  docs-engine audit run.
+  pin verification, store layout), package README touchpoints.
 
 ## Explicitly out of scope (with triggers)
 
