@@ -58,25 +58,32 @@ Durable history consumers use only snapshot-pinned cursor chunks from `RunHistor
 
 ## Build and test
 
-Build both packages:
+Build all three packages (needed for bundled browser assets, distribution, and package validation):
 
 ```sh
 npm run build
 ```
 
-Run TypeScript checks:
+Run source-level TypeScript checks without rebuilding packages (incremental on repeat runs):
 
 ```sh
 npm run typecheck
 ```
 
-Run tests:
+Run fast in-memory and UI/contract tests:
 
 ```sh
 npm test
 ```
 
-PostgreSQL integration tests are opt-in via `HYPERCHART_PG_DSN`; without it, JSONL coverage still runs and PostgreSQL cases are reported as skipped. The Pi semantic-ID test additionally requires an isolated database named `autodiscovery_labnotes_test_<digits>` or `autodiscovery_msagl_labnotes_test_<digits>` and rejects an explicitly configured database outside that allowlist.
+External-I/O, real-runner, chart-loader, host, and end-to-end suites live in `tests/integration/` and are **not** part of `npm test` or `npm run check`. Run the relevant files when changing the corresponding subsystem, or the whole suite before release:
+
+```sh
+npm run test:integration
+npx vitest run --config vitest.integration.config.ts tests/integration/user_interactions.test.ts
+```
+
+For changes to runtime/storage/rewind, run their integration suites; for Pi or Claude host changes, run that host's suites; for chart loading/build/typechecking changes, run parser and chart-typecheck suites; for Inspector history and browser-server changes, run the run-inspect/inspector suites. For cross-cutting changes, run all integration tests. PostgreSQL integration tests are opt-in via `HYPERCHART_PG_DSN`; without it, JSONL coverage still runs and PostgreSQL cases are reported as skipped. The Pi semantic-ID test additionally requires an isolated database named `autodiscovery_labnotes_test_<digits>` or `autodiscovery_msagl_labnotes_test_<digits>` and rejects an explicitly configured database outside that allowlist.
 
 Boundary tests scan owned TypeScript sources, not generated `dist` declarations or linked `node_modules` trees. UI behavior tests should exercise reference navigation and production-projected graph/visit data rather than assert arbitrary CSS colors or implementation strings. The Inspector dialog's re-entry story uses a real captured actor run and checks that repeated action invocations remain separate execution nodes. A reply snapshot includes the entire atomic reply/settlement/call-resolution transaction; it must not claim a still-pending caller after that transaction.
 
@@ -86,7 +93,7 @@ Run the standard gate:
 npm run check
 ```
 
-`check` builds, typechecks, runs Vitest, validates package contents and links, packs both workspaces, installs the tarballs in a clean project, tests runtime and type imports, loads the packed Pi extension through Jiti, and verifies the bundled skill.
+`check` only typechecks sources and runs fast tests; it does not clean or rebuild `dist`, run integration tests, or pack/install packages. On repeat runs, TypeScript reuses `node_modules/.cache/hyperchart-check.tsbuildinfo`. On release, run `npm run check:release`: fast checks, a single full build, all integration tests, then package validation (including tarballs, clean-consumer imports, packed Pi extension and skill). Run `npm run build-storybook` separately when UI stories change or before release.
 
 ## Storybook
 
@@ -104,7 +111,7 @@ npm run build-storybook
 
 React changes need a story that shows the affected state. Test both light and dark schemes, narrow layouts, long content, modal stacking, and keyboard behavior where relevant.
 
-Organize Storybook by product surface: `Hyperchart/Inspector`, `Hyperchart/Launch`, and `Hyperchart/TUI`. A story is a deterministic named UI state; rendering, visual, interaction, and stress are verification properties, not top-level navigation categories. Do not add `Components`, `Features`, `Examples`, `Visual Tests`, `Internal`, or giant-object `Playground` sections. Actor cases belong under the Inspector surface they exercise (Dialog, Graph, or State Details). Controls are disabled by default; use fixed typed fixtures and `play` functions for meaningful interactions. Semantic Inspector Storybook scenarios must pass real normalized charts and typed durable facts through the production host adapters; do not hand-author `HyperchartRunInfo`, state status/topology, actor declarations/occurrences/mailboxes, completion colors, or failure issues. Build runtime cases with the replay-checking `storyScenario()` fixture boundary. Card/detail boards may focus an adapter-derived run, but must not clone or mutate it. Manual data is limited to presentation-only concerns such as viewport widths, long overflow strings, theme, modal interaction, and summary-transport omission cases.
+Organize Storybook by product surface: `Hyperchart/Inspector`, `Hyperchart/Launch`, and `Hyperchart/TUI`. A story is a deterministic named UI state; rendering, visual, interaction, and stress are verification properties, not top-level navigation categories. Do not add `Components`, `Features`, `Examples`, `Visual Tests`, `Internal`, or giant-object `Playground` sections. Actor cases belong under the Inspector surface they exercise (Dialog, Graph, or State Details). Graph Card Atlas uses one Storybook board per concrete state kind under Actions, Actors, and Flow; include each reachable runtime status and meaningful variant on that kind's board. All cards must remain production adapter projections of normalized charts and replay-valid execution-loop facts—never status-swapped or hand-authored view models. Controls are disabled by default; use fixed typed fixtures and `play` functions for meaningful interactions. Semantic Inspector Storybook scenarios must pass real normalized charts and typed durable facts through the production host adapters; do not hand-author `HyperchartRunInfo`, state status/topology, actor declarations/occurrences/mailboxes, completion colors, or failure issues. Build runtime cases with the replay-checking `storyScenario()` fixture boundary. Card/detail boards may focus an adapter-derived run, but must not clone or mutate it. Manual data is limited to presentation-only concerns such as viewport widths, long overflow strings, theme, modal interaction, and summary-transport omission cases.
 
 TUI stories live under `Hyperchart/TUI`. They render the real compact `RunWidget` and selection-only `RunHistoryOverlay` through xterm.js; detailed run inspection belongs exclusively to the React browser inspector. The widget must use the shared path-aware percentage estimator rather than graph-node counts. Its stories include both a single active state and eight concurrent map instances at 60, 80, and 120 columns. The development server keeps a live Node-side component instance so keyboard input exercises the actual component state machine, while the static Storybook build contains deterministic initial/preset frames. The production picker materializes the real `deck-director` chart, durable JSONL records, and `sessions/progress.json` into a temporary run directory. Keep browser stories free of Node-only imports; fixture loading and TUI instances belong in the Storybook Vite plugin.
 
@@ -239,7 +246,7 @@ This command:
 4. updates exact host → core dependencies and `package-lock.json` entries;
 5. updates version labels in the root and package READMEs;
 6. synchronizes the documentation bundled in the Pi package;
-7. runs `npm run check`, the Storybook build, the production dependency audit, and all publish dry-runs.
+7. runs `npm run check:release` (including integration tests, one full build, and package validation), the Storybook build, the production dependency audit, and all publish dry-runs.
 
 Review and commit the resulting version change. Publish only from that clean commit:
 
@@ -275,7 +282,7 @@ Do not publish from a workspace whose package manifests or lockfile still refer 
 ## Pre-release checklist
 
 - [ ] Node and npm versions match the supported range.
-- [ ] `npm run check` passes.
+- [ ] `npm run check:release` passes (includes `check`, build, integration tests, package validation).
 - [ ] `npm run build-storybook` passes.
 - [ ] TLA+ models and trace validation pass for semantic changes.
 - [ ] package and Markdown link validation passes.

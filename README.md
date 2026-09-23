@@ -47,7 +47,7 @@ npm run build
 pi install "$PWD/packages/pi-hyperchart"
 ```
 
-Pi loads the local package in place, so later source changes remain available after rebuilding. Use `npm run check` before relying on a local checkout for real runs.
+Pi loads the local package in place, so later source changes remain available after rebuilding. Use the fast `npm run check` for routine edits; run the relevant `npm run test:integration` suites when changing the host/runtime, and `npm run check:release` before publishing.
 
 ## Run a chart in Claude Code
 

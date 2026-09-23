@@ -80,7 +80,7 @@ A checked-in example should state:
 - the one behavior it is intended to teach;
 - safety implications for external effects and replay.
 
-Examples are typechecked and covered by `tests/examples.test.ts`. If an example is intentionally non-runnable, its missing prerequisites must be explicit here and near the source file.
+Examples are typechecked and covered by `tests/integration/examples.test.ts` (run on example changes and before release). If an example is intentionally non-runnable, its missing prerequisites must be explicit here and near the source file.
 
 ## Explicit actor pool
 

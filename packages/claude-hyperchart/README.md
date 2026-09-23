@@ -66,10 +66,10 @@ Each run directory contains `status.json` v2 (heartbeat, terminal state, and cur
 
 ## Testing
 
-`npm run check` covers the executor and MCP tools hermetically. An opt-in end-to-end test drives a one-agent chart through the real SDK:
+The executor and MCP integration suites are separate from the fast `npm run check`; run `npm run test:integration` when changing the Claude host/MCP integration or before release. The opt-in end-to-end test drives a one-agent chart through the real SDK:
 
 ```bash
-HYPERCHART_E2E=1 npx vitest run tests/claude_e2e.test.ts
+HYPERCHART_E2E=1 npx vitest run --config vitest.integration.config.ts tests/integration/claude_e2e.test.ts
 ```
 
 ## Not yet included

@@ -103,8 +103,31 @@ construct; missing UI switch cases can silently fall through to `agent`.
    projection, replay, rewind and ordering tests; host-adapter tests; React
    detail/graph tests; Storybook structural tests that assert the new kind is
    present on both boards; TUI tests; `npm run typecheck`, focused tests,
-   `npm run check`, `npm run build-storybook`, applicable TLA models, trace
-   validation, and `git diff --check`.
+   the fast `npm run check`, `npm run build-storybook` for UI changes, applicable
+   TLA models, trace validation, and `git diff --check`.
+
+## Fast checks versus integration and release
+
+`npm run check` is the routine gate: incremental source typecheck plus fast
+in-memory/React/contract tests. It must not clean or rebuild `dist`, pack
+packages, or run external-I/O integration tests. Do not run a full build or
+full integration suite after every edit; run focused tests first and `check`
+once after a coherent change.
+
+`tests/integration/` is opt-in. Run a relevant file with
+`npx vitest run --config vitest.integration.config.ts tests/integration/<file>.test.ts`.
+Run the **corresponding** integration files when code in their subsystem changes: runtime/storage/rewind → runner, journal,
+and user-interaction suites; Pi/Claude hosts → their host/executor/MCP suites;
+chart loader/typecheck → parser/chart-typecheck suites; Inspector server/history
+→ inspector/run-inspect suites. Cross-cutting changes warrant the full
+`npm run test:integration`. In-memory execution-loop and replay tests remain
+in the fast gate. Build packages when bundled assets or published outputs
+change, not just to typecheck; build Storybook when UI stories change.
+
+Before a release, run `npm run check:release` (fast checks, one full build,
+all integration tests, package validation) plus `npm run build-storybook`.
+`make release-gate` invokes this release check. Do not substitute fast `check`
+for the release gate.
 
 When a construct has singleton and batch variants, cover both independently in
 all type unions, switch statements, details boards, graph cards, and edge

@@ -49,7 +49,7 @@ _tag-release:
 
 release-gate: _require-version
 	@node scripts/set-release-version.mjs --check '$(VERSION)'
-	npm run check
+	npm run check:release
 	npm run build-storybook
 	@node scripts/check-release-audit.mjs
 

@@ -1,7 +1,18 @@
 {
 	"extends": "./tsconfig.base.json",
 	"compilerOptions": {
-		"noEmit": true
+		"noEmit": true,
+		"incremental": true,
+		"tsBuildInfoFile": "./node_modules/.cache/hyperchart-check.tsbuildinfo",
+		"baseUrl": ".",
+		"paths": {
+			"@surprisal/hyperchart": ["packages/hyperchart/src/index.ts"],
+			"@surprisal/hyperchart/internal/core/*": ["packages/hyperchart/src/core/*"],
+			"@surprisal/hyperchart/internal/utils/*": ["packages/hyperchart/src/utils/*"],
+			"@surprisal/hyperchart/package.json": ["packages/hyperchart/package.json"],
+			"@surprisal/hyperchart/*": ["packages/hyperchart/src/*/index.ts"],
+			"@surprisal/pi-hyperchart": ["packages/pi-hyperchart/src/command.ts"]
+		}
 	},
 	"include": [
 		"packages/**/*.ts",
@@ -9,6 +20,8 @@
 		"examples/**/*.ts",
 		"tests/**/*.ts",
 		"tests/**/*.tsx",
+		"vitest.config.ts",
+		"vitest.integration.config.ts",
 		".pi/hypercharts/**/*.ts",
 		".storybook/**/*.ts",
 		".storybook/**/*.tsx"
