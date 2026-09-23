@@ -3,9 +3,8 @@ import { agent, chart, final, script } from "../../core/dsl.js";
 import { storyScenario } from "../fixtures/story-scenario.js";
 import { actorNamedReplyRun, actorPoolCrowdedRun, actorSendVoidRun } from "../fixtures/actor-fixtures.js";
 import { actorStaticAdapterRun } from "../fixtures/actor-runtime-fixtures.js";
-import { BoardPage, BoardSection, GraphTile } from "./components/index.js";
-import { inspectorPanelSpecs } from "./inspector-panel/specs.js";
-import { inspectorPanelScenario } from "./inspector-panel/runtime.js";
+import { completionScenario } from "../fixtures/completion-fixture.js";
+import { BoardPage, GraphTile } from "./components/index.js";
 
 const edgeScenario = storyScenario(
 	chart({
@@ -34,58 +33,12 @@ const meta = {
 	parameters: {
 		layout: "fullscreen",
 		controls: { disable: true },
-		docs: { description: { component: "Adapter-derived coverage boards for graph cards and transition edges." } },
+		docs: { description: { component: "Adapter-derived transition-edge coverage board." } },
 	},
 } satisfies Meta;
 
 export default meta;
 type Story = StoryObj;
-
-export const CardAtlas: Story = {
-	render: () => {
-		const atlasGroups = new Map<
-			string,
-			Array<{ title: string; run: NonNullable<ReturnType<typeof inspectorPanelScenario>>["run"]; stateId: string }>
-		>();
-		for (const spec of inspectorPanelSpecs) {
-			if (spec.graphAtlas === false) {
-				continue;
-			}
-			const scenario = inspectorPanelScenario(spec);
-			if (scenario === undefined || scenario.selectedStateId === null) {
-				continue;
-			}
-			const group = atlasGroups.get(spec.group) ?? [];
-			group.push({ title: spec.title, run: scenario.run, stateId: scenario.selectedStateId });
-			atlasGroups.set(spec.group, group);
-		}
-		return (
-			<BoardPage
-				title="Card Atlas"
-				description="Только визуально различимые graph nodes из нормализованного chart definition и replay-valid durable facts."
-			>
-				{Array.from(atlasGroups, ([group, cards]) => (
-					<BoardSection key={group} title={`${group[0]?.toUpperCase() ?? ""}${group.slice(1)}`}>
-						<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-							{cards.map(({ title, run, stateId }) => (
-								<GraphTile
-									key={`${run.runId}:${stateId}`}
-									title={title}
-									run={run}
-									visibleStateIds={[stateId]}
-									height="h-[300px]"
-								/>
-							))}
-						</div>
-					</BoardSection>
-				))}
-			</BoardPage>
-		);
-	},
-	parameters: {
-		docs: { description: { story: "Focused adapter-derived nodes without cloned or mutated run models." } },
-	},
-};
 
 export const EdgeTypes: Story = {
 	render: () => (
@@ -100,6 +53,12 @@ export const EdgeTypes: Story = {
 					title="Actor sendBatch · ordered fire-and-forget messages"
 					run={actorStaticAdapterRun}
 					visibleStateIds={["queue", "@editor"]}
+					height="h-[500px]"
+				/>
+				<GraphTile
+					title="Completion notify → waitFor · chart-owned endpoint"
+					run={completionScenario.staticRun()}
+					visibleStateIds={["@worker.publish", "wait"]}
 					height="h-[500px]"
 				/>
 				<GraphTile title="Actor call · request and reply" run={actorNamedReplyRun} height="h-[500px]" />

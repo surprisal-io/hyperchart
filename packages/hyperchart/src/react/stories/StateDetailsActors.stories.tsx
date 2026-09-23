@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { InspectorPanelGroupBoard } from "./components/index.js";
+import { ActorCompletionCases, ActorRuntimeCases } from "./components/ActorCompletionBoards.js";
 import { inspectorPanelGroups, inspectorPanelSpecs, type InspectorPanelGroupId } from "./inspector-panel/specs.js";
 import { inspectorPanelTileProps } from "./inspector-panel/runtime.js";
 
@@ -44,7 +45,28 @@ export const MessagingStates = actorGroupStory(
 	"Actor-local prompts and send, call, receive, reply, batch, and self-send states.",
 );
 
-export const RuntimeAndHistory = actorGroupStory(
-	"actorRuntime",
-	"Materialized occurrences, mailboxes, re-entry generations, and retained message history.",
-);
+export const NotifyAndWaitFor: Story = {
+	render: () => (
+		<InspectorPanelGroupBoard
+			groupId="actorCompletion"
+			groups={inspectorPanelGroups}
+			specs={inspectorPanelSpecs}
+			buildTileProps={inspectorPanelTileProps}
+		>
+			<ActorCompletionCases />
+		</InspectorPanelGroupBoard>
+	),
+};
+
+export const RuntimeAndHistory: Story = {
+	render: () => (
+		<InspectorPanelGroupBoard
+			groupId="actorRuntime"
+			groups={inspectorPanelGroups}
+			specs={inspectorPanelSpecs}
+			buildTileProps={inspectorPanelTileProps}
+		>
+			<ActorRuntimeCases />
+		</InspectorPanelGroupBoard>
+	),
+};

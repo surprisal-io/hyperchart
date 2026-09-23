@@ -18,6 +18,7 @@ import {
 	allActorPoolRuns,
 } from "../fixtures/actor-fixtures.js";
 import { InteractiveInspector } from "./harnesses/InteractiveInspector.js";
+import { CapturedActorDialog } from "./components/ActorCompletionBoards.js";
 
 const meta = {
 	title: "Hyperchart/Inspector/Dialog/Actors",
@@ -78,6 +79,15 @@ export const ActorLocalReferenceTypes: Story = {
 		await userEvent.hover(actorRef);
 		await expect(canvas.getByRole("tooltip")).toHaveTextContent("string");
 	},
+};
+
+export const ChartOwnedCompletion: Story = {
+	name: "Chart-owned Completion · notify and waitFor",
+	render: () => <CapturedActorDialog kind="completion" />,
+};
+export const OrderedBatchResult: Story = {
+	name: "Pool callBatch · Ordered Result",
+	render: () => <CapturedActorDialog kind="batch" />,
 };
 
 export const BusyFifoMailbox: Story = {

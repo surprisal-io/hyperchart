@@ -35,6 +35,7 @@ import {
 	mailboxReentryChart,
 	mailboxReentryRecords,
 } from "../../fixtures/actor-runtime-fixtures.js";
+import { completionStoryChart } from "../../fixtures/completion-fixture.js";
 import {
 	actorPoolChart,
 	actorPoolCrowdedChart,
@@ -71,6 +72,7 @@ export type InspectorPanelGroupId =
 	| "agent"
 	| "actorDefinitions"
 	| "actorMessaging"
+	| "actorCompletion"
 	| "actorRuntime"
 	| "user"
 	| "gate"
@@ -124,9 +126,15 @@ export const inspectorPanelGroups: Array<{
 		storyId: "hyperchart-visual-tests-inspector-panel-actors--messaging-states",
 	},
 	{
+		id: "actorCompletion",
+		title: "Notify & Wait For",
+		description: "Event contract, authored payload, and actual published/received events across executed visits.",
+		storyId: "hyperchart-visual-tests-inspector-panel-actors--notify-and-wait-for",
+	},
+	{
 		id: "actorRuntime",
 		title: "Actor runtime & history",
-		description: "Materialized occurrences, mailboxes, re-entry generations, and retained receive/reply history.",
+		description: "Materialized occurrences, mailboxes, re-entry generations, and ordered batch-result history.",
 		storyId: "hyperchart-visual-tests-inspector-panel-actors--runtime-and-history",
 	},
 	{
@@ -940,6 +948,20 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 			"Running callBatch against a two-worker pool with ordered inputs, per-message assignments, replies, and backlog.",
 		chart: actorPoolCrowdedChart,
 		runtime: { selectedStateId: "batch", records: () => actorPoolCrowdedRecords },
+	},
+	{
+		group: "actorCompletion",
+		title: "Wait For · definition",
+		description: "Root-owned Wait For: endpoint, event, payload schema, and DONE transition from the normalized chart.",
+		chart: completionStoryChart,
+		runtime: { selectedStateId: "wait", mode: "static" },
+	},
+	{
+		group: "actorCompletion",
+		title: "Notify · definition",
+		description: "Actor-local Notify: endpoint, event, payload schema, authored payload, and NOTIFIED transition.",
+		chart: completionStoryChart,
+		runtime: { selectedStateId: "@worker.publish", mode: "static" },
 	},
 	{
 		group: "actorMessaging",

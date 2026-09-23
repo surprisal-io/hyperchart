@@ -9,6 +9,8 @@ import {
 	actorSelfSendRun,
 } from "../fixtures/actor-fixtures.js";
 import { visibleStateIdsForScope } from "../components/inspector/helpers/scope.js";
+import { CompletionRuntimePair } from "./components/ActorCompletionBoards.js";
+import { callBatchResultScenario } from "../fixtures/call-batch-result-fixture.js";
 import { BoardPage, GraphTile } from "./components/index.js";
 
 const drainingRootStateIds = [...visibleStateIdsForScope(actorDrainingRun.states)];
@@ -34,6 +36,13 @@ export const ActorNodesAndEdges: Story = {
 					title="pool complete · out-of-order work, ordered result"
 					run={actorPoolOutOfOrderRun}
 					height="h-[520px]"
+				/>
+				<CompletionRuntimePair />
+				<GraphTile
+					title="callBatch → typed result consumer"
+					run={callBatchResultScenario.staticRun()}
+					visibleStateIds={["batch", "use", "@workers"]}
+					height="h-[480px]"
 				/>
 				<GraphTile title="map-owned pool · generation 2" run={actorPoolMapReentryRun} height="h-[520px]" />
 				<GraphTile title="actor re-entry · generation 3" run={actorReentryRun} height="h-[520px]" />

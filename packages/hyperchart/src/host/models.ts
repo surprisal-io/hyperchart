@@ -547,6 +547,9 @@ export interface HyperchartStateInfo {
 	emits?: Array<{ event: string; payload: HyperchartInspectValue; schema?: JsonSchema }>;
 	gateEvent?: string;
 	gatePayload?: HyperchartInspectValue;
+	completion?: { endpoint: string; event: string; schema?: JsonSchema; payload?: HyperchartInspectValue };
+	/** Latest accepted notification, projected from its durable completion/notified fact. */
+	completionPublication?: { seqId: number; timestamp: number; endpoint: string; event: string; payload: unknown };
 	env?: HyperchartEnvInfo[];
 	validationPolicy?: { guard: HyperchartGuardInfo; onFail: HyperchartRecoveryPolicyInfo };
 	onFail?: HyperchartRecoveryPolicyInfo;

@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { explainReplay } from "../packages/hyperchart/src/core/replay_check.js";
 import { buildGraph } from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
 import { inspectorPanelSpecs } from "../packages/hyperchart/src/react/stories/inspector-panel/specs.js";
+import { atlasCases } from "../packages/hyperchart/src/react/stories/card-atlas/catalog.js";
+import type { HyperchartStateType } from "../packages/hyperchart/src/host/models.js";
 import { inspectorPanelScenario } from "../packages/hyperchart/src/react/stories/inspector-panel/runtime.js";
 import { captureExecutionBoardRun } from "../packages/hyperchart/src/react/fixtures/execution-board-fixture.js";
 import {
@@ -139,6 +141,30 @@ describe("Storybook information architecture", () => {
 			}
 			expect(source, file).not.toMatch(/export const Playground\b|\bname:\s*["`]Playground["`]/i);
 		}
+	});
+
+	it("splits graph Card Atlas into one board per concrete state kind", () => {
+		const files = ["Actions", "Actors", "Flow"].map((suffix) =>
+			readFileSync(join(storyDirectory, `InspectorGraphAtlas${suffix}.stories.tsx`), "utf8"),
+		);
+		const types = files.flatMap((source) => [...source.matchAll(/export const \w+ = card\("([\w-]+)"\)/g)]
+			.map((match) => match[1]));
+		expect(types).toHaveLength(20);
+		expect(new Set(types)).toEqual(new Set([
+			"agent", "user", "gate", "script", "tsImport", "actor-declaration", "actor-occurrence",
+			"send", "sendBatch", "call", "callBatch", "receive", "reply", "notify", "waitFor",
+			"map", "parallel", "compound", "region", "final",
+		]));
+		for (const type of types) {
+			const cards = atlasCases(type as HyperchartStateType);
+			expect(cards.length, type).toBeGreaterThan(0);
+			for (const { run, stateId, status } of cards) {
+				expect(run.states.find((state) => state.id === stateId), stateId).toMatchObject({ type, status });
+			}
+		}
+		for (const source of files) expect(source).toContain('title: "Hyperchart/Inspector/Graph/Card Atlas/');
+		expect(readFileSync(join(storyDirectory, "InspectorGraph.stories.tsx"), "utf8")).not.toContain("export const CardAtlas");
+		expect(storyFiles(storyDirectory).some((file) => file.endsWith("InspectorGraphAtlas.stories.tsx"))).toBe(false);
 	});
 
 	it("keeps graph Card Atlas limited to visually distinct nodes", () => {
@@ -635,6 +661,8 @@ describe("Storybook information architecture", () => {
 		expect(exports).toEqual([
 			"RootActorIdle",
 			"ActorLocalReferenceTypes",
+			"ChartOwnedCompletion",
+			"OrderedBatchResult",
 			"BusyFifoMailbox",
 			"ActorReentry",
 			"PoolIdle",
@@ -650,7 +678,9 @@ describe("Storybook information architecture", () => {
 		expect(dialogSource).not.toMatch(/PendingTypedCall|FireAndForgetVoidSettlement|NamedReplyVariants/);
 
 		const graphSource = readFileSync(join(storyDirectory, "InspectorGraphActors.stories.tsx"), "utf8");
-		expect(graphSource.match(/<GraphTile\b/g)).toHaveLength(7);
+		expect(graphSource.match(/<GraphTile\b/g)).toHaveLength(8);
+		expect(graphSource).toContain("<CompletionRuntimePair />");
+		expect(graphSource).toContain("callBatch → typed result consumer");
 		expect(graphSource).toContain("self-send · shared pool endpoint");
 		expect(graphSource).toContain("structured drain · SEND-only");
 		expect(graphSource).toContain("visibleStateIds={drainingRootStateIds}");

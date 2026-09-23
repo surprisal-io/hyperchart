@@ -5,7 +5,7 @@ export type StateTransitionEdge = {
 	source: string;
 	target: string;
 	labels: string[];
-	kind?: "transition" | "send" | "sendBatch" | "call" | "callBatch" | "reply";
+	kind?: "transition" | "send" | "sendBatch" | "call" | "callBatch" | "reply" | "completion";
 	self?: true;
 };
 
@@ -20,6 +20,7 @@ export type GraphInput = {
 
 function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): StateTransitionEdge[] {
 	const grouped = new Map<string, StateTransitionEdge>();
+	const waits = run.states.filter((state) => state.type === "waitFor" && visibleIds.has(state.id));
 	for (const state of run.states) {
 		if (!visibleIds.has(state.id)) {
 			continue;
@@ -34,6 +35,14 @@ function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): 
 				kind: link.kind,
 				...(link.self === true ? { self: true } : {}),
 			});
+		}
+		if (state.type === "notify" && state.completion !== undefined) {
+			for (const wait of waits) {
+				if (wait.completion?.endpoint !== state.completion.endpoint || wait.completion.event !== state.completion.event || wait.id === state.id) continue;
+				grouped.set(`${state.id}\u0000${wait.id}\u0000completion`, {
+					source: state.id, target: wait.id, labels: [state.completion.event], kind: "completion",
+				});
+			}
 		}
 		const occurrence = state.actorOccurrence;
 		const caller = occurrence?.pendingCaller;

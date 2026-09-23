@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { BoardPage } from "./BoardPage.js";
 import { BoardSection } from "./BoardSection.js";
 import { InspectorPanelTile } from "./InspectorPanelTile.js";
@@ -19,11 +20,13 @@ export function InspectorPanelGroupBoard<TSpec extends InspectorPanelGroupedSpec
 	groups,
 	specs,
 	buildTileProps,
+	children,
 }: {
 	groupId: string;
 	groups: readonly InspectorPanelGroup[];
 	specs: readonly TSpec[];
 	buildTileProps: (spec: TSpec) => InspectorPanelTileProps;
+	children?: ReactNode;
 }) {
 	const group = groups.find((item) => item.id === groupId);
 	const groupSpecs = specs.filter((spec) => spec.group === groupId);
@@ -51,6 +54,7 @@ export function InspectorPanelGroupBoard<TSpec extends InspectorPanelGroupedSpec
 					})}
 				</div>
 			</BoardSection>
+			{children}
 		</BoardPage>
 	);
 }

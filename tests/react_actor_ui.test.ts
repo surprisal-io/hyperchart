@@ -24,7 +24,7 @@ import { inspectorPanelSpecs } from "../packages/hyperchart/src/react/stories/in
 
 describe("React actor inspector structure", () => {
 	it("builds every actor inspector board case from normalized runtime data", () => {
-		const actorGroups = new Set(["actorDefinitions", "actorMessaging", "actorRuntime"]);
+		const actorGroups = new Set(["actorDefinitions", "actorMessaging", "actorCompletion", "actorRuntime"]);
 		const actorSpecs = inspectorPanelSpecs.filter((spec) => actorGroups.has(spec.group));
 		expect(
 			Object.fromEntries(
@@ -33,6 +33,7 @@ describe("React actor inspector structure", () => {
 		).toEqual({
 			actorDefinitions: 3,
 			actorMessaging: 8,
+			actorCompletion: 2,
 			actorRuntime: 4,
 		});
 		expect(actorSpecs.map((spec) => spec.title)).toEqual([
@@ -47,6 +48,8 @@ describe("React actor inspector structure", () => {
 			"Self-send state",
 			"Call state",
 			"Call batch state",
+			"Wait For · definition",
+			"Notify · definition",
 			"Receive state",
 			"Receive state across re-entry",
 			"Reply state",
@@ -60,7 +63,7 @@ describe("React actor inspector structure", () => {
 			}
 			expect(tile.run.states.some((state) => state.id === tile.selectedStateId)).toBe(true);
 			expect(tile.runtimeSources.map((source) => source.title)).toEqual(
-				expect.arrayContaining(["Definition", "log records", "status.json"]),
+				spec.runtime.mode === "static" ? ["Definition"] : expect.arrayContaining(["Definition", "log records", "status.json"]),
 			);
 		}
 		const batchStates = [];

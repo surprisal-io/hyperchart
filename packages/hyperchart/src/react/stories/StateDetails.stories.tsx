@@ -56,6 +56,7 @@ export const Index: Story = {
 							<div className="mt-1 text-xs text-[var(--text-tertiary)]">{group.description}</div>
 							<div className="mt-3 text-[11px] font-medium text-[var(--hc-blue-text)]">
 								Open board · {count} {count === 1 ? "case" : "cases"}
+								{group.id === "actorRuntime" ? " + executed completion and batch scenarios" : ""}
 							</div>
 						</a>
 					);

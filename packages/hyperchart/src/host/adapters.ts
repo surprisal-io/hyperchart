@@ -156,7 +156,7 @@ export function hyperchartRunFromInspectResult(
 		protocol: actor.protocol.map(actorMessageContractInfo),
 	}));
 	const states = [
-		...result.states.map(stateFromInspectState),
+		...result.states.map((state) => stateFromInspectState(state, result.completionDeclarations)),
 		...actorDeclarations.map(
 			(actor): HyperchartStateInfo => ({
 				id: actor.declarationPath,
@@ -777,8 +777,16 @@ export function hyperchartRunFromRuntime(
 	};
 }
 
-function stateFromInspectState(state: HyperchartInspectState): HyperchartStateInfo {
+function stateFromInspectState(
+	state: HyperchartInspectState,
+	completionDeclarations?: HyperchartInspectResult["completionDeclarations"],
+): HyperchartStateInfo {
 	const refs = refsInfo(state.refs);
+	const completionSchema = state.completion === undefined
+		? undefined
+		: completionDeclarations?.find((declaration) =>
+			declaration.name === state.completion?.endpoint && declaration.event === state.completion.event
+		)?.schema;
 	const inputs = state.inputs?.map(
 		(input): HyperchartInputInfo => ({
 			name: input.name,
@@ -883,6 +891,12 @@ function stateFromInspectState(state: HyperchartInspectState): HyperchartStateIn
 		...(state.emits === undefined ? {} : { emits: state.emits }),
 		...(state.gateEvent === undefined ? {} : { gateEvent: state.gateEvent }),
 		...(state.gatePayload === undefined ? {} : { gatePayload: state.gatePayload }),
+		...(state.completion === undefined ? {} : {
+			completion: {
+				...state.completion,
+				...(completionSchema === undefined ? {} : { schema: completionSchema }),
+			},
+		}),
 		...(state.validation === undefined
 			? {}
 			: { validationPolicy: { guard: guardInfo(state.validation.guard), onFail: state.validation.onFail } }),
@@ -977,6 +991,7 @@ type StateRuntimeFacts = {
 	session?: HyperchartAgentSessionInfo;
 	actorMessages?: HyperchartActorSentMessageInfo[];
 	actorMessageHistory?: HyperchartActorMessageInfo[];
+	completionPublication?: NonNullable<HyperchartStateInfo["completionPublication"]>;
 };
 
 type RuntimeFacts = {
@@ -1463,6 +1478,16 @@ function runtimeFacts(
 		pendingByState.set(pending.actionUid.state, pending);
 	}
 	for (const record of records) {
+		if (record.type === "completion" && record.kind === "notified" && !skippedRecords.has(record)) {
+			const stateId = record.source.actionUid.state;
+			const facts = byState.get(stateId) ?? {};
+			facts.completionPublication = {
+				seqId: record.seqId, timestamp: record.timestamp,
+				endpoint: record.endpoint, event: record.event, payload: record.payload,
+			};
+			byState.set(stateId, facts);
+			continue;
+		}
 		if (record.type === "actor_created" && record.owner !== undefined && !skippedRecords.has(record)) {
 			const visits = actorOwnerVisits.get(record.owner) ?? [];
 			const existing = visits.find((visit) => visit.generation === record.generation);
@@ -1507,13 +1532,26 @@ function runtimeFacts(
 					targetGeneration: record.generation,
 				})),
 			];
+			facts.invokedAt ??= record.timestamp;
+			facts.attempts = (facts.attempts ?? 0) + 1;
 			if (record.source.kind === "send" || record.source.kind === "sendBatch") {
-				facts.invokedAt ??= record.timestamp;
 				facts.completedAt = record.timestamp;
 				facts.completedEvent = { type: "ENQUEUED" };
-				facts.attempts = (facts.attempts ?? 0) + 1;
+			} else {
+				delete facts.completedAt;
+				delete facts.completedEvent;
 			}
 			byState.set(stateId, facts);
+			continue;
+		}
+		if ((record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") && !skippedRecords.has(record)) {
+			const facts = byState.get(record.callerState) ?? {};
+			facts.completedAt = record.timestamp;
+			facts.completedEvent = {
+				type: record.type === "actor_call_resolved" ? record.replyEvent ?? "ACTOR_REPLY" : "ACTOR_REPLY",
+				...(record.type === "actor_call_resolved" && Object.hasOwn(record, "output") ? { output: record.output } : {}),
+			};
+			byState.set(record.callerState, facts);
 			continue;
 		}
 		if (record.type === "failure_intent") {
@@ -2474,6 +2512,7 @@ function overlayRuntimeState(
 		...(latestRejectedReason === undefined ? {} : { validation: { latestRejectedReason } }),
 		...(facts?.visits === undefined ? {} : { visits: facts.visits }),
 		...(facts?.visitHistory === undefined ? {} : { visitHistory: facts.visitHistory }),
+		...(facts?.completionPublication === undefined ? {} : { completionPublication: facts.completionPublication }),
 		...(facts?.session === undefined ? {} : { session: facts.session }),
 		...(facts?.actorMessageHistory === undefined ? {} : { actorMessageHistory: facts.actorMessageHistory }),
 		...(state.actorMessageLink === undefined || facts?.actorMessages === undefined

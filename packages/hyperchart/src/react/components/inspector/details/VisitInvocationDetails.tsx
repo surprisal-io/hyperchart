@@ -52,7 +52,7 @@ export function VisitInvocationDetails({
 			<div className="space-y-2">
 				<div>
 					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-						{invocation.kind === "waitFor" ? "completion wait" : "completion notification"}
+						{invocation.kind === "waitFor" ? "waiting for event" : "notification request"}
 					</div>
 					<ExpandablePre collapsedLines={3}>{`${invocation.endpoint}.${invocation.event}`}</ExpandablePre>
 				</div>
