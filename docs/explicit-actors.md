@@ -40,7 +40,7 @@ const Editor = actor({
 });
 ```
 
-`actor()` returns an authoring-time template. Calling `Editor({...})` returns one static declaration/capability. Put that declaration directly in exactly one lexical owner's `actors` object. There is no `defineActors`, no dynamic `ActorRef`, and declarations cannot appear in messages or other runtime values.
+`actor()` returns an authoring-time template. Calling `Editor({...})` returns one static declaration/capability. Put that declaration directly in exactly one lexical owner's `actors` object. There is no dynamic runtime `ActorRef`: declarations and forward targets cannot appear in messages or other runtime values. For declaration-order-independent static graphs, use the typed authoring-only `actorRef()` described below.
 
 ## Reply contracts
 
@@ -51,6 +51,83 @@ const Editor = actor({
 - `replies: { EVENT: Schema }`: named business outcomes.
 
 Every accepted message workflow ends at `reply()`. `reply()` has no `for`; normalization propagates the message context from `receive.on` through the graph and rejects missing or ambiguous reply paths. Void replies omit `event` and `output`; single replies provide only `output`; named replies provide a declared `event` and `output`.
+
+## Typed forward references
+
+When actor templates need to send to declarations assembled later, add an actor protocol registry as the sixth `refs()` generic:
+
+```ts
+type Actors = {
+  luna: typeof LunaProtocol;
+  buffer: typeof BufferProtocol;
+  terra: typeof TerraProtocol;
+};
+
+const { chart: typedChart, actorRef } =
+  refs<Args, Results, Files, Maps, Inputs, Actors>();
+
+const luna = actorRef("luna");
+const buffer = actorRef("buffer");
+const terra = actorRef("terra");
+
+const Luna = actor({
+  input: LunaInput,
+  protocol: LunaProtocol,
+  initial: "idle",
+  states: {
+    idle: receive({ on: { GENERATE: "publish" } }),
+    publish: send({
+      to: buffer,
+      event: "DRAFT",
+      input: { rule: messageInput("GENERATE", "rule") },
+      target: "settle",
+    }),
+    settle: reply({ target: "idle" }),
+  },
+});
+
+const definition = typedChart({
+  kind: "chart",
+  id: "review-pipeline",
+  actors: {
+    luna: Luna(lunaInput),
+    buffer: Buffer(bufferInput),
+    terra: Terra(terraInput),
+  },
+  initial: "start",
+  states,
+});
+```
+
+The `Actors` registry checks names, events, and payloads before runtime. `typedChart()` also checks that every registry name has a matching declaration or pool protocol and that no undeclared name is bound. `actorRef()` is tied to that exact `refs()` instance: using it with plain `chart()` or another typed chart fails normalization. Binding happens after the complete chart object exists, so source declaration order does not matter.
+
+Normalization is fail-closed for missing, duplicate, protocol-incompatible, forged, cross-chart, or lexically inaccessible bindings. It replaces the marker with one static declaration path; no marker or name lookup enters the runtime AST. Therefore map occurrences, actor generations, replay, and resume behave exactly as they do for direct declaration targets. Forward references support `send`, `sendBatch`, `call`, and `callBatch`; they do not create actors dynamically or add nested ownership to actor definitions.
+
+## Nonblocking actor-to-chart completion
+
+A chart is not an actor and has no mailbox. For a long-lived sibling graph, declare a typed root completion instead of inventing a root actor, polling an actor, or holding an actor `call()` open:
+
+```ts
+type Completions = { finished: { event: "FINISHED"; payload: { ledger: string } } };
+const { chart: typedChart, actorRef, completionRef } =
+  refs<Args, Results, Files, Maps, Inputs, Actors, Completions>();
+const finished = completionRef("finished");
+
+// In one actor workflow:
+publish: notify({
+  to: finished,
+  event: "FINISHED",
+  payload: { ledger: result("finalize", "ledger") },
+  target: "settle",
+}),
+
+// In root or compound sequential chart control:
+wait: waitFor({ from: finished, event: "FINISHED", target: "aggregate" }),
+```
+
+The actor notification is nonblocking with respect to chart progress: schema validation, the completion fact, and the notify action's `NOTIFIED` completion are one atomic durable append. A notification published before `waitFor()` is entered remains available. Consumption and the wait action result are another atomic append. Exactly one declared wait owns each endpoint, and an endpoint can publish and be consumed only once per branch projection; duplicates and stale re-entry fail closed. Normalization resolves the authoring capability, so runtime actors and journals retain static endpoint names and ordinary occurrence/run/branch isolation rather than a symbolic lookup.
+
+Completion endpoints do not change actor ownership: actor definitions still cannot own nested actors. They only let a root/compound controller wait durably while capacity-one sibling actors continue exchanging nonblocking messages.
 
 ## Placement and lexical addressing
 
@@ -65,7 +142,7 @@ const projectActors = {
 
 A root declaration has one occurrence per run. A map-owned declaration has one occurrence per pinned finite map item (`projects#a.@editor`, `projects#b.@editor`). A state can address only declarations in its own or an ancestor lexical owner. Runtime item keys can never select another item's actor.
 
-Actor actions can read only immutable `actorInput()`, the accepted `messageInput()`, and actor-local results/artifacts/visits. Parent or sibling values must be captured explicitly in placement input.
+Actor actions can read only immutable `actorInput()`, the accepted `messageInput()`, and actor-local results/artifacts/visits. Parent or sibling values must be captured explicitly in placement input. Root chart control may read an artifact declared by a root-owned capacity-one actor using its static state path (for example `artifactOf("@buffer.finalize")`); pools and nested/map-owned actor artifacts remain ambiguous and are rejected. The runtime requires an accepted durable pin for this cross-boundary read, so it cannot fall back to unowned workspace bytes.
 
 Inside an actor template, `self()` is a typed symbolic capability for that actor's current logical endpoint. It exists because the static declaration is created only after the reusable template has been defined. `self()` is valid only as `to` for `send()` and `sendBatch()`; normalization resolves it independently for every placement. At runtime it stays within the current map-item occurrence and targets the generation processing the producer message. It is rejected outside `actor()` and by `call()`/`callBatch()`.
 
@@ -114,6 +191,6 @@ sendBatch({ to: editors, event: "APPLY", inputs: [{ patch: "a" }, { patch: "b" }
 callBatch({ to: editors, event: "READ", inputs: result("prepare", "requests"), target: "merge" });
 ```
 
-`send()`/`call()` are singleton-only. `sendBatch()`/`callBatch()` require a non-empty batch, exact-validate every item before one atomic enqueue fact, and address ordinary actors or pools. `callBatch()` is limited to a protocol message with one `reply` schema and publishes its output array only after every item settles, in authored input order.
+`send()`/`call()` are singleton-only. `sendBatch()`/`callBatch()` require a non-empty batch, exact-validate every item before one atomic enqueue fact, and address ordinary actors or pools. `callBatch()` is limited to a protocol message with one `reply` schema. After every item settles, `result("batchState")` publishes one typed reply array in authored input order; worker completion order is irrelevant. A failed or incomplete batch publishes no partial result. Each loop visit has a fresh durable batch call and replaces the state's result only when that visit resolves.
 
 Pool admission considers only the FIFO head and may durably assign it to any compatible idle worker. The accepted fact captures the scheduler choice as `workerIndex`; replay validates that the selected worker was idle and receive-compatible at that durable prefix rather than choosing again. For a pool worker, `self()` means the shared logical pool endpoint, never that concrete worker; the resulting FIFO message may be assigned to any eligible idle worker. Concrete identities (`@editors.$worker-0.apply`) isolate results, visits, artifacts, and sessions; normalized declarations use the canonical `$worker` segment. Workers persist through `reply()` and return to the authored receive target. Closing rejects external admission but allows a current actor workflow to enqueue internal self-work, then drains backlog and current work; an unbounded self-send chain can therefore keep the owner draining. Owners wait for every worker to stop. An unsupported head waits while any worker is busy and fails globally only when all workers are idle and incompatible.

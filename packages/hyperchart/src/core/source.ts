@@ -143,6 +143,20 @@ function chartDsl(ast: ChartAst, actorBindings: ReadonlyMap<StatePath, string>):
 						]),
 					),
 		],
+		[
+			"completions",
+			Object.keys(ast.completions).length === 0
+				? undefined
+				: objectDsl(
+						Object.entries(ast.completions).map(([name, declaration]) => [
+							name,
+							`completion(${objectDsl([
+								["event", stringDsl(declaration.event)],
+								["schema", schemaDsl(declaration.schema)],
+							])})`,
+						]),
+					),
+		],
 		["actors", actorsDsl(ast, undefined, actorBindings)],
 		["initial", stringDsl(ast.initial)],
 		["states", statesDsl(ast, undefined, actorBindings)],
@@ -294,6 +308,14 @@ function actorStateDsl(state: ActorWorkflowStateAst, actorBindings: ReadonlyMap<
 			["target", stringDsl(state.target)],
 		])})`;
 	}
+	if (state.kind === "state" && state.action.kind === "notify") {
+		return `notify(${objectDsl([
+			["to", `completionRef(${stringDsl(state.action.to)})`],
+			["event", stringDsl(state.action.event)],
+			["payload", hyperchartValueSource(state.action.payload)],
+			["target", stringDsl(state.transitions.NOTIFIED?.target ?? "")],
+		])})`;
+	}
 	if (state.kind === "state") {
 		return objectDsl([
 			["kind", stringDsl("state")],
@@ -337,6 +359,13 @@ function stateDsl(ast: ChartAst, path: StatePath, actorBindings: ReadonlyMap<Sta
 		}
 		const notify = objectDsl(notifyEntries);
 		return `${factory}(${objectDsl([["notify", notify]])})`;
+	}
+	if (state.kind === "state" && state.action.kind === "waitFor") {
+		return `waitFor(${objectDsl([
+			["from", `completionRef(${stringDsl(state.action.from)})`],
+			["event", stringDsl(state.action.event)],
+			["target", stringDsl(state.transitions[state.action.event]?.target ?? "")],
+		])})`;
 	}
 	if (state.kind === "state") {
 		return objectDsl([
@@ -463,6 +492,19 @@ function actionDsl(action: StateActionAst): string {
 			["event", stringDsl(action.event)],
 			["payload", hyperchartValueSource(action.payload)],
 			["reply", action.reply === undefined ? undefined : schemaDsl(action.reply)],
+		])})`;
+	}
+	if (action.kind === "waitFor") {
+		return `waitFor(${objectDsl([
+			["from", `completionRef(${stringDsl(action.from)})`],
+			["event", stringDsl(action.event)],
+		])})`;
+	}
+	if (action.kind === "notify") {
+		return `notify(${objectDsl([
+			["to", `completionRef(${stringDsl(action.to)})`],
+			["event", stringDsl(action.event)],
+			["payload", hyperchartValueSource(action.payload)],
 		])})`;
 	}
 	return `user(${objectDsl([

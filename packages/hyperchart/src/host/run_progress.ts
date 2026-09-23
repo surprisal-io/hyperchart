@@ -68,6 +68,8 @@ function isActionStateType(type: HyperchartStateType | undefined): boolean {
 		case "agent":
 		case "user":
 		case "gate":
+		case "waitFor":
+		case "notify":
 		case "script":
 		case "tsImport":
 			return true;

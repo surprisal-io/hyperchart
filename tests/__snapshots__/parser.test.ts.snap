@@ -3,6 +3,7 @@
 exports[`parseChartModule > loads a trusted local TS chart module and returns a normalized AST 1`] = `
 {
   "actors": {},
+  "completions": {},
   "id": "review-and-fix",
   "initial": "research",
   "kind": "chart",

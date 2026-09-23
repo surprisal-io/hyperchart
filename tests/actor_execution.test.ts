@@ -25,6 +25,7 @@ import {
 	protocol,
 	receive,
 	reply,
+	refs,
 	self,
 	send,
 	sendBatch,
@@ -210,6 +211,72 @@ async function waitFor<T>(read: () => T | undefined, message: string): Promise<T
 }
 
 describe("explicit event-sourced actors", () => {
+	it("normalizes refs()-bound actor targets after complete chart assembly", async () => {
+		const ProducerProtocol = protocol({
+			START: message({
+				input: z.object({ id: z.string() }).strict(),
+				replies: { ACCEPTED: z.object({}).strict() },
+			}),
+		});
+		const SinkProtocol = protocol({ ACCEPT: message({ input: z.object({ id: z.string() }).strict() }) });
+		type Actors = { producer: typeof ProducerProtocol; sink: typeof SinkProtocol };
+		const typed = refs<
+			Record<string, never>,
+			{ dispatch: Record<string, never> },
+			Record<never, Record<string, unknown>>,
+			Record<never, unknown>,
+			Record<never, Record<string, unknown>>,
+			Actors
+		>();
+		const producerRef = typed.actorRef("producer");
+		const sinkRef = typed.actorRef("sink");
+		const Producer = actor({
+			input: z.object({}).strict(),
+			protocol: ProducerProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { START: "forward" } }),
+				forward: send({
+					to: sinkRef,
+					event: "ACCEPT",
+					input: { id: messageInput("START", "id") },
+					target: "settle",
+				}),
+				settle: reply({ target: "idle", event: "ACCEPTED", output: {} }),
+			},
+		});
+		const Sink = actor({
+			input: z.object({}).strict(),
+			protocol: SinkProtocol,
+			initial: "idle",
+			states: { idle: receive({ on: { ACCEPT: "settle" } }), settle: reply({ target: "idle" }) },
+		});
+		const body = typed.chart({
+			kind: "chart",
+			id: "forward-ref-assembly",
+			actors: { producer: Producer({}), sink: Sink({}) },
+			initial: "dispatch",
+			states: {
+				dispatch: call({
+					to: producerRef,
+					event: "START",
+					input: { id: "one" },
+					transitions: { ACCEPTED: "done" },
+				}),
+				done: final(),
+			},
+		});
+		const ast = parsed(body);
+		expect(ast.states.dispatch).toMatchObject({ to: "@producer" });
+		const producer = ast.actors["@producer"];
+		assert(producer?.kind === "actor");
+		expect(producer.states.forward).toMatchObject({ to: "@sink" });
+		const runtime = new ActorRuntime(ast);
+		const state = await loop(runtime);
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(enqueuedMessages(runtime.records, "@sink").map((entry) => entry.input)).toEqual([{ id: "one" }]);
+	});
+
 	it("validates refs on named actor-call transition objects for isolation and dominance", () => {
 		const ServiceProtocol = protocol({
 			CHECK: message({
@@ -932,6 +999,58 @@ describe("explicit event-sourced actors", () => {
 		expect(runtime.records.filter((record) => record.type === "spawned")).toHaveLength(1);
 	});
 
+	it("resolves forward refs to map-local occurrence identity and replays by durable static path", async () => {
+		type Actors = { editor: typeof EditorProtocol };
+		const typed = refs<
+			{ projects: { a: { file: string }; b: { file: string } } },
+			{ "projects.apply": { commit: string } | { reason: string } },
+			Record<never, Record<string, unknown>>,
+			{ projects: unknown },
+			Record<never, Record<string, unknown>>,
+			Actors
+		>();
+		const editorRef = typed.actorRef("editor");
+		const editor = Editor({ file: item("file") });
+		const ast = parsed(
+			typed.chart({
+				kind: "chart",
+				id: "actor-ref-map",
+				initial: "projects",
+				states: {
+					projects: map({
+						over: arg("projects"),
+						actors: { editor },
+						initial: "apply",
+						onDone: "done",
+						states: {
+							apply: call({
+								to: editorRef,
+								event: "APPLY",
+								input: { patch: "p" },
+								transitions: { APPLIED: "finished", REJECTED: "failed" },
+							}),
+							finished: final(),
+							failed: failed(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		expect(ast.states["projects.apply"]).toMatchObject({ to: "projects.@editor" });
+		const runtime = new ActorRuntime(ast);
+		const state = await start(runtime, { projects: { a: { file: "a.ts" }, b: { file: "b.ts" } } });
+		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(Object.keys(state.projection.actors)).toEqual(["projects#a.@editor", "projects#b.@editor"]);
+		expect(enqueuedMessages(runtime.records, "projects#a.@editor")).toHaveLength(1);
+		expect(enqueuedMessages(runtime.records, "projects#b.@editor")).toHaveLength(1);
+		expect(explainReplay(ast, runtime.records)).toMatchObject({
+			prefixEnd: runtime.records.length,
+			stale: [],
+			skipped: [],
+		});
+	});
+
 	it("allows one map item to invoke main-chart work while another item's actor drains", async () => {
 		const WorkProtocol = protocol({ WORK: message({ input: z.object({}).strict() }) });
 		const Worker = actor({
@@ -1588,6 +1707,167 @@ describe("explicit event-sourced actors", () => {
 			stale: [],
 			skipped: [],
 		});
+	});
+
+	it("fails closed for unbound, unknown, duplicate, incompatible, out-of-scope, forged, and data actor refs", () => {
+		type Actors = { auditor: typeof AuditProtocol };
+		const typed = refs<
+			Record<string, never>,
+			Record<string, never>,
+			Record<never, Record<string, unknown>>,
+			Record<never, unknown>,
+			Record<never, Record<string, unknown>>,
+			Actors
+		>();
+		const auditorRef = typed.actorRef("auditor");
+		const makeBody = () =>
+			typed.chart({
+				kind: "chart",
+				id: "actor-ref-diagnostics",
+				actors: { auditor: Auditor({}) },
+				initial: "record",
+				states: {
+					record: send({ to: auditorRef, event: "RECORD", input: { path: "audit.log" }, target: "done" }),
+					done: final(),
+				},
+			});
+
+		const unbound = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-ref-unbound",
+				actors: { auditor: Auditor({}) },
+				initial: "record",
+				states: {
+					record: send({ to: auditorRef, event: "RECORD", input: { path: "audit.log" }, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
+		expect(unbound.ok ? [] : unbound.diagnostics.map((entry) => entry.code)).toContain("UNBOUND_ACTOR_REF");
+
+		const otherTyped = refs<
+			Record<string, never>,
+			Record<string, never>,
+			Record<never, Record<string, unknown>>,
+			Record<never, unknown>,
+			Record<never, Record<string, unknown>>,
+			Actors
+		>();
+		const crossBound = normalizeChartConfig(
+			otherTyped.chart({
+				kind: "chart",
+				id: "actor-ref-cross-binding",
+				actors: { auditor: Auditor({}) },
+				initial: "record",
+				states: {
+					record: send({ to: auditorRef, event: "RECORD", input: { path: "audit.log" }, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
+		expect(crossBound.ok ? [] : crossBound.diagnostics.map((entry) => entry.code)).toContain("UNBOUND_ACTOR_REF");
+
+		const unknownBody = makeBody();
+		delete (unknownBody.actors as { auditor?: unknown }).auditor;
+		const unknown = normalizeChartConfig(unknownBody);
+		expect(unknown.ok ? [] : unknown.diagnostics.map((entry) => entry.code)).toContain("UNKNOWN_ACTOR_REF");
+
+		const duplicateActor = Auditor({});
+		const duplicate = normalizeChartConfig(
+			typed.chart({
+				kind: "chart",
+				id: "actor-ref-duplicate",
+				actors: { auditor: Auditor({}) },
+				initial: "scope",
+				states: {
+					scope: compound({
+						actors: { auditor: duplicateActor },
+						initial: "record",
+						onDone: "done",
+						states: {
+							record: send({
+								to: auditorRef,
+								event: "RECORD",
+								input: { path: "audit.log" },
+								target: "finished",
+							}),
+							finished: final(),
+						},
+					}),
+					done: final(),
+				},
+			}),
+		);
+		expect(duplicate.ok ? [] : duplicate.diagnostics.map((entry) => entry.code)).toContain(
+			"DUPLICATE_ACTOR_REF_BINDING",
+		);
+
+		const incompatibleBody = makeBody();
+		const editor = Editor({ file: "x.ts" });
+		(incompatibleBody.actors as { auditor: unknown }).auditor = editor;
+		const incompatible = normalizeChartConfig(incompatibleBody);
+		expect(incompatible.ok ? [] : incompatible.diagnostics.map((entry) => entry.code)).toContain(
+			"UNKNOWN_PROTOCOL_MESSAGE",
+		);
+
+		const scopedActor = Auditor({});
+		const outOfScope = normalizeChartConfig(
+			typed.chart({
+				kind: "chart",
+				id: "actor-ref-scope",
+				initial: "record",
+				states: {
+					record: send({ to: auditorRef, event: "RECORD", input: { path: "audit.log" }, target: "scope" }),
+					scope: compound({
+						actors: { auditor: scopedActor },
+						initial: "finished",
+						onDone: "done",
+						states: { finished: final() },
+					}),
+					done: final(),
+				},
+			}),
+		);
+		expect(outOfScope.ok ? [] : outOfScope.diagnostics.map((entry) => entry.code)).toContain(
+			"ACTOR_SCOPE_VIOLATION",
+		);
+
+		const forged = normalizeChartConfig({
+			kind: "chart",
+			id: "actor-ref-forged",
+			actors: { auditor: Auditor({}) },
+			initial: "record",
+			states: {
+				record: {
+					kind: "send",
+					to: { kind: "actorRef", name: "auditor" },
+					event: "RECORD",
+					input: { path: "audit.log" },
+					target: "done",
+				},
+				done: { kind: "final" },
+			},
+		});
+		expect(forged.ok ? [] : forged.diagnostics.map((entry) => entry.code)).toContain("INVALID_ACTOR_REF");
+
+		const inData = normalizeChartConfig({
+			kind: "chart",
+			id: "actor-ref-data",
+			actors: { auditor: Auditor({}) },
+			initial: "record",
+			states: {
+				record: {
+					kind: "send",
+					to: Auditor({}),
+					event: "RECORD",
+					input: { path: auditorRef },
+					target: "done",
+				},
+				done: { kind: "final" },
+			},
+		});
+		expect(inData.ok ? [] : inData.diagnostics.map((entry) => entry.code)).toContain("ACTOR_REF_IN_DATA");
 	});
 
 	it("rejects self() outside actors and on recursive calls", () => {

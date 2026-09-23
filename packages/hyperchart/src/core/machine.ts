@@ -8,6 +8,7 @@ import type {
 	ActorWorkflowStateAst,
 	AgentActionAst,
 	ChartAst,
+	CompletionDeclarationAst,
 	GuardOutcome,
 	ArtifactAst,
 	ArtifactOfAst,
@@ -20,6 +21,8 @@ import type {
 	InputRef,
 	JsonValue,
 	GateActionAst,
+	NotifyActionAst,
+	WaitForActionAst,
 	RecoveryPolicyAst,
 	OnReenterAst,
 	SchemaAst,
@@ -201,6 +204,8 @@ export type ScriptEffect = Readonly<{
 	// resolves it at spawn — read the file, validate against shape, extract the field, serialize
 	// (string verbatim, everything else as JSON) — same rules as an agent's reads.
 	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	/** Pinned env artifacts restored before invocation; kept separate from path-valued env. */
+	reads?: readonly RenderedArtifact[];
 	artifacts?: readonly RenderedArtifact[];
 	events: readonly string[];
 	reply?: SchemaAst;
@@ -216,13 +221,43 @@ export type ImportedActionEffect = Readonly<{
 	module: string;
 	export: string;
 	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	/** Pinned env artifacts restored before invocation; kept separate from path-valued env. */
+	reads?: readonly RenderedArtifact[];
 	artifacts?: readonly RenderedArtifact[];
 	events: readonly string[];
 	reply?: SchemaAst;
 	input?: Readonly<Record<string, JsonValue>>;
 }>;
 
-export type ActionEffect = AgentEffect | UserEffect | GateEffect | ScriptEffect | ImportedActionEffect;
+export type CompletionNotifyEffect = Readonly<{
+	kind: "completion_notify";
+	id: EffectId;
+	actionUid: ActionUID;
+	visitId: number;
+	action: NotifyActionAst;
+	declaration: CompletionDeclarationAst;
+	payload: JsonValue;
+	schema: SchemaAst;
+}>;
+
+/** Render-only description of a root wait; the machine dispatches no executor effect for it. */
+export type WaitForEffect = Readonly<{
+	kind: "waitFor";
+	id: EffectId;
+	actionUid: ActionUID;
+	visitId: number;
+	action: WaitForActionAst;
+	declaration: CompletionDeclarationAst;
+}>;
+
+export type ActionEffect =
+	| AgentEffect
+	| UserEffect
+	| GateEffect
+	| ScriptEffect
+	| ImportedActionEffect
+	| CompletionNotifyEffect
+	| WaitForEffect;
 
 export type DurableRecordsEffect = Readonly<{
 	kind: "durable_records";
@@ -309,11 +344,7 @@ export type CancelEffect = Readonly<{
 }>;
 
 export type Effect =
-	| AgentEffect
-	| UserEffect
-	| GateEffect
-	| ScriptEffect
-	| ImportedActionEffect
+	| ActionEffect
 	| DurableRecordsEffect
 	| ActorEffect
 	| ValidateEffect
@@ -376,6 +407,14 @@ export type TimerMachineEvent = Readonly<{
 	effectId: EffectId;
 }>;
 
+export type CompletionEffectMachineEvent = Readonly<{
+	kind: "completion_effect";
+	effectId: EffectId;
+	operation: "notify";
+	ok: boolean;
+	error?: string;
+}>;
+
 export type ActorEffectMachineEvent = Readonly<{
 	kind: "actor_effect";
 	effectId: EffectId;
@@ -396,7 +435,8 @@ export type MachineEvent =
 	| DurableRecordsAddedMachineEvent
 	| ValidatedMachineEvent
 	| TimerMachineEvent
-	| ActorEffectMachineEvent;
+	| ActorEffectMachineEvent
+	| CompletionEffectMachineEvent;
 
 export type MachineOutput = MachineOutputEffect | MachineOutputFinal | MachineOutputError;
 
@@ -458,19 +498,25 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 	// record for every active action-leaf with nothing pending yet, plus the effects of each
 	// pending action — run it (with a deadline timer, if the state has one), validate its
 	// completion, or deliver the rejection.
-	const desired: (Effect | RecordAppend)[] = [
-		...dueSpawns(state),
-		...dueActorCreates(state),
-		...dueActorAdmissionFailures(state),
-		...dueActorEnqueues(state),
-		...dueActorAccepts(state),
-		...dueInvokes(state).map((actionUid) => invokeAppend(state, actionUid)),
-		...dueUserInteractionOpens(state),
-		...dueActorReplies(state),
-		...dueActorBatchResolutions(state),
-		...dueActorScopeFacts(state),
-		...state.projection.pendingActions.flatMap((pending) => pendingEffects(state, pending)),
-	];
+	const completionFailures = dueCompletionLifecycleFailures(state);
+	const desired: (Effect | RecordAppend)[] =
+		completionFailures.length > 0
+			? completionFailures
+			: [
+					...dueCompletionNotifications(state),
+					...dueCompletionConsumptions(state),
+					...dueSpawns(state),
+					...dueActorCreates(state),
+					...dueActorAdmissionFailures(state),
+					...dueActorEnqueues(state),
+					...dueActorAccepts(state),
+					...dueInvokes(state).map((actionUid) => invokeAppend(state, actionUid)),
+					...dueUserInteractionOpens(state),
+					...dueActorReplies(state),
+					...dueActorBatchResolutions(state),
+					...dueActorScopeFacts(state),
+					...state.projection.pendingActions.flatMap((pending) => pendingEffects(state, pending)),
+				];
 
 	// Each desired entry is dispatched once per machine lifetime; markers of entries no longer
 	// desired are dropped, so re-entering the same state later dispatches again.
@@ -600,8 +646,12 @@ function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 	const node = actionStateAtMachine(ast, pending.actionUid.state);
 	// User phases are represented and completed exclusively by journal facts. They never
 	// dispatch a live executor effect; validation after a resolved fact remains ordinary.
-	const journalGate = node?.action.kind === "user" || node?.action.kind === "gate";
-	const effects: Effect[] = journalGate && pending.phase !== "validating" ? [] : [pendingEffect(state, pending)];
+	const journalAction =
+		node?.action.kind === "user" ||
+		node?.action.kind === "gate" ||
+		node?.action.kind === "waitFor" ||
+		node?.action.kind === "notify";
+	const effects: Effect[] = journalAction && pending.phase !== "validating" ? [] : [pendingEffect(state, pending)];
 	if (pending.phase === "running") {
 		if (node?.after !== undefined) {
 			effects.push({
@@ -704,6 +754,10 @@ function actionInvocationForAction(
 			return userInvocationForAction(state, actionUid, action, id, seqId);
 		case "gate":
 			return gateInvocationForAction(state, actionUid, action, id, seqId);
+		case "notify":
+			return completionNotifyInvocation(state, actionUid, action, id);
+		case "waitFor":
+			return waitForInvocation(state, actionUid, action, id);
 	}
 }
 
@@ -760,11 +814,27 @@ function renderScriptOptions(
 	selfActionArtifactsState?: StatePath,
 ): {
 	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	reads?: readonly RenderedArtifact[];
 	artifacts?: readonly RenderedArtifact[];
 	reply?: SchemaAst;
 } {
+	const renderedEnv =
+		action.env === undefined ? undefined : renderScriptEnv(state, action.env, stateId, selfActionArtifactsState);
+	const reads = Object.values(renderedEnv ?? {}).filter(
+		(value): value is RenderedArtifact => typeof value !== "string",
+	);
+	const env =
+		renderedEnv === undefined
+			? undefined
+			: Object.fromEntries(
+					Object.entries(renderedEnv).map(([name, value]) => [
+						name,
+						typeof value !== "string" && value.select === undefined ? value.path : value,
+					]),
+				);
 	return {
-		...(action.env === undefined ? {} : { env: renderScriptEnv(state, action.env, stateId, selfActionArtifactsState) }),
+		...(env === undefined ? {} : { env }),
+		...(reads.length === 0 ? {} : { reads }),
 		...(action.artifacts === undefined
 			? {}
 			: {
@@ -799,7 +869,7 @@ function renderScriptEnv(
 				return [name, JSON.stringify(renderResultJoin(state, value, stateId))];
 			}
 			const read = renderRead(state, value, stateId, selfActionArtifactsState);
-			return [name, read.select === undefined ? read.path : read];
+			return [name, read];
 		}),
 	);
 }
@@ -881,6 +951,44 @@ function gateInvocationForAction(
 		events: allowedEventsForAction(state.ast, actionUid.state).filter((event) => event !== "FAILED"),
 		...(action.reply === undefined ? {} : { reply: action.reply }),
 	};
+}
+
+function completionNotifyInvocation(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: NotifyActionAst,
+	id: EffectId,
+): CompletionNotifyEffect {
+	const declaration = state.ast.completions[action.to];
+	assert(declaration !== undefined, `notify() in ${actionUid.state} targets unknown completion ${action.to}`);
+	const parts = effectIdParts(id);
+	assert(parts !== null, `notify() in ${actionUid.state} has invalid effect id ${id}`);
+	return {
+		kind: "completion_notify",
+		id,
+		actionUid,
+		visitId: parts.visitId,
+		action,
+		declaration,
+		payload: asJsonValue(
+			resolveValueAst(state, action.payload, actionUid.state),
+			`Completion payload in state ${actionUid.state}`,
+		),
+		schema: declaration.schema,
+	};
+}
+
+function waitForInvocation(
+	state: MachineState,
+	actionUid: ActionUID,
+	action: WaitForActionAst,
+	id: EffectId,
+): WaitForEffect {
+	const declaration = state.ast.completions[action.from];
+	assert(declaration !== undefined, `waitFor() in ${actionUid.state} targets unknown completion ${action.from}`);
+	const parts = effectIdParts(id);
+	assert(parts !== null, `waitFor() in ${actionUid.state} has invalid effect id ${id}`);
+	return { kind: "waitFor", id, actionUid, visitId: parts.visitId, action, declaration };
 }
 
 function resumeRequestForAction(state: MachineState, actionUid: ActionUID, id: EffectId): ResumeRequest | undefined {
@@ -1155,6 +1263,69 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 						];
 			return createMachineOutput(state, [{ kind: "append", id: event.effectId, records }]);
 		}
+		case "completion_effect": {
+			const pending = state.projection.pendingActions.find(
+				(entry) => entry.phase === "running" && pendingEffectId(entry) === event.effectId,
+			);
+			// Async schema validation can lose to actor-scope exit or global failure.
+			// Like stale actor-effect responses, a completion response with no current
+			// notify owner is a race loser and cannot publish or fail the chart.
+			if (pending === undefined || pending.definition.kind !== "notify") {
+				break;
+			}
+			if (!event.ok) {
+				return createMachineOutput(state, [
+					{
+						kind: "append",
+						id: `failure:${event.effectId}`,
+						records: [
+							{
+								type: "failure_intent",
+								origin: pending.actionUid.state,
+								error: event.error ?? "Completion payload validation failed",
+							},
+						],
+					},
+				]);
+			}
+			if (state.projection.completions[pending.definition.to] !== undefined) {
+				return createMachineOutput(state, dueCompletionLifecycleFailures(state));
+			}
+			const effect = completionNotifyInvocation(
+				state,
+				pending.actionUid,
+				pending.definition,
+				event.effectId,
+			);
+			return createMachineOutput(state, [
+				{
+					kind: "append",
+					id: event.effectId,
+					records: [
+						{
+							type: "completion",
+							kind: "notified",
+							endpoint: effect.declaration.name,
+							event: effect.declaration.event,
+							payload: effect.payload,
+							source: {
+								actionUid: pending.actionUid,
+								visitId: pending.visitId,
+								definition: pending.definition,
+								declaration: effect.declaration,
+							},
+						},
+						{
+							type: "state_action",
+							kind: "complete",
+							actionUid: pending.actionUid,
+							...resolvedStateInput(state, pending.actionUid),
+							event: { type: "NOTIFIED" },
+						},
+					],
+				},
+			]);
+		}
 		case "actor_effect": {
 			const effect = [...dueActorCreates(state), ...dueActorEnqueues(state), ...dueActorReplies(state)].find(
 				(candidate) => candidate.id === event.effectId,
@@ -1285,6 +1456,110 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 	}
 
 	return createMachineOutput(state, []);
+}
+
+function dueCompletionLifecycleFailures(state: MachineState): RecordAppend[] {
+	for (const pending of state.projection.pendingActions) {
+		if (pending.phase !== "running") {
+			continue;
+		}
+		if (pending.definition.kind === "notify" && state.projection.completions[pending.definition.to] !== undefined) {
+			return [
+				{
+					kind: "append",
+					id: `completion:duplicate:${pendingEffectId(pending)}`,
+					records: [
+						{
+							type: "failure_intent",
+							origin: pending.actionUid.state,
+							error: `Completion '${pending.definition.to}' was notified more than once`,
+						},
+					],
+				},
+			];
+		}
+		if (pending.definition.kind === "waitFor") {
+			const completion = state.projection.completions[pending.definition.from];
+			if (completion?.consumed !== undefined) {
+				return [
+					{
+						kind: "append",
+						id: `completion:stale-wait:${pendingEffectId(pending)}`,
+						records: [
+							{
+								type: "failure_intent",
+								origin: pending.actionUid.state,
+								error: `Completion '${pending.definition.from}' cannot be consumed by another wait visit`,
+							},
+						],
+					},
+				];
+			}
+		}
+	}
+	return [];
+}
+
+function dueCompletionNotifications(state: MachineState): CompletionNotifyEffect[] {
+	const reserved = new Set<string>();
+	return state.projection.pendingActions.flatMap((pending): CompletionNotifyEffect[] => {
+		if (
+			pending.phase !== "running" ||
+			pending.definition.kind !== "notify" ||
+			state.projection.completions[pending.definition.to] !== undefined ||
+			reserved.has(pending.definition.to)
+		) {
+			return [];
+		}
+		// At most one schema-validation effect per endpoint may be in flight. The
+		// first pending notifier deterministically owns this machine-lifetime
+		// reservation until its append is acknowledged or the action is canceled.
+		reserved.add(pending.definition.to);
+		return [
+			completionNotifyInvocation(
+				state,
+				pending.actionUid,
+				pending.definition,
+				pendingEffectId(pending),
+			),
+		];
+	});
+}
+
+function dueCompletionConsumptions(state: MachineState): RecordAppend[] {
+	return state.projection.pendingActions.flatMap((pending): RecordAppend[] => {
+		if (pending.phase !== "running" || pending.definition.kind !== "waitFor") {
+			return [];
+		}
+		const completion = state.projection.completions[pending.definition.from];
+		if (completion === undefined || completion.consumed !== undefined) {
+			return [];
+		}
+		return [
+			{
+				kind: "append",
+				id: `completion:consume:${pendingEffectId(pending)}:${completion.notificationSeqId}`,
+				records: [
+					{
+						type: "completion",
+						kind: "consumed",
+						endpoint: pending.definition.from,
+						notificationSeqId: completion.notificationSeqId,
+						actionUid: pending.actionUid,
+						visitId: pending.visitId,
+						definition: pending.definition,
+					},
+					{
+						type: "state_action",
+						kind: "complete",
+						actionUid: pending.actionUid,
+						...resolvedStateInput(state, pending.actionUid),
+						event: { type: completion.event, output: completion.payload },
+					},
+				],
+			},
+		];
+	});
 }
 
 function dueActorBatchResolutions(state: MachineState): RecordAppend[] {
@@ -2151,6 +2426,11 @@ export function renderRead(
 	const rendered = renderArtifact(state, declared, producerState);
 	// A validator reading its own output needs provisional bytes, not a stale accepted pin.
 	const pin = producerState === selfActionArtifactsState ? undefined : state.projection.artifactPins[rendered.path];
+	if (actor === undefined && actorContextForState(state.ast, producerState) !== undefined && pin === undefined) {
+		throw new Error(
+			`Read in state ${stateId}: actor artifact '${rendered.path}' has no accepted durable pin`,
+		);
+	}
 	return {
 		...rendered,
 		...(name === undefined ? {} : { name }),

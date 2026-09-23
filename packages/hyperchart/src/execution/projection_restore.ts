@@ -31,7 +31,7 @@ import {
 } from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
-export const PROJECTOR_VERSION = 6;
+export const PROJECTOR_VERSION = 7;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
 export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
@@ -69,7 +69,13 @@ export type LoadedBranchProjection = Readonly<{
 
 /** SHA-256 over canonical JSON for the normalized AST. */
 export function chartAstDigest(ast: ChartAst): string {
-	return createHash("sha256").update(canonicalJson(ast)).digest("hex");
+	// Empty completion registries preserve pre-endpoint chart identity; only authored
+	// endpoint contracts alter the durable AST digest.
+	const digestValue =
+		Object.keys(ast.completions).length === 0
+			? Object.fromEntries(Object.entries(ast).filter(([key]) => key !== "completions"))
+			: ast;
+	return createHash("sha256").update(canonicalJson(digestValue)).digest("hex");
 }
 
 export function projectionContractForAst(ast: ChartAst): ProjectionContract {
@@ -267,6 +273,7 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 				"seqId",
 				"pendingActions",
 				"openUserInteractions",
+				"completions",
 				"spawns",
 				"inputs",
 				"results",
@@ -289,6 +296,7 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 		!isNonNegativeInteger(value.seqId) ||
 		!isPendingActions(value.pendingActions) ||
 		!isOpenInteractions(value.openUserInteractions) ||
+		!isCompletions(value.completions) ||
 		!(value.args === undefined || isJsonRecord(value.args)) ||
 		!isRecordOfJsonRecords(value.spawns) ||
 		!isRecordOfJsonRecords(value.inputs) ||
@@ -306,6 +314,37 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 		return undefined;
 	}
 	return structuredClone(value) as BranchProjection;
+}
+
+function isCompletions(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		Object.entries(value).every(([endpoint, completion]) => {
+			if (
+				!isNonEmptyString(endpoint) ||
+				!isExactRecord(
+					completion,
+					["endpoint", "event", "payload", "notificationSeqId", "sourceActionUid", "sourceVisitId"],
+					["consumed"],
+				) ||
+				completion.endpoint !== endpoint ||
+				!isNonEmptyString(completion.event) ||
+				!isJsonValue(completion.payload) ||
+				!isPositiveInteger(completion.notificationSeqId) ||
+				!isActionUid(completion.sourceActionUid) ||
+				!isPositiveInteger(completion.sourceVisitId)
+			) {
+				return false;
+			}
+			return (
+				completion.consumed === undefined ||
+				(isExactRecord(completion.consumed, ["actionUid", "visitId", "seqId"], []) &&
+					isActionUid(completion.consumed.actionUid) &&
+					isPositiveInteger(completion.consumed.visitId) &&
+					isPositiveInteger(completion.consumed.seqId))
+			);
+		})
+	);
 }
 
 function isPendingActions(value: unknown): boolean {
@@ -739,6 +778,38 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 				matchesDeclaredUid(interaction.opened.actionUid, state.action.uid) &&
 				interaction.opened.seqId <= projection.seqId &&
 				interaction.opened.phaseSeqId <= interaction.opened.seqId
+			);
+		})
+	) {
+		return false;
+	}
+	if (
+		!Object.entries(projection.completions).every(([endpoint, completion]) => {
+			const declaration = ast.completions[endpoint];
+			const source = actionStateFor(ast, projection, completion.sourceActionUid.state);
+			if (
+				declaration === undefined ||
+				completion.endpoint !== endpoint ||
+				completion.event !== declaration.event ||
+				source?.action.kind !== "notify" ||
+				source.action.to !== endpoint ||
+				!matchesDeclaredUid(completion.sourceActionUid, source.action.uid) ||
+				completion.notificationSeqId > projection.seqId ||
+				(projection.stateVisits[actionUidKey(completion.sourceActionUid)] ?? 0) < completion.sourceVisitId
+			) {
+				return false;
+			}
+			if (completion.consumed === undefined) {
+				return true;
+			}
+			const wait = actionStateFor(ast, projection, completion.consumed.actionUid.state);
+			return (
+				wait?.action.kind === "waitFor" &&
+				wait.action.from === endpoint &&
+				matchesDeclaredUid(completion.consumed.actionUid, wait.action.uid) &&
+				completion.consumed.seqId <= projection.seqId &&
+				(projection.stateVisits[actionUidKey(completion.consumed.actionUid)] ?? 0) >=
+					completion.consumed.visitId
 			);
 		})
 	) {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { deepFreeze } from "./dsl.js";
 import { runtimeContractMetadata } from "./schema_contract.js";
+import { getActorRefMetadata, getChartActorRefBinding, getCompletionRefMetadata } from "./typed.js";
 import { isInputRef } from "./types.js";
 import { SchemaRegistry } from "./schema_registry.js";
 import type {
@@ -18,6 +19,7 @@ import type {
 	ChartArgumentAst,
 	ChartAst,
 	ChartCst,
+	CompletionDeclarationAst,
 	ChartSource,
 	JsonValue,
 	ArtifactAst,
@@ -30,6 +32,8 @@ import type {
 	GuardRefAst,
 	InputRef,
 	MapStateAst,
+	NotifyActionAst,
+	WaitForActionAst,
 	AgentReentryAst,
 	RecoveryPolicyAst,
 	OnReenterAst,
@@ -118,9 +122,19 @@ function toChartAst(
 	const chartId = typeof id === "string" ? id : "";
 	const recovery = toRecoveryPolicy(input.recovery, "/recovery", diagnostics, source, DEFAULT_RECOVERY_POLICY);
 	const args = toChartArguments(input.args, diagnostics, source, schemaRegistry);
+	const completions = toCompletionDeclarations(input.completions, diagnostics, source, schemaRegistry);
 	const states: Record<StatePath, StateAst> = {};
 	const actors: Record<StatePath, ActorEndpointDeclarationAst> = {};
 	const actorTargets = new Map<object, StatePath>();
+	const chartActorRefBinding = getChartActorRefBinding(input);
+	const actorRefs: ActorForwardRefContext = {
+		...(chartActorRefBinding === undefined ? {} : { chartBinding: chartActorRefBinding }),
+		placementsByName: new Map(),
+	};
+	const completionRefs: CompletionRefContext = {
+		...(chartActorRefBinding === undefined ? {} : { chartBinding: chartActorRefBinding }),
+		declarations: completions,
+	};
 	const rawActors: Array<{
 		declaration: Record<string, unknown>;
 		name: string;
@@ -128,12 +142,14 @@ function toChartAst(
 		owner?: StatePath;
 		pointer: string;
 	}> = [];
-	collectActorPlacements(input, undefined, "", actorTargets, rawActors, diagnostics, source);
+	collectActorPlacements(input, undefined, "", actorTargets, actorRefs, rawActors, diagnostics, source);
 	for (const placement of rawActors) {
 		const declaration = toActorDeclarationAst(
 			placement,
 			chartId,
 			actorTargets,
+			actorRefs,
+			completionRefs,
 			diagnostics,
 			source,
 			schemaRegistry,
@@ -156,6 +172,8 @@ function toChartAst(
 			schemaRegistry,
 			"state",
 			actorTargets,
+			actorRefs,
+			completionRefs,
 			actors,
 			recovery,
 		);
@@ -166,10 +184,11 @@ function toChartAst(
 			diagnostic("UNKNOWN_INITIAL_STATE", `Initial state '${initial}' does not exist.`, "/initial", source),
 		);
 	}
-	validateTargets(states, diagnostics, source);
+	validateTargets(states, actors, diagnostics, source);
 	validateActorTargets(states, actors, diagnostics, source);
 	validateActorUsage(states, actors, diagnostics, source);
 	validateActorCallCycles(actors, diagnostics, source);
+	validateCompletionUsage(states, actors, completions, diagnostics, source);
 	const beforeCycles = diagnostics.length;
 	validateEnterCycles(states, diagnostics, source);
 	// Input and domination analysis walk the same enter-resolution chain (inputEntryTargets) and
@@ -191,7 +210,61 @@ function toChartAst(
 		initial: typeof initial === "string" ? initial : "",
 		states,
 		actors,
+		completions,
 	});
+}
+
+function toCompletionDeclarations(
+	input: unknown,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+	schemaRegistry: SchemaRegistry,
+): Record<string, CompletionDeclarationAst> {
+	if (input === undefined) {
+		return {};
+	}
+	if (!isRecord(input)) {
+		diagnostics.push(
+			diagnostic("INVALID_COMPLETIONS", "Chart completions must be an object.", "/completions", source),
+		);
+		return {};
+	}
+	const completions: Record<string, CompletionDeclarationAst> = {};
+	for (const [name, raw] of Object.entries(input)) {
+		const pointer = `/completions/${escapePointer(name)}`;
+		if (!STATE_ID_PATTERN.test(name)) {
+			diagnostics.push(
+				diagnostic("INVALID_COMPLETION_NAME", `Completion name '${name}' must match [A-Za-z0-9_-]+.`, pointer, source),
+			);
+			continue;
+		}
+		if (!isRecord(raw) || raw.kind !== "completion") {
+			diagnostics.push(
+				diagnostic("INVALID_COMPLETION", "Completion entries must be created by completion().", pointer, source),
+			);
+			continue;
+		}
+		const event = typeof raw.event === "string" && raw.event.length > 0 ? raw.event : undefined;
+		if (event === undefined) {
+			diagnostics.push(
+				diagnostic("INVALID_COMPLETION_EVENT", "Completion event must be a non-empty string.", `${pointer}/event`, source),
+			);
+		} else if (isReservedSystemEvent(event)) {
+			diagnostics.push(
+				diagnostic(
+					"RESERVED_COMPLETION_EVENT",
+					`Completion event '${event}' is reserved for system failure.`,
+					`${pointer}/event`,
+					source,
+				),
+			);
+		}
+		const schema = toSchemaAst(raw.schema, `${pointer}/schema`, diagnostics, source, schemaRegistry);
+		if (schema !== undefined && event !== undefined && !isReservedSystemEvent(event)) {
+			completions[name] = deepFreeze({ name, event, schema });
+		}
+	}
+	return completions;
 }
 
 function toChartArguments(
@@ -373,12 +446,23 @@ type RawActorPlacement = {
 	pointer: string;
 };
 
+type ActorForwardRefContext = {
+	chartBinding?: object;
+	placementsByName: Map<string, RawActorPlacement[]>;
+};
+
+type CompletionRefContext = {
+	chartBinding?: object;
+	declarations: Readonly<Record<string, CompletionDeclarationAst>>;
+};
+
 /** First pass: establish object-identity capabilities before any send/call is normalized. */
 function collectActorPlacements(
 	ownerInput: Record<string, unknown>,
 	ownerPath: StatePath | undefined,
 	pointer: string,
 	targets: Map<object, StatePath>,
+	actorRefs: ActorForwardRefContext,
 	placements: RawActorPlacement[],
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
@@ -438,13 +522,17 @@ function collectActorPlacements(
 					continue;
 				}
 				targets.set(raw, path);
-				placements.push({
+				const placement = {
 					declaration: raw,
 					name,
 					path,
 					...(ownerPath === undefined ? {} : { owner: ownerPath }),
 					pointer: actorPointer,
-				});
+				};
+				placements.push(placement);
+				const named = actorRefs.placementsByName.get(name) ?? [];
+				named.push(placement);
+				actorRefs.placementsByName.set(name, named);
 			}
 		}
 	}
@@ -462,6 +550,7 @@ function collectActorPlacements(
 			childPath,
 			`${pointer}/states/${escapePointer(childName)}`,
 			targets,
+			actorRefs,
 			placements,
 			diagnostics,
 			source,
@@ -470,10 +559,137 @@ function collectActorPlacements(
 	}
 }
 
+type ResolvedActorTarget = Readonly<{ forward: boolean; path?: StatePath }>;
+
+function resolveAuthoredActorTarget(
+	input: unknown,
+	actorTargets: ReadonlyMap<object, StatePath>,
+	actorRefs: ActorForwardRefContext,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): ResolvedActorTarget {
+	if (!isRecord(input)) {
+		return { forward: false };
+	}
+	const direct = actorTargets.get(input);
+	if (direct !== undefined) {
+		return { forward: false, path: direct };
+	}
+	if (input.kind !== "actorRef") {
+		return { forward: false };
+	}
+	const metadata = getActorRefMetadata(input);
+	if (metadata === undefined || typeof input.name !== "string" || metadata.name !== input.name) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_ACTOR_REF",
+				"actorRef targets must be created by actorRef() from the refs() instance that binds this chart.",
+				pointer,
+				source,
+			),
+		);
+		return { forward: true };
+	}
+	if (actorRefs.chartBinding === undefined || actorRefs.chartBinding !== metadata.binding) {
+		diagnostics.push(
+			diagnostic(
+				"UNBOUND_ACTOR_REF",
+				`actorRef('${metadata.name}') is not owned by the refs().chart() binding for this chart.`,
+				pointer,
+				source,
+			),
+		);
+		return { forward: true };
+	}
+	const placements = actorRefs.placementsByName.get(metadata.name) ?? [];
+	if (placements.length === 0) {
+		diagnostics.push(
+			diagnostic(
+				"UNKNOWN_ACTOR_REF",
+				`actorRef('${metadata.name}') has no static actor binding named '${metadata.name}' in this chart.`,
+				pointer,
+				source,
+			),
+		);
+		return { forward: true };
+	}
+	if (placements.length > 1) {
+		diagnostics.push(
+			diagnostic(
+				"DUPLICATE_ACTOR_REF_BINDING",
+				`actorRef('${metadata.name}') is ambiguous because ${placements.length} static bindings use that name.`,
+				pointer,
+				source,
+			),
+		);
+		return { forward: true };
+	}
+	return { forward: true, path: placements[0]!.path };
+}
+
+function resolveCompletionTarget(
+	input: unknown,
+	completionRefs: CompletionRefContext,
+	pointer: string,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): CompletionDeclarationAst | undefined {
+	if (!isRecord(input) || input.kind !== "completionRef") {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_COMPLETION_REF",
+				"Completion targets must be created by completionRef() from the refs() instance that binds this chart.",
+				pointer,
+				source,
+			),
+		);
+		return undefined;
+	}
+	const metadata = getCompletionRefMetadata(input);
+	if (metadata === undefined || typeof input.name !== "string" || metadata.name !== input.name) {
+		diagnostics.push(
+			diagnostic(
+				"INVALID_COMPLETION_REF",
+				"Completion targets must be created by completionRef() from the refs() instance that binds this chart.",
+				pointer,
+				source,
+			),
+		);
+		return undefined;
+	}
+	if (completionRefs.chartBinding === undefined || completionRefs.chartBinding !== metadata.binding) {
+		diagnostics.push(
+			diagnostic(
+				"UNBOUND_COMPLETION_REF",
+				`completionRef('${metadata.name}') is not owned by the refs().chart() binding for this chart.`,
+				pointer,
+				source,
+			),
+		);
+		return undefined;
+	}
+	const declaration = completionRefs.declarations[metadata.name];
+	if (declaration === undefined) {
+		diagnostics.push(
+			diagnostic(
+				"UNKNOWN_COMPLETION_REF",
+				`completionRef('${metadata.name}') has no chart completion declaration named '${metadata.name}'.`,
+				pointer,
+				source,
+			),
+		);
+		return undefined;
+	}
+	return declaration;
+}
+
 function toActorDeclarationAst(
 	placement: RawActorPlacement,
 	chartId: string,
 	actorTargets: ReadonlyMap<object, StatePath>,
+	actorRefs: ActorForwardRefContext,
+	completionRefs: CompletionRefContext,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
@@ -597,13 +813,13 @@ function toActorDeclarationAst(
 					),
 				);
 			}
-			const targetActor =
-				authoredSelf && (raw.kind === "send" || raw.kind === "sendBatch")
-					? placement.path
-					: isRecord(raw.to)
-						? actorTargets.get(raw.to)
-						: undefined;
-			if (targetActor === undefined && !authoredSelf) {
+			const resolvedTarget: ResolvedActorTarget = authoredSelf
+				? raw.kind === "send" || raw.kind === "sendBatch"
+					? { forward: false, path: placement.path }
+					: { forward: false }
+				: resolveAuthoredActorTarget(raw.to, actorTargets, actorRefs, `${pointer}/to`, diagnostics, source);
+			const targetActor = resolvedTarget.path;
+			if (targetActor === undefined && !authoredSelf && !resolvedTarget.forward) {
 				diagnostics.push(
 					diagnostic(
 						"INVALID_ACTOR_TARGET",
@@ -705,11 +921,23 @@ function toActorDeclarationAst(
 				source,
 				schemaRegistry,
 				recovery,
+				completionRefs,
+				"actor",
 			);
 			if (action === undefined) {
 				continue;
 			}
 			const transitions = toTransitionMap(raw.transitions, `${pointer}/transitions`, diagnostics, source) ?? {};
+			if (action.kind === "notify" && (Object.keys(transitions).length !== 1 || transitions.NOTIFIED === undefined)) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_NOTIFY_TRANSITION",
+						"Actor notify() action states must declare exactly one NOTIFIED transition.",
+						`${pointer}/transitions`,
+						source,
+					),
+				);
+			}
 			if ("FAILED" in transitions) {
 				diagnostics.push(
 					diagnostic(
@@ -723,6 +951,16 @@ function toActorDeclarationAst(
 			const emits = toEmits(raw.emit, `${pointer}/emit`, diagnostics, source, schemaRegistry);
 			const stateInput = toInputDeclarations(raw.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
+			if (action.kind === "notify" && (emits !== undefined || after !== undefined)) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_NOTIFY_OPTION",
+						"notify() action states cannot declare emit or after.",
+						pointer,
+						source,
+					),
+				);
+			}
 			for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
 				if (raw[legacy] !== undefined) {
 					diagnostics.push(
@@ -1149,7 +1387,7 @@ function validateActorIsolation(
 			for (const template of actionTemplates(node.action)) {
 				refs.push(...template.refs.map((ref) => ({ ref, pointer })));
 			}
-			if (node.action.kind === "gate") {
+			if (node.action.kind === "gate" || node.action.kind === "notify") {
 				refs.push(...valueRefs(node.action.payload).map((ref) => ({ ref, pointer: `${pointer}/action/payload` })));
 			}
 			for (const [index, emitted] of (node.emit ?? []).entries()) {
@@ -1224,16 +1462,29 @@ function validateActorIsolation(
 			}
 			if (ref.kind === "result") {
 				const producer = states[ref.state];
-				if (producer?.kind !== "state") {
+				if (producer?.kind !== "state" && producer?.kind !== "callBatch") {
 					diagnostics.push(
 						diagnostic(
 							"ACTOR_ISOLATION_VIOLATION",
-							`Actor result('${ref.state}') must name an actor-local action state.`,
+							`Actor result('${ref.state}') must name an actor-local result-producing state.`,
 							use.pointer,
 							source,
 						),
 					);
-				} else if (producer.action.reply !== undefined && !schemaHasPath(producer.action.reply, ref.path)) {
+				} else if (producer.kind === "callBatch" && ref.path !== undefined) {
+					diagnostics.push(
+						diagnostic(
+							"UNKNOWN_INPUT_RESULT",
+							`Actor callBatch result '${ref.state}' is an ordered reply array and does not support selector '${ref.path}'.`,
+							use.pointer,
+							source,
+						),
+					);
+				} else if (
+					producer.kind === "state" &&
+					producer.action.reply !== undefined &&
+					!schemaHasPath(producer.action.reply, ref.path)
+				) {
 					diagnostics.push(
 						diagnostic(
 							"UNKNOWN_INPUT_RESULT",
@@ -1243,14 +1494,16 @@ function validateActorIsolation(
 						),
 					);
 				} else if (
-					use.allowSelfResult === true &&
-					ref.state !== stateId &&
-					dominators.get(stateId)?.has(ref.state) !== true
+					producer.kind === "callBatch"
+						? ref.state === stateId || dominators.get(stateId)?.has(ref.state) !== true
+						: use.allowSelfResult === true &&
+							ref.state !== stateId &&
+							dominators.get(stateId)?.has(ref.state) !== true
 				) {
 					diagnostics.push(
 						diagnostic(
 							"NON_DOMINATED_REF",
-							`Transition input in actor state '${stateId}' reads '${ref.state}', but '${ref.state}' does not dominate '${stateId}'.`,
+							`Actor result() in state '${stateId}' reads '${ref.state}', but '${ref.state}' does not dominate '${stateId}'.`,
 							use.pointer,
 							source,
 						),
@@ -1571,6 +1824,74 @@ function validateActorUsage(
 	}
 }
 
+function validateCompletionUsage(
+	states: Readonly<Record<StatePath, StateAst>>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
+	completions: Readonly<Record<string, CompletionDeclarationAst>>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const waits = new Map<string, StatePath[]>();
+	const notifies = new Map<string, StatePath[]>();
+	for (const [path, node] of Object.entries(states)) {
+		if (node.kind !== "state" || node.action.kind !== "waitFor") {
+			continue;
+		}
+		const entries = waits.get(node.action.from) ?? [];
+		entries.push(path);
+		waits.set(node.action.from, entries);
+		let owner = node.parent;
+		while (owner !== undefined) {
+			const parent = states[owner];
+			if (parent?.kind === "map" || parent?.kind === "parallel" || parent?.kind === "region") {
+				diagnostics.push(
+					diagnostic(
+						"WAIT_FOR_CONCURRENT_SCOPE",
+						`waitFor() state '${path}' must be in the root or a compound scope, not a map or parallel region.`,
+						`/states/${escapePointer(path)}`,
+						source,
+					),
+				);
+				break;
+			}
+			owner = parent?.parent;
+		}
+	}
+	for (const actor of Object.values(actors)) {
+		for (const [stateId, node] of Object.entries(actorDefinitionAst(actor).states)) {
+			if (node.kind !== "state" || node.action.kind !== "notify") {
+				continue;
+			}
+			const entries = notifies.get(node.action.to) ?? [];
+			entries.push(`${actor.path}.${stateId}`);
+			notifies.set(node.action.to, entries);
+		}
+	}
+	for (const name of Object.keys(completions)) {
+		const endpointWaits = waits.get(name) ?? [];
+		if (endpointWaits.length !== 1) {
+			diagnostics.push(
+				diagnostic(
+					endpointWaits.length === 0 ? "UNUSED_COMPLETION_WAIT" : "DUPLICATE_COMPLETION_WAIT",
+					`Completion '${name}' must have exactly one waitFor() state; found ${endpointWaits.length}.`,
+					`/completions/${escapePointer(name)}`,
+					source,
+				),
+			);
+		}
+		if ((notifies.get(name) ?? []).length === 0) {
+			diagnostics.push(
+				diagnostic(
+					"UNUSED_COMPLETION_NOTIFY",
+					`Completion '${name}' must be targeted by at least one actor notify() action.`,
+					`/completions/${escapePointer(name)}`,
+					source,
+				),
+			);
+		}
+	}
+}
+
 function validateActorCallCycles(
 	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
 	diagnostics: AuthoringDiagnostic[],
@@ -1653,6 +1974,28 @@ function toValueAst(
 		);
 		return undefined;
 	}
+	if (isRecord(input) && input.kind === "actorRef") {
+		diagnostics.push(
+			diagnostic(
+				"ACTOR_REF_IN_DATA",
+				"actorRef() is an authoring-only target and cannot be embedded in runtime data.",
+				pointer,
+				source,
+			),
+		);
+		return undefined;
+	}
+	if (isRecord(input) && input.kind === "completionRef") {
+		diagnostics.push(
+			diagnostic(
+				"COMPLETION_REF_IN_DATA",
+				"completionRef() is an authoring-only target and cannot be embedded in runtime data.",
+				pointer,
+				source,
+			),
+		);
+		return undefined;
+	}
 	if (isInputRef(input)) {
 		return toInputRef(input, pointer, diagnostics, source);
 	}
@@ -1701,6 +2044,8 @@ function collectState(
 	schemaRegistry: SchemaRegistry,
 	role: "state" | "region" = "state",
 	actorTargets: ReadonlyMap<object, StatePath> = new Map(),
+	actorRefs: ActorForwardRefContext = { placementsByName: new Map() },
+	completionRefs: CompletionRefContext = { declarations: {} },
 	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>> = {},
 	recovery: RecoveryPolicyAst = DEFAULT_RECOVERY_POLICY,
 ): void {
@@ -1782,6 +2127,8 @@ function collectState(
 				schemaRegistry,
 				"region",
 				actorTargets,
+				actorRefs,
+				completionRefs,
 				actors,
 				recovery,
 			);
@@ -1848,6 +2195,8 @@ function collectState(
 				schemaRegistry,
 				"state",
 				actorTargets,
+				actorRefs,
+				completionRefs,
 				actors,
 				recovery,
 			);
@@ -1900,6 +2249,8 @@ function collectState(
 				schemaRegistry,
 				"state",
 				actorTargets,
+				actorRefs,
+				completionRefs,
 				actors,
 				recovery,
 			);
@@ -1951,7 +2302,10 @@ function collectState(
 			return;
 		}
 		const authoredSelf = isRecord(input.to) && input.to.kind === "actorSelf";
-		const targetActor = authoredSelf ? undefined : isRecord(input.to) ? actorTargets.get(input.to) : undefined;
+		const resolvedTarget: ResolvedActorTarget = authoredSelf
+			? { forward: false }
+			: resolveAuthoredActorTarget(input.to, actorTargets, actorRefs, `${pointer}/to`, diagnostics, source);
+		const targetActor = resolvedTarget.path;
 		if (authoredSelf) {
 			diagnostics.push(
 				diagnostic(
@@ -1961,7 +2315,7 @@ function collectState(
 					source,
 				),
 			);
-		} else if (targetActor === undefined) {
+		} else if (targetActor === undefined && !resolvedTarget.forward) {
 			diagnostics.push(
 				diagnostic(
 					"INVALID_ACTOR_TARGET",
@@ -2101,11 +2455,35 @@ function collectState(
 			source,
 			schemaRegistry,
 			recovery,
+			completionRefs,
+			"chart",
 		);
 		const emits = toEmits(input.emit, `${pointer}/emit`, diagnostics, source, schemaRegistry);
 		const inputs = toInputDeclarations(input.input, `${pointer}/input`, diagnostics, source, schemaRegistry);
 		const transitions = toTransitionMap(input.transitions, `${pointer}/transitions`, diagnostics, source);
 		const after = toAfter(input.after, `${pointer}/after`, diagnostics, source);
+		if (action?.kind === "waitFor") {
+			if (Object.keys(transitions ?? {}).length !== 1 || transitions?.[action.event] === undefined) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_WAIT_FOR_TRANSITION",
+						`waitFor() action states must declare exactly one '${action.event}' transition.`,
+						`${pointer}/transitions`,
+						source,
+					),
+				);
+			}
+			if (after !== undefined) {
+				diagnostics.push(
+					diagnostic(
+						"WAIT_FOR_TIMEOUT_UNSUPPORTED",
+						"One-shot waitFor() states cannot declare after; failure and cancellation remain global.",
+						`${pointer}/after`,
+						source,
+					),
+				);
+			}
+		}
 		for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
 			if (input[legacy] !== undefined) {
 				diagnostics.push(
@@ -2158,7 +2536,12 @@ function collectState(
 export function declaredArtifactsForState(
 	state: Extract<StateAst, { kind: "state" }>,
 ): Readonly<Record<string, ArtifactAst>> | undefined {
-	if (state.action.kind === "user" || state.action.kind === "gate") {
+	if (
+		state.action.kind === "user" ||
+		state.action.kind === "gate" ||
+		state.action.kind === "waitFor" ||
+		state.action.kind === "notify"
+	) {
 		return undefined;
 	}
 	const merged: Record<string, ArtifactAst> = {};
@@ -2177,8 +2560,26 @@ export function declaredArtifactsForState(
 	return Object.keys(merged).length === 0 ? undefined : merged;
 }
 
+function externallyReadableActorActionState(
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
+	path: StatePath,
+): ActionStateAst | undefined {
+	for (const actor of Object.values(actors)) {
+		// A root-owned capacity-one actor has one unambiguous occurrence. Pool workers
+		// and nested/map-owned actors need occurrence correlation and stay unreadable.
+		if (actor.kind !== "actor" || actor.owner !== undefined || !path.startsWith(`${actor.path}.`)) {
+			continue;
+		}
+		const local = path.slice(actor.path.length + 1);
+		const state = actor.states[local];
+		return state?.kind === "state" ? state : undefined;
+	}
+	return undefined;
+}
+
 function validateTerminalArtifactRef(
 	states: Record<StatePath, StateAst>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
 	terminalPath: StatePath,
 	read: ArtifactOfAst | JoinArtifactOfAst,
 	pointer: string,
@@ -2196,7 +2597,9 @@ function validateTerminalArtifactRef(
 		);
 	}
 	const producer = states[read.state];
-	const artifacts = producer?.kind === "state" ? declaredArtifactsForState(producer) : undefined;
+	const actionProducer =
+		producer?.kind === "state" ? producer : externallyReadableActorActionState(actors, read.state);
+	const artifacts = actionProducer === undefined ? undefined : declaredArtifactsForState(actionProducer);
 	if (artifacts === undefined || Object.keys(artifacts).length === 0) {
 		diagnostics.push(
 			diagnostic(
@@ -2235,6 +2638,7 @@ function validateTerminalArtifactRef(
 // (final child, onDone presence) live in collectState; here only the targets are checked.
 function validateTargets(
 	states: Record<StatePath, StateAst>,
+	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): void {
@@ -2257,7 +2661,15 @@ function validateTargets(
 					validateTemplateRefs(states, scope, notify.prompt, `${pointer}/notify/prompt`, diagnostics, source);
 				}
 				for (const [index, read] of (notify.artifacts ?? []).entries()) {
-					validateTerminalArtifactRef(states, path, read, `${pointer}/notify/artifacts/${index}`, diagnostics, source);
+					validateTerminalArtifactRef(
+						states,
+						actors,
+						path,
+						read,
+						`${pointer}/notify/artifacts/${index}`,
+						diagnostics,
+						source,
+					);
 				}
 			}
 			continue;
@@ -2276,6 +2688,12 @@ function validateTargets(
 					source,
 				),
 			);
+		}
+		if (node.kind === "send" || node.kind === "call") {
+			validateInputRefs(states, path, valueRefs(node.input), `${pointer}/input`, diagnostics, source);
+		}
+		if (node.kind === "sendBatch" || node.kind === "callBatch") {
+			validateInputRefs(states, path, valueRefs(node.inputs), `${pointer}/inputs`, diagnostics, source);
 		}
 		for (const [eventType, transition] of Object.entries(node.transitions)) {
 			const target = transition.target;
@@ -2361,7 +2779,10 @@ function validateTargets(
 						);
 					}
 					const producer = states[read.state];
-					if (producer?.kind !== "state" || producer.action.reply === undefined) {
+					if (
+						producer === undefined ||
+						(producer.kind !== "callBatch" && (producer.kind !== "state" || producer.action.reply === undefined))
+					) {
 						diagnostics.push(
 							diagnostic(
 								"UNKNOWN_INPUT_RESULT",
@@ -2370,7 +2791,20 @@ function validateTargets(
 								source,
 							),
 						);
-					} else if (!schemaHasPath(producer.action.reply, read.path)) {
+					} else if (producer.kind === "callBatch" && read.path !== undefined) {
+						diagnostics.push(
+							diagnostic(
+								"UNKNOWN_INPUT_RESULT",
+								`joinResultOf callBatch result '${read.state}' does not support selector '${read.path}'.`,
+								`${pointer}/action/env`,
+								source,
+							),
+						);
+					} else if (
+						producer.kind === "state" &&
+						producer.action.reply !== undefined &&
+						!schemaHasPath(producer.action.reply, read.path)
+					) {
 						diagnostics.push(
 							diagnostic(
 								"UNKNOWN_INPUT_RESULT",
@@ -2403,12 +2837,15 @@ function validateTargets(
 					}
 					const producer = states[read.state];
 					const selfGuardRef = guard?.kind === "script" && read.kind === "artifactOf" && read.state === path;
+					const actorProducer = externallyReadableActorActionState(actors, read.state);
 					const artifacts =
 						producer?.kind === "state"
 							? selfGuardRef && "artifacts" in producer.action
 								? producer.action.artifacts
 								: declaredArtifactsForState(producer)
-							: undefined;
+							: actorProducer === undefined
+								? undefined
+								: declaredArtifactsForState(actorProducer);
 					if (artifacts === undefined || Object.keys(artifacts).length === 0) {
 						diagnostics.push(
 							diagnostic(
@@ -2446,7 +2883,7 @@ function validateTargets(
 			for (const template of actionTemplates(node.action)) {
 				validateTemplateRefs(states, path, template, `${pointer}/action`, diagnostics, source);
 			}
-			if (node.action.kind === "gate") {
+			if (node.action.kind === "gate" || node.action.kind === "notify") {
 				validateInputRefs(
 					states,
 					path,
@@ -2499,11 +2936,20 @@ function validateTargets(
 			continue;
 		}
 		if (node.kind === "map") {
-			if (node.over.kind === "result" && states[node.over.state]?.kind !== "state") {
+			if (node.over.kind === "result" && !isResultProducer(states[node.over.state])) {
 				diagnostics.push(
 					diagnostic(
 						"UNKNOWN_INPUT_RESULT",
-						`Map '${path}' fans out over the result of unknown action state '${node.over.state}'.`,
+						`Map '${path}' fans out over the result of unknown result-producing state '${node.over.state}'.`,
+						`${pointer}/over`,
+						source,
+					),
+				);
+			} else if (node.over.kind === "result" && states[node.over.state]?.kind === "callBatch" && node.over.path !== undefined) {
+				diagnostics.push(
+					diagnostic(
+						"UNKNOWN_INPUT_RESULT",
+						`callBatch result '${node.over.state}' is an ordered reply array and does not support selector '${node.over.path}'.`,
 						`${pointer}/over`,
 						source,
 					),
@@ -2645,7 +3091,8 @@ function validateActorPlacementRefs(
 			if (ref.kind === "result") {
 				if (
 					consumer === undefined ||
-					states[ref.state]?.kind !== "state" ||
+					!isResultProducer(states[ref.state]) ||
+					(states[ref.state]?.kind === "callBatch" && ref.path !== undefined) ||
 					!dominatesForDataRef(states, dominators, ref.state, consumer)
 				) {
 					diagnostics.push(
@@ -2840,7 +3287,9 @@ function validateDominatedRefs(
 	const graph = buildDominanceGraph(states, initial);
 	const dominators = computeDominators(graph);
 	const check = (producer: StatePath, consumer: StatePath, pointer: string, label: string, allowSelf = false) => {
-		if (states[producer]?.kind !== "state") {
+		const producerNode = states[producer];
+		const resultRead = label === "result()" || label === "joinResultOf()";
+		if (producerNode?.kind !== "state" && !(resultRead && producerNode?.kind === "callBatch")) {
 			return;
 		}
 		if ((allowSelf && producer === consumer) || dominatesForDataRef(states, dominators, producer, consumer)) {
@@ -2890,7 +3339,7 @@ function validateDominatedRefs(
 					}
 				}
 			}
-			if (node.action.kind === "gate") {
+			if (node.action.kind === "gate" || node.action.kind === "notify") {
 				for (const ref of valueRefs(node.action.payload)) {
 					if (ref.kind === "result") {
 						check(ref.state, path, `${pointer}/action/payload`, "result()");
@@ -2968,6 +3417,21 @@ function validateDominatedRefs(
 					if (ref.kind === "result") {
 						check(ref.state, path, `${pointer}/onReenter/message`, "result()");
 					}
+				}
+			}
+			continue;
+		}
+		if (node.kind === "send" || node.kind === "call") {
+			for (const ref of valueRefs(node.input)) {
+				if (ref.kind === "result") {
+					check(ref.state, path, `${pointer}/input`, "result()");
+				}
+			}
+		}
+		if (node.kind === "sendBatch" || node.kind === "callBatch") {
+			for (const ref of valueRefs(node.inputs)) {
+				if (ref.kind === "result") {
+					check(ref.state, path, `${pointer}/inputs`, "result()");
 				}
 			}
 		}
@@ -3261,6 +3725,10 @@ function validateTemplateRefs(
 	validateInputRefs(states, path, template.refs, pointer, diagnostics, source, options);
 }
 
+function isResultProducer(node: StateAst | undefined): node is ActionStateAst | CallBatchStateAst {
+	return node?.kind === "state" || node?.kind === "callBatch";
+}
+
 function validateInputRefs(
 	states: Record<StatePath, StateAst>,
 	path: StatePath,
@@ -3296,11 +3764,20 @@ function validateInputRefs(
 				),
 			);
 		}
-		if (ref.kind === "result" && states[ref.state]?.kind !== "state") {
+		if (ref.kind === "result" && !isResultProducer(states[ref.state])) {
 			diagnostics.push(
 				diagnostic(
 					"UNKNOWN_INPUT_RESULT",
-					`A template in state '${path}' reads the result of unknown action state '${ref.state}'.`,
+					`A template in state '${path}' reads the result of unknown result-producing state '${ref.state}'.`,
+					pointer,
+					source,
+				),
+			);
+		} else if (ref.kind === "result" && states[ref.state]?.kind === "callBatch" && ref.path !== undefined) {
+			diagnostics.push(
+				diagnostic(
+					"UNKNOWN_INPUT_RESULT",
+					`callBatch result '${ref.state}' is an ordered reply array and does not support selector '${ref.path}'.`,
 					pointer,
 					source,
 				),
@@ -3414,7 +3891,7 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	if (action.kind === "user") {
 		return [action.prompt];
 	}
-	if (action.kind === "gate") {
+	if (action.kind === "gate" || action.kind === "waitFor" || action.kind === "notify") {
 		return [];
 	}
 	return [
@@ -4163,6 +4640,8 @@ function toStateActionAst(
 	source: ChartSource,
 	schemaRegistry: SchemaRegistry,
 	recovery: RecoveryPolicyAst,
+	completionRefs: CompletionRefContext,
+	location: "chart" | "actor",
 ): StateActionAst | undefined {
 	if (!isRecord(input)) {
 		diagnostics.push(diagnostic("INVALID_ACTION", "State action must be an object.", path, source));
@@ -4305,6 +4784,72 @@ function toStateActionAst(
 				...(reply === undefined ? {} : { reply }),
 			} satisfies GateActionAst);
 		}
+		case "waitFor": {
+			if (location !== "chart") {
+				diagnostics.push(
+					diagnostic("WAIT_FOR_INSIDE_ACTOR", "waitFor() is chart-owned and cannot run inside an actor.", path, source),
+				);
+			}
+			const declaration = resolveCompletionTarget(input.from, completionRefs, `${path}/from`, diagnostics, source);
+			const event = typeof input.event === "string" ? input.event : "";
+			if (declaration !== undefined && event !== declaration.event) {
+				diagnostics.push(
+					diagnostic(
+						"COMPLETION_EVENT_MISMATCH",
+						`waitFor() event '${event}' does not match completion '${declaration.name}' event '${declaration.event}'.`,
+						`${path}/event`,
+						source,
+					),
+				);
+			}
+			const uid: ActionUID = { chart: chartId, state: statePath, action: "waitFor" };
+			if (declaration === undefined) {
+				return undefined;
+			}
+			return deepFreeze({
+				kind: "waitFor",
+				uid,
+				from: declaration.name,
+				event: declaration.event,
+				reply: declaration.schema,
+			} satisfies WaitForActionAst);
+		}
+		case "notify": {
+			if (location !== "actor") {
+				diagnostics.push(
+					diagnostic("NOTIFY_OUTSIDE_ACTOR", "notify() may only run inside an actor workflow.", path, source),
+				);
+			}
+			const declaration = resolveCompletionTarget(input.to, completionRefs, `${path}/to`, diagnostics, source);
+			const event = typeof input.event === "string" ? input.event : "";
+			if (declaration !== undefined && event !== declaration.event) {
+				diagnostics.push(
+					diagnostic(
+						"COMPLETION_EVENT_MISMATCH",
+						`notify() event '${event}' does not match completion '${declaration.name}' event '${declaration.event}'.`,
+						`${path}/event`,
+						source,
+					),
+				);
+			}
+			if (!Object.hasOwn(input, "payload")) {
+				diagnostics.push(
+					diagnostic("INVALID_NOTIFY_PAYLOAD", "notify() requires payload.", `${path}/payload`, source),
+				);
+			}
+			const payload = toValueAst(input.payload, `${path}/payload`, diagnostics, source);
+			const uid: ActionUID = { chart: chartId, state: statePath, action: "notify" };
+			if (declaration === undefined || payload === undefined) {
+				return undefined;
+			}
+			return deepFreeze({
+				kind: "notify",
+				uid,
+				to: declaration.name,
+				event: declaration.event,
+				payload,
+			} satisfies NotifyActionAst);
+		}
 		case "user": {
 			const prompt = toTemplate(input.prompt, `${path}/prompt`, diagnostics, source);
 			if (prompt === undefined) {
@@ -4347,7 +4892,7 @@ function toStateActionAst(
 			diagnostics.push(
 				diagnostic(
 					"INVALID_ACTION_KIND",
-					"Action kind must be 'agent', 'user', 'gate', 'script' or 'tsImport'.",
+					"Action kind must be 'agent', 'user', 'gate', 'waitFor', 'notify', 'script' or 'tsImport'.",
 					`${path}/kind`,
 					source,
 				),

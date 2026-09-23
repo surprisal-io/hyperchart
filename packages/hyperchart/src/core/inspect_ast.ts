@@ -154,6 +154,8 @@ export type HyperchartInspectState = {
 		| "agent"
 		| "user"
 		| "gate"
+		| "waitFor"
+		| "notify"
 		| "script"
 		| "tsImport"
 		| "send"
@@ -186,6 +188,7 @@ export type HyperchartInspectState = {
 	emits?: Array<{ event: string; payload: HyperchartInspectValue; schema?: JsonSchema }>;
 	gateEvent?: string;
 	gatePayload?: HyperchartInspectValue;
+	completion?: { endpoint: string; event: string; payload?: HyperchartInspectValue };
 	validation?: HyperchartInspectAgentValidation;
 	onFail?: HyperchartInspectRecoveryPolicy;
 	description?: string;
@@ -233,6 +236,7 @@ export type HyperchartInspectResult = {
 	definitionSource?: string;
 	mode: "static";
 	states: HyperchartInspectState[];
+	completionDeclarations?: Array<{ name: string; event: string; schema: JsonSchema }>;
 	actorDeclarations?: HyperchartInspectActorDeclaration[];
 };
 
@@ -253,6 +257,15 @@ export function inspectChartAst(
 		definitionSource: hyperchartSource(ast, null),
 		mode: "static",
 		states: statesFromAst(ast, options),
+		...(Object.keys(ast.completions).length === 0
+			? {}
+			: {
+					completionDeclarations: Object.values(ast.completions).map((declaration) => ({
+						name: declaration.name,
+						event: declaration.event,
+						schema: declaration.schema.schema,
+					})),
+				}),
 		...(Object.keys(ast.actors).length === 0
 			? {}
 			: {
@@ -337,6 +350,14 @@ function inspectActorMessageContract(
 							),
 						},
 	};
+}
+
+function callBatchResultSchema(
+	ast: ChartAst,
+	state: Extract<StateAst | ActorWorkflowStateAst, { kind: "callBatch" }>,
+): JsonSchema | undefined {
+	const reply = ast.actors[state.to]?.protocol[state.event]?.reply;
+	return reply?.kind === "single" ? { type: "array", items: reply.schema.schema } : undefined;
 }
 
 function outgoingActorMessageDefinition(
@@ -467,12 +488,14 @@ function actorDefinitionStates(
 				transitions: [{ event: "ENQUEUED", target: `${actorBase}.${state.target}` }],
 			};
 		}
+		const batchReply = state.kind === "callBatch" ? callBatchResultSchema(ast, state) : undefined;
 		return {
 			...common,
 			kind: state.kind,
 			task: `${state.event} → ${state.to}`,
 			actorMessageLink: { kind: state.kind, to: state.to, event: state.event },
 			actorMessageDefinition: outgoingActorMessageDefinition(ast, state),
+			...(batchReply === undefined ? {} : { reply: batchReply }),
 			transitions: actorTransitionEntries(actorBase, state),
 		};
 	});
@@ -530,12 +553,14 @@ function stateFromAst(
 		};
 	}
 	if (state.kind === "call" || state.kind === "callBatch") {
+		const batchReply = state.kind === "callBatch" ? callBatchResultSchema(ast, state) : undefined;
 		return {
 			id: path,
 			kind: state.kind,
 			task: `${state.event} → ${state.to}`,
 			actorMessageLink: { kind: state.kind, to: state.to, event: state.event },
 			actorMessageDefinition: outgoingActorMessageDefinition(ast, state),
+			...(batchReply === undefined ? {} : { reply: batchReply }),
 		};
 	}
 	if (state.kind === "map") {
@@ -575,7 +600,11 @@ function branchInfos(ast: ChartAst, _path: string, regions: string[]): Hyperchar
 						? `${action.module}#${action.export}`
 						: action.kind === "gate"
 							? `${action.event}: ${hyperchartValueSource(action.payload)}`
-							: templatePreview(action.kind === "agent" ? action.task : action.prompt);
+							: action.kind === "notify"
+								? `notify ${action.to}.${action.event}`
+								: action.kind === "waitFor"
+									? `wait for ${action.from}.${action.event}`
+									: templatePreview(action.kind === "agent" ? action.task : action.prompt);
 		return {
 			id: regionPath,
 			...(action?.kind === "agent" ? { agent: action.name } : {}),
@@ -691,6 +720,22 @@ function actionStateFromAst(
 			gatePayload: inspectValue(action.payload),
 		};
 	}
+	if (action.kind === "waitFor") {
+		return {
+			...base,
+			kind: "waitFor",
+			task: `wait for ${action.from}.${action.event}`,
+			completion: { endpoint: action.from, event: action.event },
+		};
+	}
+	if (action.kind === "notify") {
+		return {
+			...base,
+			kind: "notify",
+			task: `notify ${action.to}.${action.event}`,
+			completion: { endpoint: action.to, event: action.event, payload: inspectValue(action.payload) },
+		};
+	}
 	const task = templatePreview(action.prompt);
 	return { ...base, kind: "user", ...(task === undefined ? {} : { task }) };
 }
@@ -786,7 +831,12 @@ function inputRefSchema(ref: InputRef, ast: ChartAst, statePath: string): JsonSc
 	switch (ref.kind) {
 		case "result": {
 			const state = actorContext?.definition.states[ref.state] ?? ast.states[ref.state];
-			const schema = state?.kind === "state" ? state.action.reply?.schema : undefined;
+			const schema =
+				state?.kind === "state"
+					? state.action.reply?.schema
+					: state?.kind === "callBatch"
+						? callBatchResultSchema(ast, state)
+						: undefined;
 			return schema === undefined ? undefined : jsonSchemaAtPath(schema, ref.path);
 		}
 		case "input": {
@@ -985,7 +1035,7 @@ function actionRefs(action: StateActionAst): HyperchartInspectRef[] {
 		}
 	} else if (action.kind === "user") {
 		appendTemplateRefs(refs, action.prompt);
-	} else {
+	} else if (action.kind === "gate" || action.kind === "notify") {
 		appendValueRefs(refs, action.payload);
 	}
 	return uniqueRefs(refs);

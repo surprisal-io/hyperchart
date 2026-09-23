@@ -2,6 +2,7 @@ import type {
 	ActionUID,
 	ActorEndpointDeclarationAst,
 	ChartEvent,
+	CompletionDeclarationAst,
 	GuardOutcome,
 	GuardRefAst,
 	SchemaAst,
@@ -12,6 +13,8 @@ import type {
 	StateActionAst,
 	StatePath,
 	JsonValue,
+	NotifyActionAst,
+	WaitForActionAst,
 } from "./types.js";
 
 /** Durable named branch (the storage lane). Branch ids are public, stable names. */
@@ -218,6 +221,34 @@ export type EmitLog = {
 	payload: JsonValue;
 } & SessionParams;
 
+/** One validated, chart-owned one-shot completion notification. */
+export type CompletionNotifiedLog = {
+	type: "completion";
+	kind: "notified";
+	endpoint: string;
+	event: string;
+	payload: unknown;
+	source: Readonly<{
+		actionUid: ActionUID;
+		visitId: number;
+		definition: NotifyActionAst;
+		declaration: CompletionDeclarationAst;
+	}>;
+} & SessionParams;
+
+/** Atomic ownership claim linking one notification to one exact wait action visit. */
+export type CompletionConsumedLog = {
+	type: "completion";
+	kind: "consumed";
+	endpoint: string;
+	notificationSeqId: number;
+	actionUid: ActionUID;
+	visitId: number;
+	definition: WaitForActionAst;
+} & SessionParams;
+
+export type CompletionLog = CompletionNotifiedLog | CompletionConsumedLog;
+
 /** First durable fact of global fail-fast. No successor state may start after this record. */
 export type FailureIntentLog = {
 	type: "failure_intent";
@@ -336,6 +367,7 @@ export type DurableLogRecord =
 	| UserInteractionLog
 	| GateLog
 	| EmitLog
+	| CompletionLog
 	| FailureIntentLog
 	| ActorLogRecord;
 

@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { InputRef } from "../packages/hyperchart/src/index.js";
 import {
 	actor,
+	actorPool,
 	agent,
+	callBatch,
 	artifact,
 	compound,
 	contract,
@@ -11,8 +13,10 @@ import {
 	failed,
 	final,
 	gate,
+	json,
 	map,
 	message,
+	messageInput,
 	normalizeChartConfig,
 	parallel,
 	protocol,
@@ -41,6 +45,145 @@ import {
 } from "../packages/hyperchart/src/core/dsl.js";
 
 describe("normalizeChartConfig", () => {
+	it("accepts dominated callBatch results and rejects unavailable, selected, or non-dominating reads", () => {
+		const Review = z.object({ id: z.number() }).strict();
+		const ReviewProtocol = protocol({
+			REVIEW: message({ input: z.object({ id: z.number() }).strict(), reply: Review }),
+		});
+		const ReviewWorker = actor({
+			input: z.object({}).strict(),
+			protocol: ReviewProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { REVIEW: "settle" } }),
+				settle: reply({ target: "idle", output: messageInput("REVIEW") }),
+			},
+		});
+		const ReviewPool = actorPool({ concurrency: 2, worker: ReviewWorker });
+		const reviewers = ReviewPool({});
+		const reviews = () =>
+			callBatch({ to: reviewers, event: "REVIEW", inputs: [{ id: 0 }, { id: 1 }], target: "consume" });
+		const consume = (read: InputRef<unknown>) => ({
+			kind: "state" as const,
+			action: tsAction("./consume.mjs", "consume", { env: { REVIEWS: t`${json(read)}` } }),
+			transitions: { DONE: "done" },
+		});
+
+		const valid = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "call-batch-result-valid",
+				actors: { reviewers },
+				initial: "reviews",
+				states: { reviews: reviews(), consume: consume(result("reviews")), done: final() },
+			}),
+		);
+		expect(valid.ok).toBe(true);
+
+		const selected = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "call-batch-result-selector",
+				actors: { reviewers },
+				initial: "reviews",
+				states: { reviews: reviews(), consume: consume(result("reviews", "0.verdict")), done: final() },
+			}),
+		);
+		expect(selected.ok ? [] : selected.diagnostics.map((entry) => entry.code)).toContain("UNKNOWN_INPUT_RESULT");
+
+		const unavailable = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "call-batch-result-unavailable",
+				actors: { reviewers },
+				initial: "reviews",
+				states: { reviews: reviews(), consume: consume(result("missing")), done: final() },
+			}),
+		);
+		expect(unavailable.ok ? [] : unavailable.diagnostics.map((entry) => entry.code)).toContain("UNKNOWN_INPUT_RESULT");
+
+		const nonDominated = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "call-batch-result-non-dominated",
+				actors: { reviewers },
+				initial: "choose",
+				states: {
+					choose: { kind: "state", action: agent("choose"), transitions: { REVIEW: "reviews", SKIP: "consume" } },
+					reviews: reviews(),
+					consume: consume(result("reviews")),
+					done: final(),
+				},
+			}),
+		);
+		expect(nonDominated.ok ? [] : nonDominated.diagnostics.map((entry) => entry.code)).toContain(
+			"NON_DOMINATED_REF",
+		);
+
+		const ControllerProtocol = protocol({ START: message({ input: z.object({}).strict() }) });
+		const Controller = actor({
+			input: z.object({}).strict(),
+			protocol: ControllerProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { START: "choose" } }),
+				choose: { kind: "state", action: agent("choose"), transitions: { REVIEW: "reviews", SKIP: "consume" } },
+				reviews: callBatch({ to: reviewers, event: "REVIEW", inputs: [{ id: 0 }], target: "consume" }),
+				consume: {
+					kind: "state",
+					action: tsAction("./consume.mjs", "consume", {
+						env: { REVIEWS: t`${json(result("reviews"))}` },
+					}),
+					transitions: { DONE: "settle" },
+				},
+				settle: reply({ target: "idle" }),
+			},
+		} as any);
+		const controller = Controller({});
+		const actorNonDominated = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-call-batch-result-non-dominated",
+				actors: { reviewers, controller },
+				initial: "start",
+				states: {
+					start: send({ to: controller, event: "START", input: {}, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
+		expect(actorNonDominated.ok ? [] : actorNonDominated.diagnostics.map((entry) => entry.code)).toContain(
+			"NON_DOMINATED_REF",
+		);
+
+		const SelfController = actor({
+			input: z.object({}).strict(),
+			protocol: ControllerProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { START: "reviews" } }),
+				reviews: callBatch({ to: reviewers, event: "REVIEW", inputs: result("reviews"), target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		} as any);
+		const selfController = SelfController({});
+		const actorSelfRead = normalizeChartConfig(
+			chart({
+				kind: "chart",
+				id: "actor-call-batch-result-self-read",
+				actors: { reviewers, selfController },
+				initial: "start",
+				states: {
+					start: send({ to: selfController, event: "START", input: {}, target: "done" }),
+					done: final(),
+				},
+			}),
+		);
+		expect(actorSelfRead.ok ? [] : actorSelfRead.diagnostics.map((entry) => entry.code)).toContain(
+			"NON_DOMINATED_REF",
+		);
+	});
+
 	it("normalizes emit declarations and allows result() from the completing state", () => {
 		const parsed = normalizeChartConfig(
 			chart({

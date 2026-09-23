@@ -170,6 +170,16 @@ export type OpenProjectedUserInteraction = {
 	status: "open";
 };
 
+export type ProjectedCompletion = {
+	endpoint: string;
+	event: string;
+	payload: unknown;
+	notificationSeqId: number;
+	sourceActionUid: ActionUID;
+	sourceVisitId: number;
+	consumed?: Readonly<{ actionUid: ActionUID; visitId: number; seqId: number }>;
+};
+
 export type BranchProjection = {
 	// The active configuration: one leaf normally, one per region while a parallel is active.
 	// Always leaves — compounds drill down to their initial, parallels expand to their regions.
@@ -178,6 +188,8 @@ export type BranchProjection = {
 	pendingActions: PendingAction[];
 	/** Open journal-native user gates keyed by their opened-record seqId. */
 	openUserInteractions: Record<number, OpenProjectedUserInteraction>;
+	/** One validated notification and optional wait ownership claim per root completion endpoint. */
+	completions: Record<string, ProjectedCompletion>;
 	// The run's input arguments; undefined until the args fact lands in the log.
 	args?: Readonly<Record<string, unknown>>;
 	// Pinned fan-outs: map instance-path → { key → item }, written by spawned facts. Entries stay
@@ -218,6 +230,7 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		seqId: 0,
 		pendingActions: [],
 		openUserInteractions: {},
+		completions: {},
 		spawns: {},
 		inputs: {},
 		results: {},
@@ -449,6 +462,62 @@ export function projectBranch(
 					}
 					completeParallels(projection, ast);
 				}
+				break;
+			}
+			case "completion": {
+				const declaration = ast.completions[record.endpoint];
+				if (declaration === undefined || (record.kind === "notified" && declaration.event !== record.event)) {
+					throw new Error(`Completion record targets unknown or changed endpoint ${record.endpoint}`);
+				}
+				if (record.kind === "notified") {
+					if (projection.completions[record.endpoint] !== undefined) {
+						throw new Error(`Completion endpoint ${record.endpoint} was notified more than once`);
+					}
+					const pending = projection.pendingActions.find(
+						(entry) =>
+							entry.phase === "running" &&
+							entry.visitId === record.source.visitId &&
+							sameActionUid(entry.actionUid, record.source.actionUid),
+					);
+					if (
+						pending === undefined ||
+						pending.definition.kind !== "notify" ||
+						pending.definition.to !== record.endpoint ||
+						pending.definition.event !== record.event ||
+						!sameRecordedValue(pending.definition, record.source.definition) ||
+						!sameRecordedValue(declaration, record.source.declaration)
+					) {
+						throw new Error(`Completion notification source changed for endpoint ${record.endpoint}`);
+					}
+					projection.completions[record.endpoint] = {
+						endpoint: record.endpoint,
+						event: record.event,
+						payload: record.payload,
+						notificationSeqId: record.seqId,
+						sourceActionUid: record.source.actionUid,
+						sourceVisitId: record.source.visitId,
+					};
+					break;
+				}
+				const completion = projection.completions[record.endpoint];
+				const pending = projection.pendingActions.find(
+					(entry) =>
+						entry.phase === "running" &&
+						entry.visitId === record.visitId &&
+						sameActionUid(entry.actionUid, record.actionUid),
+				);
+				if (
+					completion === undefined ||
+					completion.notificationSeqId !== record.notificationSeqId ||
+					completion.consumed !== undefined ||
+					pending === undefined ||
+					pending.definition.kind !== "waitFor" ||
+					pending.definition.from !== record.endpoint ||
+					!sameRecordedValue(pending.definition, record.definition)
+				) {
+					throw new Error(`Completion consumption is stale or conflicting for endpoint ${record.endpoint}`);
+				}
+				completion.consumed = { actionUid: record.actionUid, visitId: record.visitId, seqId: record.seqId };
 				break;
 			}
 			case "emit":

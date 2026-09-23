@@ -3,8 +3,12 @@ import type { ChartAst } from "../../core/types.js";
 
 /** Coordinates/session identities are capture context, not scripted scenario identity. */
 export function storyCaptureIdentity(ast: ChartAst, schedule: readonly DurableLogRecord[]): string {
+	const identityAst =
+		Object.keys(ast.completions).length === 0
+			? Object.fromEntries(Object.entries(ast).filter(([key]) => key !== "completions"))
+			: ast;
 	return JSON.stringify({
-		ast,
+		ast: identityAst,
 		schedule: schedule.map(
 			({ seqId: _seqId, parentId: _parentId, branchId: _branchId, timestamp: _timestamp, ...record }) => {
 				if (record.type === "state_action" && record.kind === "invoke") {

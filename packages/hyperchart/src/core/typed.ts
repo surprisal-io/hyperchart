@@ -1,13 +1,20 @@
 import type { z } from "zod";
 import type {
+	ActorForwardRef,
+	AnyStaticActorDeclaration,
 	ArtifactOfCst,
 	ChartArgumentCst,
 	ChartCst,
+	CompletionContract,
+	CompletionDeclarationCst,
+	CompletionForwardRef,
 	EventBindingCst,
 	JoinArtifactOfCst,
 	JoinResultOfCst,
 	InferSchema,
 	InputRef,
+	ProtocolCst,
+	ProtocolOf,
 } from "./types.js";
 
 // Dot-paths a result() selector may take into a value of type T. Free-form objects
@@ -70,16 +77,20 @@ export type EmitsOf<C> = C extends { states: infer S }
 		}>
 	: never;
 
-// The registry the chart itself declares: every state whose action has a zod (or other) reply.
+// The registry the chart itself declares: action replies and typed call/callBatch results.
 export type ResultsOf<C> = C extends { states: infer S }
 	? Simplify2<
 			UnionToIntersection<
 				FlattenStates<S> extends infer E
-					? E extends [infer P extends string, { action: { reply: infer R } }]
-						? { [K in P]: InferSpec<R> }
-						: E extends [infer P extends string, { kind: "call"; __result?: infer R }]
-							? { [K in P]: R }
-							: never
+					? E extends [infer P extends string, { action: { kind: "waitFor"; __result?: infer R } }]
+						? { [K in P]: R }
+						: E extends [infer P extends string, { action: { reply: infer R } }]
+							? { [K in P]: InferSpec<R> }
+							: E extends [infer P extends string, { kind: "callBatch"; __result?: infer R }]
+								? { [K in P]: R }
+								: E extends [infer P extends string, { kind: "call"; __result?: infer R }]
+									? { [K in P]: R }
+									: never
 					: never
 			> &
 				NonNullable<unknown> // intersection identity for the no-entries case
@@ -153,7 +164,7 @@ export type InputsOf<C> = C extends { states: infer S }
 	? Simplify2<
 			UnionToIntersection<
 				FlattenStates<S> extends infer E
-					? E extends [infer P extends string, { input: infer I }]
+					? E extends [infer P extends string, { kind: "state" | "map"; input: infer I }]
 						? { [K in P]: InputShapes<I> }
 						: never
 					: never
@@ -161,6 +172,38 @@ export type InputsOf<C> = C extends { states: infer S }
 				NonNullable<unknown> // intersection identity for the no-entries case
 		>
 	: never;
+
+type ActorProtocols<A> = A extends Record<string, unknown>
+	? {
+			[K in keyof A & string]: A[K] extends AnyStaticActorDeclaration ? ProtocolOf<A[K]> : never;
+		}
+	: never;
+
+/** The actor protocol registry declared by all static actor bindings in a chart. */
+export type ActorsOf<C> = C extends { states: infer S }
+	? Simplify2<
+			UnionToIntersection<
+				| (C extends { actors: infer A } ? ActorProtocols<A> : never)
+				| (FlattenStates<S> extends infer E
+						? E extends [string, { actors: infer A }]
+							? ActorProtocols<A>
+							: never
+						: never)
+			> &
+				NonNullable<unknown>
+		>
+	: never;
+
+type CompletionContracts<D> = D extends Record<string, unknown>
+	? {
+			[K in keyof D & string]: D[K] extends CompletionDeclarationCst<infer S, infer Event>
+				? CompletionContract<Event, InferSchema<S>>
+				: never;
+		}
+	: never;
+
+/** The completion contract registry declared by root chart endpoints. */
+export type CompletionsOf<C> = C extends { completions: infer D } ? Simplify2<CompletionContracts<D>> : Record<never, never>;
 
 // Both directions must hold: everything the registry declares exists in the chart with the same
 // type, and everything the chart declares is written down in the registry.
@@ -190,11 +233,26 @@ type VerifyArguments<C, Args> = C extends { args: infer Actual }
 			}
 	: unknown;
 
-type VerifyDecl<C, Args, Results, Files, Maps, Inputs> = VerifyArguments<C, Args> &
+type ActorRegistry = Record<string, ProtocolCst>;
+type UncheckedActorRegistry = { readonly __hyperchartUncheckedActors: true };
+type CompletionRegistry = Record<string, CompletionContract>;
+type UncheckedCompletionRegistry = { readonly __hyperchartUncheckedCompletions: true };
+
+type VerifyActors<C, Actors> = Actors extends ActorRegistry
+	? Mutual<Actors, ActorsOf<C>, "actors registry is out of sync with the chart">
+	: unknown;
+
+type VerifyCompletions<C, Completions> = Completions extends CompletionRegistry
+	? Mutual<Completions, CompletionsOf<C>, "completions registry is out of sync with the chart">
+	: unknown;
+
+type VerifyDecl<C, Args, Results, Files, Maps, Inputs, Actors, Completions> = VerifyArguments<C, Args> &
 	Mutual<Results, ResultsOf<C>, "results registry is out of sync with the chart"> &
 	Mutual<Files, FilesOf<C>, "files registry is out of sync with the chart"> &
 	Mutual<Maps, MapsOf<C>, "maps registry is out of sync with the chart"> &
-	Mutual<Inputs, InputsOf<C>, "inputs registry is out of sync with the chart">;
+	Mutual<Inputs, InputsOf<C>, "inputs registry is out of sync with the chart"> &
+	VerifyActors<C, Actors> &
+	VerifyCompletions<C, Completions>;
 
 type InputNames<Inputs> = {
 	[S in keyof Inputs]: keyof Inputs[S];
@@ -205,10 +263,18 @@ type InputValue<Inputs, K extends string> = {
 	[S in keyof Inputs]: K extends keyof Inputs[S] ? Inputs[S][K] : never;
 }[keyof Inputs];
 
-type Refs<Args, Results, Files, Maps, Inputs> = {
+type Refs<Args, Results, Files, Maps, Inputs, Actors, Completions> = {
 	// The checking chart constructor: accepts only a literal whose declared replies/artifacts
 	// match the registry the refs were built from — the registry cannot drift from the chart.
-	chart: <const C extends ChartCst>(def: C & VerifyDecl<C, Args, Results, Files, Maps, Inputs>) => C;
+	chart: <const C extends ChartCst>(
+		def: C & VerifyDecl<C, Args, Results, Files, Maps, Inputs, Actors, Completions>,
+	) => C;
+	actorRef: Actors extends ActorRegistry
+		? <K extends keyof Actors & string>(name: K) => ActorForwardRef<Actors[K], K>
+		: (name: never) => never;
+	completionRef: Completions extends CompletionRegistry
+		? <K extends keyof Completions & string>(name: K) => CompletionForwardRef<Completions[K], K>
+		: (name: never) => never;
 	arg: <K extends keyof Args & string>(name: K) => InputRef<Args[K]>;
 	event: (path?: string) => EventBindingCst;
 	visit: (state?: string) => InputRef<number>;
@@ -269,15 +335,97 @@ type Refs<Args, Results, Files, Maps, Inputs> = {
 // and the value types flowing into templates are checked as you type; runtime enforcement rides
 // the schema refs. Consistency of the keys with real chart states stays normalize's job
 // (UNKNOWN_INPUT_RESULT / UNKNOWN_FILE_SOURCE).
+type BoundRefMetadata = Readonly<{ binding: object; name: string }>;
+type BoundRefMetadataRegistry = Readonly<{
+	actorRefs: WeakMap<object, BoundRefMetadata>;
+	completionRefs: WeakMap<object, BoundRefMetadata>;
+	charts: WeakMap<object, object>;
+}>;
+
+// Jiti loads an external chart's aliased package entry as a second module instance, while the
+// host normalizer remains in the first. Keep opaque provenance in process-local WeakMaps shared
+// by those instances; refs and chart bindings remain identity-based, non-serializable capabilities.
+const BOUND_REF_METADATA_KEY = Symbol.for("@surprisal/hyperchart/typed-ref-metadata/v1");
+
+function isBoundRefMetadataRegistry(value: unknown): value is BoundRefMetadataRegistry {
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+	const candidate = value as Partial<BoundRefMetadataRegistry>;
+	return (
+		candidate.actorRefs instanceof WeakMap &&
+		candidate.completionRefs instanceof WeakMap &&
+		candidate.charts instanceof WeakMap
+	);
+}
+
+function sharedBoundRefMetadataRegistry(): BoundRefMetadataRegistry {
+	const existing: unknown = Reflect.get(globalThis, BOUND_REF_METADATA_KEY);
+	if (existing !== undefined) {
+		if (!isBoundRefMetadataRegistry(existing)) {
+			throw new Error("Hyperchart typed-ref metadata registry is invalid");
+		}
+		return existing;
+	}
+	const registry = Object.freeze({
+		actorRefs: new WeakMap<object, BoundRefMetadata>(),
+		completionRefs: new WeakMap<object, BoundRefMetadata>(),
+		charts: new WeakMap<object, object>(),
+	});
+	Object.defineProperty(globalThis, BOUND_REF_METADATA_KEY, {
+		configurable: false,
+		enumerable: false,
+		value: registry,
+		writable: false,
+	});
+	return registry;
+}
+
+const sharedBoundRefMetadata = sharedBoundRefMetadataRegistry();
+const actorRefMetadata = sharedBoundRefMetadata.actorRefs;
+const completionRefMetadata = sharedBoundRefMetadata.completionRefs;
+const chartActorRefBindings = sharedBoundRefMetadata.charts;
+
+/** @internal Authoring metadata used only while normalizing a refs()-bound chart. */
+export function getActorRefMetadata(value: object): BoundRefMetadata | undefined {
+	return actorRefMetadata.get(value);
+}
+
+/** @internal Authoring metadata used only while normalizing a refs()-bound chart. */
+export function getCompletionRefMetadata(value: object): BoundRefMetadata | undefined {
+	return completionRefMetadata.get(value);
+}
+
+/** @internal Authoring metadata used only while normalizing a refs()-bound chart. */
+export function getChartActorRefBinding(value: object): object | undefined {
+	return chartActorRefBindings.get(value);
+}
+
 export function refs<
 	Args extends Record<string, unknown>,
 	Results extends Record<string, unknown>,
 	Files extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
 	Maps extends Record<string, unknown> = Record<never, unknown>,
 	Inputs extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
->(): Refs<Args, Results, Files, Maps, Inputs> {
+	Actors extends ActorRegistry | UncheckedActorRegistry = UncheckedActorRegistry,
+	Completions extends CompletionRegistry | UncheckedCompletionRegistry = UncheckedCompletionRegistry,
+>(): Refs<Args, Results, Files, Maps, Inputs, Actors, Completions> {
+	const binding = Object.freeze({});
 	return {
-		chart: (def) => def,
+		chart: (def) => {
+			chartActorRefBindings.set(def, binding);
+			return def;
+		},
+		actorRef: ((name: string) => {
+			const ref = Object.freeze({ kind: "actorRef" as const, name });
+			actorRefMetadata.set(ref, Object.freeze({ binding, name }));
+			return ref;
+		}) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["actorRef"],
+		completionRef: ((name: string) => {
+			const ref = Object.freeze({ kind: "completionRef" as const, name });
+			completionRefMetadata.set(ref, Object.freeze({ binding, name }));
+			return ref;
+		}) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["completionRef"],
 		arg: (name) => ({ kind: "arg", name }),
 		event: (path?: string) => ({ kind: "event", ...(path === undefined ? {} : { path }) }),
 		visit: (state?: string) => ({ kind: "visit", ...(state === undefined ? {} : { state }) }),
@@ -285,33 +433,33 @@ export function refs<
 			kind: "input",
 			name,
 			...(path === undefined ? {} : { path }),
-		})) as Refs<Args, Results, Files, Maps, Inputs>["input"],
+		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["input"],
 		result: ((state: string, path?: string) => ({
 			kind: "result",
 			state,
 			...(path === undefined ? {} : { path }),
-		})) as Refs<Args, Results, Files, Maps, Inputs>["result"],
+		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["result"],
 		artifactOf: ((state: string, opts: { artifact?: string; select?: string } = {}) => ({
 			kind: "artifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 			...(opts.select === undefined ? {} : { select: opts.select }),
-		})) as Refs<Args, Results, Files, Maps, Inputs>["artifactOf"],
+		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["artifactOf"],
 		joinArtifactOf: ((state: string, opts: { artifact?: string } = {}) => ({
 			kind: "joinArtifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
-		})) as Refs<Args, Results, Files, Maps, Inputs>["joinArtifactOf"],
+		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["joinArtifactOf"],
 		joinResultOf: ((state: string, opts: { path?: string } = {}) => ({
 			kind: "joinResultOf",
 			state,
 			...(opts.path === undefined ? {} : { path: opts.path }),
-		})) as Refs<Args, Results, Files, Maps, Inputs>["joinResultOf"],
+		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["joinResultOf"],
 		key: (map) => ({ kind: "key", map }),
 		item: ((map: string, path?: string) => ({
 			kind: "item",
 			map,
 			...(path === undefined ? {} : { path }),
-		})) as Refs<Args, Results, Files, Maps, Inputs>["item"],
+		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["item"],
 	};
 }

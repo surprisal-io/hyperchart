@@ -246,6 +246,8 @@ function invocationIcon(visit: HyperchartVisitInfo): HeroIcon {
 		case "user":
 			return ChatBubbleLeftRightIcon;
 		case "gate":
+		case "waitFor":
+		case "notify":
 			return ShieldCheckIcon;
 		case "actor":
 			return CommandLineIcon;

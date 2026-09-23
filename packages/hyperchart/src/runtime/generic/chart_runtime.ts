@@ -193,6 +193,24 @@ export class ChartRuntime implements Runtime {
 							}),
 						);
 						break;
+					case "completion_notify":
+						this.track(
+							checkSchemaAsync(effect.schema, effect.payload, this.options.schemaRegistry).then((check) => {
+								this.send({
+									kind: "completion_effect",
+									effectId: effect.id,
+									operation: "notify",
+									ok: check.ok,
+									...(check.ok
+										? {}
+										: { error: `Completion payload does not match exact endpoint schema: ${check.errors.join("; ")}` }),
+								});
+							}),
+						);
+						break;
+					case "waitFor":
+						// Render-only internal action description; never dispatched by the machine.
+						break;
 					case "agent":
 						this.track(
 							this.restorePinnedReads(effect.reads)
@@ -216,7 +234,7 @@ export class ChartRuntime implements Runtime {
 						break;
 					case "script":
 						this.track(
-							this.restorePinnedReads(envArtifacts(effect.env))
+							this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env))
 								.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
@@ -234,7 +252,7 @@ export class ChartRuntime implements Runtime {
 					case "tsImport":
 						this.track(
 							this.functions
-								.run(effect, undefined, () => this.restorePinnedReads(envArtifacts(effect.env)))
+								.run(effect, undefined, () => this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env)))
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)

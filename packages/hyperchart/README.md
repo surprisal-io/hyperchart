@@ -73,7 +73,7 @@ The core package includes statically placed, event-sourced actors with explicit 
 
 MIT · experimental `0.6.0`
 
-Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; actor templates may target their current endpoint with send-only `self()`. See the canonical [explicit actors guide](../../docs/explicit-actors.md).
+Static actor pools are available through `actorPool()`. Use singleton `send()`/`call()` or explicit non-empty `sendBatch()`/`callBatch()`; a single-reply `callBatch()` publishes its complete input-ordered reply array through `result("batchState")`. Actor templates may target their current endpoint with send-only `self()`. A sixth `refs()` actor-protocol registry exposes typed, authoring-only `actorRef(name)` forward targets; `refs().chart()` resolves them to static durable paths and rejects missing, duplicate, incompatible, out-of-scope, or cross-chart bindings. A seventh completion registry exposes nominal `completionRef(name)` capabilities: actors publish with exact-validated, nonblocking `notify()`, while root or compound sequential control durably consumes retained notifications with `waitFor()`. Publication and consumption each commit atomically with their action completion and fail closed on duplicate or stale reuse. See the canonical [explicit actors guide](../../docs/explicit-actors.md).
 
 Formal checks and their bounded/existential guarantees are documented in the [development guide](../../docs/development.md#formal-coverage-and-limits).
 

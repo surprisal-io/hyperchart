@@ -47,6 +47,24 @@ export function VisitInvocationDetails({
 			</div>
 		);
 	}
+	if (invocation.kind === "waitFor" || invocation.kind === "notify") {
+		return (
+			<div className="space-y-2">
+				<div>
+					<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+						{invocation.kind === "waitFor" ? "completion wait" : "completion notification"}
+					</div>
+					<ExpandablePre collapsedLines={3}>{`${invocation.endpoint}.${invocation.event}`}</ExpandablePre>
+				</div>
+				{invocation.kind === "notify" && invocation.payload !== undefined && (
+					<div>
+						<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">payload</div>
+						<JsonBlock value={invocation.payload} previewLines={9} />
+					</div>
+				)}
+			</div>
+		);
+	}
 	if (invocation.kind === "tsImport") {
 		return (
 			<div className="space-y-2">

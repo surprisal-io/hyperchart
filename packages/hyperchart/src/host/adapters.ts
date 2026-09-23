@@ -2007,6 +2007,15 @@ function visitInvocationInfo(effect: ActionEffect): HyperchartVisitInvocationInf
 			return { kind: "user", prompt: effect.prompt };
 		case "gate":
 			return { kind: "gate", event: effect.event, payload: effect.payload };
+		case "waitFor":
+			return { kind: "waitFor", endpoint: effect.action.from, event: effect.action.event };
+		case "completion_notify":
+			return {
+				kind: "notify",
+				endpoint: effect.action.to,
+				event: effect.action.event,
+				payload: effect.payload,
+			};
 	}
 }
 

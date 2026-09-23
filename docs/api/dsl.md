@@ -159,6 +159,8 @@ A top-level terminal ends the chart. A direct terminal child completes a compoun
 ```ts
 const {
   chart,
+  actorRef,
+  completionRef,
   arg,
   event,
   visit,
@@ -168,7 +170,7 @@ const {
   joinArtifactOf,
   key,
   item,
-} = refs<Args, Results, Files, Maps, Inputs>();
+} = refs<Args, Results, Files, Maps, Inputs, Actors>();
 ```
 
 ```ts
@@ -178,7 +180,9 @@ function refs<
   Files extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
   Maps extends Record<string, unknown> = Record<never, unknown>,
   Inputs extends Record<string, Record<string, unknown>> = Record<never, Record<string, unknown>>,
->(): Refs<Args, Results, Files, Maps, Inputs>;
+  Actors extends Record<string, ProtocolCst> = Record<never, ProtocolCst>,
+  Completions extends Record<string, CompletionContract> = Record<never, CompletionContract>,
+>(): Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>;
 ```
 
 The registries are compile-time contracts:
@@ -186,12 +190,14 @@ The registries are compile-time contracts:
 | Registry | Keys | Values |
 |---|---|---|
 | `Args` | run argument names | argument values |
-| `Results` | absolute action-state paths | accepted completion output |
+| `Results` | absolute result-producing state paths | accepted action output or ordered `callBatch` reply array |
 | `Files` | artifact-producing action-state paths | artifact name → parsed file content |
 | `Maps` | absolute map-state paths | one spawned item |
 | `Inputs` | input-declaring state paths | input name → input value |
+| `Actors` | static actor binding names | protocol returned by `protocol()` |
+| `Completions` | root completion endpoint names | `{ event, payload }` contract |
 
-The returned `chart()` checks that declared `reply`, artifact shapes, maps, and inputs agree with those registries in both directions.
+The returned `chart()` checks that declared `reply`, artifact shapes, maps, inputs, actor protocols, and completion declarations agree with supplied registries in both directions. Existing five-generic calls retain their previous behavior; `actorRef()` requires the sixth registry and `completionRef()` requires the seventh.
 
 ```ts
 const Plan = z.object({ sections: z.array(z.string()) });
@@ -235,13 +241,14 @@ result<S extends keyof Results & string>(state: S): InputRef<Results[S]>;
 result<S, P extends Paths<Results[S]>>(state: S, path: P): InputRef<ValueAt<Results[S], P>>;
 ```
 
-Reads the latest accepted output of an action state. `state` is an absolute template path. `path` is a dot-path into the output.
+Reads the latest accepted output of an action state or the completed reply array of a `callBatch` state. `state` is an absolute template path. `path` is a dot-path into an action output; `callBatch` arrays deliberately require the whole-result form and explicit `json()` when interpolated.
 
 ```ts
 t`Sections: ${json(result("plan", "sections"))}`
+t`Reviews: ${json(result("reviews"))}` // typed Output[] from callBatch
 ```
 
-A result producer must dominate its consumer. For a loop or back-edge, pass visit-local data through transition inputs instead.
+A result producer must dominate its consumer. Re-entering a `callBatch` replaces its result only when that visit's whole batch resolves; partial replies are never exposed. For other loop or back-edge data, pass visit-local data through transition inputs.
 
 #### `input(name, path?)`
 
@@ -985,6 +992,11 @@ Normalization converts Zod to plain JSON Schema in the AST. Runtime validation u
 | `INVALID_VISIT_REF` | `visit()` does not name an action state. |
 | `RESERVED_FAILED_TRANSITION` | An authored transition attempts to route global fail-fast `FAILED`. |
 | `ON_DONE_CYCLE` | Initial/final/onDone entry cannot settle on an action or final leaf. |
+| `INVALID_COMPLETION_REF` / `UNBOUND_COMPLETION_REF` / `UNKNOWN_COMPLETION_REF` | A completion capability is forged, normalized through the wrong chart binding, or names no root declaration. |
+| `COMPLETION_REF_IN_DATA` | An authoring-only completion capability entered runtime data. |
+| `INVALID_WAIT_FOR_PLACEMENT` / `INVALID_NOTIFY_PLACEMENT` | `waitFor()` is outside root/compound control flow or `notify()` is outside an actor workflow. |
+| `COMPLETION_EVENT_MISMATCH` / `RESERVED_COMPLETION_EVENT` | Endpoint and operation events differ or use reserved `FAILED`. |
+| `UNUSED_COMPLETION_WAIT` / `UNUSED_COMPLETION_NOTIFY` / `DUPLICATE_COMPLETION_REF_BINDING` | Completion ownership or one-shot usage is ambiguous. |
 | `TS_MODULE_LOAD_FAILED` | The chart module could not be loaded. |
 
 Inspect a chart before execution to obtain the complete diagnostics for that definition.
@@ -994,10 +1006,10 @@ Inspect a chart before execution to obtain the complete diagnostics for that def
 Values:
 
 ```text
-actor, actorPool, actorInput, call, callBatch, chart, agent, artifact, compound,
-contract, emit, event, final, gate, input, json, map, message, messageInput, parallel,
+actor, actorPool, actorInput, call, callBatch, chart, agent, artifact, completion, compound,
+contract, emit, event, final, gate, input, json, map, message, messageInput, notify, parallel,
 protocol, receive, refs, reply, resume, script, self, send, sendBatch, t, tsAction, tsImport,
-user, visit, z
+user, visit, waitFor, z
 ```
 
 The argument, result, artifact-read, map-key, and map-item constructors are methods returned by `refs()`.
@@ -1005,24 +1017,55 @@ The argument, result, artifact-read, map-key, and map-item constructors are meth
 Authoring types:
 
 ```text
-ActionStateCst, ActorSelfTarget, AgentActionCst, ArtifactCst, ArtifactOfCst, AfterCst,
-ChartArgumentAst, ChartArgumentCst, ChartCst, CompoundStateCst, EmitCst,
+ActionStateCst, ActorForwardRef, ActorSelfTarget, AgentActionCst, ArtifactCst, ArtifactOfCst, AfterCst,
+ChartArgumentAst, ChartArgumentCst, ChartCst, CompletionContract, CompletionForwardRef, CompoundStateCst, EmitCst,
 EventBindingCst, FinalStateCst, GateActionCst, InputRef,
 JoinArtifactOfCst, MapStateCst, OnReject, OnReenterCst,
 ImportedActionCst, ParallelStateCst, SchemaCst, ScriptActionCst, StateActionCst, StateCst,
 TemplateCst, Templatable, TransitionCst, TransitionInputCst, TransitionMapCst,
-UserActionCst, ArgsOf, EmitsOf, GuardOutcome, GuardRef, InputsOf, JsonPrimitive, JsonValue,
-Paths, ValueAt
+UserActionCst, ActorsOf, ArgsOf, EmitsOf, GuardOutcome, GuardRef, InputsOf, JsonPrimitive,
+JsonValue, Paths, ValueAt
 ```
+
+### Chart-owned completion endpoints
+
+```ts
+const Done = z.object({ ledger: z.string() }).strict();
+type Completions = { finished: { event: "FINISHED"; payload: z.infer<typeof Done> } };
+const { chart: typedChart, completionRef } =
+  refs<Args, Results, Files, Maps, Inputs, Actors, Completions>();
+const finished = completionRef("finished");
+
+const definition = typedChart({
+  kind: "chart",
+  completions: { finished: completion({ event: "FINISHED", schema: Done }) },
+  // Actor workflow only:
+  // publish: notify({ to: finished, event: "FINISHED", payload: { ledger: "final.json" }, target: "settle" }),
+  states: {
+    wait: waitFor({ from: finished, event: "FINISHED", target: "done" }),
+    done: final(),
+  },
+});
+```
+
+A completion is a root-declared, chart-owned, one-shot durable endpoint. `completionRef(name)` is nominal, authoring-only, owned by one `refs()` binding, and resolved during normalization; it never enters the normalized AST or journal. `notify()` is legal only as an actor workflow state and completes through its generated `NOTIFIED` transition. It validates the resolved payload against the endpoint's exact schema, then atomically appends the notification fact and notify-action completion without waiting for root progress. `waitFor()` is legal only in root or compound sequential control flow. It dispatches no executor effect and atomically claims the retained notification plus completes with the notification payload.
+
+Notify-before-wait is retained. Replay reconstructs both publication and consumption from journal facts. A second notification, a second wait visit, conflicting endpoint/event/schema bindings, forged or cross-chart refs, and reuse after consumption fail closed. Endpoint state is isolated by the ordinary run, branch, actor occurrence, and durable-log ownership boundaries. `FAILED` is reserved. Completions are deliberately not user gates, root actors, symbolic runtime lookups, callbacks, or polling primitives.
 
 ### Actor endpoints and messaging
 
 ```ts
-const Worker = actor({ input, protocol, initial: "idle", states });
+type Actors = { worker: typeof WorkerProtocol };
+const { chart: typedChart, actorRef } =
+  refs<Args, Results, Files, Maps, Inputs, Actors>();
+const worker = actorRef("worker"); // valid before the declaration exists
+
+const Worker = actor({ input, protocol: WorkerProtocol, initial: "idle", states });
 const Pool = actorPool({ concurrency: 4, worker: Worker });
 const workers = Pool({ projectId: arg("projectId") });
 
 send({ to: workers, event: "WORK", input: one, target: "next" });
+send({ to: worker, event: "WORK", input: one, target: "next" });
 sendBatch({ to: workers, event: "WORK", inputs: [one, two], target: "next" });
 // Inside the worker actor template only:
 sendBatch({ to: self(), event: "WORK", inputs: [one, two], target: "settle" });
@@ -1032,7 +1075,9 @@ callBatch({ to: workers, event: "WORK", inputs: result("prepare", "items"), targ
 
 `actor()` declares a capacity-one event-sourced endpoint. `actorPool()` infers the same input and protocol types from its worker and declares one endpoint with a positive safe-integer `concurrency`; concurrency and the normalized worker definition are durable replay provenance. Placements are static and lexical.
 
-`send` and `call` accept exactly one `input`. `sendBatch` and `callBatch` accept `inputs`; literal values are typed as non-empty tuples, while a ref-resolved array is checked non-empty at the runtime boundary. Every item is exact-validated before the single atomic enqueue fact. All four factories address ordinary actors or pools. `callBatch` is available only for a protocol message with one `reply` schema, waits for every item settlement, and stores typed `Output[]` in authored `batchIndex` order rather than completion order. Named- or void-reply protocols cannot be used with `callBatch`.
+`actorRef(name)` is a typed, authoring-only forward target. `name`, events, and payloads come from the sixth `Actors` protocol registry. The marker is owned by that exact `refs()` instance and becomes usable only when the same instance's `chart()` binds exactly one static actor or pool with that name and protocol. This permits declaration-order-independent actor graphs without a runtime actor lookup. Normalize the exact object returned by that `chart()`; cloning or spreading it afterward intentionally loses the binding identity and is rejected. Normalization resolves the marker to the declaration's durable lexical path, then rejects unknown, duplicate, incompatible, out-of-scope, forged, or cross-chart bindings. An `actorRef()` cannot appear in runtime input data. The normalized AST contains only the static path, so map occurrences, generations, replay, and resume keep the existing identity rules.
+
+`send` and `call` accept exactly one `input`. `sendBatch` and `callBatch` accept `inputs`; literal values are typed as non-empty tuples, while a ref-resolved array is checked non-empty at the runtime boundary. Every item is exact-validated before the single atomic enqueue fact. All four factories address ordinary actors or pools. `callBatch` is available only for a protocol message with one `reply` schema, waits for every item settlement, and exposes typed `Output[]` through `result("batchState")` in authored `batchIndex` order rather than completion order. It never exposes a partial array. Named- or void-reply protocols cannot be used with `callBatch`.
 
 `self()` is a zero-argument symbolic capability available only to actor-local `send` and `sendBatch`. The containing `actor()` checks its event and input against that actor's protocol, and normalization resolves the marker independently for every placement. For an ordinary actor it addresses that actor occurrence; for a pool worker it addresses the shared pool endpoint, so any eligible idle worker may accept the FIFO message. `self()` outside an actor and `call`/`callBatch` to `self()` are rejected.
 

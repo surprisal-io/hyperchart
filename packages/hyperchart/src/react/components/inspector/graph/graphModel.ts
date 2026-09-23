@@ -38,6 +38,8 @@ export function graphNodeSize(state: { type?: HyperchartStateType | undefined })
 		case "agent":
 		case "user":
 		case "gate":
+		case "waitFor":
+		case "notify":
 		case "script":
 		case "tsImport":
 		case "send":

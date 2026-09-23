@@ -330,6 +330,10 @@ function invocationInfo(action: StateActionAst): HyperchartVisitInfo["invocation
 			return { kind: "user", prompt: templatePreview(action.prompt) };
 		case "gate":
 			return { kind: "gate", event: action.event };
+		case "waitFor":
+			return { kind: "waitFor", endpoint: action.from, event: action.event };
+		case "notify":
+			return { kind: "notify", endpoint: action.to, event: action.event };
 	}
 }
 

@@ -768,7 +768,7 @@ describe("replay gauntlet", () => {
 		expect(spawned.map((record) => Object.keys(record.instances))).toEqual([["alpha"], ["beta"]]);
 	});
 
-	it("restarts a pool callBatch after every atomic durable boundary", async () => {
+	it("replays and resumes a looping pool callBatch with a fresh ordered result on every visit", async () => {
 		const Work = protocol({
 			WORK: message({ input: z.object({ id: z.number() }).strict(), reply: z.object({ id: z.number() }).strict() }),
 		});
@@ -783,32 +783,55 @@ describe("replay gauntlet", () => {
 		});
 		const Pool = actorPool({ concurrency: 2, worker: DirectWorker });
 		const workers = Pool({});
+		const Requests = z.object({ requests: z.array(z.object({ id: z.number() }).strict()) }).strict();
 		const ast = make(
 			chart({
 				kind: "chart",
-				id: "gauntlet-pool-restart",
+				id: "gauntlet-pool-loop-restart",
 				actors: { workers },
-				initial: "batch",
+				initial: "prepare",
 				states: {
+					prepare: {
+						kind: "state",
+						action: agent("prepare", { reply: Requests }),
+						transitions: { READY: "batch" },
+					},
 					batch: callBatch({
 						to: workers,
 						event: "WORK",
-						inputs: [{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }],
-						target: "done",
+						inputs: result("prepare", "requests"),
+						target: "route",
 					}),
+					route: {
+						kind: "state",
+						action: agent("route", { task: t`Route ${json(result("batch"))}` }),
+						transitions: { AGAIN: "prepare", DONE: "done" },
+					},
 					done: final(),
 				},
 			}),
 		);
-		const live = await runLive(ast, { args: {} });
-		expect(live.state.projection.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+		const prepareReplies: AgentReply[] = [
+			{ type: "READY", output: { requests: [{ id: 0 }, { id: 1 }] } },
+			{ type: "READY", output: { requests: [{ id: 10 }, { id: 11 }] } },
+		];
+		const routeReplies: AgentReply[] = ["AGAIN", "DONE"];
+		const live = await runLive(ast, { args: {}, agents: { prepare: prepareReplies, route: routeReplies } });
+		expect(live.state.projection.results.batch).toEqual([{ id: 10 }, { id: 11 }]);
+		expect(
+			live.runtime.effectBatches
+				.flat()
+				.filter((effect) => effect.kind === "agent" && effect.actionUid.state === "route")
+				.map((effect) => effect.kind === "agent" ? effect.task : undefined),
+		).toEqual(['Route [{"id":0},{"id":1}]', 'Route [{"id":10},{"id":11}]']);
 		let checkpointRoundTripped = createBranchProjection(ast);
 		for (const record of live.log) {
 			checkpointRoundTripped = structuredClone(checkpointRoundTripped);
 			projectBranch(checkpointRoundTripped, ast, [record]);
 		}
-		expect(checkpointRoundTripped.results.batch).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }, { id: 3 }]);
+		expect(checkpointRoundTripped.results.batch).toEqual([{ id: 10 }, { id: 11 }]);
 		expect(checkpointRoundTripped.actorPools["@workers"]).not.toHaveProperty("messages");
+		expect((await replay(ast, live.log)).state.projection.results.batch).toEqual([{ id: 10 }, { id: 11 }]);
 
 		const assignments = live.log.filter(
 			(record): record is Extract<DurableLogRecord, { type: "actor_message"; kind: "accepted" }> =>
@@ -817,22 +840,42 @@ describe("replay gauntlet", () => {
 		expect(assignments.map((record) => record.messageId)).toEqual([
 			"batch:message:1:0",
 			"batch:message:1:1",
-			"batch:message:1:2",
-			"batch:message:1:3",
+			"batch:message:2:0",
+			"batch:message:2:1",
 		]);
-		expect(new Set(assignments.slice(0, 2).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));
-		expect(new Set(assignments.slice(2, 4).map((record) => record.workerIndex))).toEqual(new Set([0, 1]));
+		expect(
+			live.log
+				.filter((record) => record.type === "actor_batch_call_resolved")
+				.map((record) => record.type === "actor_batch_call_resolved" ? record.callId : undefined),
+		).toEqual(["batch:call:1", "batch:call:2"]);
 
+		let resumedInsideSecondBatch = false;
 		for (const boundary of live.appendBoundaries.slice(0, -1)) {
-			const restarted = await runLive(ast, { logs: live.log.slice(0, boundary) });
-			expect(restarted.state.projection.results.batch, `boundary ${boundary}`).toEqual([
-				{ id: 0 },
-				{ id: 1 },
-				{ id: 2 },
-				{ id: 3 },
-			]);
+			const prefix = live.log.slice(0, boundary);
+			const completed = (state: string) =>
+				prefix.filter(
+					(record) =>
+						record.type === "state_action" && record.kind === "complete" && record.actionUid.state === state,
+				).length;
+			const secondBatchEnqueued = prefix.some(
+				(record) =>
+					record.type === "actor_messages_enqueued" && record.messages[0]?.callId === "batch:call:2",
+			);
+			const secondBatchResolved = prefix.some(
+				(record) => record.type === "actor_batch_call_resolved" && record.callId === "batch:call:2",
+			);
+			resumedInsideSecondBatch ||= secondBatchEnqueued && !secondBatchResolved;
+			const restarted = await runLive(ast, {
+				logs: prefix,
+				agents: {
+					prepare: prepareReplies.slice(completed("prepare")),
+					route: routeReplies.slice(completed("route")),
+				},
+			});
+			expect(restarted.state.projection.results.batch, `boundary ${boundary}`).toEqual([{ id: 10 }, { id: 11 }]);
 			expect(restarted.state.projection.actorPools["@workers"]?.status, `boundary ${boundary}`).toBe("stopped");
 		}
+		expect(resumedInsideSecondBatch).toBe(true);
 	});
 
 	it("modified chart: a fact the chart cannot apply fails loud", async () => {

@@ -353,6 +353,10 @@ function actionLabel(state: Extract<StateAst, { kind: "state" }>): string {
 			return "user";
 		case "gate":
 			return `gate:${action.event}`;
+		case "waitFor":
+			return `waitFor:${action.from}.${action.event}`;
+		case "notify":
+			return `notify:${action.to}.${action.event}`;
 		default: {
 			const exhaustive: never = action;
 			throw new Error(`Unknown state action: ${JSON.stringify(exhaustive)}`);
@@ -414,6 +418,10 @@ function recordText(record: DurableLogRecord): string {
 				: `gate ${record.gateSeqId} resolved → ${record.event.type}`;
 		case "emit":
 			return `emit ${record.event}`;
+		case "completion":
+			return record.kind === "notified"
+				? `completion ${record.endpoint}.${record.event} notified`
+				: `completion ${record.endpoint} consumed by ${record.actionUid.state}`;
 		case "state_action":
 			switch (record.kind) {
 				case "invoke":

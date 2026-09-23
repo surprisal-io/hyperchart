@@ -147,6 +147,51 @@ export type ActorArtifactRefMarker<
 /** Authoring-only symbolic capability resolved to the current actor endpoint at placement normalization. */
 export type ActorSelfTarget = Readonly<{ kind: "actorSelf" }>;
 
+declare const actorForwardRefBrand: unique symbol;
+
+/**
+ * Typed authoring-only forward reference to a statically bound actor name. `refs().chart()` owns
+ * the binding identity; normalization resolves this marker to one concrete lexical declaration
+ * path before the serializable AST is produced. The private brand prevents structural string
+ * targets from bypassing actorRef().
+ */
+export type ActorForwardRef<P extends ProtocolCst = ProtocolCst, Name extends string = string> = Readonly<{
+	kind: "actorRef";
+	name: Name;
+	[actorForwardRefBrand]: { protocol: P; name: Name };
+}>;
+
+export type CompletionContract<Event extends string = string, Payload = unknown> = Readonly<{
+	event: Event;
+	payload: Payload;
+}>;
+
+declare const completionForwardRefBrand: unique symbol;
+
+/** Typed authoring-only reference to one chart-owned, one-shot completion endpoint. */
+export type CompletionForwardRef<
+	C extends CompletionContract = CompletionContract,
+	Name extends string = string,
+> = Readonly<{
+	kind: "completionRef";
+	name: Name;
+	[completionForwardRefBrand]: { contract: C; name: Name };
+}>;
+
+export type AnyCompletionTarget = CompletionForwardRef<CompletionContract, string>;
+
+export type CompletionOf<D> = D extends CompletionForwardRef<infer C, string> ? C : never;
+
+export type CompletionDeclarationCst<
+	S extends SchemaCst = SchemaCst,
+	Event extends string = string,
+> = Readonly<{
+	kind: "completion";
+	event: Event;
+	schema: S;
+	readonly __payload?: InferSchema<S>;
+}>;
+
 type StateSuccessors<Node> = Node extends { kind: "state"; transitions: infer T; after?: infer A }
 	?
 			| (T extends Record<string, infer V>
@@ -200,7 +245,9 @@ type SingleMessage<T> = [T] extends [never] ? never : true extends IsUnion<T> ? 
 type ActionReplyFor<S, State extends string> = State extends keyof S
 	? S[State] extends { action: { reply: infer Reply } }
 		? InferSchema<Reply>
-		: never
+		: S[State] extends { kind: "callBatch"; __result?: infer Reply }
+			? Reply
+			: never
 	: never;
 type ActionInputFor<S, State extends string, Name extends string> = State extends keyof S
 	? S[State] extends { input: infer Inputs }
@@ -361,7 +408,7 @@ type ActionValues<Action> = Action extends { kind: "agent" }
 				| ArtifactPathValues<Action extends { artifacts: infer Artifacts } ? Artifacts : never>
 		: Action extends { kind: "user" }
 			? TemplateValues<Action extends { prompt: infer Prompt } ? Prompt : never>
-			: Action extends { kind: "gate"; payload: infer Payload }
+			: Action extends { kind: "gate" | "notify"; payload: infer Payload }
 				? Payload
 				: never;
 type NodeValues<Node> = Node extends { kind: "reply"; output: infer Output }
@@ -432,7 +479,9 @@ export type ProtocolOf<D> =
 		? P
 		: D extends StaticActorPoolDeclaration<infer P, unknown, unknown>
 			? P
-			: never;
+			: D extends ActorForwardRef<infer P, string>
+				? P
+				: never;
 
 export type NonEmptyActorBatch<I> = readonly [ActorPlacement<I>, ...ActorPlacement<I>[]] | InputRef<readonly I[] | I[]>;
 
@@ -567,6 +616,20 @@ export type GateActionCst = {
 	reply?: SchemaCst;
 };
 
+export type WaitForActionCst<C extends CompletionContract = CompletionContract> = {
+	kind: "waitFor";
+	from: CompletionForwardRef<C, string>;
+	event: C["event"];
+	readonly __result?: C["payload"];
+};
+
+export type NotifyActionCst<C extends CompletionContract = CompletionContract> = {
+	kind: "notify";
+	to: CompletionForwardRef<C, string>;
+	event: C["event"];
+	payload: ValueExpr<C["payload"]>;
+};
+
 // A command step: the runtime executes the command and answers with a completion event, exactly
 // like an agent — same artifact/reads channels, same reply shape for the parsed stdout. The
 // command and args are static; parameters flow through env templates (the taskflow contract).
@@ -594,7 +657,14 @@ export type ImportedActionCst = {
 	reply?: SchemaCst;
 };
 
-export type StateActionCst = AgentActionCst | UserActionCst | GateActionCst | ScriptActionCst | ImportedActionCst;
+export type StateActionCst =
+	| AgentActionCst
+	| UserActionCst
+	| GateActionCst
+	| WaitForActionCst
+	| NotifyActionCst
+	| ScriptActionCst
+	| ImportedActionCst;
 
 // Serializable reference to validation code. Inline closures are not allowed: the chart stays
 // plain data. A validator is an acceptance check on the action's completion claim — it runs live
@@ -866,7 +936,7 @@ export type ReceiveStateCst = {
 
 export type SendStateCst = {
 	kind: "send";
-	to: AnyStaticActorDeclaration | ActorSelfTarget;
+	to: AnyActorTarget | ActorSelfTarget;
 	event: string;
 	target: StateId;
 	input: ValueExpr;
@@ -874,7 +944,7 @@ export type SendStateCst = {
 
 export type SendBatchStateCst = {
 	kind: "sendBatch";
-	to: AnyStaticActorDeclaration | ActorSelfTarget;
+	to: AnyActorTarget | ActorSelfTarget;
 	event: string;
 	target: StateId;
 	inputs: ValueExpr;
@@ -882,7 +952,7 @@ export type SendBatchStateCst = {
 
 export type CallStateCst = {
 	kind: "call";
-	to: AnyStaticActorDeclaration;
+	to: AnyActorTarget;
 	event: string;
 	input: ValueExpr;
 	target?: StateId;
@@ -891,7 +961,7 @@ export type CallStateCst = {
 
 export type CallBatchStateCst = {
 	kind: "callBatch";
-	to: AnyStaticActorDeclaration;
+	to: AnyActorTarget;
 	event: string;
 	inputs: ValueExpr;
 	target: StateId;
@@ -950,6 +1020,8 @@ export type AnyStaticActorDeclaration =
 	| StaticActorDeclaration<ProtocolCst, unknown, unknown>
 	| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>;
 
+export type AnyActorTarget = AnyStaticActorDeclaration | ActorForwardRef<ProtocolCst, string>;
+
 export type StateCst =
 	| ActionStateCst
 	| FinalStateCst
@@ -968,6 +1040,8 @@ export type ChartCst = ActorOwnerCst & {
 	recovery?: RecoveryPolicyCst;
 	/** Optional serializable metadata for host launch forms; not runtime validation. */
 	args?: Record<string, ChartArgumentCst>;
+	/** Root-owned, one-shot completion endpoints. They are never actor mailboxes. */
+	completions?: Record<string, CompletionDeclarationCst>;
 	initial: StateId;
 	states: Record<StateId, StateCst>;
 };
@@ -1021,6 +1095,21 @@ export type GateActionAst = Readonly<{
 	payload: ValueAst;
 	reply?: SchemaAst;
 }>;
+export type WaitForActionAst = Readonly<{
+	kind: "waitFor";
+	uid: ActionUID;
+	from: string;
+	event: string;
+	reply: SchemaAst;
+}>;
+export type NotifyActionAst = Readonly<{
+	kind: "notify";
+	uid: ActionUID;
+	to: string;
+	event: string;
+	payload: ValueAst;
+	reply?: never;
+}>;
 export type ScriptActionAst = Readonly<{
 	kind: "script";
 	uid: ActionUID;
@@ -1039,7 +1128,14 @@ export type ImportedActionAst = Readonly<{
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;
-export type StateActionAst = AgentActionAst | UserActionAst | GateActionAst | ScriptActionAst | ImportedActionAst;
+export type StateActionAst =
+	| AgentActionAst
+	| UserActionAst
+	| GateActionAst
+	| WaitForActionAst
+	| NotifyActionAst
+	| ScriptActionAst
+	| ImportedActionAst;
 
 // Absolute path of a state in the chart: local ids joined with "." (e.g. "review.analyze").
 // Top-level states' paths equal their ids, so flat charts keep their addresses.
@@ -1244,6 +1340,12 @@ export type StateAst =
 	| CallStateAst
 	| CallBatchStateAst;
 
+export type CompletionDeclarationAst = Readonly<{
+	name: string;
+	event: string;
+	schema: SchemaAst;
+}>;
+
 export type ChartAst = Readonly<{
 	kind: "chart";
 	id: string;
@@ -1254,6 +1356,7 @@ export type ChartAst = Readonly<{
 	// Flat map keyed by absolute StatePath — nesting lives in `parent` links, lookups stay O(1).
 	states: Readonly<Record<StatePath, StateAst>>;
 	actors: Readonly<Record<StatePath, ActorEndpointDeclarationAst>>;
+	completions: Readonly<Record<string, CompletionDeclarationAst>>;
 }>;
 
 export type ActionEvent = {

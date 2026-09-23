@@ -5,9 +5,11 @@ import {
 	actorPool,
 	actorInput,
 	messageInput,
+	notify,
 	agent,
 	call,
 	callBatch,
+	completion,
 	final,
 	json,
 	map,
@@ -22,6 +24,7 @@ import {
 	sendBatch,
 	t,
 	tsAction,
+	waitFor,
 	z,
 } from "../packages/hyperchart/src/index.js";
 import {
@@ -445,14 +448,175 @@ describe("typed explicit actor protocols", () => {
 		send({ to: declaration, event: "APPLY", input: { patch: declaration }, target: "next" });
 	});
 
-	it("types actor pools and permits callBatch only for single-reply protocols", () => {
+	it("types declaration-order-independent forward actor references and chart bindings", () => {
+		const Draft = z.object({ id: z.string(), text: z.string() }).strict();
+		const Feedback = z.object({ id: z.string(), reason: z.string() }).strict();
+		const Batch = z.object({ drafts: z.array(Draft).min(1) }).strict();
+		const LunaProtocol = protocol({
+			GENERATE: message({ input: z.object({ id: z.string() }).strict() }),
+			REVISE: message({ input: Feedback }),
+		});
+		const BufferProtocol = protocol({
+			DRAFT: message({ input: Draft }),
+			REVIEWED: message({ input: z.object({ revise: z.array(Feedback) }).strict() }),
+		});
+		const TerraProtocol = protocol({ REVIEW: message({ input: Batch }) });
+		type Actors = {
+			luna: typeof LunaProtocol;
+			buffer: typeof BufferProtocol;
+			terra: typeof TerraProtocol;
+		};
+		const typed = refs<
+			Record<string, never>,
+			Record<string, never>,
+			EmptyFiles,
+			EmptyMaps,
+			Record<never, Record<string, unknown>>,
+			Actors
+		>();
+		const lunaRef = typed.actorRef("luna");
+		const bufferRef = typed.actorRef("buffer");
+		const terraRef = typed.actorRef("terra");
+
+		const Luna = actor({
+			input: z.object({}).strict(),
+			protocol: LunaProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { GENERATE: "publish", REVISE: "republish" } }),
+				publish: send({
+					to: bufferRef,
+					event: "DRAFT",
+					input: { id: messageInput("GENERATE", "id"), text: "draft" },
+					target: "settleGenerate",
+				}),
+				settleGenerate: reply({ target: "idle" }),
+				republish: send({
+					to: bufferRef,
+					event: "DRAFT",
+					input: { id: messageInput("REVISE", "id"), text: "revised" },
+					target: "settleRevise",
+				}),
+				settleRevise: reply({ target: "idle" }),
+			},
+		});
+		const Buffer = actor({
+			input: z.object({}).strict(),
+			protocol: BufferProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { DRAFT: "review", REVIEWED: "revise" } }),
+				review: send({
+					to: terraRef,
+					event: "REVIEW",
+					input: { drafts: [{ id: messageInput("DRAFT", "id"), text: messageInput("DRAFT", "text") }] },
+					target: "settleDraft",
+				}),
+				settleDraft: reply({ target: "idle" }),
+				revise: sendBatch({
+					to: lunaRef,
+					event: "REVISE",
+					inputs: messageInput("REVIEWED", "revise"),
+					target: "settleReview",
+				}),
+				settleReview: reply({ target: "idle" }),
+			},
+		});
+		const Terra = actor({
+			input: z.object({}).strict(),
+			protocol: TerraProtocol,
+			initial: "idle",
+			states: {
+				idle: receive({ on: { REVIEW: "return" } }),
+				return: send({ to: bufferRef, event: "REVIEWED", input: { revise: [] }, target: "settle" }),
+				settle: reply({ target: "idle" }),
+			},
+		});
+		const luna = Luna({});
+		const buffer = Buffer({});
+		const terra = Terra({});
+		const body = typed.chart({
+			kind: "chart",
+			id: "forward-actors",
+			actors: { luna, buffer, terra },
+			initial: "start",
+			states: {
+				start: send({ to: lunaRef, event: "GENERATE", input: { id: "one" }, target: "done" }),
+				done: final(),
+			},
+		});
+		expect(body.actors).toEqual({ luna, buffer, terra });
+		expect(lunaRef).toEqual({ kind: "actorRef", name: "luna" });
+
+		// @ts-expect-error actor name is absent from the Actors registry
+		typed.actorRef("missing");
+		// @ts-expect-error plain string markers cannot forge a typed actorRef capability
+		send({ to: { kind: "actorRef", name: "luna" }, event: "GENERATE", input: { id: "one" }, target: "done" });
+		// @ts-expect-error event is checked against the forward target protocol
+		send({ to: lunaRef, event: "DRAFT", input: { id: "one" }, target: "done" });
+		// @ts-expect-error payload is checked against the forward target protocol
+		send({ to: lunaRef, event: "GENERATE", input: { id: 1 }, target: "done" });
+		// @ts-expect-error actorRef capabilities cannot enter ordinary protocol data
+		send({ to: bufferRef, event: "DRAFT", input: { id: "one", text: lunaRef }, target: "done" });
+
+		const wrongBinding = { ...body, actors: { luna: buffer, buffer, terra } } as const;
+		// @ts-expect-error actual actor protocol does not match the Actors registry
+		typed.chart(wrongBinding);
+		const missingBinding = { ...body, actors: { luna, buffer } } as const;
+		// @ts-expect-error every Actors registry entry must have one chart binding
+		typed.chart(missingBinding);
+	});
+
+	it("types actor pools and registers callBatch as an ordered array result producer", () => {
 		const Pool = actorPool({ concurrency: 2, worker: Template });
 		const pool = Pool({ file: "src/index.ts" });
 		expect(send({ to: pool, event: "PING", input: { id: 1 }, target: "next" }).event).toBe("PING");
 		expect(sendBatch({ to: pool, event: "APPLY", inputs: [{ patch: "a" }], target: "next" }).event).toBe("APPLY");
-		expect(callBatch({ to: pool, event: "READ", inputs: [{ path: "a" }, { path: "b" }], target: "next" }).event).toBe(
-			"READ",
-		);
+
+		type ReadReply = { text: string };
+		const typedBatch = refs<
+			Record<string, never>,
+			{ reviews: ReadReply[] },
+			EmptyFiles,
+			EmptyMaps,
+			Record<never, Record<string, unknown>>,
+			{ pool: typeof Protocol }
+		>();
+		const poolRef = typedBatch.actorRef("pool");
+		const body = {
+			kind: "chart",
+			id: "typed-call-batch-result",
+			actors: { pool },
+			initial: "reviews",
+			states: {
+				reviews: callBatch({
+					to: poolRef,
+					event: "READ",
+					inputs: [{ path: "a" }, { path: "b" }],
+					target: "consume",
+				}),
+				consume: {
+					kind: "state",
+					action: tsAction("./consume.mjs", "consume", {
+						env: { REPLIES: t`${json(typedBatch.result("reviews"))}` },
+					}),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		} as const;
+		expect(typedBatch.chart(body).states.reviews.event).toBe("READ");
+		expect(typedBatch.result("reviews")).toEqual({ kind: "result", state: "reviews" });
+
+
+		// @ts-expect-error callBatch produces an array; array indexes/fields are not result selectors
+		typedBatch.result("reviews", "0.text");
+		// @ts-expect-error structured array results require explicit json() in templates
+		t`${typedBatch.result("reviews")}`;
+		const wrongRegistry = refs<Record<string, never>, { reviews: ReadReply }>();
+		// @ts-expect-error the callBatch result registry must contain the ordered reply array
+		wrongRegistry.chart(body);
+
 		// @ts-expect-error named-reply messages cannot be used with callBatch
 		callBatch({ to: pool, event: "APPLY", inputs: [{ patch: "a" }], target: "next" });
 		// @ts-expect-error void messages cannot be used with callBatch
@@ -593,5 +757,37 @@ describe("typed explicit actor protocols", () => {
 				settle: reply({ target: "idle", output: { text: "x" } }),
 			},
 		});
+	});
+
+	it("types chart-owned completion references, notifications, waits, and bindings", () => {
+		type DonePayload = { id: string; count: number };
+		type Completions = { done: { event: "DONE"; payload: DonePayload } };
+		const typed = refs<
+			Record<string, never>,
+			{ wait: DonePayload },
+			EmptyFiles,
+			EmptyMaps,
+			Record<never, Record<string, unknown>>,
+			Record<string, never>,
+			Completions
+		>();
+		const done = typed.completionRef("done");
+		expect(done).toEqual({ kind: "completionRef", name: "done" });
+		expect(
+			notify({ to: done, event: "DONE", payload: { id: "x", count: 1 }, target: "settle" }).transitions,
+		).toEqual({ NOTIFIED: "settle" });
+		expect(waitFor({ from: done, event: "DONE", target: "complete" }).transitions).toEqual({ DONE: "complete" });
+		expect(completion({ event: "DONE", schema: z.object({ id: z.string(), count: z.number() }).strict() }).event).toBe(
+			"DONE",
+		);
+
+		// @ts-expect-error completion name is absent from the registry
+		typed.completionRef("missing");
+		// @ts-expect-error a structural object cannot forge the nominal completion capability
+		waitFor({ from: { kind: "completionRef", name: "done" }, event: "DONE", target: "complete" });
+		// @ts-expect-error event must match the endpoint contract
+		waitFor({ from: done, event: "OTHER", target: "complete" });
+		// @ts-expect-error notification payload must match the endpoint contract
+		notify({ to: done, event: "DONE", payload: { id: "x", count: "one" }, target: "settle" });
 	});
 });

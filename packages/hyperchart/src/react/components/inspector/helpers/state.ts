@@ -143,8 +143,10 @@ export function stateKindMeta(state: HyperchartStateInfo): {
 				iconClassName: "text-[var(--hc-pink-text)]",
 			};
 		case "gate":
+		case "waitFor":
+		case "notify":
 			return {
-				label: "gate",
+				label: type,
 				Icon: ShieldCheckIcon,
 				className: "border-yellow-500/45 bg-yellow-500/10 text-[var(--hc-yellow-text)]",
 				iconClassName: "text-[var(--hc-yellow-text)]",
@@ -250,6 +252,9 @@ export function stateMechanismLabel(state: HyperchartStateInfo): string | undefi
 		case "user":
 		case "gate":
 			return undefined;
+		case "waitFor":
+		case "notify":
+			return state.taskPreview;
 		default: {
 			const exhaustive: never = type;
 			throw new Error(`Unknown Hyperchart state type: ${exhaustive}`);

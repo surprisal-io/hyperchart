@@ -1,6 +1,7 @@
 import type {
 	ActorArtifactRefMarker,
 	ActorInputRefMarker,
+	AnyActorTarget,
 	ActorMessageInputRefMarker,
 	ActorResultRefMarker,
 	ActorStateInputRefMarker,
@@ -10,6 +11,9 @@ import type {
 	ActorVerification,
 	ActorSelfTarget,
 	CallRouting,
+	AnyCompletionTarget,
+	CompletionDeclarationCst,
+	CompletionOf,
 	InferSchema,
 	MessageInput,
 	MessageTypes,
@@ -43,8 +47,6 @@ import type {
 	SchemaCst,
 	SendStateCst,
 	SendBatchStateCst,
-	StaticActorDeclaration,
-	StaticActorPoolDeclaration,
 	ParallelStateCst,
 	ScriptActionCst,
 	ImportedActionCst,
@@ -78,6 +80,14 @@ export function message(options: ProtocolMessageCst): ProtocolMessageCst {
 
 export function protocol<const P extends ProtocolCst>(messages: P): P {
 	return messages;
+}
+
+/** Declares one root-owned, one-shot completion endpoint. */
+export function completion<const S extends SchemaCst, const Event extends string>(options: {
+	event: Event;
+	schema: S;
+}): CompletionDeclarationCst<S, Event> {
+	return { kind: "completion", ...options };
 }
 
 /** Creates a reusable authoring-time template; invocation creates a static capability only. */
@@ -134,9 +144,7 @@ export function self(): ActorSelfTarget {
 }
 
 export function send<
-	const D extends
-		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
-		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends AnyActorTarget,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
 >(options: {
@@ -156,9 +164,7 @@ export function send(options: Omit<SendStateCst, "kind">): SendStateCst {
 }
 
 export function sendBatch<
-	const D extends
-		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
-		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends AnyActorTarget,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Target extends string,
 >(options: {
@@ -188,9 +194,7 @@ type ExactNamedCallRoutes<P extends ProtocolCst, M extends keyof P, Routing> = P
 	: unknown;
 
 export function call<
-	const D extends
-		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
-		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends AnyActorTarget,
 	const M extends MessageTypes<ProtocolOf<D>>,
 	const Routing extends CallRouting<ProtocolOf<D>, M>,
 >(
@@ -212,9 +216,7 @@ export function call<
 }
 
 export function callBatch<
-	const D extends
-		| StaticActorDeclaration<ProtocolCst, unknown, unknown>
-		| StaticActorPoolDeclaration<ProtocolCst, unknown, unknown>,
+	const D extends AnyActorTarget,
 	const M extends SingleReplyMessageTypes<ProtocolOf<D>>,
 	const Target extends string,
 >(options: {
@@ -273,6 +275,69 @@ export function user<const O extends Omit<UserActionCst, "kind">>(options: O): {
 
 export function gate<const O extends Omit<GateActionCst, "kind">>(options: O): { kind: "gate" } & O {
 	return { kind: "gate", ...options };
+}
+
+/** Waits for a chart-owned completion without opening a user or host gate. */
+export function waitFor<const D extends AnyCompletionTarget, const Target extends string>(options: {
+	from: D;
+	event: CompletionOf<D>["event"];
+	target: Target;
+}): {
+	kind: "state";
+	action: {
+		kind: "waitFor";
+		from: D;
+		event: CompletionOf<D>["event"];
+		readonly __result?: CompletionOf<D>["payload"];
+	};
+	transitions: Record<CompletionOf<D>["event"], Target>;
+} {
+	return {
+		kind: "state",
+		action: { kind: "waitFor", from: options.from, event: options.event },
+		transitions: { [options.event]: options.target },
+	} as {
+		kind: "state";
+		action: {
+			kind: "waitFor";
+			from: D;
+			event: CompletionOf<D>["event"];
+			readonly __result?: CompletionOf<D>["payload"];
+		};
+		transitions: Record<CompletionOf<D>["event"], Target>;
+	};
+}
+
+/** Atomically publishes one typed completion from an actor workflow. */
+export function notify<const D extends AnyCompletionTarget, const Target extends string>(options: {
+	to: D;
+	event: CompletionOf<D>["event"];
+	payload: ActorPlacement<CompletionOf<D>["payload"]>;
+	target: Target;
+}): {
+	kind: "state";
+	action: {
+		kind: "notify";
+		to: D;
+		event: CompletionOf<D>["event"];
+		payload: ActorPlacement<CompletionOf<D>["payload"]>;
+	};
+	transitions: { NOTIFIED: Target };
+} {
+	return {
+		kind: "state",
+		action: { kind: "notify", to: options.to, event: options.event, payload: options.payload },
+		transitions: { NOTIFIED: options.target },
+	} as {
+		kind: "state";
+		action: {
+			kind: "notify";
+			to: D;
+			event: CompletionOf<D>["event"];
+			payload: ActorPlacement<CompletionOf<D>["payload"]>;
+		};
+		transitions: { NOTIFIED: Target };
+	};
 }
 
 export function emit<const O extends EmitCst>(options: O & Record<Exclude<keyof O, keyof EmitCst>, never>): O {

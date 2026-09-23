@@ -199,6 +199,8 @@ export function isActionState(state: HyperchartStateInfo): boolean {
 		case "agent":
 		case "user":
 		case "gate":
+		case "waitFor":
+		case "notify":
 		case "script":
 		case "tsImport":
 			return true;

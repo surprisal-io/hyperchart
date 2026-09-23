@@ -34,6 +34,8 @@ export type HyperchartStateType =
 	| "agent"
 	| "user"
 	| "gate"
+	| "waitFor"
+	| "notify"
 	| "script"
 	| "tsImport"
 	| "send"
@@ -389,6 +391,8 @@ export type HyperchartVisitInvocationInfo =
 	  }
 	| { kind: "user"; prompt: string }
 	| { kind: "gate"; event: string; payload?: unknown }
+	| { kind: "waitFor"; endpoint: string; event: string }
+	| { kind: "notify"; endpoint: string; event: string; payload?: unknown }
 	| { kind: "actor" };
 
 /** Immutable revision of a deliverable accepted with a completion: rendered path plus content pin. */

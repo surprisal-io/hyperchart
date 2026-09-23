@@ -37,6 +37,44 @@ describe("parseChartModule", () => {
 		}
 	});
 
+	it("preserves typed actor and completion provenance across the Jiti package boundary", () => {
+		const dir = mkdtempSync(join(tmpdir(), "hyperchart-bound-ref-parser-"));
+		const path = join(dir, "chart.ts");
+		try {
+			writeFileSync(
+				path,
+				[
+					'import { actor, completion, final, message, notify, protocol, receive, refs, reply, send, waitFor, z } from "@surprisal/hyperchart";',
+					'const Work = protocol({ START: message({ input: z.object({}).strict() }) });',
+					'type Actors = { worker: typeof Work };',
+					'type Completions = { done: { event: "DONE"; payload: { value: string } } };',
+					'const typed = refs<Record<string, never>, { wait: { value: string } }, Record<never, Record<string, unknown>>, Record<never, unknown>, Record<never, Record<string, unknown>>, Actors, Completions>();',
+					'const workerRef = typed.actorRef("worker");',
+					'const doneRef = typed.completionRef("done");',
+					'const Worker = actor({ input: z.object({}).strict(), protocol: Work, initial: "idle", states: { idle: receive({ on: { START: "publish" } }), publish: notify({ to: doneRef, event: "DONE", payload: { value: "ok" }, target: "settle" }), settle: reply({ target: "idle" }) } });',
+					'const worker = Worker({});',
+					'export default typed.chart({ kind: "chart", id: "bound-ref-loader", completions: { done: completion({ event: "DONE", schema: z.object({ value: z.string() }).strict() }) }, actors: { worker }, initial: "dispatch", states: { dispatch: send({ to: workerRef, event: "START", input: {}, target: "wait" }), wait: waitFor({ from: doneRef, event: "DONE", target: "done" }), done: final() } });',
+				].join("\n"),
+			);
+			const result = parseChartModuleSync(path);
+			expect(result.ok).toBe(true);
+			if (result.ok) {
+				expect(result.ast.states.dispatch).toMatchObject({ kind: "send", to: "@worker" });
+				expect(result.ast.states.wait).toMatchObject({ kind: "state", action: { kind: "waitFor", from: "done" } });
+				const worker = result.ast.actors["@worker"];
+				expect(worker?.kind).toBe("actor");
+				if (worker?.kind === "actor") {
+					expect(worker.states.publish).toMatchObject({
+						kind: "state",
+						action: { kind: "notify", to: "done" },
+					});
+				}
+			}
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
 	it("retains runtime contract registries for sync and async parsing", async () => {
 		const dir = mkdtempSync(join(process.cwd(), "tests", ".hyperchart-contract-parser-"));
 		const path = join(dir, "chart.ts");

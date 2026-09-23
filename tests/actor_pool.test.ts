@@ -11,6 +11,7 @@ import {
 	createBranchProjection,
 	explainReplay,
 	final,
+	json,
 	message,
 	messageInput,
 	normalizeChartConfig,
@@ -19,6 +20,8 @@ import {
 	receive,
 	reply,
 	result,
+	t,
+	tsAction,
 	z,
 	type DurableLogRecord,
 	type Effect,
@@ -324,6 +327,99 @@ describe("static actor pools", () => {
 		assert(batchResolution?.type === "actor_batch_call_resolved");
 		batchResolution.messageIds = [...batchResolution.messageIds].reverse();
 		expect(explainReplay(ast, wrongMembership).broken?.error).toContain("order or membership changed");
+	});
+
+	it("renders an out-of-order pool callBatch result into a downstream tsAction in input order", async () => {
+		const Pool = actorPool({ concurrency: 2, worker: Worker });
+		const workers = Pool({ lane: "ordered-downstream" });
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "pool-call-batch-downstream",
+				actors: { workers },
+				initial: "reviews",
+				states: {
+					reviews: callBatch({
+						to: workers,
+						event: "WORK",
+						inputs: [{ id: 0 }, { id: 1 }, { id: 2 }],
+						target: "consume",
+					}),
+					consume: {
+						kind: "state",
+						action: tsAction("./consume.mjs", "consume", {
+							env: { REVIEWS: t`${json(result("reviews"))}` },
+							reply: z.object({ count: z.number() }).strict(),
+						}),
+						transitions: { DONE: "done" },
+					},
+					done: final(),
+				},
+			}),
+		);
+		const runtime = new PoolRuntime(ast);
+		const running = start(runtime, {});
+		const worker0 = await effectFor(runtime, "@workers.$worker-0.work", 1);
+		const worker1First = await effectFor(runtime, "@workers.$worker-1.work", 1);
+
+		// Settle replies out of order and reuse worker 1 before worker 0 finishes.
+		completePoolWork(runtime, worker1First);
+		const worker1Second = await effectFor(runtime, "@workers.$worker-1.work", 2);
+		completePoolWork(runtime, worker1Second);
+		completePoolWork(runtime, worker0);
+
+		let consume: Extract<Effect, { kind: "tsImport" }> | undefined;
+		for (let turn = 0; turn < 100 && consume === undefined; turn++) {
+			consume = runtime.effects.find(
+				(effect): effect is Extract<Effect, { kind: "tsImport" }> =>
+					effect.kind === "tsImport" && effect.actionUid.state === "consume",
+			);
+			if (consume === undefined) await new Promise<void>((resolve) => setImmediate(resolve));
+		}
+		assert(consume !== undefined, "missing downstream tsAction effect");
+		expect(consume.env?.REVIEWS).toBe(JSON.stringify([{ id: 0 }, { id: 1 }, { id: 2 }]));
+		runtime.queue.send({ kind: "tsImport", effectId: consume.id, event: { type: "DONE", output: { count: 3 } } });
+
+		const state = await running;
+		expect(state.projection.results.reviews).toEqual([{ id: 0 }, { id: 1 }, { id: 2 }]);
+		expect(state.projection.results.consume).toEqual({ count: 3 });
+		expect(inspectChartAst(ast).states.find((row) => row.id === "reviews")?.reply).toMatchObject({
+			type: "array",
+			items: { type: "object", properties: { id: { type: "number" } } },
+		});
+	});
+
+	it("does not publish a partial callBatch result when one worker fails", async () => {
+		const Pool = actorPool({ concurrency: 2, worker: Worker });
+		const workers = Pool({ lane: "partial-failure" });
+		const ast = parsed(
+			chart({
+				kind: "chart",
+				id: "pool-call-batch-partial-failure",
+				actors: { workers },
+				initial: "work",
+				states: {
+					work: callBatch({ to: workers, event: "WORK", inputs: [{ id: 0 }, { id: 1 }, { id: 2 }], target: "done" }),
+					done: final(),
+				},
+			}),
+		);
+		const runtime = new PoolRuntime(ast);
+		const running = start(runtime, {});
+		const worker0 = await effectFor(runtime, "@workers.$worker-0.work", 1);
+		const worker1 = await effectFor(runtime, "@workers.$worker-1.work", 1);
+		completePoolWork(runtime, worker0);
+		await effectFor(runtime, "@workers.$worker-0.work", 2);
+		runtime.queue.send({
+			kind: "agent",
+			effectId: worker1.id,
+			outcome: { kind: "failed", failure: { kind: "explicit", retryable: false, message: "boom" } },
+		});
+
+		const state = await running;
+		expect(state.projection.failure).toBeDefined();
+		expect(state.projection.results.work).toBeUndefined();
+		expect(runtime.records.some((record) => record.type === "actor_batch_call_resolved")).toBe(false);
 	});
 
 	it("uses pool-local in-flight reservations across concurrent settlements without a global append lock", async () => {

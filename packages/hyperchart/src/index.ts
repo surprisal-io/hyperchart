@@ -6,10 +6,12 @@ export type {
 	ActorEndpointDeclarationAst,
 	ActorDefinitionAst,
 	ActorDefinitionCst,
+	ActorForwardRef,
 	ActorPoolDefinitionCst,
 	ActorWorkflowStateAst,
 	ActorWorkflowStateCst,
 	ActorSelfTarget,
+	AnyCompletionTarget,
 	AnyStaticActorDeclaration,
 	StaticActorDeclaration,
 	StaticActorPoolDeclaration,
@@ -47,6 +49,11 @@ export type {
 	ChartCst,
 	ChartEvent,
 	ChartSource,
+	CompletionContract,
+	CompletionDeclarationAst,
+	CompletionDeclarationCst,
+	CompletionForwardRef,
+	CompletionOf,
 	CompoundStateAst,
 	CompoundStateCst,
 	EventBindingAst,
@@ -95,6 +102,10 @@ export type {
 	GuardRefAst,
 	GateActionAst,
 	GateActionCst,
+	NotifyActionAst,
+	NotifyActionCst,
+	WaitForActionAst,
+	WaitForActionCst,
 	OnReenterAst,
 	OnReenterCst,
 	TransitionAst,
@@ -120,6 +131,7 @@ export {
 	chart,
 	actor,
 	actorPool,
+	completion,
 	protocol,
 	message,
 	receive,
@@ -157,6 +169,8 @@ export {
 	tsImport,
 	user,
 	gate,
+	notify,
+	waitFor,
 	contract,
 } from "./core/dsl.js";
 
@@ -165,7 +179,7 @@ export type { Runtime } from "./runtime/runtime.js";
 // charts depend on one package only.
 export { z } from "zod";
 export { refs } from "./core/typed.js";
-export type { ArgsOf, EmitsOf, InputsOf, Paths, ValueAt } from "./core/typed.js";
+export type { ActorsOf, ArgsOf, CompletionsOf, EmitsOf, InputsOf, Paths, ValueAt } from "./core/typed.js";
 export { isReservedSystemEvent, normalizeChartConfig } from "./core/normalize.js";
 export { SchemaRegistry } from "./core/schema_registry.js";
 export type { SchemaRegistryLike } from "./core/schema_registry.js";
