@@ -45,14 +45,14 @@ describe("parseChartModule", () => {
 				path,
 				[
 					'import { actor, completion, final, message, notify, protocol, receive, refs, reply, send, waitFor, z } from "@surprisal/hyperchart";',
-					'const Work = protocol({ START: message({ input: z.object({}).strict() }) });',
-					'type Actors = { worker: typeof Work };',
+					"const Work = protocol({ START: message({ input: z.object({}).strict() }) });",
+					"type Actors = { worker: typeof Work };",
 					'type Completions = { done: { event: "DONE"; payload: { value: string } } };',
-					'const typed = refs<Record<string, never>, { wait: { value: string } }, Record<never, Record<string, unknown>>, Record<never, unknown>, Record<never, Record<string, unknown>>, Actors, Completions>();',
+					"const typed = refs<Record<string, never>, { wait: { value: string } }, Record<never, Record<string, unknown>>, Record<never, unknown>, Record<never, Record<string, unknown>>, Actors, Completions>();",
 					'const workerRef = typed.actorRef("worker");',
 					'const doneRef = typed.completionRef("done");',
 					'const Worker = actor({ input: z.object({}).strict(), protocol: Work, initial: "idle", states: { idle: receive({ on: { START: "publish" } }), publish: notify({ to: doneRef, event: "DONE", payload: { value: "ok" }, target: "settle" }), settle: reply({ target: "idle" }) } });',
-					'const worker = Worker({});',
+					"const worker = Worker({});",
 					'export default typed.chart({ kind: "chart", id: "bound-ref-loader", completions: { done: completion({ event: "DONE", schema: z.object({ value: z.string() }).strict() }) }, actors: { worker }, initial: "dispatch", states: { dispatch: send({ to: workerRef, event: "START", input: {}, target: "wait" }), wait: waitFor({ from: doneRef, event: "DONE", target: "done" }), done: final() } });',
 				].join("\n"),
 			);

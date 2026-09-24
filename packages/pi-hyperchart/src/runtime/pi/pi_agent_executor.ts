@@ -901,10 +901,18 @@ function sessionIdInFile(file: string): string | undefined {
 		const header = Buffer.alloc(4096);
 		const length = readSync(fd, header, 0, header.length, 0);
 		const newline = header.subarray(0, length).indexOf(10);
-		if (newline < 0) return undefined;
+		if (newline < 0) {
+			return undefined;
+		}
 		const record: unknown = JSON.parse(header.toString("utf8", 0, newline));
-		return typeof record === "object" && record !== null && "type" in record && record.type === "session" &&
-			"id" in record && typeof record.id === "string" ? record.id : undefined;
+		return typeof record === "object" &&
+			record !== null &&
+			"type" in record &&
+			record.type === "session" &&
+			"id" in record &&
+			typeof record.id === "string"
+			? record.id
+			: undefined;
 	} catch {
 		return undefined;
 	} finally {
@@ -913,7 +921,9 @@ function sessionIdInFile(file: string): string | undefined {
 }
 
 function latestJsonl(dir: string, sessionId: string): string | undefined {
-	if (!existsSync(dir)) return undefined;
+	if (!existsSync(dir)) {
+		return undefined;
+	}
 	return readdirSync(dir)
 		.filter((file) => file.endsWith(".jsonl"))
 		.map((file) => join(dir, file))
@@ -928,7 +938,9 @@ function latestJsonlForPreviousActionSession(
 	previousSessionId: string,
 ): string | undefined {
 	const root = join(sessionsDir, branchSessionSegment(branchId), actionUidDirName(effect.actionUid));
-	if (!existsSync(root)) return undefined;
+	if (!existsSync(root)) {
+		return undefined;
+	}
 	const currentKey = sanitizeSegment(sessionKey(effect.id));
 	const candidates = readdirSync(root, { withFileTypes: true })
 		.filter((entry) => entry.isDirectory() && entry.name !== currentKey)

@@ -229,7 +229,10 @@ describe("ChartRuntime", () => {
 			}
 			if (count === 513) {
 				const nearest = await store.findNearestCheckpoint({ targetHeadSeqId: snapshot.headSeqId, ...contract });
-				expect(nearest?.headSeqId).toBe(snapshot.headSeqId! - 1);
+				if (snapshot.headSeqId === null) {
+					throw new Error("Expected a non-empty snapshot");
+				}
+				expect(nearest?.headSeqId).toBe(snapshot.headSeqId - 1);
 			}
 			await runtime.dispose();
 			await semantic.storeExactCheckpoint();

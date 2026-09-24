@@ -78,8 +78,7 @@ function authoredCompletionChart(
 			settle: reply({ target: "idle" }),
 		},
 	});
-	const worker =
-		options.concurrent === true ? actorPool({ concurrency: 2, worker: Worker })({}) : Worker({});
+	const worker = options.concurrent === true ? actorPool({ concurrency: 2, worker: Worker })({}) : Worker({});
 	const wait = waitFor({ from: doneRef, event: "DONE", target: options.reuseWait === true ? "wait" : "complete" });
 	const authored = typed.chart({
 		kind: "chart",
@@ -213,7 +212,9 @@ class CompletionRuntime implements Runtime {
 
 async function eventually(check: () => boolean): Promise<void> {
 	for (let attempt = 0; attempt < 200; attempt++) {
-		if (check()) return;
+		if (check()) {
+			return;
+		}
 		await new Promise((resolve) => setTimeout(resolve, 5));
 	}
 	throw new Error("condition was not reached");
@@ -224,7 +225,17 @@ describe("durable chart-owned completion endpoints", () => {
 		const runtime = new CompletionRuntime(completionChart());
 		const inspected = inspectChartAst(runtime.ast);
 		expect(inspected.completionDeclarations).toEqual([
-			{ name: "done", event: "DONE", schema: { $schema: "https://json-schema.org/draft/2020-12/schema", type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false } },
+			{
+				name: "done",
+				event: "DONE",
+				schema: {
+					$schema: "https://json-schema.org/draft/2020-12/schema",
+					type: "object",
+					properties: { value: { type: "string" } },
+					required: ["value"],
+					additionalProperties: false,
+				},
+			},
 		]);
 		expect(inspected.states.some((item) => item.id === "wait" && item.kind === "waitFor")).toBe(true);
 		expect(inspected.states.some((item) => item.id === "@worker.publish" && item.kind === "notify")).toBe(true);
@@ -250,15 +261,17 @@ describe("durable chart-owned completion endpoints", () => {
 			seqId: runtime.records.length + 1,
 			parentId: runtime.records.at(-1)?.seqId ?? null,
 		} as DurableLogRecord;
-		expect(() => projectBranch(createBranchProjection(runtime.ast), runtime.ast, [...runtime.records, duplicate])).toThrow(
-			/notified more than once/,
-		);
+		expect(() =>
+			projectBranch(createBranchProjection(runtime.ast), runtime.ast, [...runtime.records, duplicate]),
+		).toThrow(/notified more than once/);
 	});
 
 	it("retains a notification that arrives before the chart enters waitFor", async () => {
 		const runtime = new CompletionRuntime(completionChart({ delay: true }), true, false);
 		const running = start(runtime);
-		await eventually(() => runtime.records.some((record) => record.type === "completion" && record.kind === "notified"));
+		await eventually(() =>
+			runtime.records.some((record) => record.type === "completion" && record.kind === "notified"),
+		);
 		expect(runtime.records.some((record) => record.type === "completion" && record.kind === "consumed")).toBe(false);
 		const delay = runtime.effectsSeen.find((effect) => effect.kind === "agent");
 		assert(delay?.kind === "agent");
@@ -276,24 +289,32 @@ describe("durable chart-owned completion endpoints", () => {
 		const cloned = { ...authoredCompletionChart() };
 		const clonedResult = normalizeChartConfig(cloned);
 		expect(clonedResult.ok).toBe(false);
-		if (!clonedResult.ok) expect(clonedResult.diagnostics.some((row) => row.code === "UNBOUND_COMPLETION_REF")).toBe(true);
+		if (!clonedResult.ok) {
+			expect(clonedResult.diagnostics.some((row) => row.code === "UNBOUND_COMPLETION_REF")).toBe(true);
+		}
 
 		const unknown = authoredCompletionChart();
 		Reflect.deleteProperty(unknown.completions, "done");
 		const unknownResult = normalizeChartConfig(unknown);
 		expect(unknownResult.ok).toBe(false);
-		if (!unknownResult.ok) expect(unknownResult.diagnostics.some((row) => row.code === "UNKNOWN_COMPLETION_REF")).toBe(true);
+		if (!unknownResult.ok) {
+			expect(unknownResult.diagnostics.some((row) => row.code === "UNKNOWN_COMPLETION_REF")).toBe(true);
+		}
 
 		const forged = authoredCompletionChart();
 		Reflect.set(forged.states.wait.action, "from", { kind: "completionRef", name: "done" });
 		const forgedResult = normalizeChartConfig(forged);
 		expect(forgedResult.ok).toBe(false);
-		if (!forgedResult.ok) expect(forgedResult.diagnostics.some((row) => row.code === "INVALID_COMPLETION_REF")).toBe(true);
+		if (!forgedResult.ok) {
+			expect(forgedResult.diagnostics.some((row) => row.code === "INVALID_COMPLETION_REF")).toBe(true);
+		}
 
 		const embedded = authoredCompletionChart();
 		const definition = embedded.actors.worker.definition;
 		assert.equal(definition.kind, "actorTemplate");
-		if (definition.kind !== "actorTemplate") throw new Error("expected ordinary actor");
+		if (definition.kind !== "actorTemplate") {
+			throw new Error("expected ordinary actor");
+		}
 		const publish = definition.states.publish;
 		assert(publish !== undefined && publish.kind === "state");
 		const notifyAction = publish.action;
@@ -301,7 +322,9 @@ describe("durable chart-owned completion endpoints", () => {
 		Reflect.set(notifyAction, "payload", { value: notifyAction.to });
 		const embeddedResult = normalizeChartConfig(embedded);
 		expect(embeddedResult.ok).toBe(false);
-		if (!embeddedResult.ok) expect(embeddedResult.diagnostics.some((row) => row.code === "COMPLETION_REF_IN_DATA")).toBe(true);
+		if (!embeddedResult.ok) {
+			expect(embeddedResult.diagnostics.some((row) => row.code === "COMPLETION_REF_IN_DATA")).toBe(true);
+		}
 	});
 
 	it("treats a late completion validator response after notify cancellation as a race loser", async () => {
@@ -354,9 +377,9 @@ describe("durable chart-owned completion endpoints", () => {
 		concurrentRuntime.releaseHeldNotificationAppend();
 		const concurrent = await concurrentRun;
 		expect(concurrent.projection.failure?.error).toContain("notified more than once");
-		expect(concurrentRuntime.records.filter((record) => record.type === "completion").map((record) => record.kind)).toEqual([
-			"notified",
-		]);
+		expect(
+			concurrentRuntime.records.filter((record) => record.type === "completion").map((record) => record.kind),
+		).toEqual(["notified"]);
 		expect(concurrentRuntime.effectsSeen.filter((effect) => effect.kind === "completion_notify")).toHaveLength(1);
 
 		const duplicateRuntime = new CompletionRuntime(completionChart({ duplicate: true }));

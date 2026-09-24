@@ -63,7 +63,9 @@ describe("React actor inspector structure", () => {
 			}
 			expect(tile.run.states.some((state) => state.id === tile.selectedStateId)).toBe(true);
 			expect(tile.runtimeSources.map((source) => source.title)).toEqual(
-				spec.runtime.mode === "static" ? ["Definition"] : expect.arrayContaining(["Definition", "log records", "status.json"]),
+				spec.runtime.mode === "static"
+					? ["Definition"]
+					: expect.arrayContaining(["Definition", "log records", "status.json"]),
 			);
 		}
 		const batchStates = [];

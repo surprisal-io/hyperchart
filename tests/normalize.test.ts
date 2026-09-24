@@ -116,9 +116,7 @@ describe("normalizeChartConfig", () => {
 				},
 			}),
 		);
-		expect(nonDominated.ok ? [] : nonDominated.diagnostics.map((entry) => entry.code)).toContain(
-			"NON_DOMINATED_REF",
-		);
+		expect(nonDominated.ok ? [] : nonDominated.diagnostics.map((entry) => entry.code)).toContain("NON_DOMINATED_REF");
 
 		const ControllerProtocol = protocol({ START: message({ input: z.object({}).strict() }) });
 		const Controller = actor({
@@ -179,9 +177,7 @@ describe("normalizeChartConfig", () => {
 				},
 			}),
 		);
-		expect(actorSelfRead.ok ? [] : actorSelfRead.diagnostics.map((entry) => entry.code)).toContain(
-			"NON_DOMINATED_REF",
-		);
+		expect(actorSelfRead.ok ? [] : actorSelfRead.diagnostics.map((entry) => entry.code)).toContain("NON_DOMINATED_REF");
 	});
 
 	it("normalizes emit declarations and allows result() from the completing state", () => {

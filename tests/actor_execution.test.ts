@@ -1829,9 +1829,7 @@ describe("explicit event-sourced actors", () => {
 				},
 			}),
 		);
-		expect(outOfScope.ok ? [] : outOfScope.diagnostics.map((entry) => entry.code)).toContain(
-			"ACTOR_SCOPE_VIOLATION",
-		);
+		expect(outOfScope.ok ? [] : outOfScope.diagnostics.map((entry) => entry.code)).toContain("ACTOR_SCOPE_VIOLATION");
 
 		const forged = normalizeChartConfig({
 			kind: "chart",

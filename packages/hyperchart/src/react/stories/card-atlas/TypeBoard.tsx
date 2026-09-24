@@ -12,13 +12,24 @@ export function TypeBoard({ kind }: { kind: HyperchartStateType }) {
 		>
 			<div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
 				{cases.map(({ title, run, stateId, status }) => (
-					<GraphTile key={`${run.runId}:${stateId}:${title}`} title={`${status} · ${title}`}
-						run={run} visibleStateIds={[stateId]} height="h-[300px]" />
+					<GraphTile
+						key={`${run.runId}:${stateId}:${title}`}
+						title={`${status} · ${title}`}
+						run={run}
+						visibleStateIds={[stateId]}
+						height="h-[300px]"
+					/>
 				))}
 				<AtlasRuntimeCards kind={kind} />
 				{(kind === "notify" || kind === "waitFor") && (
 					<div className="col-span-full text-xs text-[var(--text-secondary)]">
-						Notify / Wait For State Details: <a className="underline" href="/?path=/story/hyperchart-visual-tests-inspector-panel-actors--notify-and-wait-for">contract, runtime, and visit history</a>
+						Notify / Wait For State Details:{" "}
+						<a
+							className="underline"
+							href="/?path=/story/hyperchart-visual-tests-inspector-panel-actors--notify-and-wait-for"
+						>
+							contract, runtime, and visit history
+						</a>
 					</div>
 				)}
 			</div>

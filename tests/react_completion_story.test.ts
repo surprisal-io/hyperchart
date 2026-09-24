@@ -6,8 +6,14 @@ import { StateDetails } from "../packages/hyperchart/src/react/components/inspec
 import { buildGraph } from "../packages/hyperchart/src/react/components/inspector/graph/graphModel.js";
 import { inspectorPanelSpecs } from "../packages/hyperchart/src/react/stories/inspector-panel/specs.js";
 import { inspectorPanelScenario } from "../packages/hyperchart/src/react/stories/inspector-panel/runtime.js";
-import { captureCompletionStory, completionScenario } from "../packages/hyperchart/src/react/fixtures/completion-fixture.js";
-import { captureCallBatchResultStory, captureSingletonCallStory } from "../packages/hyperchart/src/react/fixtures/call-batch-result-fixture.js";
+import {
+	captureCompletionStory,
+	completionScenario,
+} from "../packages/hyperchart/src/react/fixtures/completion-fixture.js";
+import {
+	captureCallBatchResultStory,
+	captureSingletonCallStory,
+} from "../packages/hyperchart/src/react/fixtures/call-batch-result-fixture.js";
 import { captureAtlasStatus } from "../packages/hyperchart/src/react/fixtures/atlas-status-fixtures.js";
 
 describe("completion Storybook pipeline", () => {
@@ -24,7 +30,8 @@ describe("completion Storybook pipeline", () => {
 		}
 	});
 	it("puts notify and waitFor definitions and executed statuses on a dedicated Actor State Details board", () => {
-		const story = (name: string) => readFileSync(new URL(`../packages/hyperchart/src/react/stories/${name}`, import.meta.url), "utf8");
+		const story = (name: string) =>
+			readFileSync(new URL(`../packages/hyperchart/src/react/stories/${name}`, import.meta.url), "utf8");
 		expect(story("StateDetailsActors.stories.tsx")).toContain("export const NotifyAndWaitFor");
 		expect(story("StateDetailsActors.stories.tsx")).toContain('groupId="actorCompletion"');
 		expect(story("StateDetailsActors.stories.tsx")).toContain("<ActorCompletionCases />");
@@ -47,13 +54,16 @@ describe("completion Storybook pipeline", () => {
 		expect(run.states.find((state) => state.id === "batch")?.status).toBe("done");
 		expect(run.states.find((state) => state.id === "use")?.status).toBe("done");
 		expect(run.states.find((state) => state.id === "use")?.visitHistory?.[0]?.invocation).toMatchObject({
-			kind: "agent", task: 'Ordered replies: [{"id":1},{"id":0}]',
+			kind: "agent",
+			task: 'Ordered replies: [{"id":1},{"id":0}]',
 		});
 	});
 	it("marks a resolved singleton call done from its durable actor_call_resolved fact", async () => {
 		const run = await captureSingletonCallStory();
 		expect(run.states.find((state) => state.id === "request")).toMatchObject({
-			type: "call", status: "done", completedEvent: "ACTOR_REPLY",
+			type: "call",
+			status: "done",
+			completedEvent: "ACTOR_REPLY",
 		});
 	});
 	it("executes, replay-validates and projects both completion node kinds and retained/consumed visits", async () => {
@@ -70,13 +80,20 @@ describe("completion Storybook pipeline", () => {
 		expect(failed.states.find((state) => state.id === "@worker.publish")?.status).toBe("failed");
 		expect(retained.states.find((state) => state.id === "@worker.publish")?.status).toBe("done");
 		expect(retained.states.find((state) => state.id === "@worker.publish")?.completionPublication).toMatchObject({
-			endpoint: "done", event: "DONE", payload: { value: "from worker" }, seqId: expect.any(Number),
+			endpoint: "done",
+			event: "DONE",
+			payload: { value: "from worker" },
+			seqId: expect.any(Number),
 		});
 		expect(failed.states.find((state) => state.id === "@worker.publish")?.completionPublication).toBeUndefined();
 		expect(retained.states.find((state) => state.id === "wait")?.status).toBe("pending");
 		for (const stateId of ["@worker.publish", "wait"]) {
-			expect(completionScenario.staticRun().states.find((state) => state.id === stateId)?.completion?.schema).toMatchObject({
-				type: "object", properties: { value: { type: "string" } }, required: ["value"],
+			expect(
+				completionScenario.staticRun().states.find((state) => state.id === stateId)?.completion?.schema,
+			).toMatchObject({
+				type: "object",
+				properties: { value: { type: "string" } },
+				required: ["value"],
 			});
 		}
 		expect(waiting.states.find((state) => state.id === "wait")?.status).toBe("running");
@@ -101,9 +118,11 @@ describe("completion Storybook pipeline", () => {
 			expect(graph.nodes[0]?.data.state.status).toBe(status);
 		}
 		const edgeGraph = buildGraph(completionScenario.staticRun(), new Set(["wait", "@worker.publish"]));
-		expect(edgeGraph.edges).toEqual(expect.arrayContaining([
-			expect.objectContaining({ source: "@worker.publish", target: "wait", label: "completion · DONE" }),
-		]));
+		expect(edgeGraph.edges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ source: "@worker.publish", target: "wait", label: "completion · DONE" }),
+			]),
+		);
 		for (const stateId of ["wait", "@worker.publish"] as const) {
 			const state = consumed.states.find((candidate) => candidate.id === stateId)!;
 			const markup = renderToStaticMarkup(createElement(StateDetails, { state, allStates: consumed.states }));

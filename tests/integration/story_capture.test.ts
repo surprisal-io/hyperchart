@@ -3,7 +3,11 @@ import { captureStorySchedule } from "../../scripts/story-fixtures/capture-story
 import { actorCallAst, actorNamedReplyRecords } from "../../packages/hyperchart/src/react/fixtures/actor-fixtures.js";
 import { readFileSync } from "node:fs";
 import captured from "../../packages/hyperchart/src/react/fixtures/captured-story-records.json" with { type: "json" };
-import { scenario, records, secondRecords } from "../../packages/hyperchart/src/react/fixtures/runtime-section-fixture.js";
+import {
+	scenario,
+	records,
+	secondRecords,
+} from "../../packages/hyperchart/src/react/fixtures/runtime-section-fixture.js";
 import {
 	plainScenario,
 	plainPrefix,

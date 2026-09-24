@@ -822,7 +822,7 @@ describe("replay gauntlet", () => {
 			live.runtime.effectBatches
 				.flat()
 				.filter((effect) => effect.kind === "agent" && effect.actionUid.state === "route")
-				.map((effect) => effect.kind === "agent" ? effect.task : undefined),
+				.map((effect) => (effect.kind === "agent" ? effect.task : undefined)),
 		).toEqual(['Route [{"id":0},{"id":1}]', 'Route [{"id":10},{"id":11}]']);
 		let checkpointRoundTripped = createBranchProjection(ast);
 		for (const record of live.log) {
@@ -846,7 +846,7 @@ describe("replay gauntlet", () => {
 		expect(
 			live.log
 				.filter((record) => record.type === "actor_batch_call_resolved")
-				.map((record) => record.type === "actor_batch_call_resolved" ? record.callId : undefined),
+				.map((record) => (record.type === "actor_batch_call_resolved" ? record.callId : undefined)),
 		).toEqual(["batch:call:1", "batch:call:2"]);
 
 		let resumedInsideSecondBatch = false;
@@ -854,12 +854,10 @@ describe("replay gauntlet", () => {
 			const prefix = live.log.slice(0, boundary);
 			const completed = (state: string) =>
 				prefix.filter(
-					(record) =>
-						record.type === "state_action" && record.kind === "complete" && record.actionUid.state === state,
+					(record) => record.type === "state_action" && record.kind === "complete" && record.actionUid.state === state,
 				).length;
 			const secondBatchEnqueued = prefix.some(
-				(record) =>
-					record.type === "actor_messages_enqueued" && record.messages[0]?.callId === "batch:call:2",
+				(record) => record.type === "actor_messages_enqueued" && record.messages[0]?.callId === "batch:call:2",
 			);
 			const secondBatchResolved = prefix.some(
 				(record) => record.type === "actor_batch_call_resolved" && record.callId === "batch:call:2",

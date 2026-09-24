@@ -147,23 +147,53 @@ describe("Storybook information architecture", () => {
 		const files = ["Actions", "Actors", "Flow"].map((suffix) =>
 			readFileSync(join(storyDirectory, `InspectorGraphAtlas${suffix}.stories.tsx`), "utf8"),
 		);
-		const types = files.flatMap((source) => [...source.matchAll(/export const \w+ = card\("([\w-]+)"\)/g)]
-			.map((match) => match[1]));
+		const types = files.flatMap((source) => [
+			...[...source.matchAll(/export const \w+ = card\("([\w-]+)"\)/g)].map((match) => match[1]),
+			...[...source.matchAll(/const (\w+) = card\("([\w-]+)"\);\s*export \{\s*\1 as \w+\s*\};/g)].map(
+				(match) => match[2],
+			),
+		]);
 		expect(types).toHaveLength(20);
-		expect(new Set(types)).toEqual(new Set([
-			"agent", "user", "gate", "script", "tsImport", "actor-declaration", "actor-occurrence",
-			"send", "sendBatch", "call", "callBatch", "receive", "reply", "notify", "waitFor",
-			"map", "parallel", "compound", "region", "final",
-		]));
+		expect(new Set(types)).toEqual(
+			new Set([
+				"agent",
+				"user",
+				"gate",
+				"script",
+				"tsImport",
+				"actor-declaration",
+				"actor-occurrence",
+				"send",
+				"sendBatch",
+				"call",
+				"callBatch",
+				"receive",
+				"reply",
+				"notify",
+				"waitFor",
+				"map",
+				"parallel",
+				"compound",
+				"region",
+				"final",
+			]),
+		);
 		for (const type of types) {
 			const cards = atlasCases(type as HyperchartStateType);
 			expect(cards.length, type).toBeGreaterThan(0);
 			for (const { run, stateId, status } of cards) {
-				expect(run.states.find((state) => state.id === stateId), stateId).toMatchObject({ type, status });
+				expect(
+					run.states.find((state) => state.id === stateId),
+					stateId,
+				).toMatchObject({ type, status });
 			}
 		}
-		for (const source of files) expect(source).toContain('title: "Hyperchart/Inspector/Graph/Card Atlas/');
-		expect(readFileSync(join(storyDirectory, "InspectorGraph.stories.tsx"), "utf8")).not.toContain("export const CardAtlas");
+		for (const source of files) {
+			expect(source).toContain('title: "Hyperchart/Inspector/Graph/Card Atlas/');
+		}
+		expect(readFileSync(join(storyDirectory, "InspectorGraph.stories.tsx"), "utf8")).not.toContain(
+			"export const CardAtlas",
+		);
 		expect(storyFiles(storyDirectory).some((file) => file.endsWith("InspectorGraphAtlas.stories.tsx"))).toBe(false);
 	});
 

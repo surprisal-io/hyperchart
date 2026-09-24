@@ -173,11 +173,12 @@ export type InputsOf<C> = C extends { states: infer S }
 		>
 	: never;
 
-type ActorProtocols<A> = A extends Record<string, unknown>
-	? {
-			[K in keyof A & string]: A[K] extends AnyStaticActorDeclaration ? ProtocolOf<A[K]> : never;
-		}
-	: never;
+type ActorProtocols<A> =
+	A extends Record<string, unknown>
+		? {
+				[K in keyof A & string]: A[K] extends AnyStaticActorDeclaration ? ProtocolOf<A[K]> : never;
+			}
+		: never;
 
 /** The actor protocol registry declared by all static actor bindings in a chart. */
 export type ActorsOf<C> = C extends { states: infer S }
@@ -194,16 +195,19 @@ export type ActorsOf<C> = C extends { states: infer S }
 		>
 	: never;
 
-type CompletionContracts<D> = D extends Record<string, unknown>
-	? {
-			[K in keyof D & string]: D[K] extends CompletionDeclarationCst<infer S, infer Event>
-				? CompletionContract<Event, InferSchema<S>>
-				: never;
-		}
-	: never;
+type CompletionContracts<D> =
+	D extends Record<string, unknown>
+		? {
+				[K in keyof D & string]: D[K] extends CompletionDeclarationCst<infer S, infer Event>
+					? CompletionContract<Event, InferSchema<S>>
+					: never;
+			}
+		: never;
 
 /** The completion contract registry declared by root chart endpoints. */
-export type CompletionsOf<C> = C extends { completions: infer D } ? Simplify2<CompletionContracts<D>> : Record<never, never>;
+export type CompletionsOf<C> = C extends { completions: infer D }
+	? Simplify2<CompletionContracts<D>>
+	: Record<never, never>;
 
 // Both directions must hold: everything the registry declares exists in the chart with the same
 // type, and everything the chart declares is written down in the registry.

@@ -182,10 +182,7 @@ export type AnyCompletionTarget = CompletionForwardRef<CompletionContract, strin
 
 export type CompletionOf<D> = D extends CompletionForwardRef<infer C, string> ? C : never;
 
-export type CompletionDeclarationCst<
-	S extends SchemaCst = SchemaCst,
-	Event extends string = string,
-> = Readonly<{
+export type CompletionDeclarationCst<S extends SchemaCst = SchemaCst, Event extends string = string> = Readonly<{
 	kind: "completion";
 	event: Event;
 	schema: S;

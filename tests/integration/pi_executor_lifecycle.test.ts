@@ -88,18 +88,19 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated", withSess
 		},
 	};
 	const overrides = vi.fn(async () => undefined);
-	const createExecutor = () => new PiAgentExecutor({
-		resolveSessionOverrides: overrides,
-		workDir: root,
-		projectDir: root,
-		agentDir: root,
-		definitionDirs: [root],
-		sessionsDir: join(root, "sessions"),
-		branchId: "main",
-		modelRuntime,
-		...(extensionPolicy === "ambient" ? {} : { extensionPolicy }),
-		...(withSessionService ? { sessionService: service } : {}),
-	});
+	const createExecutor = () =>
+		new PiAgentExecutor({
+			resolveSessionOverrides: overrides,
+			workDir: root,
+			projectDir: root,
+			agentDir: root,
+			definitionDirs: [root],
+			sessionsDir: join(root, "sessions"),
+			branchId: "main",
+			modelRuntime,
+			...(extensionPolicy === "ambient" ? {} : { extensionPolicy }),
+			...(withSessionService ? { sessionService: service } : {}),
+		});
 	const executor = createExecutor();
 	const subscribe = AgentSession.prototype.subscribe;
 	vi.spyOn(AgentSession.prototype, "subscribe").mockImplementation(function (this: AgentSession, listener) {
@@ -117,7 +118,13 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated", withSess
 		dispose.call(this);
 	});
 	const seenSessions = new WeakSet<AgentSession>();
-	const prompts: Array<{ id: string; text: string; entries: number; previousUsers: string[]; file: string | undefined }> = [];
+	const prompts: Array<{
+		id: string;
+		text: string;
+		entries: number;
+		previousUsers: string[];
+		file: string | undefined;
+	}> = [];
 	const prompt = vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (
 		this: AgentSession,
 		text,
@@ -128,8 +135,11 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated", withSess
 			file: this.sessionManager.getSessionFile(),
 			text,
 			entries: entries.length,
-			previousUsers: entries.flatMap((entry) => entry.type === "message" && entry.message.role === "user"
-				? [typeof entry.message.content === "string" ? entry.message.content : ""] : []),
+			previousUsers: entries.flatMap((entry) =>
+				entry.type === "message" && entry.message.role === "user"
+					? [typeof entry.message.content === "string" ? entry.message.content : ""]
+					: [],
+			),
 		});
 		// Exercise real SDK extension contexts without invoking a provider. The
 		// fixture starts a resource as a normal host would, then executor owns teardown.
@@ -151,16 +161,31 @@ async function fixture(extensionPolicy: PiExtensionPolicy = "isolated", withSess
 		// transcript real while stubbing the provider turn and finish tool.
 		const callId = `finish-call-${this.sessionManager.getEntries().length}`;
 		this.sessionManager.appendMessage({
-			role: "assistant", content: [{ type: "toolCall", id: callId, name: "finish", arguments: { event: "DONE" } }],
-			timestamp: Date.now(), stopReason: "toolUse", api: "openai-codex-responses", provider: "openai-codex", model: "test",
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+			role: "assistant",
+			content: [{ type: "toolCall", id: callId, name: "finish", arguments: { event: "DONE" } }],
+			timestamp: Date.now(),
+			stopReason: "toolUse",
+			api: "openai-codex-responses",
+			provider: "openai-codex",
+			model: "test",
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
 		} as never);
 		const finish = this.agent.state.tools.find((tool) => tool.name === "finish")!;
 		await finish.execute(callId, { event: "DONE" });
 		this.sessionManager.appendMessage({
-			role: "toolResult", toolCallId: callId, toolName: "finish", content: [{ type: "text", text: "Recorded." }],
-			isError: false, timestamp: Date.now(),
+			role: "toolResult",
+			toolCallId: callId,
+			toolName: "finish",
+			content: [{ type: "text", text: "Recorded." }],
+			isError: false,
+			timestamp: Date.now(),
 		} as never);
 	});
 	return { root, executor, createExecutor, counts, order, prompts, prompt, stored, opened, service, overrides };
@@ -277,13 +302,18 @@ describe("PiAgentExecutor session resources", () => {
 		let resumed: PiAgentExecutor | undefined;
 		const job = (visit: number, name: string): AgentEffect => ({ ...effect(visit), task: `Job: ${name}` });
 		const retry = (
-			invocation: AgentEffect, seq: number, mode: "nudge" | "restart", sessionId = invocation.sessionId,
+			invocation: AgentEffect,
+			seq: number,
+			mode: "nudge" | "restart",
+			sessionId = invocation.sessionId,
 		): AgentEffect => ({
 			...invocation,
 			id: `resources:work:worker:2:${seq}`,
 			sessionId,
 			recovery: {
-				mode, scope: "validation", nudgeAttempt: mode === "nudge" ? 1 : 0,
+				mode,
+				scope: "validation",
+				nudgeAttempt: mode === "nudge" ? 1 : 0,
 				restartAttempt: mode === "restart" ? 1 : 0,
 				failure: { kind: "validation", message: "wrong citation" },
 			},
@@ -317,13 +347,18 @@ describe("PiAgentExecutor session resources", () => {
 		try {
 			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
 			const second = { ...effect(2), task: "Job: current-rule" };
-			expect(await complete(f.executor, {
-				...second,
-				recovery: {
-					mode: "nudge", scope: "validation", nudgeAttempt: 1, restartAttempt: 0,
-					failure: { kind: "validation", message: "retry current job" },
-				},
-			})).toEqual({ type: "DONE" });
+			expect(
+				await complete(f.executor, {
+					...second,
+					recovery: {
+						mode: "nudge",
+						scope: "validation",
+						nudgeAttempt: 1,
+						restartAttempt: 0,
+						failure: { kind: "validation", message: "retry current job" },
+					},
+				}),
+			).toEqual({ type: "DONE" });
 			expect(f.prompts[1]!.previousUsers).toEqual([]);
 			expect(f.prompts[1]!.text).toContain("Job: current-rule");
 			expect(f.prompts[1]!.text).toContain("retry current job");
@@ -332,17 +367,25 @@ describe("PiAgentExecutor session resources", () => {
 		}
 	});
 
-	it.each([false, true])("permits explicit reentry to its pinned previous session (service=%s)", async (withSessionService) => {
+	it.each([
+		false,
+		true,
+	])("permits explicit reentry to its pinned previous session (service=%s)", async (withSessionService) => {
 		const f = await fixture("isolated", withSessionService);
 		try {
 			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
-			expect(await complete(f.executor, {
-				...effect(2), task: "Job: current-rule",
-				resume: { message: "Continue the pinned previous session.", session: effect(1).sessionId },
-			})).toEqual({ type: "DONE" });
+			expect(
+				await complete(f.executor, {
+					...effect(2),
+					task: "Job: current-rule",
+					resume: { message: "Continue the pinned previous session.", session: effect(1).sessionId },
+				}),
+			).toEqual({ type: "DONE" });
 			expect(f.prompts[1]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(true);
 			expect(f.prompts[1]!.text).toContain("Continue the pinned previous session.");
-			if (withSessionService) expect(f.opened).toEqual([effect(1).sessionId, effect(1).sessionId]);
+			if (withSessionService) {
+				expect(f.opened).toEqual([effect(1).sessionId, effect(1).sessionId]);
+			}
 		} finally {
 			await f.executor.dispose();
 		}
@@ -352,16 +395,22 @@ describe("PiAgentExecutor session resources", () => {
 		const f = await fixture("isolated", false);
 		try {
 			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
-			expect(await complete(f.executor, {
-				...effect(2), task: "Job: current-rule",
-				resume: { message: "Resume explicit file.", session: f.prompts[0]!.file! },
-			})).toEqual({ type: "DONE" });
+			expect(
+				await complete(f.executor, {
+					...effect(2),
+					task: "Job: current-rule",
+					resume: { message: "Resume explicit file.", session: f.prompts[0]!.file! },
+				}),
+			).toEqual({ type: "DONE" });
 			expect(f.prompts[1]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(true);
 			expect(f.prompts[1]!.text).toBe("Resume explicit file.");
-			expect(await complete(f.executor, {
-				...effect(3), task: "Job: third-rule",
-				resume: { message: "Resume unknown ID.", session: "not-a-recorded-session" },
-			})).toEqual({ type: "DONE" });
+			expect(
+				await complete(f.executor, {
+					...effect(3),
+					task: "Job: third-rule",
+					resume: { message: "Resume unknown ID.", session: "not-a-recorded-session" },
+				}),
+			).toEqual({ type: "DONE" });
 			expect(f.prompts[2]!.previousUsers).toEqual([]);
 			expect(f.prompts[2]!.text).toContain("Job: third-rule");
 		} finally {
@@ -375,11 +424,19 @@ describe("PiAgentExecutor session resources", () => {
 			expect(await complete(f.executor, { ...effect(1), task: "Job: old-rule" })).toEqual({ type: "DONE" });
 			const second = { ...effect(2), task: "Job: current-rule" };
 			expect(await complete(f.executor, second)).toEqual({ type: "DONE" });
-			expect(await complete(f.executor, {
-				...second, id: "resources:work:worker:2:3",
-				recovery: { mode: "nudge", scope: "validation", nudgeAttempt: 1, restartAttempt: 0,
-					failure: { kind: "validation", message: "wrong citation" } },
-			})).toEqual({ type: "DONE" });
+			expect(
+				await complete(f.executor, {
+					...second,
+					id: "resources:work:worker:2:3",
+					recovery: {
+						mode: "nudge",
+						scope: "validation",
+						nudgeAttempt: 1,
+						restartAttempt: 0,
+						failure: { kind: "validation", message: "wrong citation" },
+					},
+				}),
+			).toEqual({ type: "DONE" });
 			expect(f.opened).toEqual([effect(1).sessionId, second.sessionId, second.sessionId]);
 			expect(f.prompts[2]!.previousUsers.some((text) => text.includes("current-rule"))).toBe(true);
 			expect(f.prompts[2]!.previousUsers.some((text) => text.includes("old-rule"))).toBe(false);

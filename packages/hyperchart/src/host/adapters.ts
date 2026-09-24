@@ -782,11 +782,13 @@ function stateFromInspectState(
 	completionDeclarations?: HyperchartInspectResult["completionDeclarations"],
 ): HyperchartStateInfo {
 	const refs = refsInfo(state.refs);
-	const completionSchema = state.completion === undefined
-		? undefined
-		: completionDeclarations?.find((declaration) =>
-			declaration.name === state.completion?.endpoint && declaration.event === state.completion.event
-		)?.schema;
+	const completionSchema =
+		state.completion === undefined
+			? undefined
+			: completionDeclarations?.find(
+					(declaration) =>
+						declaration.name === state.completion?.endpoint && declaration.event === state.completion.event,
+				)?.schema;
 	const inputs = state.inputs?.map(
 		(input): HyperchartInputInfo => ({
 			name: input.name,
@@ -891,12 +893,14 @@ function stateFromInspectState(
 		...(state.emits === undefined ? {} : { emits: state.emits }),
 		...(state.gateEvent === undefined ? {} : { gateEvent: state.gateEvent }),
 		...(state.gatePayload === undefined ? {} : { gatePayload: state.gatePayload }),
-		...(state.completion === undefined ? {} : {
-			completion: {
-				...state.completion,
-				...(completionSchema === undefined ? {} : { schema: completionSchema }),
-			},
-		}),
+		...(state.completion === undefined
+			? {}
+			: {
+					completion: {
+						...state.completion,
+						...(completionSchema === undefined ? {} : { schema: completionSchema }),
+					},
+				}),
 		...(state.validation === undefined
 			? {}
 			: { validationPolicy: { guard: guardInfo(state.validation.guard), onFail: state.validation.onFail } }),
@@ -1482,8 +1486,11 @@ function runtimeFacts(
 			const stateId = record.source.actionUid.state;
 			const facts = byState.get(stateId) ?? {};
 			facts.completionPublication = {
-				seqId: record.seqId, timestamp: record.timestamp,
-				endpoint: record.endpoint, event: record.event, payload: record.payload,
+				seqId: record.seqId,
+				timestamp: record.timestamp,
+				endpoint: record.endpoint,
+				event: record.event,
+				payload: record.payload,
 			};
 			byState.set(stateId, facts);
 			continue;
@@ -1544,11 +1551,14 @@ function runtimeFacts(
 			byState.set(stateId, facts);
 			continue;
 		}
-		if ((record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") && !skippedRecords.has(record)) {
+		if (
+			(record.type === "actor_call_resolved" || record.type === "actor_batch_call_resolved") &&
+			!skippedRecords.has(record)
+		) {
 			const facts = byState.get(record.callerState) ?? {};
 			facts.completedAt = record.timestamp;
 			facts.completedEvent = {
-				type: record.type === "actor_call_resolved" ? record.replyEvent ?? "ACTOR_REPLY" : "ACTOR_REPLY",
+				type: record.type === "actor_call_resolved" ? (record.replyEvent ?? "ACTOR_REPLY") : "ACTOR_REPLY",
 				...(record.type === "actor_call_resolved" && Object.hasOwn(record, "output") ? { output: record.output } : {}),
 			};
 			byState.set(record.callerState, facts);

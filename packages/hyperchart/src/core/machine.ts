@@ -343,13 +343,7 @@ export type CancelEffect = Readonly<{
 	actionUid: ActionUID;
 }>;
 
-export type Effect =
-	| ActionEffect
-	| DurableRecordsEffect
-	| ActorEffect
-	| ValidateEffect
-	| TimerEffect
-	| CancelEffect;
+export type Effect = ActionEffect | DurableRecordsEffect | ActorEffect | ValidateEffect | TimerEffect | CancelEffect;
 
 // A record the machine wants to append, before global numbering and branch provenance. Building
 // an append is pure; only the serialized storage writer may stamp durable coordinates.
@@ -1291,12 +1285,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			if (state.projection.completions[pending.definition.to] !== undefined) {
 				return createMachineOutput(state, dueCompletionLifecycleFailures(state));
 			}
-			const effect = completionNotifyInvocation(
-				state,
-				pending.actionUid,
-				pending.definition,
-				event.effectId,
-			);
+			const effect = completionNotifyInvocation(state, pending.actionUid, pending.definition, event.effectId);
 			return createMachineOutput(state, [
 				{
 					kind: "append",
@@ -1515,14 +1504,7 @@ function dueCompletionNotifications(state: MachineState): CompletionNotifyEffect
 		// first pending notifier deterministically owns this machine-lifetime
 		// reservation until its append is acknowledged or the action is canceled.
 		reserved.add(pending.definition.to);
-		return [
-			completionNotifyInvocation(
-				state,
-				pending.actionUid,
-				pending.definition,
-				pendingEffectId(pending),
-			),
-		];
+		return [completionNotifyInvocation(state, pending.actionUid, pending.definition, pendingEffectId(pending))];
 	});
 }
 
@@ -2427,9 +2409,7 @@ export function renderRead(
 	// A validator reading its own output needs provisional bytes, not a stale accepted pin.
 	const pin = producerState === selfActionArtifactsState ? undefined : state.projection.artifactPins[rendered.path];
 	if (actor === undefined && actorContextForState(state.ast, producerState) !== undefined && pin === undefined) {
-		throw new Error(
-			`Read in state ${stateId}: actor artifact '${rendered.path}' has no accepted durable pin`,
-		);
+		throw new Error(`Read in state ${stateId}: actor artifact '${rendered.path}' has no accepted durable pin`);
 	}
 	return {
 		...rendered,

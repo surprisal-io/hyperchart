@@ -608,7 +608,6 @@ describe("typed explicit actor protocols", () => {
 		expect(typedBatch.chart(body).states.reviews.event).toBe("READ");
 		expect(typedBatch.result("reviews")).toEqual({ kind: "result", state: "reviews" });
 
-
 		// @ts-expect-error callBatch produces an array; array indexes/fields are not result selectors
 		typedBatch.result("reviews", "0.text");
 		// @ts-expect-error structured array results require explicit json() in templates
@@ -773,9 +772,9 @@ describe("typed explicit actor protocols", () => {
 		>();
 		const done = typed.completionRef("done");
 		expect(done).toEqual({ kind: "completionRef", name: "done" });
-		expect(
-			notify({ to: done, event: "DONE", payload: { id: "x", count: 1 }, target: "settle" }).transitions,
-		).toEqual({ NOTIFIED: "settle" });
+		expect(notify({ to: done, event: "DONE", payload: { id: "x", count: 1 }, target: "settle" }).transitions).toEqual({
+			NOTIFIED: "settle",
+		});
 		expect(waitFor({ from: done, event: "DONE", target: "complete" }).transitions).toEqual({ DONE: "complete" });
 		expect(completion({ event: "DONE", schema: z.object({ id: z.string(), count: z.number() }).strict() }).event).toBe(
 			"DONE",

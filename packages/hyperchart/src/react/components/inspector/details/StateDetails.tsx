@@ -421,19 +421,27 @@ export function StateDetails({
 					<div className="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-2">
 						<div className="flex flex-wrap items-center gap-1.5 text-[10px]">
 							<span className="text-[var(--text-muted)]">endpoint</span>
-							<code className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[var(--hc-amber-text)]">{state.completion.endpoint}</code>
+							<code className="rounded border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[var(--hc-amber-text)]">
+								{state.completion.endpoint}
+							</code>
 							<span className="text-[var(--text-muted)]">event</span>
-							<code className="rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[var(--hc-cyan-text)]">{state.completion.event}</code>
+							<code className="rounded border border-cyan-500/30 bg-cyan-500/10 px-1.5 py-0.5 text-[var(--hc-cyan-text)]">
+								{state.completion.event}
+							</code>
 						</div>
 						{state.completion.schema !== undefined && (
 							<div>
-								<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--hc-green-text)]">event payload shape</div>
+								<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--hc-green-text)]">
+									event payload shape
+								</div>
 								<TypeBlock schema={{ schema: state.completion.schema }} name={`${state.completion.event} payload`} />
 							</div>
 						)}
 						{state.type === "notify" && state.completion.payload !== undefined && (
 							<div>
-								<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">authored payload</div>
+								<div className="mb-1 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+									authored payload
+								</div>
 								<TransitionBindingJson
 									state={state}
 									allStates={allStates}

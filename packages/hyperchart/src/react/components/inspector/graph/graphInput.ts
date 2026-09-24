@@ -38,9 +38,18 @@ function stateTransitionEdges(run: HyperchartRunInfo, visibleIds: Set<string>): 
 		}
 		if (state.type === "notify" && state.completion !== undefined) {
 			for (const wait of waits) {
-				if (wait.completion?.endpoint !== state.completion.endpoint || wait.completion.event !== state.completion.event || wait.id === state.id) continue;
+				if (
+					wait.completion?.endpoint !== state.completion.endpoint ||
+					wait.completion.event !== state.completion.event ||
+					wait.id === state.id
+				) {
+					continue;
+				}
 				grouped.set(`${state.id}\u0000${wait.id}\u0000completion`, {
-					source: state.id, target: wait.id, labels: [state.completion.event], kind: "completion",
+					source: state.id,
+					target: wait.id,
+					labels: [state.completion.event],
+					kind: "completion",
 				});
 			}
 		}

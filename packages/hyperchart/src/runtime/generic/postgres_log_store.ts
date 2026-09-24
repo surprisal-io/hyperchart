@@ -209,7 +209,9 @@ export function decodePostgresJournalRow(row: PostgresJournalRow): StorageEntry 
 
 function journalNumber(value: string | number): number {
 	const number = pgNumber(value);
-	if (!Number.isSafeInteger(number)) throw new Error("Journal coordinate is not a safe integer");
+	if (!Number.isSafeInteger(number)) {
+		throw new Error("Journal coordinate is not a safe integer");
+	}
 	return number;
 }
 

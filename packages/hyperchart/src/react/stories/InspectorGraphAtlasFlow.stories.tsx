@@ -12,7 +12,8 @@ type Story = StoryObj;
 function card(kind: HyperchartStateType): Story {
 	return { render: () => <TypeBoard kind={kind} /> };
 }
-export const Map = card("map");
+const mapStory = card("map");
+export { mapStory as Map };
 export const Parallel = card("parallel");
 export const Compound = card("compound");
 export const Region = card("region");

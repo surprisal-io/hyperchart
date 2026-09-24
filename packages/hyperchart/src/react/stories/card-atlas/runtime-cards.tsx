@@ -13,13 +13,31 @@ function ExecutedCard({ title, stateId, load }: { title: string; stateId: string
 	useEffect(() => {
 		let active = true;
 		void load().then(
-			(value) => { if (active) setRun(value); },
-			(reason) => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); },
+			(value) => {
+				if (active) {
+					setRun(value);
+				}
+			},
+			(reason) => {
+				if (active) {
+					setError(reason instanceof Error ? reason.message : String(reason));
+				}
+			},
 		);
-		return () => { active = false; };
+		return () => {
+			active = false;
+		};
 	}, [load]);
-	if (error !== undefined) return <div role="alert">{title}: {error}</div>;
-	if (run === undefined) return <div role="status">Executing and replay-validating {title}…</div>;
+	if (error !== undefined) {
+		return (
+			<div role="alert">
+				{title}: {error}
+			</div>
+		);
+	}
+	if (run === undefined) {
+		return <div role="status">Executing and replay-validating {title}…</div>;
+	}
 	return <GraphTile title={title} run={run} visibleStateIds={[stateId]} height="h-[300px]" />;
 }
 
@@ -36,26 +54,34 @@ const functionFailed = () => captureAtlasStatus("function-failed");
 export function AtlasRuntimeCards({ kind }: { kind: HyperchartStateType }) {
 	switch (kind) {
 		case "notify":
-			return <>
-				<ExecutedCard title="notify · validating" stateId="@worker.publish" load={notifyInFlight} />
-				<ExecutedCard title="notify · published" stateId="@worker.publish" load={notifyPublished} />
-				<ExecutedCard title="notify · failed delivery" stateId="@worker.publish" load={notifyFailed} />
-			</>;
+			return (
+				<>
+					<ExecutedCard title="notify · validating" stateId="@worker.publish" load={notifyInFlight} />
+					<ExecutedCard title="notify · published" stateId="@worker.publish" load={notifyPublished} />
+					<ExecutedCard title="notify · failed delivery" stateId="@worker.publish" load={notifyFailed} />
+				</>
+			);
 		case "waitFor":
-			return <>
-				<ExecutedCard title="waitFor · waiting" stateId="wait" load={waitActive} />
-				<ExecutedCard title="waitFor · consumed" stateId="wait" load={waitDone} />
-			</>;
+			return (
+				<>
+					<ExecutedCard title="waitFor · waiting" stateId="wait" load={waitActive} />
+					<ExecutedCard title="waitFor · consumed" stateId="wait" load={waitDone} />
+				</>
+			);
 		case "call":
 			return <ExecutedCard title="call · resolved reply" stateId="request" load={captureSingletonCallStory} />;
 		case "callBatch":
-			return <ExecutedCard title="callBatch · completed ordered result" stateId="batch" load={captureCallBatchResultStory} />;
+			return (
+				<ExecutedCard title="callBatch · completed ordered result" stateId="batch" load={captureCallBatchResultStory} />
+			);
 		case "tsImport":
-			return <>
-				<ExecutedCard title="Function action · running" stateId="execute" load={functionRunning} />
-				<ExecutedCard title="Function action · completed" stateId="score" load={captureExecutionBoardRun} />
-				<ExecutedCard title="Function action · failed" stateId="execute" load={functionFailed} />
-			</>;
+			return (
+				<>
+					<ExecutedCard title="Function action · running" stateId="execute" load={functionRunning} />
+					<ExecutedCard title="Function action · completed" stateId="score" load={captureExecutionBoardRun} />
+					<ExecutedCard title="Function action · failed" stateId="execute" load={functionFailed} />
+				</>
+			);
 		case "compound":
 			return <ExecutedCard title="Compound scope · completed" stateId="scope" load={compoundDone} />;
 		default:

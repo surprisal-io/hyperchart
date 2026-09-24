@@ -808,8 +808,7 @@ function projectionMatchesAst(projection: BranchProjection, ast: ChartAst): bool
 				wait.action.from === endpoint &&
 				matchesDeclaredUid(completion.consumed.actionUid, wait.action.uid) &&
 				completion.consumed.seqId <= projection.seqId &&
-				(projection.stateVisits[actionUidKey(completion.consumed.actionUid)] ?? 0) >=
-					completion.consumed.visitId
+				(projection.stateVisits[actionUidKey(completion.consumed.actionUid)] ?? 0) >= completion.consumed.visitId
 			);
 		})
 	) {

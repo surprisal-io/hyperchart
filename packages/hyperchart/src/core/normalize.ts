@@ -224,9 +224,7 @@ function toCompletionDeclarations(
 		return {};
 	}
 	if (!isRecord(input)) {
-		diagnostics.push(
-			diagnostic("INVALID_COMPLETIONS", "Chart completions must be an object.", "/completions", source),
-		);
+		diagnostics.push(diagnostic("INVALID_COMPLETIONS", "Chart completions must be an object.", "/completions", source));
 		return {};
 	}
 	const completions: Record<string, CompletionDeclarationAst> = {};
@@ -247,7 +245,12 @@ function toCompletionDeclarations(
 		const event = typeof raw.event === "string" && raw.event.length > 0 ? raw.event : undefined;
 		if (event === undefined) {
 			diagnostics.push(
-				diagnostic("INVALID_COMPLETION_EVENT", "Completion event must be a non-empty string.", `${pointer}/event`, source),
+				diagnostic(
+					"INVALID_COMPLETION_EVENT",
+					"Completion event must be a non-empty string.",
+					`${pointer}/event`,
+					source,
+				),
 			);
 		} else if (isReservedSystemEvent(event)) {
 			diagnostics.push(
@@ -953,12 +956,7 @@ function toActorDeclarationAst(
 			const after = toAfter(raw.after, `${pointer}/after`, diagnostics, source);
 			if (action.kind === "notify" && (emits !== undefined || after !== undefined)) {
 				diagnostics.push(
-					diagnostic(
-						"INVALID_NOTIFY_OPTION",
-						"notify() action states cannot declare emit or after.",
-						pointer,
-						source,
-					),
+					diagnostic("INVALID_NOTIFY_OPTION", "notify() action states cannot declare emit or after.", pointer, source),
 				);
 			}
 			for (const legacy of ["validate", "onReject", "retries", "onReenter"] as const) {
@@ -1496,9 +1494,7 @@ function validateActorIsolation(
 				} else if (
 					producer.kind === "callBatch"
 						? ref.state === stateId || dominators.get(stateId)?.has(ref.state) !== true
-						: use.allowSelfResult === true &&
-							ref.state !== stateId &&
-							dominators.get(stateId)?.has(ref.state) !== true
+						: use.allowSelfResult === true && ref.state !== stateId && dominators.get(stateId)?.has(ref.state) !== true
 				) {
 					diagnostics.push(
 						diagnostic(
@@ -2597,8 +2593,7 @@ function validateTerminalArtifactRef(
 		);
 	}
 	const producer = states[read.state];
-	const actionProducer =
-		producer?.kind === "state" ? producer : externallyReadableActorActionState(actors, read.state);
+	const actionProducer = producer?.kind === "state" ? producer : externallyReadableActorActionState(actors, read.state);
 	const artifacts = actionProducer === undefined ? undefined : declaredArtifactsForState(actionProducer);
 	if (artifacts === undefined || Object.keys(artifacts).length === 0) {
 		diagnostics.push(
@@ -2945,7 +2940,11 @@ function validateTargets(
 						source,
 					),
 				);
-			} else if (node.over.kind === "result" && states[node.over.state]?.kind === "callBatch" && node.over.path !== undefined) {
+			} else if (
+				node.over.kind === "result" &&
+				states[node.over.state]?.kind === "callBatch" &&
+				node.over.path !== undefined
+			) {
 				diagnostics.push(
 					diagnostic(
 						"UNKNOWN_INPUT_RESULT",
@@ -4833,9 +4832,7 @@ function toStateActionAst(
 				);
 			}
 			if (!Object.hasOwn(input, "payload")) {
-				diagnostics.push(
-					diagnostic("INVALID_NOTIFY_PAYLOAD", "notify() requires payload.", `${path}/payload`, source),
-				);
+				diagnostics.push(diagnostic("INVALID_NOTIFY_PAYLOAD", "notify() requires payload.", `${path}/payload`, source));
 			}
 			const payload = toValueAst(input.payload, `${path}/payload`, diagnostics, source);
 			const uid: ActionUID = { chart: chartId, state: statePath, action: "notify" };

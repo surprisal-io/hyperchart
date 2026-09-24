@@ -713,11 +713,17 @@ export function RuntimeSection({
 				)?.actorOccurrence?.occurrencePath;
 	const historyOccurrence = actorOccurrence?.occurrencePath ?? state.actorInternal?.occurrencePath ?? linkedOccurrence;
 	const historyLogicalOccurrence = actorOccurrence?.logicalPath ?? state.actorInternal?.logicalOccurrencePath;
-	const acceptedWait = state.type === "waitFor"
-		? [...(state.visitHistory ?? [])].reverse().find((visit) =>
-			visit.invocation.kind === "waitFor" && visit.completedEvent === state.completion?.event && visit.completedOutput !== undefined
-		)
-		: undefined;
+	const acceptedWait =
+		state.type === "waitFor"
+			? [...(state.visitHistory ?? [])]
+					.reverse()
+					.find(
+						(visit) =>
+							visit.invocation.kind === "waitFor" &&
+							visit.completedEvent === state.completion?.event &&
+							visit.completedOutput !== undefined,
+					)
+			: undefined;
 	return (
 		<>
 			<Section
@@ -787,8 +793,13 @@ export function RuntimeSection({
 					<div className="space-y-2 rounded-lg border border-cyan-500/25 bg-cyan-500/5 p-2 text-[11px]">
 						<div className="font-semibold text-[var(--hc-cyan-text)]">Published event</div>
 						<div className="flex flex-wrap items-center gap-2">
-							<code className="font-mono text-[var(--text-primary)]">{state.completionPublication.endpoint}.{state.completionPublication.event}</code>
-							<span className="text-[var(--text-muted)]">journal #{state.completionPublication.seqId} · {formatHyperchartDateTime(state.completionPublication.timestamp)}</span>
+							<code className="font-mono text-[var(--text-primary)]">
+								{state.completionPublication.endpoint}.{state.completionPublication.event}
+							</code>
+							<span className="text-[var(--text-muted)]">
+								journal #{state.completionPublication.seqId} ·{" "}
+								{formatHyperchartDateTime(state.completionPublication.timestamp)}
+							</span>
 						</div>
 						<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">sent payload</div>
 						<JsonBlock value={state.completionPublication.payload} previewLines={9} />
@@ -797,7 +808,9 @@ export function RuntimeSection({
 				{acceptedWait !== undefined && (
 					<div className="space-y-2 rounded-lg border border-emerald-500/25 bg-emerald-500/5 p-2 text-[11px]">
 						<div className="font-semibold text-[var(--hc-green-text)]">Received event</div>
-						<code className="font-mono text-[var(--text-primary)]">{state.completion?.endpoint}.{acceptedWait.completedEvent}</code>
+						<code className="font-mono text-[var(--text-primary)]">
+							{state.completion?.endpoint}.{acceptedWait.completedEvent}
+						</code>
 						<div className="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">accepted payload</div>
 						<JsonBlock value={acceptedWait.completedOutput} previewLines={9} />
 					</div>

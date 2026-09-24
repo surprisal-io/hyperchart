@@ -571,7 +571,15 @@ describe("pi executor helpers", () => {
 			branchId: "main",
 			modelRuntime: {} as never,
 		});
-		const internal = executor as unknown as { run: Function; generations: { next(key: string): number } };
+		const internal = executor as unknown as {
+			run(
+				effect: AgentEffect,
+				emit: (outcome: AgentOutcome) => void,
+				options: typeof runOptions,
+				generation: number,
+			): Promise<void>;
+			generations: { next(key: string): number };
+		};
 		const generation = internal.generations.next(actionUidKey(effect().actionUid));
 		await expect(
 			internal.run(

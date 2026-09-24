@@ -374,7 +374,9 @@ describe("static actor pools", () => {
 				(effect): effect is Extract<Effect, { kind: "tsImport" }> =>
 					effect.kind === "tsImport" && effect.actionUid.state === "consume",
 			);
-			if (consume === undefined) await new Promise<void>((resolve) => setImmediate(resolve));
+			if (consume === undefined) {
+				await new Promise<void>((resolve) => setImmediate(resolve));
+			}
 		}
 		assert(consume !== undefined, "missing downstream tsAction effect");
 		expect(consume.env?.REVIEWS).toBe(JSON.stringify([{ id: 0 }, { id: 1 }, { id: 2 }]));
