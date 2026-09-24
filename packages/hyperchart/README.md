@@ -86,3 +86,10 @@ Historical inspector hosts can pass `snapshot: { branchId, headSeqId }` to
 unanswered user gate. See [historical branch inspection](../../docs/api/react.md#inspecting-a-historical-branch-boundary).
 
 Runs are addressed only by `runId`. Host storage config declares backend, root and `run-id` or `sha256` layout; existing literal framework and hashed AutoDiscovery layouts remain unchanged. See the [canonical runtime identity contract](../../docs/api/runtime.md#run-identity-and-storage-scope). Moves only drain and change the head. External schedulers can recover ordinary durable unfinished work using controller-owned `canStartBranch()` fences and `onBranchChange()` lifecycle wakeups, including readiness changes without journal writes. Failed cleanup remains non-reusable and preserves its cause. See the [runner lifecycle contract](../../docs/api/runtime.md).
+
+## PostgreSQL journal consumers
+
+`readPostgresJournalPage` from `@surprisal/hyperchart/runtime` provides bounded,
+sequence-ordered pages of original records and branch mutations across a run.
+Applications own their consumer cursors; Hyperchart owns SQL and decoding.
+See [Runtime API](../../docs/api/runtime.md#physical-postgresql-journal-pages).

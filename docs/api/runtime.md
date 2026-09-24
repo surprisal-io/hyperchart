@@ -268,6 +268,25 @@ A cursor is valid only for the exact snapshot and typed subject that minted it; 
 
 Storage returns AST-free durable record groups for state visits, map visits, actor generations, and actor message batches. State/map groups include their one-based ancestry ordinal for presentation. It never imports the chart AST, projector, or host presentation models. The host adapter performs AST-aware mapping in the inspector layer. Actor message history intentionally stays grouped by the durable enqueue transaction: one `HyperchartActorMessageBatchInfo` may contain several authored-order messages, and chunk/window caps count batch rows.
 
+### Physical PostgreSQL journal pages
+
+`readPostgresJournalPage(db, { runId, afterSeq, limit? })` from
+`@surprisal/hyperchart/runtime` reads a single physical journal page in ascending
+per-run sequence order. Unlike branch history, it includes records from **all**
+branches plus `branch/create` and `branch/move` mutations, returning original
+`StorageEntry` values. `db` supplies `query()` (a PostgreSQL pool or client).
+
+`afterSeq` is an exclusive nonnegative safe-integer cursor; `limit` is 1–500
+(default 500). The function issues one query, rejects sequence gaps and unsafe
+coordinates, and returns an empty array at the current tail. Pages are
+read-committed, not snapshot-stable. Callers own scheduling and durable consumer
+cursors. This API does not write records, acquire writer ownership, subscribe to
+notifications, or perform projection replay.
+
+For application-owned SQL joins, `decodePostgresJournalRow(row)` and
+`PostgresJournalRow` expose the same decoder used by the page reader. Input rows
+must come from the trusted Hyperchart journal; payloads are not revalidated.
+
 ### Lazy inspector history
 
 `hyperchartRunOverviewFromRunId()` asks the internal execution service for current graph/control state and returns a captured `HistorySnapshot`, the first keyset branch page, and an overview run with no elapsed `visitHistory`, map history, actor generation/message history, record tree, transcript arrays, queued mailbox `entries`, per-generation processed messages, or pool-worker message/visit histories. It retains only counts, mailbox head/current message, and current worker/session summaries. `createRunInspectorDataSource()` exposes serializable `readStateVisits`, `readMapVisits`, `readActorGenerations`, `readActorMessages`, `readRecords`, `cursorAt`, and `readVisitSession` requests bound to one run.

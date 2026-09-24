@@ -123,7 +123,7 @@ export type PgClientLike = {
 	on(event: "error", listener: (error: Error) => void): unknown;
 };
 
-type JournalSqlRow = {
+export type PostgresJournalRow = {
 	seq: string | number;
 	kind: "record" | "branch_create" | "branch_move";
 	branch_id: string;
@@ -134,6 +134,84 @@ type JournalSqlRow = {
 	metadata: unknown;
 	committed_at_ms: string | number;
 };
+
+/** Bounded physical journal page, independent of branch ancestry. */
+export type PostgresJournalPageInput = Readonly<{
+	runId: string;
+	afterSeq: number;
+	/** 1..500, default 500. */
+	limit?: number;
+}>;
+
+/** Read committed entries in global per-run sequence order, including branch mutations. */
+export async function readPostgresJournalPage(
+	db: Pick<PgClientLike, "query">,
+	input: PostgresJournalPageInput,
+): Promise<readonly StorageEntry[]> {
+	const limit = input.limit ?? 500;
+	if (!Number.isSafeInteger(input.afterSeq) || input.afterSeq < 0) {
+		throw new Error("Journal afterSeq must be a nonnegative safe integer");
+	}
+	if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+		throw new Error("Journal page limit must be an integer between 1 and 500");
+	}
+	const { rows } = await db.query(
+		`SELECT seq, kind, branch_id, parent_id, head_seq_id,
+          record_type, payload, metadata, committed_at_ms
+     FROM ${JOURNAL_TABLE}
+    WHERE run_id = $1 AND seq > $2
+    ORDER BY seq LIMIT $3`,
+		[input.runId, input.afterSeq, limit],
+	);
+	let expected = input.afterSeq + 1;
+	return rows.map((row) => {
+		const entry = decodePostgresJournalRow(row as PostgresJournalRow);
+		if (entry.seqId !== expected) {
+			throw new Error(
+				`Hyperchart journal '${input.runId}' has a sequence gap: expected ${expected}, got ${entry.seqId}`,
+			);
+		}
+		expected += 1;
+		return entry;
+	});
+}
+
+/** Decode a trusted journal row, for callers that join it to application-owned tables. */
+export function decodePostgresJournalRow(row: PostgresJournalRow): StorageEntry {
+	switch (row.kind) {
+		case "record":
+			return decodeRecordRow(row);
+		case "branch_create":
+			return {
+				kind: "branch",
+				op: "create",
+				seqId: journalNumber(row.seq),
+				branchId: row.branch_id,
+				headSeqId: row.head_seq_id === null ? null : journalNumber(row.head_seq_id),
+				committedAt: journalNumber(row.committed_at_ms),
+				...(row.metadata === null ? {} : { metadata: row.metadata as BranchMetadata }),
+			};
+		case "branch_move":
+			return {
+				kind: "branch",
+				op: "move",
+				seqId: journalNumber(row.seq),
+				branchId: row.branch_id,
+				headSeqId: row.head_seq_id === null ? null : journalNumber(row.head_seq_id),
+				committedAt: journalNumber(row.committed_at_ms),
+			};
+		default: {
+			const unexpected: never = row.kind;
+			throw new Error(`Unknown journal row kind: ${String(unexpected)}`);
+		}
+	}
+}
+
+function journalNumber(value: string | number): number {
+	const number = pgNumber(value);
+	if (!Number.isSafeInteger(number)) throw new Error("Journal coordinate is not a safe integer");
+	return number;
+}
 
 type SharedPgJournal = {
 	client: PgClientLike;
@@ -1071,7 +1149,7 @@ async function findRecordDirect(
 		`SELECT seq, kind, branch_id, parent_id, head_seq_id, record_type, payload, metadata, committed_at_ms FROM ${JOURNAL_TABLE} WHERE run_id = $1 AND seq = $2 AND kind = 'record'`,
 		[runId, seqId],
 	);
-	return rows[0] === undefined ? undefined : decodeRecordRow(rows[0] as JournalSqlRow);
+	return rows[0] === undefined ? undefined : decodeRecordRow(rows[0] as PostgresJournalRow);
 }
 async function materializeHistoryToHeadDirect(
 	client: PgClientLike,
@@ -1103,7 +1181,7 @@ async function materializeHistoryToHeadDirect(
 	if (rows.length === 0) {
 		throw new Error(`No durable log record with seqId ${headSeqId}`);
 	}
-	return rows.map((row) => decodeRecordRow(row as JournalSqlRow));
+	return rows.map((row) => decodeRecordRow(row as PostgresJournalRow));
 }
 async function readForwardReplayPageDirect(
 	client: PgClientLike,
@@ -1140,7 +1218,7 @@ async function readForwardReplayPageDirect(
 	) {
 		throw new Error(`No durable log record with seqId ${input.targetHeadSeqId}`);
 	}
-	const page = rows.slice(0, 500).map((row) => decodeRecordRow(row as JournalSqlRow));
+	const page = rows.slice(0, 500).map((row) => decodeRecordRow(row as PostgresJournalRow));
 	return { records: page, ...(rows.length > 500 ? { nextAfterSeqId: page.at(-1)!.seqId } : {}) };
 }
 
@@ -1269,12 +1347,12 @@ async function queryRows(
 		throw error;
 	}
 }
-function decodeRecordRow(row: JournalSqlRow): DurableLogRecord {
+function decodeRecordRow(row: PostgresJournalRow): DurableLogRecord {
 	return {
 		...(row.payload as Record<string, unknown>),
 		type: row.record_type!,
-		seqId: pgNumber(row.seq),
-		parentId: row.parent_id === null ? null : pgNumber(row.parent_id),
+		seqId: journalNumber(row.seq),
+		parentId: row.parent_id === null ? null : journalNumber(row.parent_id),
 		branchId: row.branch_id,
 	} as unknown as DurableLogRecord;
 }

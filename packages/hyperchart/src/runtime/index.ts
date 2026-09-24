@@ -41,10 +41,14 @@ export {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
 	PostgresLogStore,
+	readPostgresJournalPage,
+	decodePostgresJournalRow,
 	supportsSqlTransactions,
 } from "./generic/postgres_log_store.js";
 export type {
 	OpenPostgresLogStoreOptions,
+	PostgresJournalRow,
+	PostgresJournalPageInput,
 	PostgresLogAccess,
 	PostgresRunTransaction,
 	PostgresForkAndAppendInput,

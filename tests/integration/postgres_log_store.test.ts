@@ -31,6 +31,7 @@ import {
 	JOURNAL_CHANNEL,
 	JOURNAL_TABLE,
 	PostgresLogStore,
+	readPostgresJournalPage,
 	CHECKPOINT_TABLE,
 	RUN_META_TABLE,
 } from "../../packages/hyperchart/src/runtime/generic/postgres_log_store.js";
@@ -219,6 +220,31 @@ afterAll(async () => {
 });
 
 describePg("PostgresLogStore", () => {
+	it("pages the physical journal across branches and retains moves", async () => {
+		const runId = newRunId();
+		const store = await openWriter(runId);
+		await store.initializeRootBranch();
+		const [args] = await store.appendDrafts([argsDraft()]);
+		await store.createBranch("fork", args!.seqId);
+		const [invoked] = await store.forBranch("fork").appendDrafts([invokeDraft()]);
+		await store.moveBranch("fork", args!.seqId);
+		const { Client } = await import("pg");
+		const client = new Client({ connectionString: dsn });
+		await client.connect();
+		try {
+			const first = await readPostgresJournalPage(client, { runId, afterSeq: 0, limit: 3 });
+			const second = await readPostgresJournalPage(client, { runId, afterSeq: first.at(-1)!.seqId, limit: 3 });
+			expect(first.map((entry) => entry.seqId)).toEqual([1, 2, 3]);
+			expect(second).toEqual([
+				invoked,
+				expect.objectContaining({ kind: "branch", op: "move", branchId: "fork", headSeqId: args!.seqId }),
+			]);
+			expect(await readPostgresJournalPage(client, { runId, afterSeq: second.at(-1)!.seqId })).toEqual([]);
+		} finally {
+			await client.end();
+		}
+	});
+
 	it("honors an explicit durable run id distinct from the directory basename", async () => {
 		const runId = newRunId();
 		const storage: RunStorage = { kind: "postgres", dsn: dsn as string, rootDir: tmpdir(), layout: "sha256" };
