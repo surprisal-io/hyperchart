@@ -35,6 +35,24 @@ import {
 } from "@surprisal/hyperchart/runtime";
 ```
 
+## Agent recovery backoff
+
+The generic `ChartRuntime` delays **durable agent retries** after transient provider failures
+(e.g. in-flight capacity exhaustion, HTTP 429, 502, 503 or 504). Provider errors
+that indicate depleted credits/quota and unknown errors remain non-retryable. The
+chart's `onFail` policy still determines the maximum nudge/restart attempts and
+records each decision in the journal; the runtime does not retry requests outside
+that policy. The default is two nudges and one restart.
+
+Retries use exponential backoff (30 seconds initially, doubling up to four minutes),
+respect a numeric `Retry-After` when included in the reported error as a minimum,
+and add jitter.
+The delay is recomputed from the durable retry fact when a branch resumes. Stopping
+or cancelling a branch cancels a pending delay. This retries the **agent action**,
+not just the failed HTTP request: tools may have run before the failure and may be
+invoked again. Actions with side effects must therefore be idempotent or have their
+own deduplication.
+
 ## Embedded Pi workers
 
 `PiAgentExecutor` and `PiExecutorOptions` are exported from

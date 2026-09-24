@@ -480,6 +480,130 @@ describe("ChartRuntime", () => {
 		expect(await runtime.eventsQueue()[Symbol.asyncIterator]().next()).toEqual({ done: true, value: undefined });
 	});
 
+	it("classifies transient failures from any agent executor before the durable recovery decision", async () => {
+		const ast = linearChart();
+		const state = ast.states.work;
+		if (state?.kind !== "state" || state.action.kind !== "agent") {
+			throw new Error("expected work agent");
+		}
+		const runtime = new ChartRuntime({
+			ast,
+			branchId: "main",
+			logStore: new MemoryLogStore(),
+			agentExecutor: {
+				start: (_effect, emit) =>
+					emit({
+						kind: "failed",
+						failure: { kind: "runtime", retryable: false, message: "HTTP 429: Too many requests" },
+					}),
+				cancel: async () => undefined,
+				dispose: async () => undefined,
+			},
+			workDir: process.cwd(),
+			chartDir: process.cwd(),
+		});
+		await runtime.runEffects([
+			{
+				kind: "agent",
+				id: "first",
+				actionUid: state.action.uid,
+				action: state.action,
+				sessionId: "session",
+				events: ["DONE"],
+			},
+		]);
+		const event = await withTimeout(runtime.eventsQueue()[Symbol.asyncIterator]().next());
+		expect(event.value).toMatchObject({
+			kind: "agent",
+			outcome: { kind: "failed", failure: { kind: "runtime", retryable: true } },
+		});
+		await runtime.dispose();
+	});
+
+	it("delays transient provider retries and cancels pending retries on chart cancellation", async () => {
+		vi.useFakeTimers();
+		const ast = linearChart();
+		const state = ast.states.work;
+		if (state?.kind !== "state" || state.action.kind !== "agent") {
+			throw new Error("expected work agent");
+		}
+		const executor = new FakeAgentExecutor();
+		const runtime = new ChartRuntime({
+			ast,
+			branchId: "main",
+			logStore: new MemoryLogStore(),
+			agentExecutor: executor,
+			workDir: process.cwd(),
+			chartDir: process.cwd(),
+		});
+		const retry = {
+			kind: "agent" as const,
+			id: "retry-1",
+			actionUid: state.action.uid,
+			action: state.action,
+			sessionId: "session",
+			events: ["DONE"],
+			recovery: {
+				mode: "nudge" as const,
+				scope: "general" as const,
+				nudgeAttempt: 1,
+				restartAttempt: 0,
+				failure: { kind: "provider" as const, message: "HTTP 429" },
+			},
+		};
+		try {
+			await runtime.runEffects([retry]);
+			await vi.advanceTimersByTimeAsync(29_999);
+			expect(executor.starts).toHaveLength(0);
+			await vi.advanceTimersByTimeAsync(30_001);
+			expect(executor.starts).toHaveLength(1);
+
+			await runtime.runEffects([{ ...retry, id: "retry-2" }]);
+			await runtime.runEffects([{ kind: "cancel", id: "cancel-retry-2", actionUid: retry.actionUid }]);
+			await vi.advanceTimersByTimeAsync(60_000);
+			expect(executor.starts).toHaveLength(1);
+			await runtime.dispose();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("drains a delayed provider retry without waiting for backoff", async () => {
+		const ast = linearChart();
+		const state = ast.states.work;
+		if (state?.kind !== "state" || state.action.kind !== "agent") {
+			throw new Error("expected work agent");
+		}
+		const executor = new FakeAgentExecutor();
+		const runtime = new ChartRuntime({
+			ast,
+			branchId: "main",
+			logStore: new MemoryLogStore(),
+			agentExecutor: executor,
+			workDir: process.cwd(),
+			chartDir: process.cwd(),
+		});
+		await runtime.runEffects([
+			{
+				kind: "agent",
+				id: "delayed",
+				actionUid: state.action.uid,
+				action: state.action,
+				sessionId: "session",
+				events: ["DONE"],
+				recovery: {
+					mode: "nudge",
+					scope: "general",
+					nudgeAttempt: 1,
+					restartAttempt: 0,
+					failure: { kind: "provider", message: 'HTTP 429: {"Retry-After":"120"}' },
+				},
+			},
+		]);
+		await withTimeout(runtime.dispose());
+		expect(executor.starts).toHaveLength(0);
+	});
+
 	it("runs every component cleanup and surfaces failures from idempotent disposal", async () => {
 		const calls: string[] = [];
 		const agentExecutor = {

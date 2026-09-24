@@ -7,6 +7,7 @@ import type { BranchId } from "../../core/durable_events.js";
 import type { SchemaRegistryLike as SchemaRegistry } from "../../core/schema_registry.js";
 import { checkArtifactFile, resolveArtifactValue } from "./artifacts.js";
 import { buildArtifactFeedbackPrompt, buildNudgePrompt, type ResolvedRead } from "./agent_prompts.js";
+import { isTransientProviderFailure } from "./agent_retry_backoff.js";
 import type { CompletionSink } from "./finish_protocol.js";
 import type { AgentDefinition, ThinkingLevel } from "./agent_definitions.js";
 
@@ -146,7 +147,7 @@ export type EvaluateAgentTurnOptions = {
 	sink: CompletionSink;
 	isCancelled(): boolean;
 	lastAssistantText(): string | undefined;
-	/** Latest provider/runtime error. Unknown provider failures are deliberately fail-fast. */
+	/** Latest provider/runtime error. Only transient capacity failures are retryable. */
 	lastAssistantError?(): string | undefined;
 	checkArtifacts(): Promise<string[]>;
 };
@@ -159,7 +160,10 @@ export async function evaluateAgentTurn(options: EvaluateAgentTurnOptions): Prom
 	if (options.sink.captured === undefined) {
 		const assistantError = options.lastAssistantError?.();
 		if (assistantError !== undefined) {
-			return { kind: "failed", failure: { kind: "provider", retryable: false, message: assistantError } };
+			return {
+				kind: "failed",
+				failure: { kind: "provider", retryable: isTransientProviderFailure(assistantError), message: assistantError },
+			};
 		}
 		return {
 			kind: "failed",

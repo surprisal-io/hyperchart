@@ -686,6 +686,19 @@ describe("pi executor helpers", () => {
 		});
 	});
 
+	it("classifies transient capacity failure for durable generic recovery", async () => {
+		const message = 'HTTP 402: {"metadata":{"reason":"in_flight_budget_exhausted"},"headers":{"Retry-After":"120"}}';
+		const outcome = await evaluateAgentTurn({
+			effect: effect(),
+			sink: { captured: undefined },
+			isCancelled: () => false,
+			lastAssistantText: () => undefined,
+			lastAssistantError: () => message,
+			checkArtifacts: async () => [],
+		});
+		expect(outcome).toEqual({ kind: "failed", failure: { kind: "provider", retryable: true, message } });
+	});
+
 	it("finds a successful finish call after the last user message in restored messages", async () => {
 		const currentEffect = effect();
 		const messages = [

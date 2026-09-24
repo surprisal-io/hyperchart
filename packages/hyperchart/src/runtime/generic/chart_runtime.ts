@@ -7,6 +7,7 @@ import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import type { AgentEffect, AgentOutcome, Effect, MachineEvent, RenderedArtifact } from "../../core/machine.js";
 import { ArtifactStore, hashFile } from "./artifact_store.js";
+import { agentRetryDelayMs, isTransientProviderFailure } from "./agent_retry_backoff.js";
 import { renderedArtifactPath } from "./artifacts.js";
 import type { SchemaCheck } from "./schema.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
@@ -44,6 +45,7 @@ export class ChartRuntime implements Runtime {
 	readonly branchId: BranchId;
 	private readonly queue: AsyncQueue<MachineEvent> = createAsyncQueue<MachineEvent>();
 	private readonly timers = new Map<string, NodeJS.Timeout>();
+	private readonly delayedAgents = new Map<string, { actionUid: AgentEffect["actionUid"]; cancel(): void }>();
 	private readonly scripts: ScriptRunner;
 	private readonly functions: FunctionRunner;
 	private readonly artifactStore?: ArtifactStore;
@@ -213,8 +215,12 @@ export class ChartRuntime implements Runtime {
 						break;
 					case "agent":
 						this.track(
-							this.restorePinnedReads(effect.reads)
-								.then(() => {
+							this.waitForAgentRetry(effect)
+								.then(async (ready) => {
+									if (!ready || this.quiescing) {
+										return;
+									}
+									await this.restorePinnedReads(effect.reads);
 									if (this.quiescing) {
 										return;
 									}
@@ -310,6 +316,15 @@ export class ChartRuntime implements Runtime {
 						break;
 					}
 					case "cancel": {
+						for (const delayed of this.delayedAgents.values()) {
+							if (
+								delayed.actionUid.chart === effect.actionUid.chart &&
+								delayed.actionUid.state === effect.actionUid.state &&
+								delayed.actionUid.action === effect.actionUid.action
+							) {
+								delayed.cancel();
+							}
+						}
 						const cancellations = [
 							this.options.agentExecutor.cancel(effect.actionUid),
 							this.scripts.cancel(effect.actionUid),
@@ -357,6 +372,9 @@ export class ChartRuntime implements Runtime {
 			return;
 		}
 		this.quiescing = true;
+		for (const delayed of this.delayedAgents.values()) {
+			delayed.cancel();
+		}
 		for (const timer of this.timers.values()) {
 			clearTimeout(timer);
 		}
@@ -427,12 +445,38 @@ export class ChartRuntime implements Runtime {
 		this.queue.send(event);
 	}
 
+	private waitForAgentRetry(effect: AgentEffect): Promise<boolean> {
+		const delayMs = agentRetryDelayMs(effect);
+		if (this.quiescing) {
+			return Promise.resolve(false);
+		}
+		if (delayMs === 0) {
+			return Promise.resolve(true);
+		}
+		return new Promise((resolve) => {
+			const finish = (ready: boolean) => {
+				clearTimeout(timer);
+				this.delayedAgents.delete(effect.id);
+				resolve(ready);
+			};
+			const timer = setTimeout(() => finish(true), delayMs);
+			this.delayedAgents.set(effect.id, { actionUid: effect.actionUid, cancel: () => finish(false) });
+		});
+	}
+
 	private dispatchAgentOutcome(effect: AgentEffect, outcome: AgentOutcome): void {
 		if (this.quiescing) {
 			return;
 		}
 		if (outcome.kind === "failed") {
-			this.send({ kind: "agent", effectId: effect.id, outcome });
+			const failure = outcome.failure;
+			const transient =
+				(failure.kind === "provider" || failure.kind === "runtime") && isTransientProviderFailure(failure.message);
+			this.send({
+				kind: "agent",
+				effectId: effect.id,
+				outcome: transient ? { kind: "failed", failure: { ...failure, retryable: true } } : outcome,
+			});
 			return;
 		}
 		this.track(
