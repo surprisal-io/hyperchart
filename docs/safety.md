@@ -51,7 +51,9 @@ external action runs ──► side effect succeeds
         └── process crashes before completion fact
 ```
 
-On recovery, the log proves that the action was invoked. It may not prove whether the external effect completed.
+On recovery, the log proves that the action was invoked. It may not prove whether the external effect completed. For example, a workflow calls a mailing API to send a campaign to 10,000 recipients. The provider accepts it, but the response is lost before the completion fact is committed. Blindly retrying the action sends the campaign twice. **When completion is ambiguous and duplicates are unacceptable, stop and reconcile rather than blindly repeating the action.** A resumed pending invocation can run again; Hyperchart cannot promise exactly-once delivery across an independent API and its journal. Give the action an idempotency key or an external status check before allowing that retry.
+
+A branch runner can also fail *before* any action starts, for example while materializing a pinned artifact into its workspace. That failure is a runner outcome, not necessarily a durable `failure_intent` in the state machine. An orchestrator can readmit a branch with no durable failure intent; this is not proof that every previously invoked action lacked external effects. AutoDiscovery currently retries non-terminal branch failures with exponential backoff regardless of error message. Its action authors must account for possible re-execution and deduplicate external effects where needed.
 
 Design actions to be idempotent when possible:
 

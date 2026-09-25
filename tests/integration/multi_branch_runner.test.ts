@@ -1176,6 +1176,48 @@ export default chart({ kind: "chart", id: "workspace-isolation", initial: "write
 		});
 	});
 
+	it("readmits a settled failed branch through startBranch and journal replay", async () => {
+		const root = mkdtempSync(join(tmpdir(), "hyperchart-retry-admission-"));
+		roots.push(root);
+		const workDir = join(root, "work");
+		const runDir = join(root, "run");
+		mkdirSync(workDir, { recursive: true });
+		mkdirSync(runDir, { recursive: true });
+		const chartPath = join(workDir, "chart.mjs");
+		writeFileSync(chartPath, `export default { kind: "chart", id: "retry-admission", initial: "work", states: { work: { kind: "state", action: { kind: "agent", name: "worker" }, transitions: { DONE: "done" } }, done: { kind: "final" } } };\n`);
+		writeFileSync(join(runDir, "log.jsonl"), `${JSON.stringify({ kind: "branch", op: "create", seqId: 1, branchId: "main", headSeqId: null, committedAt: 1 })}\n`);
+		let failOnce = true;
+		const executors = new Map<string, ControlledExecutor>();
+		const controller = await createHyperchartRunnerController(
+			{ runId: "run", storage: fixtureStorage(runDir), chartPath, chartId: "retry-admission", workDir, branchId: "main" },
+			({ config }) => {
+				if (config.branchId === "retry" && failOnce) {
+					failOnce = false;
+					throw new Error("temporary artifact unavailable");
+				}
+				const executor = new ControlledExecutor();
+				executors.set(config.branchId, executor);
+				return executor;
+			},
+		);
+		const hold = controller.acquireHold();
+		const completion = controller.start();
+		await waitFor(() => executors.get("main")?.emit !== undefined);
+		executors.get("main")?.complete();
+		await waitFor(() => controller.liveBranchIds.length === 0);
+		const head = (await new JsonlLogStore(join(runDir, "log.jsonl"), "main").getBranch("main")).headSeqId!;
+		await controller.forkBranch({ branchId: "retry", fromSeqId: head - 1, sourceBranchId: "main" });
+		const failed = await controller.startBranch("retry");
+		expect(failed).toMatchObject({ outcome: "failed", error: "temporary artifact unavailable" });
+		expect(controller.canStartBranch("retry")).toBe(true);
+		const resumed = controller.startBranch("retry");
+		await waitFor(() => executors.get("retry")?.emit !== undefined);
+		executors.get("retry")?.complete();
+		expect((await resumed).outcome).toBe("complete");
+		hold.release();
+		await completion;
+	});
+
 	it("signal shutdown closes a held controller", async () => {
 		const root = mkdtempSync(join(tmpdir(), "hyperchart-held-signal-"));
 		roots.push(root);

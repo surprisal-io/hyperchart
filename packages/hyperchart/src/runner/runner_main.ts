@@ -186,7 +186,7 @@ export interface HyperchartRunnerController {
 	): Promise<{ branch: BranchHead; response: UserInteractionResponseCommit; participant: T }>;
 	/** Seal and drain the affected fork subtree, then atomically append one durable head move. */
 	moveBranch(branchId: BranchId, targetHeadSeqId: number | null): Promise<number>;
-	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. Drained branches are replay-gated before readmission. */
+	/** Reserve, replay-gate, execute, dispose, and return this branch's outcome. A settled failure without a durable failure intent may be replay-gated and readmitted. */
 	startBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
 	/** Release an idle user-gated branch runtime without writing a new checkpoint. The branch remains replay-gated and eligible for readmission. */
 	unloadBranch(branchId: BranchId): Promise<RunnerBranchOutcome>;
@@ -377,13 +377,13 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 
 	canStartBranch(branchId: BranchId): boolean {
 		const failure = this.admitted.get(branchId);
-		if (failure !== undefined) {
+		if (failure?.cause !== undefined) {
 			throw failure;
 		}
 		return (
 			this.phase === "accepting" &&
 			this.knownDurableBranches.has(branchId) &&
-			!this.admitted.has(branchId) &&
+			(this.admitted.has(branchId) === false || failure !== undefined) &&
 			!this.movingBranches.has(branchId) &&
 			(!this.sealedBranches.has(branchId) || this.readmissionRequired.has(branchId))
 		);
@@ -737,11 +737,30 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			);
 		}
 		assertRunnerBranchId(branchId);
-		if (this.admitted.has(branchId)) {
-			throw this.admitted.get(branchId) ?? new BranchAdmissionError(branchId);
+		const previous = this.admitted.get(branchId);
+		if (this.admitted.has(branchId) && (previous === undefined || previous.cause !== undefined)) {
+			throw previous ?? new BranchAdmissionError(branchId);
 		}
 		if (!this.knownDurableBranches.has(branchId)) {
 			throw new Error(`Unknown Hyperchart branch '${branchId}'`);
+		}
+		if (previous !== undefined) {
+			// Claim this failed admission before the async replay check so concurrent
+			// callers cannot both reserve the same branch.
+			this.admitted.set(branchId, undefined);
+			try {
+				const store = branchId === this.rootStore.branchId ? this.rootStore : this.rootStore.forBranch(branchId);
+				const semantic = await BranchExecution.restore({ ast: this.ast, branchId, store, saveCheckpoint: "never" });
+				if (semantic.machineState().projection.failure !== undefined) {
+					throw new Error(`Hyperchart branch '${branchId}' has a durable failure intent and cannot be retried`);
+				}
+			} catch (error) {
+				this.admitted.set(branchId, previous);
+				throw error;
+			}
+			this.assertAccepting("start a branch");
+			this.admitted.delete(branchId);
+			this.readmissionRequired.add(branchId);
 		}
 		const readmission = this.readmissionRequired.has(branchId);
 		if (this.movingBranches.has(branchId) || (this.sealedBranches.has(branchId) && !readmission)) {
@@ -1406,6 +1425,9 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 			return;
 		}
 		this.outcomes.push(settledOutcome);
+		if (settledOutcome.outcome === "failed") {
+			this.admitted.set(entry.branchId, new BranchAdmissionError(entry.branchId, { cause: settledOutcome.cause }));
+		}
 		entry.outcome.resolve(settledOutcome);
 		this.live.delete(entry.branchId);
 		this.notifyBranchChange();
