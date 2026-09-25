@@ -12,7 +12,7 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
  * Flat content-addressable store inside a run directory. Objects are immutable
  * accepted artifact states; identity is the sha256 of the full content, so an
  * object is externally verifiable with `sha256sum`. Writes are copy-then-hash
- * with an atomic rename: the pin always references exactly the stored bytes.
+ * with an atomic no-replace link: the pin always references exactly the stored bytes.
  */
 export class ArtifactStore {
 	private readonly objectsDir: string;
@@ -34,19 +34,19 @@ export class ArtifactStore {
 			const finalPath = this.objectPath(hash);
 			await fsp.mkdir(dirname(finalPath), { recursive: true });
 			try {
-				// Identical content maps to the same path, so a concurrent put of the
-				// same bytes is benign: first rename wins, the loser's temp is removed.
-				await fsp.rename(tempPath, finalPath);
+				// A no-replace link keeps the first object available to concurrent
+				// readers. Renaming over the same hash can briefly hide it on virtiofs.
+				await fsp.link(tempPath, finalPath);
 			} catch (error) {
-				if (!(await this.has(hash))) {
+				if (!isAlreadyExists(error)) {
 					throw error;
 				}
-				await fsp.rm(tempPath, { force: true });
+				// Do not accept an existing object whose bytes no longer match its name.
+				await this.get(hash);
 			}
 			return { hash, size };
-		} catch (error) {
+		} finally {
 			await fsp.rm(tempPath, { force: true });
-			throw error;
 		}
 	}
 
@@ -80,6 +80,10 @@ export class ArtifactStore {
 		}
 		return join(this.objectsDir, hash.slice(0, 2), hash.slice(2));
 	}
+}
+
+function isAlreadyExists(error: unknown): boolean {
+	return error !== null && typeof error === "object" && "code" in error && error.code === "EEXIST";
 }
 
 export async function hashFile(path: string): Promise<string> {

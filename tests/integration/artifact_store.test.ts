@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -46,16 +46,27 @@ describe("ArtifactStore", () => {
 		expect(await store.has(first.hash)).toBe(true);
 	});
 
-	it("survives concurrent puts of identical content", async () => {
+	it("keeps an existing object readable and never replaces it during concurrent identical puts", async () => {
 		const dir = await makeTempDir();
 		const source = join(dir, "shared.json");
-		await writeFile(source, JSON.stringify({ v: 1 }));
+		const content = JSON.stringify({ v: 1 });
+		await writeFile(source, content);
 		const store = new ArtifactStore(dir);
+		const first = await store.put(source);
+		const objectPath = store.objectPath(first.hash);
+		const originalInode = (await stat(objectPath)).ino;
 
-		const pins = await Promise.all([store.put(source), store.put(source), store.put(source)]);
+		const pins = await Promise.all(
+			Array.from({ length: 40 }, async () => {
+				const pin = await store.put(source);
+				expect(await readFile(objectPath, "utf8")).toBe(content);
+				return pin;
+			}),
+		);
 
-		expect(new Set(pins.map((p) => p.hash)).size).toBe(1);
-		await expect(store.get(pins[0].hash)).resolves.toBe(store.objectPath(pins[0].hash));
+		expect(pins.every((pin) => pin.hash === first.hash)).toBe(true);
+		expect((await stat(objectPath)).ino).toBe(originalInode);
+		await expect(store.get(first.hash)).resolves.toBe(objectPath);
 	});
 
 	it("get verifies content and reports corruption", async () => {
@@ -68,6 +79,8 @@ describe("ArtifactStore", () => {
 		await writeFile(store.objectPath(pin.hash), "tampered");
 
 		await expect(store.get(pin.hash)).rejects.toThrow(/corrupt/);
+		await expect(store.put(source)).rejects.toThrow(/corrupt/);
+		expect(await readFile(store.objectPath(pin.hash), "utf8")).toBe("tampered");
 	});
 
 	it("get reports a missing object", async () => {

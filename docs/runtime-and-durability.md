@@ -140,6 +140,7 @@ Projection checkpoint contract version 6 retains per-invocation validation polic
 A declared deliverable file is mutable on disk, but the state the workflow *accepted* is a fact. When a run directory is configured, completion admission snapshots each declared artifact into a content-addressable store inside the run directory and records a pin on the completion fact:
 
 - the file is copied first and the copy is hashed, so the pin references exactly the stored bytes even if the working file keeps changing;
+- a no-replace hard link installs the hashed copy only if its object path is absent; concurrent puts of identical bytes reuse and verify the existing object rather than replacing it, so readers never encounter a transient missing path during replacement (including on `virtiofs`);
 - schema checks at admission run against the snapshotted bytes, so the accepted revision is the validated one;
 - the completion fact stores `artifacts: { <renderedPath>: { hash, size } }`; the pin is provenance — replay never re-hashes;
 - store objects live at `<runDir>/artifact_store/objects/<aa>/<rest-of-sha256>` and are externally verifiable with `sha256sum`;
