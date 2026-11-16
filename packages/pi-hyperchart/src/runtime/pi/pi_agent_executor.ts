@@ -36,6 +36,7 @@ import {
 } from "@surprisal/hyperchart/runtime";
 import { loadAgentDefinition, resolvePiSubagentDefinitionDirs, type AgentDefinition } from "./agent_definitions.js";
 import { createFinishTool, type CompletionSink, stopAfterRejectedFinish, validateFinishParams } from "./finish_tool.js";
+import { samplingParamsExtension } from "./sampling_params.js";
 import { strictFinishExtension } from "./strict_finish.js";
 import { createThrottledProgressWriter, updateSessionProgress } from "@surprisal/hyperchart/sessions";
 
@@ -69,6 +70,12 @@ export type PiSessionOverrides = Readonly<{
 	 * only for routes whose providers honor strict tool calls.
 	 */
 	strictFinish?: boolean;
+	/**
+	 * Sampling parameters for this invocation's provider requests, e.g. `{ temperature: 0 }`.
+	 * Written at the top level of the request body over the model's own; only OpenAI-compatible
+	 * request shapes read them there.
+	 */
+	samplingParams?: Readonly<Record<string, unknown>>;
 }>;
 
 export type PiSessionHandle = Readonly<{
@@ -503,6 +510,10 @@ export class PiAgentExecutor implements AgentExecutor {
 		]
 			.filter((part): part is string => part !== undefined && part.trim().length > 0)
 			.join("\n\n");
+		const invocationExtensions = [
+			...(overrides?.strictFinish === true ? [strictFinishExtension()] : []),
+			...(overrides?.samplingParams === undefined ? [] : [samplingParamsExtension(overrides.samplingParams)]),
+		];
 		// Services load extensions and register their providers before model lookup,
 		// matching Pi startup. Reloading a loader alone only queues registrations.
 		const services = await createAgentSessionServices({
@@ -512,7 +523,7 @@ export class PiAgentExecutor implements AgentExecutor {
 			resourceLoaderOptions: {
 				noExtensions: this.options.extensionPolicy === "isolated",
 				// Inline extensions load under either policy.
-				...(overrides?.strictFinish === true ? { extensionFactories: [strictFinishExtension()] } : {}),
+				...(invocationExtensions.length > 0 ? { extensionFactories: invocationExtensions } : {}),
 				...(plan.promptMode === "append"
 					? { appendSystemPromptOverride: (base: string[]) => [...base, invocationSystemPrompt] }
 					: {
