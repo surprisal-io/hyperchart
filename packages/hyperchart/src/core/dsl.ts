@@ -1,3 +1,5 @@
+import type { ArtifactVersion } from "./artifact_version.js";
+import type { ArtifactVersionCst } from "./types.js";
 import type {
 	ActorArtifactRefMarker,
 	ActorInputRefMarker,
@@ -530,3 +532,13 @@ export function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
 
 export type { SchemaCst } from "./types.js";
 export { contract } from "./schema_contract.js";
+
+/** Resolve the latest accepted revision from this branch's durable artifact pins. */
+export function currentVersion(path: string): InputRef<ArtifactVersion> {
+	return { kind: "currentVersion", path };
+}
+
+/** Read a historical revision without restoring over the live artifact path. */
+export function artifactVersion(version: InputRef<ArtifactVersion>): ArtifactVersionCst {
+	return { kind: "artifactVersion", version };
+}

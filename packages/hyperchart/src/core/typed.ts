@@ -1,3 +1,4 @@
+import { currentVersion, artifactVersion } from "./dsl.js";
 import type { z } from "zod";
 import type {
 	ActorForwardRef,
@@ -268,6 +269,8 @@ type InputValue<Inputs, K extends string> = {
 }[keyof Inputs];
 
 type Refs<Args, Results, Files, Maps, Inputs, Actors, Completions> = {
+	currentVersion: typeof currentVersion;
+	artifactVersion: typeof artifactVersion;
 	// The checking chart constructor: accepts only a literal whose declared replies/artifacts
 	// match the registry the refs were built from — the registry cannot drift from the chart.
 	chart: <const C extends ChartCst>(
@@ -430,6 +433,8 @@ export function refs<
 			completionRefMetadata.set(ref, Object.freeze({ binding, name }));
 			return ref;
 		}) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["completionRef"],
+		currentVersion,
+		artifactVersion,
 		arg: (name) => ({ kind: "arg", name }),
 		event: (path?: string) => ({ kind: "event", ...(path === undefined ? {} : { path }) }),
 		visit: (state?: string) => ({ kind: "visit", ...(state === undefined ? {} : { state }) }),

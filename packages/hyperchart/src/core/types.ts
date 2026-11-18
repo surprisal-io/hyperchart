@@ -1,3 +1,4 @@
+import type { ArtifactVersion } from "./artifact_version.js";
 import type { z, ZodType } from "zod";
 import type { RuntimeContractMetadata } from "./schema_contract.js";
 import type { SchemaRegistry } from "./schema_registry.js";
@@ -583,7 +584,7 @@ export type AgentActionCst = {
 	// Templatable value is an artifact with just a path.
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	// Files the agent should read first: previous steps' artifacts via fileOf(), or raw paths.
-	reads?: readonly (Templatable | ArtifactOfCst | JoinArtifactOfCst)[];
+	reads?: readonly (Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst)[];
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -637,7 +638,7 @@ export type ScriptActionCst = {
 	args?: readonly string[];
 	// All dynamic values flow through env: templates render from args/results, artifactOf renders
 	// to the producer's artifact PATH — the process reads the file itself, no prompt channel.
-	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
+	env?: Record<string, Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	reply?: SchemaCst;
 };
@@ -649,7 +650,7 @@ export type ImportedActionCst = {
 	kind: "tsImport";
 	module: string;
 	export: string;
-	env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
+	env?: Record<string, Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 	artifacts?: Record<string, Templatable | ArtifactCst>;
 	reply?: SchemaCst;
 };
@@ -672,7 +673,7 @@ export type GuardRef =
 			module: string;
 			export: string;
 			// Imported guards run in process and support rendered inputs only.
-			env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
+			env?: Record<string, Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 	  }
 	| {
 			kind: "script";
@@ -680,7 +681,7 @@ export type GuardRef =
 			args?: readonly string[];
 			// Guards share the script-option surface. Imported guards receive rendered
 			// options in process rather than through environment variables and files.
-			env?: Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
+			env?: Record<string, Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>;
 			artifacts?: Record<string, Templatable | ArtifactCst>;
 			reply?: SchemaCst;
 	  };
@@ -691,13 +692,17 @@ export type GuardRefAst =
 			kind: "tsImport";
 			module: string;
 			export: string;
-			env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
+			env?: Readonly<
+				Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+			>;
 	  }
 	| {
 			kind: "script";
 			command: string;
 			args?: readonly string[];
-			env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
+			env?: Readonly<
+				Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+			>;
 			artifacts?: Readonly<Record<string, ArtifactAst>>;
 			reply?: SchemaAst;
 	  };
@@ -745,6 +750,7 @@ export type AfterCst = {
 // Declared as an optional method for bivariance: untyped refs (V = unknown) pass everywhere,
 // refs with unrelated value types do not.
 export type InputRef<V = unknown> = (
+	| { kind: "currentVersion"; path: string }
 	| {
 			kind: "arg";
 			name: string;
@@ -794,6 +800,7 @@ export type InputRef<V = unknown> = (
 };
 
 const INPUT_REF_KINDS: ReadonlySet<string> = new Set([
+	"currentVersion",
 	"arg",
 	"result",
 	"input",
@@ -1048,6 +1055,12 @@ export type ArtifactAst = Readonly<{
 	shape?: SchemaAst;
 }>;
 
+export type ArtifactVersionCst = Readonly<{
+	kind: "artifactVersion";
+	version: InputRef<ArtifactVersion>;
+}>;
+export type ArtifactVersionAst = ArtifactVersionCst;
+
 export type ArtifactOfAst = Readonly<ArtifactOfCst>;
 
 export type JoinArtifactOfAst = Readonly<JoinArtifactOfCst>;
@@ -1069,7 +1082,7 @@ export type AgentActionAst = Readonly<{
 	name: string;
 	task?: TemplateAst;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
-	reads?: readonly (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[];
+	reads?: readonly (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[];
 	model?: string;
 	thinking?: string;
 	tools?: readonly string[];
@@ -1112,7 +1125,9 @@ export type ScriptActionAst = Readonly<{
 	uid: ActionUID;
 	command: string;
 	args: readonly string[];
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
+	env?: Readonly<
+		Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+	>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;
@@ -1121,7 +1136,9 @@ export type ImportedActionAst = Readonly<{
 	uid: ActionUID;
 	module: string;
 	export: string;
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
+	env?: Readonly<
+		Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+	>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 }>;

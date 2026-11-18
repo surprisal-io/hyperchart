@@ -288,3 +288,14 @@ Completion facts snapshot declared action artifacts before validation, but guard
 Projection checkpoints use projector version 4; earlier caches are discarded and existing completion/verdict facts rebuild this distinction without journal changes. Old guarded completions are interpreted according to their recorded verdicts, not revalidated. Workspace overlays are recovery state, not accepted history. Artifact bytes/pins are outside the control-flow TLA state space; the acceptance transition corresponds to its existing successful-validation transition, exercised by runtime replay/fork tests.
 
 A fork at a pending or rejected guarded completion must produce a fresh branch-local completion before it can accept the result. Foreign provisional validation is rejected before invoking the guard; inherited rejection feedback requests local artifacts. The declared `onReject` resume/restart policy and retry budget apply normally, including fail-closed exhaustion at `retries: 0`. Projection rejects a foreign positive verdict rather than pairing its result with older accepted bytes. No retry budget or invocation identity is reset implicitly.
+
+## Saved artifact references
+
+`currentVersion()` resolves the current accepted pin at ref resolution time; it
+does not freeze the version at action entry. Return the reference as an ordinary
+schema-checked capture result to retain it across subsequent steps, forks, or
+rewinds. Use an actor when concurrent access requires serialization.
+A historical `artifactVersion()` read resolves directly to the verified object
+already in the artifact store; it neither creates a workspace copy nor rolls back
+the live filename. There are no new journal record kinds or
+control transitions. See [saved artifact revisions](api/dsl.md#saved-artifact-revisions).

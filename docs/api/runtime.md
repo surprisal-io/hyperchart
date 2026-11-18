@@ -734,3 +734,22 @@ Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_re
 ## Named branch storage API
 
 `RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runId, cursor?)` exposes the same bounded page contract for run-ID callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported. Runner/control helpers are imported from `@surprisal/hyperchart/runner`, separately from the projection-free runtime/storage package. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is an append-only move; live moves use the owning runner transport. It has no cleanup/backup options.
+
+### Historical artifact read resolution
+
+The authoring `currentVersion()` ref resolves accepted branch pins, not arbitrary
+filesystem bytes, at ref resolution time. There is no invocation-local pin cache
+or action-entry snapshot. A saved reference is an ordinary accepted action result;
+concurrent access coordination belongs to the chart, for example an actor. This
+adds no durable fact kind or checkpoint shape and does not change scheduling.
+
+`artifactVersion()` renders only the authored path and pin. At dispatch, the
+runtime calls `ArtifactStore.get(hash)` to verify and resolve the already stored
+object, then passes its absolute path to agent reads and script/function/guard
+env. There is no additional snapshot directory or workspace copy, and the live
+file is never replaced. Ordinary artifact reads retain their existing workspace
+restoration behavior. Historical reads require a configured run store and fail
+on missing/corrupt objects. Consumers must treat shared store objects as read-only;
+this API does not enforce OS-level write isolation. Workspace containment checks
+remain unchanged for ordinary files; historical paths come only from the run's
+verified artifact store.
