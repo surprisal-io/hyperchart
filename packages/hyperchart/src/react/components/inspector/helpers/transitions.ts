@@ -214,6 +214,10 @@ export function transitionBindingTitle(
 	launchArgs?: Readonly<Record<string, HyperchartLaunchArgumentInfo>>,
 ): string {
 	switch (binding.kind) {
+		case "currentVersion":
+			return "artifact revision";
+		case "artifactVersion":
+			return "artifact revision path";
 		case "event": {
 			const sourceSchema = schemaAtPath(state.replySchema, binding.path);
 			return sourceSchema ? schemaTypeText(sourceSchema) : "unknown";

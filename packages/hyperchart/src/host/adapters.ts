@@ -3142,7 +3142,7 @@ function refsInfo(refs: HyperchartInspectState["refs"]): HyperchartRefInfo | und
 	const grouped: HyperchartRefInfo = {};
 	for (const ref of refs) {
 		const kind =
-			ref.kind === "artifactOf" || ref.kind === "joinArtifactOf"
+			ref.kind === "artifactOf" || ref.kind === "joinArtifactOf" || ref.kind === "artifactVersion"
 				? "artifact"
 				: ref.kind === "joinResultOf"
 					? "result"

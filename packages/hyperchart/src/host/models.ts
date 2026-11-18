@@ -334,6 +334,7 @@ export interface HyperchartInputInfo {
 }
 
 export interface HyperchartRefInfo {
+	currentVersion?: string[];
 	arg?: string[];
 	result?: string[];
 	artifact?: string[];

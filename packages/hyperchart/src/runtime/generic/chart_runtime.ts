@@ -220,11 +220,11 @@ export class ChartRuntime implements Runtime {
 									if (!ready || this.quiescing) {
 										return;
 									}
-									await this.restorePinnedReads(effect.reads);
+									const prepared = await this.prepareReadPaths(effect);
 									if (this.quiescing) {
 										return;
 									}
-									this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
+									this.options.agentExecutor.start(prepared, (outcome) => this.dispatchAgentOutcome(effect, outcome));
 								})
 								.catch((error: unknown) => {
 									this.send({
@@ -240,8 +240,8 @@ export class ChartRuntime implements Runtime {
 						break;
 					case "script":
 						this.track(
-							this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env))
-								.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
+							this.prepareReadPaths(effect)
+								.then((prepared) => (this.quiescing ? undefined : this.scripts.run(prepared)))
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
@@ -255,10 +255,13 @@ export class ChartRuntime implements Runtime {
 								}),
 						);
 						break;
-					case "tsImport":
+					case "tsImport": {
+						const prepared = { ...effect };
 						this.track(
 							this.functions
-								.run(effect, undefined, () => this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env)))
+								.run(prepared, undefined, async () => {
+									Object.assign(prepared, await this.prepareReadPaths(effect));
+								})
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
@@ -272,6 +275,7 @@ export class ChartRuntime implements Runtime {
 								}),
 						);
 						break;
+					}
 					case "validate": {
 						this.track(
 							(effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId
@@ -279,25 +283,27 @@ export class ChartRuntime implements Runtime {
 										ok: false,
 										reason: foreignCompletionReason(effect.completionBranchId, this.branchId),
 									})
-								: runGuard(
-										effect.guard,
-										effect.event,
-										{
-											chartDir: this.options.chartDir,
-											workDir: this.options.workDir,
-											invocation: {
-												branchId: this.branchId,
-												actionUid: effect.actionUid,
-												invocationId: effect.invocationId,
+								: this.prepareReadPaths(effect).then((prepared) =>
+										runGuard(
+											effect.guard,
+											effect.event,
+											{
+												chartDir: this.options.chartDir,
+												workDir: this.options.workDir,
+												invocation: {
+													branchId: this.branchId,
+													actionUid: effect.actionUid,
+													invocationId: effect.invocationId,
+												},
 											},
-										},
-										{
-											scripts: this.scripts,
-											...(effect.env === undefined ? {} : { env: effect.env }),
-											...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
-											...(effect.reply === undefined ? {} : { reply: effect.reply }),
-											actionUid: effect.actionUid,
-										} satisfies RenderedGuardInvocation,
+											{
+												scripts: this.scripts,
+												...(prepared.env === undefined ? {} : { env: prepared.env }),
+												...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
+												...(effect.reply === undefined ? {} : { reply: effect.reply }),
+												actionUid: effect.actionUid,
+											} satisfies RenderedGuardInvocation,
+										),
 									)
 							)
 								.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
@@ -494,12 +500,51 @@ export class ChartRuntime implements Runtime {
 		);
 	}
 
-	/**
-	 * Action entry: restore each declared read to its pinned revision. The runtime cannot control
-	 * how agents read files, so the guarantee is placed on entry — whatever overwrote the authored
-	 * path (a sibling branch, an out-of-band edit), the action sees the accepted state its chart
-	 * channel declared. Reads whose producer completion carries no pin keep current-file semantics.
-	 */
+	/** Resolve historical reads to existing store objects; restore only ordinary live reads. */
+	private async prepareReadPaths<
+		T extends {
+			reads?: readonly RenderedArtifact[];
+			env?: Readonly<Record<string, string | RenderedArtifact>>;
+		},
+	>(effect: T): Promise<T> {
+		const reads = effect.reads ?? envArtifacts(effect.env);
+		await this.restorePinnedReads(reads.filter((read) => read.versioned !== true));
+		const resolved = new Map<RenderedArtifact, Promise<RenderedArtifact>>();
+		const resolveRead = (read: RenderedArtifact): Promise<RenderedArtifact> => {
+			if (read.versioned !== true) {
+				return Promise.resolve(read);
+			}
+			let pending = resolved.get(read);
+			if (pending === undefined) {
+				const store = this.artifactStore;
+				const pin = read.pin;
+				if (store === undefined || pin === undefined) {
+					throw new Error("artifactVersion reads require a run artifact store and a revision pin");
+				}
+				pending = store.get(pin.hash).then((path) => ({ ...read, path }));
+				resolved.set(read, pending);
+			}
+			return pending;
+		};
+		const preparedReads = await Promise.all(reads.map(resolveRead));
+		const env =
+			effect.env === undefined
+				? undefined
+				: Object.fromEntries(
+						await Promise.all(
+							Object.entries(effect.env).map(async ([name, value]) => [
+								name,
+								typeof value === "string" || value.versioned !== true ? value : (await resolveRead(value)).path,
+							]),
+						),
+					);
+		return {
+			...effect,
+			...(effect.reads === undefined ? {} : { reads: preparedReads }),
+			...(env === undefined ? {} : { env }),
+		};
+	}
+
 	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {
 		const store = this.artifactStore;
 		if (store === undefined || reads === undefined || reads.length === 0) {

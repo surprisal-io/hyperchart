@@ -1082,3 +1082,68 @@ callBatch({ to: workers, event: "WORK", inputs: result("prepare", "items"), targ
 `self()` is a zero-argument symbolic capability available only to actor-local `send` and `sendBatch`. The containing `actor()` checks its event and input against that actor's protocol, and normalization resolves the marker independently for every placement. For an ordinary actor it addresses that actor occurrence; for a pool worker it addresses the shared pool endpoint, so any eligible idle worker may accept the FIFO message. `self()` outside an actor and `call`/`callBatch` to `self()` are rejected.
 
 `receive()` is the only acceptance point. `reply()` validates the inferred current message and returns the worker to its authored receive target. A self-send is queued before the current workflow reaches its required `reply()` and is accepted only after an ordinary actor, or an eligible pool worker, returns to `receive()`. Use `actorInput()` and `messageInput()` for isolated actor-local data. See [Explicit event-sourced actors](../explicit-actors.md).
+
+## Saved artifact revisions
+
+```ts
+const { currentVersion, result } = refs<Args, Results>();
+```
+
+`currentVersion(path): InputRef<ArtifactVersion>` resolves the latest **accepted**
+artifact pin when the ref is resolved. It does not snapshot an uncommitted edit
+of the working file. The relative path must identify an artifact
+already accepted on the selected branch ancestry; a missing/unpinned artifact is
+an error, never an empty file. A pending action rendered again after restart reads
+the pin current at that time; this ref does not freeze action-entry state. To save
+a particular version, return the reference from a capture action and reuse its
+accepted result. Coordinate concurrent updates explicitly, for example through an
+actor. Transition-input uses resolve at transition time like other refs.
+
+`ArtifactVersionSchema` and its inferred `ArtifactVersion` type describe the
+serializable reference `{ path, hash, size }`. Store it in a schema-checked reply
+or input; treat it as a revision reference rather than a live filename.
+
+`artifactVersion(ref): ArtifactVersionCst` accepts an `InputRef<ArtifactVersion>`
+and is valid in agent `reads`, script/function `env`, and guard `env`. It resolves
+through `ArtifactStore.get(hash)` to the existing verified store object path,
+**not** the mutable artifact's original path. No additional workspace copy is made. It requires a run artifact store; missing/corrupt
+objects fail rather than falling back to the live file. It does not grant OS-level
+read isolation; consumers must treat the shared store object as read-only.
+
+A deterministic action can capture a reference for later actions without plumbing
+it through intermediate states:
+
+```ts
+capture: {
+  kind: "state",
+  action: tsAction("./actions.mjs", "capture", {
+    env: { VERSION: t`${json(currentVersion("artifacts/notes.md"))}` },
+    reply: z.object({ notesVersion: ArtifactVersionSchema }),
+  }),
+  transitions: { CAPTURED: "generate" },
+},
+// Later, after other actions have changed artifacts/notes.md:
+informed: {
+  kind: "state",
+  action: agent("observer", {
+    reads: [artifactVersion(result("capture", "notesVersion"))],
+  }),
+  transitions: { DONE: "done" },
+},
+```
+
+The chart-owned module returns an ordinary completion:
+
+```js
+export function capture(params) {
+  return {
+    type: "CAPTURED",
+    output: { notesVersion: JSON.parse(params.VERSION) },
+  };
+}
+```
+
+The capture state must dominate its consumers. Route retries directly back to
+`generate` to reuse the capture result; re-enter `capture` only when beginning a
+new research cycle. All paths and references remain scoped to the same run store;
+a reference is not a cross-run locator.

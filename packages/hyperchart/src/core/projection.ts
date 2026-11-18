@@ -1831,6 +1831,13 @@ export function resolveRef(
 	stateId: StatePath,
 	context = "Template",
 ): unknown {
+	if (ref.kind === "currentVersion") {
+		const pin = state.projection.artifactPins[ref.path];
+		if (pin === undefined) {
+			throw new Error(`${context} in state ${stateId}: artifact '${ref.path}' has no accepted revision`);
+		}
+		return { path: ref.path, ...pin };
+	}
 	const actorContext = actorContextForState(state.ast, stateId);
 	const actor =
 		actorContext === undefined ? undefined : projectedActorEndpoint(state.projection, actorContext.endpointOccurrence);
@@ -1960,6 +1967,8 @@ function selectRefPath(
 
 function refLabel(ref: InputRef): string {
 	switch (ref.kind) {
+		case "currentVersion":
+			return `current version of '${ref.path}'`;
 		case "arg":
 			return `arg '${ref.name}'`;
 		case "result":
