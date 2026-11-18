@@ -218,7 +218,6 @@ import * as claudeHost from "@surprisal/claude-hyperchart";
 import * as command from "@surprisal/pi-hyperchart/command";
 import * as piHost from "@surprisal/pi-hyperchart/pi-host";
 import * as react from "@surprisal/pi-hyperchart/react";
-if (typeof core.currentVersion !== "function" || typeof core.artifactVersion !== "function" || typeof core.ArtifactVersionSchema?.parse !== "function") throw new Error("artifact version exports missing");
 if (typeof core.refs !== "function" || "start" in core || "loadBranchProjection" in core) throw new Error("core exports invalid");
 if (typeof host.hyperchartRunFromInspectResult !== "function" || "hyperchartRunFromRuntime" in host) throw new Error("host exports invalid");
 if (typeof runtime.ChartRuntime !== "function" || typeof runtime.JsonlLogStore !== "function" || typeof runtime.materializeWorkspaceFromPins !== "function") throw new Error("runtime exports missing");
@@ -244,12 +243,9 @@ if (typeof extension !== "function" && typeof extension.default !== "function") 
 
 	writeFileSync(
 		resolve(consumer, "smoke.ts"),
-		`import { actor, actorInput, call, final, message, protocol, receive, refs, reply, send, t, z, currentVersion, artifactVersion, ArtifactVersionSchema } from "@surprisal/hyperchart";
+		`import { actor, actorInput, call, final, message, protocol, receive, refs, reply, send, t, z } from "@surprisal/hyperchart";
 import type {
   ArtifactCst,
-  ArtifactVersion,
-  ArtifactVersionCst,
-  ArtifactVersionAst,
   ArtifactOfCst,
   ChartArgumentAst,
   ChartArgumentCst,
@@ -270,12 +266,6 @@ import type {
 } from "@surprisal/hyperchart/host";
 import type { HyperchartInspectorDialogProps, HyperchartRunStripProps } from "@surprisal/pi-hyperchart/react";
 const { chart } = refs<{ topic: string }, Record<never, never>>();
-const capturedRevision = currentVersion("notes.md");
-const revisionRead: ArtifactVersionCst = artifactVersion(capturedRevision);
-const inferredRevision: ArtifactVersion = ArtifactVersionSchema.parse({path:"notes.md",hash:"a".repeat(64),size:1});
-const revisionAst: ArtifactVersionAst = revisionRead;
-void inferredRevision;
-void revisionAst;
 export const definition = chart({ kind: "chart", id: "smoke", args: { topic: { description: "Subject", default: "Hyperchart" } }, initial: "done", states: { done: final() } });
 const PackedProtocol = protocol({ READ: message({ input: z.object({ path: z.string() }), reply: z.object({ text: z.string() }) }) });
 const PackedActor = actor({

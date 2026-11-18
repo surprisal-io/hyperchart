@@ -734,37 +734,3 @@ Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_re
 ## Named branch storage API
 
 `RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runId, cursor?)` exposes the same bounded page contract for run-ID callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported. Runner/control helpers are imported from `@surprisal/hyperchart/runner`, separately from the projection-free runtime/storage package. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is an append-only move; live moves use the owning runner transport. It has no cleanup/backup options.
-
-### Historical artifact read resolution
-
-The authoring `currentVersion()` ref resolves accepted branch pins, not arbitrary
-filesystem bytes, at ref resolution time. There is no invocation-local pin cache
-or action-entry snapshot. A saved reference is an ordinary accepted action result;
-concurrent access coordination belongs to the chart, for example an actor. This
-adds no durable fact kind or checkpoint shape and does not change scheduling.
-
-`ChartRuntimeOptions.readArtifactPins` is an execution-owned callback returning
-the branch's current accepted `{ path: pin }` mapping. Runner composition binds it
-to `BranchExecution.artifactPins()`; direct runtime compositions may use
-`bindArtifactPins()`. Runtime receives pins only, never a projection or lineage
-reader. It reuses `materializeWorkspaceFromPins()` before each executor action,
-then restores explicit declared reads over those accepted defaults.
-
-`artifactVersion()` supplies the authored path and selected pin. It overrides the
-default bytes for that action; script/function/guard env receives the absolute
-workspace path, while agent reads keep the authored path. It requires a configured
-run store and pin-reader callback. The following action restores accepted defaults
-again. There is no `restorePin`, snapshot namespace, after-action cleanup, lock, or
-invocation pin cache. Cancellation/disposal need no special artifact rollback.
-Normal branch startup also materializes accepted pins before resuming execution.
-
-Guards are part of the current action, not a new action boundary: they apply their
-explicit reads without resetting all defaults, so provisional completion artifacts
-remain available to the validating action. Accepted defaults never promote those
-provisional bytes to evidence for a later action.
-
-This mutates a branch workspace, not concurrent isolation. Authors must serialize
-shared-workspace access when overrides are used, via chart control or an actor.
-Normalized historical descriptors include `mode: "workspace"`, so earlier
-direct-store invocation definitions are detected as stale rather than silently
-reinterpreted. No new durable fact kind or checkpoint schema is needed.

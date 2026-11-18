@@ -412,14 +412,3 @@ Use [`actor()`, protocols, `receive()`, `send()`, `call()`, and `reply()`](./exp
 ### Actor pools and batches
 
 Use `actorPool({ concurrency, worker })` when one statically placed capability needs bounded parallelism. The endpoint keeps one durable FIFO mailbox and fixed persistent workers; use singleton `send`/`call` or explicit non-empty `sendBatch`/single-reply `callBatch`. Inside an actor template, `send({ to: self(), ... })` and `sendBatch({ to: self(), ... })` enqueue follow-up work on the current logical endpoint; pool self-sends return to the shared endpoint, not a concrete worker. Calls to `self()` are deliberately unsupported. `callBatch` publishes outputs only after all items settle and preserves input order. See [Explicit actors](explicit-actors.md).
-
-## Keep an earlier artifact version
-
-Use `currentVersion(path)` in a deterministic capture action to return an
-`ArtifactVersionSchema`-validated reference. Later actions can read it directly
-with `artifactVersion(result("capture", "notesVersion"))` even if intermediate
-steps changed the live artifact. No intermediate reply/input forwarding is
-required. The source must already be a declared, accepted artifact; working-file
-edits are not implicitly promoted to accepted evidence. See
-[saved artifact revisions](api/dsl.md#saved-artifact-revisions) for a complete
-capture/action example and retry boundaries.

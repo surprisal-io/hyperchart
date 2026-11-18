@@ -1,5 +1,3 @@
-import { ArtifactVersionSchema } from "./artifact_version.js";
-import type { ArtifactVersionAst, ArtifactVersionCst } from "./types.js";
 import { randomUUID } from "../utils/random_uuid.js";
 import assert from "./assert.js";
 import type {
@@ -135,8 +133,6 @@ export type RenderedArtifact = Readonly<{
 	sourceState?: string;
 	/** One producer artifact or one expanded member of a map fan-in. */
 	readKind?: "artifact" | "join";
-	/** Historical read overrides the default accepted revision at its authored workspace path. */
-	versioned?: true;
 	path: string;
 	shape?: SchemaAst;
 	// Present on artifactOf reads with a selector: the runtime hands the agent only this field of the
@@ -325,7 +321,6 @@ export type ValidateEffect = Readonly<{
 	event: ChartEvent;
 	// Rendered exactly like a script action's options. Values are resolved only while this
 	// completion is pending; they are never durable facts or action results.
-	reads?: readonly RenderedArtifact[];
 	env?: Readonly<Record<string, string | RenderedArtifact>>;
 	artifacts?: readonly RenderedArtifact[];
 	reply?: SchemaAst;
@@ -805,9 +800,7 @@ function agentInvocationForAction(
 }
 
 type ScriptOptionsAst = {
-	env?: Readonly<
-		Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
-	>;
+	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 };
@@ -834,7 +827,7 @@ function renderScriptOptions(
 			: Object.fromEntries(
 					Object.entries(renderedEnv).map(([name, value]) => [
 						name,
-						typeof value !== "string" && value.select === undefined && value.versioned !== true ? value.path : value,
+						typeof value !== "string" && value.select === undefined ? value.path : value,
 					]),
 				);
 	return {
@@ -854,7 +847,7 @@ function renderScriptOptions(
 
 function renderScriptEnv(
 	state: MachineState,
-	env: Readonly<Record<string, Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>>,
+	env: Readonly<Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>>,
 	stateId: StatePath,
 	selfActionArtifactsState?: StatePath,
 ): Readonly<Record<string, string | RenderedArtifact>> {
@@ -2393,20 +2386,12 @@ function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: str
 // live log — fail loud.
 export function renderRead(
 	state: MachineState,
-	read: TemplateAst | ArtifactVersionAst | ArtifactOfAst,
+	read: TemplateAst | ArtifactOfAst,
 	stateId: string,
 	selfActionArtifactsState?: StatePath,
 ): RenderedArtifact {
 	if (read.kind === "template") {
 		return { path: renderTemplate(state, read, stateId) };
-	}
-	if (read.kind === "artifactVersion") {
-		const version = ArtifactVersionSchema.parse(resolveRef(state, read.version, stateId));
-		return {
-			path: version.path,
-			pin: { hash: version.hash, size: version.size },
-			versioned: true,
-		};
 	}
 	const actor = actorContextForState(state.ast, stateId);
 	const producerState =
@@ -2498,8 +2483,6 @@ function enclosingMapPath(ast: ChartAst, producer: StatePath, stateId: string): 
 
 function refLabel(ref: InputRef): string {
 	switch (ref.kind) {
-		case "currentVersion":
-			return `current version of '${ref.path}'`;
 		case "arg":
 			return `arg '${ref.name}'`;
 		case "result":

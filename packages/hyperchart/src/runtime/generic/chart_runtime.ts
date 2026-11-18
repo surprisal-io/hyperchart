@@ -6,7 +6,6 @@ import type { ChartAst, ChartEvent, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import type { AgentEffect, AgentOutcome, Effect, MachineEvent, RenderedArtifact } from "../../core/machine.js";
-import { materializeWorkspaceFromPins } from "./artifact_workspace.js";
 import { ArtifactStore, hashFile } from "./artifact_store.js";
 import { agentRetryDelayMs, isTransientProviderFailure } from "./agent_retry_backoff.js";
 import { renderedArtifactPath } from "./artifacts.js";
@@ -29,8 +28,6 @@ export type ChartRuntimeOptions = {
 	prepareStampedCommit?: PrepareStampedCommit;
 	/** Execution-owned semantic validation over runtime-acquired immutable bytes. */
 	validateArtifactSnapshot?: (artifact: RenderedArtifact, content: string) => Promise<SchemaCheck>;
-	/** Execution-owned current accepted pins for default action workspace preparation. */
-	readArtifactPins?: () => Readonly<Record<string, ArtifactPin>>;
 	agentExecutor: AgentExecutor;
 	/** Repository/project directory that owns the run. Scripts remain cwd-scoped to workDir. */
 	projectDir?: string;
@@ -103,13 +100,6 @@ export class ChartRuntime implements Runtime {
 			throw new Error("ChartRuntime artifact validator is already bound");
 		}
 		this.options.validateArtifactSnapshot = validate;
-	}
-
-	bindArtifactPins(read: () => Readonly<Record<string, ArtifactPin>>): void {
-		if (this.options.readArtifactPins !== undefined && this.options.readArtifactPins !== read) {
-			throw new Error("ChartRuntime artifact pin reader is already bound");
-		}
-		this.options.readArtifactPins = read;
 	}
 
 	bindStampedCommit(prepare: PrepareStampedCommit): void {
@@ -230,11 +220,11 @@ export class ChartRuntime implements Runtime {
 									if (!ready || this.quiescing) {
 										return;
 									}
-									const prepared = await this.prepareReadPaths(effect);
+									await this.restorePinnedReads(effect.reads);
 									if (this.quiescing) {
 										return;
 									}
-									this.options.agentExecutor.start(prepared, (outcome) => this.dispatchAgentOutcome(effect, outcome));
+									this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
 								})
 								.catch((error: unknown) => {
 									this.send({
@@ -250,8 +240,8 @@ export class ChartRuntime implements Runtime {
 						break;
 					case "script":
 						this.track(
-							this.prepareReadPaths(effect)
-								.then((prepared) => (this.quiescing ? undefined : this.scripts.run(prepared)))
+							this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env))
+								.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
@@ -265,13 +255,10 @@ export class ChartRuntime implements Runtime {
 								}),
 						);
 						break;
-					case "tsImport": {
-						const prepared = { ...effect };
+					case "tsImport":
 						this.track(
 							this.functions
-								.run(prepared, undefined, async () => {
-									Object.assign(prepared, await this.prepareReadPaths(effect));
-								})
+								.run(effect, undefined, () => this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env)))
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
@@ -285,7 +272,6 @@ export class ChartRuntime implements Runtime {
 								}),
 						);
 						break;
-					}
 					case "validate": {
 						this.track(
 							(effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId
@@ -293,27 +279,25 @@ export class ChartRuntime implements Runtime {
 										ok: false,
 										reason: foreignCompletionReason(effect.completionBranchId, this.branchId),
 									})
-								: this.prepareReadPaths(effect, false).then((prepared) =>
-										runGuard(
-											effect.guard,
-											effect.event,
-											{
-												chartDir: this.options.chartDir,
-												workDir: this.options.workDir,
-												invocation: {
-													branchId: this.branchId,
-													actionUid: effect.actionUid,
-													invocationId: effect.invocationId,
-												},
-											},
-											{
-												scripts: this.scripts,
-												...(prepared.env === undefined ? {} : { env: prepared.env }),
-												...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
-												...(effect.reply === undefined ? {} : { reply: effect.reply }),
+								: runGuard(
+										effect.guard,
+										effect.event,
+										{
+											chartDir: this.options.chartDir,
+											workDir: this.options.workDir,
+											invocation: {
+												branchId: this.branchId,
 												actionUid: effect.actionUid,
-											} satisfies RenderedGuardInvocation,
-										),
+												invocationId: effect.invocationId,
+											},
+										},
+										{
+											scripts: this.scripts,
+											...(effect.env === undefined ? {} : { env: effect.env }),
+											...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
+											...(effect.reply === undefined ? {} : { reply: effect.reply }),
+											actionUid: effect.actionUid,
+										} satisfies RenderedGuardInvocation,
 									)
 							)
 								.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
@@ -510,39 +494,12 @@ export class ChartRuntime implements Runtime {
 		);
 	}
 
-	/** Restore the current branch workspace first; explicit reads then override its defaults. */
-	private async prepareReadPaths<
-		T extends {
-			reads?: readonly RenderedArtifact[];
-			env?: Readonly<Record<string, string | RenderedArtifact>>;
-		},
-	>(effect: T, restoreDefaults = true): Promise<T> {
-		const reads = effect.reads ?? envArtifacts(effect.env);
-		const store = this.artifactStore;
-		if (restoreDefaults && store !== undefined && this.options.readArtifactPins !== undefined) {
-			await materializeWorkspaceFromPins(this.options.readArtifactPins(), store, this.options.workDir);
-		}
-		if (
-			reads.some((read) => read.versioned === true) &&
-			(store === undefined || this.options.readArtifactPins === undefined)
-		) {
-			throw new Error("artifactVersion reads require a run artifact store and an execution pin reader");
-		}
-		await this.restorePinnedReads(reads);
-		const env =
-			effect.env === undefined
-				? undefined
-				: Object.fromEntries(
-						Object.entries(effect.env).map(([name, value]) => [
-							name,
-							typeof value === "string" || value.versioned !== true
-								? value
-								: renderedArtifactPath(value, this.options.workDir),
-						]),
-					);
-		return { ...effect, ...(env === undefined ? {} : { env }) };
-	}
-
+	/**
+	 * Action entry: restore each declared read to its pinned revision. The runtime cannot control
+	 * how agents read files, so the guarantee is placed on entry — whatever overwrote the authored
+	 * path (a sibling branch, an out-of-band edit), the action sees the accepted state its chart
+	 * channel declared. Reads whose producer completion carries no pin keep current-file semantics.
+	 */
 	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {
 		const store = this.artifactStore;
 		if (store === undefined || reads === undefined || reads.length === 0) {

@@ -1,5 +1,3 @@
-import { ArtifactVersionSchema } from "./artifact_version.js";
-import type { ArtifactVersionAst } from "./types.js";
 import { z } from "zod";
 import { deepFreeze } from "./dsl.js";
 import { runtimeContractMetadata } from "./schema_contract.js";
@@ -2906,16 +2904,6 @@ function validateTargets(
 					if (typeof value !== "string" && value.kind === "template") {
 						validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
 					}
-					if (typeof value !== "string" && value.kind === "artifactVersion") {
-						validateInputRefs(
-							states,
-							path,
-							[value.version],
-							`${pointer}/action/validation/guard/env`,
-							diagnostics,
-							source,
-						);
-					}
 				}
 			}
 			if (guard?.kind === "script") {
@@ -3390,14 +3378,6 @@ function validateDominatedRefs(
 							pointer: `${pointer}/action/validation/guard/env/${escapePointer(name)}`,
 							allowSelf: value.kind === "artifactOf" && value.state === path,
 						});
-					}
-					if (typeof value !== "string" && value.kind === "artifactVersion" && value.version.kind === "result") {
-						check(
-							value.version.state,
-							path,
-							`${pointer}/action/validation/guard/env/${escapePointer(name)}`,
-							"result()",
-						);
 					}
 					if (typeof value !== "string" && value.kind === "template") {
 						for (const ref of value.refs) {
@@ -3913,12 +3893,7 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	if (action.kind === "gate" || action.kind === "waitFor" || action.kind === "notify") {
 		return [];
 	}
-	const versionReads = [
-		...(action.kind === "agent" ? (action.reads ?? []) : []),
-		...(action.kind === "script" || action.kind === "tsImport" ? Object.values(action.env ?? {}) : []),
-	].filter((read): read is ArtifactVersionAst => typeof read !== "string" && read.kind === "artifactVersion");
 	return [
-		...versionReads.map((read): TemplateAst => ({ kind: "template", strings: ["", ""], refs: [read.version] })),
 		...(action.kind === "agent" && action.task ? [action.task] : []),
 		...(action.kind === "script" || action.kind === "tsImport"
 			? Object.values(action.env ?? {}).filter((value): value is TemplateAst => value.kind === "template")
@@ -4085,7 +4060,7 @@ function toEnv(
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> | undefined {
+): Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> | undefined {
 	if (input === undefined) {
 		return undefined;
 	}
@@ -4095,17 +4070,9 @@ function toEnv(
 		);
 		return undefined;
 	}
-	const env: Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> =
-		{};
+	const env: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> = {};
 	for (const [name, value] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
-		if (isRecord(value) && value.kind === "artifactVersion") {
-			const version = toInputRef(value.version, `${pointer}/version`, diagnostics, source);
-			if (version !== undefined) {
-				env[name] = { kind: "artifactVersion", mode: "workspace", version };
-			}
-			continue;
-		}
 		if (isRecord(value) && value.kind === "artifactOf") {
 			const ref = toArtifactOf(value, pointer, diagnostics, source);
 			if (ref !== undefined) {
@@ -4220,7 +4187,7 @@ function toReads(
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined {
+): (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined {
 	if (input === undefined) {
 		return undefined;
 	}
@@ -4235,15 +4202,8 @@ function toReads(
 		);
 		return undefined;
 	}
-	const reads: (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[] = [];
+	const reads: (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] = [];
 	for (const [index, item] of input.entries()) {
-		if (isRecord(item) && item.kind === "artifactVersion") {
-			const version = toInputRef(item.version, `${path}/${index}/version`, diagnostics, source);
-			if (version !== undefined) {
-				reads.push({ kind: "artifactVersion", mode: "workspace", version });
-			}
-			continue;
-		}
 		if (isRecord(item) && item.kind === "artifactOf") {
 			const ref = toArtifactOf(item, `${path}/${index}`, diagnostics, source);
 			if (ref !== undefined) {
@@ -4288,21 +4248,6 @@ function toInputRef(
 		return undefined;
 	}
 	const jsonMark = input.json === true ? { json: true as const } : {};
-	if (input.kind === "currentVersion") {
-		const valid = ArtifactVersionSchema.shape.path.safeParse(input.path);
-		if (!valid.success) {
-			diagnostics.push(
-				diagnostic(
-					"INVALID_TEMPLATE",
-					"currentVersion requires a relative artifact path without traversal.",
-					path,
-					source,
-				),
-			);
-			return undefined;
-		}
-		return { kind: "currentVersion", path: valid.data, ...jsonMark };
-	}
 	if (input.kind === "arg") {
 		if (typeof input.name !== "string" || input.name.length === 0) {
 			diagnostics.push(diagnostic("INVALID_TEMPLATE", "arg ref name must be a non-empty string.", path, source));
@@ -4520,7 +4465,7 @@ function toScriptOptions(
 	code: "INVALID_SCRIPT" | "INVALID_GUARD" | "INVALID_TS_IMPORT",
 ): {
 	args?: readonly string[];
-	env?: Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>;
+	env?: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>;
 	artifacts?: Record<string, ArtifactAst>;
 	reply?: SchemaAst;
 } {

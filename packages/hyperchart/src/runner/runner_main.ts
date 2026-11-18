@@ -1124,7 +1124,6 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 					schemaRegistry: this.schemaRegistry,
 					onWarn: (message) => console.warn(message),
 					prepareStampedCommit: gate.semantic!.prepareStampedCommit,
-					readArtifactPins: () => gate.semantic!.artifactPins(),
 					validateArtifactSnapshot: artifactSnapshotValidator(this.schemaRegistry),
 				});
 				entry.setupState = "running";
@@ -1250,7 +1249,6 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 				schemaRegistry: this.schemaRegistry,
 				onWarn: (message) => console.warn(message),
 				prepareStampedCommit: gate.semantic.prepareStampedCommit,
-				readArtifactPins: () => gate.semantic!.artifactPins(),
 				validateArtifactSnapshot: artifactSnapshotValidator(this.schemaRegistry),
 			});
 		} catch (error) {
