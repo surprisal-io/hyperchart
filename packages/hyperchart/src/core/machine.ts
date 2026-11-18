@@ -135,7 +135,7 @@ export type RenderedArtifact = Readonly<{
 	sourceState?: string;
 	/** One producer artifact or one expanded member of a map fan-in. */
 	readKind?: "artifact" | "join";
-	/** Historical read resolved directly to an object in the run artifact store. */
+	/** Historical read overrides the default accepted revision at its authored workspace path. */
 	versioned?: true;
 	path: string;
 	shape?: SchemaAst;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	agent,
@@ -44,9 +44,11 @@ function readerExecutor(workDir: string): FakeAgentExecutor {
 		if (path === undefined) {
 			throw new Error("missing historical agent read");
 		}
-		void Promise.all([readFile(path, "utf8"), readFile(join(workDir, "notes.md"), "utf8")]).then(([old, live]) => {
-			emit({ kind: "completed", event: { type: "DONE", output: { old, live, path } } });
-		});
+		void Promise.all([readFile(resolve(workDir, path), "utf8"), readFile(join(workDir, "notes.md"), "utf8")]).then(
+			([old, live]) => {
+				emit({ kind: "completed", event: { type: "DONE", output: { old, live, path: resolve(workDir, path) } } });
+			},
+		);
 	};
 	return executor;
 }
@@ -182,7 +184,7 @@ it.each([
 	await writeFile(
 		join(directory, "capture.mjs"),
 		`import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 export function capture(p) { return {type:"DONE",output:{notesVersion:JSON.parse(p.VERSION)}}; }
 export function consume(p, ctx) {
   return {type:"DONE", output:{old:readFileSync(p.NOTES,"utf8"),live:readFileSync(join(ctx.workDir,"notes.md"),"utf8"),path:p.NOTES}};
@@ -251,6 +253,14 @@ export function consume(p, ctx) {
 				read: {
 					kind: "state",
 					action: readAction(),
+					transitions: { DONE: "observe" },
+				},
+				observe: {
+					kind: "state",
+					action: script(node, [
+						"-e",
+						'console.log(JSON.stringify({type:"DONE",output:{notes:require("node:fs").readFileSync("notes.md","utf8")}}))',
+					]),
 					transitions: { DONE: "done" },
 				},
 				done: final(),
@@ -283,9 +293,29 @@ export function consume(p, ctx) {
 	expect(replay.broken).toBeUndefined();
 	expect(replay.stale).toEqual([]);
 	expect(replay.skipped).toEqual([]);
+	const changedMode = structuredClone(records);
+	for (const record of changedMode) {
+		if (record.type !== "state_action" || record.kind !== "invoke" || record.actionUid.state !== "read") {
+			continue;
+		}
+		const action = record.definition;
+		const read =
+			action.kind === "agent"
+				? action.reads?.[0]
+				: action.kind === "script" || action.kind === "tsImport"
+					? action.env?.NOTES
+					: undefined;
+		if (typeof read === "object" && read.kind === "artifactVersion") {
+			delete (read as { mode?: string }).mode;
+		}
+	}
+	expect(explainReplay(ast, changedMode).stale).toEqual(
+		expect.arrayContaining([expect.objectContaining({ state: "read", reason: "action_definition_changed" })]),
+	);
 	const projection = projectBranch(createBranchProjection(ast), ast, records);
-	expect(projection.results.read).toMatchObject({ old: "old", live: "new" });
+	expect(projection.results.read).toMatchObject({ old: "old", live: "old" });
 	expect(await readFile(join(directory, "notes.md"), "utf8")).toBe("new");
+	expect(projection.results.observe).toEqual({ notes: "new" });
 	const saved = projection.results.capture as { notesVersion: z.infer<typeof ArtifactVersionSchema> };
 	expect(saved.notesVersion).toEqual({ path: "notes.md", ...pin("old") });
 	// A second workspace/branch may read the saved reference without the live file.
@@ -299,7 +329,7 @@ export function consume(p, ctx) {
 	expect(rendered).toMatchObject({ path: "notes.md", versioned: true, pin: pin("old") });
 	const objects = new ArtifactStore(resolveRunPaths("run", storage).runDir);
 	expect(await readFile(await objects.get(saved.notesVersion.hash), "utf8")).toBe("old");
-	expect(projection.results.read).toMatchObject({ path: await objects.get(saved.notesVersion.hash) });
+	expect(projection.results.read).toMatchObject({ path: join(directory, "notes.md") });
 	await expect(access(join(directory, ".hyperchart", "artifact-versions"))).rejects.toThrow();
 	const boundary = records.find(
 		(record) => record.type === "state_action" && record.kind === "complete" && record.actionUid.state === "mutate",
@@ -333,8 +363,9 @@ export function consume(p, ctx) {
 	}
 	const forkRecords = await collectHistoryRecords(forkStore, "fork");
 	const forkProjection = projectBranch(createBranchProjection(ast), ast, forkRecords);
-	expect(forkProjection.results.read).toMatchObject({ old: "old", live: "fork live" });
+	expect(forkProjection.results.read).toMatchObject({ old: "old", live: "old" });
 	expect(explainReplay(ast, forkRecords).broken).toBeUndefined();
+	expect(await readFile(join(forkDir, "notes.md"), "utf8")).toBe("new");
 	// Rewinding the source branch reuses the same saved result too.
 	await store.moveBranch("main", boundary.seqId);
 	await writeFile(join(directory, "notes.md"), "rewound live");
@@ -359,7 +390,7 @@ export function consume(p, ctx) {
 	const rewindRecords = await collectHistoryRecords(store, "main");
 	expect(projectBranch(createBranchProjection(ast), ast, rewindRecords).results.read).toMatchObject({
 		old: "old",
-		live: "rewound live",
+		live: "old",
 	});
 	// A fresh workspace cannot silently fall back to live bytes on store corruption.
 	await store.createBranch("corrupt", boundary.seqId);

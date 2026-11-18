@@ -295,7 +295,11 @@ A fork at a pending or rejected guarded completion must produce a fresh branch-l
 does not freeze the version at action entry. Return the reference as an ordinary
 schema-checked capture result to retain it across subsequent steps, forks, or
 rewinds. Use an actor when concurrent access requires serialization.
-A historical `artifactVersion()` read resolves directly to the verified object
-already in the artifact store; it neither creates a workspace copy nor rolls back
-the live filename. There are no new journal record kinds or
-control transitions. See [saved artifact revisions](api/dsl.md#saved-artifact-revisions).
+A historical `artifactVersion()` read overrides the default revision at its authored
+workspace path. Before each executor action, runtime materializes accepted branch
+pins, then applies explicit `reads`. The next action gets accepted defaults again;
+there is no after-action rollback or separate restoration pin. The execution layer
+supplies the existing pin map through a callback without exposing projection state
+to runtime. Authors must serialize shared-workspace access when using historical
+overrides, for example through an actor. See
+[saved artifact revisions](api/dsl.md#saved-artifact-revisions).

@@ -1057,6 +1057,8 @@ export type ArtifactAst = Readonly<{
 
 export type ArtifactVersionCst = Readonly<{
 	kind: "artifactVersion";
+	/** Execution provenance: historical reads restore the authored workspace path. */
+	mode: "workspace";
 	version: InputRef<ArtifactVersion>;
 }>;
 export type ArtifactVersionAst = ArtifactVersionCst;

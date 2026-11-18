@@ -1105,10 +1105,25 @@ or input; treat it as a revision reference rather than a live filename.
 
 `artifactVersion(ref): ArtifactVersionCst` accepts an `InputRef<ArtifactVersion>`
 and is valid in agent `reads`, script/function `env`, and guard `env`. It resolves
-through `ArtifactStore.get(hash)` to the existing verified store object path,
-**not** the mutable artifact's original path. No additional workspace copy is made. It requires a run artifact store; missing/corrupt
-objects fail rather than falling back to the live file. It does not grant OS-level
-read isolation; consumers must treat the shared store object as read-only.
+by overriding the accepted default at the artifact's **original workspace path**
+before the action runs. Thus ordinary `read`/`grep` access sees the selected
+revision too. Before the next executor action, the workspace is materialized from
+the branch's current accepted pins again, then that action's own `reads` are applied.
+There is no after-action rollback, restoration pin, or invocation-local version cache.
+
+A run artifact store and execution-owned pin reader are required. Missing/corrupt
+revisions fail closed. Authors must serialize actions sharing a workspace when
+historical overrides are used, for example with an actor or sequential chart
+control. Default workspace preparation itself can overwrite another action's
+historical override; overlapping historical readers are unsafe even if they select
+the same revision. Actions must use these reads as inputs, not publish the same
+path as an output. Store objects are never exposed as writable action paths.
+
+After cancellation, disposal, or a crash, no special rollback runs. Normal branch
+startup and the next action's workspace preparation reconstruct accepted pins.
+The normalized descriptor carries `mode: "workspace"` as execution provenance;
+journals from the earlier direct-store read implementation are reported as changed
+action definitions on replay.
 
 A deterministic action can capture a reference for later actions without plumbing
 it through intermediate states:

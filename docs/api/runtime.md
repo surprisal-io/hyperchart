@@ -743,13 +743,28 @@ or action-entry snapshot. A saved reference is an ordinary accepted action resul
 concurrent access coordination belongs to the chart, for example an actor. This
 adds no durable fact kind or checkpoint shape and does not change scheduling.
 
-`artifactVersion()` renders only the authored path and pin. At dispatch, the
-runtime calls `ArtifactStore.get(hash)` to verify and resolve the already stored
-object, then passes its absolute path to agent reads and script/function/guard
-env. There is no additional snapshot directory or workspace copy, and the live
-file is never replaced. Ordinary artifact reads retain their existing workspace
-restoration behavior. Historical reads require a configured run store and fail
-on missing/corrupt objects. Consumers must treat shared store objects as read-only;
-this API does not enforce OS-level write isolation. Workspace containment checks
-remain unchanged for ordinary files; historical paths come only from the run's
-verified artifact store.
+`ChartRuntimeOptions.readArtifactPins` is an execution-owned callback returning
+the branch's current accepted `{ path: pin }` mapping. Runner composition binds it
+to `BranchExecution.artifactPins()`; direct runtime compositions may use
+`bindArtifactPins()`. Runtime receives pins only, never a projection or lineage
+reader. It reuses `materializeWorkspaceFromPins()` before each executor action,
+then restores explicit declared reads over those accepted defaults.
+
+`artifactVersion()` supplies the authored path and selected pin. It overrides the
+default bytes for that action; script/function/guard env receives the absolute
+workspace path, while agent reads keep the authored path. It requires a configured
+run store and pin-reader callback. The following action restores accepted defaults
+again. There is no `restorePin`, snapshot namespace, after-action cleanup, lock, or
+invocation pin cache. Cancellation/disposal need no special artifact rollback.
+Normal branch startup also materializes accepted pins before resuming execution.
+
+Guards are part of the current action, not a new action boundary: they apply their
+explicit reads without resetting all defaults, so provisional completion artifacts
+remain available to the validating action. Accepted defaults never promote those
+provisional bytes to evidence for a later action.
+
+This mutates a branch workspace, not concurrent isolation. Authors must serialize
+shared-workspace access when overrides are used, via chart control or an actor.
+Normalized historical descriptors include `mode: "workspace"`, so earlier
+direct-store invocation definitions are detected as stale rather than silently
+reinterpreted. No new durable fact kind or checkpoint schema is needed.

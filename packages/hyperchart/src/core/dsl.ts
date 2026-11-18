@@ -538,7 +538,7 @@ export function currentVersion(path: string): InputRef<ArtifactVersion> {
 	return { kind: "currentVersion", path };
 }
 
-/** Read a historical revision without restoring over the live artifact path. */
+/** Temporarily restore a historical revision at its authored workspace path. */
 export function artifactVersion(version: InputRef<ArtifactVersion>): ArtifactVersionCst {
-	return { kind: "artifactVersion", version };
+	return { kind: "artifactVersion", mode: "workspace", version };
 }

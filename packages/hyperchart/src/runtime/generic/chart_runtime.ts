@@ -6,6 +6,7 @@ import type { ChartAst, ChartEvent, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
 import type { AgentEffect, AgentOutcome, Effect, MachineEvent, RenderedArtifact } from "../../core/machine.js";
+import { materializeWorkspaceFromPins } from "./artifact_workspace.js";
 import { ArtifactStore, hashFile } from "./artifact_store.js";
 import { agentRetryDelayMs, isTransientProviderFailure } from "./agent_retry_backoff.js";
 import { renderedArtifactPath } from "./artifacts.js";
@@ -28,6 +29,8 @@ export type ChartRuntimeOptions = {
 	prepareStampedCommit?: PrepareStampedCommit;
 	/** Execution-owned semantic validation over runtime-acquired immutable bytes. */
 	validateArtifactSnapshot?: (artifact: RenderedArtifact, content: string) => Promise<SchemaCheck>;
+	/** Execution-owned current accepted pins for default action workspace preparation. */
+	readArtifactPins?: () => Readonly<Record<string, ArtifactPin>>;
 	agentExecutor: AgentExecutor;
 	/** Repository/project directory that owns the run. Scripts remain cwd-scoped to workDir. */
 	projectDir?: string;
@@ -100,6 +103,13 @@ export class ChartRuntime implements Runtime {
 			throw new Error("ChartRuntime artifact validator is already bound");
 		}
 		this.options.validateArtifactSnapshot = validate;
+	}
+
+	bindArtifactPins(read: () => Readonly<Record<string, ArtifactPin>>): void {
+		if (this.options.readArtifactPins !== undefined && this.options.readArtifactPins !== read) {
+			throw new Error("ChartRuntime artifact pin reader is already bound");
+		}
+		this.options.readArtifactPins = read;
 	}
 
 	bindStampedCommit(prepare: PrepareStampedCommit): void {
@@ -283,7 +293,7 @@ export class ChartRuntime implements Runtime {
 										ok: false,
 										reason: foreignCompletionReason(effect.completionBranchId, this.branchId),
 									})
-								: this.prepareReadPaths(effect).then((prepared) =>
+								: this.prepareReadPaths(effect, false).then((prepared) =>
 										runGuard(
 											effect.guard,
 											effect.event,
@@ -500,49 +510,37 @@ export class ChartRuntime implements Runtime {
 		);
 	}
 
-	/** Resolve historical reads to existing store objects; restore only ordinary live reads. */
+	/** Restore the current branch workspace first; explicit reads then override its defaults. */
 	private async prepareReadPaths<
 		T extends {
 			reads?: readonly RenderedArtifact[];
 			env?: Readonly<Record<string, string | RenderedArtifact>>;
 		},
-	>(effect: T): Promise<T> {
+	>(effect: T, restoreDefaults = true): Promise<T> {
 		const reads = effect.reads ?? envArtifacts(effect.env);
-		await this.restorePinnedReads(reads.filter((read) => read.versioned !== true));
-		const resolved = new Map<RenderedArtifact, Promise<RenderedArtifact>>();
-		const resolveRead = (read: RenderedArtifact): Promise<RenderedArtifact> => {
-			if (read.versioned !== true) {
-				return Promise.resolve(read);
-			}
-			let pending = resolved.get(read);
-			if (pending === undefined) {
-				const store = this.artifactStore;
-				const pin = read.pin;
-				if (store === undefined || pin === undefined) {
-					throw new Error("artifactVersion reads require a run artifact store and a revision pin");
-				}
-				pending = store.get(pin.hash).then((path) => ({ ...read, path }));
-				resolved.set(read, pending);
-			}
-			return pending;
-		};
-		const preparedReads = await Promise.all(reads.map(resolveRead));
+		const store = this.artifactStore;
+		if (restoreDefaults && store !== undefined && this.options.readArtifactPins !== undefined) {
+			await materializeWorkspaceFromPins(this.options.readArtifactPins(), store, this.options.workDir);
+		}
+		if (
+			reads.some((read) => read.versioned === true) &&
+			(store === undefined || this.options.readArtifactPins === undefined)
+		) {
+			throw new Error("artifactVersion reads require a run artifact store and an execution pin reader");
+		}
+		await this.restorePinnedReads(reads);
 		const env =
 			effect.env === undefined
 				? undefined
 				: Object.fromEntries(
-						await Promise.all(
-							Object.entries(effect.env).map(async ([name, value]) => [
-								name,
-								typeof value === "string" || value.versioned !== true ? value : (await resolveRead(value)).path,
-							]),
-						),
+						Object.entries(effect.env).map(([name, value]) => [
+							name,
+							typeof value === "string" || value.versioned !== true
+								? value
+								: renderedArtifactPath(value, this.options.workDir),
+						]),
 					);
-		return {
-			...effect,
-			...(effect.reads === undefined ? {} : { reads: preparedReads }),
-			...(env === undefined ? {} : { env }),
-		};
+		return { ...effect, ...(env === undefined ? {} : { env }) };
 	}
 
 	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {

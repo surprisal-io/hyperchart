@@ -4102,7 +4102,7 @@ function toEnv(
 		if (isRecord(value) && value.kind === "artifactVersion") {
 			const version = toInputRef(value.version, `${pointer}/version`, diagnostics, source);
 			if (version !== undefined) {
-				env[name] = { kind: "artifactVersion", version };
+				env[name] = { kind: "artifactVersion", mode: "workspace", version };
 			}
 			continue;
 		}
@@ -4240,7 +4240,7 @@ function toReads(
 		if (isRecord(item) && item.kind === "artifactVersion") {
 			const version = toInputRef(item.version, `${path}/${index}/version`, diagnostics, source);
 			if (version !== undefined) {
-				reads.push({ kind: "artifactVersion", version });
+				reads.push({ kind: "artifactVersion", mode: "workspace", version });
 			}
 			continue;
 		}

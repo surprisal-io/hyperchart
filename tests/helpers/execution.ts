@@ -38,6 +38,7 @@ export async function startChartRuntime(
 ): Promise<MachineState> {
 	const execution = await BranchExecution.restore({ ast, branchId: runtime.branchId, store });
 	runtime.bindStampedCommit(execution.prepareStampedCommit);
+	runtime.bindArtifactPins(() => execution.artifactPins());
 	runtime.bindArtifactValidator(artifactSnapshotValidator(runtime.executionInputs().schemaRegistry));
 	return import("../../packages/hyperchart/src/execution/execution_loop.js").then(({ start }) =>
 		start(runtime, execution, args),

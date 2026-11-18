@@ -95,5 +95,7 @@ Applications own their consumer cursors; Hyperchart owns SQL and decoding.
 See [Runtime API](../../docs/api/runtime.md#physical-postgresql-journal-pages).
 
 `currentVersion(path)`, `ArtifactVersionSchema`, and `artifactVersion(ref)` let a
-capture action save an accepted artifact revision and later actions read it
-without overwriting its live file. See [saved artifact revisions](../../docs/api/dsl.md#saved-artifact-revisions).
+capture action save an accepted artifact revision and later actions read it at its
+original workspace path. Each executor action first gets current accepted workspace
+defaults, then explicit `reads` override them; no after-action rollback is needed.
+Authors serialize access to shared paths explicitly. See [saved artifact revisions](../../docs/api/dsl.md#saved-artifact-revisions).
