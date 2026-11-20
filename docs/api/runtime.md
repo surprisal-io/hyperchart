@@ -418,6 +418,7 @@ type ImportedActionContext = Readonly<{
   artifacts: Readonly<Record<string, string>>; // absolute paths
   signal: AbortSignal;
   validationAttempt?: ValidationAttempt;
+  host?: unknown; // the runner host's capabilities, when it passed any
 }>;
 
 type ImportedActionFunction = (
@@ -431,6 +432,7 @@ class FunctionRunner {
     workDir: string;
     projectDir?: string;
     schemaRegistry?: SchemaRegistryLike;
+    host?: unknown;
   });
   run(
     effect: ImportedActionEffect,
@@ -448,6 +450,26 @@ A validation retry invokes the function again with one-based `{ n, reason? }` me
 
 `cancel()` aborts the signal and immediately settles the tracked invocation without awaiting user code. A result or rejection that arrives after abort is observed and discarded. `dispose()` aborts all live invocations and also returns immediately, allowing branch drain and rewind to finish even when a function ignores its signal or never settles. This only prevents late completion admission; continuing CPU work and side effects cannot be terminated in-process. Native imports are cached for the runner lifetime. See [Recovery and safety](../safety.md#in-process-function-actions).
 
+### Host capabilities for imported functions
+
+A host that runs a chart in its own process can hand imported guards and imported actions the services they need
+(a database client, a query engine, per-run state) through `host` in the runner config:
+
+```ts
+const controller = await createHyperchartRunnerController(
+  { runId, chartId, chartPath, workDir, branchId: "main", host: { acceptance } },
+  buildExecutor,
+);
+```
+
+The runner passes the same value as `context.host` to every imported action (`ImportedActionContext.host`) and
+imported guard (`GuardContext.host`) of that run, with the branch's `workDir` beside it. It is in-process only:
+never journaled, never serialized, and absent from runners started from a config file, where `context.host` is
+`undefined`. A host that runs several runs in one process gives each run's controller its own `host`, so a
+function never has to work out which run it belongs to. Use it instead of process globals: a global is shared by
+every run and every branch of the process. Script actions and script guards run in a subprocess and cannot
+receive it.
+
 ## Guards
 
 ### `runGuard()`
@@ -456,6 +478,8 @@ A validation retry invokes the function again with one-based `{ n, reason? }` me
 type GuardContext = Readonly<{
   chartDir: string;
   workDir: string;
+  invocation?: Readonly<{ branchId: string; actionUid: ActionUID; invocationId: string }>;
+  host?: unknown; // the runner host's capabilities, imported guards only
 }>;
 
 type RenderedGuardInvocation = Readonly<{
@@ -480,6 +504,7 @@ For `tsImport` guards:
 - package specifiers are imported directly;
 - the named export must be a function;
 - the function receives `(event, context, invocation?)`; existing one-argument guards remain valid;
+- `context.host` carries the runner host's capabilities when the host passed `host` in the runner config (see [Host capabilities](#host-capabilities-for-imported-functions)); script guards never receive it;
 - declared `env` is structurally validated and rendered into `invocation.env` by ChartRuntime;
 - imported guards do not support artifact declarations or reply schemas; use a script guard for checked outputs;
 - the result must be `boolean` or `{ ok: false, reason: string }`.

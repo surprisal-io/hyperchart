@@ -49,6 +49,8 @@ export type ChartRuntimeOptions = {
 	/** Enables artifact pinning: accepted deliverables are snapshotted into `<runDir>/artifact_store`. */
 	runId?: string;
 	schemaRegistry?: SchemaRegistryLike;
+	/** Host capabilities handed to imported guards and actions in this process; never journaled. */
+	host?: unknown;
 	now?: () => number;
 	onWarn?: (msg: string) => void;
 };
@@ -94,6 +96,7 @@ export class ChartRuntime implements Runtime {
 			workDir: options.workDir,
 			projectDir: options.projectDir ?? options.workDir,
 			...(options.schemaRegistry === undefined ? {} : { schemaRegistry: options.schemaRegistry }),
+			...(options.host === undefined ? {} : { host: options.host }),
 		});
 		if (options.runId !== undefined) {
 			this.artifactStore = new ArtifactStore(resolveRunPaths(options.runId).runDir);
@@ -311,6 +314,7 @@ export class ChartRuntime implements Runtime {
 													actionUid: effect.actionUid,
 													invocationId: effect.invocationId,
 												},
+												...(this.options.host === undefined ? {} : { host: this.options.host }),
 											},
 											{
 												scripts: this.scripts,

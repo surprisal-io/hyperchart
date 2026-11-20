@@ -54,6 +54,12 @@ export type RunnerCommonConfig = {
 	ignoreReplayWarnings?: boolean;
 	agentDir?: string;
 	storage?: RunLogStorage;
+	/**
+	 * Host capabilities of this run (services, clients, per-run state), handed as `context.host` to every imported
+	 * guard and imported action the runner executes. In-process only: never journaled or serialized, and absent from
+	 * runners started from a config file.
+	 */
+	host?: unknown;
 };
 
 /** Legacy singleton input remains accepted; branchIds are initial runner seeds. */
@@ -1122,6 +1128,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 					chartDir: dirname(this.config.chartPath),
 					runId: this.config.runId,
 					schemaRegistry: this.schemaRegistry,
+					...(this.config.host === undefined ? {} : { host: this.config.host }),
 					onWarn: (message) => console.warn(message),
 					prepareStampedCommit: gate.semantic!.prepareStampedCommit,
 					validateArtifactSnapshot: artifactSnapshotValidator(this.schemaRegistry),
@@ -1247,6 +1254,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 				chartDir: dirname(this.config.chartPath),
 				runId: this.config.runId,
 				schemaRegistry: this.schemaRegistry,
+				...(this.config.host === undefined ? {} : { host: this.config.host }),
 				onWarn: (message) => console.warn(message),
 				prepareStampedCommit: gate.semantic.prepareStampedCommit,
 				validateArtifactSnapshot: artifactSnapshotValidator(this.schemaRegistry),
