@@ -263,7 +263,7 @@ export async function scoreCandidate(params, context) {
 }
 ```
 
-`params` contains rendered `env` declarations. Selected artifact refs are schema-checked and decoded; other entries remain strings. `context` contains the resolved visit `input`, allowed `events`, `actionUid`, absolute `chartDir`, branch `workDir`, owning `projectDir`, absolute declared artifact paths, an `AbortSignal`, and optional `{ n, reason }` retry metadata. It never exposes projection state or a runtime handle. The returned event, reply, and artifacts use the same completion validator as scripts, and accepted deliverables go through the same artifact pinning boundary.
+`params` contains rendered `env` declarations. Selected artifact refs are schema-checked and decoded; other entries remain strings. `context` contains the resolved visit `input`, allowed `events`, `actionUid`, absolute `chartDir`, branch `workDir`, owning `projectDir`, absolute declared artifact paths, an `AbortSignal`, optional `{ n, reason }` retry metadata, and `hostServices`, the runner host's services when the host passed any (see [Host services](api/runtime.md#host-services-for-imported-functions)). It never exposes projection state or a runtime handle. The returned event, reply, and artifacts use the same completion validator as scripts, and accepted deliverables go through the same artifact pinning boundary.
 
 Cancellation is cooperative. Hyperchart aborts the signal, suppresses late results, and lets runtime drain finish without waiting for a function that ignores the signal, but it cannot stop that function's CPU work or side effects. See [Recovery and safety](safety.md#in-process-function-actions).
 
