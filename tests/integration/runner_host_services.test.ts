@@ -34,33 +34,33 @@ function recordingHost() {
 }
 
 function fixture() {
-	const root = mkdtempSync(join(tmpdir(), "hyperchart-host-context-"));
+	const root = mkdtempSync(join(tmpdir(), "hyperchart-host-services-"));
 	roots.push(root);
 	const storage: RunStorage = { kind: "jsonl", rootDir: join(root, "runs"), layout: "sha256" };
 	const chartPath = join(root, "chart.ts");
 	writeFileSync(
 		join(root, "guard.mjs"),
-		"export function check(event, ctx) { return ctx.host.check(event, ctx.workDir) ? true : { ok: false, reason: 'rejected by host' }; }\n",
+		"export function check(event, ctx) { return ctx.hostServices.check(event, ctx.workDir) ? true : { ok: false, reason: 'rejected by host' }; }\n",
 	);
 	writeFileSync(
 		join(root, "compute.mjs"),
-		"export function compute(_params, ctx) { return { type: 'DONE', output: { doubled: ctx.host.double(ctx.input.n, ctx.workDir) } }; }\n",
+		"export function compute(_params, ctx) { return { type: 'DONE', output: { doubled: ctx.hostServices.double(ctx.input.n, ctx.workDir) } }; }\n",
 	);
 	writeFileSync(
 		chartPath,
 		`import { chart, agent, final, tsAction, tsImport, event, z } from "@surprisal/hyperchart";
-export default chart({ kind: "chart", id: "host-context", initial: "work", states: {
+export default chart({ kind: "chart", id: "host-services", initial: "work", states: {
   work: { kind: "state", action: agent("worker", { validation: { guard: tsImport("./guard.mjs", "check") } }),
     transitions: { DONE: { target: "compute", input: { n: event("n") } } } },
   compute: { kind: "state", input: { n: z.number() }, action: tsAction("./compute.mjs", "compute"),
     transitions: { DONE: "done" } },
   done: final() } });`,
 	);
-	return { root, storage, chartPath, runId: "host-context:run" };
+	return { root, storage, chartPath, runId: "host-services:run" };
 }
 
-describe("host capabilities for imported functions", () => {
-	it("hands the runner host's capabilities to imported guards and actions, with the branch workspace", async () => {
+describe("host services for imported functions", () => {
+	it("hands the runner host's services to imported guards and actions, with the branch workspace", async () => {
 		const f = fixture();
 		await withRunStorage(f.storage, () => initializeRun(f.runId));
 		const host = recordingHost();
@@ -68,11 +68,11 @@ describe("host capabilities for imported functions", () => {
 			{
 				runId: f.runId,
 				storage: f.storage,
-				chartId: "host-context",
+				chartId: "host-services",
 				chartPath: f.chartPath,
 				workDir: f.root,
 				branchId: "main",
-				host,
+				hostServices: host,
 			},
 			() => ({
 				start(_effect, emit) {
@@ -99,12 +99,12 @@ describe("host capabilities for imported functions", () => {
 		expect([...workDirs][0]).toContain(join("workspaces", "main"));
 	});
 
-	it("leaves context.host out when the host passes none", async () => {
+	it("leaves context.hostServices out when the host passes none", async () => {
 		const root = await mkdtemp(join(tmpdir(), "hyperchart-host-absent-"));
 		roots.push(root);
 		await writeFile(
 			join(root, "probe.mjs"),
-			"export function probe(_params, ctx) { return { type: 'DONE', output: { hasHost: 'host' in ctx } }; }\n",
+			"export function probe(_params, ctx) { return { type: 'DONE', output: { hasHost: 'hostServices' in ctx } }; }\n",
 		);
 		const actionUid = { chart: "host-unit", state: "work", action: "tsImport" };
 		const effect: Omit<ImportedActionEffect, "env"> = {
@@ -119,7 +119,7 @@ describe("host capabilities for imported functions", () => {
 		const bare = new FunctionRunner({ chartDir: root, workDir: root });
 		await expect(bare.run(effect)).resolves.toEqual({ type: "DONE", output: { hasHost: false } });
 		await bare.dispose();
-		const hosted = new FunctionRunner({ chartDir: root, workDir: root, host: { any: "service" } });
+		const hosted = new FunctionRunner({ chartDir: root, workDir: root, hostServices: { any: "service" } });
 		await expect(hosted.run(effect)).resolves.toEqual({ type: "DONE", output: { hasHost: true } });
 		await hosted.dispose();
 	});

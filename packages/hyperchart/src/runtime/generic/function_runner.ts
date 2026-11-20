@@ -21,8 +21,8 @@ export type ImportedActionContext = Readonly<{
 	artifacts: Readonly<Record<string, string>>;
 	signal: AbortSignal;
 	validationAttempt?: ValidationAttempt;
-	/** Host capabilities of this run, as the runner's host passed them (`host` in the runner config). Never journaled. */
-	host?: unknown;
+	/** Services of this run, as the runner's host passed them (`hostServices` in the runner config). Never journaled. */
+	hostServices?: unknown;
 }>;
 
 export type ImportedActionFunction = (
@@ -49,7 +49,7 @@ export class FunctionRunner {
 		workDir: string;
 		projectDir: string;
 		schemaRegistry?: SchemaRegistryLike;
-		host?: unknown;
+		hostServices?: unknown;
 	};
 
 	constructor(opts: {
@@ -57,14 +57,14 @@ export class FunctionRunner {
 		workDir: string;
 		projectDir?: string;
 		schemaRegistry?: SchemaRegistryLike;
-		host?: unknown;
+		hostServices?: unknown;
 	}) {
 		this.opts = {
 			chartDir: resolve(opts.chartDir),
 			workDir: resolve(opts.workDir),
 			projectDir: resolve(opts.projectDir ?? opts.workDir),
 			...(opts.schemaRegistry === undefined ? {} : { schemaRegistry: opts.schemaRegistry }),
-			...(opts.host === undefined ? {} : { host: opts.host }),
+			...(opts.hostServices === undefined ? {} : { hostServices: opts.hostServices }),
 		};
 	}
 
@@ -150,7 +150,7 @@ export class FunctionRunner {
 			artifacts,
 			signal,
 			...(validationAttempt === undefined ? {} : { validationAttempt: { ...validationAttempt } }),
-			...(this.opts.host === undefined ? {} : { host: this.opts.host }),
+			...(this.opts.hostServices === undefined ? {} : { hostServices: this.opts.hostServices }),
 		};
 		const value = await (fn as ImportedActionFunction)(params, context);
 		return explicitChartEvent(value);

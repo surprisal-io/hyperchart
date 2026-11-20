@@ -28,7 +28,7 @@ Only use function actions whose code is trusted, re-entrant, and cooperative:
 - a CPU-bound loop blocks every branch, timer, gate, and runner heartbeat on the event loop;
 - `process.exit()`, `process.chdir()`, or mutation of `process.env` affects the whole runner;
 - relative filesystem paths use the runner process cwd (normally the owning project), **not** the branch workspace; use the absolute `context.workDir` and `context.artifacts` paths;
-- do not reach host services through process globals: they are shared by every run and branch of the process; take them from `context.host`, which the runner's host passes per run;
+- do not reach host services through process globals: they are shared by every run and branch of the process; take them from `context.hostServices`, which the runner's host passes per run;
 - module-scope mutable state is shared by concurrent branch invocations;
 - native `import()` caches a module for the process lifetime, so edits require a runner restart;
 - `.ts` modules depend on the supported Node version's erasable type stripping and do not get the chart loader's Jiti aliases; prefer `.mjs`/`.js` or erasable-only TypeScript.
