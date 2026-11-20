@@ -868,6 +868,38 @@ const inspectorPanelSpecInputs: InspectorPanelSpecInput[] = [
 		runtime: { selectedStateId: "inputs-and-refs" },
 	},
 	{
+		group: "agent",
+		title: "Borrowed artifact · rollback",
+		description:
+			"An explicitly borrowed producer snapshot with temporary working-file restoration and initial empty memory.",
+		graphAtlas: true,
+		chart: chart({
+			kind: "chart",
+			id: "inspector-borrowed-artifact",
+			initial: "score",
+			states: {
+				score: {
+					kind: "state",
+					action: script("node", ["score.mjs"], { artifacts: { labnotes: artifact("artifacts/lab-notes.md") } }),
+					transitions: { DONE: "prior" },
+				},
+				prior: {
+					kind: "state",
+					action: agent("reviewer", {
+						task: "Use completed experimental evidence only.",
+						artifacts: {
+							labnotes: artifact({ from: "score", artifact: "labnotes", rollback: true, ifMissing: "empty" }),
+						},
+					}),
+					transitions: { DONE: "done" },
+				},
+				done: final(),
+			},
+		}),
+		runtime: { selectedStateId: "prior", mode: "static" },
+	},
+
+	{
 		group: "actorDefinitions",
 		title: "Actor definition-only",
 		description: "Static actor placement input, initial receive state, and complete protocol.",

@@ -11,8 +11,9 @@ export function buildTaskPrompt(effect: AgentEffect, resolvedReads: ResolvedRead
 	if (resolvedReads.length > 0) {
 		sections.push(formatReads(resolvedReads));
 	}
-	if ((effect.artifacts?.length ?? 0) > 0) {
-		sections.push(formatDeliverables(effect.artifacts ?? []));
+	const outputs = deliverables(effect);
+	if (outputs.length > 0) {
+		sections.push(formatDeliverables(outputs));
 	}
 	sections.push(formatCompletion(effect));
 	return sections.join("\n\n");
@@ -26,10 +27,11 @@ export function buildRecoveryPrompt(effect: AgentEffect, lastAssistantText?: str
 	if (recovery.failure.kind === "incomplete") {
 		return buildNudgePrompt(effect, lastAssistantText);
 	}
+	const outputs = deliverables(effect);
 	const artifactReminder =
-		(effect.artifacts?.length ?? 0) === 0
+		outputs.length === 0
 			? ""
-			: `\nKeep each declared artifact at its exact path (${effect.artifacts!.map((artifact) => artifact.path).join(", ")}); do not increment, rename, or version it yourself.`;
+			: `\nKeep each declared artifact at its exact path (${outputs.map((artifact) => artifact.path).join(", ")}); do not increment, rename, or version it yourself.`;
 	return `The previous attempt failed (${recovery.failure.kind}): ${recovery.failure.message}${artifactReminder}\nFix the problem and call \`finish\` again.\n\n${formatCompletion(effect)}`;
 }
 
@@ -107,6 +109,11 @@ function formatReads(reads: ResolvedRead[]): string {
 		lines.push("```");
 	}
 	return lines.join("\n");
+}
+
+// A borrowed artifact arrives with saved bytes already in place; it is not a request to write the file.
+function deliverables(effect: AgentEffect): RenderedArtifact[] {
+	return (effect.artifacts ?? []).filter((artifact) => artifact.snapshot === undefined);
 }
 
 function formatDeliverables(artifacts: readonly RenderedArtifact[]): string {

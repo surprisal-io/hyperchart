@@ -1,3 +1,4 @@
+import type { RenderedScriptEnv } from "./script_runner.js";
 import { resolve } from "node:path";
 import { actionUidKey } from "../../core/action_uid.js";
 import type { ImportedActionEffect, RenderedArtifact } from "../../core/machine.js";
@@ -63,7 +64,7 @@ export class FunctionRunner {
 	}
 
 	async run(
-		effect: ImportedActionEffect,
+		effect: ImportedActionEffect & { env?: RenderedScriptEnv },
 		validationAttempt?: ValidationAttempt,
 		prepare?: () => Promise<void>,
 	): Promise<ChartEvent | undefined> {
@@ -106,7 +107,7 @@ export class FunctionRunner {
 	}
 
 	private async invoke(
-		effect: ImportedActionEffect,
+		effect: ImportedActionEffect & { env?: RenderedScriptEnv },
 		signal: AbortSignal,
 		validationAttempt: ValidationAttempt | undefined,
 		prepare: (() => Promise<void>) | undefined,
@@ -158,9 +159,7 @@ export class FunctionRunner {
 					async ([name, value]) =>
 						[
 							name,
-							typeof value === "string"
-								? value
-								: await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry),
+							typeof value === "string" ? value : await resolveArtifactValue(value, this.opts.schemaRegistry),
 						] as const,
 				),
 			),

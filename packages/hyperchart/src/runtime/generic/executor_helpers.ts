@@ -81,18 +81,14 @@ export function validateDeclaredReadPaths(reads: readonly { path: string }[] | u
 	}
 }
 
-export async function resolveReads(
-	effect: AgentEffect,
-	workDir: string,
-	registry?: SchemaRegistry,
-): Promise<ResolvedRead[]> {
+export async function resolveReads(effect: AgentEffect, registry?: SchemaRegistry): Promise<ResolvedRead[]> {
 	const reads: ResolvedRead[] = [];
 	validateDeclaredReadPaths(effect.reads);
 	for (const artifact of effect.reads ?? []) {
 		reads.push(
 			artifact.select === undefined
 				? { artifact }
-				: { artifact, value: await resolveArtifactValue(artifact, workDir, registry) },
+				: { artifact, value: await resolveArtifactValue(artifact, registry) },
 		);
 	}
 	return reads;
@@ -105,6 +101,9 @@ export async function checkEffectArtifacts(
 ): Promise<string[]> {
 	const errors: string[] = [];
 	for (const artifact of effect.artifacts ?? []) {
+		if (artifact.rollback !== undefined) {
+			continue;
+		}
 		const check = await checkArtifactFile(artifact, workDir, registry);
 		if (!check.ok) {
 			errors.push(...check.errors);

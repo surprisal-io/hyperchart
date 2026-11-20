@@ -258,7 +258,10 @@ describe("runtime Zod contracts", () => {
 		};
 		expect((await checkArtifactFile(artifactValue, dir, result.schemaRegistry)).ok).toBe(false);
 		await expect(
-			resolveArtifactValue({ ...artifactValue, select: "value" }, dir, result.schemaRegistry),
+			resolveArtifactValue(
+				{ ...artifactValue, path: join(dir, artifactValue.path), select: "value" },
+				result.schemaRegistry,
+			),
 		).rejects.toThrow("schema mismatch");
 		const runner = new ScriptRunner({
 			workDir: dir,

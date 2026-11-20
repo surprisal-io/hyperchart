@@ -723,6 +723,77 @@ artifacts: {
 
 A shape means the file contains JSON matching the Zod schema. Without a shape, the runtime only requires a readable file. Artifact paths are resolved from the run working directory; the generic runtime rejects paths escaping that directory.
 
+### Borrow an existing artifact
+
+The second `artifact()` form binds an already accepted artifact to this action:
+
+```ts
+artifacts: {
+  labnotes: artifact({
+    from: "score",
+    artifact: "labnotes", // optional only when the source has exactly one artifact
+    rollback: true,
+    ifMissing: "empty",
+  }),
+}
+```
+
+`from` selects the **last accepted completion** of that concrete state occurrence
+in the selected branch ancestry. Path and schema come from its declaration; bytes
+come from that completion's recorded snapshot, not the current writer of the path.
+For map/actor scopes the same occurrence rules as `artifactOf()` apply. Cyclic,
+unknown, ambiguous, and cross-map source declarations are rejected.
+
+A borrowed artifact is a working copy at its saved authored path, not a new request
+for an agent to write that file. It adds no automatic Deliverables instruction.
+Scripts/functions receive its path in the existing artifacts context, as for other
+bound files. Ordinary `read`, `grep` and filesystem operations remain unchanged;
+this is not an OS security sandbox or a read-only capability.
+
+`rollback: true` records, at invoke, the path's latest **accepted** revision in this
+branch (or that it has none), supplies the selected snapshot, then materializes that
+accepted revision from CAS — or removes the file when there was none — after accepted
+completion, failure, cancellation, or disposal. Unaccepted workspace edits to the path
+made before the action are not preserved. A missing or corrupt restore revision fails
+closed, like a missing or corrupt source. Rejected guard claims keep their working view
+for the existing correction loop. Temporary edits are **not snapshotted into CAS**,
+not accepted as a new branch revision, and not included among completion outputs.
+Rollback bindings are inputs only: they do not appear in the consuming action's
+accepted output index and cannot be read back as its produced artifacts.
+Other declared output files are still validated and saved normally. Without
+rollback the resulting working file is accepted like an ordinary output.
+
+Overlapping access to a temporarily borrowed path is rejected; serialize conflicting
+actions in the chart. Cancellation cleanup finishes before that path can be reused.
+Trusted in-process functions must honor cancellation: Hyperchart cannot stop an
+ignored AbortSignal from causing later filesystem side effects.
+
+`ifMissing: "empty"` is explicit initialization for a producer that has **never
+completed**: provide a zero-byte file. Without it, a missing completion is an error.
+It does not hide a missing/corrupt CAS object or a completed-but-unpinned output.
+An empty input is not synthesized JSON data; JSON selection still requires valid JSON.
+Read refs support the same initial-empty policy:
+
+```ts
+env: {
+  NOTES: artifactOf("score", { artifact: "labnotes", ifMissing: "empty" }),
+}
+```
+
+`artifactOf()` and `joinArtifactOf()` now expose accepted producer snapshots as
+stable CAS input paths instead of restoring the branch's latest path pin over the
+working file. Joined versions belong to the recorded map instances. A join requires
+each selected producer to have completed; do not use it as a path-only listing of
+unfinished workers. JSON `select` validates/reads the same selected snapshot.
+CAS inputs must be treated as immutable; borrow through `artifacts` when a mutable
+working copy is required. Raw string reads keep their existing workspace behavior.
+
+The normalized read carries a producer-revision semantic marker. Older invocation
+definitions are detected by replay as stale rather than silently reinterpreted.
+The journal fact types are unchanged; replay derives a latest-per-state version
+index and per-invocation bindings. Disposable checkpoints use projector version 8.
+
+
 A validation guard returns only a verdict, but a script guard supports the complete script option surface: `env`, `artifacts`, and `reply`. Its `reply` validates the guard script's optional completion-envelope output and is not stored as the containing action's result. Guard artifacts are validated after exit and become declared artifacts of the containing action state for downstream `artifactOf()`/Files references; duplicate names with action artifacts are rejected. Env values use the same args/results/input/map-item/key/visit renderer as script actions. `artifactOf()` values without a selector become paths; selected values are read, shape-validated, and serialized exactly like script-action env. A guard may read the validated action's own artifact because that file exists before the verdict. `joinArtifactOf()` becomes a JSON array of rendered paths. Missing or invalid reads reject closed. Values are resolved only while validation is pending, never placed in stdin/context or durable facts.
 
 ## Compound states

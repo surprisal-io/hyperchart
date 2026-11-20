@@ -890,6 +890,14 @@ function artifactsDsl(artifacts: Readonly<Record<string, ArtifactAst>> | undefin
 }
 
 function artifactDsl(value: ArtifactAst): string {
+	if (value.source !== undefined) {
+		return `artifact(${objectDsl([
+			["from", stringDsl(value.source.state)],
+			["artifact", value.source.artifact === undefined ? undefined : stringDsl(value.source.artifact)],
+			["rollback", value.rollback === undefined ? undefined : String(value.rollback)],
+			["ifMissing", value.source.ifMissing === undefined ? undefined : stringDsl(value.source.ifMissing)],
+		])})`;
+	}
 	const path = templateDsl(value.path) ?? stringDsl("");
 	return value.shape === undefined ? path : `artifact(${path}, ${schemaDsl(value.shape)})`;
 }
@@ -920,6 +928,7 @@ function artifactOfDsl(read: ArtifactOfAst): string {
 	const options = objectDsl([
 		["artifact", read.artifact === undefined ? undefined : stringDsl(read.artifact)],
 		["select", read.select === undefined ? undefined : stringDsl(read.select)],
+		["ifMissing", read.ifMissing === undefined ? undefined : stringDsl(read.ifMissing)],
 	]);
 	return options === "{}" ? `artifactOf(${stringDsl(read.state)})` : `artifactOf(${stringDsl(read.state)}, ${options})`;
 }

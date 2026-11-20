@@ -61,6 +61,9 @@ export async function validateArtifacts(
 ): Promise<string[]> {
 	const errors: string[] = [];
 	for (const artifact of artifacts ?? []) {
+		if (artifact.rollback !== undefined) {
+			continue;
+		}
 		const check = await checkArtifactFile(artifact, workDir, schemaRegistry);
 		if (!check.ok) {
 			errors.push(...check.errors);

@@ -378,6 +378,8 @@ Read artifacts through declared refs:
 reads: [artifactOf("build", { artifact: "report" })]
 ```
 
+Use `artifact({ from: "build", artifact: "report", rollback: true })` in action artifacts to temporarily borrow an existing producer snapshot. Use `ifMissing: "empty"` only when an initial zero-byte input is intentional. See the [artifact contract](api/dsl.md#borrow-an-existing-artifact).
+
 Artifacts are files owned by the run or working directory. The durable log records the accepted declaration and invocation; it does not embed arbitrary file contents.
 
 ## Module loading and trust

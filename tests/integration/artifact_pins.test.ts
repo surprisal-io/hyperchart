@@ -314,7 +314,7 @@ describe("artifact pins", () => {
 		expect(pin.hash).toBe(createHash("sha256").update("agent report").digest("hex"));
 	});
 
-	it("restores a pinned read overwritten between runs to its accepted revision", async () => {
+	it("reads the producer snapshot without replacing a subsequently overwritten working file", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
 		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
@@ -359,7 +359,12 @@ describe("artifact pins", () => {
 		const { state } = await run(resumed, workDir, { runId, logStore, executor });
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(await readFile(join(workDir, "report.json"), "utf8")).toBe(accepted);
+		expect(await readFile(join(workDir, "report.json"), "utf8")).toBe("overwritten by a sibling branch");
+		const snapshot = executor.starts[0]?.reads?.[0]?.path;
+		if (snapshot === undefined) {
+			throw new Error("Missing producer snapshot input");
+		}
+		expect(await readFile(snapshot, "utf8")).toBe(accepted);
 	});
 
 	it("fails action entry when the pinned object is missing from the store", async () => {
@@ -408,7 +413,7 @@ describe("artifact pins", () => {
 		expect(await readFile(join(workDir, "report.json"), "utf8")).toBe("overwritten");
 	});
 
-	it("keeps current-file semantics for reads of unpinned legacy completions", async () => {
+	it("rejects an unpinned completed producer instead of falling back to current files or initial empty", async () => {
 		const workDir = await tempDir();
 		const runId = "run";
 		const _runDir = resolveRunPaths(runId, { kind: "jsonl", rootDir: workDir, layout: "sha256" }).runDir;
@@ -439,7 +444,7 @@ describe("artifact pins", () => {
 					},
 					consume: {
 						kind: "state",
-						action: agent("reader", { reads: [artifactOf("work")] }),
+						action: agent("reader", { reads: [artifactOf("work", { ifMissing: "empty" })] }),
 						transitions: { DONE: "done" },
 					},
 					done: final(),
@@ -448,9 +453,10 @@ describe("artifact pins", () => {
 			}),
 		);
 		const executor = new FakeAgentExecutor({ consume: [{ type: "DONE" }] });
-		const { state } = await run(resumed, workDir, { runId, logStore, executor });
+		const { log } = await run(resumed, workDir, { runId, logStore, executor });
 
-		expect(state.projection.activeLeaves).toEqual(["done"]);
+		expect(log.some((record) => record.type === "failure_intent")).toBe(true);
+		expect(executor.starts).toHaveLength(0);
 		expect(await readFile(join(workDir, "report.json"), "utf8")).toBe("edited out of band");
 	});
 

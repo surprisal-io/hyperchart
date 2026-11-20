@@ -37,7 +37,10 @@ export class ScriptRunner {
 		},
 	) {}
 
-	async run(effect: ScriptEffect, validationAttempt?: { n: number; reason?: string }): Promise<ChartEvent> {
+	async run(
+		effect: ScriptEffect & { env?: RenderedScriptEnv },
+		validationAttempt?: { n: number; reason?: string },
+	): Promise<ChartEvent> {
 		const key = actionUidKey(effect.actionUid);
 		const live = this.begin(key);
 		try {
@@ -248,7 +251,7 @@ export class ScriptRunner {
 			env[name] =
 				typeof value === "string"
 					? value
-					: serializeEnvValue(await resolveArtifactValue(value, this.opts.workDir, this.opts.schemaRegistry));
+					: serializeEnvValue(await resolveArtifactValue(value, this.opts.schemaRegistry));
 		}
 		env.HYPERCHART_PROJECT_DIR = this.opts.projectDir ?? this.opts.workDir;
 		env.HYPERCHART_BRANCH_WORKSPACE = this.opts.workDir;

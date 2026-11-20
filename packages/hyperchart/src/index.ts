@@ -40,6 +40,7 @@ export type {
 	AgentActionCst,
 	ArtifactAst,
 	ArtifactCst,
+	ArtifactFromCst,
 	ArtifactOfAst,
 	ArtifactOfCst,
 	AuthoringDiagnostic,

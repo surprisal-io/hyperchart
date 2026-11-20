@@ -36,6 +36,7 @@ import type {
 	FinalStateCst,
 	GuardRef,
 	ArtifactCst,
+	ArtifactFromCst,
 	ArtifactOfCst,
 	JoinArtifactOfCst,
 	JoinResultOfCst,
@@ -443,12 +444,16 @@ export function result(state: string, path?: string): InputRef {
 }
 
 // A deliverable file with an optional content shape — see ArtifactCst.
+export function artifact(options: Omit<ArtifactFromCst, "kind">): ArtifactFromCst;
 export function artifact<const P extends Templatable>(path: P): { kind: "artifact"; path: P };
 export function artifact<const P extends Templatable, const S extends SchemaCst>(
 	path: P,
 	shape: S,
 ): { kind: "artifact"; path: P; shape: S };
-export function artifact(path: Templatable, shape?: SchemaCst): ArtifactCst {
+export function artifact(path: Templatable | Omit<ArtifactFromCst, "kind">, shape?: SchemaCst): ArtifactCst {
+	if (typeof path === "object" && "from" in path) {
+		return { kind: "artifactFrom", ...path };
+	}
 	return { kind: "artifact", path, ...(shape === undefined ? {} : { shape }) };
 }
 
@@ -458,7 +463,10 @@ export function artifact(path: Templatable, shape?: SchemaCst): ArtifactCst {
 export function artifactOf<const State extends string>(
 	state: State,
 ): ArtifactOfCst & ActorArtifactRefMarker<State, undefined, undefined>;
-export function artifactOf<const State extends string, const Options extends { artifact?: string; select?: string }>(
+export function artifactOf<
+	const State extends string,
+	const Options extends { artifact?: string; select?: string; ifMissing?: "empty" },
+>(
 	state: State,
 	opts: Options,
 ): ArtifactOfCst &
@@ -467,12 +475,16 @@ export function artifactOf<const State extends string, const Options extends { a
 		Options extends { artifact: infer Artifact extends string } ? Artifact : undefined,
 		Options extends { select: infer Select extends string } ? Select : undefined
 	>;
-export function artifactOf(state: string, opts: { artifact?: string; select?: string } = {}): ArtifactOfCst {
+export function artifactOf(
+	state: string,
+	opts: { artifact?: string; select?: string; ifMissing?: "empty" } = {},
+): ArtifactOfCst {
 	return {
 		kind: "artifactOf",
 		state,
 		...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 		...(opts.select === undefined ? {} : { select: opts.select }),
+		...(opts.ifMissing === undefined ? {} : { ifMissing: opts.ifMissing }),
 	};
 }
 

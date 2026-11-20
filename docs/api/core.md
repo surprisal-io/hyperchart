@@ -486,7 +486,8 @@ type ValidateEffect = {
   actionUid: ActionUID;
   guard: GuardRefAst;
   event: ChartEvent;
-  env?: Readonly<Record<string, string | RenderedArtifact>>;
+  // joinArtifactOf renders to one descriptor per map instance; runtime prepares paths before dispatch
+  env?: Readonly<Record<string, string | RenderedArtifact | readonly RenderedArtifact[]>>;
   artifacts?: readonly RenderedArtifact[];
   reply?: SchemaAst;
 };

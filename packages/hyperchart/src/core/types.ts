@@ -515,11 +515,21 @@ export type SchemaAst = Readonly<{
 // to write this shape and may verify the written file; consumers reading via fileOf() inherit
 // path and shape from here, so they cannot drift. Artifacts are NOT the step's result — the
 // result is the completion event's payload (see `reply`).
-export type ArtifactCst = {
-	kind: "artifact";
-	path: Templatable;
-	shape?: SchemaCst;
-};
+export type ArtifactCst =
+	| {
+			kind: "artifact";
+			path: Templatable;
+			shape?: SchemaCst;
+	  }
+	| ArtifactFromCst;
+
+export type ArtifactFromCst = Readonly<{
+	kind: "artifactFrom";
+	from: StatePath;
+	artifact?: string;
+	rollback?: boolean;
+	ifMissing?: "empty";
+}>;
 
 // A read of another state's declared artifact, by producer rather than by path. `artifact` names
 // which one (may be omitted when the producer declares exactly one). An optional dot-path
@@ -532,6 +542,7 @@ export type ArtifactOfCst = {
 	state: StatePath;
 	artifact?: string;
 	select?: string;
+	ifMissing?: "empty";
 };
 
 // A fan-in read: the artifact of EVERY instance of a map, addressed by the producer's template
@@ -1053,6 +1064,9 @@ export type ChartCst = ActorOwnerCst & {
 export type ArtifactAst = Readonly<{
 	path: TemplateAst;
 	shape?: SchemaAst;
+	/** Borrowed source; path/shape are inherited during normalization. */
+	source?: ArtifactOfAst;
+	rollback?: boolean;
 }>;
 
 export type ArtifactVersionCst = Readonly<{
@@ -1061,9 +1075,9 @@ export type ArtifactVersionCst = Readonly<{
 }>;
 export type ArtifactVersionAst = ArtifactVersionCst;
 
-export type ArtifactOfAst = Readonly<ArtifactOfCst>;
+export type ArtifactOfAst = Readonly<ArtifactOfCst & { revision?: "producer" }>;
 
-export type JoinArtifactOfAst = Readonly<JoinArtifactOfCst>;
+export type JoinArtifactOfAst = Readonly<JoinArtifactOfCst & { revision?: "producer" }>;
 
 export type JoinResultOfAst = Readonly<JoinResultOfCst>;
 

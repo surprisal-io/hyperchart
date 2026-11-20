@@ -81,7 +81,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs = 1_000): Promise<T
 	}
 }
 
-function effect(module: string, exportName: string): ImportedActionEffect {
+function effect(module: string, exportName: string): Omit<ImportedActionEffect, "env"> {
 	const actionUid = { chart: "function-unit", state: "work", action: "tsImport" };
 	const action = { kind: "tsImport" as const, uid: actionUid, module, export: exportName };
 	return {

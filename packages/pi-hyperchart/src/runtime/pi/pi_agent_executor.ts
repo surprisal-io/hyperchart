@@ -414,7 +414,7 @@ export class PiAgentExecutor implements AgentExecutor {
 		}
 		// Validate every declared read before selecting or opening any restored session. A resumed
 		// session must not bypass the local-artifact/URL boundary that a fresh run enforces.
-		const reads = await resolveReads(effect, this.options.workDir, this.options.schemaRegistry);
+		const reads = await resolveReads(effect, this.options.schemaRegistry);
 		if (this.isStopped(key, generation)) {
 			return;
 		}

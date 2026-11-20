@@ -42,6 +42,11 @@ function replaceRequired(source, before, after, filename) {
 const transformed = new Set();
 const compiler = createJiti(import.meta.url, { fsCache: false });
 const jiti = createJiti(import.meta.url, {
+	alias: {
+		"@surprisal/hyperchart": `${root}packages/hyperchart/src/index.ts`,
+		"@surprisal/hyperchart/internal/core/normalize": `${root}packages/hyperchart/src/core/normalize.ts`,
+		"@surprisal/hyperchart/internal/core/action_uid": `${root}packages/hyperchart/src/core/action_uid.ts`,
+	},
 	fsCache: false,
 	moduleCache: true,
 	transform(options) {

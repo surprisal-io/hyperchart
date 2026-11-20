@@ -1782,7 +1782,7 @@ describe("execution loop", () => {
 		// late-bound read the runtime resolves at spawn
 		expect(consumeEffect).toMatchObject({
 			env: {
-				EVIDENCE: "artifacts/evidence.json",
+				EVIDENCE: { path: "artifacts/evidence.json" },
 				THRESHOLD: { path: "artifacts/evidence.json", select: "threshold" },
 			},
 		});
@@ -2569,7 +2569,7 @@ describe("execution loop", () => {
 		const ast = parsed.ast;
 		const events: MachineEvent[] = [];
 		let reads: readonly { path: string }[] = [];
-		let files = "";
+		let files: unknown;
 		const runtime = new MockRuntime({
 			ast,
 			events,
@@ -2588,7 +2588,7 @@ describe("execution loop", () => {
 						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "script") {
-						files = typeof effect.env?.FILES === "string" ? effect.env.FILES : "";
+						files = effect.env?.FILES;
 						events.push({ kind: "script", effectId: effect.id, event: { type: "OK" } });
 					}
 					if (effect.kind === "durable_records") {
@@ -2603,7 +2603,7 @@ describe("execution loop", () => {
 		expect(state.projection.activeLeaves).toEqual(["done"]);
 		// One artifact per spawned instance, in replay-stable canonical key order.
 		expect(reads.map((read) => read.path)).toEqual(["out/body.json", "out/intro.json"]);
-		expect(files).toBe(JSON.stringify(["out/body.json", "out/intro.json"]));
+		expect(files).toMatchObject([{ path: "out/body.json" }, { path: "out/intro.json" }]);
 	});
 
 	it("fans mapped action results into one JSON script environment value", async () => {
@@ -2786,7 +2786,7 @@ describe("execution loop", () => {
 		}
 		const ast = parsed.ast;
 		const events: MachineEvent[] = [];
-		const joined = new Map<string, string>();
+		const joined = new Map<string, unknown>();
 		const runtime = new MockRuntime({
 			ast,
 			events,
@@ -2813,7 +2813,7 @@ describe("execution loop", () => {
 						events.push({ kind: "agent", effectId: effect.id, outcome: { kind: "completed", event: { type: "OK" } } });
 					}
 					if (effect.kind === "script") {
-						joined.set(effect.actionUid.state, typeof effect.env?.FILES === "string" ? effect.env.FILES : "");
+						joined.set(effect.actionUid.state, effect.env?.FILES);
 						events.push({ kind: "script", effectId: effect.id, event: { type: "OK" } });
 					}
 					if (effect.kind === "durable_records") {
@@ -2826,8 +2826,8 @@ describe("execution loop", () => {
 		const state = await loop(runtime);
 
 		expect(state.projection.activeLeaves).toEqual(["done"]);
-		expect(joined.get("sections#a.gather")).toBe(JSON.stringify(["out/x.json", "out/y.json"]));
-		expect(joined.get("sections#b.gather")).toBe(JSON.stringify(["out/z.json"]));
+		expect(joined.get("sections#a.gather")).toMatchObject([{ path: "out/x.json" }, { path: "out/y.json" }]);
+		expect(joined.get("sections#b.gather")).toMatchObject([{ path: "out/z.json" }]);
 	});
 
 	it("replays a map log without re-running agents", async () => {

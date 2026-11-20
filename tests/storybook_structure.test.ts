@@ -62,6 +62,15 @@ function storyFiles(directory: string): string[] {
 }
 
 describe("Storybook information architecture", () => {
+	it("shows borrowed source and rollback on a production-normalized definition story", () => {
+		const spec = inspectorPanelSpecs.find((candidate) => candidate.title === "Borrowed artifact · rollback");
+		expect(spec?.graphAtlas).toBe(true);
+		if (spec === undefined) {
+			throw new Error("Missing borrowed artifact story");
+		}
+		const scenario = inspectorPanelScenario(spec);
+		expect(JSON.stringify(scenario)).toContain("rollback");
+	});
 	it("captures resolved-input cases through the execution loop, including absent input", () => {
 		const source = readFileSync(join(storyDirectory, "ResolvedInputRecords.stories.tsx"), "utf8");
 		expect(source).toContain("await loop(runtime");

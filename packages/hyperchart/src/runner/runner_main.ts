@@ -1286,6 +1286,7 @@ class HyperchartRunnerControllerImpl implements HyperchartRunnerController {
 				entry.semantic.notificationRenderer(state, {
 					runId: this.config.runId,
 					workDir: join(this.config.runDir, "workspaces", entry.branchId),
+					snapshotPath: (pin) => this.artifactStore.objectPath(pin.hash),
 				}),
 			);
 			await this.settle(entry, {

@@ -5,9 +5,11 @@ import type { DurableLogRecord } from "../core/durable_events.js";
 import type { HyperchartInspectResult, HyperchartInspectState } from "../core/inspect.js";
 import {
 	concurrencyBlockedActionLeaves,
+	isJoinedArtifacts,
 	renderPendingActionInvocation,
 	type ActionEffect,
 	type RenderedArtifact,
+	type RenderedEnvValue,
 } from "../core/machine.js";
 import {
 	createBranchProjection,
@@ -885,6 +887,10 @@ function stateFromInspectState(
 			: {
 					artifacts: state.artifacts.map((artifact) => ({
 						name: artifact.name,
+						...(artifact.sourceState === undefined ? {} : { sourceState: artifact.sourceState }),
+						...(artifact.sourceArtifact === undefined ? {} : { sourceArtifact: artifact.sourceArtifact }),
+						...(artifact.rollback === undefined ? {} : { rollback: artifact.rollback }),
+						...(artifact.ifMissing === undefined ? {} : { ifMissing: artifact.ifMissing }),
 						...(artifact.path === undefined ? {} : { path: artifact.path }),
 						...(artifact.shape === undefined ? {} : { schema: { schema: artifact.shape } }),
 					})),
@@ -2026,10 +2032,7 @@ function visitInvocationInfo(effect: ActionEffect): HyperchartVisitInvocationInf
 					? {}
 					: {
 							env: Object.fromEntries(
-								Object.entries(effect.env).map(([name, value]) => [
-									name,
-									typeof value === "string" ? value : renderedArtifactInfo(value),
-								]),
+								Object.entries(effect.env).map(([name, value]) => [name, renderedEnvValueInfo(value)]),
 							),
 						}),
 				...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
@@ -2043,10 +2046,7 @@ function visitInvocationInfo(effect: ActionEffect): HyperchartVisitInvocationInf
 					? {}
 					: {
 							params: Object.fromEntries(
-								Object.entries(effect.env).map(([name, value]) => [
-									name,
-									typeof value === "string" ? value : renderedArtifactInfo(value),
-								]),
+								Object.entries(effect.env).map(([name, value]) => [name, renderedEnvValueInfo(value)]),
 							),
 						}),
 				...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts.map(renderedArtifactInfo) }),
@@ -2065,6 +2065,16 @@ function visitInvocationInfo(effect: ActionEffect): HyperchartVisitInvocationInf
 				payload: effect.payload,
 			};
 	}
+}
+
+function renderedEnvValueInfo(value: RenderedEnvValue): unknown {
+	if (typeof value === "string") {
+		return value;
+	}
+	if (isJoinedArtifacts(value)) {
+		return value.map(renderedArtifactInfo);
+	}
+	return renderedArtifactInfo(value);
 }
 
 function renderedArtifactInfo(artifact: RenderedArtifact): HyperchartRenderedArtifactInfo {

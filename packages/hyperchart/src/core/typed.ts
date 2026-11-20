@@ -303,12 +303,12 @@ type Refs<Args, Results, Files, Maps, Inputs, Actors, Completions> = {
 		<S extends keyof Files & string>(state: S): ArtifactOfCst;
 		<S extends keyof Files & string, A extends keyof Files[S] & string>(
 			state: S,
-			opts: { artifact: A; select?: Paths<Files[S][A]> & string },
+			opts: { artifact: A; select?: Paths<Files[S][A]> & string; ifMissing?: "empty" },
 		): ArtifactOfCst;
 		// single-artifact convenience: select checked against the (union of) content types
 		<S extends keyof Files & string>(
 			state: S,
-			opts: { select: Paths<Files[S][keyof Files[S]]> & string },
+			opts: { select: Paths<Files[S][keyof Files[S]]> & string; ifMissing?: "empty" },
 		): ArtifactOfCst;
 	};
 	joinArtifactOf: {
@@ -448,11 +448,12 @@ export function refs<
 			state,
 			...(path === undefined ? {} : { path }),
 		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["result"],
-		artifactOf: ((state: string, opts: { artifact?: string; select?: string } = {}) => ({
+		artifactOf: ((state: string, opts: { artifact?: string; select?: string; ifMissing?: "empty" } = {}) => ({
 			kind: "artifactOf",
 			state,
 			...(opts.artifact === undefined ? {} : { artifact: opts.artifact }),
 			...(opts.select === undefined ? {} : { select: opts.select }),
+			...(opts.ifMissing === undefined ? {} : { ifMissing: opts.ifMissing }),
 		})) as Refs<Args, Results, Files, Maps, Inputs, Actors, Completions>["artifactOf"],
 		joinArtifactOf: ((state: string, opts: { artifact?: string } = {}) => ({
 			kind: "joinArtifactOf",

@@ -296,7 +296,7 @@ export function consume(p, ctx) {
 		artifactVersion(result("saved", "notesVersion")),
 		"read",
 	);
-	expect(rendered).toMatchObject({ path: "notes.md", versioned: true, pin: pin("old") });
+	expect(rendered).toMatchObject({ path: "notes.md", snapshot: pin("old") });
 	const objects = new ArtifactStore(resolveRunPaths("run", storage).runDir);
 	expect(await readFile(await objects.get(saved.notesVersion.hash), "utf8")).toBe("old");
 	expect(projection.results.read).toMatchObject({ path: await objects.get(saved.notesVersion.hash) });

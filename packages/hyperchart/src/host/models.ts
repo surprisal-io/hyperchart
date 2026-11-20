@@ -294,6 +294,9 @@ export interface HyperchartActorOccurrenceInfo {
 }
 
 export interface HyperchartArtifactInfo {
+	rollback?: boolean;
+	ifMissing?: "empty";
+	sourceArtifact?: string;
 	name: string;
 	path?: string;
 	schema?: HyperchartSchemaInfo;

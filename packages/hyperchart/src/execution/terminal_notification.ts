@@ -1,13 +1,20 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { renderJoin, renderRead, renderTemplate, type MachineState } from "../core/machine.js";
 import { nodeAt } from "../core/paths.js";
-import type { BranchId } from "../core/durable_events.js";
+import type { ArtifactPin, BranchId } from "../core/durable_events.js";
 import type { TerminalNotificationPayload } from "../runtime/generic/terminal_notifications.js";
 import type { RunTerminalState } from "./run_outcome.js";
 
 export function renderTerminalNotificationPayload(
 	state: MachineState,
-	input: { runId: string; branchId: BranchId; workDir: string; outcome: RunTerminalState; error?: string },
+	input: {
+		runId: string;
+		branchId: BranchId;
+		workDir: string;
+		outcome: RunTerminalState;
+		error?: string;
+		snapshotPath?: (pin: ArtifactPin) => string;
+	},
 ): TerminalNotificationPayload {
 	const standard =
 		input.outcome === "failed"
@@ -28,7 +35,11 @@ export function renderTerminalNotificationPayload(
 			const rendered =
 				read.kind === "joinArtifactOf" ? renderJoin(state, read, scope) : [renderRead(state, read, scope)];
 			for (const artifact of rendered) {
-				artifactPaths.push(authoritativeArtifactPath(input.workDir, artifact.path));
+				artifactPaths.push(
+					typeof artifact.snapshot === "object" && input.snapshotPath !== undefined
+						? input.snapshotPath(artifact.snapshot)
+						: authoritativeArtifactPath(input.workDir, artifact.path),
+				);
 			}
 		}
 	}

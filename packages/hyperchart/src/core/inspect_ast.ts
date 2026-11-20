@@ -44,6 +44,9 @@ export type InspectChartModuleOptions = {
 };
 
 export type HyperchartInspectArtifact = {
+	rollback?: boolean;
+	ifMissing?: "empty";
+	sourceArtifact?: string;
 	name: string;
 	path?: string;
 	shape?: JsonSchema;
@@ -936,6 +939,14 @@ function artifactInfo(name: string, artifact: ArtifactAst): HyperchartInspectArt
 	const path = templatePreview(artifact.path);
 	return {
 		name,
+		...(artifact.source === undefined
+			? {}
+			: {
+					sourceState: artifact.source.state,
+					...(artifact.source.artifact === undefined ? {} : { sourceArtifact: artifact.source.artifact }),
+					...(artifact.source.ifMissing === undefined ? {} : { ifMissing: artifact.source.ifMissing }),
+				}),
+		...(artifact.rollback === undefined ? {} : { rollback: artifact.rollback }),
 		...(path === undefined ? {} : { path }),
 		...(artifact.shape === undefined ? {} : { shape: artifact.shape.schema }),
 	};
@@ -1055,6 +1066,13 @@ function actionRefs(action: StateActionAst): HyperchartInspectRef[] {
 		appendTemplateRefs(refs, action.prompt);
 	} else if (action.kind === "gate" || action.kind === "notify") {
 		appendValueRefs(refs, action.payload);
+	}
+	if ("artifacts" in action) {
+		for (const declared of Object.values(action.artifacts ?? {})) {
+			if (declared.source !== undefined) {
+				appendReadRefs(refs, declared.source);
+			}
+		}
 	}
 	return uniqueRefs(refs);
 }

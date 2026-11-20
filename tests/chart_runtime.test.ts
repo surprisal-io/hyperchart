@@ -401,7 +401,7 @@ describe("ChartRuntime", () => {
 		await runtime.dispose();
 	});
 
-	it("quiesces delayed pinned-read restoration without starting an executor after disposal", async () => {
+	it("quiesces delayed snapshot-read resolution without starting an executor after disposal", async () => {
 		const root = await makeTempDir();
 		const runId = "run";
 		const storage: RunStorage = { kind: "jsonl", rootDir: root, layout: "sha256" };
@@ -450,7 +450,7 @@ describe("ChartRuntime", () => {
 				actionUid: state.action.uid,
 				action: state.action,
 				sessionId: "delayed-read",
-				reads: [{ path: "input.txt", pin }],
+				reads: [{ path: "input.txt", snapshot: pin }],
 				events: ["DONE"],
 			},
 		]);
