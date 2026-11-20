@@ -8,6 +8,7 @@ import type { JsonSchema, SchemaAst } from "../packages/hyperchart/src/core/type
 import {
 	checkArtifactFile,
 	resolveArtifactValue,
+	renderedArtifactPath,
 	serializeEnvValue,
 } from "../packages/hyperchart/src/runtime/generic/artifacts.js";
 import { checkSchema } from "../packages/hyperchart/src/runtime/generic/schema.js";
@@ -77,19 +78,19 @@ describe("artifacts", () => {
 		const dir = await makeTempDir();
 		await writeFile(join(dir, "evidence.json"), JSON.stringify({ facts: { score: 7 }, extra: true }), "utf8");
 		const artifact: RenderedArtifact = {
-			path: "evidence.json",
+			path: join(dir, "evidence.json"),
 			shape: schema(z.object({ facts: z.object({ score: z.number() }), extra: z.boolean() })),
 			select: "facts.score",
 		};
 
-		await expect(resolveArtifactValue(artifact, dir)).resolves.toBe(7);
+		await expect(resolveArtifactValue(artifact)).resolves.toBe(7);
 	});
 
 	it("returns file text for unshaped unselected artifacts", async () => {
 		const dir = await makeTempDir();
 		await writeFile(join(dir, "note.txt"), "hello", "utf8");
 
-		await expect(resolveArtifactValue({ path: "note.txt" }, dir)).resolves.toBe("hello");
+		await expect(resolveArtifactValue({ path: join(dir, "note.txt") })).resolves.toBe("hello");
 	});
 
 	it("serializes string env values verbatim and JSON values as JSON", () => {
@@ -117,13 +118,15 @@ describe("artifacts", () => {
 		const dir = await makeTempDir();
 		await writeFile(join(dir, "data.json"), JSON.stringify({ a: {} }), "utf8");
 
-		await expect(resolveArtifactValue({ path: "data.json", select: "a.b" }, dir)).rejects.toThrow("selector 'a.b'");
+		await expect(resolveArtifactValue({ path: join(dir, "data.json"), select: "a.b" })).rejects.toThrow(
+			"selector 'a.b'",
+		);
 	});
 
 	it("rejects artifact paths outside the workDir", async () => {
 		const dir = await makeTempDir();
 
-		await expect(resolveArtifactValue({ path: "../secret.txt" }, dir)).rejects.toThrow("path escapes workDir");
+		expect(() => renderedArtifactPath({ path: "../secret.txt" }, dir)).toThrow("path escapes workDir");
 		await expect(checkArtifactFile({ path: "../secret.txt" }, dir)).resolves.toMatchObject({
 			ok: false,
 			errors: [expect.stringContaining("path escapes workDir")],

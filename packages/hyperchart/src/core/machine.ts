@@ -1,3 +1,6 @@
+import { ArtifactVersionSchema } from "./artifact_version.js";
+import type { ArtifactVersionAst, ArtifactVersionCst } from "./types.js";
+import { artifactBindingOf, resolveTemplate, type ArtifactBinding } from "./projection.js";
 import { randomUUID } from "../utils/random_uuid.js";
 import assert from "./assert.js";
 import type {
@@ -126,21 +129,29 @@ export type AgentRecoveryRequest = Readonly<{
 
 // A file parameter with its path rendered and — when the producer declared one — the shape of
 // its content; the runtime uses the shape both to instruct the agent and to verify the file.
-export type RenderedArtifact = Readonly<{
-	// Present on the producing side: the artifact's declared name.
-	name?: string;
-	/** Producer state for artifact-backed reads; absent for raw paths and produced outputs. */
-	sourceState?: string;
-	/** One producer artifact or one expanded member of a map fan-in. */
-	readKind?: "artifact" | "join";
-	path: string;
-	shape?: SchemaAst;
-	// Present on artifactOf reads with a selector: the runtime hands the agent only this field of the
-	// file's content (validated against `shape`, which describes the WHOLE file).
-	select?: string;
-	/** Latest accepted durable revision for this rendered read path. */
-	pin?: ArtifactPin;
-}>;
+// `snapshot` and `rollback` come from ArtifactBinding. The list carrying the file decides how a
+// snapshot is delivered: a read receives the saved object's path, an action artifact gets the
+// saved bytes materialized at its authored working path before the action starts.
+export type RenderedArtifact = ArtifactBinding &
+	Readonly<{
+		// Present on the producing side: the artifact's declared name.
+		name?: string;
+		/** Producer state for artifact-backed reads; absent for raw paths and produced outputs. */
+		sourceState?: string;
+		/** One producer artifact or one expanded member of a map fan-in. */
+		readKind?: "artifact" | "join";
+		shape?: SchemaAst;
+		// Present on artifactOf reads with a selector: the runtime hands the agent only this field of the
+		// file's content (validated against `shape`, which describes the WHOLE file).
+		select?: string;
+	}>;
+
+/** A joinArtifactOf env parameter is a list of file inputs, one per map instance. */
+export type RenderedEnvValue = string | RenderedArtifact | readonly RenderedArtifact[];
+
+export function isJoinedArtifacts(value: RenderedEnvValue): value is readonly RenderedArtifact[] {
+	return Array.isArray(value);
+}
 
 // A spawn-ready subagent call: the definition name and frontmatter overrides live in `action`;
 // task/output/reads are the templated parameters rendered into final text by the machine.
@@ -200,11 +211,9 @@ export type ScriptEffect = Readonly<{
 	action: ScriptActionAst;
 	command: string;
 	args: readonly string[];
-	// Rendered env. A string is final (templates; artifactOf without select renders to the
-	// producer's file path). A RenderedArtifact appears for artifactOf WITH select: the runtime
-	// resolves it at spawn — read the file, validate against shape, extract the field, serialize
-	// (string verbatim, everything else as JSON) — same rules as an agent's reads.
-	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	// Strings are final template values. File descriptors and joined file lists are
+	// resolved by runtime before dispatch; select additionally reads/validates JSON.
+	env?: Readonly<Record<string, RenderedEnvValue>>;
 	/** Pinned env artifacts restored before invocation; kept separate from path-valued env. */
 	reads?: readonly RenderedArtifact[];
 	artifacts?: readonly RenderedArtifact[];
@@ -221,7 +230,7 @@ export type ImportedActionEffect = Readonly<{
 	action: ImportedActionAst;
 	module: string;
 	export: string;
-	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	env?: Readonly<Record<string, RenderedEnvValue>>;
 	/** Pinned env artifacts restored before invocation; kept separate from path-valued env. */
 	reads?: readonly RenderedArtifact[];
 	artifacts?: readonly RenderedArtifact[];
@@ -321,7 +330,8 @@ export type ValidateEffect = Readonly<{
 	event: ChartEvent;
 	// Rendered exactly like a script action's options. Values are resolved only while this
 	// completion is pending; they are never durable facts or action results.
-	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	reads?: readonly RenderedArtifact[];
+	env?: Readonly<Record<string, RenderedEnvValue>>;
 	artifacts?: readonly RenderedArtifact[];
 	reply?: SchemaAst;
 }>;
@@ -342,9 +352,37 @@ export type CancelEffect = Readonly<{
 	kind: "cancel";
 	id: EffectId;
 	actionUid: ActionUID;
+	/** Rollback working files to restore once the action has stopped; see RestoreEffect. */
+	restore?: readonly RenderedArtifact[];
 }>;
 
-export type Effect = ActionEffect | DurableRecordsEffect | ActorEffect | ValidateEffect | TimerEffect | CancelEffect;
+// Borrowed working files are mounted from their selected snapshot (or empty) before the
+// invocation's first action effect, once per agent session, and the action's rollback paths are
+// returned to their `rollback.to` revision (or removed) when its outcome is accepted. The runtime performs
+// both in effect order, before any later effect of the same batch.
+export type BorrowEffect = Readonly<{
+	kind: "borrow";
+	id: EffectId;
+	actionUid: ActionUID;
+	artifacts: readonly RenderedArtifact[];
+}>;
+
+export type RestoreEffect = Readonly<{
+	kind: "restore";
+	id: EffectId;
+	actionUid: ActionUID;
+	artifacts: readonly RenderedArtifact[];
+}>;
+
+export type Effect =
+	| ActionEffect
+	| DurableRecordsEffect
+	| ActorEffect
+	| ValidateEffect
+	| TimerEffect
+	| CancelEffect
+	| BorrowEffect
+	| RestoreEffect;
 
 // A record the machine wants to append, before global numbering and branch provenance. Building
 // an append is pure; only the serialized storage writer may stamp durable coordinates.
@@ -469,13 +507,7 @@ export function createMachineOutput(state: MachineState, responses: readonly (Ef
 			state,
 			effects: [
 				...responses.map((entry) => (entry.kind === "append" ? prepareAppend(state, entry) : entry)),
-				...state.projection.pendingActions.map(
-					(pending): CancelEffect => ({
-						kind: "cancel",
-						id: pendingEffectId(pending),
-						actionUid: pending.actionUid,
-					}),
-				),
+				...state.projection.pendingActions.map((pending) => cancelEffect(pending, pendingEffectId(pending))),
 			],
 			result: undefined,
 		};
@@ -649,7 +681,10 @@ function pendingEffects(state: MachineState, pending: PendingAction): Effect[] {
 		node?.action.kind === "gate" ||
 		node?.action.kind === "waitFor" ||
 		node?.action.kind === "notify";
-	const effects: Effect[] = journalAction && pending.phase !== "validating" ? [] : [pendingEffect(state, pending)];
+	const effects: Effect[] = [...borrowEffects(pending)];
+	if (!journalAction || pending.phase === "validating") {
+		effects.push(pendingEffect(state, pending));
+	}
 	if (pending.phase === "running") {
 		if (node?.after !== undefined) {
 			effects.push({
@@ -784,7 +819,7 @@ function agentInvocationForAction(
 			: {
 					artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
 						name,
-						...renderArtifact(state, declared, actionUid.state),
+						...renderArtifact(state, declared, actionUid.state, name),
 					})),
 				}),
 		...(action.reads === undefined
@@ -800,7 +835,9 @@ function agentInvocationForAction(
 }
 
 type ScriptOptionsAst = {
-	env?: Readonly<Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>>;
+	env?: Readonly<
+		Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+	>;
 	artifacts?: Readonly<Record<string, ArtifactAst>>;
 	reply?: SchemaAst;
 };
@@ -811,34 +848,21 @@ function renderScriptOptions(
 	stateId: StatePath,
 	selfActionArtifactsState?: StatePath,
 ): {
-	env?: Readonly<Record<string, string | RenderedArtifact>>;
+	env?: Readonly<Record<string, RenderedEnvValue>>;
 	reads?: readonly RenderedArtifact[];
 	artifacts?: readonly RenderedArtifact[];
 	reply?: SchemaAst;
 } {
-	const renderedEnv =
-		action.env === undefined ? undefined : renderScriptEnv(state, action.env, stateId, selfActionArtifactsState);
-	const reads = Object.values(renderedEnv ?? {}).filter(
-		(value): value is RenderedArtifact => typeof value !== "string",
-	);
-	const env =
-		renderedEnv === undefined
-			? undefined
-			: Object.fromEntries(
-					Object.entries(renderedEnv).map(([name, value]) => [
-						name,
-						typeof value !== "string" && value.select === undefined ? value.path : value,
-					]),
-				);
+	const { env, reads } = renderScriptEnv(state, action.env ?? {}, stateId, selfActionArtifactsState);
 	return {
-		...(env === undefined ? {} : { env }),
+		...(action.env === undefined ? {} : { env }),
 		...(reads.length === 0 ? {} : { reads }),
 		...(action.artifacts === undefined
 			? {}
 			: {
 					artifacts: Object.entries(action.artifacts).map(([name, declared]) => ({
 						name,
-						...renderArtifact(state, declared, stateId),
+						...renderArtifact(state, declared, stateId, name),
 					})),
 				}),
 		...(action.reply === undefined ? {} : { reply: action.reply }),
@@ -847,29 +871,40 @@ function renderScriptOptions(
 
 function renderScriptEnv(
 	state: MachineState,
-	env: Readonly<Record<string, Templatable | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>>,
+	env: Readonly<Record<string, Templatable | ArtifactVersionCst | ArtifactOfCst | JoinArtifactOfCst | JoinResultOfCst>>,
 	stateId: StatePath,
 	selfActionArtifactsState?: StatePath,
-): Readonly<Record<string, string | RenderedArtifact>> {
-	return Object.fromEntries(
-		Object.entries(env).map(([name, value]) => {
-			if (typeof value === "string") {
-				return [name, value];
+): { env: Readonly<Record<string, RenderedEnvValue>>; reads: RenderedArtifact[] } {
+	const rendered: Record<string, RenderedEnvValue> = {};
+	const reads: RenderedArtifact[] = [];
+	for (const [name, value] of Object.entries(env)) {
+		if (typeof value === "string") {
+			rendered[name] = value;
+			continue;
+		}
+		switch (value.kind) {
+			case "template":
+				rendered[name] = renderTemplate(state, value, stateId);
+				break;
+			case "joinResultOf":
+				rendered[name] = JSON.stringify(renderResultJoin(state, value, stateId));
+				break;
+			case "joinArtifactOf": {
+				const joined = renderJoin(state, value, stateId);
+				reads.push(...joined);
+				rendered[name] = joined;
+				break;
 			}
-			if (value.kind === "template") {
-				return [name, renderTemplate(state, value, stateId)];
+			case "artifactOf":
+			case "artifactVersion": {
+				const read = renderRead(state, value, stateId, selfActionArtifactsState);
+				reads.push(read);
+				rendered[name] = read;
+				break;
 			}
-			if (value.kind === "joinArtifactOf") {
-				const paths = renderJoin(state, value, stateId).map((read) => read.path);
-				return [name, JSON.stringify(paths)];
-			}
-			if (value.kind === "joinResultOf") {
-				return [name, JSON.stringify(renderResultJoin(state, value, stateId))];
-			}
-			const read = renderRead(state, value, stateId, selfActionArtifactsState);
-			return [name, read];
-		}),
-	);
+		}
+	}
+	return { env: rendered, reads };
 }
 
 function scriptInvocationForAction(
@@ -1160,14 +1195,16 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 				...(completion.artifacts === undefined ? {} : { artifacts: completion.artifacts }),
 			};
 			const guarded = pending.definition.kind === "agent" && pending.definition.validation !== undefined;
+			if (guarded) {
+				// The working view stays open for the validator and any correction round.
+				return createMachineOutput(state, [{ kind: "append", id: event.effectId, records: [complete] }]);
+			}
 			return createMachineOutput(state, [
+				...restoreEffects(pending, event.effectId),
 				{
 					kind: "append",
 					id: event.effectId,
-					records: [
-						complete,
-						...(guarded ? [] : emittedRecordsForAcceptedCompletion(state, pending.actionUid, completion.event)),
-					],
+					records: [complete, ...emittedRecordsForAcceptedCompletion(state, pending.actionUid, completion.event)],
 				},
 			]);
 		}
@@ -1203,6 +1240,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 				};
 			}
 			return createMachineOutput(state, [
+				...restoreEffects(pending, event.effectId),
 				{
 					kind: "append",
 					id: event.effectId,
@@ -1226,7 +1264,8 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					pending.phase === "validating" && pendingEffectId(pending) === event.effectId,
 			);
 			if (!validating) {
-				return { kind: "error", state, error: `No pending validation found for effectId ${event.effectId}` };
+				// A verdict for a cancelled or superseded completion is a race loser, like a stale agent outcome.
+				break;
 			}
 			const validation = validating.definition.kind === "agent" ? validating.definition.validation : undefined;
 			if (validation === undefined) {
@@ -1259,7 +1298,8 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 								"validation",
 							),
 						];
-			return createMachineOutput(state, [{ kind: "append", id: event.effectId, records }]);
+			const restores = event.outcome === true ? restoreEffects(validating, event.effectId) : [];
+			return createMachineOutput(state, [...restores, { kind: "append", id: event.effectId, records }]);
 		}
 		case "completion_effect": {
 			const pending = state.projection.pendingActions.find(
@@ -1425,7 +1465,7 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 					id: event.effectId,
 					records: [{ type: "state_action", kind: "timer_fired", actionUid: running.actionUid }],
 				},
-				{ kind: "cancel", id: event.effectId, actionUid: running.actionUid },
+				cancelEffect(running, event.effectId),
 			]);
 		}
 		case "start":
@@ -1437,18 +1477,51 @@ export function stepMachine(state: MachineState, event: MachineEvent): MachineOu
 			const abandoned: PendingAction[] = [];
 			state.projection = projectBranch(state.projection, state.ast, event.records, abandoned);
 			removePoolAdmissionReservations(state, event.effectId);
-			const cancels = abandoned.map(
-				(pending): Effect => ({
-					kind: "cancel",
-					id: pendingEffectId(pending),
-					actionUid: pending.actionUid,
-				}),
+			return createMachineOutput(
+				state,
+				abandoned.map((pending) => cancelEffect(pending, pendingEffectId(pending))),
 			);
-			return createMachineOutput(state, cancels);
 		}
 	}
 
 	return createMachineOutput(state, []);
+}
+
+// Borrowed working files belong to the pending invocation whose bindings selected them. Rollback
+// paths are restored only from that invocation's accepted outcome or cancellation; outcomes of a
+// cancelled or superseded invocation are discarded before this point, so they restore nothing.
+function rollbackArtifacts(pending: PendingAction): RenderedArtifact[] {
+	return Object.values(pending.artifactBindings ?? {}).filter((binding) => binding.rollback !== undefined);
+}
+
+function cancelEffect(pending: PendingAction, id: EffectId): CancelEffect {
+	const restore = rollbackArtifacts(pending);
+	if (restore.length === 0) {
+		return { kind: "cancel", id, actionUid: pending.actionUid };
+	}
+	return { kind: "cancel", id, actionUid: pending.actionUid, restore };
+}
+
+function restoreEffects(pending: PendingAction, id: EffectId): RestoreEffect[] {
+	const artifacts = rollbackArtifacts(pending);
+	if (artifacts.length === 0) {
+		return [];
+	}
+	return [{ kind: "restore", id: `restore:${id}`, actionUid: pending.actionUid, artifacts }];
+}
+
+// Desired in every phase of one session, so nudges and guard corrections keep the working edits;
+// a restart (new session) or a new machine lifetime mounts the selected source again.
+function borrowEffects(pending: PendingAction): BorrowEffect[] {
+	const declared = "artifacts" in pending.definition ? pending.definition.artifacts : undefined;
+	const artifacts = Object.entries(pending.artifactBindings ?? {})
+		.filter(([name]) => declared?.[name]?.source !== undefined)
+		.map(([, binding]) => binding);
+	if (artifacts.length === 0) {
+		return [];
+	}
+	const id = `borrow:${actionUidKey(pending.actionUid)}:${pending.visitId}:${pending.sessionId}`;
+	return [{ kind: "borrow", id, actionUid: pending.actionUid, artifacts }];
 }
 
 function dueCompletionLifecycleFailures(state: MachineState): RecordAppend[] {
@@ -2346,34 +2419,19 @@ function asJsonValue(value: unknown, context: string): JsonValue {
 // the last moment the engine holds the value — so the parameter contract is enforced here: a ref
 // into a missing arg/result and a non-primitive value without a json() mark both fail loud.
 export function renderTemplate(state: MachineState, template: TemplateAst, stateId: string): string {
-	const parts: string[] = [template.strings[0] ?? ""];
-	template.refs.forEach((ref, index) => {
-		parts.push(renderValue(resolveRef(state, ref, stateId), ref, stateId));
-		parts.push(template.strings[index + 1] ?? "");
-	});
-	return parts.join("");
+	return resolveTemplate(state, template, stateId);
 }
 
-function renderValue(value: unknown, ref: InputRef, stateId: string): string {
-	if (ref.json === true) {
-		const text = JSON.stringify(value);
-		if (text === undefined) {
-			throw new Error(`Template in state ${stateId}: ${refLabel(ref)} is not JSON-serializable`);
-		}
-		return text;
+function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: string, name?: string): RenderedArtifact {
+	const pending = state.projection.pendingActions.find((action) => action.actionUid.state === stateId);
+	const binding = name === undefined ? undefined : pending?.artifactBindings?.[name];
+	if (binding !== undefined) {
+		return { ...binding, ...(declared.shape === undefined ? {} : { shape: declared.shape }) };
 	}
-	if (typeof value === "string") {
-		return value;
+	// Borrowed sources and rollback targets are fixed at invoke; never re-select them from later facts.
+	if (declared.source !== undefined) {
+		throw new Error(`State ${stateId}: borrowed artifact '${name ?? "*"}' has no invocation binding`);
 	}
-	if (typeof value === "number" || typeof value === "boolean") {
-		return String(value);
-	}
-	throw new Error(
-		`Template in state ${stateId}: ${refLabel(ref)} resolved to a non-primitive value; wrap the ref in json() to embed it as JSON`,
-	);
-}
-
-function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: string): RenderedArtifact {
 	return {
 		path: renderTemplate(state, declared.path, stateId),
 		...(declared.shape === undefined ? {} : { shape: declared.shape }),
@@ -2386,12 +2444,16 @@ function renderArtifact(state: MachineState, declared: ArtifactAst, stateId: str
 // live log — fail loud.
 export function renderRead(
 	state: MachineState,
-	read: TemplateAst | ArtifactOfAst,
+	read: TemplateAst | ArtifactVersionAst | ArtifactOfAst,
 	stateId: string,
 	selfActionArtifactsState?: StatePath,
 ): RenderedArtifact {
 	if (read.kind === "template") {
 		return { path: renderTemplate(state, read, stateId) };
+	}
+	if (read.kind === "artifactVersion") {
+		const version = ArtifactVersionSchema.parse(resolveRef(state, read.version, stateId));
+		return { path: version.path, snapshot: { hash: version.hash, size: version.size } };
 	}
 	const actor = actorContextForState(state.ast, stateId);
 	const producerState =
@@ -2406,21 +2468,20 @@ export function renderRead(
 	const names = Object.keys(artifacts ?? {});
 	const name = read.artifact ?? (names.length === 1 ? names[0] : undefined);
 	const declared = name === undefined ? undefined : artifacts?.[name];
-	if (declared === undefined) {
+	if (declared === undefined || name === undefined) {
 		throw new Error(`Read in state ${stateId}: cannot resolve artifact '${read.artifact ?? "*"}' of ${read.state}`);
 	}
-	const rendered = renderArtifact(state, declared, producerState);
-	// A validator reading its own output needs provisional bytes, not a stale accepted pin.
-	const pin = producerState === selfActionArtifactsState ? undefined : state.projection.artifactPins[rendered.path];
-	if (actor === undefined && actorContextForState(state.ast, producerState) !== undefined && pin === undefined) {
-		throw new Error(`Read in state ${stateId}: actor artifact '${rendered.path}' has no accepted durable pin`);
-	}
+	// A validator reading its own action's output needs the provisional working file, not a snapshot.
+	const self = producerState === selfActionArtifactsState;
+	const binding = self
+		? { path: renderArtifact(state, declared, producerState, name).path }
+		: artifactBindingOf(state, { ...read, artifact: name }, stateId, declared.path);
 	return {
-		...rendered,
-		...(name === undefined ? {} : { name }),
+		...binding,
+		...(declared.shape === undefined ? {} : { shape: declared.shape }),
+		name,
 		sourceState: producerState,
 		...(read.select === undefined ? {} : { select: read.select }),
-		...(pin === undefined ? {} : { pin }),
 	};
 }
 
@@ -2479,27 +2540,6 @@ function enclosingMapPath(ast: ChartAst, producer: StatePath, stateId: string): 
 		path = parentPath(path);
 	}
 	throw new Error(`Read in state ${stateId}: joinArtifactOf('${producer}') is not inside a map`);
-}
-
-function refLabel(ref: InputRef): string {
-	switch (ref.kind) {
-		case "arg":
-			return `arg '${ref.name}'`;
-		case "result":
-			return `result of '${ref.state}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "key":
-			return `map key${ref.map === undefined ? "" : ` of '${ref.map}'`}`;
-		case "item":
-			return `map item${ref.map === undefined ? "" : ` of '${ref.map}'`}${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "input":
-			return `input '${ref.name}'${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "visit":
-			return `visit${ref.state === undefined ? "" : ` of '${ref.state}'`}`;
-		case "actorInput":
-			return `actor input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-		case "messageInput":
-			return `message '${ref.message}' input${ref.path === undefined ? "" : ` at '${ref.path}'`}`;
-	}
 }
 
 function resolvedStateInput(

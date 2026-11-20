@@ -294,6 +294,9 @@ export interface HyperchartActorOccurrenceInfo {
 }
 
 export interface HyperchartArtifactInfo {
+	rollback?: boolean;
+	ifMissing?: "empty";
+	sourceArtifact?: string;
 	name: string;
 	path?: string;
 	schema?: HyperchartSchemaInfo;
@@ -334,6 +337,7 @@ export interface HyperchartInputInfo {
 }
 
 export interface HyperchartRefInfo {
+	currentVersion?: string[];
 	arg?: string[];
 	result?: string[];
 	artifact?: string[];

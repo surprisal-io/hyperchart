@@ -1,3 +1,5 @@
+import { ArtifactVersionSchema } from "./artifact_version.js";
+import type { ArtifactVersionAst } from "./types.js";
 import { z } from "zod";
 import { deepFreeze } from "./dsl.js";
 import { runtimeContractMetadata } from "./schema_contract.js";
@@ -184,6 +186,7 @@ function toChartAst(
 			diagnostic("UNKNOWN_INITIAL_STATE", `Initial state '${initial}' does not exist.`, "/initial", source),
 		);
 	}
+	resolveBorrowedArtifacts(states, actors, diagnostics, source);
 	validateTargets(states, actors, diagnostics, source);
 	validateActorTargets(states, actors, diagnostics, source);
 	validateActorUsage(states, actors, diagnostics, source);
@@ -2527,6 +2530,97 @@ function collectState(
 	diagnostics.push(diagnostic("MISSING_ACTION", "Non-final state must define exactly one action.", pointer, source));
 }
 
+function resolveBorrowedArtifacts(
+	states: Record<StatePath, StateAst>,
+	actors: Record<string, ActorEndpointDeclarationAst>,
+	diagnostics: AuthoringDiagnostic[],
+	source: ChartSource,
+): void {
+	const rewrite = <N extends StateAst | ActorWorkflowStateAst>(
+		table: Readonly<Record<string, N>>,
+	): Record<string, N> => {
+		const memo = new Map<ArtifactAst, ArtifactAst>();
+		const resolve = (state: string, declared: ArtifactAst, visiting: Set<ArtifactAst>): ArtifactAst => {
+			if (declared.source === undefined) {
+				return declared;
+			}
+			const cached = memo.get(declared);
+			if (cached !== undefined) {
+				return cached;
+			}
+			if (visiting.has(declared)) {
+				diagnostics.push(
+					diagnostic("INVALID_ARTIFACT", "Borrowed artifact sources form a cycle.", statePointer(state), source),
+				);
+				return declared;
+			}
+			const producer = table[declared.source.state];
+			const outputs = producer?.kind === "state" ? declaredArtifactsForState(producer) : undefined;
+			const names = Object.keys(outputs ?? {});
+			const selected = declared.source.artifact ?? (names.length === 1 ? names[0] : undefined);
+			const upstream = selected === undefined ? undefined : outputs?.[selected];
+			if (upstream === undefined) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_ARTIFACT",
+						`Unknown or ambiguous source artifact of '${declared.source.state}'.`,
+						statePointer(state),
+						source,
+					),
+				);
+				return declared;
+			}
+			visiting.add(declared);
+			const resolved = resolve(declared.source.state, upstream, visiting);
+			visiting.delete(declared);
+			const result = {
+				...declared,
+				path: resolved.path,
+				...(resolved.shape === undefined ? {} : { shape: resolved.shape }),
+			};
+			memo.set(declared, result);
+			return result;
+		};
+		const declarations = (path: string, values: Readonly<Record<string, ArtifactAst>> | undefined) =>
+			values === undefined
+				? undefined
+				: Object.fromEntries(
+						Object.entries(values).map(([name, declared]) => [name, resolve(path, declared, new Set())]),
+					);
+		const action = (path: string, value: StateActionAst): StateActionAst => {
+			const guard = value.kind === "agent" ? value.validation?.guard : undefined;
+			if (guard?.kind === "script" && Object.values(guard.artifacts ?? {}).some((declared) => declared.source)) {
+				diagnostics.push(
+					diagnostic(
+						"INVALID_ARTIFACT",
+						"Bind borrowed artifacts on the action; a guard can read them through its env.",
+						statePointer(path),
+						source,
+					),
+				);
+			}
+			if (!("artifacts" in value)) {
+				return value;
+			}
+			const artifacts = declarations(path, value.artifacts);
+			return artifacts === undefined ? value : { ...value, artifacts };
+		};
+		return Object.fromEntries(
+			Object.entries(table).map(([path, node]) => [
+				path,
+				node.kind === "state" ? { ...node, action: action(path, node.action) } : node,
+			]),
+		) as Record<string, N>;
+	};
+	Object.assign(states, rewrite(states));
+	for (const [path, actor] of Object.entries(actors)) {
+		actors[path] =
+			actor.kind === "actorPool"
+				? { ...actor, worker: { ...actor.worker, states: rewrite(actor.worker.states) } }
+				: { ...actor, states: rewrite(actor.states) };
+	}
+}
+
 // Shared by authoring validation and runtime rendering (machine.ts renderRead): both must agree
 // on which artifacts a state exposes, or a reference accepted here would miss at render time.
 export function declaredArtifactsForState(
@@ -2740,6 +2834,11 @@ function validateTargets(
 			if (node.action.kind !== "user") {
 				const guard = node.action.kind === "agent" ? node.action.validation?.guard : undefined;
 				const actionArtifactRefs = [
+					...("artifacts" in node.action
+						? Object.values(node.action.artifacts ?? {}).flatMap((declared) =>
+								declared.source === undefined ? [] : [declared.source],
+							)
+						: []),
 					...(node.action.kind === "agent" ? (node.action.reads ?? []) : []),
 					...(node.action.kind === "script" || node.action.kind === "tsImport"
 						? Object.values(node.action.env ?? {})
@@ -2903,6 +3002,16 @@ function validateTargets(
 				for (const value of Object.values(guard.env ?? {})) {
 					if (typeof value !== "string" && value.kind === "template") {
 						validateTemplateRefs(states, path, value, `${pointer}/action/validation/guard/env`, diagnostics, source);
+					}
+					if (typeof value !== "string" && value.kind === "artifactVersion") {
+						validateInputRefs(
+							states,
+							path,
+							[value.version],
+							`${pointer}/action/validation/guard/env`,
+							diagnostics,
+							source,
+						);
 					}
 				}
 			}
@@ -3313,7 +3422,9 @@ function validateDominatedRefs(
 				}
 			}
 			for (const [index, read] of (node.notify?.artifacts ?? []).entries()) {
-				check(read.state, path, `${pointer}/notify/artifacts/${index}`, "artifactOf()");
+				if (read.kind !== "artifactOf" || read.ifMissing !== "empty") {
+					check(read.state, path, `${pointer}/notify/artifacts/${index}`, "artifactOf()");
+				}
 			}
 			continue;
 		}
@@ -3379,6 +3490,14 @@ function validateDominatedRefs(
 							allowSelf: value.kind === "artifactOf" && value.state === path,
 						});
 					}
+					if (typeof value !== "string" && value.kind === "artifactVersion" && value.version.kind === "result") {
+						check(
+							value.version.state,
+							path,
+							`${pointer}/action/validation/guard/env/${escapePointer(name)}`,
+							"result()",
+						);
+					}
 					if (typeof value !== "string" && value.kind === "template") {
 						for (const ref of value.refs) {
 							if (ref.kind === "result") {
@@ -3403,7 +3522,9 @@ function validateDominatedRefs(
 				}
 			}
 			for (const read of reads) {
-				check(read.state, path, read.pointer, "artifactOf()", read.allowSelf);
+				if (!read.initialEmpty) {
+					check(read.state, path, read.pointer, "artifactOf()", read.allowSelf);
+				}
 			}
 			continue;
 		}
@@ -3440,19 +3561,38 @@ function validateDominatedRefs(
 function artifactReads(
 	action: StateActionAst,
 	basePointer: string,
-): Array<{ state: StatePath; pointer: string; allowSelf?: boolean }> {
-	const reads: Array<{ state: StatePath; pointer: string; allowSelf?: boolean }> = [];
+): Array<{ state: StatePath; pointer: string; allowSelf?: boolean; initialEmpty?: boolean }> {
+	const reads: Array<{ state: StatePath; pointer: string; allowSelf?: boolean; initialEmpty?: boolean }> = [];
 	if (action.kind === "agent") {
 		for (const [index, read] of (action.reads ?? []).entries()) {
 			if (read.kind === "artifactOf" || read.kind === "joinArtifactOf") {
-				reads.push({ state: read.state, pointer: `${basePointer}/action/reads/${index}` });
+				reads.push({
+					state: read.state,
+					pointer: `${basePointer}/action/reads/${index}`,
+					initialEmpty: read.kind === "artifactOf" && read.ifMissing === "empty",
+				});
 			}
 		}
 	}
 	if (action.kind === "script" || action.kind === "tsImport") {
 		for (const [name, value] of Object.entries(action.env ?? {})) {
 			if (value.kind === "artifactOf" || value.kind === "joinArtifactOf") {
-				reads.push({ state: value.state, pointer: `${basePointer}/action/env/${escapePointer(name)}` });
+				reads.push({
+					state: value.state,
+					pointer: `${basePointer}/action/env/${escapePointer(name)}`,
+					initialEmpty: value.kind === "artifactOf" && value.ifMissing === "empty",
+				});
+			}
+		}
+	}
+	if ("artifacts" in action) {
+		for (const [name, declared] of Object.entries(action.artifacts ?? {})) {
+			if (declared.source !== undefined) {
+				reads.push({
+					state: declared.source.state,
+					pointer: `${basePointer}/action/artifacts/${escapePointer(name)}`,
+					initialEmpty: declared.source.ifMissing === "empty",
+				});
 			}
 		}
 	}
@@ -3893,12 +4033,19 @@ function actionTemplates(action: StateActionAst): readonly TemplateAst[] {
 	if (action.kind === "gate" || action.kind === "waitFor" || action.kind === "notify") {
 		return [];
 	}
+	const versionReads = [
+		...(action.kind === "agent" ? (action.reads ?? []) : []),
+		...(action.kind === "script" || action.kind === "tsImport" ? Object.values(action.env ?? {}) : []),
+	].filter((read): read is ArtifactVersionAst => typeof read !== "string" && read.kind === "artifactVersion");
 	return [
+		...versionReads.map((read): TemplateAst => ({ kind: "template", strings: ["", ""], refs: [read.version] })),
 		...(action.kind === "agent" && action.task ? [action.task] : []),
 		...(action.kind === "script" || action.kind === "tsImport"
 			? Object.values(action.env ?? {}).filter((value): value is TemplateAst => value.kind === "template")
 			: []),
-		...Object.values(action.artifacts ?? {}).map((declared) => declared.path),
+		...Object.values(action.artifacts ?? {})
+			.filter((declared) => declared.source === undefined)
+			.map((declared) => declared.path),
 		...(action.kind === "agent" ? (action.reads ?? []) : []).filter(
 			(read): read is TemplateAst => read.kind === "template",
 		),
@@ -4024,6 +4171,21 @@ function toArtifacts(
 	const artifacts: Record<string, ArtifactAst> = {};
 	for (const [name, item] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
+		if (isRecord(item) && item.kind === "artifactFrom") {
+			const ref = toArtifactOf({ ...item, kind: "artifactOf", state: item.from }, pointer, diagnostics, source);
+			if (item.rollback !== undefined && typeof item.rollback !== "boolean") {
+				diagnostics.push(diagnostic("INVALID_ARTIFACT", "rollback must be boolean.", pointer, source));
+				continue;
+			}
+			if (ref !== undefined) {
+				artifacts[name] = {
+					path: { kind: "template", strings: [""], refs: [] },
+					source: ref,
+					...(item.rollback === undefined ? {} : { rollback: item.rollback }),
+				};
+			}
+			continue;
+		}
 		if (isRecord(item) && item.kind === "artifact") {
 			const template = toTemplate(item.path, `${pointer}/path`, diagnostics, source);
 			if (template === undefined) {
@@ -4060,7 +4222,7 @@ function toEnv(
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> | undefined {
+): Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> | undefined {
 	if (input === undefined) {
 		return undefined;
 	}
@@ -4070,9 +4232,17 @@ function toEnv(
 		);
 		return undefined;
 	}
-	const env: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> = {};
+	const env: Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst> =
+		{};
 	for (const [name, value] of Object.entries(input)) {
 		const pointer = `${path}/${escapePointer(name)}`;
+		if (isRecord(value) && value.kind === "artifactVersion") {
+			const version = toInputRef(value.version, `${pointer}/version`, diagnostics, source);
+			if (version !== undefined) {
+				env[name] = { kind: "artifactVersion", version };
+			}
+			continue;
+		}
 		if (isRecord(value) && value.kind === "artifactOf") {
 			const ref = toArtifactOf(value, pointer, diagnostics, source);
 			if (ref !== undefined) {
@@ -4108,6 +4278,10 @@ function toArtifactOf(
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
 ): ArtifactOfAst | undefined {
+	if (item.ifMissing !== undefined && item.ifMissing !== "empty") {
+		diagnostics.push(diagnostic("INVALID_ARTIFACT", 'ifMissing must be "empty".', pointer, source));
+		return undefined;
+	}
 	if (typeof item.state !== "string" || item.state.length === 0) {
 		diagnostics.push(
 			diagnostic("INVALID_TEMPLATE", "artifactOf state must be a non-empty state path.", pointer, source),
@@ -4126,6 +4300,8 @@ function toArtifactOf(
 	}
 	return {
 		kind: "artifactOf",
+		revision: "producer",
+		...(item.ifMissing === undefined ? {} : { ifMissing: item.ifMissing as "empty" }),
 		state: item.state,
 		...(item.artifact === undefined ? {} : { artifact: item.artifact }),
 		...(item.select === undefined ? {} : { select: item.select }),
@@ -4152,6 +4328,7 @@ function toJoinArtifactOf(
 	}
 	return {
 		kind: "joinArtifactOf",
+		revision: "producer",
 		state: item.state,
 		...(item.artifact === undefined ? {} : { artifact: item.artifact }),
 	};
@@ -4187,7 +4364,7 @@ function toReads(
 	path: string,
 	diagnostics: AuthoringDiagnostic[],
 	source: ChartSource,
-): (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined {
+): (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined {
 	if (input === undefined) {
 		return undefined;
 	}
@@ -4202,8 +4379,15 @@ function toReads(
 		);
 		return undefined;
 	}
-	const reads: (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] = [];
+	const reads: (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[] = [];
 	for (const [index, item] of input.entries()) {
+		if (isRecord(item) && item.kind === "artifactVersion") {
+			const version = toInputRef(item.version, `${path}/${index}/version`, diagnostics, source);
+			if (version !== undefined) {
+				reads.push({ kind: "artifactVersion", version });
+			}
+			continue;
+		}
 		if (isRecord(item) && item.kind === "artifactOf") {
 			const ref = toArtifactOf(item, `${path}/${index}`, diagnostics, source);
 			if (ref !== undefined) {
@@ -4248,6 +4432,21 @@ function toInputRef(
 		return undefined;
 	}
 	const jsonMark = input.json === true ? { json: true as const } : {};
+	if (input.kind === "currentVersion") {
+		const valid = ArtifactVersionSchema.shape.path.safeParse(input.path);
+		if (!valid.success) {
+			diagnostics.push(
+				diagnostic(
+					"INVALID_TEMPLATE",
+					"currentVersion requires a relative artifact path without traversal.",
+					path,
+					source,
+				),
+			);
+			return undefined;
+		}
+		return { kind: "currentVersion", path: valid.data, ...jsonMark };
+	}
 	if (input.kind === "arg") {
 		if (typeof input.name !== "string" || input.name.length === 0) {
 			diagnostics.push(diagnostic("INVALID_TEMPLATE", "arg ref name must be a non-empty string.", path, source));
@@ -4465,7 +4664,7 @@ function toScriptOptions(
 	code: "INVALID_SCRIPT" | "INVALID_GUARD" | "INVALID_TS_IMPORT",
 ): {
 	args?: readonly string[];
-	env?: Record<string, TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>;
+	env?: Record<string, TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>;
 	artifacts?: Record<string, ArtifactAst>;
 	reply?: SchemaAst;
 } {

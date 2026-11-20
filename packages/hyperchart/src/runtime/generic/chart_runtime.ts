@@ -1,21 +1,33 @@
+import type { ActionUID } from "../../core/types.js";
 import { resolveRunPaths } from "./run_paths.js";
 import { promises as fsp } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { actionUidKey } from "../../core/action_uid.js";
 import type { Runtime } from "../runtime.js";
 import type { ChartAst, ChartEvent, GuardOutcome } from "../../core/types.js";
 import type { SchemaRegistryLike } from "../../core/schema_registry.js";
 import type { ArtifactPin, BranchId, DurableLogRecord } from "../../core/durable_events.js";
-import type { AgentEffect, AgentOutcome, Effect, MachineEvent, RenderedArtifact } from "../../core/machine.js";
-import { ArtifactStore, hashFile } from "./artifact_store.js";
+import {
+	isJoinedArtifacts,
+	type AgentEffect,
+	type AgentOutcome,
+	type BorrowEffect,
+	type Effect,
+	type MachineEvent,
+	type RenderedArtifact,
+	type RenderedEnvValue,
+} from "../../core/machine.js";
+import { ArtifactStore } from "./artifact_store.js";
 import { agentRetryDelayMs, isTransientProviderFailure } from "./agent_retry_backoff.js";
 import { renderedArtifactPath } from "./artifacts.js";
+import { materializeWorkspaceFromPins } from "./artifact_workspace.js";
 import type { SchemaCheck } from "./schema.js";
 import { createAsyncQueue, type AsyncQueue } from "../../utils/async_queue.js";
 import { errorMessage } from "../../utils/errors.js";
 import type { AgentExecutor } from "./agent_executor.js";
 import type { CheckpointRepository, LogStore, PrepareStampedCommit } from "./log_store.js";
 import { runGuard, type RenderedGuardInvocation } from "./guards.js";
-import { ScriptRunner } from "./script_runner.js";
+import { ScriptRunner, type RenderedScriptEnv } from "./script_runner.js";
 import { FunctionRunner } from "./function_runner.js";
 import { checkSchemaAsync } from "./schema.js";
 
@@ -49,6 +61,11 @@ export class ChartRuntime implements Runtime {
 	private readonly scripts: ScriptRunner;
 	private readonly functions: FunctionRunner;
 	private readonly artifactStore?: ArtifactStore;
+	/**
+	 * Operational occupancy of rollback working files mounted by a borrow effect and not yet restored:
+	 * detects overlapping borrowers and lets disposal restore views the machine could not release.
+	 */
+	private readonly borrowedPaths = new Map<string, { action: string; artifact: RenderedArtifact }>();
 	private readonly now: () => number;
 	private readonly onWarn: (msg: string) => void;
 	private readonly pending = new Set<Promise<void>>();
@@ -85,7 +102,6 @@ export class ChartRuntime implements Runtime {
 		this.onWarn = options.onWarn ?? (() => {});
 	}
 
-	/** Composition metadata used by the execution layer; contains no projection state. */
 	executionInputs(): { ast: ChartAst; store: LogStore & CheckpointRepository; schemaRegistry?: SchemaRegistryLike } {
 		return {
 			ast: this.options.ast,
@@ -220,11 +236,11 @@ export class ChartRuntime implements Runtime {
 									if (!ready || this.quiescing) {
 										return;
 									}
-									await this.restorePinnedReads(effect.reads);
+									const prepared = await this.prepareAction(effect);
 									if (this.quiescing) {
 										return;
 									}
-									this.options.agentExecutor.start(effect, (outcome) => this.dispatchAgentOutcome(effect, outcome));
+									this.options.agentExecutor.start(prepared, (outcome) => this.dispatchAgentOutcome(effect, outcome));
 								})
 								.catch((error: unknown) => {
 									this.send({
@@ -240,8 +256,8 @@ export class ChartRuntime implements Runtime {
 						break;
 					case "script":
 						this.track(
-							this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env))
-								.then(() => (this.quiescing ? undefined : this.scripts.run(effect)))
+							this.prepareAction(effect)
+								.then((prepared) => (this.quiescing ? undefined : this.scripts.run(prepared)))
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
@@ -255,10 +271,13 @@ export class ChartRuntime implements Runtime {
 								}),
 						);
 						break;
-					case "tsImport":
+					case "tsImport": {
+						const { env: _env, ...prepared } = effect;
 						this.track(
 							this.functions
-								.run(effect, undefined, () => this.restorePinnedReads(effect.reads ?? envArtifacts(effect.env)))
+								.run(prepared, undefined, async () => {
+									Object.assign(prepared, await this.prepareAction(effect));
+								})
 								.then((event) =>
 									event === undefined || this.quiescing ? undefined : this.admitCompletion(event, effect.artifacts),
 								)
@@ -272,6 +291,7 @@ export class ChartRuntime implements Runtime {
 								}),
 						);
 						break;
+					}
 					case "validate": {
 						this.track(
 							(effect.completionBranchId !== undefined && effect.completionBranchId !== this.branchId
@@ -279,25 +299,27 @@ export class ChartRuntime implements Runtime {
 										ok: false,
 										reason: foreignCompletionReason(effect.completionBranchId, this.branchId),
 									})
-								: runGuard(
-										effect.guard,
-										effect.event,
-										{
-											chartDir: this.options.chartDir,
-											workDir: this.options.workDir,
-											invocation: {
-												branchId: this.branchId,
-												actionUid: effect.actionUid,
-												invocationId: effect.invocationId,
+								: this.prepareReadPaths(effect).then((prepared) =>
+										runGuard(
+											effect.guard,
+											effect.event,
+											{
+												chartDir: this.options.chartDir,
+												workDir: this.options.workDir,
+												invocation: {
+													branchId: this.branchId,
+													actionUid: effect.actionUid,
+													invocationId: effect.invocationId,
+												},
 											},
-										},
-										{
-											scripts: this.scripts,
-											...(effect.env === undefined ? {} : { env: effect.env }),
-											...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
-											...(effect.reply === undefined ? {} : { reply: effect.reply }),
-											actionUid: effect.actionUid,
-										} satisfies RenderedGuardInvocation,
+											{
+												scripts: this.scripts,
+												...(prepared.env === undefined ? {} : { env: prepared.env }),
+												...(effect.artifacts === undefined ? {} : { artifacts: effect.artifacts }),
+												...(effect.reply === undefined ? {} : { reply: effect.reply }),
+												actionUid: effect.actionUid,
+											} satisfies RenderedGuardInvocation,
+										),
 									)
 							)
 								.catch((error: unknown): GuardOutcome => ({ ok: false, reason: errorMessage(error) }))
@@ -330,17 +352,28 @@ export class ChartRuntime implements Runtime {
 							this.scripts.cancel(effect.actionUid),
 							this.functions.cancel(effect.actionUid),
 						];
-						this.track(
-							Promise.allSettled(cancellations).then((results) => {
-								for (const result of results) {
-									if (result.status === "rejected") {
-										this.onWarn(`Cancellation ${effect.id} failed: ${errorMessage(result.reason)}`);
-									}
+						const cancelled = Promise.allSettled(cancellations).then((results) => {
+							for (const result of results) {
+								if (result.status === "rejected") {
+									this.onWarn(`Cancellation ${effect.id} failed: ${errorMessage(result.reason)}`);
 								}
-							}),
-						);
+							}
+						});
+						if (effect.restore === undefined) {
+							this.track(cancelled);
+							break;
+						}
+						// Restore only after the executors stopped, and before any later effect can reuse the path.
+						await cancelled;
+						await this.restore(effect.restore);
 						break;
 					}
+					case "borrow":
+						await this.borrow(effect);
+						break;
+					case "restore":
+						await this.restore(effect.artifacts);
+						break;
 				}
 			}
 		} finally {
@@ -402,10 +435,20 @@ export class ChartRuntime implements Runtime {
 			await Promise.allSettled([...this.effectRuns]);
 		}
 		await this.drainPending();
+		// Views still mounted here belong to actions the machine will resume (or never release).
+		const rollbackErrors: unknown[] = [];
+		for (const { artifact } of [...this.borrowedPaths.values()]) {
+			try {
+				await this.restore([artifact]);
+			} catch (error) {
+				rollbackErrors.push(error);
+			}
+		}
 		this.queue.close();
 		const errors = [
 			...cleanupResults.flatMap((result) => (result.status === "rejected" ? [result.reason] : [])),
 			...this.backgroundErrors,
+			...rollbackErrors,
 		];
 		if (errors.length > 0) {
 			throw new AggregateError(errors, `ChartRuntime disposal failed: ${errors.map(errorMessage).join("; ")}`);
@@ -494,29 +537,161 @@ export class ChartRuntime implements Runtime {
 		);
 	}
 
-	/**
-	 * Action entry: restore each declared read to its pinned revision. The runtime cannot control
-	 * how agents read files, so the guarantee is placed on entry — whatever overwrote the authored
-	 * path (a sibling branch, an out-of-band edit), the action sees the accepted state its chart
-	 * channel declared. Reads whose producer completion carries no pin keep current-file semantics.
-	 */
-	private async restorePinnedReads(reads: readonly RenderedArtifact[] | undefined): Promise<void> {
+	/** Reject paths another action holds as a rollback view, then resolve snapshot inputs. */
+	private async prepareAction<
+		T extends {
+			actionUid: ActionUID;
+			artifacts?: readonly RenderedArtifact[];
+			reads?: readonly RenderedArtifact[];
+			env?: Readonly<Record<string, RenderedEnvValue>>;
+		},
+	>(effect: T): Promise<T & { env?: RenderedScriptEnv }> {
+		const outputs = new Set(
+			(effect.artifacts ?? [])
+				.filter((artifact) => artifact.rollback === undefined)
+				.map((artifact) => renderedArtifactPath(artifact, this.options.workDir)),
+		);
+		for (const artifact of effect.artifacts ?? []) {
+			if (artifact.rollback !== undefined && outputs.has(renderedArtifactPath(artifact, this.options.workDir))) {
+				throw new Error(`Temporary artifact '${artifact.path}' cannot also be declared as a completion output`);
+			}
+		}
+		// Snapshot reads resolve to saved objects, not the working path, so they never conflict.
+		const reads = (effect.reads ?? envArtifacts(effect.env)).filter((read) => read.snapshot === undefined);
+		for (const artifact of [...(effect.artifacts ?? []), ...reads]) {
+			this.assertNotBorrowedByAnother(artifact, effect.actionUid);
+		}
+		return this.prepareReadPaths(effect);
+	}
+
+	/** Mount borrowed working files from their selected snapshot (or empty), holding rollback paths. */
+	private async borrow(effect: BorrowEffect): Promise<void> {
 		const store = this.artifactStore;
-		if (store === undefined || reads === undefined || reads.length === 0) {
+		if (store === undefined) {
+			throw new Error("Borrowed artifacts require a run artifact store");
+		}
+		for (const artifact of effect.artifacts) {
+			this.assertNotBorrowedByAnother(artifact, effect.actionUid);
+			const path = renderedArtifactPath(artifact, this.options.workDir);
+			if (artifact.rollback !== undefined) {
+				this.borrowedPaths.set(path, { action: actionUidKey(effect.actionUid), artifact });
+			}
+			if (artifact.snapshot === "empty") {
+				await this.replaceWorkingFile(artifact, undefined);
+				await fsp.mkdir(dirname(path), { recursive: true });
+				await fsp.writeFile(path, "");
+			} else if (artifact.snapshot === undefined) {
+				throw new Error(`Borrowed artifact '${artifact.path}' has no accepted revision`);
+			} else {
+				await this.replaceWorkingFile(artifact, artifact.snapshot);
+			}
+		}
+	}
+
+	/** Return rollback paths to their accepted revision at invoke (`rollback.to`), or remove them. */
+	private async restore(artifacts: readonly RenderedArtifact[]): Promise<void> {
+		for (const artifact of artifacts) {
+			await this.replaceWorkingFile(artifact, artifact.rollback?.to);
+			this.borrowedPaths.delete(renderedArtifactPath(artifact, this.options.workDir));
+		}
+	}
+
+	/** Unlink first (never write through a link an action left; a directory fails), then materialize. */
+	private async replaceWorkingFile(artifact: RenderedArtifact, pin: ArtifactPin | undefined): Promise<void> {
+		await fsp.rm(renderedArtifactPath(artifact, this.options.workDir), { force: true });
+		if (pin === undefined) {
 			return;
 		}
-		for (const artifact of reads) {
-			const pin = artifact.pin;
-			if (pin === undefined) {
-				continue;
+		if (this.artifactStore === undefined) {
+			throw new Error("Borrowed artifacts require a run artifact store");
+		}
+		await materializeWorkspaceFromPins({ [artifact.path]: pin }, this.artifactStore, this.options.workDir);
+	}
+
+	private assertNotBorrowedByAnother(artifact: RenderedArtifact, actionUid: ActionUID): void {
+		const holder = this.borrowedPaths.get(renderedArtifactPath(artifact, this.options.workDir));
+		if (holder !== undefined && holder.action !== actionUidKey(actionUid)) {
+			throw new Error(`Artifact '${artifact.path}' is temporarily borrowed by another action; serialize access`);
+		}
+	}
+
+	/** Resolve snapshot reads to verified store objects and workspace reads inside workDir. */
+	private async prepareReadPaths<
+		T extends {
+			reads?: readonly RenderedArtifact[];
+			env?: Readonly<Record<string, RenderedEnvValue>>;
+			actionUid?: ActionUID;
+		},
+	>(effect: T): Promise<T & { env?: RenderedScriptEnv }> {
+		const reads = effect.reads ?? envArtifacts(effect.env);
+		for (const read of reads) {
+			if (
+				this.artifactStore !== undefined &&
+				read.sourceState !== undefined &&
+				read.snapshot === undefined &&
+				read.sourceState !== effect.actionUid?.state
+			) {
+				throw new Error(`Artifact of '${read.sourceState}' has no accepted CAS revision`);
 			}
-			const path = renderedArtifactPath(artifact, this.options.workDir);
-			if (await matchesHash(path, pin.hash)) {
-				continue;
+		}
+		const resolved = new Map<RenderedArtifact, Promise<RenderedArtifact>>();
+		const resolveRead = (read: RenderedArtifact): Promise<RenderedArtifact> => {
+			const snapshot = read.snapshot;
+			if (snapshot === undefined) {
+				return Promise.resolve({ ...read, path: renderedArtifactPath(read, this.options.workDir) });
 			}
-			const source = await store.get(pin.hash);
-			await fsp.mkdir(dirname(path), { recursive: true });
-			await fsp.copyFile(source, path);
+			let pending = resolved.get(read);
+			if (pending === undefined) {
+				const store = this.artifactStore;
+				if (store === undefined) {
+					throw new Error("Snapshot reads require a run artifact store");
+				}
+				const pin = snapshot === "empty" ? undefined : snapshot;
+				pending = (pin === undefined ? this.emptySnapshot(store) : store.get(pin.hash)).then(async (path) => {
+					if (pin !== undefined && (await fsp.stat(path)).size !== pin.size) {
+						throw new Error("Artifact revision has an invalid size");
+					}
+					return { ...read, path };
+				});
+				resolved.set(read, pending);
+			}
+			return pending;
+		};
+		const preparedReads = await Promise.all(reads.map(resolveRead));
+		const env: RenderedScriptEnv | undefined =
+			effect.env === undefined
+				? undefined
+				: Object.fromEntries(
+						await Promise.all(
+							Object.entries(effect.env).map(async ([name, value]) => {
+								if (typeof value === "string") {
+									return [name, value];
+								}
+								if (isJoinedArtifacts(value)) {
+									const artifacts = await Promise.all(value.map(resolveRead));
+									return [name, JSON.stringify(artifacts.map((artifact) => artifact.path))];
+								}
+								const artifact = await resolveRead(value);
+								return [name, artifact.select === undefined ? artifact.path : artifact];
+							}),
+						),
+					);
+		return {
+			...effect,
+			...(effect.reads === undefined ? {} : { reads: preparedReads }),
+			...(env === undefined ? {} : { env }),
+		};
+	}
+
+	private async emptySnapshot(store: ArtifactStore): Promise<string> {
+		const dir = await fsp.mkdtemp(join(this.options.workDir, ".hyperchart-empty-"));
+		try {
+			const path = join(dir, "empty");
+			await fsp.writeFile(path, "");
+			const pin = await store.put(path);
+			return await store.get(pin.hash);
+		} finally {
+			await fsp.rm(dir, { recursive: true, force: true });
 		}
 	}
 
@@ -536,6 +711,9 @@ export class ChartRuntime implements Runtime {
 		try {
 			const pins: Record<string, ArtifactPin> = {};
 			for (const artifact of artifacts) {
+				if (artifact.rollback !== undefined) {
+					continue;
+				}
 				const pin = await store.put(renderedArtifactPath(artifact, this.options.workDir));
 				if (artifact.shape !== undefined) {
 					const content = await fsp.readFile(store.objectPath(pin.hash), "utf8");
@@ -561,16 +739,13 @@ function toFailedEvent(error: unknown): { type: "FAILED"; error: string } {
 	return { type: "FAILED", error: errorMessage(error) };
 }
 
-function envArtifacts(env: Readonly<Record<string, string | RenderedArtifact>> | undefined): RenderedArtifact[] {
-	return Object.values(env ?? {}).filter((value): value is RenderedArtifact => typeof value !== "string");
-}
-
-async function matchesHash(path: string, hash: string): Promise<boolean> {
-	try {
-		return (await hashFile(path)) === hash;
-	} catch {
-		return false;
-	}
+function envArtifacts(env: Readonly<Record<string, RenderedEnvValue>> | undefined): RenderedArtifact[] {
+	return Object.values(env ?? {}).flatMap((value) => {
+		if (typeof value === "string") {
+			return [];
+		}
+		return isJoinedArtifacts(value) ? value : [value];
+	});
 }
 
 function foreignCompletionReason(sourceBranchId: string, branchId: string): string {

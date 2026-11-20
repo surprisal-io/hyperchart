@@ -60,7 +60,7 @@ The run owns two different filesystem locations. `projectDir` is the repository/
 
 `BranchProjection` is current machine state, not a history view. It retains only open journal-native interactions (`user_interaction/opened` and `gate/opened`); resolving, closing, or global failure removes them, while exact historical response lookup and UI history come from the storage history API. `liveActorMessages` is the sole mutable owner of queued, current, or unresolved-call messages; endpoint mailboxes, workers, and pending calls retain message IDs only. Settled non-call message history is reconstructed from durable record groups rather than accumulated in each endpoint. The retained `actorProducerVisits` counter is exact and monotonic: replay requires each enqueue to use the next producer visit and canonical `<producer>:message:<visit>:<batchIndex>` identity, preserving durable global message-id uniqueness after settled payloads leave live state.
 
-Accepted completion pins are projected into `artifactPins`, keyed by rendered authored path. `machine` attaches the current pin to each rendered artifact read, so `ChartRuntime` restores the accepted revision without reading ancestry or performing storage I/O from synchronous machine code.
+Accepted completion pins are projected into `artifactPins`, keyed by rendered authored path. A separate `artifactVersions` index retains the last accepted named outputs of each concrete action occurrence. The machine resolves `artifactOf`/joins from that index and runtime provides stable verified snapshot paths. Borrowed declarations materialize mutable working copies, with optional rollback to the accepted pin recorded at invoke (`rollback.to`); synchronous machine code performs no filesystem I/O.
 
 The internal execution retention policy records statically discovered result readers, externally read map scopes, resumable actions, and re-enterable states. Compaction is synchronous and prunes only values proven dead; inputs, results, spawns, actor generations, and other values are retained whenever loops, guards, dynamic map paths, actor-local control, or future readers make liveness ambiguous. A stronger whole-chart data-flow analysis is deferred rather than guessed. Runtime/storage cannot import this policy.
 
@@ -288,3 +288,14 @@ Completion facts snapshot declared action artifacts before validation, but guard
 Projection checkpoints use projector version 4; earlier caches are discarded and existing completion/verdict facts rebuild this distinction without journal changes. Old guarded completions are interpreted according to their recorded verdicts, not revalidated. Workspace overlays are recovery state, not accepted history. Artifact bytes/pins are outside the control-flow TLA state space; the acceptance transition corresponds to its existing successful-validation transition, exercised by runtime replay/fork tests.
 
 A fork at a pending or rejected guarded completion must produce a fresh branch-local completion before it can accept the result. Foreign provisional validation is rejected before invoking the guard; inherited rejection feedback requests local artifacts. The declared `onReject` resume/restart policy and retry budget apply normally, including fail-closed exhaustion at `retries: 0`. Projection rejects a foreign positive verdict rather than pairing its result with older accepted bytes. No retry budget or invocation identity is reset implicitly.
+
+## Saved artifact references
+
+`currentVersion()` resolves the current accepted pin at ref resolution time; it
+does not freeze the version at action entry. Return the reference as an ordinary
+schema-checked capture result to retain it across subsequent steps, forks, or
+rewinds. Use an actor when concurrent access requires serialization.
+A historical `artifactVersion()` read resolves directly to the verified object
+already in the artifact store; it neither creates a workspace copy nor rolls back
+the live filename. There are no new journal record kinds or
+control transitions. See [saved artifact revisions](api/dsl.md#saved-artifact-revisions).

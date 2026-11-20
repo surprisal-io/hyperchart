@@ -535,24 +535,34 @@ if (!checked.ok) console.error(checked.errors);
 type RenderedArtifact = {
   name?: string;
   sourceState?: string; // producer for artifact-backed reads
-  path: string;
+  readKind?: "artifact" | "join";
+  path: string; // authored path; runtime replaces it with the prepared path before dispatch
   shape?: SchemaAst;
   select?: string;
+  snapshot?: ArtifactPin | "empty"; // saved bytes to supply instead of the working file
+  rollback?: { to?: ArtifactPin }; // temporary working copy; restore `to` or remove the file
 };
 ```
+
+`snapshot` means the same saved bytes on every list; the list decides delivery.
+A read (agent `reads`, script/function/guard `env`) receives the verified store
+object path. An action `artifacts` entry (a borrowed binding) gets those bytes
+materialized at its authored working path, and it is not listed as an agent
+deliverable. `"empty"` is an explicit zero-byte input for a producer that never
+completed. `rollback` appears only on borrowed bindings, and its entries are never
+saved as completion outputs.
 
 ### `resolveArtifactValue()`
 
 ```ts
 function resolveArtifactValue(
   artifact: RenderedArtifact,
-  workDir: string,
   registry?: SchemaRegistryLike,
 ): Promise<unknown>;
 ```
 
-- resolves `artifact.path` inside `workDir`;
-- rejects paths escaping `workDir`;
+- reads the already prepared `artifact.path` (workspace and CAS inputs use the same reader);
+- path resolution, workspace containment and CAS verification happen before this call in runtime preparation;
 - returns raw UTF-8 text when neither `shape` nor `select` is present;
 - otherwise parses JSON;
 - validates the full parsed value when `shape` exists, including the original runtime Zod contract when one is declared;
@@ -723,7 +733,7 @@ Projection restoration, checkpoint selectors/codecs, retention plans, cadence co
 
 ## Live projection retention
 
-`BranchProjection` contains current synchronous machine state rather than elapsed history. `openUserInteractions` contains open `user_interaction` and `gate` records only; human scanners filter to `user_interaction`. Actor message lifecycle state has one authoritative entry in `liveActorMessages`, keyed by durable message ID; endpoint mailboxes, current worker slots, and `pendingActorCalls` retain IDs rather than duplicate mutable message objects. Settled non-call messages are removed immediately, while settled call messages remain only until the matching call-resolution fact. `artifactPins` contains the latest accepted revision for each rendered authored path and is attached to rendered artifact reads before the runtime performs asynchronous restoration.
+`BranchProjection` contains current synchronous machine state rather than elapsed history. `openUserInteractions` contains open `user_interaction` and `gate` records only; human scanners filter to `user_interaction`. Actor message lifecycle state has one authoritative entry in `liveActorMessages`, keyed by durable message ID; endpoint mailboxes, current worker slots, and `pendingActorCalls` retain IDs rather than duplicate mutable message objects. Settled non-call messages are removed immediately, while settled call messages remain only until the matching call-resolution fact. `artifactPins` contains the latest accepted revision for each rendered authored path. `artifactVersions` separately retains the outputs of the last accepted completion of each concrete action state; `artifactOf` and joins use this producer index, not current pins by path. Pending actions retain replay-derived artifact paths and selected input revisions from their invoke boundary.
 
 The internal execution retention policy deletes session references proven non-resumable and canonical actor-message entries that have no mailbox, current-worker, or pending-call reference. Inputs, results, spawns, actor generations, and counters remain when future liveness is ambiguous. Compaction runs after projected batches and before execution encodes a checkpoint blob; runtime/storage cannot invoke or import it.
 
@@ -734,3 +744,56 @@ Runtime adapters execute the same `actor_create`, `actor_enqueue`, and `actor_re
 ## Named branch storage API
 
 `RunHistoryStore.listBranches()` returns read-committed keyset pages of at most 100 durable branch heads. `listHyperchartBranchPage(runId, cursor?)` exposes the same bounded page contract for run-ID callers; its opaque `next` cursor continues from the following creation coordinate. No branch collector is exported. Runner/control helpers are imported from `@surprisal/hyperchart/runner`, separately from the projection-free runtime/storage package. Package-internal control paths may consume bounded pages when orchestration requires it. `appendDrafts()` numbers from the full journal and appends from the selected durable head. `listHyperchartBranchPage()`, `getHyperchartBranch()`, `forkHyperchartRun()`, and `rewindHyperchartRun()` expose named heads. Fork does not select/start. Rewind is an append-only move; live moves use the owning runner transport. It has no cleanup/backup options.
+
+### Historical artifact read resolution
+
+The authoring `currentVersion()` ref resolves accepted branch pins, not arbitrary
+filesystem bytes, at ref resolution time. There is no invocation-local pin cache
+or action-entry snapshot. A saved reference is an ordinary accepted action result;
+concurrent access coordination belongs to the chart, for example an actor. This
+adds no durable fact kind and does not change scheduling. Borrowed bindings and
+the producer version index use the version-8 disposable checkpoint shape.
+
+The machine chooses snapshots and sends their pins and authored paths in effects.
+For `joinArtifactOf` in env it sends an array of file descriptors, one per map
+instance; `RenderedArtifact` itself describes only one file.
+Runtime resolves ordinary file inputs inside the workspace and snapshot inputs
+through `ArtifactStore.get(hash)` before dispatch. Both reach file readers with
+an already prepared path; file readers perform no path resolution. Runtime then
+builds path-valued env strings or JSON arrays before dispatch. Explicit empty
+inputs are materialized there as well. Machine state contains neither a storage
+callback nor filesystem-layout configuration. There is no additional snapshot directory or workspace copy, and the live
+file is never replaced. `artifactOf` and `joinArtifactOf` resolve the saved producer snapshots in the same
+way; raw string reads retain their workspace behavior. Historical reads require a configured run store and fail
+on missing/corrupt objects. Consumers must treat shared store objects as read-only;
+this API does not enforce OS-level write isolation. Workspace containment checks
+remain unchanged for ordinary files; historical paths come only from the run's
+verified artifact store.
+
+
+### Borrowed working files
+
+`artifact({ from, artifact?, rollback?, ifMissing? })` in action artifacts is fixed in
+replay-derived invocation bindings: the selected source `snapshot` (a pin or `"empty"`)
+and, with rollback, `rollback.to` — the path's accepted branch pin at invoke, absent when
+the path had none. The machine owns the lifecycle and sends it as ordinary non-durable effects:
+`borrow` before the first action effect of each agent session (nudges and guard
+corrections keep the working edits; a restart or a new machine lifetime mounts the
+source again), `restore` before an accepted completion or positive verdict is
+appended, and `cancel.restore` when the action is cancelled, scope-exited, timed out,
+or terminalized by global failure. Outcomes of a cancelled or superseded invocation
+(including late guard verdicts) are discarded by the machine, so they never restore a
+newer view. Runtime performs these effects in order before later effects of the same
+batch: it materializes verified CAS bytes (or writes an empty file) at the authored
+path, and on restore materializes `rollback.to` or removes the file. It keeps no copies
+of workspace bytes, so unaccepted edits made before the action are discarded, and it
+never admits temporary edits as outputs. Read-only snapshot inputs remain stable after
+the consuming action ends, including paths later used by an agent.
+
+A borrowed view requires a run artifact store. Runtime tracks only which rollback paths
+are currently mounted: another action using such a path is rejected (serialize it in
+the chart), a failed restore keeps the path blocked, and runtime disposal restores any
+view still mounted, reporting failures. A cancel restore waits until executors stop.
+In-process functions that ignore abort may still perform late side effects; this
+existing limitation is not a filesystem sandbox guarantee. Bind borrowed files on the
+action, not on a guard's output list; guards may read the action's working files through self `artifactOf` refs.

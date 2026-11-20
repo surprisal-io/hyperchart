@@ -229,7 +229,7 @@ export class BranchExecution {
 	}
 	notificationRenderer(
 		state: MachineState,
-		input: { runId: string; workDir: string },
+		input: { runId: string; workDir: string; snapshotPath?: (pin: ArtifactPin) => string },
 	): (outcome: RunTerminalState, error?: string) => TerminalNotificationPayload {
 		const branchId = this.branchId;
 		return (outcome, error) =>
@@ -272,5 +272,4 @@ export class BranchExecution {
 		};
 		return prepareUserInteractionResponseFromProjection(this.projection, this.branchId, gate, input);
 	}
-
 }

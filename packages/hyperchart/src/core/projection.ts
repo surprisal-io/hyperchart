@@ -8,6 +8,9 @@ import type {
 	ChartAst,
 	ChartEvent,
 	InputRef,
+	ArtifactOfAst,
+	ArtifactAst,
+	TemplateAst,
 	SchemaAst,
 	StateActionAst,
 	StateAst,
@@ -66,6 +69,15 @@ const EMPTY_RECOVERY_COUNTERS: RecoveryCounters = {
 	validation: { nudges: 0, restarts: 0 },
 };
 
+/** A file at its authored path, plus which saved bytes (if any) to supply in place of the working file. */
+export type ArtifactBinding = Readonly<{
+	path: string;
+	/** Accepted CAS revision, or an explicitly empty file for a never-completed producer. */
+	snapshot?: ArtifactPin | "empty";
+	/** Temporary working copy: return the path to the accepted revision at invoke (`to`), or remove it. */
+	rollback?: Readonly<{ to?: ArtifactPin }>;
+}>;
+
 type PendingActionBase = {
 	actionUid: ActionUID;
 	visitId: number;
@@ -74,6 +86,8 @@ type PendingActionBase = {
 	sessionId: string;
 	/** Resolved action definition pinned by the original invoke fact. */
 	definition: StateActionAst;
+	/** Replay-derived artifact paths and input revisions fixed at this invocation. */
+	artifactBindings?: Readonly<Record<string, ArtifactBinding>>;
 	/** Original invoke timestamp — the anchor for the state's after deadline. */
 	timestamp: number;
 	gateSeqId?: number;
@@ -207,6 +221,8 @@ export type BranchProjection = {
 	sessions: Record<string, string>;
 	/** Latest accepted durable artifact revision per rendered authored path. */
 	artifactPins: Record<string, ArtifactPin>;
+	/** Last accepted binding/output of each concrete action occurrence, not current pins by path. */
+	artifactVersions: Record<StatePath, Record<string, ArtifactBinding>>;
 	/** Durable global fail-fast intent. Presence blocks every new invoke/message effect. */
 	failure?: { origin: StatePath; error: unknown; seqId: number };
 	actors: Record<StatePath, ProjectedActorOccurrence>;
@@ -237,6 +253,7 @@ export function createBranchProjection(ast: ChartAst): BranchProjection {
 		stateVisits: {},
 		sessions: {},
 		artifactPins: {},
+		artifactVersions: {},
 		actors: {},
 		actorPools: {},
 		liveActorMessages: {},
@@ -626,6 +643,12 @@ export function projectBranch(
 							const key = actionUidKey(record.actionUid);
 							const visitId = (projection.stateVisits[key] ?? 0) + 1;
 							projection.stateVisits[key] = visitId;
+							const artifactBindings = captureArtifactBindings(
+								projection,
+								ast,
+								record.definition,
+								record.actionUid.state,
+							);
 							projection.pendingActions.push({
 								actionUid: record.actionUid,
 								visitId,
@@ -633,6 +656,7 @@ export function projectBranch(
 								invokeSeqId: record.seqId,
 								sessionId: record.sessionId,
 								definition: record.definition,
+								...(artifactBindings === undefined ? {} : { artifactBindings }),
 								timestamp: record.timestamp,
 								recovery: EMPTY_RECOVERY_COUNTERS,
 								phase: "running",
@@ -691,6 +715,7 @@ export function projectBranch(
 							if (validating.completionArtifacts !== undefined) {
 								Object.assign(projection.artifactPins, validating.completionArtifacts.pins);
 							}
+							recordArtifactVersions(projection, validating, validating.completionArtifacts?.pins);
 							recordResult(projection, record.actionUid.state, validating.event);
 							removePendingAction(projection, record.actionUid);
 							applyTransition(projection, ast, record.actionUid.state, record.event.type, abandoned, record.event);
@@ -878,6 +903,7 @@ function applyActionRetry(projection: BranchProjection, record: StateActionRetry
 		invokeSeqId: pending.invokeSeqId,
 		sessionId: record.resultingSessionId,
 		definition: pending.definition,
+		...(pending.artifactBindings === undefined ? {} : { artifactBindings: pending.artifactBindings }),
 		timestamp: pending.timestamp,
 		phase: "running",
 		recovery: recoveryCountersAfter(pending.recovery, record),
@@ -997,6 +1023,7 @@ function applyActionCompletion(
 			invokeSeqId: previous.invokeSeqId,
 			sessionId: previous.sessionId,
 			definition: previous.definition,
+			...(previous.artifactBindings === undefined ? {} : { artifactBindings: previous.artifactBindings }),
 			timestamp: previous.timestamp,
 			phase: "validating",
 			recovery: previous.recovery,
@@ -1008,6 +1035,7 @@ function applyActionCompletion(
 	if (completionArtifacts !== undefined) {
 		Object.assign(projection.artifactPins, completionArtifacts.pins);
 	}
+	recordArtifactVersions(projection, previous, completionArtifacts?.pins);
 	recordResult(projection, actionUid.state, event);
 	removePendingAction(projection, actionUid);
 	applyTransition(projection, ast, actionUid.state, event.type, abandoned, event);
@@ -1831,6 +1859,13 @@ export function resolveRef(
 	stateId: StatePath,
 	context = "Template",
 ): unknown {
+	if (ref.kind === "currentVersion") {
+		const pin = state.projection.artifactPins[ref.path];
+		if (pin === undefined) {
+			throw new Error(`${context} in state ${stateId}: artifact '${ref.path}' has no accepted revision`);
+		}
+		return { path: ref.path, ...pin };
+	}
 	const actorContext = actorContextForState(state.ast, stateId);
 	const actor =
 		actorContext === undefined ? undefined : projectedActorEndpoint(state.projection, actorContext.endpointOccurrence);
@@ -1960,6 +1995,8 @@ function selectRefPath(
 
 function refLabel(ref: InputRef): string {
 	switch (ref.kind) {
+		case "currentVersion":
+			return `current version of '${ref.path}'`;
 		case "arg":
 			return `arg '${ref.name}'`;
 		case "result":
@@ -2158,4 +2195,105 @@ function sameRecordedValue(left: unknown, right: unknown): boolean {
 
 function sameActionUid(left: ActionUID, right: ActionUID): boolean {
 	return left.chart === right.chart && left.state === right.state && left.action === right.action;
+}
+
+/** Shared template resolver; no filesystem work or host state is involved. */
+export function resolveTemplate(
+	state: { ast: ChartAst; projection: BranchProjection },
+	template: TemplateAst,
+	scope: StatePath,
+): string {
+	const parts = [template.strings[0] ?? ""];
+	for (const [index, ref] of template.refs.entries()) {
+		const value = resolveRef(state, ref, scope);
+		if (ref.json === true) {
+			const text = JSON.stringify(value);
+			if (text === undefined) {
+				throw new Error(`Template in state ${scope}: ${refLabel(ref)} is not JSON-serializable`);
+			}
+			parts.push(text);
+		} else if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+			parts.push(String(value));
+		} else {
+			throw new Error(
+				`Template in state ${scope}: ${refLabel(ref)} resolved to a non-primitive value; wrap the ref in json() to embed it as JSON`,
+			);
+		}
+		parts.push(template.strings[index + 1] ?? "");
+	}
+	return parts.join("");
+}
+
+/** Look up the last accepted occurrence snapshot, never the latest writer of its path. */
+export function artifactBindingOf(
+	state: { ast: ChartAst; projection: BranchProjection },
+	read: ArtifactOfAst,
+	scope: StatePath,
+	path: TemplateAst,
+): ArtifactBinding {
+	const actor = actorContextForState(state.ast, scope);
+	const producer =
+		actor === undefined ? instancePathFor(read.state, scope) : actorStatePath(actor.occurrence, read.state);
+	const completed = state.projection.artifactVersions[producer];
+	if (completed !== undefined) {
+		const name = read.artifact ?? Object.keys(completed)[0];
+		const binding = name === undefined ? undefined : completed[name];
+		if (binding === undefined) {
+			throw new Error(`State '${producer}' has no accepted artifact '${name ?? "*"}'`);
+		}
+		return binding;
+	}
+	if (read.ifMissing === "empty") {
+		return { path: resolveTemplate(state, path, producer), snapshot: "empty" };
+	}
+	throw new Error(`State '${producer}' has no accepted completion for artifact '${read.artifact ?? "*"}'`);
+}
+
+function captureArtifactBindings(
+	projection: BranchProjection,
+	ast: ChartAst,
+	definition: StateActionAst,
+	scope: StatePath,
+): Record<string, ArtifactBinding> | undefined {
+	let declarations: Readonly<Record<string, ArtifactAst>> = {};
+	if ("artifacts" in definition) {
+		declarations = definition.artifacts ?? {};
+	}
+	if (definition.kind === "agent") {
+		const guard = definition.validation?.guard;
+		if (guard?.kind === "script") {
+			declarations = { ...declarations, ...guard.artifacts };
+		}
+	}
+	if (Object.keys(declarations).length === 0) {
+		return undefined;
+	}
+	return Object.fromEntries(
+		Object.entries(declarations).map(([name, declared]): [string, ArtifactBinding] => {
+			if (declared.source === undefined) {
+				return [name, { path: resolveTemplate({ ast, projection }, declared.path, scope) }];
+			}
+			const source = artifactBindingOf({ ast, projection }, declared.source, scope, declared.path);
+			if (declared.rollback !== true) {
+				return [name, source];
+			}
+			const to = projection.artifactPins[source.path];
+			return [name, { ...source, rollback: to === undefined ? {} : { to } }];
+		}),
+	);
+}
+
+function recordArtifactVersions(
+	projection: BranchProjection,
+	pending: PendingAction,
+	pins: Readonly<Record<string, ArtifactPin>> | undefined,
+): void {
+	projection.artifactVersions[pending.actionUid.state] = Object.fromEntries(
+		Object.entries(pending.artifactBindings ?? {})
+			.filter(([, binding]) => binding.rollback === undefined)
+			.map(([name, { path }]) => {
+				const snapshot = pins?.[path];
+				return [name, { path, ...(snapshot === undefined ? {} : { snapshot }) }];
+			}),
+	);
 }

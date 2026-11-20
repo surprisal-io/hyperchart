@@ -31,7 +31,7 @@ import {
 } from "../runtime/generic/log_store.js";
 
 /** Serialized projection shape/version. Increment whenever BranchProjection replay semantics change. */
-export const PROJECTOR_VERSION = 7;
+export const PROJECTOR_VERSION = 8;
 export const PROJECTION_CHECKPOINT_SCHEMA_VERSION = 1;
 export const PROJECTION_CHECKPOINT_INTERVAL = 512;
 export const EXECUTION_REPLAY_BATCH_RECORDS = 500;
@@ -280,6 +280,7 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 				"stateVisits",
 				"sessions",
 				"artifactPins",
+				"artifactVersions",
 				"actors",
 				"actorPools",
 				"liveActorMessages",
@@ -304,6 +305,8 @@ function decodeBranchProjection(value: unknown): BranchProjection | undefined {
 		!isRecordOfPositiveIntegers(value.stateVisits) ||
 		!isRecordOfNonEmptyStrings(value.sessions) ||
 		!isArtifactPins(value.artifactPins) ||
+		!isRecord(value.artifactVersions) ||
+		!Object.values(value.artifactVersions).every(isArtifactBindings) ||
 		!(value.failure === undefined || isFailure(value.failure)) ||
 		!isActors(value.actors) ||
 		!isActorPools(value.actorPools) ||
@@ -359,6 +362,7 @@ function isPendingAction(value: unknown): boolean {
 		!isPositiveInteger(value.invokeSeqId) ||
 		!isNonEmptyString(value.sessionId) ||
 		!isRecord(value.definition) ||
+		!(value.artifactBindings === undefined || isArtifactBindings(value.artifactBindings)) ||
 		!isRecoveryCounters(value.recovery) ||
 		!(value.gateSeqId === undefined || isPositiveInteger(value.gateSeqId)) ||
 		!(value.lastRetry === undefined || isLastRetry(value.lastRetry)) ||
@@ -366,7 +370,7 @@ function isPendingAction(value: unknown): boolean {
 	) {
 		return false;
 	}
-	const optional = ["gateSeqId", "lastRetry"];
+	const optional = ["gateSeqId", "lastRetry", "artifactBindings"];
 	if (value.phase === "running") {
 		return isExactRecord(
 			value,
@@ -1196,4 +1200,21 @@ function canonicalJson(value: unknown): string {
 			.join(",")}}`;
 	}
 	throw new Error(`Normalized ChartAst contains a non-JSON value of type ${typeof value}`);
+}
+
+function isArtifactBindings(value: unknown): boolean {
+	return (
+		isRecord(value) &&
+		Object.values(value).every(
+			(binding) =>
+				isExactRecord(binding, ["path"], ["snapshot", "rollback"]) &&
+				isNonEmptyString(binding.path) &&
+				(binding.snapshot === undefined ||
+					binding.snapshot === "empty" ||
+					isArtifactPins({ snapshot: binding.snapshot })) &&
+				(binding.rollback === undefined ||
+					(isExactRecord(binding.rollback, [], ["to"]) &&
+						(binding.rollback.to === undefined || isArtifactPins({ to: binding.rollback.to })))),
+		)
+	);
 }

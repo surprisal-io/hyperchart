@@ -35,6 +35,8 @@ export default chart({
 
 Optional chart-level `args` metadata gives hosts serializable descriptions and JSON defaults for on-demand launch forms; it is inspection metadata, not executable validation or automatic runtime input. Action states may publish finite-JSON domain facts with ordered `emit()` declarations; optional emit schemas are consumer/typing/UI contracts only, are neither runtime-enforced nor journaled, and emits are appended atomically only with accepted outcomes and remain inert during projection. `gate()` opens a durable host-application request without dispatching an executor or entering human request scanning, then uses the same branch-aware interaction commit APIs as `user()`. `refs<Args>().chart()` accepts subset or empty metadata and rejects every key outside `Args`, including typos mixed with valid keys. A script with one successful transition may select it implicitly on exit code `0`. `tsAction(module, exportName, options)` is the trusted in-process alternative for measured subprocess hot paths; it preserves durable action provenance, shared completion validation, and artifact pinning, but cancellation cannot terminate continuing CPU work or side effects. Top-level `final()` and `failed()` terminals explicitly select `complete` or `failed` run outcome; optional terminal notifications can append a scoped prompt and authoritative paths for declared artifacts. Runner/host delivery uses a persist-once outbox and per-session receipts.
 
+`artifact({ from, artifact?, rollback?, ifMissing? })` borrows the last accepted producer snapshot into an action workspace. Rollback returns the path to its previously accepted revision (or removes it) without publishing temporary edits. `artifactOf`/joins read the producer snapshots rather than the latest writer of the same path. See the [artifact contract](../../docs/api/dsl.md#borrow-an-existing-artifact).
+
 ## Entry points
 
 | Import | Purpose |
@@ -93,3 +95,7 @@ Runs are addressed only by `runId`. Host storage config declares backend, root a
 sequence-ordered pages of original records and branch mutations across a run.
 Applications own their consumer cursors; Hyperchart owns SQL and decoding.
 See [Runtime API](../../docs/api/runtime.md#physical-postgresql-journal-pages).
+
+`currentVersion(path)`, `ArtifactVersionSchema`, and `artifactVersion(ref)` let a
+capture action save an accepted artifact revision and later actions read it
+without overwriting its live file. See [saved artifact revisions](../../docs/api/dsl.md#saved-artifact-revisions).

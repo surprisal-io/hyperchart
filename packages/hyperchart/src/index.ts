@@ -40,6 +40,7 @@ export type {
 	AgentActionCst,
 	ArtifactAst,
 	ArtifactCst,
+	ArtifactFromCst,
 	ArtifactOfAst,
 	ArtifactOfCst,
 	AuthoringDiagnostic,
@@ -297,3 +298,8 @@ export type {
 export { actorEndpointAdmission, createMachineOutput, stepMachine } from "./core/machine.js";
 export { concatAsyncIterables, createAsyncQueue, toAsyncIterable } from "./utils/index.js";
 export type { AsyncQueue, MaybeAsyncIterable } from "./utils/index.js";
+
+export { ArtifactVersionSchema } from "./core/artifact_version.js";
+export type { ArtifactVersion } from "./core/artifact_version.js";
+export type { ArtifactVersionCst, ArtifactVersionAst } from "./core/types.js";
+export { currentVersion, artifactVersion } from "./core/dsl.js";

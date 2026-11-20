@@ -18,7 +18,7 @@ import {
 	tsImport,
 	z,
 } from "../packages/hyperchart/src/index.js";
-import { arg, input, joinArtifactOf, json, key, item, result, t, visit } from "../packages/hyperchart/src/core/dsl.js";
+import { arg, input, joinArtifactOf, result, t, visit } from "../packages/hyperchart/src/core/dsl.js";
 import type {
 	ChartAst,
 	ChartCst,
@@ -32,7 +32,11 @@ import type {
 import { ChartRuntime } from "../packages/hyperchart/src/runtime/generic/chart_runtime.js";
 import { MemoryLogStore } from "../packages/hyperchart/src/runtime/generic/memory_log_store.js";
 import { FakeAgentExecutor } from "./fake_agent_executor.js";
-import { checkArtifactFile, resolveArtifactValue } from "../packages/hyperchart/src/runtime/generic/artifacts.js";
+import {
+	checkArtifactFile,
+	renderedArtifactPath,
+	resolveArtifactValue,
+} from "../packages/hyperchart/src/runtime/generic/artifacts.js";
 
 const node = process.execPath;
 const tempDirs: string[] = [];
@@ -243,7 +247,7 @@ describe("validation script env", () => {
 					node,
 					[
 						"-e",
-						'require("node:fs").writeFileSync("guard.json", "guard"); process.exit(process.env.SELF === "action.json" ? 0 : 1)',
+						'require("node:fs").writeFileSync("guard.json", "guard"); process.exit(require("node:fs").readFileSync(process.env.SELF,"utf8") === "action" ? 0 : 1)',
 					],
 					{
 						env: { SELF: { kind: "artifactOf", state: "work" } },
@@ -556,7 +560,7 @@ describe("validation script env", () => {
 		await writeFile(join(dir, "domain.json"), JSON.stringify({ type: "house", properties: { rooms: 3 } }), "utf8");
 		const domainShape = schema(z.object({ type: z.string(), properties: z.object({ rooms: z.number() }) }));
 		expect((await checkArtifactFile({ path: "domain.json", shape: domainShape }, dir)).ok).toBe(true);
-		expect(await resolveArtifactValue({ path: "domain.json", shape: domainShape }, dir)).toEqual({
+		expect(await resolveArtifactValue({ path: join(dir, "domain.json"), shape: domainShape })).toEqual({
 			type: "house",
 			properties: { rooms: 3 },
 		});
@@ -577,7 +581,7 @@ describe("validation script env", () => {
 			dir,
 		);
 		expect(mismatch.ok).toBe(false);
-		await expect(resolveArtifactValue({ path: "https://example.com/data.json" }, dir)).rejects.toThrow(
+		expect(() => renderedArtifactPath({ path: "https://example.com/data.json" }, dir)).toThrow(
 			"web URLs are not local artifacts",
 		);
 	});
@@ -595,7 +599,7 @@ describe("joinArtifactOf validation env", () => {
 					kind: "map",
 					over: arg("items"),
 					initial: "produce",
-					onDone: "end",
+					onDone: "check",
 					states: {
 						produce: {
 							kind: "state",
@@ -607,26 +611,27 @@ describe("joinArtifactOf validation env", () => {
 								],
 								{ artifacts: { report: artifact("out/report.txt") } },
 							),
-							transitions: { DONE: "check" },
-						},
-						check: {
-							kind: "state",
-							action: agent("checker", {
-								validation: {
-									guard: script(
-										node,
-										[
-											"-e",
-											'process.exit(JSON.parse(process.env.ALL).length === 2 && (process.env.KEY === "a" || process.env.KEY === "b") && process.env.ITEM === "{}" ? 0 : 1)',
-										],
-										{ env: { ALL: joinArtifactOf("items.produce"), KEY: t`${key()}`, ITEM: t`${json(item())}` } },
-									),
-								},
-							}),
 							transitions: { DONE: "finish" },
 						},
 						finish: final(),
 					},
+				},
+
+				check: {
+					kind: "state",
+					action: agent("checker", {
+						validation: {
+							guard: script(
+								node,
+								[
+									"-e",
+									'process.exit(JSON.parse(process.env.ALL).length === 2 && (process.env.KEY === "a" || process.env.KEY === "b") && process.env.ITEM === "{}" ? 0 : 1)',
+								],
+								{ env: { ALL: joinArtifactOf("items.produce"), KEY: "a", ITEM: "{}" } },
+							),
+						},
+					}),
+					transitions: { DONE: "end" },
 				},
 				end: final(),
 			},
@@ -636,7 +641,7 @@ describe("joinArtifactOf validation env", () => {
 			normalized.ast,
 			dir,
 			{ items: { a: {}, b: {} } },
-			new FakeAgentExecutor({ "items#a.check": [{ type: "DONE" }], "items#b.check": [{ type: "DONE" }] }),
+			new FakeAgentExecutor({ check: [{ type: "DONE" }] }),
 		);
 		expect(state.projection.activeLeaves).toEqual(["end"]);
 	});

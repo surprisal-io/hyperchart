@@ -5,12 +5,8 @@ import { errorMessage } from "../../utils/errors.js";
 import { checkSchemaAsync, type SchemaCheck } from "./schema.js";
 import type { SchemaRegistryLike as SchemaRegistry } from "../../core/schema_registry.js";
 
-export async function resolveArtifactValue(
-	artifact: RenderedArtifact,
-	workDir: string,
-	registry?: SchemaRegistry,
-): Promise<unknown> {
-	const filePath = artifactPath(artifact, workDir);
+export async function resolveArtifactValue(artifact: RenderedArtifact, registry?: SchemaRegistry): Promise<unknown> {
+	const filePath = artifact.path;
 	let content: string;
 	try {
 		content = await fsp.readFile(filePath, "utf8");

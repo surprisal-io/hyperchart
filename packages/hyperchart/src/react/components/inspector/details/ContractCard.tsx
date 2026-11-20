@@ -70,6 +70,13 @@ export function ContractCard({
 									</TypeTooltip>
 									{artifact.name}
 								</span>
+								{artifact.sourceState && (
+									<span className="font-mono text-[10px] text-[var(--text-muted)]">
+										from {artifact.sourceState}.{artifact.sourceArtifact ?? artifact.name}
+										{artifact.rollback ? " · rollback" : ""}
+										{artifact.ifMissing === "empty" ? " · initially empty" : ""}
+									</span>
+								)}
 								{artifact.schema && (
 									<span className="rounded border border-[var(--border-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
 										{schemaLabel(artifact.schema)}

@@ -1,3 +1,4 @@
+import type { ArtifactVersionAst } from "./types.js";
 import { isInputRef } from "./types.js";
 import type {
 	ActionStateAst,
@@ -631,6 +632,8 @@ function inputRefDsl(ref: InputRef): string {
 
 function inputRefDslBase(ref: InputRef): string {
 	switch (ref.kind) {
+		case "currentVersion":
+			return `currentVersion(${stringDsl(ref.path)})`;
 		case "arg":
 			return `arg(${stringDsl(ref.name)})`;
 		case "result":
@@ -887,18 +890,31 @@ function artifactsDsl(artifacts: Readonly<Record<string, ArtifactAst>> | undefin
 }
 
 function artifactDsl(value: ArtifactAst): string {
+	if (value.source !== undefined) {
+		return `artifact(${objectDsl([
+			["from", stringDsl(value.source.state)],
+			["artifact", value.source.artifact === undefined ? undefined : stringDsl(value.source.artifact)],
+			["rollback", value.rollback === undefined ? undefined : String(value.rollback)],
+			["ifMissing", value.source.ifMissing === undefined ? undefined : stringDsl(value.source.ifMissing)],
+		])})`;
+	}
 	const path = templateDsl(value.path) ?? stringDsl("");
 	return value.shape === undefined ? path : `artifact(${path}, ${schemaDsl(value.shape)})`;
 }
 
-function readsDsl(reads: readonly (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined): string | undefined {
+function readsDsl(
+	reads: readonly (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[] | undefined,
+): string | undefined {
 	if (reads === undefined || reads.length === 0) {
 		return undefined;
 	}
 	return arrayDsl(reads.map(readDsl));
 }
 
-function readDsl(read: TemplateAst | ArtifactOfAst | JoinArtifactOfAst): string {
+function readDsl(read: TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst): string {
+	if (read.kind === "artifactVersion") {
+		return `artifactVersion(${inputRefDsl(read.version)})`;
+	}
 	if (read.kind === "artifactOf") {
 		return artifactOfDsl(read);
 	}
@@ -912,6 +928,7 @@ function artifactOfDsl(read: ArtifactOfAst): string {
 	const options = objectDsl([
 		["artifact", read.artifact === undefined ? undefined : stringDsl(read.artifact)],
 		["select", read.select === undefined ? undefined : stringDsl(read.select)],
+		["ifMissing", read.ifMissing === undefined ? undefined : stringDsl(read.ifMissing)],
 	]);
 	return options === "{}" ? `artifactOf(${stringDsl(read.state)})` : `artifactOf(${stringDsl(read.state)}, ${options})`;
 }
@@ -931,7 +948,11 @@ function joinResultOfDsl(read: JoinResultOfAst): string {
 }
 
 function envDsl(
-	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>> | undefined,
+	env:
+		| Readonly<
+				Record<string, string | TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+		  >
+		| undefined,
 ): string | undefined {
 	if (env === undefined || Object.keys(env).length === 0) {
 		return undefined;

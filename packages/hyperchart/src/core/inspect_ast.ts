@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { ArtifactVersionSchema } from "./artifact_version.js";
+import type { ArtifactVersionAst } from "./types.js";
 import { hyperchartSource, hyperchartValueSource } from "./source.js";
 import type {
 	ArtifactAst,
@@ -41,6 +44,9 @@ export type InspectChartModuleOptions = {
 };
 
 export type HyperchartInspectArtifact = {
+	rollback?: boolean;
+	ifMissing?: "empty";
+	sourceArtifact?: string;
 	name: string;
 	path?: string;
 	shape?: JsonSchema;
@@ -64,7 +70,7 @@ export type HyperchartInspectTransition = {
 };
 
 export type HyperchartInspectRef = {
-	kind: InputRef["kind"] | "artifactOf" | "joinArtifactOf" | "joinResultOf";
+	kind: InputRef["kind"] | "artifactVersion" | "artifactOf" | "joinArtifactOf" | "joinResultOf";
 	preview: string;
 	state?: string;
 	name?: string;
@@ -627,7 +633,9 @@ function actionStateFromAst(
 					.map((read) =>
 						read.kind === "artifactOf" || read.kind === "joinArtifactOf"
 							? artifactRefPreview(read)
-							: templatePreview(read),
+							: read.kind === "artifactVersion"
+								? `artifactVersion(${inputRefPreview(read.version)})`
+								: templatePreview(read),
 					)
 					.filter((read): read is string => read !== undefined)
 			: [];
@@ -768,7 +776,11 @@ function guardInfo(guard: GuardRefAst, ast: ChartAst, statePath: string): Hyperc
 }
 
 function envInfo(
-	env: Readonly<Record<string, string | TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>> | undefined,
+	env:
+		| Readonly<
+				Record<string, string | TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst>
+		  >
+		| undefined,
 	ast: ChartAst,
 	statePath: string,
 ): HyperchartInspectEnv[] | undefined {
@@ -778,6 +790,13 @@ function envInfo(
 	const entries = Object.entries(env).map(([name, value]): HyperchartInspectEnv => {
 		if (typeof value === "string") {
 			return { name, type: "string", value };
+		}
+		if (value.kind === "artifactVersion") {
+			return {
+				name,
+				type: "string (artifact revision path)",
+				value: `artifactVersion(${inputRefPreview(value.version)})`,
+			};
 		}
 		if (value.kind === "artifactOf") {
 			return { name, type: "string (artifact path)", value: artifactRefPreview(value) };
@@ -829,6 +848,8 @@ function actorForInspectState(
 function inputRefSchema(ref: InputRef, ast: ChartAst, statePath: string): JsonSchema | undefined {
 	const actorContext = actorForInspectState(ast, statePath);
 	switch (ref.kind) {
+		case "currentVersion":
+			return z.toJSONSchema(ArtifactVersionSchema);
 		case "result": {
 			const state = actorContext?.definition.states[ref.state] ?? ast.states[ref.state];
 			const schema =
@@ -918,6 +939,14 @@ function artifactInfo(name: string, artifact: ArtifactAst): HyperchartInspectArt
 	const path = templatePreview(artifact.path);
 	return {
 		name,
+		...(artifact.source === undefined
+			? {}
+			: {
+					sourceState: artifact.source.state,
+					...(artifact.source.artifact === undefined ? {} : { sourceArtifact: artifact.source.artifact }),
+					...(artifact.source.ifMissing === undefined ? {} : { ifMissing: artifact.source.ifMissing }),
+				}),
+		...(artifact.rollback === undefined ? {} : { rollback: artifact.rollback }),
 		...(path === undefined ? {} : { path }),
 		...(artifact.shape === undefined ? {} : { shape: artifact.shape.schema }),
 	};
@@ -940,7 +969,7 @@ function referencedReadArtifacts(action: AgentActionAst, ast: ChartAst): Hyperch
 }
 
 function referencedArtifacts(
-	reads: readonly (TemplateAst | ArtifactOfAst | JoinArtifactOfAst)[],
+	reads: readonly (TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst)[],
 	ast: ChartAst,
 ): HyperchartInspectArtifact[] {
 	const artifacts = reads.flatMap((read) => {
@@ -1038,6 +1067,13 @@ function actionRefs(action: StateActionAst): HyperchartInspectRef[] {
 	} else if (action.kind === "gate" || action.kind === "notify") {
 		appendValueRefs(refs, action.payload);
 	}
+	if ("artifacts" in action) {
+		for (const declared of Object.values(action.artifacts ?? {})) {
+			if (declared.source !== undefined) {
+				appendReadRefs(refs, declared.source);
+			}
+		}
+	}
 	return uniqueRefs(refs);
 }
 
@@ -1069,8 +1105,13 @@ function appendValueRefs(refs: HyperchartInspectRef[], value: ValueAst): void {
 
 function appendReadRefs(
 	refs: HyperchartInspectRef[],
-	value: TemplateAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst,
+	value: TemplateAst | ArtifactVersionAst | ArtifactOfAst | JoinArtifactOfAst | JoinResultOfAst,
 ): void {
+	if (value.kind === "artifactVersion") {
+		refs.push({ kind: "artifactVersion", preview: `artifactVersion(${inputRefPreview(value.version)})` });
+		refs.push(inputRefInfo(value.version));
+		return;
+	}
 	if (value.kind === "joinResultOf") {
 		refs.push({
 			kind: value.kind,
@@ -1119,6 +1160,8 @@ function inputRefInfo(ref: InputRef): HyperchartInspectRef {
 	const preview = inputRefPreview(ref);
 	const common = { kind: ref.kind, preview, ...(ref.json === true ? { json: true } : {}) };
 	switch (ref.kind) {
+		case "currentVersion":
+			return { ...common, path: ref.path };
 		case "arg":
 			return { ...common, name: ref.name };
 		case "result":
@@ -1175,6 +1218,8 @@ function inputRefPreview(ref: InputRef): string {
 
 function inputRefPreviewBase(ref: InputRef): string {
 	switch (ref.kind) {
+		case "currentVersion":
+			return `currentVersion(${literal(ref.path)})`;
 		case "arg":
 			return `arg(${literal(ref.name)})`;
 		case "result":
