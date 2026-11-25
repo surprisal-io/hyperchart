@@ -763,8 +763,12 @@ accepted output index and cannot be read back as its produced artifacts.
 Other declared output files are still validated and saved normally. Without
 rollback the resulting working file is accepted like an ordinary output.
 
-Overlapping access to a temporarily borrowed path is rejected; serialize conflicting
-actions in the chart. Cancellation cleanup finishes before that path can be reused.
+Concurrent actions may hold the same path when their `rollback: true` bindings select
+the same snapshot and return to the same accepted revision, as parallel map instances
+borrowing one producer do. They share a single mounted file: it is restored when the last
+holder finishes, an edit by one holder is visible to the others, and a restarted session
+does not get a fresh copy while another holder remains. Any other overlapping access to a
+temporarily borrowed path is rejected; serialize conflicting actions in the chart. Cancellation cleanup finishes before that path can be reused.
 Trusted in-process functions must honor cancellation: Hyperchart cannot stop an
 ignored AbortSignal from causing later filesystem side effects.
 

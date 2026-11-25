@@ -63,9 +63,10 @@ export class ChartRuntime implements Runtime {
 	private readonly artifactStore?: ArtifactStore;
 	/**
 	 * Operational occupancy of rollback working files mounted by a borrow effect and not yet restored:
-	 * detects overlapping borrowers and lets disposal restore views the machine could not release.
+	 * detects conflicting borrowers, lets actions with the same view share one mount, and lets
+	 * disposal restore views the machine could not release.
 	 */
-	private readonly borrowedPaths = new Map<string, { action: string; artifact: RenderedArtifact }>();
+	private readonly borrowedPaths = new Map<string, { holders: Set<string>; artifact: RenderedArtifact }>();
 	private readonly now: () => number;
 	private readonly onWarn: (msg: string) => void;
 	private readonly pending = new Set<Promise<void>>();
@@ -365,14 +366,14 @@ export class ChartRuntime implements Runtime {
 						}
 						// Restore only after the executors stopped, and before any later effect can reuse the path.
 						await cancelled;
-						await this.restore(effect.restore);
+						await this.restore(effect.restore, effect.actionUid);
 						break;
 					}
 					case "borrow":
 						await this.borrow(effect);
 						break;
 					case "restore":
-						await this.restore(effect.artifacts);
+						await this.restore(effect.artifacts, effect.actionUid);
 						break;
 				}
 			}
@@ -570,11 +571,21 @@ export class ChartRuntime implements Runtime {
 		if (store === undefined) {
 			throw new Error("Borrowed artifacts require a run artifact store");
 		}
+		const action = actionUidKey(effect.actionUid);
 		for (const artifact of effect.artifacts) {
-			this.assertNotBorrowedByAnother(artifact, effect.actionUid);
 			const path = renderedArtifactPath(artifact, this.options.workDir);
+			const held = this.borrowedPaths.get(path);
+			if (held !== undefined && (held.holders.size > 1 || !held.holders.has(action))) {
+				// Another action still reads this mount. Only the identical view may join it, and the
+				// file is left in place: replacing it would pull it from under the other holders.
+				if (!sameRollbackView(held.artifact, artifact)) {
+					throw new Error(`Artifact '${artifact.path}' is temporarily borrowed by another action; serialize access`);
+				}
+				held.holders.add(action);
+				continue;
+			}
 			if (artifact.rollback !== undefined) {
-				this.borrowedPaths.set(path, { action: actionUidKey(effect.actionUid), artifact });
+				this.borrowedPaths.set(path, { holders: new Set([action]), artifact });
 			}
 			if (artifact.snapshot === "empty") {
 				await this.replaceWorkingFile(artifact, undefined);
@@ -588,11 +599,23 @@ export class ChartRuntime implements Runtime {
 		}
 	}
 
-	/** Return rollback paths to their accepted revision at invoke (`rollback.to`), or remove them. */
-	private async restore(artifacts: readonly RenderedArtifact[]): Promise<void> {
+	/**
+	 * Return rollback paths to their accepted revision at invoke (`rollback.to`), or remove them.
+	 * A path shared with other actions is only released; its last holder restores it. Without an
+	 * action (disposal) the path is restored whoever still holds it.
+	 */
+	private async restore(artifacts: readonly RenderedArtifact[], actionUid?: ActionUID): Promise<void> {
 		for (const artifact of artifacts) {
+			const path = renderedArtifactPath(artifact, this.options.workDir);
+			const held = this.borrowedPaths.get(path);
+			if (held !== undefined && actionUid !== undefined) {
+				held.holders.delete(actionUidKey(actionUid));
+				if (held.holders.size > 0) {
+					continue;
+				}
+			}
 			await this.replaceWorkingFile(artifact, artifact.rollback?.to);
-			this.borrowedPaths.delete(renderedArtifactPath(artifact, this.options.workDir));
+			this.borrowedPaths.delete(path);
 		}
 	}
 
@@ -610,7 +633,7 @@ export class ChartRuntime implements Runtime {
 
 	private assertNotBorrowedByAnother(artifact: RenderedArtifact, actionUid: ActionUID): void {
 		const holder = this.borrowedPaths.get(renderedArtifactPath(artifact, this.options.workDir));
-		if (holder !== undefined && holder.action !== actionUidKey(actionUid)) {
+		if (holder !== undefined && !holder.holders.has(actionUidKey(actionUid))) {
 			throw new Error(`Artifact '${artifact.path}' is temporarily borrowed by another action; serialize access`);
 		}
 	}
@@ -750,4 +773,21 @@ function envArtifacts(env: Readonly<Record<string, RenderedEnvValue>> | undefine
 
 function foreignCompletionReason(sourceBranchId: string, branchId: string): string {
 	return `Completion artifacts from branch '${sourceBranchId}' are provisional and were not inherited by '${branchId}'. Produce a fresh branch-local completion and its declared artifacts before validation; do not reuse the inherited result with older accepted files. The declared recovery policy and durable budget still apply.`;
+}
+
+function samePin(left: ArtifactPin | "empty" | undefined, right: ArtifactPin | "empty" | undefined): boolean {
+	if (left === undefined || right === undefined || left === "empty" || right === "empty") {
+		return left === right;
+	}
+	return left.hash === right.hash && left.size === right.size;
+}
+
+/** Two rollback bindings of one path that mount the same bytes and return to the same revision. */
+function sameRollbackView(left: RenderedArtifact, right: RenderedArtifact): boolean {
+	return (
+		left.rollback !== undefined &&
+		right.rollback !== undefined &&
+		samePin(left.snapshot, right.snapshot) &&
+		samePin(left.rollback.to, right.rollback.to)
+	);
 }

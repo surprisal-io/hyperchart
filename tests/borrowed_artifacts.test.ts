@@ -632,9 +632,11 @@ it("rejects overlapping borrowers and restores a cancelled view before a later b
 	await writeFile(join(f.root, "notes.md"), "current");
 	const view = { path: "notes.md", snapshot: old, rollback: { to: current } };
 	await f.runtime.runEffects([borrow("first", [view])]);
-	// A restart of the same action may mount its source again; another action may not.
+	// A restart of the same action may mount its source again; another action with a different view may not.
 	await f.runtime.runEffects([borrow("first", [view])]);
-	await expect(f.runtime.runEffects([borrow("conflict", [view])])).rejects.toThrow("serialize access");
+	await expect(f.runtime.runEffects([borrow("conflict", [{ ...view, rollback: {} }])])).rejects.toThrow(
+		"serialize access",
+	);
 	await writeFile(join(f.root, "notes.md"), "first edit");
 	await f.runtime.runEffects([
 		{ kind: "cancel", id: "cancel:first", actionUid: uid("first"), restore: [view] },
@@ -644,6 +646,39 @@ it("rejects overlapping borrowers and restores a cancelled view before a later b
 	await f.runtime.runEffects([restore("next", [view])]);
 	expect(await readFile(join(f.root, "notes.md"), "utf8")).toBe("current");
 	await f.runtime.dispose();
+});
+
+it("lets actions with the same rollback view share one mount and restores it after the last one", async () => {
+	const f = await effectRuntime();
+	const old = await stored(f.store, f.root, "old");
+	const other = await stored(f.store, f.root, "other");
+	const current = await stored(f.store, f.root, "current");
+	await writeFile(join(f.root, "notes.md"), "current");
+	const view = { path: "notes.md", snapshot: old, rollback: { to: current } };
+	await f.runtime.runEffects([borrow("first", [view]), borrow("second", [{ ...view }])]);
+	expect(await readFile(join(f.root, "notes.md"), "utf8")).toBe("old");
+	// A different source, a different return revision, or a non-rollback borrow cannot join.
+	for (const conflict of [
+		{ ...view, snapshot: other },
+		{ ...view, rollback: {} },
+		{ path: "notes.md", snapshot: old },
+	]) {
+		await expect(f.runtime.runEffects([borrow("conflict", [conflict])])).rejects.toThrow("serialize access");
+	}
+	// A restart of one holder does not remount the file under the other.
+	await writeFile(join(f.root, "notes.md"), "shared edit");
+	await f.runtime.runEffects([borrow("first", [view])]);
+	expect(await readFile(join(f.root, "notes.md"), "utf8")).toBe("shared edit");
+	await f.runtime.runEffects([restore("first", [view])]);
+	expect(await readFile(join(f.root, "notes.md"), "utf8")).toBe("shared edit");
+	await expect(f.runtime.runEffects([borrow("conflict", [{ ...view, snapshot: other }])])).rejects.toThrow(
+		"serialize access",
+	);
+	await f.runtime.runEffects([{ kind: "cancel", id: "cancel:second", actionUid: uid("second"), restore: [view] }]);
+	expect(await readFile(join(f.root, "notes.md"), "utf8")).toBe("current");
+	await f.runtime.runEffects([borrow("first", [view]), borrow("second", [view])]);
+	await f.runtime.dispose();
+	expect(await readFile(join(f.root, "notes.md"), "utf8")).toBe("current");
 });
 
 it("ignores a late guard verdict of a cancelled invocation without touching the re-entered view", async () => {
