@@ -8,6 +8,11 @@ export type GuardContext = Readonly<{
 	workDir: string;
 	/** Runtime-supplied original action identity, stable across validation rounds. */
 	invocation?: Readonly<{ branchId: string; actionUid: ActionUID; invocationId: string }>;
+	/**
+	 * Services of this run, as the runner's host passed them (`hostServices` in the runner config). Imported
+	 * guards receive it; subprocess guards cannot. Never journaled.
+	 */
+	hostServices?: unknown;
 }>;
 
 /** Runtime-rendered script options. Raw dynamic guard options are never silently discarded. */
